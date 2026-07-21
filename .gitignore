@@ -1,0 +1,46 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Secrets & credentials (NEVER commit)
+service-account.json
+*.key
+*.pem
+*.p12
+
+# Sensitive business data
+sheet_data.csv
+hrdata_snippet.txt
+
+# Local dev / backup artifacts
+DashboardOverview_original.tsx
+*.orig
+*.bak
+
+# Claude local settings (per-machine)
+.claude/settings.local.json
+.claude/memory/
+src/components/.claude/settings.local.json
+
+# AI Studio generated
+metadata.json
+
+# Dev / debug / migration scripts (one-off, not part of the app)
+scripts/repro.mjs
+scripts/fix-encoding.cjs
+scripts/fix-encoding.js
+scripts/fix-encoding.ps1
+scripts/migrate-browser-console.js
+scripts/migrate-node.js
+scripts/migrate-to-firestore.cjs
+scripts/to_router.cjs
+
+# Internal / working docs (not project docs)
+MIGRATION_PLAN_SUPABASE.md
+PROGRESS.md
+README_FIXES.md

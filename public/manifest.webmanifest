@@ -1,0 +1,23 @@
+{
+  "name": "Hoàng Long ERP",
+  "short_name": "HL ERP",
+  "description": "Hệ thống Thiết kế & Dự toán Nội thất - Quản lý dự án, vật tư, nhân sự, tài chính",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0ea5e9",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "lang": "vi",
+  "dir": "ltr",
+  "scope": "/",
+  "prefer_related_applications": false
+}
