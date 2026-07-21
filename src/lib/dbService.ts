@@ -93,15 +93,17 @@ export async function seedTableToSupabase(tableName: string, data: any[]): Promi
 async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T[]> {
   const supabase = getSupabase();
   if (!supabase) {
-    console.warn(`Supabase chưa được cấu hình — không thể truy vấn ${tableName}`);
+    console.warn(`[DB] Supabase client is NULL — cannot query ${tableName}`);
     return fallbackData;
   }
   try {
+    console.log(`[DB] Querying ${tableName}...`);
     const { data, error } = await supabase.from(tableName).select('*');
     if (error) {
-      console.error(`Supabase load error for ${tableName}:`, error.message);
+      console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
       throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
     }
+    console.log(`[DB] ✅ Loaded ${tableName}:`, data?.length || 0, 'rows');
     if (data && data.length > 0) {
       return data.map(rowToCamel) as T[];
     }
@@ -109,7 +111,7 @@ async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T
     // người dùng đã cố tình xóa trực tiếp trên Supabase. Bảng rỗng trả về [].
     return [];
   } catch (err) {
-    console.error(`Supabase fetch exception for ${tableName}:`, err);
+    console.error(`[DB] ❌ Supabase fetch exception for ${tableName}:`, err);
     throw err;
   }
 }
@@ -118,17 +120,20 @@ async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T
 async function saveSupabase(tableName: string, item: any): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) {
+    console.error(`[DB] Supabase client is NULL — cannot save ${tableName}. Check VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in .env`);
     throw new Error(`Supabase chưa được cấu hình — không thể lưu ${tableName}`);
   }
   try {
     const snakeItem = keysToSnake(item);
-    const { error } = await supabase.from(tableName).upsert(snakeItem);
+    console.log(`[DB] Saving to ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
+    const { data, error } = await supabase.from(tableName).upsert(snakeItem).select();
     if (error) {
-      console.error(`Supabase save error for ${tableName}:`, error.message);
+      console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
       throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
     }
+    console.log(`[DB] ✅ Saved to ${tableName}:`, data?.length, 'row(s)');
   } catch (err) {
-    console.error(`Supabase save exception for ${tableName}:`, err);
+    console.error(`[DB] ❌ Supabase save exception for ${tableName}:`, err);
     throw err;
   }
 }

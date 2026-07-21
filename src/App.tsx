@@ -505,7 +505,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
-    dbService.businessProfile.save(businessInfo);
+    dbService.businessProfile.save(businessInfo).catch(err => console.error('Lỗi lưu hồ sơ doanh nghiệp:', err));
   }, [businessInfo]);
 
   // Bootstrap và đồng bộ hoá dữ liệu từ Cloud Firestore trên nền tảng Firebase
@@ -553,7 +553,7 @@ export default function App() {
         setCustomers(custs);
 
         const projs = await dbService.projects.list();
-        const filteredProjs = projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+        const filteredProjs = projs.filter(p => !(p.name.startsWith('Dự án độc lập - ') && p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
         const autoProjIds = projs.filter(p => p.name.startsWith('Dự án độc lập - ') && p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')).map(p => p.id);
         for (const pid of autoProjIds) {
           dbService.projects.delete(pid).catch(err => console.error("Could not delete legacy auto project", err));
@@ -567,16 +567,7 @@ export default function App() {
         setReceipts(recs);
 
         const pays = await dbService.payments.list();
-        const pendingPays = pays.filter(p => p.status === 'pending');
-        if (pendingPays.length > 0) {
-          const cleanedPays = pays.filter(p => p.status !== 'pending');
-          setPayments(cleanedPays);
-          for (const p of pendingPays) {
-            dbService.payments.delete(p.id).catch(err => console.error("Lỗi xóa đồng bộ payment chờ duyệt:", err));
-          }
-        } else {
-          setPayments(pays);
-        }
+        setPayments(pays);
 
         const qtes = await dbService.quotes.list();
         setQuotes(qtes);
@@ -1533,19 +1524,22 @@ export default function App() {
   };
 
   // HANDLERS DỰ ÁN
-  const handleAddProject = (newProj: Project) => {
+  const handleAddProject = async (newProj: Project) => {
     setProjects([newProj, ...projects]);
-    dbService.projects.save(newProj);
-    
-    // Phát thông báo Toast nổi
-    addToast({
-      title: '📁 Khởi tạo dự án mới',
-      message: `Dự án "${newProj.name}" [Mã số: ${newProj.code}] đã được ghi nhận trên hệ thống thành công!`,
-      type: 'success'
-    });
+    try {
+      await dbService.projects.save(newProj);
+      addToast({
+        title: '📁 Khởi tạo dự án mới',
+        message: `Dự án "${newProj.name}" [Mã số: ${newProj.code}] đã được ghi nhận trên hệ thống thành công!`,
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('Lỗi lưu dự án:', err);
+      addToast({ title: '❌ Lỗi lưu dự án', message: `${err}`, type: 'error' });
+    }
   };
 
-  const handleUpdateProjectStatus = (id: string, status: ProjectStatus, progress: number) => {
+  const handleUpdateProjectStatus = async (id: string, status: ProjectStatus, progress: number) => {
     const updated = projects.map(p => {
       if (p.id === id) {
         const isCompleted = (status === 'completed') || (progress === 100);
@@ -1555,7 +1549,9 @@ export default function App() {
           progress,
           ...(isCompleted ? { kanbanColumnId: 'col_done' } : {})
         };
-        dbService.projects.save(nextp);
+        try { await dbService.projects.save(nextp); } catch (err) {
+          console.error("Lỗi lưu trạng thái dự án:", err);
+        }
         return nextp;
       }
       return p;
@@ -1563,7 +1559,7 @@ export default function App() {
     setProjects(updated);
   };
 
-  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
+  const handleUpdateProject = async (id: string, updates: Partial<Project>) => {
     setProjects(prevProjects => {
       const updated = prevProjects.map(p => {
         if (p.id === id) {
@@ -1575,15 +1571,12 @@ export default function App() {
             ...updates,
             ...(isCompleted && !updates.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
           };
-          
-          // Trigger the Firestore save as a side-effect outside state rendering if possible, 
-          // but to be safe and compatible, we run it immediately on the constructed nextp
-          setTimeout(() => {
-            dbService.projects.save(nextp).catch(err => {
-              console.error("Lỗi khi lưu cập nhật dự án:", err);
-            });
-          }, 0);
-          
+
+          // Save to Supabase asynchronously
+          dbService.projects.save(nextp).catch(err => {
+            console.error("Lỗi khi lưu cập nhật dự án:", err);
+          });
+
           return nextp;
         }
         return p;
@@ -1634,11 +1627,14 @@ export default function App() {
   };
 
   // HANDLERS CÔNG VIỆC
-  const handleAddTask = (newTask: Task) => {
+  const handleAddTask = async (newTask: Task) => {
     setTasks(prev => [newTask, ...prev]);
-    dbService.tasks.save(newTask).catch(err => {
+    try {
+      await dbService.tasks.save(newTask);
+    } catch (err) {
       console.error("Lỗi khi thêm công việc mới:", err);
-    });
+      addToast({ title: '❌ Lỗi lưu công việc', message: `${err}`, type: 'error' });
+    }
 
     // Auto-create task chat group
     try {
@@ -1766,6 +1762,7 @@ export default function App() {
 
         dbService.tasks.save(changedTask).catch(err => {
           console.error("Lỗi khi cập nhật công việc:", err);
+          addToast({ title: '❌ Lỗi lưu công việc', message: `${err}`, type: 'error' });
         });
 
         // TỰ ĐỘNG CHUYỂN CỘT KHI HOÀN THÀNH:
@@ -1967,10 +1964,10 @@ export default function App() {
                           !prevTasks.some(pt => pt.projectId === projectId && pt.name === gt.name && pt.columnId === targetColId && pt.status === 'todo')
                         );
 
-                        nonDuplicateGenerated.forEach(task => {
-                          dbService.tasks.save(task).catch(err => {
+                        nonDuplicateGenerated.forEach(async task => {
+                          try { await dbService.tasks.save(task); } catch (err) {
                             console.error("Lỗi khi lưu tự động tạo công việc từ quy trình:", err);
-                          });
+                          }
                         });
 
                         return [...nonDuplicateGenerated, ...prevTasks];
@@ -1994,11 +1991,11 @@ export default function App() {
     });
   };
 
-  const handleDeleteTask = (id: string) => {
+  const handleDeleteTask = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    dbService.tasks.delete(id).catch(err => {
+    try { await dbService.tasks.delete(id); } catch (err) {
       console.error("Lỗi khi xóa công việc:", err);
-    });
+    }
 
     // Auto-delete associated task chat group
     try {
@@ -2006,11 +2003,11 @@ export default function App() {
     } catch (e) { console.error('Auto-delete chat group failed:', e); }
   };
 
-  const handleDeleteMultipleTasks = (ids: string[]) => {
+  const handleDeleteMultipleTasks = async (ids: string[]) => {
     setTasks(prev => prev.filter(t => !ids.includes(t.id)));
-    dbService.tasks.deleteMultiple(ids).catch(err => {
+    try { await dbService.tasks.deleteMultiple(ids); } catch (err) {
       console.error("Lỗi khi dọn dẹp các công việc:", err);
-    });
+    }
 
     // Auto-delete associated task chat groups
     try {
@@ -2019,16 +2016,21 @@ export default function App() {
   };
 
   // HANDLERS TÀI CHÍNH
-  const handleAddReceipt = (newRec: Receipt) => {
+  const handleAddReceipt = async (newRec: Receipt) => {
     setReceipts([newRec, ...receipts]);
-    dbService.receipts.save(newRec);
-    
+    try {
+      await dbService.receipts.save(newRec);
+    } catch (err) {
+      console.error("Lỗi lưu phiếu thu:", err);
+      addToast({ title: '❌ Lỗi lưu phiếu thu', message: `${err}`, type: 'error' });
+    }
+
     // Nếu có dự án kết nối, tăng nhẹ tiến trình ngẫu nhiên
     if (newRec.projectId) {
       const updatedProjs = projects.map(p => {
         if (p.id === newRec.projectId) {
           const nextp = { ...p, progress: Math.min(p.progress + 5, 100) };
-          dbService.projects.save(nextp);
+          dbService.projects.save(nextp).catch(err => console.error("Lỗi lưu tiến trình dự án:", err));
           return nextp;
         }
         return p;
@@ -2037,43 +2039,59 @@ export default function App() {
     }
   };
 
-  const handleAddCustomer = (newCust: Customer) => {
+  const handleAddCustomer = async (newCust: Customer) => {
     const exists = customers.some(c => c.id === newCust.id);
     if (exists) {
       setCustomers(customers.map(c => c.id === newCust.id ? newCust : c));
     } else {
       setCustomers([newCust, ...customers]);
     }
-    dbService.customers.save(newCust);
+    try { await dbService.customers.save(newCust); } catch (err) {
+      console.error("Lỗi lưu khách hàng:", err);
+      addToast({ title: '❌ Lỗi lưu khách hàng', message: `${err}`, type: 'error' });
+    }
   };
 
-  const handleDeleteCustomer = (id: string) => {
+  const handleDeleteCustomer = async (id: string) => {
     setCustomers(customers.filter(c => c.id !== id));
-    dbService.customers.delete(id);
+    try { await dbService.customers.delete(id); } catch (err) {
+      console.error("Lỗi xóa khách hàng:", err);
+    }
   };
 
-  const handleAddPayment = (newPay: Payment) => {
+  const handleAddPayment = async (newPay: Payment) => {
     setPayments([newPay, ...payments]);
-    dbService.payments.save(newPay);
+    try { await dbService.payments.save(newPay); } catch (err) {
+      console.error("Lỗi lưu phiếu chi:", err);
+      addToast({ title: '❌ Lỗi lưu phiếu chi', message: `${err}`, type: 'error' });
+    }
   };
 
-  const handleDeleteReceipt = (id: string) => {
+  const handleDeleteReceipt = async (id: string) => {
     setReceipts(prev => prev.filter(r => r.id !== id));
-    dbService.receipts.delete(id).catch(err => console.error("Lỗi xóa phiếu thu:", err));
+    try { await dbService.receipts.delete(id); } catch (err) {
+      console.error("Lỗi xóa phiếu thu:", err);
+    }
   };
 
-  const handleDeletePayment = (id: string) => {
+  const handleDeletePayment = async (id: string) => {
     setPayments(prev => prev.filter(p => p.id !== id));
-    dbService.payments.delete(id).catch(err => console.error("Lỗi xóa phiếu chi:", err));
+    try { await dbService.payments.delete(id); } catch (err) {
+      console.error("Lỗi xóa phiếu chi:", err);
+    }
   };
 
-  const handleApprovePayment = (id: string, status: 'approved' | 'rejected') => {
+  const handleApprovePayment = async (id: string, status: 'approved' | 'rejected') => {
     const targetPayment = payments.find(p => p.id === id);
     const updated = payments.map(p => p.id === id ? { ...p, status } : p);
     setPayments(updated);
 
     if (targetPayment) {
-      dbService.payments.save({ ...targetPayment, status });
+      try {
+        await dbService.payments.save({ ...targetPayment, status });
+      } catch (err) {
+        console.error("Lỗi lưu phê duyệt thanh toán:", err);
+      }
 
       // Phát thông báo trạng thái phê duyệt cho người đề xuất
       const proposerEmployee = employees.find(e => e.name === targetPayment.proposer);
@@ -2155,11 +2173,11 @@ export default function App() {
       };
       updatedCustomers = [...customers, newCust];
       setCustomers(updatedCustomers);
-      dbService.customers.save(newCust);
+      dbService.customers.save(newCust).catch(err => console.error("Lỗi lưu khách hàng từ báo giá:", err));
     }
 
     setQuotes([newQuote, ...quotes]);
-    dbService.quotes.save(newQuote);
+    dbService.quotes.save(newQuote).catch(err => console.error("Lỗi lưu báo giá:", err));
     
     // Tự sinh dự án tương ứng và trả file/hồ sơ về dự án
     if (newQuote.projectId) {
@@ -2197,7 +2215,7 @@ export default function App() {
             contractValue: totalAmount, // Cập nhật trị giá hợp đồng dự án bằng báo giá thực tế
             documents: [...(p.documents || []), newDoc]
           };
-          dbService.projects.save(nextp);
+          dbService.projects.save(nextp).catch(err => console.error("Lỗi lưu dự án từ báo giá:", err));
           return nextp;
         }
         return p;
@@ -2206,19 +2224,18 @@ export default function App() {
     }
   };
 
-  const handleUpdateQuoteStatus = (quoteId: string, status: 'approved' | 'rejected' | 'sent' | 'draft') => {
+  const handleUpdateQuoteStatus = async (quoteId: string, status: 'approved' | 'rejected' | 'sent' | 'draft') => {
     const updated = quotes.map(q => {
       if (q.id === quoteId) {
         const nextq = { ...q, status };
-        dbService.quotes.save(nextq);
-
-        const statusTexts: Record<string, string> = { draft: 'Nháp', sent: 'Đã gửi', approved: 'Đã phê duyệt', rejected: 'Bị từ chối' };
-        const associatedProject = projects.find(p => p.id === q.projectId);
-        const recipientId = associatedProject ? associatedProject.pmId : 'emp_1';
-
-        setTimeout(() => {
-          if (!currentUser) return;
-          addNotification({
+        try { await dbService.quotes.save(nextq); } catch (err) {
+          console.error("Lỗi lưu trạng thái báo giá:", err);
+        }
+        return nextq;
+      }
+      return q;
+    });
+    setQuotes(updated);
             recipientId,
             senderId: currentUser.id,
             senderName: currentUser.name,
