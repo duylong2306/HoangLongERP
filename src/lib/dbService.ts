@@ -273,9 +273,11 @@ export const dbService = {
       const sb = getSupabase();
       if (!sb) return null;
       try {
-        const { data, error } = await sb.from('kanban_columns').select('*').eq('sector', sector).single();
-        if (error || !data) return null;
-        return { columns: data.columns || [], columnWidth: data.column_width || 280 };
+        // Use select without .single() to avoid 406 when table is empty or has no matching row
+        const { data, error } = await sb.from('kanban_columns').select('*').eq('sector', sector);
+        if (error || !data || data.length === 0) return null;
+        const row = data[0];
+        return { columns: row.columns || [], columnWidth: row.column_width || 280 };
       } catch { return null; }
     },
     async save(sector: string, columns: any[], columnWidth: number): Promise<void> {
@@ -283,8 +285,8 @@ export const dbService = {
       if (!sb) return;
       try {
         const { error } = await sb.from('kanban_columns').upsert({ sector, columns, column_width: columnWidth });
-        if (error) console.error('kanbanColumns save error:', error.message);
-      } catch (e) { console.error('kanbanColumns save exception:', e); }
+        if (error) console.warn('kanbanColumns save error:', error.message);
+      } catch (e) { console.warn('kanbanColumns save exception:', e); }
     }
   },
 

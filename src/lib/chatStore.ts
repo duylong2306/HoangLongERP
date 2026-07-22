@@ -446,7 +446,7 @@ export async function loadConversationsFromCloud(userId?: string): Promise<Conve
   try {
     let query = sb.from('conversations').select('*');
     if (userId) {
-      query = query.contains('participant_ids', JSON.stringify([userId]));
+      query = query.contains('participant_ids', [userId]);
     }
     const { data, error } = await query;
     if (error) {

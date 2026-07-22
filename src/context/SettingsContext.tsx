@@ -228,7 +228,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Update both localStorage and Supabase when businessInfo changes
     localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
-    import({ dbService }).then(({ dbService }) => dbService.businessProfile.save(businessInfo));
+    dbService.businessProfile.save(businessInfo).catch(err => console.warn('SettingsContext: save businessProfile failed:', err));
   }, [businessInfo]);
 
   const updateBusinessInfo = useCallback((updates: Partial<BusinessInfo>) => {
@@ -262,7 +262,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Update both localStorage and Supabase when hrmConfig changes
     localStorage.setItem('hl_system_settings_v3', JSON.stringify(hrmConfig));
-    import({ dbService }).then(({ dbService }) => dbService.shiftConfig.save(hrmConfig));
+    dbService.shiftConfig.save(hrmConfig).catch(err => console.warn('SettingsContext: save shiftConfig failed:', err));
   }, [hrmConfig]);
 
   const updateHrmConfig = useCallback((updates: Partial<HrmConfig>) => {
