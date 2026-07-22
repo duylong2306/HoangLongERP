@@ -32,6 +32,16 @@ Hệ thống quản trị doanh nghiệp - Lâm Đồng ERP
 
 3. Nhấn **Save** rồi **Redeploy** project
 
+### Thêm VAPID Key (Optional - cho Web Push notifications)
+
+⚠️ **Tùy chọn:** Nếu bạn muốn tính năng Web Push notification hoạt động, thêm VITE_WEBPUSH_VAPID_PUBLIC_KEY:
+
+1. Tạo keys: `npx web-push generate-vapid-keys`
+2. Thêm biến môi trường:
+   | Variable | Value | Environment |
+   |----------|-------|-------------|
+   | `VITE_WEBPUSH_VAPID_PUBLIC_KEY` | key public từ trên | Production, Preview, Development |
+
 ### Bước 2: Lấy Supabase Anon Key
 
 1. Vào [Supabase Dashboard](https://supabase.com/dashboard)
