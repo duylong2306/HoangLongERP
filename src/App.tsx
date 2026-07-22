@@ -453,7 +453,8 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
-    // Chỉ lưu localStorage vì đây là cài đặt cá nhân hóa (màu sắc, font chữ)
+    // Đồng bộ Supabase để giữ nhất quán giữa các thiết bị
+    dbService.displaySettings.save(displaySettings).catch(err => console.warn('App: save displaySettings to Supabase failed:', err));
   }, [displaySettings]);
 
   // Helper cho Màu chủ đạo hiển thị động
@@ -609,7 +610,19 @@ export default function App() {
           }
         }
 
-        // displaySettings chỉ lưu localStorage (cá nhân hóa - màu sắc, font chữ)
+        // Đồng bộ displaySettings từ Supabase (màu sắc, font chữ, logo)
+        const cloudDisplaySettings = await dbService.displaySettings.get();
+        if (cloudDisplaySettings) {
+          setDisplaySettings(cloudDisplaySettings);
+          localStorage.setItem('hl_display_settings', JSON.stringify(cloudDisplaySettings));
+        } else {
+          // Chưa có trên cloud → push dữ liệu local lên Supabase
+          const localDisplaySettings = localStorage.getItem('hl_display_settings');
+          if (localDisplaySettings) {
+            const parsed = JSON.parse(localDisplaySettings);
+            await dbService.displaySettings.save(parsed);
+          }
+        }
       } catch (err) {
         console.warn("Lỗi kết nối đồng bộ cơ sở dữ liệu Firebase Firestore:", err);
       }
