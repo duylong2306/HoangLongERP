@@ -7,21 +7,26 @@ const CACHE_STATIC = 'hl-erp-static-v1';
 const CACHE_DYNAMIC = 'hl-erp-dynamic-v1';
 
 // Assets to cache immediately on install (App Shell)
+// Chỉ include các file chắc chắn tồn tại, tránh lỗi addAll
 const STATIC_ASSETS = [
   '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/icon.svg',
-  '/firebase-messaging-sw.js',
 ];
 
-// Install event - cache static assets
+// Install event - cache static assets (fault-tolerant)
 self.addEventListener('install', (event) => {
   console.log('[SW] Installing...');
   event.waitUntil(
-    caches.open(CACHE_STATIC).then((cache) => {
+    caches.open(CACHE_STATIC).then(async (cache) => {
       console.log('[SW] Caching static assets');
-      return cache.addAll(STATIC_ASSETS.map(url => new Request(url, { cache: 'reload' })));
+      for (const url of STATIC_ASSETS) {
+        try {
+          await cache.add(new Request(url, { cache: 'reload' }));
+        } catch (err) {
+          console.warn('[SW] Failed to cache:', url, err.message);
+        }
+      }
     })
   );
   self.skipWaiting();
