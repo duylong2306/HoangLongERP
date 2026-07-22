@@ -432,6 +432,7 @@ export default function ConstructionFinalQuote({
       status: 'approved',
       finalItems: finalItems,
       takeoffRows: JSON.parse(sessionStorage.getItem('takeoff_rows') || '[]'),
+      takeoffTotals: takeoffTotals,
       isFinalQuote: true,
       selectedFinalResult: selectedFinalResult,
       // Store both amounts for reference

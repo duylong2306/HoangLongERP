@@ -325,92 +325,54 @@ export default function DashboardOverview({
     allowedLateMinutes: number; weekendDays: number[];
     constructionSites: string[];
   }
-  const [config, setConfig] = useState<SystemConfig>(() => {
-    const saved = localStorage.getItem('hl_system_settings_v3');
-    const baseConfig = {
-      morningIn: '07:30',
-      morningOut: '11:30',
-      afternoonIn: '13:00',
-      afternoonOut: '17:00',
-      overtimeIn: '17:45',
-      overtimeOut: '20:45',
-      gpsRadiusAllowed: 50,
-      antiFakeCam: true,
-      otMultiplier: 1.5,
-      directorBaseSalary: 45000000,
-      pmBaseSalary: 22000000,
-      accountantBaseSalary: 18000000,
-      staffBaseSalary: 14000000,
-      punchOpenBeforeMinutes: 30,
-      punchCloseAfterMinutes: 30,
-      punchOutOpenBeforeMinutes: 30,
-      punchOutCloseAfterMinutes: 30,
-      otPunchOpenBeforeMinutes: 30,
-      otPunchCloseAfterMinutes: 30,
-      otPunchOutOpenBeforeMinutes: 30,
-      otPunchOutCloseAfterMinutes: 30,
-      allowedLateMinutes: 15,
-      weekendDays: [0], // 0 represents Sunday
-      constructionSites: [
-        'Công trình Blue Sky',
-        'Xưởng mộc Hoàng Long',
-        'Bộ phận văn phòng chính',
-        'Biệt thự SS400 Cát Lái'
-      ]
-    };
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (!parsed.weekendDays) {
-          parsed.weekendDays = [0];
-        }
-        if (parsed.allowedLateMinutes === undefined) {
-          parsed.allowedLateMinutes = 15;
-        }
-        if (parsed.punchOutOpenBeforeMinutes === undefined) {
-          parsed.punchOutOpenBeforeMinutes = 15;
-        }
-        if (parsed.punchOutCloseAfterMinutes === undefined) {
-          parsed.punchOutCloseAfterMinutes = 15;
-        }
-        return { ...baseConfig, ...parsed };
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return baseConfig;
+  const [config, setConfig] = useState<SystemConfig>({
+    morningIn: '07:30',
+    morningOut: '11:30',
+    afternoonIn: '13:00',
+    afternoonOut: '17:00',
+    overtimeIn: '17:45',
+    overtimeOut: '20:45',
+    gpsRadiusAllowed: 50,
+    antiFakeCam: true,
+    otMultiplier: 1.5,
+    directorBaseSalary: 45000000,
+    pmBaseSalary: 22000000,
+    accountantBaseSalary: 18000000,
+    staffBaseSalary: 14000000,
+    punchOpenBeforeMinutes: 30,
+    punchCloseAfterMinutes: 30,
+    punchOutOpenBeforeMinutes: 30,
+    punchOutCloseAfterMinutes: 30,
+    otPunchOpenBeforeMinutes: 30,
+    otPunchCloseAfterMinutes: 30,
+    otPunchOutOpenBeforeMinutes: 30,
+    otPunchOutCloseAfterMinutes: 30,
+    allowedLateMinutes: 15,
+    weekendDays: [0],
+    constructionSites: [
+      'Công trình Blue Sky',
+      'Xưởng mộc Hoàng Long',
+      'Bộ phận văn phòng chính',
+      'Biệt thự SS400 Cát Lái'
+    ]
   });
 
-  // Listen for configuration changes (e.g. from the custom settings tab)
+  // Load config từ Supabase khi mount
+  useEffect(() => {
+    dbService.shiftConfig.get().then(cloud => {
+      if (cloud) setConfig(prev => ({ ...prev, ...cloud }));
+    }).catch(() => {});
+  }, []);
+
+  // Listen for realtime config changes from Supabase
   useEffect(() => {
     const handleSettingsUpdate = () => {
-      const saved = localStorage.getItem('hl_system_settings_v3');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          setConfig(prev => {
-            const next = { ...prev, ...parsed };
-            if (next.allowedLateMinutes === undefined) {
-              next.allowedLateMinutes = 15;
-            }
-            if (next.punchOutOpenBeforeMinutes === undefined) {
-              next.punchOutOpenBeforeMinutes = 15;
-            }
-            if (next.punchOutCloseAfterMinutes === undefined) {
-              next.punchOutCloseAfterMinutes = 15;
-            }
-            return next;
-          });
-        } catch (e) {
-          console.error(e);
-        }
-      }
+      dbService.shiftConfig.get().then(cloud => {
+        if (cloud) setConfig(prev => ({ ...prev, ...cloud }));
+      }).catch(() => {});
     };
-    window.addEventListener('storage', handleSettingsUpdate);
-    // Custom trigger for cross-tab or component updates
     window.addEventListener('hl_system_settings_updated', handleSettingsUpdate);
     return () => {
-      window.removeEventListener('storage', handleSettingsUpdate);
       window.removeEventListener('hl_system_settings_updated', handleSettingsUpdate);
     };
   }, []);
@@ -1238,17 +1200,7 @@ export default function DashboardOverview({
     }
 
     // ─── GUARD 3: Kiểm tra khung giờ được phép chấm ───
-    // Đọc cấu hình mới nhất từ localStorage để tránh state React bị trễ so với cài đặt
-    const freshConfig = (() => {
-      try {
-        const saved = localStorage.getItem('hl_system_settings_v3');
-        return saved ? JSON.parse(saved) : {};
-      } catch (e) {
-        return {};
-      }
-    })();
-    const mergedConfig = { ...config, ...freshConfig };
-    const sessionGuardCheck = getSessionInfoWithConfig(activePunchSlot, mergedConfig);
+    const sessionGuardCheck = getSessionInfoWithConfig(activePunchSlot, config);
     const currGuardMin = getCurrentMinute();
     if (!isTimeBetween(currGuardMin, sessionGuardCheck.sessionStartMin, sessionGuardCheck.sessionEndMin)) {
       stopCameraStream();

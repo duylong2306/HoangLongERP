@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { ProductCatalogItem, ProductPriceItem, ProductMaterialItem } from '../types';
 import { useNotification } from '../context';
+import { dbService } from '../lib/dbService';
 import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
 import {
   Plus,
@@ -490,6 +491,63 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     localStorage.setItem('hl_acc_product_materials', JSON.stringify(materialsList));
   }, [materialsList]);
 
+  // ── Load from Supabase on mount & sync prices to Supabase ──
+  useEffect(() => {
+    dbService.productPrices.list().then((cloudPrices) => {
+      if (cloudPrices && cloudPrices.length > 0) {
+        setPricesList(cloudPrices);
+        localStorage.setItem('hl_acc_product_prices', JSON.stringify(cloudPrices));
+      }
+    }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err));
+
+    dbService.productMaterials.list().then((cloudMats) => {
+      if (cloudMats && cloudMats.length > 0) {
+        setMaterialsList(cloudMats);
+        localStorage.setItem('hl_acc_product_materials', JSON.stringify(cloudMats));
+      }
+    }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err));
+  }, []);
+
+  // Sync prices to Supabase when changed (only after initial load to avoid overwrite)
+  const [pricesLoaded, setPricesLoaded] = useState(false);
+  useEffect(() => {
+    if (!pricesLoaded) {
+      if (pricesList.length >= 0) setPricesLoaded(true);
+      return;
+    }
+    if (pricesList.length > 0) {
+      pricesList.forEach(p => dbService.productPrices.save(p).catch(() => {}));
+    }
+  }, [pricesList, pricesLoaded]);
+
+  const [materialsLoaded, setMaterialsLoaded] = useState(false);
+  useEffect(() => {
+    if (!materialsLoaded) {
+      if (materialsList.length >= 0) setMaterialsLoaded(true);
+      return;
+    }
+    if (materialsList.length > 0) {
+      materialsList.forEach(m => dbService.productMaterials.save(m).catch(() => {}));
+    }
+  }, [materialsList, materialsLoaded]);
+
+  // ── Load from Supabase on mount & sync products to Supabase ──
+  useEffect(() => {
+    dbService.subcontractorCatalog.list().then((cloudProducts: ProductCatalogItem[]) => {
+      if (cloudProducts && cloudProducts.length > 0) {
+        setProducts(cloudProducts);
+        localStorage.setItem('hl_acc_products', JSON.stringify(cloudProducts));
+      }
+    }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err));
+  }, []);
+
+  // Sync products to Supabase when changed
+  useEffect(() => {
+    if (products.length > 0) {
+      products.forEach(p => dbService.subcontractorCatalog.save(p).catch(() => {}));
+    }
+  }, [products]);
+
   // Price Management modal active states
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [priceModalProduct, setPriceModalProduct] = useState<ProductCatalogItem | null>(null);
@@ -739,6 +797,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       setFDonGia('');
       setFPriceGhiChu('');
     }
+    // Đồng bộ xóa lên Supabase
+    dbService.productPrices.delete(priceId).catch(err => console.warn('Xóa giá bán khỏi Supabase thất bại:', err));
   };
 
   // Open the Material Manager Modal for a specific product
@@ -801,6 +861,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       setFTenChatLieu('');
       setFMaterialGhiChu('');
     }
+    // Đồng bộ xóa lên Supabase
+    dbService.productMaterials.delete(materialId).catch(err => console.warn('Xóa chất liệu khỏi Supabase thất bại:', err));
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -871,6 +933,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
   const handleDeleteProduct = (id: string) => {
     setProducts(prev => prev.filter(p => p.id !== id));
     setDeleteConfirmId(null);
+    // Đồng bộ xóa lên Supabase
+    dbService.subcontractorCatalog.delete(id).catch(err => console.warn('Xóa sản phẩm khỏi Supabase thất bại:', err));
   };
 
   // Categories list

@@ -703,6 +703,43 @@ export const dbService = {
           creatorId: row.creator_id,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
+          // Construction-specific fields
+          projectName: row.project_name,
+          customerName: row.customer_name,
+          customerPhone: row.customer_phone,
+          customerAddress: row.customer_address,
+          chieuDai: row.chieu_dai,
+          chieuRong: row.chieu_rong,
+          soTang: row.so_tang,
+          selectedHouseType: row.selected_house_type,
+          donGiaKhaiToan: row.don_gia_khai_toan,
+          nganSachNoiThat: row.ngan_sach_noi_that,
+          features: row.features,
+          minPrice: row.min_price,
+          maxPrice: row.max_price,
+          dienTichSan: row.dien_tich_san,
+          tongDienTichXayDung: row.tong_dien_tich_xay_dung,
+          date: row.date,
+          config: row.config,
+          notes: row.notes,
+          paymentTerms: row.payment_terms,
+          totalAmount: row.total_amount,
+          creatorName: row.creator_name,
+          companyLogoImg: row.company_logo_img,
+          companyLogoText: row.company_logo_text,
+          companySlogan: row.company_slogan,
+          companyAddressInfo: row.company_address_info,
+          companyContactInfo: row.company_contact_info,
+          contractTemplate: row.contract_template,
+          acceptanceTemplate: row.acceptance_template,
+          liquidationTemplate: row.liquidation_template,
+          takeoffRows: row.takeoff_rows,
+          takeoffTotals: row.takeoff_totals,
+          finalItems: row.final_items,
+          selectedFinalResult: row.selected_final_result,
+          preEstimateAmount: row.pre_estimate_amount,
+          takeoffCostTotal: row.takeoff_cost_total,
+          isFinalQuote: row.is_final_quote,
         }));
       } catch (e) {
         console.error('Supabase archived_quotes load error:', e);
@@ -717,8 +754,8 @@ export const dbService = {
           id: quote.id,
           sector: quote.sector || 'general',
           code: quote.code,
-          customer_id: quote.customerId,
-          project_id: quote.projectId,
+          customer_id: quote.customerId || null,
+          project_id: quote.projectId || null,
           subcontractor_id: quote.subcontractorId,
           contract_value: quote.contractValue,
           status: quote.status,
@@ -735,6 +772,45 @@ export const dbService = {
           approved_at: quote.approvedAt,
           approved_by: quote.approvedBy,
           creator_id: quote.creatorId,
+          // Construction-specific fields
+          project_name: quote.projectName || null,
+          customer_name: quote.customerName || null,
+          customer_phone: quote.customerPhone || null,
+          customer_address: quote.customerAddress || null,
+          chieu_dai: quote.chieuDai || null,
+          chieu_rong: quote.chieuRong || null,
+          so_tang: quote.soTang || null,
+          selected_house_type: quote.selectedHouseType || null,
+          don_gia_khai_toan: quote.donGiaKhaiToan || null,
+          ngan_sach_noi_that: quote.nganSachNoiThat || null,
+          features: quote.features || null,
+          min_price: quote.minPrice || null,
+          max_price: quote.maxPrice || null,
+          dien_tich_san: quote.dienTichSan || null,
+          tong_dien_tich_xay_dung: quote.tongDienTichXayDung || null,
+          date: quote.date || null,
+          config: quote.config || null,
+          notes: quote.notes || null,
+          payment_terms: quote.paymentTerms || null,
+          total_amount: quote.totalAmount || null,
+          creator_name: quote.creatorName || null,
+          company_logo_img: quote.companyLogoImg || null,
+          company_logo_text: quote.companyLogoText || null,
+          company_slogan: quote.companySlogan || null,
+          company_address_info: quote.companyAddressInfo || null,
+          company_contact_info: quote.companyContactInfo || null,
+          contract_template: quote.contractTemplate || null,
+          acceptance_template: quote.acceptanceTemplate || null,
+          liquidation_template: quote.liquidationTemplate || null,
+          takeoff_rows: quote.takeoffRows || null,
+          takeoff_totals: quote.takeoffTotals || null,
+          final_items: quote.finalItems || null,
+          selected_final_result: quote.selectedFinalResult || null,
+          pre_estimate_amount: quote.preEstimateAmount || null,
+          takeoff_cost_total: quote.takeoffCostTotal || null,
+          is_final_quote: quote.isFinalQuote || null,
+          created_at: quote.createdAt || null,
+          updated_at: quote.updatedAt || new Date().toISOString(),
         });
         if (error) throw new Error(`Lưu archived_quotes thất bại: ${error.message}`);
       } catch (e) {
@@ -902,12 +978,12 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return null;
       try {
-        const { data, error } = await supabase.from('project_permissions').select('*').eq('id', 'global').single();
+        const { data, error } = await supabase.from('project_permissions').select('matrix').eq('id', 'global').single();
         if (error) {
           console.warn('Supabase project_permissions load error:', error.message);
           return null;
         }
-        return data;
+        return data?.matrix ?? null;
       } catch (error) {
         console.warn('Supabase project_permissions load error:', error);
         return null;
@@ -920,7 +996,7 @@ export const dbService = {
         return;
       }
       try {
-        const { error } = await supabase.from('project_permissions').upsert({ id: 'global', ...matrix });
+        const { error } = await supabase.from('project_permissions').upsert({ id: 'global', matrix });
         if (error) console.warn('Supabase projectPermissions save error:', error.message);
       } catch (e) {
         console.warn('Supabase projectPermissions save error:', e);
@@ -999,14 +1075,12 @@ export const dbService = {
     async save(sector: string, config: any): Promise<void> {
       const supabase = getSupabase();
       if (!supabase) {
-        console.warn('Supabase chưa cấu hình — không lưu được quotationConfigs');
-        return;
+        throw new Error('Supabase chưa cấu hình — không lưu được quotationConfigs');
       }
-      try {
-        const { error } = await supabase.from('quotation_configs').upsert({ sector, config });
-        if (error) console.warn(`Supabase quotation_configs ${sector} save error:`, error.message);
-      } catch (e) {
-        console.warn(`Supabase quotation_configs ${sector} save exception:`, e);
+      const { error } = await supabase.from('quotation_configs').upsert({ sector, config });
+      if (error) {
+        console.error(`Supabase quotation_configs ${sector} save error:`, error.message);
+        throw new Error(`Lỗi lưu lên Supabase: ${error.message}`);
       }
     }
   },
@@ -1195,7 +1269,112 @@ export const dbService = {
     }
   },
 
-  // 14. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
+  // 14. CONSTRUCTION NORMS (Định mức & đơn giá xây dựng)
+  constructionNorms: {
+    async get(type: string): Promise<any[] | null> {
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      try {
+        const { data, error } = await supabase.from('construction_norms').select('data').eq('id', type).maybeSingle();
+        if (error) { console.warn('[DB] Load construction_norms error:', error.message); return null; }
+        return data?.data ?? null;
+      } catch (err) {
+        console.warn('[DB] Load construction_norms exception:', err);
+        return null;
+      }
+    },
+    async save(type: string, items: any[]): Promise<void> {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      try {
+        await supabase.from('construction_norms').upsert({ id: type, data: items, updated_at: new Date().toISOString() });
+      } catch (err) {
+        console.warn('[DB] Save construction_norms exception:', err);
+      }
+    }
+  },
+
+  // 14b. PRODUCT PRICES (Giá bán theo sản phẩm — từ Danh mục sản phẩm Nội Thất)
+  productPrices: {
+    async list(): Promise<any[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase.from('product_prices').select('*');
+        if (error) { console.warn('[DB] Load product_prices error:', error.message); return []; }
+        return (data || []).map((row: any) => ({
+          id: row.id,
+          productId: row.product_id,
+          tenGia: row.ten_gia,
+          donGia: row.don_gia,
+          ghiChu: row.ghi_chu,
+        }));
+      } catch (err) { console.warn('[DB] Load product_prices exception:', err); return []; }
+    },
+    async save(item: any): Promise<void> {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      try {
+        const { error } = await supabase.from('product_prices').upsert({
+          id: item.id,
+          product_id: item.productId,
+          ten_gia: item.tenGia,
+          don_gia: item.donGia,
+          ghi_chu: item.ghiChu || null,
+        });
+        if (error) console.warn('[DB] Save product_prices error:', error.message);
+      } catch (err) { console.warn('[DB] Save product_prices exception:', err); }
+    },
+    async delete(id: string): Promise<void> {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      try {
+        const { error } = await supabase.from('product_prices').delete().eq('id', id);
+        if (error) console.warn('[DB] Delete product_prices error:', error.message);
+      } catch (err) { console.warn('[DB] Delete product_prices exception:', err); }
+    }
+  },
+
+  // 14c. PRODUCT MATERIALS (Chất liệu theo sản phẩm — từ Danh mục sản phẩm Nội Thất)
+  productMaterials: {
+    async list(): Promise<any[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase.from('product_materials').select('*');
+        if (error) { console.warn('[DB] Load product_materials error:', error.message); return []; }
+        return (data || []).map((row: any) => ({
+          id: row.id,
+          productId: row.product_id,
+          tenChatLieu: row.ten_chat_lieu,
+          ghiChu: row.ghi_chu,
+        }));
+      } catch (err) { console.warn('[DB] Load product_materials exception:', err); return []; }
+    },
+    async save(item: any): Promise<void> {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      try {
+        const { error } = await supabase.from('product_materials').upsert({
+          id: item.id,
+          product_id: item.productId,
+          ten_chat_lieu: item.tenChatLieu,
+          ghi_chu: item.ghiChu || null,
+        });
+        if (error) console.warn('[DB] Save product_materials error:', error.message);
+      } catch (err) { console.warn('[DB] Save product_materials exception:', err); }
+    },
+    async delete(id: string): Promise<void> {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      try {
+        const { error } = await supabase.from('product_materials').delete().eq('id', id);
+        if (error) console.warn('[DB] Delete product_materials error:', error.message);
+      } catch (err) { console.warn('[DB] Delete product_materials exception:', err); }
+    }
+  },
+
+  // 15. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
   attendance: {
     async list(): Promise<any[]> {
       const supabase = getSupabase();

@@ -236,32 +236,36 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── HRM Config ──
-  const [hrmConfig, setHrmConfig] = useState<HrmConfig>(() => {
-    try {
-      const saved = localStorage.getItem('hl_system_settings_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          ...DEFAULT_HRM_CONFIG,
-          ...parsed,
-          // Ensure defaults for new fields
-          weekendDays: parsed.weekendDays ?? [0],
-          allowedLateMinutes: parsed.allowedLateMinutes ?? 15,
-          punchOutOpenBeforeMinutes: parsed.punchOutOpenBeforeMinutes ?? 15,
-          punchOutCloseAfterMinutes: parsed.punchOutCloseAfterMinutes ?? 15,
-          otPunchOpenBeforeMinutes: parsed.otPunchOpenBeforeMinutes ?? 15,
-          otPunchCloseAfterMinutes: parsed.otPunchCloseAfterMinutes ?? 15,
-          otPunchOutOpenBeforeMinutes: parsed.otPunchOutOpenBeforeMinutes ?? 15,
-          otPunchOutCloseAfterMinutes: parsed.otPunchOutCloseAfterMinutes ?? 15,
-        };
-      }
-    } catch {} /* eslint-disable-line no-empty */
-    return DEFAULT_HRM_CONFIG;
-  });
+  const [hrmConfig, setHrmConfig] = useState<HrmConfig>(DEFAULT_HRM_CONFIG);
+  const hrmConfigLoadedRef = React.useRef(false);
 
+  // Load từ Supabase khi mount
   useEffect(() => {
-    // Update both localStorage and Supabase when hrmConfig changes
-    localStorage.setItem('hl_system_settings_v3', JSON.stringify(hrmConfig));
+    (async () => {
+      try {
+        const cloud = await dbService.shiftConfig.get();
+        if (cloud) {
+          setHrmConfig(prev => ({
+            ...prev,
+            ...cloud,
+            weekendDays: cloud.weekendDays ?? [0],
+            allowedLateMinutes: cloud.allowedLateMinutes ?? 15,
+          }));
+        }
+        // Nạp cache cho hrCalculations (readHrmConfigFromStorage)
+        const { refreshHrmConfigCache } = await import('../components/hr/hrCalculations');
+        await refreshHrmConfigCache();
+      } catch (e) {
+        console.warn('SettingsContext: load shiftConfig from Supabase failed:', e);
+      } finally {
+        hrmConfigLoadedRef.current = true;
+      }
+    })();
+  }, []);
+
+  // Save Supabase only khi hrmConfig thay đổi SAU KHI đã load xong
+  useEffect(() => {
+    if (!hrmConfigLoadedRef.current) return;
     dbService.shiftConfig.save(hrmConfig).catch(err => console.warn('SettingsContext: save shiftConfig failed:', err));
   }, [hrmConfig]);
 
@@ -340,15 +344,21 @@ export function loadHrmRoleGroups(): HrmRoleGroup[] {
 /**
  * Lưu danh sách cấu hình Quyền Phê Duyệt xuống localStorage và đồng bộ Supabase
  */
-export function saveApprovalConfig(config: ApprovalPermission[]): void {
+export async function saveApprovalConfig(config: ApprovalPermission[]): Promise<void> {
   try {
     localStorage.setItem('hl_hrm_approval_config', JSON.stringify(config));
-    // Đồng bộ Supabase bất đồng bộ
-    config.forEach(cfg => {
-      dbService.hrmApprovalConfig.save(cfg as any).catch(() => {});
-    });
+    // Đồng bộ Supabase — chờ tất cả hoàn tất
+    await Promise.all(
+      config.map(cfg =>
+        dbService.hrmApprovalConfig.save(cfg as any).catch(e => {
+          console.error('Supabase hrmApprovalConfig save error:', e);
+          throw e; // Propagate lỗi để caller biết
+        })
+      )
+    );
   } catch (e) {
     console.error('Lỗi ghi hl_hrm_approval_config:', e);
+    throw e;
   }
 }
 
@@ -378,13 +388,17 @@ const DEFAULT_SNAPSHOT_KEYS: Record<string, string> = {
 /**
  * Đặt cấu hình mặc định cho tab Group / Project / Approval
  */
-export function saveDefaultSnapshot(tab: 'group' | 'project' | 'approval', data: any): void {
+export async function saveDefaultSnapshot(tab: 'group' | 'project' | 'approval', data: any): Promise<void> {
   try {
     localStorage.setItem(DEFAULT_SNAPSHOT_KEYS[tab], JSON.stringify(data));
-    // Đồng bộ Supabase
-    dbService.hrmDefaultSnapshots.save(tab, data).catch(() => {});
+    // Đồng bộ Supabase — chờ tất cả hoàn tất
+    await dbService.hrmDefaultSnapshots.save(tab, data).catch(e => {
+      console.error('Supabase hrmDefaultSnapshots save error:', e);
+      throw e; // Propagate lỗi để caller biết
+    });
   } catch (e) {
     console.error(`Lỗi ghi default snapshot ${tab}:`, e);
+    throw e;
   }
 }
 

@@ -176,6 +176,8 @@ export default function ProfilesTab({
   const handleBulkDelete = () => {
     if (selectedRows.size === 0) return;
     if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${selectedRows.size} nhân viên được chọn không?\nHành động này không thể hoàn tác.`)) {
+      const idsToDelete = Array.from(selectedRows);
+      const deletedEmps = employees.filter(e => selectedRows.has(e.id));
       setEmployees(employees.filter(e => !selectedRows.has(e.id)));
       setSelectedRows(new Set());
       setSelectAll(false);
@@ -183,7 +185,12 @@ export default function ProfilesTab({
         setSelectedEmpId(null);
         setIsEditingEmp(false);
       }
-      addToast({ title: '✅ Đã xóa', message: `Đã xóa ${selectedRows.size} nhân viên.`, type: 'success' });
+      // Đồng bộ xóa lên Supabase
+      deletedEmps.forEach(emp => {
+        dbService.employees.delete(emp.id).catch(err =>
+          console.warn(`Xóa nhân viên ${emp.id} trên Supabase thất bại:`, err));
+      });
+      addToast({ title: '✅ Đã xóa', message: `Đã xóa ${idsToDelete.length} nhân viên.`, type: 'success' });
     }
   };
 
@@ -722,6 +729,9 @@ export default function ProfilesTab({
                         if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa vĩnh viễn hồ sơ nhân sự của ${emp.name} (${emp.id}) không?\nHành động này không thể hoàn tác.`)) {
                           setEmployees(employees.filter(e => e.id !== emp.id));
                           setSelectedEmpId(null);
+                          // Đồng bộ xóa lên Supabase
+                          dbService.employees.delete(emp.id).catch(err =>
+                            console.warn(`Xóa nhân viên ${emp.id} trên Supabase thất bại:`, err));
                         }
                       }}
                       className="bg-red-650 hover:bg-red-600 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
@@ -740,6 +750,9 @@ export default function ProfilesTab({
                     const updated = employees.map(item => item.id === editingEmpData.id ? editingEmpData : item);
                     setEmployees(updated);
                     setIsEditingEmp(false);
+                    // Đồng bộ lên Supabase
+                    dbService.employees.save(editingEmpData).catch(err =>
+                      console.warn('Lưu chỉnh sửa hồ sơ lên Supabase thất bại:', err));
                   }}
                   className="space-y-3.5 max-h-[70vh] overflow-y-auto pr-1 text-slate-200"
                 >

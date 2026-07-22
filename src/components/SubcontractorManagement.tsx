@@ -386,6 +386,8 @@ export default function SubcontractorManagement({
           else merged.push(imp);
         });
         setSuppliers(merged);
+        // Đồng bộ lên Supabase
+        imported.forEach(imp => dbService.suppliers.save(imp).catch(err => console.warn('Lưu import thầu phụ lên Supabase thất bại:', err)));
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} thầu phụ`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });

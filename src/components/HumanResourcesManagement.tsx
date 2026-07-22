@@ -214,6 +214,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     if (!confirm(`Xóa bản ghi chấm công của "${log.empName}" ngày ${log.date}?`)) return;
     const updated = attendance.filter(a => a.id !== log.id);
     setAttendance(updated);
+    // Đồng bộ xóa lên Supabase
+    dbService.attendance.delete(log.id).catch(err => console.warn('Xóa bản ghi chấm công trên Supabase thất bại:', err));
     addToast({ title: '🗑️ Đã xóa', message: 'Bản ghi chấm công đã được xóa', type: 'info' });
     window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
   };
@@ -830,20 +832,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   const [trips, setTrips] = useState<BusinessTrip[]>([]);
 
-  const weekendDays = (() => {
-    try {
-      const saved = localStorage.getItem('hl_system_settings_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && Array.isArray(parsed.weekendDays)) {
-          return parsed.weekendDays;
-        }
+  const [weekendDays, setWeekendDays] = useState<number[]>([0]);
+
+  useEffect(() => {
+    dbService.shiftConfig.get().then(config => {
+      if (config && Array.isArray(config.weekendDays)) {
+        setWeekendDays(config.weekendDays);
       }
-    } catch (e) {
-      console.error(e);
-    }
-    return [0];
-  })();
+    }).catch(() => {});
+  }, []);
 
   const [travelExpensesSummary, setTravelExpensesSummary] = useState<{ id: string; employeeId?: string; empId?: string; employeeName: string; amount: number; period: string; completedDate?: string; projectName?: string; customerName?: string; taskName?: string; missionName?: string; content?: string; month?: string; fuelFee?: number; mealFee?: number; lodgeFee?: number; otherFee?: number }[]>([]);
 
@@ -1035,11 +1032,18 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           permissions: r.permissions || {}, memberIds: r.memberIds || [],
         })));
       }
-    }).catch(() => {});
+    }).catch(err => { console.warn('Load roles from Supabase thất bại:', err); });
     // Employees
     dbService.employees.list().then((cloudEmps: any[]) => {
-      if (cloudEmps && cloudEmps.length > 0) setEmployees(cloudEmps);
-    }).catch(() => {});
+      if (cloudEmps && cloudEmps.length > 0) {
+        setEmployees(cloudEmps);
+        // Thêm: sync localStorage với employee profile để tránh mất data
+        const cached = localStorage.getItem('hl_hrm_employees_v3');
+        if (cached) {
+          try { localStorage.setItem('hl_cached_hrm_employees', cached); } catch {}
+        }
+      }
+    }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); });
     // Holidays
     dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {});
     // Leaves
@@ -1573,6 +1577,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     if (confirm('Bạn có chắc muốn xóa ngày nghỉ lễ này?')) {
       const updated = holidays.filter(h => h.id !== id);
       setHolidays(updated);
+      // Đồng bộ xóa lên Supabase
+      dbService.hrmHolidays.delete(id).catch(err => console.warn('Xóa ngày lễ trên Supabase thất bại:', err));
     }
   };
 
@@ -1623,7 +1629,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   const handleDeleteSalaryScale = (id: string) => {
     if (confirm(`Bạn có chắc chắn muốn xóa Bậc Lương "${id}" này không?`)) {
+      const target = salaryScales.find(item => item.id === id);
       setSalaryScales(prev => prev.filter(item => item.id !== id));
+      // Đồng bộ xóa lên Supabase
+      if (target) dbService.hrmSalaryScales.delete(id).catch(err => console.warn('Xóa bậc lương trên Supabase thất bại:', err));
     }
   };
 
@@ -1699,6 +1708,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     if (confirm('Bạn có chắc muốn xóa hệ số chấm công này?')) {
       const updated = leaveCoefficients.filter(c => c.id !== id);
       setLeaveCoefficients(updated);
+      // Đồng bộ xóa lên Supabase
+      dbService.hrmLeaveCoefficients.delete(id).catch(err => console.warn('Xóa hệ số chấm công trên Supabase thất bại:', err));
     }
   };
 
@@ -1861,7 +1872,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteError = (id: string) => {
+    const target = employeeErrors.find(e => e.id === id);
     setEmployeeErrors(prev => prev.filter(e => e.id !== id));
+    // Đồng bộ xóa lên Supabase
+    if (target) dbService.hrmEmployeeErrors.delete(id).catch(err => console.warn('Xóa lỗi vi phạm trên Supabase thất bại:', err));
   };
 
   const handleEditErrorTrigger = (err: EmployeeErrorLog) => {
@@ -2255,7 +2269,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // Simulation actions
   // ===================== BLOCK HỒ SƠ NHÂN VIÊN (profiles) =====================
-  const handleCreateEmployee = (e: React.FormEvent) => {
+  const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = `NV${String(employees.length + 1).padStart(3, '0')}`;
     const profile: EmployeeProfile = {
@@ -2268,6 +2282,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     };
     setEmployees([...employees, profile]);
     setShowEmpModal(false);
+    // Đồng bộ lên Supabase
+    try {
+      await dbService.employees.save(profile);
+    } catch (err) {
+      console.warn('Lưu hồ sơ nhân sự lên Supabase thất bại:', err);
+    }
     addToast({ title: '✅ Thành công', message: `🎉 Đã thêm hồ sơ nhân sự mã ${id} cho anh/chị ${newEmp.name} thành công.`, type: 'success' });
   };
 

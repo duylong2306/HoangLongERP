@@ -840,7 +840,7 @@ export default function QuotationSystem({
     sessionStorage.setItem('hl_construction_items', JSON.stringify(quoteItems));
   }, [selectedHouseType, chieuDai, chieuRong, soTang, donGiaKhaiToan, nganSachNoiThat, quoteItems]);
 
-  // Sync loadedQuote to populate other shared states immediately
+	// Sync loadedQuote to populate other shared states immediately
   useEffect(() => {
     if (loadedQuote) {
       if (loadedQuote.projectName) setProjectName(loadedQuote.projectName);
@@ -849,7 +849,7 @@ export default function QuotationSystem({
       if (loadedQuote.customerAddress) setCustomerAddress(loadedQuote.customerAddress);
       if (loadedQuote.projectId) setSelectedProjectId(loadedQuote.projectId);
       if (loadedQuote.customerId) setSelectedCustomerId(loadedQuote.customerId);
-      
+
       if (loadedQuote.chieuDai !== undefined) setChieuDai(loadedQuote.chieuDai);
       if (loadedQuote.chieuRong !== undefined) setChieuRong(loadedQuote.chieuRong);
       if (loadedQuote.soTang !== undefined) setSoTang(loadedQuote.soTang);
@@ -857,11 +857,28 @@ export default function QuotationSystem({
       if (loadedQuote.donGiaKhaiToan !== undefined) setDonGiaKhaiToan(loadedQuote.donGiaKhaiToan);
       if (loadedQuote.nganSachNoiThat !== undefined) setNganSachNoiThat(loadedQuote.nganSachNoiThat);
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
-      
+
       setIsConstructionSaved(true);
       setIsLocked(true);
     }
   }, [loadedQuote]);
+
+  // Load construction norms from Supabase on mount
+  useEffect(() => {
+    const normTypes = [
+      { key: 'house_estimate_prices', setter: setHouseEstimatePrices },
+      { key: 'material_composition_norms', setter: setMaterialCompositionNorms },
+      { key: 'material_labor_prices', setter: setMaterialLaborPrices },
+    ];
+    normTypes.forEach(({ key, setter }) => {
+      dbService.constructionNorms.get(key).then(cloudData => {
+        if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
+          setter(cloudData as any);
+          localStorage.setItem(key, JSON.stringify(cloudData));
+        }
+      }).catch(() => {});
+    });
+  }, []);
 
   // Listener for instant archived quote reloading
   useEffect(() => {
@@ -1158,16 +1175,19 @@ export default function QuotationSystem({
   const updateHouseEstimatePrices = (newData: any[]) => {
     setHouseEstimatePrices(newData);
     localStorage.setItem('house_estimate_prices', JSON.stringify(newData));
+    dbService.constructionNorms.save('house_estimate_prices', newData).catch(() => {});
   };
 
   const updateMaterialCompositionNorms = (newData: any[]) => {
     setMaterialCompositionNorms(newData);
     localStorage.setItem('material_composition_norms', JSON.stringify(newData));
+    dbService.constructionNorms.save('material_composition_norms', newData).catch(() => {});
   };
 
   const updateMaterialLaborPrices = (newData: any[]) => {
     setMaterialLaborPrices(newData);
     localStorage.setItem('material_labor_prices', JSON.stringify(newData));
+    dbService.constructionNorms.save('material_labor_prices', newData).catch(() => {});
   };
 
   const handleDeletePrice = (stt: number) => {

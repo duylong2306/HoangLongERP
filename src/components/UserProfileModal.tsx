@@ -1,5 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { Employee } from '../types';
+import { hashPasswordSync } from '../lib/passwordUtils';
 import {
   X,
   User,
@@ -79,7 +80,7 @@ export default function UserProfileModal({
         name: name.trim(),
         phone: phone.trim(),
         address: address.trim(),
-        password: password.trim() || '123',
+        password: hashPasswordSync(password.trim() || '123'),
         avatar: avatar
       };
 

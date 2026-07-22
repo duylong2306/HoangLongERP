@@ -3,7 +3,7 @@ import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCata
 import { useNotification } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
 import { INITIAL_PRODUCTS } from './ProductCatalogTable';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -538,6 +538,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const handleSetAsDefault = async () => {
     setDbSaving(true);
     setDbSaveSuccess(false);
+    setDbSaveError(null);
     try {
       let defaultData = await dbService.quotationConfigs.get('construction_default') || {};
       
@@ -579,11 +580,12 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {
       console.error("Lỗi khi đặt làm mặc định:", err);
+      setDbSaveError(err instanceof Error ? err.message : 'Có lỗi xảy ra khi lưu thiết lập mặc định!');
       setFeedback({
         type: 'error',
-        message: 'Có lỗi xảy ra khi lưu thiết lập mặc định!'
+        message: err instanceof Error ? err.message : 'Có lỗi xảy ra khi lưu thiết lập mặc định!'
       });
-      setTimeout(() => setFeedback(null), 4000);
+      setTimeout(() => setFeedback(null), 5000);
     } finally {
       setDbSaving(false);
     }
@@ -747,13 +749,15 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [dbLoading, setDbLoading] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
   const [dbSaveSuccess, setDbSaveSuccess] = useState(false);
+  const [dbSaveError, setDbSaveError] = useState<string | null>(null);
 
   // Load configuration from database on mount
   useEffect(() => {
     const fetchDbConfig = async () => {
       setDbLoading(true);
       try {
-        const dbConfig = await dbService.quotationConfigs.get('construction');
+        // Load from 'construction_default' (matches the save key in handleSetAsDefault)
+        const dbConfig = await dbService.quotationConfigs.get('construction_default');
         if (dbConfig) {
           if (dbConfig.companyLogoImg !== undefined) setCompanyLogoImg(dbConfig.companyLogoImg);
           if (dbConfig.companyLogoText !== undefined) setCompanyLogoText(dbConfig.companyLogoText);
@@ -1958,6 +1962,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
               onClick={async () => {
                 setDbSaving(true);
                 setDbSaveSuccess(false);
+                setDbSaveError(null);
                 try {
                   await dbService.quotationConfigs.save('construction', {
                     companyLogoImg,
@@ -1975,6 +1980,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   setTimeout(() => setDbSaveSuccess(false), 4000);
                 } catch (e) {
                   console.error("Lỗi khi lưu cấu hình Xây dựng lên database:", e);
+                  setDbSaveSuccess(false);
+                  setDbSaveError(e instanceof Error ? e.message : 'Lỗi khi lưu lên Supabase');
+                  setFeedback({
+                    type: 'error',
+                    message: e instanceof Error ? e.message : 'Lỗi khi lưu lên Supabase'
+                  });
+                  setTimeout(() => setFeedback(null), 5000);
                 } finally {
                   setDbSaving(false);
                 }
@@ -1996,6 +2008,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
             <Check className="w-4 h-4 text-emerald-600 shrink-0" />
             <div>
               <span className="font-bold">Lưu thành công:</span> Cấu hình mẫu báo giá Xây dựng đã được lưu vào hệ thống cơ sở dữ liệu đám mây và đồng bộ hóa thành công trên toàn ứng dụng!
+            </div>
+          </div>
+        )}
+        {dbSaveError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
+            <XCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <div>
+              <span className="font-bold">Lỗi lưu:</span> {dbSaveError}
             </div>
           </div>
         )}

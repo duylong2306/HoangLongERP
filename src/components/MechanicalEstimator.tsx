@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { QuoteConfig, QuoteItem, Customer, Project, ProjectDoc, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Printer, Send, AlertTriangle, Edit, Save, Check } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Printer, Send, AlertTriangle, Edit, Save, Check, XCircle } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -193,8 +193,9 @@ export default function MechanicalEstimator({
   const handleSetAsDefault = async () => {
     setDbSaving(true);
     setDbSaveSuccess(false);
+    setDbSaveError(null);
     try {
-      let defaultData = await dbService.quotationConfigs.get('mechanical_default') || {};
+      let defaultData = await dbService.quotationConfigs.get('mechanical') || {};
       
       if (activeTemplateTab === 'quote') {
         defaultData.companyLogoImg = companyLogoImg;
@@ -204,24 +205,24 @@ export default function MechanicalEstimator({
         defaultData.companyContactInfo = companyContactInfo;
         defaultData.paymentTerms = paymentTerms;
         
-        localStorage.setItem('hl_mechanical_default_logo', companyLogoImg);
-        localStorage.setItem('hl_mechanical_default_company_name', companyLogoText);
-        localStorage.setItem('hl_mechanical_default_company_slogan', companySlogan);
-        localStorage.setItem('hl_mechanical_default_company_address', companyAddressInfo);
-        localStorage.setItem('hl_mechanical_default_company_contact', companyContactInfo);
-        localStorage.setItem('hl_mechanical_default_payment_terms', paymentTerms);
+        localStorage.setItem('hl_mechanical_company_logo', companyLogoImg);
+        localStorage.setItem('hl_mechanical_company_name', companyLogoText);
+        localStorage.setItem('hl_mechanical_company_slogan', companySlogan);
+        localStorage.setItem('hl_mechanical_company_address', companyAddressInfo);
+        localStorage.setItem('hl_mechanical_company_contact', companyContactInfo);
+        localStorage.setItem('hl_mechanical_payment_terms', paymentTerms);
       } else if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_mechanical_default_contract_template', contractTemplate);
+        localStorage.setItem('hl_mechanical_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_mechanical_default_acceptance_template', acceptanceTemplate);
+        localStorage.setItem('hl_mechanical_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_mechanical_default_liquidation_template', liquidationTemplate);
+        localStorage.setItem('hl_mechanical_liquidation_template', liquidationTemplate);
       }
       
-      await dbService.quotationConfigs.save('mechanical_default', defaultData);
+      await dbService.quotationConfigs.save('mechanical', defaultData);
       
       setFeedback({
         type: 'success',
@@ -234,11 +235,12 @@ export default function MechanicalEstimator({
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {
       console.error("Lỗi khi đặt làm mặc định:", err);
+      setDbSaveError(err instanceof Error ? err.message : 'Có lỗi xảy ra khi lưu thiết lập mặc định!');
       setFeedback({
         type: 'error',
-        message: 'Có lỗi xảy ra khi lưu thiết lập mặc định!'
+        message: err instanceof Error ? err.message : 'Có lỗi xảy ra khi lưu thiết lập mặc định!'
       });
-      setTimeout(() => setFeedback(null), 4000);
+      setTimeout(() => setFeedback(null), 5000);
     } finally {
       setDbSaving(false);
     }
@@ -248,16 +250,16 @@ export default function MechanicalEstimator({
     setDbSaving(true);
     setDbSaveSuccess(false);
     try {
-      const defaultData = await dbService.quotationConfigs.get('mechanical_default');
+      const defaultData = await dbService.quotationConfigs.get('mechanical');
       
       if (activeTemplateTab === 'quote') {
-        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_mechanical_default_logo') ?? '';
-        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_mechanical_default_company_name') ?? 'HOANG LONG';
-        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_mechanical_default_company_slogan') ?? 'Construction - Furniture - Doors';
-        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_mechanical_default_company_address') ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
-        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_mechanical_default_company_contact') ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
-        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_mechanical_default_payment_terms') ?? DEFAULT_MECH_PAYMENT_TERMS;
-        
+        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_mechanical_company_logo') ?? '';
+        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_mechanical_company_name') ?? 'HOANG LONG';
+        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_mechanical_company_slogan') ?? 'Construction - Furniture - Doors';
+        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_mechanical_company_address') ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
+        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_mechanical_company_contact') ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
+        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_mechanical_payment_terms') ?? DEFAULT_MECH_PAYMENT_TERMS;
+
         setCompanyLogoImg(logo);
         setCompanyLogoText(name);
         setCompanySlogan(slogan);
@@ -265,13 +267,13 @@ export default function MechanicalEstimator({
         setCompanyContactInfo(contact);
         setPaymentTerms(terms);
       } else if (activeTemplateTab === 'contract') {
-        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_mechanical_default_contract_template') ?? DEFAULT_MECH_CONTRACT_TEMPLATE;
+        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_mechanical_contract_template') ?? DEFAULT_MECH_CONTRACT_TEMPLATE;
         setContractTemplate(template);
       } else if (activeTemplateTab === 'acceptance') {
-        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_mechanical_default_acceptance_template') ?? DEFAULT_MECH_ACCEPTANCE_TEMPLATE;
+        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_mechanical_acceptance_template') ?? DEFAULT_MECH_ACCEPTANCE_TEMPLATE;
         setAcceptanceTemplate(template);
       } else if (activeTemplateTab === 'liquidation') {
-        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_mechanical_default_liquidation_template') ?? DEFAULT_MECH_LIQUIDATION_TEMPLATE;
+        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_mechanical_liquidation_template') ?? DEFAULT_MECH_LIQUIDATION_TEMPLATE;
         setLiquidationTemplate(template);
       }
       
@@ -587,6 +589,7 @@ export default function MechanicalEstimator({
   const [dbLoading, setDbLoading] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
   const [dbSaveSuccess, setDbSaveSuccess] = useState(false);
+  const [dbSaveError, setDbSaveError] = useState<string | null>(null);
 
   // Load configuration from database on mount
   useEffect(() => {
@@ -1563,6 +1566,7 @@ export default function MechanicalEstimator({
               onClick={async () => {
                 setDbSaving(true);
                 setDbSaveSuccess(false);
+                setDbSaveError(null);
                 try {
                   await dbService.quotationConfigs.save('mechanical', {
                     companyLogoImg,
@@ -1580,6 +1584,13 @@ export default function MechanicalEstimator({
                   setTimeout(() => setDbSaveSuccess(false), 4000);
                 } catch (e) {
                   console.error("Lỗi khi lưu cấu hình Cơ khí lên database:", e);
+                  setDbSaveSuccess(false);
+                  setDbSaveError(e instanceof Error ? e.message : 'Lỗi khi lưu lên Supabase');
+                  setFeedback({
+                    type: 'error',
+                    message: e instanceof Error ? e.message : 'Lỗi khi lưu lên Supabase'
+                  });
+                  setTimeout(() => setFeedback(null), 5000);
                 } finally {
                   setDbSaving(false);
                 }
@@ -1601,6 +1612,14 @@ export default function MechanicalEstimator({
             <Check className="w-4 h-4 text-emerald-400 shrink-0" />
             <div>
               <span className="font-bold">Lưu thành công:</span> Cấu hình mẫu báo giá Cơ khí đã được lưu vào hệ thống cơ sở dữ liệu đám mây và đồng bộ hóa thành công trên toàn ứng dụng!
+            </div>
+          </div>
+        )}
+        {dbSaveError && (
+          <div className="bg-red-950/20 border border-red-500/30 text-red-400 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
+            <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <div>
+              <span className="font-bold">Lỗi lưu:</span> {dbSaveError}
             </div>
           </div>
         )}

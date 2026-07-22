@@ -16,37 +16,43 @@ export function minutesDiff(timeActual: string, timeStandard: string): number {
   return parse(timeActual) - parse(timeStandard);
 }
 
-/** Đọc cấu hình HrmConfig từ localStorage. Trả về cấu hình mặc định nếu chưa lưu. */
-export function readHrmConfigFromStorage(): {
-  morningIn: string; morningOut: string;
-  afternoonIn: string; afternoonOut: string;
-  allowedLateMinutes: number;
-  punchOutOpenBeforeMinutes: number;
-  punchOutCloseAfterMinutes: number;
-} {
-  const defaults = {
-    morningIn: '07:30', morningOut: '11:30',
-    afternoonIn: '13:00', afternoonOut: '17:00',
-    allowedLateMinutes: 15,
-    punchOutOpenBeforeMinutes: 15,
-    punchOutCloseAfterMinutes: 15,
-  };
+// ─── Module-level cache cho shift config (đọc đồng bộ từ Supabase cache) ───────
+const HRM_CONFIG_DEFAULTS = {
+  morningIn: '07:30', morningOut: '11:30',
+  afternoonIn: '13:00', afternoonOut: '17:00',
+  allowedLateMinutes: 15,
+  punchOutOpenBeforeMinutes: 15,
+  punchOutCloseAfterMinutes: 15,
+};
+
+let _hrmConfigCache: typeof HRM_CONFIG_DEFAULTS = { ...HRM_CONFIG_DEFAULTS };
+
+/**
+ * Nạp shift config từ Supabase vào cache đồng bộ.
+ * Gọi 1 lần khi app mount (SettingsContext hoặc App.tsx).
+ */
+export async function refreshHrmConfigCache(): Promise<void> {
   try {
-    const raw = localStorage.getItem('hl_system_settings_v3');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        morningIn:        parsed.morningIn        ?? defaults.morningIn,
-        morningOut:       parsed.morningOut       ?? defaults.morningOut,
-        afternoonIn:      parsed.afternoonIn      ?? defaults.afternoonIn,
-        afternoonOut:     parsed.afternoonOut     ?? defaults.afternoonOut,
-        allowedLateMinutes:          parsed.allowedLateMinutes          ?? defaults.allowedLateMinutes,
-        punchOutOpenBeforeMinutes:   parsed.punchOutOpenBeforeMinutes   ?? defaults.punchOutOpenBeforeMinutes,
-        punchOutCloseAfterMinutes:   parsed.punchOutCloseAfterMinutes   ?? defaults.punchOutCloseAfterMinutes,
+    const { dbService } = await import('../../lib/dbService');
+    const shiftConfig = dbService.shiftConfig;
+    const cloud = await shiftConfig.get();
+    if (cloud) {
+      _hrmConfigCache = {
+        morningIn:        cloud.morningIn        ?? HRM_CONFIG_DEFAULTS.morningIn,
+        morningOut:       cloud.morningOut       ?? HRM_CONFIG_DEFAULTS.morningOut,
+        afternoonIn:      cloud.afternoonIn      ?? HRM_CONFIG_DEFAULTS.afternoonIn,
+        afternoonOut:     cloud.afternoonOut     ?? HRM_CONFIG_DEFAULTS.afternoonOut,
+        allowedLateMinutes:          cloud.allowedLateMinutes          ?? HRM_CONFIG_DEFAULTS.allowedLateMinutes,
+        punchOutOpenBeforeMinutes:   cloud.punchOutOpenBeforeMinutes   ?? HRM_CONFIG_DEFAULTS.punchOutOpenBeforeMinutes,
+        punchOutCloseAfterMinutes:   cloud.punchOutCloseAfterMinutes   ?? HRM_CONFIG_DEFAULTS.punchOutCloseAfterMinutes,
       };
     }
-  } catch { /* ignore */ }
-  return defaults;
+  } catch { /* defaults */ }
+}
+
+/** Đọc cấu hình HrmConfig từ cache (đã load từ Supabase). Trả về defaults nếu cache chưa sẵn sàng. */
+export function readHrmConfigFromStorage(): typeof HRM_CONFIG_DEFAULTS {
+  return _hrmConfigCache;
 }
 
 /**

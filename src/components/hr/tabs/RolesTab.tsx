@@ -96,36 +96,64 @@ export default function RolesTab(props: RolesTabProps) {
   // Save handlers
   const { addToast } = useNotification();
 
-  const handleSaveGroup = React.useCallback(() => {
+  const handleSaveGroup = React.useCallback(async () => {
     const updated = [...draftRoles];
-    // Ghi cache Supabase + localStorage cũ
+    // Ghi cache localStorage trước (offline-safe)
     localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
     localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
     setRoles(updated);
     syncHrmPermissionsToApp(updated);
-    // Đồng bộ lên Supabase
-    updated.forEach((role: any) => {
-      dbService.hrmRoleGroups.save({
-        id: role.id,
-        name: role.name,
-        description: role.description || '',
-        permissions: role.permissions || {},
-        memberIds: role.memberIds || [],
-      }).catch(() => {});
-    });
+    // Đồng bộ lên Supabase (chờ tất cả hoàn tất)
+    let supabaseFailed = false;
+    try {
+      await Promise.all(updated.map((role: any) =>
+        dbService.hrmRoleGroups.save({
+          id: role.id,
+          name: role.name,
+          description: role.description || '',
+          permissions: role.permissions || {},
+          memberIds: role.memberIds || [],
+        }).catch((e) => { supabaseFailed = true; console.error('Supabase hrmRoleGroups save error:', e); })
+      ));
+    } catch (e) {
+      supabaseFailed = true;
+      console.error('Supabase hrmRoleGroups save unexpected error:', e);
+    }
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
-    addToast({ title: '✅ Thành công', message: 'Phân quyền nhóm vai trò đã được lưu.', type: 'success' });
+    if (supabaseFailed) {
+      addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
+    } else {
+      addToast({ title: '✅ Thành công', message: 'Phân quyền nhóm vai trò đã được lưu.', type: 'success' });
+    }
   }, [draftRoles, setRoles, syncHrmPermissionsToApp, addToast]);
 
   const handleSaveProject = React.useCallback(async () => {
-    await saveProjectPermissions(draftMatrix);
-    addToast({ title: '✅ Thành công', message: 'Quyền dự án đã được lưu.', type: 'success' });
+    try {
+      await saveProjectPermissions(draftMatrix);
+      addToast({ title: '✅ Thành công', message: 'Quyền dự án đã được lưu.', type: 'success' });
+    } catch (e) {
+      console.error('Supabase projectPermissions save error:', e);
+      addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
+    }
   }, [draftMatrix, addToast]);
 
-  const handleSaveApproval = React.useCallback(() => {
-    saveApprovalConfig(draftApprovalConfig);
-    addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
+  const handleSaveApproval = React.useCallback(async () => {
+    let supabaseFailed = false;
+    try {
+      await saveApprovalConfig(draftApprovalConfig).catch((e) => {
+        supabaseFailed = true;
+        console.error('Supabase hrmApprovalConfig save error:', e);
+      });
+    } catch (e) {
+      supabaseFailed = true;
+      console.error('Supabase hrmApprovalConfig save unexpected error:', e);
+    }
+    if (supabaseFailed) {
+      addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
+    } else {
+      addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
+    }
   }, [draftApprovalConfig, addToast]);
 
   // Default snapshot helpers (per-tab)
@@ -135,11 +163,21 @@ export default function RolesTab(props: RolesTabProps) {
     return loadDefaultSnapshot('approval');
   }, [roleMainTab]);
 
-  const handleSetDefault = React.useCallback(() => {
-    if (roleMainTab === 'group') saveDefaultSnapshot('group', draftRoles);
-    else if (roleMainTab === 'task') saveDefaultSnapshot('project', draftMatrix);
-    else saveDefaultSnapshot('approval', draftApprovalConfig);
-    addToast({ title: '📌 Đã đặt mặc định', message: 'Cấu hình hiện tại đã được lưu làm mặc định cho tab này.', type: 'info' });
+  const handleSetDefault = React.useCallback(async () => {
+    let supabaseFailed = false;
+    try {
+      if (roleMainTab === 'group') await saveDefaultSnapshot('group', draftRoles);
+      else if (roleMainTab === 'task') await saveDefaultSnapshot('project', draftMatrix);
+      else await saveDefaultSnapshot('approval', draftApprovalConfig);
+    } catch (e) {
+      supabaseFailed = true;
+      console.error('Supabase default snapshot save error:', e);
+    }
+    if (supabaseFailed) {
+      addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ cấu hình mặc định lên Supabase.', type: 'warning' });
+    } else {
+      addToast({ title: '📌 Đã đặt mặc định', message: 'Cấu hình hiện tại đã được lưu làm mặc định cho tab này.', type: 'info' });
+    }
   }, [roleMainTab, draftRoles, draftMatrix, draftApprovalConfig, addToast]);
 
   const handleRestoreDefault = React.useCallback(() => {
@@ -304,7 +342,9 @@ export default function RolesTab(props: RolesTabProps) {
                           setRoles(updated);
                           localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
                           localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
-                          dbService.hrmRoleGroups.delete(r.id).catch(() => {});
+                          dbService.hrmRoleGroups.delete(r.id).catch(err => {
+                            console.error('Supabase hrmRoleGroups delete error:', err);
+                          });
                           syncHrmPermissionsToApp(updated);
                           if (selectedRoleId === r.id) {
                             setSelectedRoleId('role_admin');

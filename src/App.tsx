@@ -32,6 +32,7 @@ import {
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { isUserInRoleGroup } from './context';
+import { hashPasswordSync, verifyPasswordSync } from './lib/passwordUtils';
 
 // COMPONENTS
 import DashboardOverview from './components/DashboardOverview';
@@ -232,7 +233,7 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
     return {
       ...emp,
       username: emp.username || generateUsername(emp.name),
-      password: emp.password || '123'
+      password: emp.password || hashPasswordSync('123')
     };
   });
   if (!mapped.some(e => e.username === 'admin' || e.id === 'emp_admin')) {
@@ -294,7 +295,7 @@ function ShiftMinuteInput({
     const val = rawVal === '' ? '' : Math.max(0, parseInt(rawVal, 10));
     const updated = { ...hrmConfig, [field]: val };
     setHrmConfig?.(updated);
-    localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+    dbService.shiftConfig.save(updated).catch(e => console.error('Supabase shiftConfig save error:', e));
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
   };
@@ -302,7 +303,7 @@ function ShiftMinuteInput({
     if ((hrmConfig as any)[field] === '' || (hrmConfig as any)[field] === undefined || (hrmConfig as any)[field] === null) {
       const updated = { ...hrmConfig, [field]: 15 };
       setHrmConfig?.(updated);
-      localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+      dbService.shiftConfig.save(updated).catch(e => console.error('Supabase shiftConfig save error:', e));
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
     }
@@ -598,14 +599,6 @@ export default function App() {
         const cloudShiftConfig = await dbService.shiftConfig.get();
         if (cloudShiftConfig) {
           setHrmConfig(cloudShiftConfig);
-          localStorage.setItem('hl_system_settings_v3', JSON.stringify(cloudShiftConfig));
-        } else {
-          // Chưa có trên cloud → push dữ liệu local lên Supabase
-          const localConfig = localStorage.getItem('hl_system_settings_v3');
-          if (localConfig) {
-            const parsed = JSON.parse(localConfig);
-            await dbService.shiftConfig.save(parsed);
-          }
         }
 
         // displaySettings chỉ lưu localStorage (cá nhân hóa - màu sắc, font chữ)
@@ -677,11 +670,11 @@ export default function App() {
 
       if (existingIndex >= 0) {
         const existing = merged[existingIndex];
-        if (existing.username !== formattedUsername || existing.password !== '123') {
+        if (existing.username !== formattedUsername || !verifyPasswordSync('123', existing.password || '')) {
           merged[existingIndex] = {
             ...existing,
             username: formattedUsername,
-            password: '123'
+            password: hashPasswordSync('123')
           };
           updatedCount++;
           toSave.push(merged[existingIndex]);
@@ -690,7 +683,7 @@ export default function App() {
         const processedEmp = {
           ...newEmp,
           username: formattedUsername,
-          password: '123'
+          password: hashPasswordSync('123')
         };
         merged.push(processedEmp);
         addedCount++;
@@ -971,7 +964,7 @@ export default function App() {
       const mappedEmps = emps.map(emp => ({
         ...emp,
         username: emp.username || generateUsername(emp.name),
-        password: emp.password || '123'
+        password: emp.password || hashPasswordSync('123')
       }));
       setEmployees(mappedEmps);
 
@@ -1025,48 +1018,26 @@ export default function App() {
   // ========== CÁC TRẠNG THÁI FORM CHO MODULE CÀI ĐẶT TÙY BIẾN =========
   const [subSettingsTab, setSubSettingsTab] = useState<'business' | 'shift' | 'display' | 'supabase'>('business');
 
-  const [hrmConfig, setHrmConfig] = useState(() => {
-    const saved = localStorage.getItem('hl_system_settings_v3');
-    const base = {
-      morningIn: '07:30',
-      morningOut: '11:30',
-      afternoonIn: '13:00',
-      afternoonOut: '17:00',
-      overtimeIn: '17:45',
-      overtimeOut: '20:45',
-      gpsRadiusAllowed: 50,
-      antiFakeCam: true,
-      punchOpenBeforeMinutes: 15,
-      punchCloseAfterMinutes: 15,
-      punchOutOpenBeforeMinutes: 15,
-      punchOutCloseAfterMinutes: 15,
-      otPunchOpenBeforeMinutes: 15,
-      otPunchCloseAfterMinutes: 15,
-      otPunchOutOpenBeforeMinutes: 15,
-      otPunchOutCloseAfterMinutes: 15,
-      allowedLateMinutes: 15,
-      weekendDays: [0], // 0 is Sunday
-    };
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (!parsed.weekendDays) {
-          parsed.weekendDays = [0];
-        }
-        if (parsed.allowedLateMinutes === undefined) {
-          parsed.allowedLateMinutes = 15;
-        }
-        if (parsed.punchOutOpenBeforeMinutes === undefined) parsed.punchOutOpenBeforeMinutes = 15;
-        if (parsed.punchOutCloseAfterMinutes === undefined) parsed.punchOutCloseAfterMinutes = 15;
-        if (parsed.otPunchOpenBeforeMinutes === undefined) parsed.otPunchOpenBeforeMinutes = 15;
-        if (parsed.otPunchCloseAfterMinutes === undefined) parsed.otPunchCloseAfterMinutes = 15;
-        if (parsed.otPunchOutOpenBeforeMinutes === undefined) parsed.otPunchOutOpenBeforeMinutes = 15;
-        if (parsed.otPunchOutCloseAfterMinutes === undefined) parsed.otPunchOutCloseAfterMinutes = 15;
-        return { ...base, ...parsed };
-      } catch (e) {}
-    }
-    return base;
-  });
+  const [hrmConfig, setHrmConfig] = useState(() => ({
+    morningIn: '07:30',
+    morningOut: '11:30',
+    afternoonIn: '13:00',
+    afternoonOut: '17:00',
+    overtimeIn: '17:45',
+    overtimeOut: '20:45',
+    gpsRadiusAllowed: 50,
+    antiFakeCam: true,
+    punchOpenBeforeMinutes: 15,
+    punchCloseAfterMinutes: 15,
+    punchOutOpenBeforeMinutes: 15,
+    punchOutCloseAfterMinutes: 15,
+    otPunchOpenBeforeMinutes: 15,
+    otPunchCloseAfterMinutes: 15,
+    otPunchOutOpenBeforeMinutes: 15,
+    otPunchOutCloseAfterMinutes: 15,
+    allowedLateMinutes: 15,
+    weekendDays: [0] as number[],
+  }));
 
   // ─── Helper tính toán phút từ chuỗi "HH:MM" ───
   const timeToMinutes = (timeStr: string): number => {
@@ -1376,7 +1347,6 @@ export default function App() {
         const config = await dbService.shiftConfig.get();
         if (config) {
           setHrmConfig(config);
-          localStorage.setItem('hl_system_settings_v3', JSON.stringify(config));
         }
       } catch (e) { console.error('Realtime shift_config sync error:', e); }
     };
@@ -1477,7 +1447,7 @@ export default function App() {
     if (remember) {
       const creds = {
         username: loggedInUser.username || generateUsername(loggedInUser.name),
-        password: loggedInUser.password || '123'
+        password: loggedInUser.password || hashPasswordSync('123')
       };
       localStorage.setItem('hl_erp_remembered_credentials', JSON.stringify(creds));
     } else {
@@ -3596,7 +3566,7 @@ export default function App() {
                         phone: newEmpPhone.trim() || '09xxxxxxxx',
                         department: newEmpDept.trim() || 'Phòng Ban Liên Quan',
                         username: usernameToUse,
-                        password: newEmpPassword || '123'
+                        password: hashPasswordSync(newEmpPassword || '123')
                       };
 
                       // Thêm employee vào Role Group đã chọn (Supabase là nguồn sự thật)
@@ -4206,7 +4176,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = { ...hrmConfig, morningIn: e.target.value };
                             setHrmConfig(updated);
-                            localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                            dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           }}
@@ -4221,7 +4191,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = { ...hrmConfig, morningOut: e.target.value };
                             setHrmConfig(updated);
-                            localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                            dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           }}
@@ -4236,7 +4206,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = { ...hrmConfig, afternoonIn: e.target.value };
                             setHrmConfig(updated);
-                            localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                            dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           }}
@@ -4251,7 +4221,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = { ...hrmConfig, afternoonOut: e.target.value };
                             setHrmConfig(updated);
-                            localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                            dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           }}
@@ -4266,7 +4236,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = { ...hrmConfig, overtimeIn: e.target.value };
                             setHrmConfig(updated);
-                            localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                            dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           }}
@@ -4281,7 +4251,7 @@ export default function App() {
                           onChange={(e) => {
                             const updated = { ...hrmConfig, overtimeOut: e.target.value };
                             setHrmConfig(updated);
-                            localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                            dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                             window.dispatchEvent(new Event('storage'));
                             window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           }}
@@ -4387,18 +4357,18 @@ export default function App() {
                                   value={shift.allowLate ?? ''}
                                   onChange={(e) => {
                                     const rawVal = e.target.value;
-                                    const val = rawVal === '' ? '' : Math.max(0, parseInt(rawVal, 10));
+                                    const val = rawVal === '' ? 15 : Math.max(0, parseInt(rawVal, 10));
                                     const updated = { ...hrmConfig, allowedLateMinutes: val };
                                     setHrmConfig(updated);
-                                    localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                                    dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                     window.dispatchEvent(new Event('storage'));
                                     window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                                   }}
                                   onBlur={() => {
-                                    if (hrmConfig.allowedLateMinutes === '' || hrmConfig.allowedLateMinutes === undefined || hrmConfig.allowedLateMinutes === null) {
+                                    if (hrmConfig.allowedLateMinutes === undefined || hrmConfig.allowedLateMinutes === null) {
                                       const updated = { ...hrmConfig, allowedLateMinutes: 15 };
                                       setHrmConfig(updated);
-                                      localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                                      dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                       window.dispatchEvent(new Event('storage'));
                                       window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                                     }
@@ -4482,7 +4452,7 @@ export default function App() {
                                 }
                                 const updated = { ...hrmConfig, weekendDays: nextWeekends };
                                 setHrmConfig(updated);
-                                localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
+                                dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                 window.dispatchEvent(new Event('storage'));
                                 window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                               }}
@@ -4517,8 +4487,7 @@ export default function App() {
                             allowedLateMinutes: 15,
                           };
                           setHrmConfig(updated);
-                          localStorage.setItem('hl_system_settings_v3', JSON.stringify(updated));
-                          dbService.shiftConfig.save(updated).catch(() => {}); // Lưu cả lên Supabase
+                          dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                           window.dispatchEvent(new Event('storage'));
                           window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                           alert('✅ Đã đặt lại cấu hình ca về mặc định.');

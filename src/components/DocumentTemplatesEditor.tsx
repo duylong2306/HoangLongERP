@@ -60,20 +60,20 @@ export default function DocumentTemplatesEditor() {
     liquidationAgreement: 'Sau khi hoàn tất chuyển giao tiền mặt hoặc tất toán tài chính trên, hai bên đồng ý tuyên bố hợp đồng chính thức được thanh lý, không còn bất kỳ tranh chấp công trình nào phát sinh sau này.'
   });
 
-  // Load existing configuration
+  // Load existing configuration từ Supabase (quotation_configs.interior)
   useEffect(() => {
     const fetchTemplateConfig = async () => {
       setLoading(true);
       try {
-        const stored = await dbService.documentTemplates.get();
-        if (stored) {
+        const stored = await dbService.quotationConfigs.get('interior');
+        if (stored && typeof stored === 'object' && Object.keys(stored).length > 0) {
           setTemplate(prev => ({
             ...prev,
             ...stored
           }));
         }
       } catch (e) {
-        console.error("Lỗi khi đồng bộ mẫu hồ sơ từ Firestore:", e);
+        console.error("Lỗi khi đồng bộ mẫu hồ sơ từ Supabase:", e);
       } finally {
         setLoading(false);
       }
@@ -95,7 +95,7 @@ export default function DocumentTemplatesEditor() {
     setSaving(true);
     setSaveStatus('idle');
     try {
-      await dbService.documentTemplates.save(template);
+      await dbService.quotationConfigs.save('interior', template);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (e) {
