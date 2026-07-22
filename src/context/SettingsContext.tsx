@@ -210,7 +210,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
-    dbService.displaySettings.save(displaySettings).catch(err => console.warn('SettingsContext: save displaySettings failed:', err));
   }, [displaySettings]);
 
   const updateDisplaySettings = useCallback((updates: Partial<DisplaySettings>) => {

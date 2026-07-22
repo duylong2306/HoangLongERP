@@ -27,7 +27,7 @@ Hệ thống quản trị doanh nghiệp - Lâm Đồng ERP
 
 | Variable | Value | Environment |
 |----------|-------|-------------|
-| `VITE_SUPABASE_URL` | `https://sujhvotnlbsgavoenuma.supabase.co` | Production, Preview, Development |
+| `VITE_SUPABASE_URL` | `https://cyuunmrdrymhzxfcruoe.supabase.co` | Production, Preview, Development |
 | `VITE_SUPABASE_ANON_KEY` | Lấy từ Supabase Dashboard > Project Settings > API > `anon` `public` | Production, Preview, Development |
 
 3. Nhấn **Save** rồi **Redeploy** project
@@ -35,7 +35,7 @@ Hệ thống quản trị doanh nghiệp - Lâm Đồng ERP
 ### Bước 2: Lấy Supabase Anon Key
 
 1. Vào [Supabase Dashboard](https://supabase.com/dashboard)
-2. Chọn project `sujhvotnlbsgavoenuma`
+2. Chọn project `cyuunmrdrymhzxfcruoe`
 3. Vào **Project Settings** > **API**
 4. Copy giá trị `anon` `public` key
 
