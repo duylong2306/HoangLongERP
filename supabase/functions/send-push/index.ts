@@ -51,6 +51,17 @@ serve(async (req) => {
     );
     const subs = await subRes.json();
 
+    // Cleanup: xóa subscription quá cũ (>3 tháng không hoạt động)
+    try {
+      await fetch(
+        `${SUPABASE_URL}/rest/v1/push_subscriptions?created_at=lt.${new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()}`,
+        {
+          method: "DELETE",
+          headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+        }
+      );
+    } catch (_) { /* ignore cleanup errors */ }
+
     if (!subs || subs.length === 0) {
       return new Response(
         JSON.stringify({ successCount: 0, failureCount: 0, note: "no subscriptions" }),
