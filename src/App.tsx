@@ -645,7 +645,7 @@ export default function App() {
   });
 
   // Web Push notification registration (using Supabase Realtime)
-  useWebPush(currentUser?.id ?? null);
+  const { isPushEnabled, togglePush } = useWebPush(currentUser?.id ?? null);
 
   const [activeTab, setActiveTab ] = useState<string>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
@@ -4806,6 +4806,8 @@ export default function App() {
         onUpdateProfile={handleUpdateProfile}
         accentTextClass={accentTextClass}
         accentBgClass={accentBgClass}
+        isPushEnabled={isPushEnabled}
+        onTogglePush={togglePush}
       />
 
       {/* FLOATING TOAST NOTIFICATIONS */}
