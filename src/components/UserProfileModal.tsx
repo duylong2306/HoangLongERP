@@ -31,7 +31,7 @@ const PRESET_AVATARS = [
   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80',
   'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80',
-  'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?auto=format&fit=crop&w=256&q=80',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=256&q=80',
   'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=256&q=80',
   'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=256&q=80',
 ];
@@ -50,15 +50,20 @@ export default function UserProfileModal({
   const [name, setName] = useState(currentUser.name || '');
   const [phone, setPhone] = useState(currentUser.phone || '');
   const [address, setAddress] = useState(currentUser.address || '');
-  const [password, setPassword] = useState(currentUser.password || '');
   const [avatar, setAvatar] = useState(currentUser.avatar || '');
-  
+
   // Custom image URL mode
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [showCustomUrlInput, setShowCustomUrlInput] = useState(false);
-  
-  // Password visibility
-  const [showPassword, setShowPassword] = useState(false);
+
+  // Change password
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -80,7 +85,6 @@ export default function UserProfileModal({
         name: name.trim(),
         phone: phone.trim(),
         address: address.trim(),
-        password: hashPasswordSync(password.trim() || '123'),
         avatar: avatar
       };
 
@@ -95,6 +99,42 @@ export default function UserProfileModal({
       addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi cập nhật thông tin!', type: 'error' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPassword.trim()) {
+      addToast({ title: '⚠️ Lỗi', message: 'Vui lòng nhập mật khẩu mới!', type: 'warning' });
+      return;
+    }
+    if (newPassword.trim().length < 3) {
+      addToast({ title: '⚠️ Lỗi', message: 'Mật khẩu phải có ít nhất 3 ký tự!', type: 'warning' });
+      return;
+    }
+    if (newPassword.trim() !== confirmPassword.trim()) {
+      addToast({ title: '⚠️ Lỗi', message: 'Mật khẩu xác nhận không khớp!', type: 'warning' });
+      return;
+    }
+
+    setChangingPassword(true);
+    setPasswordSuccess(false);
+
+    try {
+      const updatedUser: Employee = {
+        ...currentUser,
+        password: hashPasswordSync(newPassword.trim())
+      };
+      await onUpdateProfile(updatedUser);
+      setPasswordSuccess(true);
+      addToast({ title: '✅ Thành công', message: 'Đổi mật khẩu thành công!', type: 'success' });
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPasswordSuccess(false), 2000);
+    } catch (error) {
+      console.error(error);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi đổi mật khẩu!', type: 'error' });
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -293,30 +333,88 @@ export default function UserProfileModal({
                 </div>
               </div>
 
-              {/* Mật khẩu thay đổi */}
-              <div className="space-y-1">
+              {/* Đổi mật khẩu */}
+              <div className="bg-slate-950/40 p-3.5 sm:p-4 rounded-xl border border-slate-850 space-y-3.5">
                 <label className="block text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                  Mật khẩu truy cập hệ thống
+                  🔒 Đổi mật khẩu truy cập hệ thống
                 </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 pl-9 pr-10 text-xs text-white outline-none focus:border-slate-700 font-mono font-bold transition-all"
-                    placeholder="Mật khẩu bảo mật"
-                  />
-                  <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-2 text-slate-500 hover:text-slate-300 transition-all"
-                  >
-                    {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
-                  </button>
+
+                {/* Mật khẩu mới */}
+                <div className="space-y-1">
+                  <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                    Mật khẩu mới
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 pl-9 pr-10 text-xs text-white outline-none focus:border-slate-700 font-mono font-bold transition-all"
+                      placeholder="Nhập mật khẩu mới"
+                    />
+                    <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-2 text-slate-500 hover:text-slate-300 transition-all"
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Xác nhận mật khẩu */}
+                <div className="space-y-1">
+                  <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                    Xác nhận mật khẩu mới
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 pl-9 pr-10 text-xs text-white outline-none focus:border-slate-700 font-mono font-bold transition-all"
+                      placeholder="Nhập lại mật khẩu mới"
+                    />
+                    <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-2 text-slate-500 hover:text-slate-300 transition-all"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {confirmPassword && newPassword !== confirmPassword && (
+                    <span className="block text-[10px] text-red-400 font-bold tracking-wide">
+                      ⚠️ Mật khẩu xác nhận không khớp!
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleChangePassword}
+                  disabled={changingPassword || !newPassword.trim() || !confirmPassword.trim()}
+                  className={`w-full py-2 rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${passwordSuccess ? 'bg-emerald-600 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'}`}
+                >
+                  {passwordSuccess ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      Đã đổi mật khẩu!
+                    </>
+                  ) : changingPassword ? (
+                    'Đang xử lý...'
+                  ) : (
+                    <>
+                      <Lock className="w-4 h-4" />
+                      Lưu mật khẩu mới
+                    </>
+                  )}
+                </button>
+
                 <span className="block text-[10px] text-slate-500 font-bold tracking-wide">
-                  Gợi ý: Mật khẩu nên bảo mật và dễ nhớ để tránh quên tài khoản đăng nhập.
+                  💡 Mật khẩu phải có ít nhất 3 ký tự. Nên dùng mật khẩu dễ nhớ nhưng khó đoán.
                 </span>
               </div>
             </div>
