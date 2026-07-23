@@ -39,20 +39,19 @@ async function subscribeToPush(userId: string): Promise<boolean> {
       return false;
     }
 
-    // Check existing subscription first — reuse if still valid
+    // Request notification permission first
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        console.warn('Web Push: Người dùng từ chối cấp quyền thông báo');
+        return false;
+      }
+    }
+
+    // Check existing subscription — reuse if valid
     let subscription = await registration.pushManager.getSubscription();
 
-    // If no subscription, request permission and subscribe
     if (!subscription) {
-      // Request notification permission
-      if ('Notification' in window && Notification.permission !== 'granted') {
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-          console.warn('Web Push: Người dùng từ chối cấp quyền thông báo');
-          return false;
-        }
-      }
-
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToArrayBuffer(VAPID_PUBLIC_KEY),
@@ -92,8 +91,9 @@ async function subscribeToPush(userId: string): Promise<boolean> {
   }
 }
 
-async function unsubscribeFromPush(): Promise<void> {
+async function unsubscribeFromPush(): Promise<boolean> {
   const supabase = getSupabase();
+  let success = true;
 
   try {
     const currentEndpoint = sessionStorage.getItem(PUSH_ENDPOINT_KEY);
@@ -106,6 +106,7 @@ async function unsubscribeFromPush(): Promise<void> {
 
       if (error) {
         console.error('Web Push: Lỗi xóa subscription:', error);
+        success = false;
       } else {
         console.log('Web Push: Đã xóa subscription thiết bị hiện tại');
       }
@@ -122,7 +123,9 @@ async function unsubscribeFromPush(): Promise<void> {
     }
   } catch (err) {
     console.error('Web Push: Lỗi hủy đăng ký:', err);
+    success = false;
   }
+  return success;
 }
 
 // Check if current device has an active subscription
@@ -134,7 +137,6 @@ async function checkSubscriptionStatus(): Promise<boolean> {
     const subscription = await registration.pushManager.getSubscription();
     const endpoint = sessionStorage.getItem(PUSH_ENDPOINT_KEY);
 
-    // Must have both browser subscription AND stored endpoint
     return !!subscription && !!endpoint;
   } catch {
     return false;
@@ -151,7 +153,7 @@ export interface UseWebPushReturn {
 export function useWebPush(userId: string | null): UseWebPushReturn {
   const [isPushEnabled, setIsPushEnabled] = useState(false);
 
-  // Check subscription status on mount & when userId changes
+  // Only check status on mount — do NOT auto-subscribe
   useEffect(() => {
     if (!userId) {
       setIsPushEnabled(false);
@@ -160,31 +162,22 @@ export function useWebPush(userId: string | null): UseWebPushReturn {
     checkSubscriptionStatus().then(setIsPushEnabled);
   }, [userId]);
 
-  // Subscribe on login (auto-enable if not already subscribed)
+  // Cleanup on logout — xóa subscription thiết bị hiện tại
   useEffect(() => {
     if (!userId) return;
 
-    checkSubscriptionStatus().then(async (enabled) => {
-      if (!enabled) {
-        const result = await subscribeToPush(userId);
-        setIsPushEnabled(result);
-      }
-    });
-
-    // Cleanup on logout — chỉ xóa subscription thiết bị này
     return () => {
-      unsubscribeFromPush();
-      setIsPushEnabled(false);
+      unsubscribeFromPush().then(() => setIsPushEnabled(false));
     };
   }, [userId]);
 
-  // Toggle function — gọi từ UI
+  // Toggle function — gọi từ UI (UserProfileModal)
   const togglePush = useCallback(async () => {
     if (!userId) return;
 
     if (isPushEnabled) {
-      await unsubscribeFromPush();
-      setIsPushEnabled(false);
+      const ok = await unsubscribeFromPush();
+      if (ok) setIsPushEnabled(false);
     } else {
       const result = await subscribeToPush(userId);
       setIsPushEnabled(result);
