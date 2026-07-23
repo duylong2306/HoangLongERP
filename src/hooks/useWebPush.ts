@@ -47,7 +47,7 @@ async function subscribeToPush(userId: string): Promise<void> {
       }
     }
 
-    // Get existing subscription
+    // Get existing browser subscription
     let subscription = await registration.pushManager.getSubscription();
 
     // Subscribe if none exists
@@ -68,7 +68,28 @@ async function subscribeToPush(userId: string): Promise<void> {
       return;
     }
 
-    // Upsert based on endpoint — cùng thiết bị update, thiết bị khác insert mới
+    // ─── CLEANUP: Xóa subscription cũ trong DB không khớp endpoint hiện tại ───
+    try {
+      const { data: existingSubs } = await supabase
+        .from('push_subscriptions')
+        .select('id, endpoint')
+        .eq('user_id', userId);
+
+      if (existingSubs && existingSubs.length > 0) {
+        const staleIds = existingSubs
+          .filter(sub => sub.endpoint !== endpoint)
+          .map(sub => sub.id);
+
+        if (staleIds.length > 0) {
+          await supabase.from('push_subscriptions').delete().in('id', staleIds);
+          console.log(`Web Push: Đã dọn ${staleIds.length} subscription cũ`);
+        }
+      }
+    } catch (cleanupErr) {
+      console.warn('Web Push: Cleanup subscription cũ lỗi (không nghiêm trọng):', cleanupErr);
+    }
+
+    // Upsert subscription mới
     const { error } = await supabase.from('push_subscriptions').upsert({
       user_id: userId,
       endpoint,

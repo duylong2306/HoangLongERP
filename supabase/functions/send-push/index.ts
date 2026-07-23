@@ -69,7 +69,7 @@ serve(async (req) => {
 
     let successCount = 0;
     let failureCount = 0;
-    const failedEndpoints = [];
+    const failedEndpoints: string[] = [];
 
     for (const sub of subs) {
       try {
@@ -80,14 +80,17 @@ serve(async (req) => {
         successCount++;
       } catch (err) {
         failureCount++;
-        if (err.statusCode === 410 || err.statusCode === 404 || (err.message && err.message.includes("gone"))) {
-          failedEndpoints.push(sub.endpoint);
-        }
-        console.error("Push failed:", err.message || err);
+        const statusCode = err.statusCode || err.status || 0;
+        const errMsg = err.message || String(err);
+        console.error("Push failed:", statusCode, errMsg, "endpoint:", sub.endpoint.substring(0, 60));
+
+        // Xóa subscription fail: 410/404 (expired) hoặc bất kỳ lỗi nào (sai VAPID key, v.v.)
+        // → Tự dọn subscription không hợp lệ, không cần can thiệp thủ công
+        failedEndpoints.push(sub.endpoint);
       }
     }
 
-    // Delete invalid subscriptions
+    // Delete all failed subscriptions (tự dọn dẹp)
     if (failedEndpoints.length > 0) {
       const epIds = failedEndpoints.map((e) => `"${e}"`).join(",");
       await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=in.(${epIds})`, {
