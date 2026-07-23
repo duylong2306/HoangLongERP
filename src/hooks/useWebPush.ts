@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 import { getSupabase } from '../lib/supabase';
 
-// VAPID public key - should be set in environment variables
-// Tạo bằng: npx web-push generate-vapid-keys
+// VAPID public key
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEBPUSH_VAPID_PUBLIC_KEY || '';
 
 // sessionStorage key to track this device's subscription endpoint
@@ -22,35 +21,36 @@ function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
 
 // ─── Core subscribe/unsubscribe ─────────────────────────────────────────────
 
-async function subscribeToPush(userId: string): Promise<boolean> {
+async function subscribeToPush(userId: string): Promise<void> {
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) return;
 
   try {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       console.warn('Web Push: Trình duyệt không hỗ trợ Push API');
-      return false;
+      return;
     }
 
     const registration = await navigator.serviceWorker.register('/web-push-sw.js');
 
     if (!VAPID_PUBLIC_KEY) {
-      console.warn('Web Push: VAPID public key chưa được thiết lập (VITE_WEBPUSH_VAPID_PUBLIC_KEY)');
-      return false;
+      console.warn('Web Push: VAPID public key chưa được thiết lập');
+      return;
     }
 
-    // Request notification permission first
+    // Request notification permission
     if ('Notification' in window && Notification.permission !== 'granted') {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         console.warn('Web Push: Người dùng từ chối cấp quyền thông báo');
-        return false;
+        return;
       }
     }
 
-    // Check existing subscription — reuse if valid
+    // Get existing subscription
     let subscription = await registration.pushManager.getSubscription();
 
+    // Subscribe if none exists
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -65,7 +65,7 @@ async function subscribeToPush(userId: string): Promise<boolean> {
 
     if (!endpoint || !p256dh || !auth) {
       console.error('Web Push: Thiếu keys trong subscription');
-      return false;
+      return;
     }
 
     // Upsert based on endpoint — cùng thiết bị update, thiết bị khác insert mới
@@ -79,23 +79,22 @@ async function subscribeToPush(userId: string): Promise<boolean> {
 
     if (error) {
       console.error('Web Push: Lỗi lưu subscription:', error);
-      return false;
+      return;
     }
 
     sessionStorage.setItem(PUSH_ENDPOINT_KEY, endpoint);
     console.log('Web Push: Đăng ký thành công cho user', userId);
-    return true;
   } catch (err) {
     console.error('Web Push: Lỗi đăng ký:', err);
-    return false;
   }
 }
 
-async function unsubscribeFromPush(): Promise<boolean> {
+// Unsubscribe from push notifications — chỉ xóa subscription của thiết bị này
+async function unsubscribeFromPush(): Promise<void> {
   const supabase = getSupabase();
-  let success = true;
 
   try {
+    // Xóa subscription của thiết bị hiện tại (theo endpoint)
     const currentEndpoint = sessionStorage.getItem(PUSH_ENDPOINT_KEY);
 
     if (supabase && currentEndpoint) {
@@ -106,7 +105,6 @@ async function unsubscribeFromPush(): Promise<boolean> {
 
       if (error) {
         console.error('Web Push: Lỗi xóa subscription:', error);
-        success = false;
       } else {
         console.log('Web Push: Đã xóa subscription thiết bị hiện tại');
       }
@@ -123,66 +121,21 @@ async function unsubscribeFromPush(): Promise<boolean> {
     }
   } catch (err) {
     console.error('Web Push: Lỗi hủy đăng ký:', err);
-    success = false;
-  }
-  return success;
-}
-
-// Check if current device has an active subscription
-async function checkSubscriptionStatus(): Promise<boolean> {
-  try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
-
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
-    const endpoint = sessionStorage.getItem(PUSH_ENDPOINT_KEY);
-
-    return !!subscription && !!endpoint;
-  } catch {
-    return false;
   }
 }
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
-export interface UseWebPushReturn {
-  isPushEnabled: boolean;
-  togglePush: () => Promise<void>;
-}
-
-export function useWebPush(userId: string | null): UseWebPushReturn {
-  const [isPushEnabled, setIsPushEnabled] = useState(false);
-
-  // Only check status on mount — do NOT auto-subscribe
-  useEffect(() => {
-    if (!userId) {
-      setIsPushEnabled(false);
-      return;
-    }
-    checkSubscriptionStatus().then(setIsPushEnabled);
-  }, [userId]);
-
-  // Cleanup on logout — xóa subscription thiết bị hiện tại
+export function useWebPush(userId: string | null) {
+  // Auto-subscribe when user logs in
   useEffect(() => {
     if (!userId) return;
 
+    subscribeToPush(userId);
+
+    // Cleanup on logout — chỉ xóa subscription thiết bị này
     return () => {
-      unsubscribeFromPush().then(() => setIsPushEnabled(false));
+      unsubscribeFromPush();
     };
   }, [userId]);
-
-  // Toggle function — gọi từ UI (UserProfileModal)
-  const togglePush = useCallback(async () => {
-    if (!userId) return;
-
-    if (isPushEnabled) {
-      const ok = await unsubscribeFromPush();
-      if (ok) setIsPushEnabled(false);
-    } else {
-      const result = await subscribeToPush(userId);
-      setIsPushEnabled(result);
-    }
-  }, [userId, isPushEnabled]);
-
-  return { isPushEnabled, togglePush };
 }

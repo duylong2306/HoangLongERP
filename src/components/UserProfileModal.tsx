@@ -13,9 +13,7 @@ import {
   EyeOff,
   Save,
   KeyRound,
-  Sparkles,
-  Bell,
-  BellOff
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNotification } from '../context';
@@ -27,8 +25,6 @@ interface UserProfileModalProps {
   onUpdateProfile: (updatedUser: Employee) => Promise<void>;
   accentTextClass: string;
   accentBgClass: string;
-  isPushEnabled?: boolean;
-  onTogglePush?: () => Promise<void>;
 }
 
 const PRESET_AVATARS = [
@@ -48,12 +44,9 @@ export default function UserProfileModal({
   currentUser,
   onUpdateProfile,
   accentTextClass,
-  accentBgClass,
-  isPushEnabled = false,
-  onTogglePush
+  accentBgClass
 }: UserProfileModalProps) {
   const { addToast } = useNotification();
-  const [pushLoading, setPushLoading] = useState(false);
   const [name, setName] = useState(currentUser.name || '');
   const [phone, setPhone] = useState(currentUser.phone || '');
   const [address, setAddress] = useState(currentUser.address || '');
@@ -107,29 +100,6 @@ export default function UserProfileModal({
 
   const selectAvatar = (urlOrEmoji: string) => {
     setAvatar(urlOrEmoji);
-  };
-
-  const handleTogglePush = async () => {
-    if (!onTogglePush) return;
-    setPushLoading(true);
-    try {
-      await onTogglePush();
-      addToast({
-        title: isPushEnabled ? '🔕 Thông báo đã tắt' : '🔔 Thông báo đã bật',
-        message: isPushEnabled
-          ? 'Bạn sẽ không nhận thông báo push trên thiết bị này nữa.'
-          : 'Bạn sẽ nhận thông báo push trên thiết bị này.',
-        type: 'success',
-      });
-    } catch {
-      addToast({
-        title: '⚠️ Lỗi',
-        message: 'Không thể thay đổi cài đặt thông báo. Vui lòng thử lại.',
-        type: 'error',
-      });
-    } finally {
-      setPushLoading(false);
-    }
   };
 
   return (
@@ -320,49 +290,6 @@ export default function UserProfileModal({
                     placeholder="Nhập địa chỉ của bạn"
                   />
                   <MapPin className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                </div>
-              </div>
-
-              {/* Push Notification Toggle */}
-              <div className="space-y-1 pt-2 border-t border-slate-850">
-                <label className="block text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
-                  Thông báo Push (Web Push)
-                </label>
-                <div className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    {isPushEnabled ? (
-                      <Bell className="w-5 h-5 text-emerald-400" />
-                    ) : (
-                      <BellOff className="w-5 h-5 text-slate-500" />
-                    )}
-                    <div>
-                      <span className="block text-sm font-semibold text-white">
-                        {isPushEnabled ? 'Đang bật' : 'Đang tắt'}
-                      </span>
-                      <span className="block text-[10px] text-slate-500">
-                        {isPushEnabled
-                          ? 'Nhận thông báo khi app đóng/background'
-                          : 'Không nhận thông báo push trên thiết bị này'}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleTogglePush}
-                    disabled={pushLoading || !onTogglePush}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed ${isPushEnabled
-                      ? 'bg-emerald-600 border-emerald-600'
-                      : 'bg-slate-700 border-slate-600'
-                    }`}
-                    role="switch"
-                    aria-checked={isPushEnabled}
-                    aria-label={isPushEnabled ? 'Tắt thông báo push' : 'Bật thông báo push'}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPushEnabled ? 'translate-x-6' : 'translate-x-0'}
-                    }`}
-                    />
-                  </button>
                 </div>
               </div>
 
