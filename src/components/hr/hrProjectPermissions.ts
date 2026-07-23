@@ -8,6 +8,7 @@
 
 import { Employee, Project, Task } from '../../types';
 import { isUserInRoleGroup } from '../../context';
+import { dbService } from '../../lib/dbService';
 
 // ─── Role Scope: vai trò của user đối với MỘT dự án / công việc cụ thể ───
 // Tên hiển thị UI (Xem ProjectPermissionModal.tsx > roleScopeLabels):
@@ -373,7 +374,6 @@ export const saveProjectPermissions = async (matrix: ProjectPermissionMatrix): P
   }
   // Đẩy lên cloud (Firestore + Supabase) nếu có dbService
   try {
-    const { dbService } = await import('../../lib/dbService');
     await dbService.projectPermissions.save(finalMatrix);
   } catch (e) {
     console.warn('Lưu projectPermissions lên cloud thất bại (offline fallback):', e);

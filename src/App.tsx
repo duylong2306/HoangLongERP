@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { dbService } from './lib/dbService';
+import { getSupabase } from './lib/supabase';
 import { useWebPush } from './hooks/useWebPush';
 import { createGroupConversation, deleteConversation, getUserConversations, getConversations } from './lib/chatStore';
 import {
@@ -249,7 +250,7 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
  */
 async function loadAllRoleGroups(): Promise<{ id: string; name: string }[]> {
   try {
-    const supabase = (await import('./lib/supabase')).getSupabase();
+    const supabase = getSupabase();
     if (supabase) {
       const { data, error } = await supabase.from('hrm_role_groups').select('id, name');
       if (!error && data && data.length > 0) {

@@ -10,6 +10,7 @@
   address?: string;
   role?: string; // Legacy field — dùng Role Groups thay thế (hl_hrm_roles_v2)
   roleGroupIds?: string[]; // Danh sách ID của HRM Role Groups mà nhân viên thuộc về (vd: ['role_office', 'role_technical'])
+  bank_account?: string; // Số tài khoản ngân hàng
 }
 
 export interface Customer {

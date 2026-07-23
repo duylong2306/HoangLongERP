@@ -1,6 +1,7 @@
 // ─── HRM pure utility functions ────────────────────────────────────────
 // Tách từ HumanResourcesManagement.tsx
 // Các hàm thuần (pure) — không phụ thuộc React hook hay component state.
+import { dbService } from '../../lib/dbService';
 
 /** Helper trả về ngày local (UTC+7) theo định dạng YYYY-MM-DD. */
 export function getLocalYYYYMMDD(d: Date): string {
@@ -33,7 +34,6 @@ let _hrmConfigCache: typeof HRM_CONFIG_DEFAULTS = { ...HRM_CONFIG_DEFAULTS };
  */
 export async function refreshHrmConfigCache(): Promise<void> {
   try {
-    const { dbService } = await import('../../lib/dbService');
     const shiftConfig = dbService.shiftConfig;
     const cloud = await shiftConfig.get();
     if (cloud) {

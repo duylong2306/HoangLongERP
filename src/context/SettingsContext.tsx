@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { dbService } from '../lib/dbService';
+import { refreshHrmConfigCache } from '../components/hr/hrCalculations';
 import type { HrmRoleGroup, HrmApprovalConfig, HrmApprovalConfig as ApprovalPermission } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -253,7 +254,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           }));
         }
         // Nạp cache cho hrCalculations (readHrmConfigFromStorage)
-        const { refreshHrmConfigCache } = await import('../components/hr/hrCalculations');
         await refreshHrmConfigCache();
       } catch (e) {
         console.warn('SettingsContext: load shiftConfig from Supabase failed:', e);
