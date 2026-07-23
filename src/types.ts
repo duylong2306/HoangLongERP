@@ -10,8 +10,32 @@
   address?: string;
   role?: string; // Legacy field — dùng Role Groups thay thế (hl_hrm_roles_v2)
   roleGroupIds?: string[]; // Danh sách ID của HRM Role Groups mà nhân viên thuộc về (vd: ['role_office', 'role_technical'])
-  bank_account?: string; // Số tài khoản ngân hàng
-  bank_name?: string; // Tên ngân hàng
+  bankAccount?: string; // Số tài khoản ngân hàng
+  bankName?: string; // Tên ngân hàng
+  // ── HRM Profile fields (đồng bộ Supabase via migration 004) ──
+  gender?: string;
+  dob?: string;
+  cccd?: string;
+  cccdIssuedDate?: string;
+  cccdIssuedPlace?: string;
+  currentAddress?: string;
+  emergencyContact?: string;
+  position?: string;
+  startDate?: string;
+  contractType?: string;
+  contractDurationMonths?: number;
+  status?: 'working' | 'leave' | 'retired';
+  phepNam?: number;
+  docsCount?: number;
+  education?: string;
+  salaryCode?: string;
+  bhxhBookNo?: string;
+  bhxhSalary?: number;
+  bhxhRate?: number;
+  bhxhDate?: string;
+  taxPersonalRelief?: number;
+  dependentCount?: number;
+  hasSystemAccount?: boolean;
 }
 
 export interface Customer {

@@ -137,6 +137,34 @@ export function NotificationProvider({
     // Persist to Supabase (non-blocking)
     dbService.notifications.save(newNotif).catch(err =>
       console.warn('Lỗi khi lưu thông báo lên Supabase:', err));
+
+    // 🔔 Gửi Web Push notification đến thiết bị người nhận (non-blocking)
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (supabaseUrl && supabaseAnonKey && recipient.id) {
+        fetch(`${supabaseUrl}/functions/v1/send-push`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            userIds: [recipient.id],
+            title: newNotif.title || 'Thông báo mới',
+            body: newNotif.content || '',
+            data: {
+              url: '/',
+              type: newNotif.category,
+              sourceId: newNotif.subTaskCode,
+              tag: `system-${newNotif.category}`,
+            },
+          }),
+        }).catch(err => console.warn('Web Push error:', err));
+      }
+    } catch (err) {
+      console.warn('Web Push error (ignored):', err);
+    }
   }, [employees, currentUser, addToast]);
 
   const markNotificationRead = useCallback((id: string) => {
@@ -186,10 +214,30 @@ export function NotificationProvider({
 
 // ─── Consumer Hook ────────────────────────────────────────────────────────────
 
+// Fallback an toàn khi component render ngoài NotificationProvider
+// (tránh crash toàn bộ app do lỗi import/HMR)
+const FALLBACK_TOAST = {
+  toasts: [] as Toast[],
+  addToast: (_t: ToastInput) => { console.warn('[useNotification] Provider chưa sẵn sàng, toast bị bỏ qua'); },
+  removeToast: () => {},
+  notifications: [] as AppNotification[],
+  addNotification: () => {},
+  markNotificationRead: () => {},
+  deleteNotification: () => {},
+  unreadCount: 0,
+  showNotificationsPanel: false,
+  setShowNotificationsPanel: () => {},
+  selectedNotification: null,
+  setSelectedNotification: () => {},
+  notificationFilter: 'all' as NotificationFilter,
+  setNotificationFilter: () => {},
+};
+
 export function useNotification(): NotificationContextValue {
   const ctx = useContext(NotificationContext);
   if (!ctx) {
-    throw new Error('useNotification must be used within a NotificationProvider');
+    console.warn('[useNotification] Context null — trả về fallback an toàn');
+    return FALLBACK_TOAST as NotificationContextValue;
   }
   return ctx;
 }

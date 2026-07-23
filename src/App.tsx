@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { dbService } from './lib/dbService';
-import { getSupabase } from './lib/supabase';
 import { useWebPush } from './hooks/useWebPush';
 import { createGroupConversation, deleteConversation, getUserConversations, getConversations } from './lib/chatStore';
 import {
@@ -19,7 +18,6 @@ import {
 } from './types';
 import {
   INITIAL_EMPLOYEES,
-  HRM_26_EMPLOYEES,
   INITIAL_CUSTOMERS,
   INITIAL_PROJECTS,
   INITIAL_TASKS,
@@ -33,7 +31,7 @@ import {
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { isUserInRoleGroup } from './context';
-import { hashPasswordSync, verifyPasswordSync } from './lib/passwordUtils';
+import { hashPasswordSync } from './lib/passwordUtils';
 
 // COMPONENTS
 import DashboardOverview from './components/DashboardOverview';
@@ -658,61 +656,6 @@ export default function App() {
     setMobileMenuOpen(false);
   }, [activeTab]);
 
-  const handleSync26Accounts = async () => {
-    // Bước 1: Tính toán danh sách mới (chỉ update state, không save cloud ở đây)
-    const merged = [...employees];
-    let addedCount = 0;
-    let updatedCount = 0;
-    const toSave: Employee[] = [];
-
-    HRM_26_EMPLOYEES.forEach(newEmp => {
-      const formattedUsername = generateUsernameWithPhone(newEmp.name, newEmp.phone);
-      const existingIndex = merged.findIndex(e => e.id === newEmp.id);
-
-      if (existingIndex >= 0) {
-        const existing = merged[existingIndex];
-        if (existing.username !== formattedUsername || !verifyPasswordSync('123', existing.password || '')) {
-          merged[existingIndex] = {
-            ...existing,
-            username: formattedUsername,
-            password: hashPasswordSync('123')
-          };
-          updatedCount++;
-          toSave.push(merged[existingIndex]);
-        }
-      } else {
-        const processedEmp = {
-          ...newEmp,
-          username: formattedUsername,
-          password: hashPasswordSync('123')
-        };
-        merged.push(processedEmp);
-        addedCount++;
-        toSave.push(processedEmp);
-      }
-    });
-
-    setEmployees(merged);
-    localStorage.setItem('hl_erp_employees', JSON.stringify(merged));
-
-    // Bước 2: Đồng bộ lên cloud (await tất cả, bắt lỗi cụ thể)
-    let saveErrors = 0;
-    await Promise.allSettled(
-      toSave.map(emp =>
-        dbService.employees.save(emp).catch(err => {
-          saveErrors++;
-          console.error("❌ Lỗi lưu tài khoản lên cloud:", emp.id, emp.username, err);
-        })
-      )
-    );
-
-    if (saveErrors > 0) {
-      alert(`🎉 Đã tạo tài khoản từ nhân sự thành công!\n- Tạo mới: ${addedCount} tài khoản\n- Cập nhật: ${updatedCount} tài khoản.\nMật khẩu mặc định: 123.\n\n⚠️ Cảnh báo: ${saveErrors} tài khoản chưa đồng bộ lên cloud (kiểm tra kết nối mạng). Dữ liệu cục bộ vẫn được lưu an toàn.`);
-    } else {
-      alert(`🎉 Đã tạo tài khoản từ nhân sự thành công!\n- Tạo mới: ${addedCount} tài khoản\n- Cập nhật: ${updatedCount} tài khoản.\nMật khẩu mặc định: 123.\n✅ Đã đồng bộ lên cloud thành công.`);
-    }
-  };
-
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
   const [hrSubTab, setHrSubTab] = useState<string>('profiles');
   const [financeDuLieuTab, setFinanceDuLieuTab] = useState<string>('khach_hang');
@@ -862,6 +805,34 @@ export default function App() {
     // Persist to Supabase (non-blocking)
     dbService.notifications.save(newNotif).catch(err =>
       console.warn('Lỗi khi lưu thông báo lên Supabase:', err));
+
+    // 🔔 Gửi Web Push notification đến thiết bị người nhận (non-blocking)
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (supabaseUrl && supabaseAnonKey && recipient.id) {
+        fetch(`${supabaseUrl}/functions/v1/send-push`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            userIds: [recipient.id],
+            title: newNotif.title || 'Thông báo mới',
+            body: newNotif.content || '',
+            data: {
+              url: '/',
+              type: newNotif.category,
+              sourceId: newNotif.subTaskCode,
+              tag: `system-${newNotif.category}`,
+            },
+          }),
+        }).catch(err => console.warn('Web Push error:', err));
+      }
+    } catch (err) {
+      console.warn('Web Push error (ignored):', err);
+    }
   };
 
   useEffect(() => {
@@ -1275,103 +1246,148 @@ export default function App() {
     return () => window.removeEventListener('hl-payments-updated', handlePaymentsUpdated);
   }, []);
 
-  // ─── Supabase Realtime: lắng nghe thay đổi projects, tasks, payments, customers, quotes, receipts, suppliers, inventory, subcontractorAdvances ───
+  // ─── Supabase Realtime: lắng nghe thay đổi projects, tasks, payments, receipts, subcontractorAdvances, attendance ───
   useEffect(() => {
     const sb = getSupabase();
-    if (!sb) return;
+    if (!sb) {
+      console.warn('[Realtime] Supabase not available, skipping realtime subscription');
+      return;
+    }
 
-    const fetchProjects = async () => {
+    const fetchProjects = async (payload?: any) => {
       try {
+        console.log('[Realtime] 🔔 projects event received:', payload ? { event: payload.eventType, table: payload.table } : '(manual)');
         const projs = await dbService.projects.list();
+        console.log('[Realtime] 📦 projects fetched:', projs.length, 'rows');
         setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
       } catch (e) { console.error('Realtime projects sync error:', e); }
     };
-    const fetchTasks = async () => {
-      try { setTasks(await dbService.tasks.list()); } catch (e) { console.error('Realtime tasks sync error:', e); }
+    const fetchTasks = async (payload?: any) => {
+      try {
+        console.log('[Realtime] 🔔 tasks event:', payload ? { event: payload.eventType } : '(manual)');
+        setTasks(await dbService.tasks.list());
+      } catch (e) { console.error('Realtime tasks sync error:', e); }
     };
-    const fetchPayments = async () => {
-      try { setPayments(await dbService.payments.list()); } catch (e) { console.error('Realtime payments sync error:', e); }
+    const fetchPayments = async (payload?: any) => {
+      try {
+        console.log('[Realtime] 🔔 payments event:', payload ? { event: payload.eventType } : '(manual)');
+        setPayments(await dbService.payments.list());
+      } catch (e) { console.error('Realtime payments sync error:', e); }
     };
-    const fetchCustomers = async () => {
-      try { setCustomers(await dbService.customers.list()); } catch (e) { console.error('Realtime customers sync error:', e); }
+    const fetchReceipts = async (payload?: any) => {
+      try {
+        console.log('[Realtime] 🔔 receipts event:', payload ? { event: payload.eventType } : '(manual)');
+        setReceipts(await dbService.receipts.list());
+      } catch (e) { console.error('Realtime receipts sync error:', e); }
     };
-    const fetchQuotes = async () => {
-      try { setQuotes(await dbService.quotes.list()); } catch (e) { console.error('Realtime quotes sync error:', e); }
-    };
-    const fetchReceipts = async () => {
-      try { setReceipts(await dbService.receipts.list()); } catch (e) { console.error('Realtime receipts sync error:', e); }
-    };
-    const fireSuppliersEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
-    };
-    const fireInventoryEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
-    };
-    const fireAdvancesEvent = () => {
+    const fireAdvancesEvent = (payload?: any) => {
+      console.log('[Realtime] 🔔 subcontractor_advances event:', payload ? { event: payload.eventType } : '(manual)');
       try { window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated')); } catch {}
     };
-    const fireLogsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
-    };
-    const fireArchivedQuotesEvent = () => {
+    const fireAttendanceEvent = async (payload?: any) => {
+      console.log('[Realtime] 🔔 attendance_records event:', payload ? { event: payload.eventType } : '(manual)');
       try {
-        window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
-        window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
-      } catch {}
+        const attendanceList = await dbService.attendance.list();
+        window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: attendanceList }));
+      } catch (e) { console.error('Realtime attendance sync error:', e); }
     };
 
-    // Realtime cho employees & hrm_role_groups (Quản Lý Tài Khoản)
-    const fetchEmployees = async () => {
+    console.log('[Realtime] Creating channel...');
+    const channel = sb
+      .channel('app-realtime-sync-v2')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, fetchProjects)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, fetchTasks)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, fetchReceipts)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, fireAttendanceEvent)
+      .subscribe((status: string, err: any) => {
+        console.log('[Realtime] Status:', status, err ? `Error: ${err.message}` : '');
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] ✅ Channel ready. Listening for changes on: projects, tasks, payments, receipts, subcontractor_advances, attendance_records');
+        }
+      });
+
+    console.log('[Realtime] ✅ Subscribed');
+    return () => { sb.removeChannel(channel); };
+  }, []);
+
+  // ─── Polling: tự động fetch quotes mỗi 30 giây ──────────────────────────
+  useEffect(() => {
+    const fetchQuotesPolling = async () => {
       try {
-        const emps = await dbService.employees.list();
-        setEmployees(emps);
-      } catch (e) { console.error('Realtime employees sync error:', e); }
+        const qtes = await dbService.quotes.list();
+        setQuotes(qtes);
+      } catch (e) { console.error('Polling quotes error:', e); }
     };
-    const fireHrmRoleGroupsEvent = () => {
+
+    // Fetch ngay lập tức khi mount
+    fetchQuotesPolling();
+
+    // Fallback mỗi 120 giây (Realtime là primary, polling chỉ là backup)
+    const interval = setInterval(fetchQuotesPolling, 120000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Polling: tự động fetch customers mỗi 30 giây ──────────────────────
+  useEffect(() => {
+    const fetchCustomersPolling = async () => {
       try {
+        const custs = await dbService.customers.list();
+        setCustomers(custs);
+      } catch (e) { console.error('Polling customers error:', e); }
+    };
+
+    fetchCustomersPolling();
+    const interval = setInterval(fetchCustomersPolling, 120000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Polling: tự động fetch projects mỗi 30 giây (fallback cho Realtime) ──
+  useEffect(() => {
+    const fetchProjectsPolling = async () => {
+      try {
+        const projs = await dbService.projects.list();
+        setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
+      } catch (e) { console.error('Polling projects error:', e); }
+    };
+
+    fetchProjectsPolling();
+    const interval = setInterval(fetchProjectsPolling, 120000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Polling: suppliers, inventory, warehouse_logs, archived_quotes,
+  //     hrm_role_groups, business_profile, shift_config, employees mỗi 30 giây ─
+  useEffect(() => {
+    const fireEvents = () => {
+      try {
+        window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
+        window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
+        window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated'));
+        window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
+        window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
         window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
       } catch {}
     };
-
-    // Realtime cho Cài Đặt Hệ Thống (business_profile, shift_config)
-    const fetchBusinessProfile = async () => {
+    const fetchConfigPolling = async () => {
       try {
         const profile = await dbService.businessProfile.get();
         if (profile) {
           setBusinessInfo(profile);
           localStorage.setItem('hl_business_info', JSON.stringify(profile));
         }
-      } catch (e) { console.error('Realtime business_profile sync error:', e); }
-    };
-    const fetchShiftConfig = async () => {
-      try {
         const config = await dbService.shiftConfig.get();
-        if (config) {
-          setHrmConfig(config);
-        }
-      } catch (e) { console.error('Realtime shift_config sync error:', e); }
+        if (config) setHrmConfig(config);
+        const emps = await dbService.employees.list();
+        setEmployees(emps);
+      } catch (e) { console.error('Polling config error:', e); }
     };
 
-    const channel = sb
-      .channel('app-realtime-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, fetchProjects)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, fetchTasks)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, fetchCustomers)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' }, fetchQuotes)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, fetchReceipts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, fireSuppliersEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fireInventoryEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs' }, fireLogsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'archived_quotes' }, fireArchivedQuotesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, fetchEmployees)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_role_groups' }, fireHrmRoleGroupsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'business_profile' }, fetchBusinessProfile)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fetchShiftConfig)
-      .subscribe();
-
-    return () => { sb.removeChannel(channel); };
+    fireEvents();
+    fetchConfigPolling();
+    const interval = setInterval(() => { fireEvents(); fetchConfigPolling(); }, 120000);
+    return () => clearInterval(interval);
   }, []);
 
   // Sync role permissions when updated from HRM
@@ -1447,8 +1463,7 @@ export default function App() {
     
     if (remember) {
       const creds = {
-        username: loggedInUser.username || generateUsername(loggedInUser.name),
-        password: loggedInUser.password || hashPasswordSync('123')
+        username: loggedInUser.username || generateUsername(loggedInUser.name)
       };
       localStorage.setItem('hl_erp_remembered_credentials', JSON.stringify(creds));
     } else {
@@ -1505,8 +1520,15 @@ export default function App() {
   // HANDLERS DỰ ÁN
   const handleAddProject = (newProj: Project) => {
     setProjects([newProj, ...projects]);
-    dbService.projects.save(newProj);
-    
+    dbService.projects.save(newProj).catch(err => {
+      console.error('Lỗi lưu project lên Supabase:', err);
+      addToast({
+        title: '⚠️ Lưu dự án thất bại',
+        message: `Không thể đồng bộ "${newProj.name}" lên đám mây: ${err.message}`,
+        type: 'error'
+      });
+    });
+
     // Phát thông báo Toast nổi
     addToast({
       title: '📁 Khởi tạo dự án mới',
@@ -3629,14 +3651,6 @@ export default function App() {
                       👤 Danh Sách Tài Khoản Hệ Thống ({employees.length})
                     </h3>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSync26Accounts}
-                    className="flex items-center gap-1 px-3 py-1 bg-indigo-600/90 hover:bg-indigo-600 text-white font-bold text-[10px] uppercase font-mono rounded border border-indigo-500 transition-all cursor-pointer shadow-md"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Tạo Tài Khoản Từ Nhân Sự
-                  </button>
                 </div>
 
                 <div className="overflow-x-auto">

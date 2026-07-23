@@ -406,6 +406,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           else merged.push(imp);
         });
         setEmployees(merged);
+        // Đồng bộ toàn bộ hồ sơ import lên Supabase
+        imported.forEach(emp => {
+          dbService.employees.save(emp).catch(err =>
+            console.warn(`Import nhân viên ${emp.id} lên Supabase thất bại:`, err));
+        });
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} hồ sơ nhân sự`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
@@ -1059,7 +1064,16 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     // Salary Scales
     dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {});
     // Performance Criteria
-    dbService.hrmPerformanceCriteria.list().then((d: any[]) => { if (d?.length) setDepartmentCriteria(d); }).catch(() => {});
+    dbService.hrmPerformanceCriteria.list().then((d: any[]) => {
+      if (d?.length) {
+        // criteria có thể là JSON string từ Supabase → cần parse
+        const parsed = d.map((item: any) => ({
+          ...item,
+          criteria: typeof item.criteria === 'string' ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })() : (Array.isArray(item.criteria) ? item.criteria : []),
+        }));
+        setDepartmentCriteria(parsed);
+      }
+    }).catch(() => {});
     // Travel Norms
     dbService.travelNorms.list().then((d: any[]) => { if (d?.length) setTravelNorms(d); }).catch(() => {});
   }, []);
@@ -1911,6 +1925,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     });
 
     setEmployees(updated);
+    // Đồng bộ BHXH/Thuế lên Supabase
+    const savedEmp = updated.find(e => e.id === editingInsEmpId);
+    if (savedEmp) {
+      dbService.employees.save(savedEmp).catch(err =>
+        console.warn(`Lưu BHXH/Thuế ${savedEmp.id} lên Supabase thất bại:`, err));
+    }
     setShowInsModal(false);
     setEditingInsEmpId(null);
     addToast({ title: '✅ Thành công', message: 'Cập nhật thông tin BHXH & Giảm trừ thuế thành công!', type: 'success' });
@@ -2418,14 +2438,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const handleApproveLeave = (id: string, status: 'approved' | 'rejected') => {
     const targetLeave = leaves.find(l => l.id === id);
     if (targetLeave && status === 'approved' && targetLeave.type === 'Nghỉ phép năm' && targetLeave.status !== 'approved') {
-      setEmployees(prev => prev.map(emp => {
-        if (emp.id === targetLeave.empId) {
-          const currentPhep = emp.phepNam !== undefined ? emp.phepNam : 12;
-          const leaveDays = targetLeave.daysCount !== undefined ? targetLeave.daysCount : 1;
-          return { ...emp, phepNam: Math.max(0, currentPhep - leaveDays) };
-        }
-        return emp;
-      }));
+      // Tìm nhân viên bị trừ phép để lưu Supabase
+      const affectedEmp = employees.find(e => e.id === targetLeave.empId);
+      if (affectedEmp) {
+        const currentPhep = affectedEmp.phepNam !== undefined ? affectedEmp.phepNam : 12;
+        const leaveDays = targetLeave.daysCount !== undefined ? targetLeave.daysCount : 1;
+        const updatedEmp = { ...affectedEmp, phepNam: Math.max(0, currentPhep - leaveDays) };
+        setEmployees(prev => prev.map(emp => emp.id === affectedEmp.id ? updatedEmp : emp));
+        // Đồng bộ phép năm mới lên Supabase
+        dbService.employees.save(updatedEmp).catch(err =>
+          console.warn(`Trừ phép năm ${affectedEmp.id} lên Supabase thất bại:`, err));
+      }
     }
 
     const getLeaveSymbol = (type: string) => {

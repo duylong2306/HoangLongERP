@@ -489,14 +489,6 @@ export default function MaterialCoordination({
             <span>Phiên điều phối: <strong className="text-amber-600">ACTIVE</strong></span>
             <span>Tài khoản kiểm duyệt: <strong className="text-slate-800">{currentUser?.name || 'Kế Toán'}</strong></span>
           </div>
-          <button
-            type="button"
-            onClick={handleClearAllMaterialDocs}
-            className="bg-red-950/30 hover:bg-red-900/40 text-red-400 border border-red-900/30 font-bold text-[9.5px] px-3 py-1.5 rounded-lg cursor-pointer transition-all uppercase tracking-wider flex items-center gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Dọn dẹp dữ liệu
-          </button>
         </div>
       </div>
 

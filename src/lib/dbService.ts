@@ -368,7 +368,12 @@ export const dbService = {
       return querySupabase<any>('hrm_performance_criteria', []);
     },
     async save(criteria: any): Promise<void> {
-      await saveSupabase('hrm_performance_criteria', criteria);
+      // Ensure criteria array is JSON string for TEXT columns
+      const toSave = { ...criteria };
+      if (Array.isArray(toSave.criteria)) {
+        toSave.criteria = JSON.stringify(toSave.criteria);
+      }
+      await saveSupabase('hrm_performance_criteria', toSave);
     }
   },
 
@@ -1064,7 +1069,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return null;
       try {
-        const { data, error } = await supabase.from('quotation_configs').select('config').eq('sector', sector).single();
+        const { data, error } = await supabase.from('quotation_configs').select('config').eq('sector', sector).maybeSingle();
         if (error) {
           console.warn(`Supabase quotation_configs ${sector} load error:`, error.message);
           return null;

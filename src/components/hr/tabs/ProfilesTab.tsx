@@ -196,11 +196,17 @@ export default function ProfilesTab({
 
   const handleBulkResetPhepNam = () => {
     if (selectedRows.size === 0) return;
-    setEmployees(employees.map(e =>
+    const updatedEmps = employees.map(e =>
       selectedRows.has(e.id) ? { ...e, phepNam: 12 } : e
-    ));
+    );
+    setEmployees(updatedEmps);
     setSelectedRows(new Set());
     setSelectAll(false);
+    // Đồng bộ phép năm mới lên Supabase
+    updatedEmps.filter(e => selectedRows.has(e.id)).forEach(emp => {
+      dbService.employees.save(emp).catch(err =>
+        console.warn(`Reset phép năm ${emp.id} trên Supabase thất bại:`, err));
+    });
     addToast({ title: '✅ Đã reset', message: `Đã reset phép năm về 12 cho ${selectedRows.size} nhân viên.`, type: 'success' });
   };
 

@@ -46,7 +46,6 @@ export default function Login({
       try {
         const parsed = JSON.parse(remembered);
         if (parsed.username) setUsername(parsed.username);
-        if (parsed.password) setPassword(parsed.password);
         setRemember(true);
       } catch (e) {
         console.warn('Error parsing remembered credentials', e);

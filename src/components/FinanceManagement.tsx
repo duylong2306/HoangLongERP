@@ -2362,6 +2362,8 @@ export default function FinanceManagement({
                     <span className="font-bold text-slate-300 uppercase tracking-wide text-[11px]">
                       Sổ Danh sách khách hàng mộc thợ ({filteredCustomers.length})
                     </span>
+
+                    <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => setShowAddCustomerModal(true)}
@@ -2370,7 +2372,6 @@ export default function FinanceManagement({
                       <Plus className="w-3.5 h-3.5" />
                       Thêm KH Mới
                     </button>
-                    <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={handleExportCustomerExcel}
