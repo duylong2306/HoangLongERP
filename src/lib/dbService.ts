@@ -389,6 +389,9 @@ export const dbService = {
     },
     async save(norm: any): Promise<void> {
       await saveSupabase('travel_norms', norm);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('travel_norms', id);
     }
   },
 
@@ -1230,20 +1233,7 @@ export const dbService = {
     }
   },
 
-  // 16. TRAVEL NORMS (Định mức công tác phí)
-  travelNorms: {
-    async list(): Promise<any[]> {
-      return querySupabase<any>('travel_norms', []);
-    },
-    async save(norm: any): Promise<void> {
-      await saveSupabase('travel_norms', norm);
-    },
-    async delete(id: string): Promise<void> {
-      await deleteSupabase('travel_norms', id);
-    }
-  },
-
-  // 17. ACCOUNTING CUSTOM LIABILITIES (Công nợ tùy chỉnh kế toán)
+  // 16. ACCOUNTING CUSTOM LIABILITIES (Công nợ tùy chỉnh kế toán)
   accountingLiabilities: {
     async list(): Promise<any[]> {
       return querySupabase<any>('accounting_liabilities', []);
