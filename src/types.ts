@@ -493,6 +493,7 @@ export interface AppNotification {
   attachments?: ChatAttachment[]; // File đính kèm tin nhắn
   conversationId?: string; // ID hội thoại (dùng cho category chat để điều hướng)
   taskId?: string; // ID công việc liên quan
+  notificationType?: string; // Loại thông báo chi tiết (morning/afternoon cho attendance)
 }
 
 export interface ChatAttachment {
@@ -784,5 +785,6 @@ export interface ChatMessage {
     senderName: string;
     content: string;
   };
+  mentions?: string[];    // Danh sách tên người được @tag
 }
 

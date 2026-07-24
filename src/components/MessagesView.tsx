@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Employee, AppNotification, ChatAttachment, Task, TaskComment, Conversation, ChatMessage } from '../types';
 import { useNotification } from '../context';
+import { dbService } from '../lib/dbService';
 import NotificationList from './NotificationList';
 import {
   getConversations, saveConversations, getMessages, addMessage,
@@ -14,7 +15,7 @@ import {
 import {
   Search, MessageSquare, Bell, User, Users, Send, Image, Smile,
   ThumbsUp, Phone, Info, MoreVertical, CheckCheck, ChevronLeft,
-  Pin, Plus, X, Trash, Camera, Paperclip, File, Download,
+  Pin, Plus, X, Trash, Camera, Paperclip, File, Download, Check,
 } from 'lucide-react';
 
 interface MessagesViewProps {
@@ -27,7 +28,6 @@ interface MessagesViewProps {
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void;
   initialPaneTab?: ActivePaneTab;
   initialConversationId?: string; // Mở trực tiếp hội thoại này
-  initialNotificationId?: string | null; // Mở trực tiếp chi tiết thông báo này
   showBadgeCounts?: boolean; // Hiển thị badge số chưa đọc trên tab
   onToggleBadgeCounts?: (next: boolean) => void; // Bật/tắt badge
 }
@@ -38,7 +38,6 @@ export default function MessagesView({
   currentUser, employees, notifications, onUpdateNotifications, onNavigateTab, tasks = [], onUpdateTask,
   initialPaneTab = 'all',
   initialConversationId,
-  initialNotificationId,
   showBadgeCounts = true,
   onToggleBadgeCounts,
 }: MessagesViewProps) {
@@ -51,15 +50,6 @@ export default function MessagesView({
     setSearchQuery('');
   }, [initialPaneTab]);
 
-  // Khi App yêu cầu mở chi tiết một thông báo cụ thể
-  useEffect(() => {
-    if (!initialNotificationId) return;
-    const target = notifications.find(n => n.id === initialNotificationId);
-    if (target) {
-      setActivePaneTab('notifications');
-      // NotificationList sẽ tự động select thông báo này qua initialSelectedId
-    }
-  }, [initialNotificationId]);
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
@@ -83,12 +73,6 @@ export default function MessagesView({
     }
   }, [initialConversationId]);
 
-  // ─── Khi App yêu cầu mở chi tiết một thông báo cụ thể ────────────────
-  useEffect(() => {
-    if (!initialNotificationId) return;
-    setActivePaneTab('notifications');
-  }, [initialNotificationId]);
-
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupMembers, setNewGroupMembers] = useState<string[]>([]);
@@ -109,10 +93,18 @@ export default function MessagesView({
   const [showAddMember, setShowAddMember] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
+  // ─── @Mention State ────────────────────────────────────────────────────
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+
   // ─── In-conversation Search ─────────────────────────────────────────────
   const [showConvSearch, setShowConvSearch] = useState(false);
   const [convSearchQuery, setConvSearchQuery] = useState('');
   const [convSearchResults, setConvSearchResults] = useState<ChatMessage[]>([]);
+
+  // ─── Multi-select mode ──────────────────────────────────────────────────
+  const [convSelectMode, setConvSelectMode] = useState(false);
+  const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
 
   // ─── Cloud: load hội thoại + subscribe realtime khi mount ────────────────
   useEffect(() => {
@@ -281,6 +273,53 @@ export default function MessagesView({
     }
   };
 
+  // ─── Multi-select: Chọn/Bỏ chọn 1 hội thoại ──────────────────────────
+  const toggleConvSelect = (convId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedConvIds(prev => {
+      const next = new Set(prev);
+      if (next.has(convId)) next.delete(convId);
+      else next.add(convId);
+      return next;
+    });
+  };
+
+  // Chọn/Bỏ chọn tất cả hội thoại đang hiển thị
+  const toggleSelectAllConvs = () => {
+    if (selectedConvIds.size === filteredConversations.length) {
+      setSelectedConvIds(new Set());
+    } else {
+      setSelectedConvIds(new Set(filteredConversations.map(c => c.id)));
+    }
+  };
+
+  // Xóa hàng loạt hội thoại đã chọn
+  const handleBulkDeleteConversations = async () => {
+    const count = selectedConvIds.size;
+    if (count === 0) return;
+    if (!confirm(`Xóa ${count} cuộc trò chuyện đã chọn?\nThao tác này không thể hoàn tác.`)) return;
+
+    let deletedCount = 0;
+    for (const convId of selectedConvIds) {
+      const conv = conversations.find(c => c.id === convId);
+      if (conv && conv.type !== 'task') {
+        await deleteConversation(convId);
+        deletedCount++;
+      }
+    }
+
+    // Nếu hội thoại đang mở cũng bị xóa → reset
+    if (selectedConv && selectedConvIds.has(selectedConv.id)) {
+      setSelectedConv(null);
+      setConvMessages([]);
+    }
+
+    setSelectedConvIds(new Set());
+    setConvSelectMode(false);
+    setConversations(getConversations());
+    addToast({ title: '🗑️ Đã xóa', message: `Đã xóa ${deletedCount} cuộc trò chuyện`, type: 'info' });
+  };
+
   // Đếm tin nhắn chưa đọc CHỈ của hội thoại cá nhân (1-1)
   const personalUnreadCount = useMemo(() => {
     const userConvs = getUserConversations(getConversations(), currentUser.id);
@@ -308,6 +347,17 @@ export default function MessagesView({
     if (!text.trim() && pendingAttachments.length === 0) return;
     const attachments = pendingAttachments.length > 0 ? [...pendingAttachments] : undefined;
 
+    // Trích xuất danh sách tên được @tag từ nội dung tin nhắn
+    const mentionRegex = /@([^\s,.:;!?]+)/g;
+    const mentionedNames: string[] = [];
+    let match;
+    while ((match = mentionRegex.exec(text)) !== null) {
+      const name = match[1].trim();
+      if (name && !mentionedNames.includes(name)) {
+        mentionedNames.push(name);
+      }
+    }
+
     if (selectedConv || pendingChatEmpId) {
       // Personal or group chat
       const otherEmpId = pendingChatEmpId ?? selectedConv?.participantIds.find(id => id !== currentUser.id);
@@ -333,14 +383,75 @@ export default function MessagesView({
         content: text || (attachments ? `📎 ${attachments[0].name}` : ''),
         attachments,
         replyTo: replyToMsg ?? undefined,
+        mentions: mentionedNames.length > 0 ? mentionedNames : undefined,
       });
       setConvMessages(getMessages(conv.id));
       setConversations(getConversations());
       setInputText('');
       clearAttachments();
       setReplyToMsg(null);
+      setShowMentionPicker(false);
+
+      // Gửi notification cho những người được tag trong group chat
+      if (mentionedNames.length > 0 && conv && (conv.type === 'group' || conv.type === 'task')) {
+        const convName = conv.name;
+        for (const name of mentionedNames) {
+          const mentionedEmp = employees.find(e =>
+            e.id !== currentUser.id && e.name.toLowerCase() === name.toLowerCase()
+          );
+          if (mentionedEmp) {
+            const notifId = `MENTION-${Date.now()}-${Math.floor(Math.random() * 900) + 100}`;
+            const notif = {
+              id: notifId,
+              recipientId: mentionedEmp.id,
+              recipientName: mentionedEmp.name,
+              department: mentionedEmp.department || '',
+              title: `💬 ${currentUser.name} đã tag bạn`,
+              content: `trong "${convName}": ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`,
+              detailedContent: text,
+              category: 'chat' as const,
+              senderName: currentUser.name,
+              senderAvatar: currentUser.name.charAt(0).toUpperCase(),
+              senderId: currentUser.id,
+              read: false,
+              createdAt: new Date().toISOString(),
+            };
+            try {
+              dbService.notifications.save(notif).catch(() => {});
+              window.dispatchEvent(new CustomEvent('hl-dispatch-notification', { detail: notif }));
+            } catch {}
+          }
+        }
+      }
+
       return;
     }
+  };
+
+  // ─── Render content with highlighted @mentions ──────────────────────────
+  const renderContentWithMentions = (content: string) => {
+    const mentionRegex = /@([^\s,.:;!?]+)/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+    while ((match = mentionRegex.exec(content)) !== null) {
+      // Text trước @mention
+      if (match.index > lastIndex) {
+        parts.push(<span key={`t${lastIndex}`}>{content.substring(lastIndex, match.index)}</span>);
+      }
+      // @mention highlight
+      parts.push(
+        <span key={`m${match.index}`} className="inline-flex items-center bg-indigo-500/20 text-indigo-300 font-semibold rounded px-1 text-[13px] leading-tight cursor-default">
+          @{match[1]}
+        </span>
+      );
+      lastIndex = match.index + match[0].length;
+    }
+    // Text còn lại
+    if (lastIndex < content.length) {
+      parts.push(<span key={`e${lastIndex}`}>{content.substring(lastIndex)}</span>);
+    }
+    return parts;
   };
 
   // ─── In-conversation Search ─────────────────────────────────────────────
@@ -512,6 +623,20 @@ export default function MessagesView({
               <span>Tin nhắn</span>
             </h1>
             <div className="flex items-center gap-2">
+              {activePaneTab !== 'notifications' && activePaneTab !== 'contacts' && (
+                <button
+                  onClick={() => { setConvSelectMode(v => !v); setSelectedConvIds(new Set()); }}
+                  className={`px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    convSelectMode
+                      ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                  }`}
+                  title={convSelectMode ? 'Hủy chọn' : 'Chọn nhiều'}
+                >
+                  {convSelectMode ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                  <span className="hidden sm:inline">{convSelectMode ? 'Hủy' : 'Chọn'}</span>
+                </button>
+              )}
               <button
                 onClick={() => setShowCreateGroup(true)}
                 className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
@@ -572,9 +697,29 @@ export default function MessagesView({
 
                 return (
                   <div key={conv.id} id={conv.id}
-                    onClick={() => handleSelectConv(conv)}
-                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-all border-l-[3px] ${isActive ? 'bg-indigo-500/10 border-l-indigo-500' : 'border-l-transparent hover:bg-slate-900'}`}
+                    onClick={() => convSelectMode ? toggleConvSelect(conv.id) : handleSelectConv(conv)}
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-all border-l-[3px] ${
+                      convSelectMode && selectedConvIds.has(conv.id)
+                        ? 'bg-indigo-500/15 border-l-indigo-500'
+                        : isActive ? 'bg-indigo-500/10 border-l-indigo-500' : 'border-l-transparent hover:bg-slate-900'
+                    }`}
                   >
+                    {/* Select checkbox */}
+                    {convSelectMode && (
+                      <div
+                        onClick={(e) => toggleConvSelect(conv.id, e)}
+                        className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all cursor-pointer ${
+                          selectedConvIds.has(conv.id)
+                            ? 'bg-indigo-500 border-indigo-500'
+                            : 'border-slate-600 hover:border-slate-400'
+                        }`}
+                      >
+                        {selectedConvIds.has(conv.id) && (
+                          <Check className="w-3 h-3 text-white" />
+                        )}
+                      </div>
+                    )}
+
                     {/* Avatar */}
                     <div className="relative shrink-0">
                       <div
@@ -632,13 +777,40 @@ export default function MessagesView({
 
           </>)}
 
+          {/* BULK ACTION BAR */}
+          {convSelectMode && activePaneTab !== 'notifications' && activePaneTab !== 'contacts' && (
+            <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 px-3 py-2.5 flex items-center justify-between z-20">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleSelectAllConvs}
+                  className="text-[11px] text-indigo-400 hover:text-white font-semibold cursor-pointer transition-colors"
+                >
+                  {selectedConvIds.size === filteredConversations.length ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+                </button>
+                <span className="text-[11px] text-slate-500">
+                  {selectedConvIds.size > 0 && `Đã chọn ${selectedConvIds.size}`}
+                </span>
+              </div>
+              {selectedConvIds.size > 0 && (
+                <button
+                  onClick={handleBulkDeleteConversations}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer"
+                >
+                  <Trash className="w-3.5 h-3.5" />
+                  Xóa ({selectedConvIds.size})
+                </button>
+              )}
+            </div>
+          )}
+
           {/* NOTIFICATIONS TAB */}
           {activePaneTab === 'notifications' && (
             <NotificationList
-              notifications={notifications} currentUser={currentUser}
-              employees={employees} onUpdateNotifications={onUpdateNotifications}
+              notifications={notifications}
+              employees={employees}
+              currentUser={currentUser}
+              onUpdateNotifications={onUpdateNotifications}
               onNavigateTab={onNavigateTab}
-              initialSelectedId={initialNotificationId}
               onClose={() => setActivePaneTab('all')}
             />
           )}
@@ -904,7 +1076,7 @@ export default function MessagesView({
 
                                 {/* Message bubble */}
                                 <div id={`msg_${msg.id}`} className={`p-2.5 text-[14px] leading-relaxed ${isSelf ? 'bg-indigo-700 text-white rounded-2xl rounded-br-md' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md'} ${msg.deleted ? 'opacity-60 italic' : ''}`}>
-                                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                                  <p className="whitespace-pre-wrap">{renderContentWithMentions(msg.content)}</p>
                                   {/* Attachments */}
                                   {msg.attachments && msg.attachments.length > 0 && !msg.deleted && (
                                     <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -1046,12 +1218,75 @@ export default function MessagesView({
                           )}
                         </button>
                       </div>
-                      <input type="text"
-                        placeholder={`Nhắn tin${(selectedConv?.type === 'group' || selectedConv?.type === 'task') ? ` đến ${selectedConv.name}` : ''}...`}
-                        value={inputText}
-                        onChange={e => setInputText(e.target.value)}
-                        onFocus={() => setShowEmojiPicker(false)}
-                        className="flex-1 bg-slate-800 border-none text-[14px] text-white rounded-lg px-4 py-2.5 placeholder-slate-400 outline-none" />
+                      <div className="relative flex-1">
+                        <input type="text"
+                          placeholder={`Nhắn tin${(selectedConv?.type === 'group' || selectedConv?.type === 'task') ? ` đến ${selectedConv.name}` : ''}...`}
+                          value={inputText}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setInputText(val);
+
+                            // Detect @mention trigger trong group chat
+                            if (selectedConv && (selectedConv.type === 'group' || selectedConv.type === 'task')) {
+                              const lastAt = val.lastIndexOf('@');
+                              if (lastAt >= 0 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
+                                const query = val.substring(lastAt + 1);
+                                // Chỉ show picker nếu query không có khoảng trắng (chưa chọn xong)
+                                if (!query.includes(' ')) {
+                                  setMentionQuery(query.toLowerCase());
+                                  setShowMentionPicker(true);
+                                  return;
+                                }
+                              }
+                            }
+                            setShowMentionPicker(false);
+                          }}
+                          onFocus={() => { setShowEmojiPicker(false); setShowMentionPicker(false); }}
+                          className="flex-1 bg-slate-800 border-none text-[14px] text-white rounded-lg px-4 py-2.5 placeholder-slate-400 outline-none w-full" />
+
+                        {/* @MENTION PICKER DROPDOWN */}
+                        {showMentionPicker && selectedConv && (selectedConv.type === 'group' || selectedConv.type === 'task') && (() => {
+                          const memberIds = Array.from(new Set(selectedConv.participantIds.filter(Boolean)));
+                          const filtered = employees.filter(e =>
+                            memberIds.includes(e.id) &&
+                            e.id !== currentUser.id &&
+                            e.name.toLowerCase().includes(mentionQuery)
+                          ).slice(0, 8);
+
+                          if (filtered.length === 0) return null;
+
+                          return (
+                            <div className="absolute bottom-full left-0 mb-1 w-64 max-h-[220px] overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50">
+                              <div className="px-3 py-1.5 border-b border-slate-700">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Tag thành viên</span>
+                              </div>
+                              {filtered.map(emp => (
+                                <button
+                                  key={emp.id}
+                                  type="button"
+                                  onClick={() => {
+                                    // Thay thế "@query" bằng "@Tên "
+                                    const lastAt = inputText.lastIndexOf('@');
+                                    const newText = inputText.substring(0, lastAt) + `@${emp.name} `;
+                                    setInputText(newText);
+                                    setShowMentionPicker(false);
+                                    setMentionQuery('');
+                                  }}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700 transition-colors cursor-pointer text-left"
+                                >
+                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 ${getAvatarBgColor(emp.name)}`}>
+                                    {getAvatarFallback(emp.name)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className="text-[13px] text-white font-medium block truncate">{emp.name}</span>
+                                    <span className="text-[10px] text-slate-400">{emp.department || emp.role || ''}</span>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
                       <div className="flex items-center gap-0.5">
                         <button type="submit"
                           className="w-9 h-9 bg-indigo-600 hover:bg-indigo-500 rounded-full flex items-center justify-center transition-all cursor-pointer">

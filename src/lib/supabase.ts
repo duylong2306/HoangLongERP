@@ -15,7 +15,13 @@ export function initializeSupabase(url: string, anonKey: string): SupabaseClient
   }
 
   try {
-    supabaseInstance = createClient(url, anonKey);
+    supabaseInstance = createClient(url, anonKey, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    });
     currentConfig = { url, anonKey };
     console.log("[Supabase] Successfully initialized with URL:", url);
     return supabaseInstance;

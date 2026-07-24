@@ -1,15 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { AppNotification, Employee } from '../types';
+import { dbService } from '../lib/dbService';
 import {
   Bell,
-  CheckCheck,
-  CheckCircle,
-  XCircle,
   ChevronDown,
   ChevronRight,
-  Clock,
-  ExternalLink,
-  AlertCircle
+  Check,
+  Trash,
+  X
 } from 'lucide-react';
 
 interface NotificationListProps {
@@ -18,8 +16,7 @@ interface NotificationListProps {
   employees: Employee[];
   onUpdateNotifications: (updated: AppNotification[]) => void;
   onNavigateTab?: (tab: string) => void;
-  initialSelectedId?: string | null; // Tự động mở chi tiết thông báo này khi mount
-  onClose?: () => void; // Đóng cửa sổ thông báo (khi click ra ngoài)
+  onClose?: () => void;
 }
 
 type NotificationGroupKey = 'approval' | 'tasks' | 'finance' | 'hr' | 'attendance' | 'projects' | 'other';
@@ -103,34 +100,31 @@ const formatTime = (iso: string) => {
 export default function NotificationList({
   notifications,
   currentUser,
-  employees,
   onUpdateNotifications,
   onNavigateTab,
-  initialSelectedId,
   onClose
 }: NotificationListProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(GROUPS.map(g => g.key)));
-  const [selectedNotif, setSelectedNotif] = useState<AppNotification | null>(null);
 
-  // Khi được yêu cầu mở chi tiết một thông báo cụ thể (từ chuông thông báo)
+  // ─── Multi-select mode ──────────────────────────────────────────────────
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedNotifIds, setSelectedNotifIds] = useState<Set<string>>(new Set());
+
+  // Đóng băng thông báo khi click ra ngoài
   useEffect(() => {
-    if (!initialSelectedId) return;
-    const target = notifications.find(n => n.id === initialSelectedId);
-    if (target) {
-      setSelectedNotif(target);
-      // Mở rộng nhóm chứa thông báo này để nó hiển thị
-      const group = GROUPS.find(g => g.filter(target));
-      if (group) {
-        setExpandedGroups(prev => {
-          const next = new Set(prev);
-          next.add(group.key);
-          return next;
-        });
-      }
-      // Đánh dấu đã đọc
-      if (!target.read) markAsRead(target.id);
-    }
-  }, [initialSelectedId]);
+    if (!onClose) return;
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const inNotif = target.closest('#notification_list_root');
+      const inMessenger = target.closest('#messenger_container');
+      const inBell = target.closest('#notification_bell_btn');
+      const inPopover = target.closest('#notification_popover');
+      if (inNotif || inMessenger || inBell || inPopover) return;
+      onClose();
+    };
+    document.addEventListener('click', handleGlobalClick);
+    return () => document.removeEventListener('click', handleGlobalClick);
+  }, [onClose]);
 
   // Lọc notification thuộc về user hiện tại
   const myNotifications = notifications.filter(
@@ -150,12 +144,51 @@ export default function NotificationList({
     onUpdateNotifications(notifications.map(n =>
       n.id === notifId ? { ...n, read: true } : n
     ));
+    // Lưu lên Supabase (non-blocking)
+    dbService.notifications.markRead(notifId).catch(() => {});
   };
 
   const markAllRead = (group: NotificationGroup) => {
+    const toMark = notifications.filter(n => group.filter(n) && !n.read);
     onUpdateNotifications(notifications.map(n =>
       group.filter(n) && !n.read ? { ...n, read: true } : n
     ));
+    // Lưu lên Supabase (non-blocking)
+    toMark.forEach(n => dbService.notifications.markRead(n.id).catch(() => {}));
+  };
+
+  // ─── Multi-select handlers ───────────────────────────────────────────────
+  const toggleNotifSelect = (notifId: string) => {
+    setSelectedNotifIds(prev => {
+      const next = new Set(prev);
+      if (next.has(notifId)) next.delete(notifId);
+      else next.add(notifId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllNotifs = () => {
+    if (selectedNotifIds.size === myNotifications.length) {
+      setSelectedNotifIds(new Set());
+    } else {
+      setSelectedNotifIds(new Set(myNotifications.map(n => n.id)));
+    }
+  };
+
+  const handleBulkDeleteNotifications = async () => {
+    const count = selectedNotifIds.size;
+    if (count === 0) return;
+    if (!confirm(`Xóa ${count} thông báo đã chọn?\nThao tác này không thể hoàn tác.`)) return;
+
+    const idsToDelete = Array.from(selectedNotifIds);
+    // Cập nhật state ngay lập tức
+    onUpdateNotifications(notifications.filter(n => !selectedNotifIds.has(n.id)));
+    // Xóa trên Supabase (non-blocking)
+    for (const id of idsToDelete) {
+      dbService.notifications.delete(id).catch(() => {});
+    }
+    setSelectedNotifIds(new Set());
+    setSelectMode(false);
   };
 
   // Khi user click ra ngoài cửa sổ thông báo → đóng cửa sổ
@@ -190,13 +223,9 @@ export default function NotificationList({
     if (cat === 'tasks' || cat === 'approval') onNavigateTab('tasks');
     else if (cat === 'projects') onNavigateTab('projects-construction');
     else if (cat === 'finance') onNavigateTab('finance');
-    else if (cat === 'hr' || cat === 'attendance') onNavigateTab('employees');
+    else if (cat === 'hr') onNavigateTab('employees');
+    else if (cat === 'attendance') onNavigateTab('dashboard');
     else onNavigateTab('dashboard');
-  };
-
-  const getActionForNotif = (notif: AppNotification) => {
-    const hasNavigation = onNavigateTab && notif.subTaskCode;
-    return { hasNavigation };
   };
 
   const totalUnread = myNotifications.filter(n => !n.read).length;
@@ -210,11 +239,24 @@ export default function NotificationList({
             <Bell className="w-5 h-5 text-indigo-400" />
             Thông báo
           </h1>
-          {totalUnread > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-              {totalUnread} chưa đọc
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {totalUnread > 0 && (
+              <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {totalUnread} chưa đọc
+              </span>
+            )}
+            <button
+              onClick={() => { setSelectMode(v => !v); setSelectedNotifIds(new Set()); }}
+              className={`px-2.5 py-1 text-[10px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                selectMode
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              }`}
+            >
+              {selectMode ? <X className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+              {selectMode ? 'Hủy' : 'Chọn'}
+            </button>
+          </div>
         </div>
         <p className="text-[11px] text-slate-400">
           Nhắc nhở điểm danh, công việc, phê duyệt & cập nhật hệ thống
@@ -223,15 +265,7 @@ export default function NotificationList({
 
       {/* Notification groups */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {totalUnread === 0 && (
-          <div className="py-12 text-center">
-            <div className="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center mx-auto mb-3">
-              <CheckCircle className="w-7 h-7 text-emerald-500" />
-            </div>
-            <p className="text-[13px] text-slate-400 font-medium">Tất cả đã xem</p>
-            <p className="text-[11px] text-slate-500 mt-1">Bạn không có thông báo nào chưa đọc</p>
-          </div>
-        )}
+       
 
         {GROUPS.map(group => {
           const groupNotifs = myNotifications.filter(group.filter).sort(sortByUnreadThenNewest);
@@ -241,7 +275,7 @@ export default function NotificationList({
           if (groupNotifs.length === 0) return null;
 
           return (
-            <div key={group.key} className="border-b border-slate-800/50">
+            <div key={group.key} className="">
               {/* Group header */}
               <div
                 onClick={() => toggleGroup(group.key)}
@@ -282,29 +316,38 @@ export default function NotificationList({
                 <div className="space-y-0.5 pb-1">
                   {groupNotifs.map(notif => {
                     const isUnread = !notif.read;
-                    const isSelected = selectedNotif?.id === notif.id;
-                    const { hasNavigation } = getActionForNotif(notif);
 
                     // Click vào thông báo: đánh dấu đã đọc + chuyển ngay sang phân hệ liên quan
                     const handleClick = () => {
                       if (isUnread) markAsRead(notif.id);
-                      if (hasNavigation && onNavigateTab) handleNavigate(notif);
-                      else setSelectedNotif(isSelected ? null : notif);
+                      if (onNavigateTab) handleNavigate(notif);
                     };
 
                     return (
                       <div
                         key={notif.id}
-                        onClick={handleClick}
+                        onClick={() => selectMode ? toggleNotifSelect(notif.id) : handleClick()}
                         className={`mx-2 rounded-xl transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-indigo-500/10'
+                          selectMode && selectedNotifIds.has(notif.id)
+                            ? 'bg-indigo-500/15 border border-indigo-500/30'
                             : isUnread
                               ? 'bg-indigo-500/5 border border-indigo-500/10'
                               : 'hover:bg-slate-900'
                         }`}
                       >
                         <div className="flex items-start gap-3 p-3">
+                          {/* Select checkbox */}
+                          {selectMode && (
+                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                              selectedNotifIds.has(notif.id)
+                                ? 'bg-indigo-500 border-indigo-500'
+                                : 'border-slate-600 hover:border-slate-400'
+                            }`}>
+                              {selectedNotifIds.has(notif.id) && (
+                                <Check className="w-3 h-3 text-white" />
+                              )}
+                            </div>
+                          )}
                           {/* Icon */}
                           <div
                             className="w-9 h-9 rounded-full flex items-center justify-center text-sm shrink-0"
@@ -325,22 +368,6 @@ export default function NotificationList({
                                 <span className="text-[10px] text-slate-500 font-mono">
                                   {formatTime(notif.createdAt)}
                                 </span>
-                              </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {isUnread && (
-                                  <button
-                                    onClick={() => markAsRead(notif.id)}
-                                    className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer"
-                                    title="Đánh dấu đã đọc"
-                                  >
-                                    <CheckCheck className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                {isSelected ? (
-                                  <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
-                                ) : (
-                                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                                )}
                               </div>
                             </div>
                             <p className={`text-[11px] mt-0.5 leading-snug ${
@@ -363,52 +390,13 @@ export default function NotificationList({
                                 </span>
                               )}
                             </div>
-
-                            {/* Buttons (hiện khi selected) */}
-                            {isSelected && (
-                              <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-800">
-                                {hasNavigation && (
-                                  <button
-                                    onClick={() => handleNavigate(notif)}
-                                    className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1"
-                                  >
-                                    <ExternalLink className="w-3 h-3" />
-                                    Xem chi tiết
-                                  </button>
-                                )}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isUnread) markAsRead(notif.id);
-                                    if (hasNavigation && onNavigateTab) handleNavigate(notif);
-                                  }}
-                                  className={`py-1.5 px-3 text-[11px] font-semibold rounded-lg transition-all cursor-pointer ${
-                                    isUnread
-                                      ? 'bg-slate-800 text-white hover:bg-slate-700'
-                                      : 'text-slate-400'
-                                  }`}
-                                >
-                                  {hasNavigation ? 'Đi tới' : (isUnread ? 'Đã đọc' : 'Đã xem')}
-                                </button>
-                              </div>
-                            )}
                           </div>
 
                           {/* Unread dot */}
-                          {isUnread && !isSelected && (
+                          {isUnread && (
                             <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 mt-1"></div>
                           )}
                         </div>
-
-                        {/* Detail content (hiện khi selected và có detailedContent) */}
-                        {isSelected && notif.detailedContent && notif.detailedContent !== notif.content && (
-                          <div className="px-3 pb-3 pl-[60px]">
-                            <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-[11px] text-slate-400 leading-relaxed whitespace-pre-wrap">
-                              {notif.detailedContent}
-                            </div>
-                          </div>
-                        )}
-
                       </div>
                     );
                   })}
@@ -417,6 +405,32 @@ export default function NotificationList({
             </div>
           );
         })}
+
+        {/* BULK ACTION BAR */}
+        {selectMode && (
+          <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 px-4 py-2.5 flex items-center justify-between z-20">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleSelectAllNotifs}
+                className="text-[11px] text-indigo-400 hover:text-white font-semibold cursor-pointer transition-colors"
+              >
+                {selectedNotifIds.size === myNotifications.length ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+              </button>
+              <span className="text-[11px] text-slate-500">
+                {selectedNotifIds.size > 0 && `Đã chọn ${selectedNotifIds.size}`}
+              </span>
+            </div>
+            {selectedNotifIds.size > 0 && (
+              <button
+                onClick={handleBulkDeleteNotifications}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer"
+              >
+                <Trash className="w-3.5 h-3.5" />
+                Xóa ({selectedNotifIds.size})
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

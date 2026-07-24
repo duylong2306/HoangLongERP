@@ -74,6 +74,7 @@ function msgFromRow(r: any): ChatMessage {
     deletedAt: r.deleted_at ?? undefined,
     pinned: r.pinned ?? false,
     replyTo: r.reply_to ?? undefined,
+    mentions: r.mentions ?? undefined,
   };
 }
 
@@ -95,6 +96,7 @@ function msgToRow(m: ChatMessage): any {
     deleted_at: m.deletedAt ?? null,
     pinned: m.pinned ?? false,
     reply_to: m.replyTo ?? null,
+    mentions: m.mentions ?? null,
   };
 }
 

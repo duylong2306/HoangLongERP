@@ -703,21 +703,13 @@ export default function App() {
   const [popoverFilter, setPopoverFilter] = useState<'all' | 'personal' | 'group' | 'notifications'>('all');
   // Hội thoại cần mở khi điều hướng vào Messenger
   const [initialConvId, setInitialConvId] = useState<string | null>(null);
-  // Thông báo cần mở chi tiết khi điều hướng vào Messenger
-  const [initialNotificationId, setInitialNotificationId] = useState<string | null>(null);
-  // Sau khi MessagesView đã nhận initialConvId / initialNotificationId, reset để lần click sau vẫn kích hoạt lại
+  // Sau khi MessagesView đã nhận initialConvId, reset để lần click sau vẫn kích hoạt lại
   useEffect(() => {
     if (initialConvId) {
       const t = setTimeout(() => setInitialConvId(null), 300);
       return () => clearTimeout(t);
     }
   }, [initialConvId]);
-  useEffect(() => {
-    if (initialNotificationId) {
-      const t = setTimeout(() => setInitialNotificationId(null), 300);
-      return () => clearTimeout(t);
-    }
-  }, [initialNotificationId]);
   // Hiển thị badge đếm số chưa đọc trên tab
   const [showBadgeCounts, setShowBadgeCounts] = useState<boolean>(() => localStorage.getItem('hl_show_badge_counts') !== 'false');
 
@@ -780,7 +772,8 @@ export default function App() {
       title: notif.title || 'Thông báo hệ thống',
       detailedContent: notif.detailedContent || notif.content || 'Nội dung chi tiết thông báo hệ thống.',
       conversationId: notif.conversationId,
-      taskId: notif.taskId
+      taskId: notif.taskId,
+      notificationType: notif.notificationType
     };
 
     setNotifications(prev => {
@@ -846,60 +839,10 @@ export default function App() {
     return () => window.removeEventListener('hl-dispatch-notification', handleDispatchNotification);
   }, [employees, currentUser]);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    const checkAttendanceTimeAndNotify = () => {
-      const now = new Date();
-      const day = now.getDay(); // 0: Sunday, 6: Saturday
-      if (day === 0) return; // Do not notify on Sundays (rest day)
-
-      // Kiểm tra nghỉ lễ cố định Việt Nam (01/01, 30/04, 01/05, 02/09)
-      const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const holidays = ['01/01', '30/04', '01/05', '02/09'];
-      if (holidays.includes(dateStr)) return; // Không thông báo điểm danh ngày nghỉ lễ
-
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-
-      // Ca sáng: 7:00 - 7:30
-      if (hours === 7 && minutes >= 0 && minutes <= 30) {
-        const key = `attendance_morning_notified_${now.toDateString()}`;
-        if (!localStorage.getItem(key)) {
-          addNotification({
-            category: 'attendance',
-            title: '⏰ Điểm danh Ca Sáng',
-            content: 'Sắp đến ca làm việc sáng (07:30). Hãy điểm danh vân tay/khuôn mặt ngay!',
-            detailedContent: 'Ca làm việc chính thức: Sáng 07:30 - 11:30.\nThời gian bắt đầu điểm danh vào ca: 07:00.\nHãy thực hiện điểm danh sinh trắc học trên hệ thống ERP để ghi nhận công chuẩn.',
-            senderName: 'Phòng Hành Chính Nhân Sự',
-            senderAvatar: 'NS',
-            recipientId: currentUser.id
-          });
-          localStorage.setItem(key, 'true');
-        }
-      }
-
-      // Ca chiều: 12:30 - 13:00 (13:00)
-      if ((hours === 12 && minutes >= 30) || (hours === 13 && minutes === 0)) {
-        const key = `attendance_afternoon_notified_${now.toDateString()}`;
-        if (!localStorage.getItem(key)) {
-          addNotification({
-            category: 'attendance',
-            title: '⏰ Điểm danh Ca Chiều',
-            content: 'Sắp đến ca làm việc chiều (13:00). Hãy điểm danh vân tay/khuôn mặt!',
-            detailedContent: 'Ca làm việc chính thức: Chiều 13:00 - 17:00.\nThời gian bắt đầu điểm danh vào ca: 12:30.\nHãy thực hiện điểm danh để không bị ghi nhận đi muộn.',
-            senderName: 'Phòng Hành Chính Nhân Sự',
-            senderAvatar: 'NS',
-            recipientId: currentUser.id
-          });
-          localStorage.setItem(key, 'true');
-        }
-      }
-    };
-
-    checkAttendanceTimeAndNotify();
-    const interval = setInterval(checkAttendanceTimeAndNotify, 60000);
-    return () => clearInterval(interval);
-  }, [currentUser, employees]);
+  // ⚠️ Client-side attendance timer ĐÃ BỎ (gây trùng lặp).
+  // Thông báo điểm danh giờ chỉ chạy qua server-side:
+  //   1. pg_cron SQL (trigger_attendance_reminders) — nguồn chính
+  //   2. Edge Function (send-attendance-reminders) — backup
 
   // Trạng thái cây thư mục Sidebar dạng mô phỏng
   const [isDirectorGroupExpanded, setIsDirectorGroupExpanded] = useState(true);
@@ -1305,6 +1248,9 @@ export default function App() {
         console.log('[Realtime] Status:', status, err ? `Error: ${err.message}` : '');
         if (status === 'SUBSCRIBED') {
           console.log('[Realtime] ✅ Channel ready. Listening for changes on: projects, tasks, payments, receipts, subcontractor_advances, attendance_records');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.error('[Realtime] ❌ Connection issue:', status, err);
+          console.error('[Realtime] 💡 Kiểm tra Supabase Dashboard → Database → Replication → Enable tables!');
         }
       });
 
@@ -3084,18 +3030,34 @@ export default function App() {
                                 <div
                                   key={notif.id}
                                   onClick={() => {
+                                    // Đánh dấu đã đọc + lưu lên Supabase
                                     const updated = notifications.map(n => n.id === notif.id ? { ...n, read: true } : n);
                                     setNotifications(updated);
+                                    dbService.notifications.markRead(notif.id).catch(() => {});
                                     setShowNotificationsPanel(false);
-                                    setActiveTab('messages');
                                     if (mobileMenuOpen) setMobileMenuOpen(false);
+
+                                    // Nếu có conversationId → mở thẳng vào Messenger hội thoại đó
                                     if (notif.conversationId) {
-                                      // Có hội thoại → mở thẳng vào chi tiết hội thoại đó
+                                      setActiveTab('messages');
                                       setInitialConvId(notif.conversationId);
+                                      return;
+                                    }
+
+                                    // Điều hướng đến phân hệ liên quan theo category
+                                    const cat = notif.category;
+                                    if (cat === 'tasks' || cat === 'approval') {
+                                      setActiveTab('tasks');
+                                    } else if (cat === 'projects') {
+                                      setActiveTab('projects-construction');
+                                    } else if (cat === 'finance') {
+                                      setActiveTab('finance');
+                                    } else if (cat === 'hr') {
+                                      setActiveTab('employees');
+                                    } else if (cat === 'attendance') {
+                                      setActiveTab('dashboard');
                                     } else {
-                                      // Thông báo hệ thống → mở tab Thông báo & chi tiết thông báo này
-                                      setMessengerInitialTab('notifications');
-                                      setInitialNotificationId(notif.id);
+                                      setActiveTab('dashboard');
                                     }
                                   }}
                                   className={`flex items-center gap-3 px-2.5 py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
@@ -4781,10 +4743,15 @@ export default function App() {
               currentUser={currentUser!}
               employees={employees}
               notifications={notifications}
-              onUpdateNotifications={(updated) => setNotifications(updated)}
+              onUpdateNotifications={(updated) => {
+                setNotifications(updated);
+                // Lưu trạng thái đã đọc lên Supabase (non-blocking)
+                const readNotifs = updated.filter(n => n.read);
+                readNotifs.forEach(n => dbService.notifications.markRead(n.id).catch(() => {}));
+              }}
+              onNavigateTab={(tab) => setActiveTab(tab)}
               initialPaneTab={messengerInitialTab}
               initialConversationId={initialConvId ?? undefined}
-              initialNotificationId={initialNotificationId}
               showBadgeCounts={showBadgeCounts}
               onToggleBadgeCounts={(next) => {
                 setShowBadgeCounts(next);

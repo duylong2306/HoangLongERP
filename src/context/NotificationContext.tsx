@@ -129,7 +129,8 @@ export function NotificationProvider({
       title: notif.title || 'Thông báo hệ thống',
       detailedContent: notif.detailedContent || notif.content || 'Nội dung chi tiết thông báo hệ thống.',
       conversationId: notif.conversationId,
-      taskId: notif.taskId
+      taskId: notif.taskId,
+      notificationType: notif.notificationType
     };
 
     setNotifications(prev => [newNotif, ...prev]);
