@@ -395,43 +395,46 @@ export default function DashboardOverview({
     return [];
   });
 
+  // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
+  const isSyncingFromCloud = useRef(false);
+
   // Load attendance from Supabase on mount (dbService.attendance.list hits Supabase first)
   useEffect(() => {
     let mounted = true;
     dbService.attendance.list()
       .then(list => {
         if (mounted && Array.isArray(list) && list.length > 0) {
+          isSyncingFromCloud.current = true;
           setAttendanceList(list);
+          requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
         }
       })
       .catch(err => console.warn('Lỗi khi tải chấm công từ Supabase:', err));
     return () => { mounted = false; };
   }, []);
 
-  // Persist attendanceList changes to both dbService.attendance (Supabase+cache) and localStorage
+  // Persist attendanceList changes to localStorage (LUÔN) + Supabase (CHỈ KHI user action)
   useEffect(() => {
     if (!attendanceList || attendanceList.length === 0) return;
     localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(attendanceList));
-    // Non-blocking save each record to Supabase (debounce via last-write-wins on next effect)
-    attendanceList.forEach((rec, i) => {
-      if (i === attendanceList.length - 1) {
-        dbService.attendance.save(rec).catch(err =>
-          console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
-      }
-    });
+    // Nếu update đến từ cloud (Realtime/mount) → KHÔNG save lại Supabase — tránh vòng lặp
+    if (isSyncingFromCloud.current) return;
+    // Non-blocking save last record to Supabase (chỉ khi user check-in/check-out)
+    const lastRec = attendanceList[attendanceList.length - 1];
+    dbService.attendance.save(lastRec).catch(err =>
+      console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
   }, [attendanceList]);
 
   const [selectedDayDetail, setSelectedDayDetail] = useState<{ date: string; log: any; holidayName?: string } | null>(null);
 
-  // Listen for real-time changes to the attendance logs from the HRM module
+  // Listen for real-time changes to the attendance logs (chỉ update UI, KHÔNG save lại Supabase — tránh vòng lặp Realtime)
   useEffect(() => {
     const handleSync = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
+        isSyncingFromCloud.current = true;
         setAttendanceList(customEvent.detail.attendance || customEvent.detail);
-        // Persist synced data to Supabase
-        const list = customEvent.detail.attendance || customEvent.detail;
-        dbService.attendance.save(list[list.length - 1]).catch(() => {});
+        requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
       }
     };
     window.addEventListener('hl-attendance-updated', handleSync);
@@ -962,19 +965,6 @@ export default function DashboardOverview({
     accountingGroup.memberIds.forEach((memberId: string) => {
       // Tìm theo ID trực tiếp trong hrmEmployees
       let emp = hrmEmployees.find(e => e.id === memberId);
-      // Nếu không tìm thấy, thử tìm theo ID từ hl_erp_employees (emp_xxx) qua tên
-      if (!emp) {
-        const erpEmpsStr = localStorage.getItem('hl_erp_employees');
-        if (erpEmpsStr) {
-          try {
-            const erpEmps = JSON.parse(erpEmpsStr);
-            const erpEmp = erpEmps.find((e: any) => e.id === memberId);
-            if (erpEmp) {
-              emp = hrmEmployees.find(e => e.name.toLowerCase() === erpEmp.name.toLowerCase());
-            }
-          } catch (e) {}
-        }
-      }
       if (emp) {
         approvers.push(emp);
       }

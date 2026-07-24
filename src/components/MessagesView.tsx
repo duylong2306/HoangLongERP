@@ -139,8 +139,14 @@ export default function MessagesView({
       const convId = selectedConv.id;
       let mounted = true;
       loadMessagesFromCloud(convId).then(msgs => {
-        if (mounted) setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
+        if (mounted) {
+          setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
+          markConversationRead(convId);
+          setConversations(getConversations());
+        }
       });
+      // Chỉ cập nhật UI khi có tin nhắn MỚI (insert), KHÔNG gọi markConversationRead
+      // để tránh loop: realtime fire → markRead → update → realtime fire lại
       const unsub = subscribeMessages(convId, (msgs) => {
         if (mounted) setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
       });
@@ -1196,7 +1202,7 @@ export default function MessagesView({
                           className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-indigo-400 rounded-lg cursor-pointer transition-all" title="Đính kèm file">
                           <Paperclip className="w-4 h-4" />
                         </button>
-                        <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        <div onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                           className="relative w-8 h-8 flex items-center justify-center text-sm hover:bg-slate-800 rounded-lg cursor-pointer transition-all" title="Biểu tượng cảm xúc">
                           <Smile className="w-4 h-4 text-slate-400 hover:text-amber-400" />
                           {showEmojiPicker && (
@@ -1216,7 +1222,7 @@ export default function MessagesView({
                               </div>
                             </div>
                           )}
-                        </button>
+                        </div>
                       </div>
                       <div className="relative flex-1">
                         <input type="text"

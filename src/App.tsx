@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { dbService } from './lib/dbService';
+import { dbService, invalidateCache } from './lib/dbService';
 import { useWebPush } from './hooks/useWebPush';
-import { createGroupConversation, deleteConversation, getUserConversations, getConversations } from './lib/chatStore';
+import { createGroupConversation, deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
 import {
   Employee,
   Customer,
@@ -326,7 +326,17 @@ function ShiftMinuteInput({
   );
 }
 
+/** Bỏ password khỏi user object trước khi lưu session — KHÔNG lưu password hash vào storage */
+const stripPassword = (emp: any) => {
+  if (!emp) return emp;
+  const { password, ...safe } = emp;
+  return safe;
+};
+
 export default function App() {
+  // ── Trạng thái khởi tạo: hiển thị splash screen trong khi load data từ Supabase ──
+  const [isInitializing, setIsInitializing] = useState(true);
+
   // 1. Cấu hình Phân quyền từng vai trò
   const [toasts, setToasts] = useState<any[]>([]);
 
@@ -502,31 +512,95 @@ export default function App() {
     };
   });
 
+  const isBusinessInfoInitRef = React.useRef(true);
   useEffect(() => {
     localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
+    // Skip save lần đầu (khi load từ cloud) — chỉ save khi user thay đổi thực sự
+    if (isBusinessInfoInitRef.current) {
+      isBusinessInfoInitRef.current = false;
+      return;
+    }
     dbService.businessProfile.save(businessInfo);
   }, [businessInfo]);
 
-  // Bootstrap và đồng bộ hoá dữ liệu từ Cloud Firestore trên nền tảng Firebase
+  // Bootstrap và đồng bộ hoá dữ liệu từ Cloud trên nền tảng Supabase
+  // ── BƯỚC 1: Load từ localStorage (instant) → hiện app ngay ──
+  // ── BƯỚC 2: Fetch employees từ cloud (bắt buộc cho auth) ──
+  // ── BƯỚC 3: Sync tất cả data từ cloud ở background → update state + localStorage ──
   useEffect(() => {
+    const CACHE_KEY = 'hl_core_cache_v1';
+    const CACHE_TABLES = ['customers', 'projects', 'tasks', 'receipts', 'payments', 'quotes'];
+
+    const toCamel = (rows: any[]) => (rows || []).map((r: any) => {
+      const n: any = {};
+      Object.keys(r).forEach(k => {
+        const camel = k.replace(/([-_][a-z])/g, g => g.toUpperCase().replace('-', '').replace('_', ''));
+        n[camel] = r[k];
+      });
+      return n;
+    });
+
+    const saveToCache = (table: string, data: any[]) => {
+      try {
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+        cache[table] = data;
+        cache._ts = Date.now();
+        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      } catch {}
+    };
+
+    const loadFromCache = (): Record<string, any[]> | null => {
+      try {
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+        if (cache._ts && Object.keys(cache).length > 1) return cache;
+      } catch {}
+      return null;
+    };
+
     const initAndSync = async () => {
       try {
-        await dbService.bootstrapFirstTime();
+        // ── BƯỚC 1: Load non-sensitive data từ localStorage (instant) ──
+        const cache = loadFromCache();
+        if (cache) {
+          console.log('[Init] 📦 Loaded from localStorage cache');
+          if (cache.customers) setCustomers(cache.customers);
+          if (cache.projects) {
+            const filtered = cache.projects.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+            setProjects(filtered);
+          }
+          if (cache.tasks) setTasks(cache.tasks);
+          if (cache.receipts) setReceipts(cache.receipts);
+          if (cache.payments) setPayments(cache.payments);
+          if (cache.quotes) setQuotes(cache.quotes);
+          // Populate query cache để các component query lẻ dùng luôn
+          for (const t of CACHE_TABLES) {
+            if (cache[t]) dbService.populateCache(t, cache[t]);
+          }
+        }
 
-        // Cloud (Supabase) là nguồn sự thật duy nhất. KHÔNG đọc localStorage làm chuẩn
-        // để tránh "hồi sinh" dữ liệu đã xóa trực tiếp trên Supabase khi reload ứng dụng.
-        const cloudEmps = await dbService.employees.list();
+        // ── BƯỚC 2: Fetch employees từ cloud (bắt buộc cho auth) ──
+        let cloudEmps: Employee[];
+        try {
+          let data: Record<string, any[]> | null = null;
+          try {
+            data = await dbService.loadAllCore();
+          } catch { /* RPC chưa có */ }
+          cloudEmps = data
+            ? toCamel(data.employees || [])
+            : await dbService.employees.list();
+        } catch {
+          cloudEmps = await dbService.employees.list();
+        }
         const finalEmps = ensureAdminAndPasswords(cloudEmps);
         setEmployees(finalEmps);
-        // Đồng bộ ngược cache localStorage cho khớp cloud (chỉ là bản sao, không ghi đè lên cloud)
-        localStorage.setItem('hl_erp_employees', JSON.stringify(finalEmps));
 
-        // Ensure admin is saved to db as well
+        // Ensure admin
         const hasAdminInDb = finalEmps.some(e => e.username === 'admin' || e.id === 'emp_admin');
         if (!hasAdminInDb) {
-          dbService.employees.save(ADMIN_EMPLOYEE).catch(err => console.error("Error saving admin employee:", err));
+          dbService.employees.save(ADMIN_EMPLOYEE).catch(() => {});
         }
-        // Cập nhật thông tin tài khoản hiện tại từ database vừa tải nếu đã đăng nhập trước đó
+
+        // Session
         const activeSessionStr = sessionStorage.getItem('hl_erp_active_session') || localStorage.getItem('hl_erp_active_session');
         if (activeSessionStr) {
           try {
@@ -534,91 +608,87 @@ export default function App() {
             const foundUser = finalEmps.find(e => e.id === parsedSession.id || e.username === parsedSession.username);
             if (foundUser) {
               setCurrentUser(foundUser);
-              sessionStorage.setItem('hl_erp_active_session', JSON.stringify(foundUser));
-              if (localStorage.getItem('hl_erp_active_session')) {
-                localStorage.setItem('hl_erp_active_session', JSON.stringify(foundUser));
-              }
+              sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(foundUser)));
             } else {
               setCurrentUser(parsedSession);
             }
-          } catch (e) {
-            setCurrentUser(null);
-          }
+          } catch { setCurrentUser(null); }
         } else {
           setCurrentUser(null);
         }
 
-        const custs = await dbService.customers.list();
-        setCustomers(custs);
+        // Employees xong → ẩn splash screen
+        setIsInitializing(false);
 
-        const projs = await dbService.projects.list();
-        const filteredProjs = projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
-        const autoProjIds = projs.filter(p => p.name.startsWith('Dự án độc lập - ') && p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')).map(p => p.id);
-        for (const pid of autoProjIds) {
-          dbService.projects.delete(pid).catch(err => console.error("Could not delete legacy auto project", err));
-        }
-        setProjects(filteredProjs);
+        // ── BƯỚC 3: Sync cloud ở background → update state + cache ──
+        // (non-blocking, app đã render xong từ localStorage)
+        (async () => {
+          try {
+            let cloudData: Record<string, any[]> | null = null;
+            try {
+              cloudData = await dbService.loadAllCore();
+            } catch {
+              // Fallback: query từng bảng
+              const [custs, projs, tsks, recs, pays, qtes] = await Promise.all([
+                dbService.customers.list(), dbService.projects.list(),
+                dbService.tasks.list(), dbService.receipts.list(),
+                dbService.payments.list(), dbService.quotes.list(),
+              ]);
+              cloudData = {
+                customers: custs, projects: projs, tasks: tsks,
+                receipts: recs, payments: pays, quotes: qtes,
+                business_profile: [], shift_config: [],
+              };
+            }
 
-        const tsks = await dbService.tasks.list();
-        setTasks(tsks);
+            // Update state từ cloud
+            const custRows = toCamel(cloudData.customers || []);
+            const projRows = toCamel(cloudData.projects || []);
+            const taskRows = toCamel(cloudData.tasks || []);
+            const recRows = toCamel(cloudData.receipts || []);
+            const payRows = toCamel(cloudData.payments || []);
+            const quoteRows = toCamel(cloudData.quotes || []);
 
-        const recs = await dbService.receipts.list();
-        setReceipts(recs);
+            setCustomers(custRows);
+            setProjects(projRows.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
+            setTasks(taskRows);
+            setReceipts(recRows);
+            setPayments(payRows);
+            setQuotes(quoteRows);
 
-        const pays = await dbService.payments.list();
-        const pendingPays = pays.filter(p => p.status === 'pending');
-        if (pendingPays.length > 0) {
-          const cleanedPays = pays.filter(p => p.status !== 'pending');
-          setPayments(cleanedPays);
-          for (const p of pendingPays) {
-            dbService.payments.delete(p.id).catch(err => console.error("Lỗi xóa đồng bộ payment chờ duyệt:", err));
+            if (cloudData.business_profile?.[0]) {
+              const bp = toCamel([cloudData.business_profile[0]])[0];
+              setBusinessInfo(bp);
+              localStorage.setItem('hl_business_info', JSON.stringify(bp));
+            }
+            if (cloudData.shift_config?.[0]) setHrmConfig(toCamel([cloudData.shift_config[0]])[0]);
+
+            // Save vào cache (bỏ qua sensitive tables)
+            for (const t of CACHE_TABLES) {
+              const key = t === 'projects' ? 'projects' : t;
+              const rows = { customers: custRows, projects: projRows, tasks: taskRows, receipts: recRows, payments: payRows, quotes: quoteRows }[key];
+              if (rows) saveToCache(t, rows);
+              if (rows) dbService.populateCache(t, rows);
+            }
+
+            console.log('[Init] ✅ Cloud sync done — cache updated');
+          } catch (e) {
+            console.warn('[Init] ⚠️ Cloud sync failed, using cached data:', e);
           }
-        } else {
-          setPayments(pays);
-        }
+        })();
 
-        const qtes = await dbService.quotes.list();
-        setQuotes(qtes);
-
-        // Đồng bộ hồ sơ doanh nghiệp từ Supabase
-        const cloudProfile = await dbService.businessProfile.get();
-        if (cloudProfile) {
-          setBusinessInfo(cloudProfile);
-          localStorage.setItem('hl_business_info', JSON.stringify(cloudProfile));
-        } else {
-          // Chưa có trên cloud → push dữ liệu local lên Supabase
-          const localProfile = localStorage.getItem('hl_business_info');
-          if (localProfile) {
-            const parsed = JSON.parse(localProfile);
-            await dbService.businessProfile.save(parsed);
-          }
-        }
-
-        // Đồng bộ cấu hình ca từ Supabase
-        const cloudShiftConfig = await dbService.shiftConfig.get();
-        if (cloudShiftConfig) {
-          setHrmConfig(cloudShiftConfig);
-        }
-
-        // displaySettings chỉ lưu localStorage (cá nhân hóa - màu sắc, font chữ)
       } catch (err) {
-        console.warn("Lỗi kết nối đồng bộ cơ sở dữ liệu Firebase Firestore:", err);
+        console.warn("Lỗi kết nối:", err);
+        setIsInitializing(false);
       }
     };
     initAndSync();
   }, []);
 
-  // Khối Dữ Liệu Nhân Viên - Khởi tạo rỗng, sẽ nạp từ Supabase trong useEffect
-  const [employees, setEmployees] = useState<Employee[]>(() => {
-    // Trả về mảng rỗng - dữ liệu sẽ được nạp từ Supabase trong useEffect
-    return [];
-  });
+  // Khối Dữ Liệu Nhân Viên — KHÔNG cache localStorage để tránh lộ thông tin nhạy cảm
+  const [employees, setEmployees] = useState<Employee[]>([]);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-
-  useEffect(() => {
-    localStorage.setItem('hl_erp_employees', JSON.stringify(employees));
-  }, [employees]);
 
   // Trạng thái Người dùng hiện tại (bỏ chế độ phân quyền giả định, bắt buộc đăng nhập thực thụ)
   const [currentUser, setCurrentUser] = useState<Employee | null>(() => {
@@ -646,6 +716,23 @@ export default function App() {
 
   // Web Push notification registration
   useWebPush(currentUser?.id ?? null);
+
+  // ─── Load chat conversations từ sớm để sidebar badge hoạt động ──────────────
+  const [, forceChatUpdate] = useState(0);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    loadConversationsFromCloud(currentUser.id);
+  }, [currentUser?.id]);
+
+  // Subscribe realtime + trigger re-render để sidebar badge cập nhật
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const unsub = subscribeConversations(currentUser.id, () => {
+      forceChatUpdate(n => n + 1);
+    });
+    return () => unsub();
+  }, [currentUser?.id]);
 
   const [activeTab, setActiveTab ] = useState<string>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
@@ -890,7 +977,7 @@ export default function App() {
           const foundUser = mappedEmps.find(e => e.id === parsedSession.id || e.username === parsedSession.username);
           if (foundUser) {
             setCurrentUser(foundUser);
-            sessionStorage.setItem('hl_erp_active_session', JSON.stringify(foundUser));
+            sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(foundUser)));
           } else if (mappedEmps.length > 0) {
             setCurrentUser(mappedEmps[0]);
           }
@@ -1189,7 +1276,7 @@ export default function App() {
     return () => window.removeEventListener('hl-payments-updated', handlePaymentsUpdated);
   }, []);
 
-  // ─── Supabase Realtime: lắng nghe thay đổi projects, tasks, payments, receipts, subcontractorAdvances, attendance ───
+  // ─── Supabase Realtime: lắng nghe thay đổi 17 bảng (primary sync, polling chỉ là backup) ───
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) {
@@ -1200,6 +1287,7 @@ export default function App() {
     const fetchProjects = async (payload?: any) => {
       try {
         console.log('[Realtime] 🔔 projects event received:', payload ? { event: payload.eventType, table: payload.table } : '(manual)');
+        invalidateCache('projects');
         const projs = await dbService.projects.list();
         console.log('[Realtime] 📦 projects fetched:', projs.length, 'rows');
         setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
@@ -1208,18 +1296,21 @@ export default function App() {
     const fetchTasks = async (payload?: any) => {
       try {
         console.log('[Realtime] 🔔 tasks event:', payload ? { event: payload.eventType } : '(manual)');
+        invalidateCache('tasks');
         setTasks(await dbService.tasks.list());
       } catch (e) { console.error('Realtime tasks sync error:', e); }
     };
     const fetchPayments = async (payload?: any) => {
       try {
         console.log('[Realtime] 🔔 payments event:', payload ? { event: payload.eventType } : '(manual)');
+        invalidateCache('payments');
         setPayments(await dbService.payments.list());
       } catch (e) { console.error('Realtime payments sync error:', e); }
     };
     const fetchReceipts = async (payload?: any) => {
       try {
         console.log('[Realtime] 🔔 receipts event:', payload ? { event: payload.eventType } : '(manual)');
+        invalidateCache('receipts');
         setReceipts(await dbService.receipts.list());
       } catch (e) { console.error('Realtime receipts sync error:', e); }
     };
@@ -1230,93 +1321,45 @@ export default function App() {
     const fireAttendanceEvent = async (payload?: any) => {
       console.log('[Realtime] 🔔 attendance_records event:', payload ? { event: payload.eventType } : '(manual)');
       try {
+        invalidateCache('attendance_records');
         const attendanceList = await dbService.attendance.list();
         window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: attendanceList }));
       } catch (e) { console.error('Realtime attendance sync error:', e); }
     };
-
-    console.log('[Realtime] Creating channel...');
-    const channel = sb
-      .channel('app-realtime-sync-v2')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, fetchProjects)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, fetchTasks)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, fetchReceipts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, fireAttendanceEvent)
-      .subscribe((status: string, err: any) => {
-        console.log('[Realtime] Status:', status, err ? `Error: ${err.message}` : '');
-        if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Channel ready. Listening for changes on: projects, tasks, payments, receipts, subcontractor_advances, attendance_records');
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.error('[Realtime] ❌ Connection issue:', status, err);
-          console.error('[Realtime] 💡 Kiểm tra Supabase Dashboard → Database → Replication → Enable tables!');
-        }
-      });
-
-    console.log('[Realtime] ✅ Subscribed');
-    return () => { sb.removeChannel(channel); };
-  }, []);
-
-  // ─── Polling: tự động fetch quotes mỗi 30 giây ──────────────────────────
-  useEffect(() => {
-    const fetchQuotesPolling = async () => {
-      try {
-        const qtes = await dbService.quotes.list();
-        setQuotes(qtes);
-      } catch (e) { console.error('Polling quotes error:', e); }
+    const fetchQuotes = async () => {
+      try { invalidateCache('quotes'); setQuotes(await dbService.quotes.list()); } catch {}
+    };
+    const fetchCustomers = async () => {
+      try { invalidateCache('customers'); setCustomers(await dbService.customers.list()); } catch {}
     };
 
-    // Fetch ngay lập tức khi mount
-    fetchQuotesPolling();
-
-    // Fallback mỗi 120 giây (Realtime là primary, polling chỉ là backup)
-    const interval = setInterval(fetchQuotesPolling, 120000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ─── Polling: tự động fetch customers mỗi 30 giây ──────────────────────
-  useEffect(() => {
-    const fetchCustomersPolling = async () => {
-      try {
-        const custs = await dbService.customers.list();
-        setCustomers(custs);
-      } catch (e) { console.error('Polling customers error:', e); }
+    // ─── Handlers cho các bảng phụ (fire custom events để component lắng nghe) ──
+    const fireSuppliersEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
     };
-
-    fetchCustomersPolling();
-    const interval = setInterval(fetchCustomersPolling, 120000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ─── Polling: tự động fetch projects mỗi 30 giây (fallback cho Realtime) ──
-  useEffect(() => {
-    const fetchProjectsPolling = async () => {
-      try {
-        const projs = await dbService.projects.list();
-        setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
-      } catch (e) { console.error('Polling projects error:', e); }
+    const fireInventoryEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
     };
-
-    fetchProjectsPolling();
-    const interval = setInterval(fetchProjectsPolling, 120000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ─── Polling: suppliers, inventory, warehouse_logs, archived_quotes,
-  //     hrm_role_groups, business_profile, shift_config, employees, task permissions mỗi 30 giây ─
-  useEffect(() => {
-    const fireEvents = () => {
+    const fireWarehouseLogsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
+    };
+    const fireArchivedQuotesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
+    };
+    const fireTaskPermissionsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-task-permissions-updated')); } catch {}
+    };
+    const fireHrmRoleGroupsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-role-groups-updated')); } catch {}
+    };
+    const fireEmployeesEvent = async () => {
       try {
-        window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
-        window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
-        window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated'));
-        window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
-        window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
-        window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+        invalidateCache('employees');
+        const emps = await dbService.employees.list();
+        window.dispatchEvent(new CustomEvent('hl-employees-updated', { detail: { employees: emps } }));
       } catch {}
     };
-    const fetchConfigPolling = async () => {
+    const fireConfigEvent = async () => {
       try {
         const profile = await dbService.businessProfile.get();
         if (profile) {
@@ -1325,17 +1368,116 @@ export default function App() {
         }
         const config = await dbService.shiftConfig.get();
         if (config) setHrmConfig(config);
-        const emps = await dbService.employees.list();
-        setEmployees(emps);
-        // Đồng bộ quyền công việc từ Supabase về localStorage (non-blocking)
-        import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()).catch(e => console.warn('Sync task permissions failed:', e));
-      } catch (e) { console.error('Polling config error:', e); }
+      } catch {}
     };
 
-    fireEvents();
-    fetchConfigPolling();
-    const interval = setInterval(() => { fireEvents(); fetchConfigPolling(); }, 120000);
+    console.log('[Realtime] Creating channel...');
+    const channel = sb
+      .channel('app-realtime-sync-v2')
+      // ── Core tables (state setters) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, fetchProjects)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, fetchTasks)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, fetchReceipts)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' }, fetchQuotes)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, fetchCustomers)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, fireAttendanceEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
+      // ── Supporting tables (fire events) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, fireSuppliersEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fireInventoryEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs' }, fireWarehouseLogsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'archived_quotes' }, fireArchivedQuotesEvent)
+      // archived_subcontractor_quotes là alias của archived_quotes (sector='subcontractor') — không có bảng riêng
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_task_permissions' }, fireTaskPermissionsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_role_groups' }, fireHrmRoleGroupsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, fireEmployeesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'business_profile' }, fireConfigEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fireConfigEvent)
+      .subscribe((status: string, err: any) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] ✅ Channel ready. Listening for 16 tables');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[Realtime] ❌ Connection issue:', status, err);
+        } else if (status === 'CLOSED') {
+          if (err) console.log('[Realtime] Channel closed:', err.message);
+        }
+      });
+
+    return () => {
+      console.log('[Realtime] Cleaning up channel...');
+      sb.removeChannel(channel);
+    };
+  }, []);
+
+  // ─── Polling Tier 1 (300s): dữ liệu thay đổi vừa phải, fallback cho Realtime ──
+  useEffect(() => {
+    const poll = async () => {
+      // Không invalidateCache ở đây — cache sẽ tự expire khi realtime event invalidate
+      try { setQuotes(await dbService.quotes.list()); } catch {}
+      try { setCustomers(await dbService.customers.list()); } catch {}
+      try {
+        const projs = await dbService.projects.list();
+        setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
+      } catch {}
+      try { setTasks(await dbService.tasks.list()); } catch {}
+      try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
+      try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
+      try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
+      try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
+      try { window.dispatchEvent(new CustomEvent('hl-task-permissions-updated')); } catch {}
+      import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()).catch(() => {});
+    };
+    poll();
+    const interval = setInterval(poll, 300000);
     return () => clearInterval(interval);
+  }, []);
+
+  // ─── Polling Tier 2 (600s): dữ liệu hiếm thay đổi (profile, config, employees, roles) ──
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const profile = await dbService.businessProfile.get();
+        if (profile) {
+          setBusinessInfo(profile);
+          localStorage.setItem('hl_business_info', JSON.stringify(profile));
+        }
+      } catch {}
+      try {
+        const config = await dbService.shiftConfig.get();
+        if (config) setHrmConfig(config);
+      } catch {}
+      try { setEmployees(await dbService.employees.list()); } catch {}
+      try {
+        const cloudRoles = await dbService.hrmRoleGroups.list();
+        if (cloudRoles && cloudRoles.length > 0) {
+          setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
+          const updated = JSON.stringify(cloudRoles);
+          localStorage.setItem('hl_cached_hrm_role_groups', updated);
+          localStorage.setItem('hl_hrm_roles_v2', updated);
+        }
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 600000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Event: cho phép component khác trigger đồng bộ tasks thủ công ──────
+  useEffect(() => {
+    const handleTasksRefreshRequest = async () => {
+      try {
+        const taskList = await dbService.tasks.list();
+        setTasks(taskList);
+      } catch (e) { console.error('Tasks refresh error:', e); }
+    };
+    window.addEventListener('hl-tasks-refresh', handleTasksRefreshRequest);
+    // Lắng nghe cả sự kiện từ Supabase Realtime (nếu có)
+    window.addEventListener('hl-tasks-updated', handleTasksRefreshRequest);
+    return () => {
+      window.removeEventListener('hl-tasks-refresh', handleTasksRefreshRequest);
+      window.removeEventListener('hl-tasks-updated', handleTasksRefreshRequest);
+    };
   }, []);
 
   // Sync role permissions when updated from HRM
@@ -1419,12 +1561,12 @@ export default function App() {
     }
 
     if (autoLogin) {
-      localStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+      localStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
     } else {
       localStorage.removeItem('hl_erp_active_session');
     }
-    
-    sessionStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+
+    sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
     
     addToast({
       title: 'Đăng nhập thành công',
@@ -1468,7 +1610,9 @@ export default function App() {
   // HANDLERS DỰ ÁN
   const handleAddProject = (newProj: Project) => {
     setProjects([newProj, ...projects]);
-    dbService.projects.save(newProj).catch(err => {
+    dbService.projects.save(newProj).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+    }).catch(err => {
       console.error('Lỗi lưu project lên Supabase:', err);
       addToast({
         title: '⚠️ Lưu dự án thất bại',
@@ -1522,10 +1666,12 @@ export default function App() {
             ...(isCompleted && !updates.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
           };
           
-          // Trigger the Firestore save as a side-effect outside state rendering if possible, 
+          // Trigger the Firestore save as a side-effect outside state rendering if possible,
           // but to be safe and compatible, we run it immediately on the constructed nextp
           setTimeout(() => {
-            dbService.projects.save(nextp).catch(err => {
+            dbService.projects.save(nextp).then(() => {
+              window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+            }).catch(err => {
               console.error("Lỗi khi lưu cập nhật dự án:", err);
             });
           }, 0);
@@ -1558,23 +1704,25 @@ export default function App() {
   const handleDeleteProject = (id: string) => {
     // 1. Cập nhật state dự án dùng functional update để tránh stale closure
     setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
-    
+
     // 2. Cập nhật state công việc dùng functional update, đồng thời xóa các tài liệu tương ứng trong Firebase
     setTasks(prevTasks => {
       const associatedTasks = prevTasks.filter(t => t.projectId === id);
       const associatedTaskIds = associatedTasks.map(t => t.id);
-      
+
       if (associatedTaskIds.length > 0) {
         dbService.tasks.deleteMultiple(associatedTaskIds).catch(err => {
           console.error("Lỗi khi xóa các công việc con liên quan đến dự án:", err);
         });
       }
-      
+
       return prevTasks.filter(t => t.projectId !== id);
     });
 
     // 3. Xóa dự án trong Firebase
-    dbService.projects.delete(id).catch(err => {
+    dbService.projects.delete(id).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+    }).catch(err => {
       console.error("Lỗi khi xóa dự án:", err);
     });
   };
@@ -1582,7 +1730,9 @@ export default function App() {
   // HANDLERS CÔNG VIỆC
   const handleAddTask = (newTask: Task) => {
     setTasks(prev => [newTask, ...prev]);
-    dbService.tasks.save(newTask).catch(err => {
+    dbService.tasks.save(newTask).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+    }).catch(err => {
       console.error("Lỗi khi thêm công việc mới:", err);
     });
 
@@ -1710,7 +1860,9 @@ export default function App() {
           });
         }
 
-        dbService.tasks.save(changedTask).catch(err => {
+        dbService.tasks.save(changedTask).then(() => {
+          window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+        }).catch(err => {
           console.error("Lỗi khi cập nhật công việc:", err);
         });
 
@@ -1942,7 +2094,9 @@ export default function App() {
 
   const handleDeleteTask = (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    dbService.tasks.delete(id).catch(err => {
+    dbService.tasks.delete(id).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+    }).catch(err => {
       console.error("Lỗi khi xóa công việc:", err);
     });
 
@@ -1954,7 +2108,9 @@ export default function App() {
 
   const handleDeleteMultipleTasks = (ids: string[]) => {
     setTasks(prev => prev.filter(t => !ids.includes(t.id)));
-    dbService.tasks.deleteMultiple(ids).catch(err => {
+    dbService.tasks.deleteMultiple(ids).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+    }).catch(err => {
       console.error("Lỗi khi dọn dẹp các công việc:", err);
     });
 
@@ -2295,8 +2451,18 @@ export default function App() {
   }).length;
 
   if (!currentUser) {
+    if (isInitializing || employees.length === 0) {
+      return (
+        <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
+            <p className="text-sm text-slate-400 font-medium">Đang tải dữ liệu...</p>
+          </div>
+        </div>
+      );
+    }
     return (
-      <Login 
+      <Login
         brandName={displaySettings.brandName}
         brandSlogan={displaySettings.brandSlogan}
         logoText={displaySettings.logoText}
@@ -2304,6 +2470,18 @@ export default function App() {
         employees={employees}
         onLoginSuccess={handleLoginSuccess}
       />
+    );
+  }
+
+  // Splash screen cho giao diện chính: auto-login xong nhưng data chưa load xong
+  if (isInitializing) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
+          <p className="text-sm text-slate-400 font-medium">Đang tải dữ liệu...</p>
+        </div>
+      </div>
     );
   }
 
@@ -2397,9 +2575,11 @@ export default function App() {
                       <MessageSquare className={`w-5 h-5 shrink-0 transition duration-75 ${activeTab === 'messages' ? 'text-emerald-600' : 'text-gray-500 group-hover:text-gray-900'}`} />
                       <span className="flex-1 ms-3 text-left whitespace-nowrap truncate">Tin nhắn</span>
                       {(() => {
-                        const unreadCount = notifications.filter(n => n.recipientId === currentUser?.id && !n.read).length;
-                        return unreadCount > 0 ? (
-                          <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium text-white bg-rose-600 rounded-full">{unreadCount}</span>
+                        const conversations = getConversations();
+                        const userConvs = getUserConversations(conversations, currentUser?.id ?? '');
+                        const chatUnreadCount = userConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+                        return chatUnreadCount > 0 ? (
+                          <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium text-white bg-rose-600 rounded-full">{chatUnreadCount > 99 ? '99+' : chatUnreadCount}</span>
                         ) : null;
                       })()}
                     </button>
@@ -2774,7 +2954,11 @@ export default function App() {
             {/* THÔNG BÁO TIN NHẮN MỚI (CHUÔNG THÔNG BÁO) */}
             {(() => {
               const userNotifications = notifications.filter(n => n.recipientId === currentUser?.id);
-              const unreadCount = userNotifications.filter(n => !n.read).length;
+              const systemUnreadCount = userNotifications.filter(n => !n.read).length;
+              // Thêm tin nhắn chat chưa đọc từ conversations
+              const chatConvs = getUserConversations(getConversations(), currentUser?.id ?? '');
+              const chatUnreadCount = chatConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+              const unreadCount = systemUnreadCount + chatUnreadCount;
 
               // Helper sinh màu avatar và fallback tên (giống MessagesView)
               const avatarColors = ['#6366F1','#EF4444','#10B981','#F59E0B','#A855F7','#3B82F6','#14B8A6','#F97316','#334155'];
@@ -2803,15 +2987,15 @@ export default function App() {
               };
 
               // Badge counts cho 4 tab bộ lọc
-              const notifAllCount = notifications.filter(n => n.recipientId === currentUser?.id && !n.read).length;
-              const notifPersonalCount = notifications.filter(n => n.recipientId === currentUser?.id && n.category === 'chat' && !n.read).length;
-              const notifGroupCount = notifications.filter(n => n.recipientId === currentUser?.id && n.category !== 'chat' && !n.read).length;
+              const notifAllCount = systemUnreadCount + chatUnreadCount;
+              const notifPersonalCount = chatConvs.filter(c => c.type === 'personal').reduce((s, c) => s + (c.unreadCount || 0), 0);
+              const notifGroupCount = chatConvs.filter(c => c.type === 'group' || c.type === 'task').reduce((s, c) => s + (c.unreadCount || 0), 0);
 
               const popoverTabs: Array<{id: typeof popoverFilter, label: string, icon: any, count: number}> = [
                 { id: 'all', label: 'Tất cả', icon: MessageSquare, count: notifAllCount },
                 { id: 'personal', label: 'Cá nhân', icon: User, count: notifPersonalCount },
                 { id: 'group', label: 'Nhóm', icon: Users, count: notifGroupCount },
-                { id: 'notifications', label: 'Thông báo', icon: Bell, count: notifAllCount },
+                { id: 'notifications', label: 'Thông báo', icon: Bell, count: systemUnreadCount },
               ];
 
               return (

@@ -3,6 +3,13 @@ import { Employee, HrmRoleGroup } from '../types';
 import { dbService } from '../lib/dbService';
 import { generateUsername } from './SettingsContext';
 
+/** Bỏ password khỏi user object — KHÔNG lưu password hash vào storage */
+const stripPassword = (emp: any) => {
+  if (!emp) return emp;
+  const { password, ...safe } = emp;
+  return safe;
+};
+
 // ─── Context Type ─────────────────────────────────────────────────────────────
 
 interface AuthContextValue {
@@ -105,7 +112,7 @@ export function AuthProvider({
   // Update session storage whenever currentUser changes
   useEffect(() => {
     if (currentUser) {
-      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(currentUser));
+      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(currentUser)));
     } else {
       sessionStorage.removeItem('hl_erp_active_session');
     }
@@ -116,10 +123,10 @@ export function AuthProvider({
     (loggedInUser: Employee, remember: boolean, autoLogin: boolean) => {
       setCurrentUser(loggedInUser);
 
+      // Chỉ lưu username — KHÔNG lưu password
       if (remember) {
         const creds = {
-          username: loggedInUser.username || generateUsername(loggedInUser.name),
-          password: loggedInUser.password || '123'
+          username: loggedInUser.username || generateUsername(loggedInUser.name)
         };
         localStorage.setItem('hl_erp_remembered_credentials', JSON.stringify(creds));
       } else {
@@ -127,12 +134,12 @@ export function AuthProvider({
       }
 
       if (autoLogin) {
-        localStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+        localStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
       } else {
         localStorage.removeItem('hl_erp_active_session');
       }
 
-      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
 
       addToast({
         title: 'Đăng nhập thành công',
@@ -159,11 +166,11 @@ export function AuthProvider({
   const handleUpdateProfile = useCallback(
     async (updatedUser: Employee): Promise<void> => {
       setCurrentUser(updatedUser);
-      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(updatedUser));
+      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(updatedUser)));
 
       const savedSession = localStorage.getItem('hl_erp_active_session');
       if (savedSession) {
-        localStorage.setItem('hl_erp_active_session', JSON.stringify(updatedUser));
+        localStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(updatedUser)));
       }
 
       // Update remembered credentials if applicable

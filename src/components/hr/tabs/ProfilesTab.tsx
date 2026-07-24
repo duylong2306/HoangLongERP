@@ -238,16 +238,11 @@ export default function ProfilesTab({
     };
 
     try {
-      // Save to localStorage (hl_erp_employees)
-      const existingAccounts = JSON.parse(localStorage.getItem('hl_erp_employees') || '[]');
-      const updatedAccounts = [...existingAccounts, newAccount];
-      localStorage.setItem('hl_erp_employees', JSON.stringify(updatedAccounts));
-
-      // Also save to cloud via dbService (don't let cloud failures block the local save)
+      // Save to cloud via dbService (cloud is source of truth — no localStorage for employees)
       try {
         await dbService.employees.save(newAccount);
       } catch (cloudErr) {
-        console.warn('Lưu lên cloud thất bại, nhưng đã lưu cục bộ:', cloudErr);
+        console.warn('Lưu lên cloud thất bại:', cloudErr);
       }
 
       // If roleGroupId provided, add employee to the role group

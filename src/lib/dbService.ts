@@ -89,31 +89,64 @@ export async function seedTableToSupabase(tableName: string, data: any[]): Promi
   }
 }
 
-// Query helper for Supabase
+// ─── Query Cache ─────────────────────────────────────────────────────────
+// Tránh query trùng bảng: cùng 1 table chỉ gọi Supabase 1 lần / session.
+// Save/delete tự động invalidate cache để lần query sau lấy data mới.
+const _queryCache = new Map<string, any[]>();
+const _inflight = new Map<string, Promise<any[]>>();
+
+export function invalidateCache(tableName?: string) {
+  if (tableName) {
+    _queryCache.delete(tableName);
+  } else {
+    _queryCache.clear();
+  }
+}
+
+/** Populate cache từ dữ liệu bên ngoài (dùng khi RPC đã fetch sẵn, tránh query lại) */
+export function populateCache(tableName: string, data: any[]) {
+  _queryCache.set(tableName, data);
+}
+
+// Query helper for Supabase (cached per table)
 async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T[]> {
+  // Trả cache nếu có
+  if (_queryCache.has(tableName)) {
+    return _queryCache.get(tableName) as T[];
+  }
+  // Deduplicate concurrent requests cho cùng 1 table
+  if (_inflight.has(tableName)) {
+    return _inflight.get(tableName) as Promise<T[]>;
+  }
+
   const supabase = getSupabase();
   if (!supabase) {
     console.warn(`[DB] Supabase client is NULL — cannot query ${tableName}`);
     return fallbackData;
   }
-  try {
-    console.log(`[DB] Querying ${tableName}...`);
-    const { data, error } = await supabase.from(tableName).select('*');
-    if (error) {
-      console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
-      throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
+
+  const promise = (async () => {
+    try {
+      console.log(`[DB] Querying ${tableName}...`);
+      const { data, error } = await supabase.from(tableName).select('*');
+      if (error) {
+        console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
+        throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
+      }
+      const rows = data && data.length > 0 ? data.map(rowToCamel) as T[] : [];
+      console.log(`[DB] ✅ Loaded ${tableName}:`, rows.length, 'rows');
+      _queryCache.set(tableName, rows);
+      return rows;
+    } catch (err) {
+      console.error(`[DB] ❌ Supabase fetch exception for ${tableName}:`, err);
+      throw err;
+    } finally {
+      _inflight.delete(tableName);
     }
-    console.log(`[DB] ✅ Loaded ${tableName}:`, data?.length || 0, 'rows');
-    if (data && data.length > 0) {
-      return data.map(rowToCamel) as T[];
-    }
-    // KHÔNG tự động bơm dữ liệu mẫu khi bảng rỗng — tránh "hồi sinh" dữ liệu
-    // người dùng đã cố tình xóa trực tiếp trên Supabase. Bảng rỗng trả về [].
-    return [];
-  } catch (err) {
-    console.error(`[DB] ❌ Supabase fetch exception for ${tableName}:`, err);
-    throw err;
-  }
+  })();
+
+  _inflight.set(tableName, promise);
+  return promise;
 }
 
 // Upsert helper
@@ -132,6 +165,7 @@ async function saveSupabase(tableName: string, item: any): Promise<void> {
       throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
     }
     console.log(`[DB] ✅ Saved to ${tableName}:`, data?.length, 'row(s)');
+    invalidateCache(tableName);
   } catch (err) {
     console.error(`[DB] ❌ Supabase save exception for ${tableName}:`, err);
     throw err;
@@ -150,6 +184,7 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
       console.error(`Supabase delete error for ${tableName}:`, error.message);
       throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
     }
+    invalidateCache(tableName);
   } catch (err) {
     console.error(`Supabase delete exception for ${tableName}:`, err);
     throw err;
@@ -157,6 +192,26 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
 }
 
 export const dbService = {
+  /** Populate cache từ data bên ngoài (dùng khi RPC đã fetch sẵn) */
+  populateCache(tableName: string, data: any[]) {
+    _queryCache.set(tableName, data);
+  },
+
+  // ─── BATCH LOAD: gộp tất cả bảng core thành 1 RPC call ──────────────────
+  // Giảm từ 9 HTTP requests → 1 request duy nhất
+  async loadAllCore(): Promise<Record<string, any[]>> {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Supabase not configured');
+
+    // Thử gọi RPC function (cần tạo trên Supabase)
+    const { data, error } = await supabase.rpc('load_all_core_data');
+    if (error) throw error;
+    if (!data) throw new Error('No data returned from RPC');
+
+    // RPC trả về JSON object { employees: [...], customers: [...], ... }
+    return typeof data === 'string' ? JSON.parse(data) : data;
+  },
+
   // 1. EMPLOYEES
   employees: {
     async list(): Promise<Employee[]> {
@@ -313,12 +368,12 @@ export const dbService = {
           .from('hrm_task_permissions')
           .select('matrix')
           .eq('id', 'task_permission_matrix_v1')
-          .single();
+          .limit(1);
         if (error) {
           console.warn('Supabase load task permissions error:', error.message);
           return null;
         }
-        return data?.matrix ?? null;
+        return data?.[0]?.matrix ?? null;
       } catch (e) {
         console.warn('Supabase load task permissions error:', e);
         return null;

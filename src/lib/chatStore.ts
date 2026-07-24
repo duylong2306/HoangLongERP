@@ -232,7 +232,7 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
     read: false,
   };
 
-  // Update cache
+  // Update cache — KHÔNG increment unreadCount cho người gửi
   const existing = messagesCache.get(msg.conversationId) || [];
   messagesCache.set(msg.conversationId, [...existing, newMsg]);
 
@@ -241,20 +241,27 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
     conversationsCache.set(msg.conversationId, {
       ...conv,
       lastMessageAt: newMsg.createdAt,
-      unreadCount: (conv.unreadCount || 0) + 1,
+      // Không tăng unreadCount — tin nhắn của chính mình không tính là chưa đọc
     });
   }
 
-  // Push to Supabase
+  // Push message lên Supabase
   await pushMessage(newMsg);
-  const updatedConv = conversationsCache.get(msg.conversationId);
-  if (updatedConv) {
-    await pushConversation(updatedConv);
+
+  // Push conversation LÊN SUPABASE với unreadCount +1 (dành cho người nhận)
+  let convForPush = conv;
+  if (conv) {
+    convForPush = {
+      ...conv,
+      lastMessageAt: newMsg.createdAt,
+      unreadCount: (conv.unreadCount || 0) + 1,
+    };
+    await pushConversation(convForPush);
   }
 
   // 🔔 Gửi Web Push cho người nhận (khi app đóng / background)
   // Gọi async, không block UI. Bỏ qua lỗi nếu Supabase chưa cấu hình.
-  notifyChatPush(newMsg, updatedConv);
+  notifyChatPush(newMsg, convForPush);
 
   return newMsg;
 }
@@ -305,16 +312,30 @@ async function notifyChatPush(msg: ChatMessage, conv?: Conversation): Promise<vo
   }
 }
 
+// Guard: đánh dấu đã đọc chỉ khi chưa đọc
+let _lastMarkReadTime: Record<string, number> = {};
+const MARK_READ_DEBOUNCE_MS = 1000; // Tối thiểu 1 giây giữa 2 lần gọi liên tiếp cho cùng 1 hội thoại
+
 export async function markConversationRead(convId: string): Promise<void> {
   const sb = getSupabase();
   if (!sb) return;
+
+  // Guard: nếu unreadCount đã = 0 trong cache thì bỏ qua
+  const conv = conversationsCache.get(convId);
+  if (conv && (conv.unreadCount || 0) === 0) return;
+
+  // Guard debounce: không gọi lại trong vòng 1 giây
+  const now = Date.now();
+  if (_lastMarkReadTime[convId] && now - _lastMarkReadTime[convId] < MARK_READ_DEBOUNCE_MS) return;
+  _lastMarkReadTime[convId] = now;
+
+  // Update cache trước để tránh race condition
+  if (conv) conversationsCache.set(convId, { ...conv, unreadCount: 0 });
+
   const { error: convErr } = await sb.from('conversations').update({ unread_count: 0 }).eq('id', convId);
   if (convErr) console.error('markConversationRead error:', convErr.message);
   const { error: msgErr } = await sb.from('chat_messages').update({ read: true }).eq('conversation_id', convId);
   if (msgErr) console.error('mark messages read error:', msgErr.message);
-
-  const conv = conversationsCache.get(convId);
-  if (conv) conversationsCache.set(convId, { ...conv, unreadCount: 0 });
 }
 
 // Lấy hội thoại của user (filter theo participantIds)
@@ -456,6 +477,21 @@ export async function loadConversationsFromCloud(userId?: string): Promise<Conve
       return [];
     }
     const convs = (data || []).map(convFromRow);
+
+    // 🔧 FIX: Nếu userId được truyền vào, zero out unreadCount cho các conversation
+    // mà tin nhắn cuối do chính userId gửi → tránh đếm tin nhắn của chính mình.
+    if (userId) {
+      convs.forEach(c => {
+        if ((c.unreadCount || 0) > 0) {
+          const msgs = messagesCache.get(c.id) || [];
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg && lastMsg.senderId === userId) {
+            c.unreadCount = 0;
+          }
+        }
+      });
+    }
+
     saveConversations(convs);
     return convs;
   } catch (e) {
@@ -489,27 +525,56 @@ export async function loadMessagesFromCloud(conversationId: string): Promise<Cha
 
 /**
  * Subscribe realtime cho danh sách hội thoại.
- * Trả về hàm unsubscribe. onChange được gọi mỗi khi có thay đổi.
+ * Hỗ trợ N callback (multi-component): channel chỉ subscribe 1 lần duy nhất.
+ * Khi unsubscribe callback cuối → cleanup channel.
  */
+let _convChannel: any = null;
+let _convCallbacks: Set<() => void> = new Set();
+let _convUserId: string | null = null;
+
 export function subscribeConversations(userId: string, onChange: () => void): () => void {
   const sb = getSupabase();
   if (!sb) return () => {};
 
-  const channel = sb
-    .channel(`conversations_${userId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
-      async () => {
-        await loadConversationsFromCloud(userId);
-        onChange();
-      })
-    .subscribe();
+  // Nếu userId khác với channel đang active → cleanup channel cũ
+  if (_convChannel && _convUserId !== userId) {
+    sb.removeChannel(_convChannel);
+    _convChannel = null;
+    _convCallbacks = new Set();
+    _convUserId = null;
+  }
 
-  return () => { sb.removeChannel(channel); };
+  _convCallbacks.add(onChange);
+
+  // Chỉ subscribe channel 1 lần
+  if (!_convChannel) {
+    _convUserId = userId;
+    _convChannel = sb
+      .channel(`conversations_${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
+        async () => {
+          await loadConversationsFromCloud(userId);
+          _convCallbacks.forEach(cb => cb());
+        })
+      .subscribe();
+  }
+
+  // Trả về hàm unsubscribe: xóa callback, cleanup channel nếu không còn callback nào
+  return () => {
+    _convCallbacks.delete(onChange);
+    if (_convCallbacks.size === 0 && _convChannel) {
+      const sb2 = getSupabase();
+      if (sb2) sb2.removeChannel(_convChannel);
+      _convChannel = null;
+      _convUserId = null;
+    }
+  };
 }
 
 /**
  * Subscribe realtime cho tin nhắn của 1 hội thoại.
- * Trả về hàm unsubscribe. onChange(messages) được gọi mỗi khi có thay đổi.
+ * Trả về hàm unsubscribe. onChange(messages) được gọi mỗi khi có INSERT mới.
+ * CHỈ lắng nghe INSERT — không lắng nghe UPDATE (tránh loop do markConversationRead).
  */
 export function subscribeMessages(
   conversationId: string,
@@ -521,7 +586,7 @@ export function subscribeMessages(
   const channel = sb
     .channel(`messages_${conversationId}`)
     .on('postgres_changes',
-      { event: '*', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
+      { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
       async () => {
         const msgs = await loadMessagesFromCloud(conversationId);
         onChange(msgs);

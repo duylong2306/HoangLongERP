@@ -246,9 +246,6 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
     }));
   };
 
-  const handleInheritToggle = () => {
-    setMatrix(prev => ({ ...prev, inheritBelow: !prev.inheritBelow }));
-  };
 
   const handleResetToDefault = () => {
     setMatrix(DEFAULT_PROJECT_PERMISSIONS);
@@ -358,22 +355,16 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           </button>
         </div>
 
-        {/* Kế thừa cấp dưới */}
-        <div className="flex items-center gap-2 mt-3 p-2 bg-slate-900 rounded-lg border border-slate-850">
-          <ArrowDownWideNarrow className="w-4 h-4 text-amber-400" />
-          <span className="text-[10px] text-slate-300 font-medium">Kế thừa cấp dưới:</span>
-          <button
-            onClick={handleInheritToggle}
-            className={`relative w-10 h-5 rounded-full transition-colors ${matrix.inheritBelow ? 'bg-emerald-600' : 'bg-slate-700'}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${matrix.inheritBelow ? 'translate-x-5' : ''}`} />
-          </button>
-          <span className="text-[9px] text-slate-500 italic">Bật → cấp cho vai trò cao sẽ tự động cấp cho vai trò thấp hơn</span>
-        </div>
 
         {/* Cột Tầm nhìn */}
         <div className="mt-3">
           <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Tầm nhìn của từng vai trò dự án</span>
+          {/* Chú thích tầm nhìn */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[9px] text-slate-400">
+            <span><b className="text-emerald-400">Tất cả:</b> Xem & thao tác (theo quyền) với mọi dự án</span>
+            <span><b className="text-sky-400">Liên quan:</b> Chỉ xem & thao tác dự án mình liên quan</span>
+            <span><b className="text-slate-300">Chỉ xem:</b> Xem toàn bộ dự án, không được thao tác</span>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
             {scopeKeys.map(key => (
               <div key={key} className="flex items-center justify-between gap-1 bg-slate-900 rounded-lg px-2 py-1 border border-slate-850">
