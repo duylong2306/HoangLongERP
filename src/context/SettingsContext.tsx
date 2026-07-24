@@ -452,3 +452,51 @@ export function isUserInAnyRoleGroup(empId: string | undefined, groupIds: string
   return groupIds.some(gid => isUserInRoleGroup(empId, gid));
 }
 
+/**
+ * Ánh xạ parent-child cho module permissions
+ */
+const MODULE_PARENT_CHILDREN: Record<string, string[]> = {
+  director_office: ['director_dashboard'],
+  project_office: ['projects_construction', 'projects_furniture', 'projects_mechanical'],
+  hr_office: ['employees', 'hr_data'],
+  accounting_office: ['finance', 'finance_data'],
+  warehouse_office: ['material_coordination', 'warehouse_suppliers', 'warehouse_management'],
+  subcontractor_office: ['subcontractor_management'],
+  library_office: ['quotes_construction', 'quotes', 'quotes_mechanical', 'quotes_subcontractor'],
+  system_office: ['settings_accounts', 'settings_roles', 'settings'],
+};
+
+/**
+ * Kiểm tra user có quyền cụ thể (view/create/edit/delete) trên module code không.
+ * Hỗ trợ kế thừa: có quyền cha → có quyền con.
+ * @param empId   ID nhân viên
+ * @param moduleCode  Mã phân hệ (VD: 'projects_construction')
+ * @param action  Hành động: 'view' | 'create' | 'edit' | 'delete'
+ * @returns boolean
+ */
+export function hasModulePermission(empId: string | undefined, moduleCode: string, action: 'view' | 'create' | 'edit' | 'delete'): boolean {
+  if (!empId) return false;
+
+  // Admin role luôn full quyền
+  if (isUserInRoleGroup(empId, 'role_admin')) return true;
+
+  const groups = loadHrmRoleGroups();
+  const userGroups = groups.filter(g => g.memberIds?.includes(empId));
+  if (userGroups.length === 0) return false;
+
+  for (const group of userGroups) {
+    const perms = group.permissions || {};
+
+    // 1. Kiểm tra trực tiếp trên module
+    if (perms[moduleCode]?.[action]) return true;
+
+    // 2. Kế thừa từ cha: nếu có quyền cha → có quyền con
+    const parentCode = Object.keys(MODULE_PARENT_CHILDREN).find(
+      p => MODULE_PARENT_CHILDREN[p].includes(moduleCode)
+    );
+    if (parentCode && perms[parentCode]?.[action]) return true;
+  }
+
+  return false;
+}
+

@@ -2184,6 +2184,25 @@ export default function App() {
     }
   };
 
+  // Ánh xạ parent-child cho sidebar: nếu có quyền cha → tự động có quyền con
+  // (dùng dấu gạch ngang vì getAllowedTabsFromRoleGroups đã convert _ → -)
+  const parentChildrenMap: Record<string, string[]> = {
+    'project-office': ['projects-construction', 'projects-furniture', 'projects-mechanical'],
+    'hr-office': ['employees', 'hr-data'],
+    'accounting-office': ['finance', 'finance-data'],
+    'warehouse-office': ['material-coordination', 'warehouse-suppliers', 'warehouse-management'],
+    'subcontractor-office': ['subcontractor-management'],
+    'library-office': ['quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'],
+    'system-office': ['settings-accounts', 'settings-roles', 'settings'],
+    'director-office': ['director-dashboard'],
+  };
+
+  // Ánh xạ ngược: con → cha
+  const childParentMap: Record<string, string> = {};
+  for (const [parent, children] of Object.entries(parentChildrenMap)) {
+    children.forEach(child => { childParentMap[child] = parent; });
+  }
+
   const isAccessible = (tab: string): boolean => {
     if (!currentUser) return false;
     if (currentUser.username === 'admin') return true;
@@ -2194,22 +2213,36 @@ export default function App() {
     const allowedFromGroups = getAllowedTabsFromRoleGroups(currentUser);
 
     // Fallback: dùng legacy role field nếu Role Groups chưa có cấu hình
-    let allowed: string[] = allowedFromGroups;
-    if (!allowed || allowed.length === 0) {
+    let allowedSet = new Set(allowedFromGroups);
+    if (!allowedFromGroups || allowedFromGroups.length === 0) {
       const role = currentUser.role;
       const legacy = role ? rolePermissions[role] : undefined;
       if (legacy && legacy.length > 0) {
-        allowed = legacy;
+        legacy.forEach(t => allowedSet.add(t));
       }
     }
 
     // Các tab lõi (core) luôn hiển thị với mọi người dùng đã đăng nhập
-    // (Tin nhắn là tính năng liên lạc bắt buộc, không nằm trong ma trận phân quyền module)
     const coreTabs = ['dashboard', 'tasks', 'messages'];
-    allowed = Array.from(new Set([...coreTabs, ...(allowed || [])]));
+    coreTabs.forEach(t => allowedSet.add(t));
+
+    // ─── Logic kế thừa parent → child ───────────────────────────────────
+    // Nếu có quyền cha → tự động thêm tất cả quyền con
+    for (const [parent, children] of Object.entries(parentChildrenMap)) {
+      if (allowedSet.has(parent)) {
+        children.forEach(child => allowedSet.add(child));
+      }
+    }
+    // Nếu có quyền con → tự động thêm quyền cha (để sidebar hiển thị nhóm cha)
+    for (const childStr of Array.from(allowedSet)) {
+      const parentStr = childParentMap[childStr];
+      if (parentStr) {
+        allowedSet.add(parentStr);
+      }
+    }
 
     // Fail-safe: nếu chưa cấu hình → không có quyền (ẩn menu)
-    if (!allowed || allowed.length === 0) return false;
+    if (allowedSet.size === 0) return false;
 
     // Giám đốc luôn giữ quyền Cài đặt hệ thống để không tự khóa mình ra ngoài
     if (isAdminGroup && (tab === 'settings' || tab === 'settings-accounts' || tab === 'settings-roles')) return true;
@@ -2219,42 +2252,7 @@ export default function App() {
       return isAdminGroup;
     }
 
-    // Map các trường hợp đặc thù liên kết giữa tab tổng và các tab con để tương thích ngược
-    if (tab === 'projects') {
-      return allowed.includes('project-office') ||
-             allowed.includes('projects-construction') ||
-             allowed.includes('projects-furniture') ||
-             allowed.includes('projects-mechanical');
-    }
-    if (tab === 'material-coordination') {
-      return allowed.includes('material-coordination') || allowed.includes('finance');
-    }
-    if (tab === 'warehouse-suppliers') {
-      return allowed.includes('warehouse-suppliers') || allowed.includes('finance');
-    }
-    if (tab === 'warehouse-management') {
-      return allowed.includes('warehouse-management') || allowed.includes('finance');
-    }
-    if (tab === 'subcontractor-management') {
-      return allowed.includes('subcontractor-management') || allowed.includes('finance') || allowed.includes('quotes');
-    }
-    if (tab === 'quotes-construction') {
-      return allowed.includes('quotes-construction') || allowed.includes('quotes');
-    }
-    if (tab === 'quotes-mechanical') {
-      return allowed.includes('quotes-mechanical') || allowed.includes('quotes');
-    }
-    if (tab === 'quotes-subcontractor') {
-      return allowed.includes('quotes-subcontractor') || allowed.includes('quotes');
-    }
-    if (tab === 'settings-accounts') {
-      return allowed.includes('settings-accounts') || allowed.includes('settings');
-    }
-    if (tab === 'settings-roles') {
-      return allowed.includes('settings-roles') || allowed.includes('settings');
-    }
-
-    return allowed.includes(tab);
+    return allowedSet.has(tab);
   };
 
   // Tự động điều hướng về 'dashboard' nếu tab hiện tại không có quyền truy cập

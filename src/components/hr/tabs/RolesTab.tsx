@@ -380,81 +380,92 @@ export default function RolesTab(props: RolesTabProps) {
         // Admin (role_admin) luôn full quyền, không cho sửa
         const isAdmin = activeRole.id === 'role_admin';
 
+        // Ánh xạ cha-con cho logic "chọn cha tự động chọn hết con"
+        const parentChildrenMap: Record<string, string[]> = {
+          director_office: ['director_dashboard'],
+          project_office: ['projects_construction', 'projects_furniture', 'projects_mechanical'],
+          hr_office: ['employees', 'hr_data'],
+          accounting_office: ['finance', 'finance_data'],
+          warehouse_office: ['material_coordination', 'warehouse_suppliers', 'warehouse_management'],
+          subcontractor_office: ['subcontractor_management'],
+          library_office: ['quotes_construction', 'quotes', 'quotes_mechanical', 'quotes_subcontractor'],
+          system_office: ['settings_accounts', 'settings_roles', 'settings'],
+        };
+
         const groupedModules = [
           {
             department: 'PHÒNG GIÁM ĐỐC',
             color: 'border-violet-500/20 text-violet-400 bg-violet-500/5',
             modules: [
-              { code: 'director_office', name: 'Menu Cha: Phòng Giám Đốc', desc: 'Kiểm soát khu vực làm việc và dữ liệu nhạy cảm của Ban Giám Đốc' },
-              { code: 'director_dashboard', name: '↳ Bàn Làm Việc Giám Đốc', desc: 'Báo cáo chỉ số kinh doanh, biểu đồ tăng trưởng và duyệt ngân sách lớn' }
+              { code: 'director_office', name: 'Menu Cha: Phòng Giám Đốc', desc: 'Phòng Giám Đốc - Dashboard Tổng Hợp' },
+              { code: 'director_dashboard', name: '↳ Dashboard Tổng Hợp', desc: 'Bảng điều hành tổng hợp các chỉ số doanh nghiệp' }
             ]
           },
           {
             department: 'PHÒNG DỰ ÁN',
             color: 'border-emerald-500/20 text-emerald-400 bg-emerald-500/5',
             modules: [
-              { code: 'project_office', name: 'Menu Cha: Phòng Dự Án', desc: 'Khu vực quản lý và giám sát các công trình xây dựng, sản xuất gỗ, cơ khí' },
-              { code: 'projects_construction', name: '↳ Công trình & Thi công mộc (Xây Dựng)', desc: 'Theo dõi hợp đồng xây dựng, thi công thô và hoàn thiện thợ thầu dẻo dai' },
-              { code: 'projects_furniture', name: '↳ Dự án Nội thất cao cấp', desc: 'Sản xuất mộc xưởng gỗ, bệ tủ kịch trần cao cấp và lắp đặt hoàn thiện' },
-              { code: 'projects_mechanical', name: '↳ Sắt mỹ thuật & Cơ khí', desc: 'Gia công hàn cắt sắt mỹ nghệ, xưởng sỹ mạ cơ khí Hoàng Long' },
-              { code: 'tasks', name: '↳ Nhiệm vụ & Tiến độ công việc', desc: 'Phân chia tác vụ việc làm, tiến độ thợ nhật thầu khoán liên thông' }
+              { code: 'project_office', name: 'Menu Cha: Phòng Dự Án', desc: 'Quản lý & giám sát các dự án Xây dựng, Nội thất, Cơ khí' },
+              { code: 'projects_construction', name: '↳ Xây dựng', desc: 'Quản lý các công trình xây dựng dân dụng & công nghiệp' },
+              { code: 'projects_furniture', name: '↳ Nội thất', desc: 'Quản lý các dự án nội thất mộc & cabinet' },
+              { code: 'projects_mechanical', name: '↳ Cơ khí', desc: 'Quản lý dự án cơ khí & gia công sắt mỹ thuật' }
             ]
           },
           {
             department: 'PHÒNG NHÂN SỰ',
             color: 'border-orange-500/20 text-orange-400 bg-orange-500/5',
             modules: [
-              { code: 'hr_office', name: 'Menu Cha: Phòng Nhân Sự', desc: 'Cổng thông tin nhân sự toàn công ty Hoàng Long Lâm Đồng' },
-              { code: 'employees', name: '↳ Quản trị Nhân sự - Chấm công', desc: 'Quản lý thông tin hồ sơ lý lịch, máy chấm công vân tay, tự động tính bảng lương' },
-              { code: 'hr_data', name: '↳ Dữ liệu nhân sự', desc: 'Lưu trữ hồ sơ số, hợp đồng lao động, quyết định bổ nhiệm và tài liệu nhân lực' }
+              { code: 'hr_office', name: 'Menu Cha: Phòng Nhân Sự', desc: 'Quản lý nhân sự toàn công ty' },
+              { code: 'employees', name: '↳ Hệ thống Nhân sự', desc: 'Hồ sơ nhân viên, chấm công, bảng lương' },
+              { code: 'hr_data', name: '↳ Dữ liệu nhân sự', desc: 'Lưu trữ hồ sơ số, hợp đồng, quyết định nhân sự' }
             ]
           },
           {
             department: 'PHÒNG KẾ TOÁN',
             color: 'border-sky-500/20 text-sky-400 bg-sky-500/5',
             modules: [
-              { code: 'accounting_office', name: 'Menu Cha: Phòng Kế Toán', desc: 'Nghiệp vụ tài chính kế toán, lập đề xuất chi tiền mặt và ngân hàng' },
-              { code: 'finance', name: '↳ Tài chính - Kế toán', desc: 'Thống kê thu chi doanh nghiệp Hoàng Long Lâm Đồng' },
-              { code: 'finance_data', name: '↳ Dữ Liệu Kế Toán', desc: 'Lịch sử giao dịch sao kê ngân hàng, hóa đơn chứng từ, phiếu thu phiếu chi' }
+              { code: 'accounting_office', name: 'Menu Cha: Phòng Kế Toán', desc: 'Nghiệp vụ tài chính kế toán doanh nghiệp' },
+              { code: 'finance', name: '↳ Tài Chính - Kế Toán', desc: 'Đề xuất thu chi, quản lý dòng tiền' },
+              { code: 'finance_data', name: '↳ Dữ Liệu Kế Toán', desc: 'Dữ liệu kế toán, sao kê, hóa đơn chứng từ' }
             ]
           },
           {
             department: 'KHO & VẬT TƯ',
             color: 'border-teal-500/20 text-teal-400 bg-teal-500/5',
             modules: [
-              { code: 'warehouse_office', name: 'Menu Cha: Kho & Vật Tư', desc: 'Theo dõi chuỗi cung ứng vật tư gỗ, sắt thép, đá tự nhiên và phụ kiện' },
-              { code: 'material_coordination', name: '↳ Điều phối vật tư', desc: 'Yêu cầu cấp phát vật tư công trình thầu phụ, điều chuyển và nghiệm thu thực tế' },
-              { code: 'warehouse_suppliers', name: '↳ Nhà cung cấp vật tư', desc: 'Danh sách và đánh giá năng lực các đơn vị cung ứng vật tư xây dựng mộc cơ khí' },
-              { code: 'warehouse_management', name: '↳ Quản lý tồn kho', desc: 'Nhập kho nguyên liệu, xuất kho chế biến và báo cáo kiểm kho định kỳ' }
+              { code: 'warehouse_office', name: 'Menu Cha: Kho & Vật Tư', desc: 'Quản lý chuỗi cung ứng & vật tư' },
+              { code: 'material_coordination', name: '↳ Điều phối vật tư', desc: 'Điều phối & yêu cầu cấp phát vật tư' },
+              { code: 'warehouse_suppliers', name: '↳ Nhà cung cấp vật tư', desc: 'Danh sách & đánh giá nhà cung cấp' },
+              { code: 'warehouse_management', name: '↳ Quản lý tồn kho', desc: 'Nhập xuất tồn kho, kiểm kho' }
             ]
           },
           {
             department: 'PHÂN HỆ THẦU PHỤ',
             color: 'border-amber-500/20 text-amber-400 bg-amber-500/5',
             modules: [
-              { code: 'subcontractor_office', name: 'Menu Cha: Thầu Phụ', desc: 'Điều hành các tổ thợ, cai thầu xây dựng dẻo dai' },
-              { code: 'subcontractor_management', name: '↳ Quản Lý Thầu Phụ', desc: 'Hồ sơ thầu phụ, nghiệm thu khối lượng thi công thô gỗ cơ khí hoàn thiện' }
+              { code: 'subcontractor_office', name: 'Menu Cha: Thầu Phụ', desc: 'Điều hành các tổ thợ & nhà thầu phụ' },
+              { code: 'subcontractor_management', name: '↳ Quản Lý Thầu Phụ', desc: 'Hồ sơ thầu phụ, nghiệm thu khối lượng' }
             ]
           },
           {
             department: 'THƯ VIỆN & BÁO GIÁ',
             color: 'border-blue-500/20 text-blue-400 bg-blue-500/5',
             modules: [
-              { code: 'library_office', name: 'Menu Cha: Thư Viện', desc: 'Cơ sở dữ liệu biểu giá định mức dự toán của Hoàng Long Lâm Đồng' },
-              { code: 'quotes_construction', name: '↳ Hồ Sơ Xây Dựng (Thư viện)', desc: 'Thư viện mẫu dự toán xây dựng công trình, thợ thầu thi công thô dẻo dai' },
-              { code: 'quotes', name: '↳ Hồ Sơ Nội Thất (Thư viện)', desc: 'Thư viện báo giá mẫu mộc tủ bếp gỗ công nghiệp, gỗ tự nhiên cao cấp' },
-              { code: 'quotes_mechanical', name: '↳ Hồ Sơ Cơ Khí (Thư viện)', desc: 'Thư viện mẫu báo giá sắt nghệ thuật, hàng rào, cổng ngõ mạ kẽm' },
-              { code: 'quotes_subcontractor', name: '↳ Hồ Sơ Thầu Phụ (Thư viện)', desc: 'Thư viện định mức báo giá chi tiết của các tổ đội thợ liên thông' }
+              { code: 'library_office', name: 'Menu Cha: Thư Viện', desc: 'Thư viện báo giá & định mức dự toán' },
+              { code: 'quotes_construction', name: '↳ Hồ Sơ Xây Dựng', desc: 'Thư viện báo giá mẫu xây dựng' },
+              { code: 'quotes', name: '↳ Hồ Sơ Nội Thất', desc: 'Thư viện báo giá mẫu nội thất' },
+              { code: 'quotes_mechanical', name: '↳ Hồ Sơ Cơ Khí', desc: 'Thư viện báo giá mẫu cơ khí' },
+              { code: 'quotes_subcontractor', name: '↳ Hồ Sơ Thầu Phụ', desc: 'Thư viện báo giá mẫu thầu phụ' }
             ]
           },
           {
-            department: 'QUẢN TRỊ HỆ THỐNG',
+            department: 'CÀI ĐẶT HỆ THỐNG',
             color: 'border-slate-800 text-slate-300 bg-slate-900/40',
             modules: [
-              { code: 'system_office', name: 'Menu Cha: Quản Trị Hệ Thống', desc: 'Công cụ quản trị hệ thống ERP, phân quyền nhóm vai trò' },
-              { code: 'settings_accounts', name: '↳ Tài Khoản Hệ Thống', desc: 'Tạo mới, phân nhóm, thay đổi trạng thái và mật khẩu người dùng' },
-              { code: 'settings_roles', name: '↳ Phân Quyền Và Vai Trò', desc: 'Thiết lập danh mục chức năng phân hệ, phân quyền Xem, Thêm, Sửa, Xóa' },
-              { code: 'settings', name: '↳ Thiết lập & Bản đồ vách mộc', desc: 'Quy chế công tác phí, hệ số lương tăng ca, ngày nghỉ lễ của công ty' }
+              { code: 'system_office', name: 'Menu Cha: Cài Đặt Hệ Thống', desc: 'Quản trị hệ thống ERP & phân quyền' },
+              { code: 'settings_accounts', name: '↳ Tài Khoản Hệ Thống', desc: 'Quản lý tài khoản người dùng' },
+              { code: 'settings_roles', name: '↳ Phân Quyền Và Vai Trò', desc: 'Thiết lập phân quyền & vai trò' },
+              { code: 'settings', name: '↳ Cài Đặt Hệ Thống', desc: 'Cấu hình chung doanh nghiệp' }
             ]
           }
         ];
@@ -571,15 +582,39 @@ export default function RolesTab(props: RolesTabProps) {
                             if (isAdmin) return;
                             const updatedRoles = draftRoles.map(r => {
                               if (r.id === activeRole.id) {
-                                const currentPerms = r.permissions[m.code] || { view: false, create: false, edit: false, delete: false };
-                                const nextPerms = {
-                                  ...r.permissions,
-                                  [m.code]: {
-                                    ...currentPerms,
-                                    [action]: !currentPerms[action]
+                                const newPerms = { ...r.permissions };
+                                const currentPerms = newPerms[m.code] || { view: false, create: false, edit: false, delete: false };
+                                const newVal = !currentPerms[action];
+
+                                // 1. Cập nhật quyền cho module hiện tại
+                                newPerms[m.code] = { ...currentPerms, [action]: newVal };
+
+                                // 2. Auto-select/con: khi tick cha → tick hết tất cả con cùng action
+                                const children = parentChildrenMap[m.code];
+                                if (children) {
+                                  children.forEach(childCode => {
+                                    const childPerms = newPerms[childCode] || { view: false, create: false, edit: false, delete: false };
+                                    newPerms[childCode] = { ...childPerms, [action]: newVal };
+                                  });
+                                }
+
+                                // 3. Auto-uncheck cha: nếu untick 1 quyền ở con → untick quyền đó ở cha (nếu tất cả con đều false)
+                                if (!newVal) {
+                                  const parentCode = Object.keys(parentChildrenMap).find(p => parentChildrenMap[p].includes(m.code));
+                                  if (parentCode) {
+                                    const siblings = parentChildrenMap[parentCode];
+                                    const allFalse = siblings.every(sibCode => {
+                                      const sibPerms = newPerms[sibCode] || { view: false, create: false, edit: false, delete: false };
+                                      return !sibPerms[action];
+                                    });
+                                    if (allFalse) {
+                                      const parentPerms = newPerms[parentCode] || { view: false, create: false, edit: false, delete: false };
+                                      newPerms[parentCode] = { ...parentPerms, [action]: false };
+                                    }
                                   }
-                                };
-                                return { ...r, permissions: nextPerms };
+                                }
+
+                                return { ...r, permissions: newPerms };
                               }
                               return r;
                             });
