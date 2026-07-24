@@ -3610,7 +3610,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <Users className={`w-4 h-4 ${accentTextClass}`} />
                     <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                      👤 Danh Sách Tài Khoản Hệ Thống ({employees.length})
+                      👤 Danh Sách Tài Khoản Hệ Thống ({employees.filter(e => e.username && e.password).length})
                     </h3>
                   </div>
                 </div>
@@ -3628,7 +3628,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {employees.map((emp) => (
+                      {employees.filter(e => e.username && e.password).map((emp) => (
                         <tr key={emp.id} className="border-b border-slate-800/60 hover:bg-slate-850/30 transition-colors">
                           <td className="py-2.5 px-3">
                             <div className="font-bold text-slate-100 flex items-center gap-1.5">
@@ -3701,7 +3701,7 @@ export default function App() {
                                       });
                                       return;
                                     }
-                                    if (employees.length <= 1) {
+                                    if (employees.filter(e => e.username && e.password).length <= 1) {
                                       addToast({
                                         title: 'Không thể thực hiện',
                                         message: 'Hệ thống cần ít nhất một tài khoản hoạt động.',
