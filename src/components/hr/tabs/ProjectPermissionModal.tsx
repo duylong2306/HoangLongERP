@@ -5,14 +5,18 @@
 // Hỗ trợ 2 chế độ: 'modal' (overlay) hoặc 'inline' (trong tab Phân Quyền).
 
 import React from 'react';
-import { X, RotateCcw, Save, Shield, AlertTriangle, CheckCircle2, Eye, Users, FolderOpen, Columns, LayoutGrid, CheckSquare, ListTodo, DollarSign, FileText, Building2, MessageSquare, Paperclip, ArrowDownWideNarrow } from 'lucide-react';
+import { X, RotateCcw, Save, Shield, AlertTriangle, CheckCircle2, Eye, Users, FolderOpen, Columns, LayoutGrid, CheckSquare, ListTodo, DollarSign, FileText, Building2, MessageSquare, Paperclip, ArrowDownWideNarrow, UserCog } from 'lucide-react';
 import {
   ProjectPermissionMatrix,
   ProjectAction,
   ProjectRoleScope,
   VisibilityMode,
   DEFAULT_PROJECT_PERMISSIONS,
+  RoleGroupProjectMatrix,
+  loadRoleGroupProjectMatrix,
+  saveRoleGroupProjectMatrix,
 } from '../hrProjectPermissions';
+import { loadHrmRoleGroups } from '../../../context';
 
 interface ProjectPermissionModalProps {
   isOpen: boolean;
@@ -136,23 +140,6 @@ const actionGroups: {
     ],
   },
   {
-    group: '🏢 THẦU PHỤ',
-    icon: <Building2 className="w-4 h-4" />,
-    actions: [
-      { action: 'viewSubcontractors', label: 'Xem danh sách thầu phụ' },
-      { action: 'addSubcontractor', label: 'Thêm thầu phụ' },
-      { action: 'editSubcontractor', label: 'Sửa thầu phụ' },
-      { action: 'deleteSubcontractor', label: 'Xóa thầu phụ' },
-      { action: 'assignSubcontractorToTask', label: 'Gán thầu phụ vào công việc' },
-      { action: 'subcontractorAcceptance', label: 'Nghiệm thu khối lượng' },
-      { action: 'subcontractorPayment', label: 'Thanh toán / tạm ứng' },
-      { action: 'subcontractorPenalty', label: 'Phiếu phạt thầu phụ' },
-      { action: 'saveSubcontractorContract', label: 'Lưu HĐ giao khoán' },
-      { action: 'approveSubcontractorContract', label: 'Duyệt HĐ giao khoán' },
-      { action: 'manageSubcontractorCatalog', label: 'Quản lý danh mục (sản phẩm/giá)' },
-    ],
-  },
-  {
     group: '🗣️ BÌNH LUẬN & CHAT',
     icon: <MessageSquare className="w-4 h-4" />,
     actions: [
@@ -171,19 +158,16 @@ const actionGroups: {
   },
 ];
 
-// Vai trò (cột của ma trận) — KHÔNG bao gồm 'none'
+// Vai trò (cột của ma trận) — dựa trên vị trí dữ liệu thực tế trong UI
 const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; color: string }> = {
-  director: { label: 'Giám Đốc', desc: 'Quyền cao nhất, luôn full quyền mọi dự án', color: 'text-violet-400 bg-violet-500/10' },
-  pm: { label: 'Trưởng Dự Án', desc: 'Người quản lý & chịu trách nhiệm chính dự án (project.pmId)', color: 'text-emerald-400 bg-emerald-500/10' },
-  assigner: { label: 'Người Giao Việc', desc: 'Người khởi tạo & giao công việc (task.assignerId)', color: 'text-sky-400 bg-sky-500/10' },
-  supervisor: { label: 'Tổ Trưởng', desc: 'Cai thầu / tổ trưởng quản lý thợ', color: 'text-orange-400 bg-orange-500/10' },
-  assignee: { label: 'Phụ Trách CV', desc: 'Phụ Trách Công Việc (task.assigneeId)', color: 'text-amber-400 bg-amber-500/10' },
-  missionAssignee: { label: 'Phụ Trách NV', desc: 'Phụ Trách Nhiệm Vụ (task.missions[].mainAssigneeId)', color: 'text-teal-400 bg-teal-500/10' },
-  involved: { label: 'Người TG', desc: 'Nhân sự hỗ trợ liên quan', color: 'text-cyan-400 bg-cyan-500/10' },
-  accountant: { label: 'Kế Toán', desc: 'Nhân viên kế toán phụ trách thu chi', color: 'text-indigo-400 bg-indigo-500/10' },
-  subcontractor: { label: 'Thầu Phụ', desc: 'Bên ngoài, hạn chế quyền (chỉ xem)', color: 'text-rose-400 bg-rose-500/10' },
-  client: { label: 'Chủ Đầu Tư', desc: 'Khách hàng, chỉ xem', color: 'text-pink-400 bg-pink-500/10' },
-  teamMember: { label: 'Thành Viên', desc: 'Thành viên nhóm chung', color: 'text-slate-400 bg-slate-500/10' },
+  director: { label: 'Giám Đốc', desc: 'Role Group role_admin — luôn full quyền mọi dự án', color: 'text-violet-400 bg-violet-500/10' },
+  pm: { label: 'Trưởng Dự Án', desc: 'project.pmId — người quản lý chính dự án', color: 'text-emerald-400 bg-emerald-500/10' },
+  assigner: { label: 'Người Giao Việc', desc: 'task.assignerId — người khởi tạo & giao việc', color: 'text-sky-400 bg-sky-500/10' },
+  assignee: { label: 'Phụ Trách CV', desc: 'task.assigneeId — phụ trách thực hiện công việc', color: 'text-amber-400 bg-amber-500/10' },
+  missionAssignee: { label: 'Phụ Trách NV', desc: 'mission.mainAssigneeId — phụ trách nhiệm vụ con', color: 'text-teal-400 bg-teal-500/10' },
+  involved: { label: 'Người Liên Quan', desc: 'project/task.involvedEmployeeIds — nhân sự hỗ trợ', color: 'text-cyan-400 bg-cyan-500/10' },
+  accountant: { label: 'Kế Toán', desc: 'Role Group role_accounting — nhân viên kế toán', color: 'text-indigo-400 bg-indigo-500/10' },
+  teamMember: { label: 'Thành Viên', desc: 'mission.memberIds — thành viên nhóm / fallback', color: 'text-slate-400 bg-slate-500/10' },
 };
 
 const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string }[] = [
@@ -195,6 +179,25 @@ const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string }[] = [
 export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange }: ProjectPermissionModalProps) {
   const [internalMatrix, setInternalMatrix] = React.useState<ProjectPermissionMatrix>(DEFAULT_PROJECT_PERMISSIONS);
   const [activeGroup, setActiveGroup] = React.useState<string | null>(null);
+  const [rgTab, setRgTab] = React.useState<'context' | 'roleGroup'>('context');
+
+  // HRM Role Group matrix state
+  const [rgMatrix, setRgMatrix] = React.useState<RoleGroupProjectMatrix>(() => loadRoleGroupProjectMatrix());
+  const hrmRoleGroups = React.useMemo(() => loadHrmRoleGroups(), []);
+
+  const handleToggleRoleGroupAction = (groupId: string, action: ProjectAction) => {
+    setRgMatrix(prev => {
+      const current = prev.roleGroupActions[groupId] || [];
+      const next = current.includes(action)
+        ? current.filter(a => a !== action)
+        : [...current, action];
+      return { ...prev, roleGroupActions: { ...prev.roleGroupActions, [groupId]: next } };
+    });
+  };
+
+  const handleSaveRoleGroup = async () => {
+    await saveRoleGroupProjectMatrix(rgMatrix);
+  };
 
   // Controlled vs uncontrolled: ưu tiên value prop nếu được truyền
   const matrix = value !== undefined ? value : internalMatrix;
@@ -271,6 +274,71 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
 
   const scopeKeys = Object.keys(roleScopeLabels).filter(k => k !== 'none') as ProjectRoleScope[];
 
+  const allActions = actionGroups.flatMap(g => g.actions);
+
+  const roleGroupTable = (
+    <div className="w-full space-y-4 text-slate-200">
+      <div className="bg-slate-950 p-4 rounded-xl border border-slate-850">
+        <div className="flex items-center gap-2">
+          <UserCog className="w-4 h-4 text-amber-400" />
+          <span className="text-[10px] text-amber-300 font-bold">
+            Phân quyền đặc biệt theo Nhóm Vai Trò HRM — Cho phép nhóm vai trò (vd: Nhân viên Kỹ thuật) được làm những hành động nào trong MỌI dự án.
+          </span>
+        </div>
+        <p className="text-[10px] text-slate-400 mt-1.5">
+          Quyền này ngoài quyền theo vị trí (PM, Assigner...). Nếu nhóm vai trò được cấp quyền ở đây → thành viên nhóm đó tự động có quyền trong mọi dự án.
+        </p>
+      </div>
+
+      <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+            <thead>
+              <tr className="bg-slate-900 border-b border-slate-800 text-slate-400">
+                <th className="p-3 font-bold font-sans sticky left-0 bg-slate-900 z-10 min-w-[180px]">Nhóm vai trò HRM</th>
+                {allActions.map(({ action, label }) => (
+                  <th key={action} className="p-2 font-bold font-sans text-center min-w-[100px]" title={label}>
+                    <span className="text-[9px] leading-tight block">{label.length > 12 ? label.substring(0, 12) + '…' : label}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-850">
+              {hrmRoleGroups.map(rg => (
+                <tr key={rg.id} className="hover:bg-slate-900/40 transition-colors">
+                  <td className="p-3 font-bold text-white text-[11px] sticky left-0 bg-slate-950 z-10 border-r border-slate-800">
+                    {rg.name}
+                  </td>
+                  {allActions.map(({ action }) => {
+                    const isChecked = rgMatrix.roleGroupActions[rg.id]?.includes(action) || false;
+                    return (
+                      <td key={action} className="p-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleRoleGroupAction(rg.id, action)}
+                          disabled={rg.id === 'role_admin'}
+                          className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer mx-auto transition-transform hover:scale-110 disabled:opacity-60 disabled:cursor-not-allowed"
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {hrmRoleGroups.length === 0 && (
+                <tr>
+                  <td colSpan={allActions.length + 1} className="p-6 text-center text-slate-500 italic">
+                    Chưa có nhóm vai trò HRM nào. Hãy tạo nhóm vai trò trong tab "Phân Quyền Và Vai Trò".
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
   const table = (
     <div className="w-full space-y-4 text-slate-200">
       {/* Header info */}
@@ -279,7 +347,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           <div className="flex items-center gap-2">
             <Eye className="w-4 h-4 text-emerald-400" />
             <span className="text-[10px] text-emerald-300 font-bold">
-              Ma trận Quyền Dự Án — 12 vai trò dự án × các hành động. Nhấp ô để bật/tắt quyền.
+              Ma trận Quyền Dự Án — 8 vai trò dự án × các hành động. Nhấp ô để bật/tắt quyền.
             </span>
           </div>
           <button
@@ -392,8 +460,44 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
     </div>
   );
 
+  const content = rgTab === 'context' ? table : roleGroupTable;
+
   if (mode === 'inline') {
-    return table;
+    return (
+      <>
+        {/* Tab selector inline */}
+        <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 w-fit mb-4">
+          <button
+            type="button"
+            onClick={() => setRgTab('context')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          >
+            <Shield className="w-3 h-3" /> Theo vị trí trong dự án
+          </button>
+          <button
+            type="button"
+            onClick={() => setRgTab('roleGroup')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          >
+            <UserCog className="w-3 h-3" /> Vai trò nhóm HRM
+          </button>
+        </div>
+
+        {/* Nút lưu riêng cho role group matrix */}
+        {rgTab === 'roleGroup' && (
+          <div className="flex justify-end mb-3">
+            <button
+              type="button"
+              onClick={handleSaveRoleGroup}
+              className="px-4 py-1.5 text-xs bg-amber-600 hover:bg-amber-550 text-white font-extrabold rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Save className="w-3 h-3" /> Lưu quyền nhóm HRM
+            </button>
+          </div>
+        )}
+        {content}
+      </>
+    );
   }
 
   return (
@@ -404,8 +508,25 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             <Shield className="w-6 h-6 text-amber-500" />
             <div>
               <h3 className="font-extrabold text-white text-sm uppercase tracking-wider">CẤU HÌNH QUYỀN DỰ ÁN</h3>
-              <p className="text-[10px] text-slate-400">Ma trận quyền theo 12 vai trò dự án</p>
+              <p className="text-[10px] text-slate-400">Ma trận quyền theo 8 vai trò dự án</p>
             </div>
+          </div>
+          {/* Tab selector trong modal */}
+          <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setRgTab('context')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+            >
+              <Shield className="w-3 h-3" /> Theo vị trí
+            </button>
+            <button
+              type="button"
+              onClick={() => setRgTab('roleGroup')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+            >
+              <UserCog className="w-3 h-3" /> Nhóm HRM
+            </button>
           </div>
           <button
             onClick={onClose}
@@ -416,7 +537,18 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          {table}
+          {rgTab === 'roleGroup' && (
+            <div className="flex justify-end mb-3 gap-2">
+              <button
+                type="button"
+                onClick={handleSaveRoleGroup}
+                className="px-4 py-1.5 text-xs bg-amber-600 hover:bg-amber-550 text-white font-extrabold rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+              >
+                <Save className="w-3 h-3" /> Lưu quyền nhóm HRM
+              </button>
+            </div>
+          )}
+          {content}
         </div>
       </div>
     </div>

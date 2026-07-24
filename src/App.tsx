@@ -1304,7 +1304,7 @@ export default function App() {
   }, []);
 
   // ─── Polling: suppliers, inventory, warehouse_logs, archived_quotes,
-  //     hrm_role_groups, business_profile, shift_config, employees mỗi 30 giây ─
+  //     hrm_role_groups, business_profile, shift_config, employees, task permissions mỗi 30 giây ─
   useEffect(() => {
     const fireEvents = () => {
       try {
@@ -1327,6 +1327,8 @@ export default function App() {
         if (config) setHrmConfig(config);
         const emps = await dbService.employees.list();
         setEmployees(emps);
+        // Đồng bộ quyền công việc từ Supabase về localStorage (non-blocking)
+        import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()).catch(e => console.warn('Sync task permissions failed:', e));
       } catch (e) { console.error('Polling config error:', e); }
     };
 

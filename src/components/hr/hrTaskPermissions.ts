@@ -9,15 +9,17 @@
 
 import { Employee, Project, Task } from '../../types';
 import { isUserInRoleGroup } from '../../context';
+import { dbService } from '../../lib/dbService';
 
 // ─── Role Scope: vai trò của user đối với MỘT task cụ thể ────────────
+// Dựa trên vị trí dữ liệu THỰC TẾ trong UI
 // Tên hiển thị UI (Xem TaskPermissionModal.tsx > roleScopeLabels):
 //   director        → "Giám Đốc"
 //   pm              → "Trưởng Dự Án"
 //   assigner        → "Người Giao Việc"
 //   assignee        → "Phụ Trách Công Việc"
 //   missionAssignee → "Phụ Trách Nhiệm Vụ"
-//   involved        → "Người Tham Gia"
+//   involved        → "Người Liên Quan"
 //   accountant      → "Kế Toán"
 //   none            → "Không Liên Quan"
 export type RoleScope =
@@ -26,7 +28,7 @@ export type RoleScope =
   | 'pm'               // Trưởng Dự Án (project.pmId)
   | 'assignee'         // Phụ Trách Công Việc (task.assigneeId)
   | 'missionAssignee'  // Phụ Trách Nhiệm Vụ (task.missions[].mainAssigneeId)
-  | 'involved'         // Người Tham Gia (task.involvedEmployeeIds)
+  | 'involved'         // Người Liên Quan (task.involvedEmployeeIds)
   | 'accountant'       // Kế Toán (role hệ thống)
   | 'none';            // Không Liên Quan
 
@@ -78,13 +80,13 @@ const STORAGE_KEY = 'hl_task_permissions_v1';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-// Đọc ma trận từ localStorage (hoặc default nếu chưa cấu hình)
+// Đọc ma trận từ localStorage (cache cho Supabase)
+// Supabase là async → load lần đầu từ cloud rồi cache vào localStorage
 export const loadTaskPermissionMatrix = (): TaskPermissionMatrix => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Merge với default để đảm bảo đủ fields
       return {
         actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
       };
@@ -95,14 +97,35 @@ export const loadTaskPermissionMatrix = (): TaskPermissionMatrix => {
   return DEFAULT_TASK_PERMISSIONS;
 };
 
+/** Đồng bộ từ Supabase về localStorage (gọi khi app mount) */
+export const syncTaskPermissionsFromCloud = async (): Promise<void> => {
+  try {
+    const cloud = await dbService.hrmTaskPermissions.get();
+    if (cloud && cloud.actions) {
+      const merged = {
+        actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...cloud.actions },
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+    }
+  } catch (e) {
+    console.warn('Sync task permissions from cloud failed:', e);
+  }
+};
+
+// Lưu lên cả localStorage + Supabase (async, fail-safe)
 export const saveTaskPermissionMatrix = (matrix: TaskPermissionMatrix): void => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(matrix));
-    window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
   } catch (e) {
-    console.error('Lỗi lưu hl_task_permissions_v1:', e);
+    console.error('Lỗi lưu localStorage hl_task_permissions_v1:', e);
   }
+  // Đồng bộ lên Supabase (non-blocking)
+  dbService.hrmTaskPermissions.save(matrix).catch(e =>
+    console.warn('Supabase save task permissions error:', e)
+  );
+  window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
 };
 
 // ─── Role Group IDs (HRM) ─────────────────────────────────────
