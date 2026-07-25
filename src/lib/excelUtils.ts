@@ -8,9 +8,17 @@ export function exportToExcel<T extends Record<string, any>>(
   data: T[],
   sheetName: string,
   fileName: string,
-  headerOrder?: (keyof T)[]
+  headerOrder?: (keyof T)[],
+  headers?: string[]
 ): void {
   if (data.length === 0) {
+    if (headers && headers.length > 0) {
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      XLSX.writeFile(wb, fileName);
+      return;
+    }
     console.warn('exportToExcel: empty data, skipping');
     return;
   }
@@ -196,6 +204,49 @@ export const EXCEL_HEADERS = {
     'Mức ăn trưa (đ)',
     'Mức lưu trú (đ/đêm)',
     'Mức khác (đ)',
+    'Ghi chú',
+  ],
+  inventory: [
+    'Mã Vật Tư',
+    'Tên Nguyên Vật Liệu',
+    'ĐVT',
+    'Số lượng tồn',
+    'Đơn giá đ.mức',
+    'Ngưỡng cảnh báo',
+    'Vị trí lưu kho',
+  ],
+  receipt: [
+    'Mã Phiếu Thu',
+    'Ngày lập sổ',
+    'Công trình',
+    'Chú giải',
+    'Tổng thực thu',
+    'Hình thức',
+    'Người thu',
+  ],
+  payment: [
+    'Mã Phiếu Chi',
+    'Nhóm gốc chi',
+    'Nạn thầu nhận',
+    'Tổng thực chi',
+    'Trạng thái duyệt',
+    'Ghi chú',
+  ],
+  receivable: [
+    'Dự án công trình',
+    'Chủ đầu tư',
+    'Lĩnh vực',
+    'Giá trị HĐ',
+    'Đã Thu',
+    'Còn phải thu',
+    'Ghi chú',
+  ],
+  liability: [
+    'Tên Đơn Vị',
+    'Phân Loại',
+    'Giá Trị',
+    'Đã Trả',
+    'Còn lại',
     'Ghi chú',
   ],
 } as const;

@@ -43,7 +43,7 @@ import ConstructionFinalQuote from './ConstructionFinalQuote';
 import MechanicalArchive from './MechanicalArchive';
 import SubcontractorEstimator from './SubcontractorEstimator';
 import SubcontractorArchive from './SubcontractorArchive';
-import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
 export const HOUSE_ESTIMATE_PRICES = [
   {
@@ -1246,7 +1246,8 @@ export default function QuotationSystem({
         'Giá cao (đ/m²)': p.maxPrice,
         'Đặc điểm kết cấu chính': p.features,
       }));
-      exportToExcel(data, 'DonGiaKhaiToan', `Don_Gia_Khai_Toan_${formatDateForFile()}.xlsx`);
+      exportToExcel(data, 'DonGiaKhaiToan', `Don_Gia_Khai_Toan_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.houseEstimatePrice]);
+      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} báo giá nhà`, type: 'success' });
     } else if (tab === 'composition') {
       const data = materialCompositionNorms.map(n => ({
         'Mã ĐM': n.id,
@@ -1260,7 +1261,8 @@ export default function QuotationSystem({
         'Nước (L)': n.water ?? '',
         'Ghi chú': n.notes ?? '',
       }));
-      exportToExcel(data, 'DinhMucCapPhoi', `Dinh_Muc_Cap_Phoi_Vat_Tu_${formatDateForFile()}.xlsx`);
+      exportToExcel(data, 'DinhMucCapPhoi', `Dinh_Muc_Cap_Phoi_Vat_Tu_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.compositionNorm]);
+      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} định mức cấp phối`, type: 'success' });
     } else {
       const data = materialLaborPrices.map((p, idx) => ({
         'STT': idx + 1,
@@ -1272,7 +1274,8 @@ export default function QuotationSystem({
         'Giá cao (đ)': p.maxPrice,
         'Nguồn / Ghi chú': p.notes ?? '',
       }));
-      exportToExcel(data, 'DonGiaVatTuNhanCong', `Don_Gia_Vat_Tu_Nhan_Cong_${formatDateForFile()}.xlsx`);
+      exportToExcel(data, 'DonGiaVatTuNhanCong', `Don_Gia_Vat_Tu_Nhan_Cong_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.materialLaborNorm]);
+      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} giá vật tư nhân công`, type: 'success' });
     }
   };
 

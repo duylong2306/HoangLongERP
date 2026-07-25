@@ -8,6 +8,7 @@ import {
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
 import * as XLSX from 'xlsx';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
 export default function WarehouseSuppliers() {
   const { addToast } = useNotification();
@@ -233,10 +234,6 @@ export default function WarehouseSuppliers() {
 
   // ===================== BLOCK EXCEL (DANH MỤC NHÀ CUNG CẤP VẬT TƯ) =====================
   const handleExportNccExcel = () => {
-    if (suppliers.length === 0) {
-      addToast({ title: '⚠️ Không có dữ liệu', message: 'Chưa có nhà cung cấp nào để xuất.', type: 'warning' });
-      return;
-    }
     const data = suppliers.map(s => ({
       'Mã NCC': s.id,
       'Tên nhà cung cấp': s.name,
@@ -246,12 +243,7 @@ export default function WarehouseSuppliers() {
       'Loại vật tư': s.field || '',
       'Ghi chú': s.note || '',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'DanhMucNCC');
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    XLSX.writeFile(wb, `DanhMucNCC_${ymd}.xlsx`);
+    exportToExcel(data, 'DanhMucNCC', `DanhMucNCC_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.supplier]);
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} nhà cung cấp`, type: 'success' });
   };
 

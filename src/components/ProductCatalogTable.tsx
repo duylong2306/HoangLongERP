@@ -2,7 +2,7 @@
 import { ProductCatalogItem, ProductPriceItem, ProductMaterialItem } from '../types';
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
-import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import {
   Plus,
   Search,
@@ -882,7 +882,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       'Đơn giá An Cường (đ)': p.donGiaAnCuong != null ? p.donGiaAnCuong.toLocaleString('vi-VN') : '',
       'Đơn giá Plywood (đ)': p.donGiaPlywood != null ? p.donGiaPlywood.toLocaleString('vi-VN') : '',
     }));
-    exportToExcel(data, 'DanhMucSanPham', `Danh_Muc_San_Pham_${formatDateForFile()}.xlsx`);
+    exportToExcel(data, 'DanhMucSanPham', `Danh_Muc_San_Pham_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.productCatalog]);
   };
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {

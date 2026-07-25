@@ -1306,6 +1306,19 @@ export const dbService = {
     }
   },
 
+  // 17. ACCOUNTING CUSTOM RECEIVABLES (Công nợ phải thu thủ công / import Excel)
+  accountingReceivables: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('accounting_receivables', []);
+    },
+    async save(receivable: any): Promise<void> {
+      await saveSupabase('accounting_receivables', receivable);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('accounting_receivables', id);
+    }
+  },
+
   // 18. ACCOUNTING SUB-CONTRACTS (Hợp đồng thầu phụ kế toán)
   accountingSubContracts: {
     async list(): Promise<any[]> {

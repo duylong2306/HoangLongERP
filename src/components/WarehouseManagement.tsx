@@ -1,11 +1,13 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { 
-  Search, Plus, Minus, Edit2, Trash2, Check, X, 
-  AlertTriangle, Layers, MapPin, DollarSign, Activity, FileText 
+import {
+  Search, Plus, Minus, Edit2, Trash2, Check, X,
+  AlertTriangle, Layers, MapPin, DollarSign, Activity, FileText, Download, FileUp
 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { WarehouseLog } from '../types';
 import { useNotification } from '../context';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
+import * as XLSX from 'xlsx';
 
 interface MaterialStock {
   id: string;
@@ -97,11 +99,72 @@ export default function WarehouseManagement() {
     try {
       const invData = await dbService.inventory.list();
       setInventory(invData);
-      
+
       const logData = await dbService.warehouseLogs.list();
       setLogs(logData.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()));
     } catch (e) {
       console.error("Lỗi khi tải dữ liệu kho từ Firebase:", e);
+    }
+  };
+
+  // ── Export / Import Excel ──
+  const handleExportExcel = () => {
+    const data = inventory.map((m) => ({
+      'Mã Vật Tư': m.code,
+      'Tên Nguyên Vật Liệu': m.name,
+      'ĐVT': m.unit,
+      'Số lượng tồn': m.qty,
+      'Đơn giá đ.mức': m.unitPrice || 0,
+      'Ngưỡng cảnh báo': m.minAlert,
+      'Vị trí lưu kho': m.location || '',
+    }));
+    const headers = [...EXCEL_HEADERS.inventory];
+    exportToExcel(data, 'TonKho', `Ton_Kho_${formatDateForFile()}.xlsx`, undefined, headers);
+    addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} vật tư`, type: 'success' });
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const rows = await importFromExcel<Record<string, any>>(file, (row) => row);
+      if (rows.length === 0) {
+        addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dữ liệu.', type: 'warning' });
+        return;
+      }
+      const mapped: MaterialStock[] = rows.map((r, idx) => ({
+        id: String(r['Mã Vật Tư'] || `MT_IMP_${Date.now()}_${idx}`),
+        code: String(r['Mã Vật Tư'] || `VT-${String(idx + 1).padStart(3, '0')}`).toUpperCase().trim(),
+        name: String(r['Tên Nguyên Vật Liệu'] || '').trim(),
+        unit: String(r['ĐVT'] || 'Tấm').trim(),
+        qty: Number(String(r['Số lượng tồn'] || '0').replace(/[^\d.-]/g, '')) || 0,
+        unitPrice: Number(String(r['Đơn giá đ.mức'] || '0').replace(/[^\d.-]/g, '')) || 0,
+        minAlert: Number(String(r['Ngưỡng cảnh báo'] || '10').replace(/[^\d.-]/g, '')) || 10,
+        location: String(r['Vị trí lưu kho'] || '').trim(),
+      })).filter(m => m.name);
+      if (mapped.length === 0) {
+        addToast({ title: '⚠️ Không hợp lệ', message: 'Không tìm thấy cột "Tên Nguyên Vật Liệu" trong file.', type: 'warning' });
+        return;
+      }
+      const merged = [...inventory];
+      mapped.forEach(imp => {
+        const existIdx = merged.findIndex(m => m.code.toLowerCase() === imp.code.toLowerCase());
+        if (existIdx > -1) merged[existIdx] = { ...merged[existIdx], ...imp };
+        else merged.push(imp);
+      });
+      setInventory(merged);
+      try {
+        await Promise.allSettled(
+          mapped.map(m => dbService.inventory.save(m).catch(err => console.error("Lỗi lưu vật tư import:", err)))
+        );
+      } catch (err) {
+        console.error("Lỗi import vật tư hàng loạt:", err);
+      }
+      addToast({ title: '✅ Nhập thành công', message: `Đã import ${mapped.length} vật tư từ file Excel`, type: 'success' });
+    } catch (err) {
+      console.error('Lỗi import Excel:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể đọc file Excel. Vui lòng kiểm tra định dạng.', type: 'error' });
     }
   };
 
@@ -537,6 +600,23 @@ export default function WarehouseManagement() {
             />
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"
+              title="Xuất Excel tồn kho"
+            >
+              <Download className="w-3 h-3 text-blue-400" />
+              Xuất Excel
+            </button>
+            <label
+              className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"
+              title="Nhập Excel tồn kho"
+            >
+              <FileUp className="w-3 h-3 text-emerald-400" />
+              Nhập Excel
+              <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
+            </label>
             <button
               type="button"
               onClick={() => setIsAdding(!isAdding)}

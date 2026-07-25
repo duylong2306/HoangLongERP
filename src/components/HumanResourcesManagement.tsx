@@ -14,6 +14,7 @@ import {
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
 import * as XLSX from 'xlsx';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
@@ -264,11 +265,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Ghi chú': log.notes,
       'Đã chốt': log.isLocked ? 'X' : '',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'BangCong');
     const monthLabel = attendanceFilterMonth === 'all' ? 'tatca' : attendanceFilterMonth.padStart(2, '0');
-    XLSX.writeFile(wb, `BangCong_${monthLabel}_${attendanceFilterYear}.xlsx`);
+    const headers = ['Mã NV', 'Tên nhân viên', 'Ngày', 'Vào Sáng', 'Ra Sáng', 'Vào Chiều', 'Ra Chiều', 'Vào OT', 'Ra OT', 'Giờ OT', 'Phương thức', 'Trạng thái', 'Ghi chú', 'Đã chốt'];
+    exportToExcel(data, 'BangCong', `BangCong_${monthLabel}_${attendanceFilterYear}.xlsx`, undefined, headers);
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} bản ghi`, type: 'success' });
   };
 
@@ -322,10 +321,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const profileFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportProfilesExcel = () => {
-    if (employees.length === 0) {
-      addToast({ title: '⚠️ Không có dữ liệu', message: 'Chưa có hồ sơ nhân sự nào để xuất.', type: 'warning' });
-      return;
-    }
     const data = employees.map(emp => ({
       'Mã NV': emp.id,
       'Họ tên': emp.name,
@@ -351,12 +346,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Số tài khoản': emp.bankAccount,
       'Trạng thái': emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'HoSoNhanSu');
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    XLSX.writeFile(wb, `HoSoNhanSu_${ymd}.xlsx`);
+    const headers = ['Mã NV', 'Họ tên', 'Giới tính', 'Ngày sinh', 'SĐT', 'CCCD', 'Ngày cấp CCCD', 'Nơi cấp CCCD', 'Email', 'Địa chỉ', 'Địa chỉ tạm trú', 'Liên hệ khẩn cấp', 'Bộ phận', 'Chức vụ', 'Loại hợp đồng', 'Thời hạn HĐ (tháng)', 'Ngày vào làm', 'Trình độ', 'Mã ngạch lương', 'Phép năm', 'Ngân hàng', 'Số tài khoản', 'Trạng thái'];
+    exportToExcel(data, 'HoSoNhanSu', `HoSoNhanSu_${formatDateForFile()}.xlsx`, undefined, headers);
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} hồ sơ nhân sự`, type: 'success' });
   };
 

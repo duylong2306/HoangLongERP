@@ -3,6 +3,7 @@ import { dbService } from '../lib/dbService';
 import { Employee, SupplierPartner, ArchivedQuote, Project } from '../types';
 import { useNotification, isUserInRoleGroup } from '../context';
 import * as XLSX from 'xlsx';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import {
   FileText,
   DollarSign,
@@ -315,10 +316,6 @@ export default function SubcontractorManagement({
   const subcontractorFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportSubcontractorExcel = () => {
-    if (suppliers.length === 0) {
-      addToast({ title: '⚠️ Không có dữ liệu', message: 'Chưa có thầu phụ nào để xuất.', type: 'warning' });
-      return;
-    }
     const data = suppliers.map(s => ({
       'Mã thầu phụ': s.id,
       'Tên thầu phụ': s.name,
@@ -337,12 +334,8 @@ export default function SubcontractorManagement({
       'Chuyên môn': s.field || '',
       'Ghi chú': s.note || '',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'DanhSachThauPhu');
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    XLSX.writeFile(wb, `DanhSachThauPhu_${ymd}.xlsx`);
+    exportToExcel(data, 'DanhSachThauPhu', `DanhSachThauPhu_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.subcontractor]);
+    addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} thầu phụ`, type: 'success' });
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} thầu phụ`, type: 'success' });
   };
 
