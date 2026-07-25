@@ -477,12 +477,9 @@ export default function MaterialCoordination({
               <Boxes className="w-5 h-5 animate-pulse" />
             </span>
             <h1 className="text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tight">
-              Điều Phối Cung Ứng Vật Tư & Vân Gỗ
+              Điều Phối Cung Ứng Vật Tư
             </h1>
           </div>
-          <p className="text-xs text-slate-600 font-medium">
-            Phê duyệt liên thông nhu cầu ván dán gỗ công nghiệp, phụ kiện xưởng mộc từ phòng Kế Toán
-          </p>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
           <div className="text-[10.5px] font-mono bg-white border border-slate-200 rounded-lg p-2.5 text-slate-600 flex flex-col items-end">

@@ -204,9 +204,6 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
           <span className="p-1 px-2.5 bg-indigo-500/10 text-indigo-400 rounded-lg border border-indigo-500/20 text-xs">🏗️ CONSTRUCTION ARCHIVE</span>
           Hồ Sơ Lưu Trữ Báo Giá Xây Dựng & Dự Toán
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1 max-w-2xl">
-          Lịch sử lưu vết các hồ sơ khái toán kết cấu móng đơn/băng, cột dầm bê tông cốt thép, trát gạch thầu xây dựng thô & hoàn thiện.
-        </p>
       </div>
 
       <div className="flex gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">

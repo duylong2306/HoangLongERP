@@ -1623,11 +1623,6 @@ export default function QuotationSystem({
                     </button>
                   </div>
                 </div>
-
-                <div className="p-3.5 bg-amber-500/5 border border-amber-500/20 rounded-xl text-left text-xs mb-4">
-                  <span className="font-extrabold text-amber-400 uppercase text-[10px] block mb-1">MÔ HÌNH THẦU BÀN BẾP, KỆ TỦ, GIƯỜNG NGĂN GỖ CÔNG NGHIỆP</span>
-                  Định mức hao mòn ván An Cường, gỗ sồi sấy dẻo dai bám dính Acrylic không đường line dính. Tính toán phụ kiện mâm xoay Blum Hafele.
-                </div>
                 
                 <CabinetEstimator 
                   customers={customers}
@@ -1828,11 +1823,6 @@ export default function QuotationSystem({
                         Lập mới
                       </button>
                     </div>
-                  </div>
-
-                  <div className="p-3.5 bg-blue-500/5 border border-blue-500/20 rounded-xl text-left text-xs mb-4">
-                    <span className="font-extrabold text-blue-400 uppercase text-[10px] block mb-1">MÔ HÌNH QUẢN LÝ THẦU PHỤ NHÂN CÔNG & VẬT TƯ</span>
-                    Định mức khối lượng nhân công thầu phụ, nhà cung cấp phụ trợ. Kiểm soát dự toán chi phí thực tế và tiến độ nghiệm thu thầu phụ.
                   </div>
 
                   <SubcontractorEstimator 
@@ -2368,10 +2358,6 @@ export default function QuotationSystem({
 
                 {quotesFolderTab === 'estimator' ? (
                   <>
-                    <div className="p-3.5 bg-indigo-500/5 border border-indigo-500/20 rounded-xl text-left text-xs mb-1">
-                      <span className="font-extrabold text-indigo-400 uppercase text-[10px] block mb-1">DỰ TOÁN KHUNG KẾT CẤU BÊ TÔNG, MÓNG ĐÚC, TRẠT GẠCH CHỈ</span>
-                      Lập mốc xi măng bao, cát san lấp vĩ độ dốc chịu tải. Đồng bộ biên bản bàn giao và mác ép thợ móng biệt thự.
-                    </div>
 
                     <ConstructionEstimator 
                       customers={customers}
@@ -3007,11 +2993,6 @@ export default function QuotationSystem({
                       Lập mới
                     </button>
                   </div>
-                </div>
-
-                <div className="p-3.5 bg-pink-500/5 border border-pink-500/20 rounded-xl text-left text-xs mb-4">
-                  <span className="font-extrabold text-pink-400 uppercase text-[10px] block mb-1">BÓC TÁCH KHỐI LƯỢNG QUE HÀN, THÉP HÌNH SS400, SƠN TĨNH ĐIỆN CNC</span>
-                  Ưu thế tính phôi sắt tôn, khối lượng nặng theo kg sắt hoặc theo bệ đo dử sắt. Chắn tia cực tím mắt thợ xưởng Bảo Lộc.
                 </div>
 
                 <MechanicalEstimator 

@@ -56,7 +56,7 @@ const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   logoText: 'HL',
   brandName: 'Hoàng Long',
   brandSlogan: 'Lâm Đồng ERP',
-  dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
+  dashboardTitle: 'Tổng Quan',
   motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
   fontFamily: 'Inter',
 };

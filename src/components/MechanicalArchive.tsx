@@ -206,9 +206,6 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
           <span className="p-1 px-2.5 bg-pink-500/10 text-pink-400 rounded-lg border border-pink-500/20 text-xs">⚙️ MECHANICAL ARCHIVE</span>
           Hồ Sơ Lưu Trữ Báo Giá Cơ Khí Hàn
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1 max-w-2xl">
-          Lịch sử lưu vết các báo giá kết cấu thép hình SS400, bóc tách khối lượng que hàn, sơn tĩnh điện, gia công bản mã thầu CNC.
-        </p>
       </div>
 
       <div className="flex gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">

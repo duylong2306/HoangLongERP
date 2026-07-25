@@ -660,10 +660,10 @@ export default function TaskManagement({
         <div>
           <h2 className="text-base font-extrabold flex items-center gap-2">
             <CheckSquare className={`w-5 h-5 ${accentTextClass}`} />
-            Bảng Điều Hành Công Việc & Giám Sát Kỹ Thuật (Phê Duyệt Nhiều Cấp)
+            Bảng Điều Hành Công Việc
           </h2>
           <p className="text-[11px] text-slate-400 font-medium">
-            Giám sát kỹ thuật xây dựng công trình, sản xuất mộc mạc xưởng, dán chỉ cạnh tự do găm người và chấm công giờ thực địa.
+            Nhận việc được giao, xét duyệt theo yêu cầu.
           </p>
         </div>
       </div>

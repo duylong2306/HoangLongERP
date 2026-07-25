@@ -316,9 +316,6 @@ export default function WarehouseSuppliers() {
             <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
             Danh Mục Nhà Cung Cấp Vật Tư (KHO)
           </h2>
-          <p className="text-[10.5px] text-slate-400 mt-1">
-            Hệ thống quản lý thông tin các nhà cung cấp gỗ ván, sắt thép dầm móng và công nợ liên kết điều phối.
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <button

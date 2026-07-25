@@ -207,9 +207,6 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
           <span className="p-1 px-2.5 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20 text-xs">🚪 CABINET ARCHIVE</span>
           Hồ Sơ Lưu Trữ Báo Giá Nội Thất Gỗ
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1 max-w-2xl">
-          Lịch sử lưu vết các báo giá tủ kệ bếp, nội thất gỗ công nghiệp chất liệu ván phủ Acrylic, Melamine An Cường thầu trọn gói.
-        </p>
       </div>
 
       <div className="flex gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">

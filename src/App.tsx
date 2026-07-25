@@ -2923,22 +2923,22 @@ export default function App() {
             <span className="text-sm md:text-base font-extrabold text-slate-100 tracking-tight font-sans truncate max-w-[150px] sm:max-w-xs md:max-w-none">
               {activeTab === 'dashboard' && displaySettings.dashboardTitle}
               {activeTab === 'projects' && 'Quản Lý Mốc Thi Công'}
-              {activeTab === 'projects-construction' && 'Phân Hệ Dự Án XÂY DỰNG'}
-              {activeTab === 'projects-furniture' && 'Phân Hệ Dự Án NỘI THẤT'}
-              {activeTab === 'projects-mechanical' && 'Phân Hệ Dự Án CƠ KHÍ & GIA CÔNG'}
-              {activeTab === 'tasks' && 'Điều Phối Việc Công Trường / Xưởng'}
+              {activeTab === 'projects-construction' && 'Dự Án Xây Dựng'}
+              {activeTab === 'projects-furniture' && 'Dự Án Nội Thất'}
+              {activeTab === 'projects-mechanical' && 'Dự Án Cơ Khí'}
+              {activeTab === 'tasks' && 'Việc Của Tôi'}
               {activeTab === 'quotes-construction' && 'Hồ Sơ Xây Dựng'}
               {activeTab === 'quotes' && 'Hồ Sơ Nội Thất'}
               {activeTab === 'quotes-mechanical' && 'Hồ Sơ Cơ Khí'}
               {activeTab === 'quotes-subcontractor' && 'Hồ Sơ Thầu Phụ'}
               {activeTab === 'subcontractor-management' && 'Quản Lý Thầu Phụ'}
-              {activeTab === 'finance' && 'Kế Toán Tổng Hợp & Sổ Sách'}
-              {activeTab === 'material-coordination' && 'Phân Hệ Điều Phối Vật Tư'}
+              {activeTab === 'finance' && 'Kế Toán - Tài Chính'}
+              {activeTab === 'material-coordination' && 'Quản Lý Vật Tư'}
               {activeTab === 'warehouse-suppliers' && 'Danh Mục Nhà Cung Cấp Vật Tư'}
-              {activeTab === 'warehouse-management' && 'Phân Hệ Quản Lý Tồn Kho & Sổ Kho'}
-              {activeTab === 'employees' && (hrSubTab === 'hr_data' ? 'Dữ Liệu Nhân Sự' : 'Danh Bạ Nhân Sự Nội Bộ')}
-              {activeTab === 'settings' && '⚙️ Trung Tâm Thiết Lập Hệ Thống & Tùy Biến'}
-              {activeTab === 'messages' && '💬 Tin Nhắn & Thông Báo Công Việc (Messenger)'}
+              {activeTab === 'warehouse-management' && 'Quản Lý Tồn Kho & Sổ Kho'}
+              {activeTab === 'employees' && (hrSubTab === 'hr_data' ? 'Dữ Liệu Nhân Sự' : 'Danh Sách Nhân Sự')}
+              {activeTab === 'settings' && '⚙️ Cấu Hình Hệ Thống'}
+              {activeTab === 'messages' && '💬 Tin Nhắn'}
               {activeTab.startsWith('director-') && '🛡️ PHÒNG GIÁM ĐỐC - BẢNG ĐIỀU HÀNH TỔNG HỢP'}
             </span>
           </div>
@@ -3591,7 +3591,7 @@ export default function App() {
                 <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-3">
                   <Lock className={`w-4 h-4 ${accentTextClass}`} />
                   <h3 className="text-sm font-black text-white uppercase tracking-wider font-mono">
-                    🔐 Phân quyền và Vai trò người dùng (MISA-Inspired)
+                    🔐 Phân quyền và Vai trò người dùng
                   </h3>
                 </div>
                 <p className="text-[11px] text-slate-400 mb-4 leading-relaxed">

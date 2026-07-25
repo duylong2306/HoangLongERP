@@ -306,6 +306,9 @@ export const dbService = {
     },
     async save(coef: any): Promise<void> {
       await saveSupabase('hrm_leave_coefficients', coef);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('hrm_leave_coefficients', id);
     }
   },
 
@@ -439,6 +442,9 @@ export const dbService = {
     },
     async save(scale: any): Promise<void> {
       await saveSupabase('hrm_salary_scales', scale);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('hrm_salary_scales', id);
     }
   },
 

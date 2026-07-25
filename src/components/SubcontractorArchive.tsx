@@ -144,9 +144,6 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
           <span className="p-1 px-2.5 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20 text-xs">📝 CONTRACT ARCHIVE</span>
           Hồ Sơ Lưu Trữ Hợp Đồng Thầu Phụ
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1 max-w-2xl">
-          Lịch sử lưu vết các hợp đồng thầu phụ thi công xây dựng, cơ khí lắp đặt và tổ thợ khoán liên kết dự án Hoàng Long.
-        </p>
       </div>
 
       <div className="flex gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">

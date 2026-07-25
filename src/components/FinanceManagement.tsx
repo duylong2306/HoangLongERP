@@ -2465,7 +2465,7 @@ export default function FinanceManagement({
                 <div className="space-y-4">
                   <div className="flex justify-between items-center border-b border-slate-850 pb-2">
                     <span className="font-bold text-slate-300 uppercase tracking-wide text-[11px]">
-                      Sổ Danh sách khách hàng mộc thợ ({filteredCustomers.length})
+                      Sổ khách hàng ({filteredCustomers.length})
                     </span>
 
                     <div className="flex gap-2">
