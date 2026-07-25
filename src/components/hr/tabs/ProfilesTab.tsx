@@ -48,7 +48,7 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
               >
                 <option value="">— Không phân quyền —</option>
                 {availableRoles.map(role => (
-                  <option key={role.id} value={role.id}>{role.id} - {role.name}</option>
+                  <option key={role.id} value={role.id}>{role.name}</option>
                 ))}
               </select>
             </div>

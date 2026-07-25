@@ -3745,6 +3745,73 @@ export default function FinanceManagement({
                       <Download className="w-3 h-3 text-blue-400" />
                       Xuất Excel
                     </button>
+                    <label
+                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
+                      title="Nhập Excel phiếu thu"
+                    >
+                      <FileUp className="w-3 h-3 text-emerald-400" />
+                      Nhập Excel
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          if (!canCreate) {
+                            addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền NHẬP phiếu thu.', type: 'error' });
+                            return;
+                          }
+                          try {
+                            addToast({ title: '⏳ Đang xử lý...', message: 'Đang đọc file Excel...', type: 'info' });
+                            const rows = await importFromExcel(file, (row, idx) => {
+                              const code = String(row['Mã Phiếu Thu'] || row['Code'] || '').trim();
+                              const date = String(row['Ngày lập sổ'] || row['Date'] || '').trim();
+                              const customerName = String(row['Chủ đầu tư chi trả'] || row['Customer'] || '').trim();
+                              const projectName = String(row['Công trình thầu liên kế'] || row['Project'] || '').trim();
+                              const notes = String(row['Giải nghĩa chi tiết phiếu thu'] || row['Notes'] || row['Chú giải'] || '').trim();
+                              const amount = Number(String(row['Tổng thực thu'] || row['Amount'] || '0').replace(/[^\d.-]/g, '')) || 0;
+                              const paymentMethod = String(row['Hình thức thanh toán thầu'] || row['Payment Method'] || 'cash').trim().toLowerCase();
+                              const collector = String(row['Người thu'] || row['Collector'] || currentUser?.name || '').trim();
+                              const customerId = customers.find(c => c.name === customerName)?.id || `customer_${Date.now()}_${idx}`;
+                              const projectId = projects.find(p => p.name === projectName)?.id || (projectName && projectName !== 'Văn phòng' ? `project_${Date.now()}_${idx}` : undefined);
+
+                              return {
+                                id: `rec_import_${Date.now()}_${idx}`,
+                                code,
+                                date,
+                                customerId,
+                                projectId,
+                                amount,
+                                paymentMethod: paymentMethod === 'chuyển khoản' || paymentMethod === 'transfer' || paymentMethod === 'bank' ? 'transfer' : 'cash',
+                                notes,
+                                collector,
+                                attachmentName: '',
+                              } as Receipt;
+                            });
+                            const validRows = rows.filter(r => r.code && r.date && r.customerId && r.amount > 0);
+                            if (validRows.length === 0) {
+                              addToast({ title: '⚠️ Không hợp lệ', message: 'Không tìm thấy cột mã, ngày, khách hàng hoặc số tiền hợp lệ. Dữ liệu bị bỏ qua.', type: 'warning' });
+                              return;
+                            }
+                            // Kiểm tra và tạo khách hàng thiếu
+                            const missingCustomers = validRows.filter(r => !customers.find(c => c.id === r.customerId));
+                            if (missingCustomers.length > 0) {
+                              // Map lại customerId nếu找不到对应的客户
+                              validRows.forEach(row => {
+                                const matched = customers.find(c => c.name === (row.customerId.includes('customer_') ? `Khách hàng ${row.customerId.split('_').pop()}` : row.customerId));
+                                if (matched) row.customerId = matched.id;
+                              });
+                            }
+                            validRows.forEach(r => onAddReceipt(r));
+                            addToast({ title: '✅ Nhập thành công', message: `Đã import ${validRows.length} phiếu thu từ Excel`, type: 'success' });
+                          } catch (err) {
+                            addToast({ title: '❌ Lỗi', message: 'Không thể đọc hoặc xử lý file Excel.', type: 'error' });
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       onClick={() => {
@@ -3948,6 +4015,71 @@ export default function FinanceManagement({
                       <Download className="w-3 h-3 text-blue-400" />
                       Xuất Excel
                     </button>
+                    <label
+                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
+                      title="Nhập Excel phiếu chi"
+                    >
+                      <FileUp className="w-3 h-3 text-emerald-400" />
+                      Nhập Excel
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          if (!canCreate) {
+                            addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền NHẬP phiếu chi.', type: 'error' });
+                            return;
+                          }
+                          try {
+                            addToast({ title: '⏳ Đang xử lý...', message: 'Đang đọc file Excel...', type: 'info' });
+                            const rows = await importFromExcel(file, (row, idx) => {
+                              const code = String(row['Mã Phiếu Chi'] || row['Code'] || '').trim();
+                              const category = String(row['Nhóm gốc chi'] || row['Category'] || 'other').trim();
+                              const recipient = String(row['Nạn thầu nhận'] || row['Người nhận tiền'] || row['Recipient'] || '').trim();
+                              const amount = Number(String(row['Tổng thực chi'] || row['Số tiền'] || row['Amount'] || '0').replace(/[^\d.-]/g, '')) || 0;
+                              const status = String(row['Trạng thái duyệt'] || row['Status'] || 'pending').trim();
+                              const notes = String(row['Ghi chú'] || row['Notes'] || '').trim();
+                              const paymentMethod = String(row['Hình thức thanh toán'] || row['Payment Method'] || 'transfer').trim().toLowerCase();
+                              const projectName = String(row['Dự án'] || row['Project'] || '').trim();
+                              const projectId = projects.find(p => p.name === projectName)?.id || (projectName ? `project_${Date.now()}_${idx}` : undefined);
+
+                              // Map Vietnamese status to English
+                              let mappedStatus: 'pending' | 'approved' | 'rejected' = 'pending';
+                              if (status === 'Đã duyệt' || status === 'approved') mappedStatus = 'approved';
+                              else if (status === 'Từ chối' || status === 'rejected') mappedStatus = 'rejected';
+
+                              return {
+                                id: `pay_import_${Date.now()}_${idx}`,
+                                code,
+                                date: row['Ngày lập sổ'] ? String(row['Ngày lập sổ']).trim() : new Date().toISOString().split('T')[0],
+                                recipient,
+                                projectId,
+                                category,
+                                amount,
+                                paymentMethod: paymentMethod === 'tiền mặt' || paymentMethod === 'cash' ? 'cash' : 'transfer',
+                                notes,
+                                proposer: currentUser?.name || '',
+                                approver: 'Trương Hữu Long (Giám đốc)',
+                                status: mappedStatus,
+                                attachmentName: '',
+                              } as Payment;
+                            });
+                            const validRows = rows.filter(r => r.code && r.recipient && r.amount > 0);
+                            if (validRows.length === 0) {
+                              addToast({ title: '⚠️ Không hợp lệ', message: 'Không tìm thấy cột mã, người nhận tiền hoặc số tiền hợp lệ. Dữ liệu bị bỏ qua.', type: 'warning' });
+                              return;
+                            }
+                            validRows.forEach(r => onAddPayment(r));
+                            addToast({ title: '✅ Nhập thành công', message: `Đã import ${validRows.length} phiếu chi từ Excel`, type: 'success' });
+                          } catch (err) {
+                            addToast({ title: '❌ Lỗi', message: 'Không thể đọc hoặc xử lý file Excel.', type: 'error' });
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       onClick={() => {
