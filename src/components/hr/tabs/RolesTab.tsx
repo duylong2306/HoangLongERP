@@ -5,8 +5,8 @@ import ProjectPermissionModal from './ProjectPermissionModal';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { loadApprovalConfig, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission } from '../../../context';
-import { loadProjectPermissions, saveProjectPermissions } from '../hrProjectPermissions';
+import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission } from '../../../context';
+import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { dbService } from '../../../lib/dbService';
 
 export interface RolesTabProps {
@@ -89,6 +89,24 @@ export default function RolesTab(props: RolesTabProps) {
   React.useEffect(() => {
     setDraftRoles([...roles]);
   }, [roles]);
+
+  // Sync Quyền Phê Duyệt từ Supabase khi mount (localStorage có thể trống trên browser mới)
+  React.useEffect(() => {
+    syncApprovalConfigFromDb().then((dbConfigs) => {
+      if (dbConfigs.length > 0) {
+        setDraftApprovalConfig(dbConfigs);
+        setSavedApprovalConfig(JSON.parse(JSON.stringify(dbConfigs)));
+      }
+    });
+  }, []);
+
+  // Sync Quyền Dự Án từ Supabase khi mount
+  React.useEffect(() => {
+    syncProjectPermissionsFromDb().then((cloudMatrix) => {
+      setDraftMatrix(cloudMatrix);
+      setSavedMatrix(JSON.parse(JSON.stringify(cloudMatrix)));
+    });
+  }, []);
 
   // Cờ hiển thị chưa lưu (để hiện badge)
   const groupChanged = React.useMemo(() => JSON.stringify(draftRoles) !== JSON.stringify(roles), [draftRoles, roles]);

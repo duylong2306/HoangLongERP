@@ -378,6 +378,23 @@ export function loadApprovalConfig(): ApprovalPermission[] {
   return [];
 }
 
+/**
+ * Đồng bộ cấu hình Quyền Phê Duyệt từ Supabase → localStorage.
+ * Gọi khi component mount để đảm bảo dữ liệu mới nhất từ DB.
+ */
+export async function syncApprovalConfigFromDb(): Promise<ApprovalPermission[]> {
+  try {
+    const dbConfigs = await dbService.hrmApprovalConfig.list();
+    if (dbConfigs && dbConfigs.length > 0) {
+      localStorage.setItem('hl_hrm_approval_config', JSON.stringify(dbConfigs));
+      return dbConfigs as ApprovalPermission[];
+    }
+  } catch (e) {
+    console.error('Supabase hrmApprovalConfig sync error:', e);
+  }
+  return loadApprovalConfig();
+}
+
 // ─── Snapshot lưu làm mặc định cho 3 tab phân quyền ──────────────────────
 const DEFAULT_SNAPSHOT_KEYS: Record<string, string> = {
   group: 'hl_hrm_roles_default_v1',

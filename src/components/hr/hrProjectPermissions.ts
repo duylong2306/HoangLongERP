@@ -321,6 +321,29 @@ export const loadProjectPermissions = (): ProjectPermissionMatrix => {
   return DEFAULT_PROJECT_PERMISSIONS;
 };
 
+/**
+ * Đồng bộ ma trận quyền dự án từ Supabase → localStorage.
+ * Gọi khi component mount để đảm bảo dữ liệu mới nhất từ DB.
+ */
+export const syncProjectPermissionsFromDb = async (): Promise<ProjectPermissionMatrix> => {
+  try {
+    const cloudMatrix = await dbService.projectPermissions.get();
+    if (cloudMatrix) {
+      const merged: ProjectPermissionMatrix = {
+        ...DEFAULT_PROJECT_PERMISSIONS,
+        ...cloudMatrix,
+        actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, ...(cloudMatrix.actions || {}) },
+        visibility: { ...DEFAULT_PROJECT_PERMISSIONS.visibility, ...(cloudMatrix.visibility || {}) },
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      return merged;
+    }
+  } catch (e) {
+    console.warn('Supabase projectPermissions sync error:', e);
+  }
+  return loadProjectPermissions();
+};
+
 /** Lưu ma trận lên localStorage + Firestore + Supabase (qua dbService). Async, fail-safe. */
 export const saveProjectPermissions = async (matrix: ProjectPermissionMatrix): Promise<void> => {
   const finalMatrix: ProjectPermissionMatrix = {
