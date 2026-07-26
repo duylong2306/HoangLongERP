@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Check, CheckSquare, Trash2, RotateCcw, UserPlus, Users, X } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
-import { SalaryScale, Employee } from '../../../types';
+import { SalaryScale } from '../../../types';
 import { dbService } from '../../../lib/dbService';
 import { hashPasswordSync } from '../../../lib/passwordUtils';
 
@@ -223,27 +223,27 @@ export default function ProfilesTab({
     }
 
     const username = generateUsernameFromProfile(emp.name, emp.phone);
-    const newId = `emp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-
-    const newAccount: Employee = {
-      id: newId,
-      name: emp.name,
-      role: 'engineer',
-      roleGroupIds: roleGroupId ? [roleGroupId] : [],
-      email: `${username}@hoanglonglamdong.vn`,
-      phone: emp.phone || '09xxxxxxxx',
-      department: emp.department || 'Phòng Ban Liên Quan',
-      username: username,
-      password: hashPasswordSync('123')
-    };
 
     try {
-      // Save to cloud via dbService (cloud is source of truth — no localStorage for employees)
-      try {
-        await dbService.employees.save(newAccount);
-      } catch (cloudErr) {
-        console.warn('Lưu lên cloud thất bại:', cloudErr);
-      }
+      // UPDATE the existing profile row in-place: add username, password, role fields.
+      // Do NOT create a new Employee with a different ID — that would duplicate the row.
+      const updatedProfile = {
+        ...emp,
+        username,
+        password: hashPasswordSync('123'),
+        role: 'engineer',
+        roleGroupIds: roleGroupId ? [roleGroupId] : ([] as string[]),
+        email: `${username}@hoanglonglamdong.vn`,
+        hasSystemAccount: true,
+      };
+
+      // Save to Supabase (same ID — upsert, no duplicate)
+      await dbService.employees.save(updatedProfile);
+
+      // Update local HR state
+      setEmployees(prev => prev.map(e =>
+        e.id === emp.id ? updatedProfile : e
+      ));
 
       // If roleGroupId provided, add employee to the role group
       if (roleGroupId) {
@@ -263,7 +263,7 @@ export default function ProfilesTab({
           const targetRole = rolesList.find((r: any) => r.id === roleGroupId);
           if (targetRole) {
             if (!targetRole.memberIds) targetRole.memberIds = [];
-            targetRole.memberIds.push(newId);
+            targetRole.memberIds.push(emp.id);
             const updated = JSON.stringify(rolesList);
             localStorage.setItem('hl_cached_hrm_role_groups', updated);
             localStorage.setItem('hl_hrm_roles_v2', updated);
@@ -287,58 +287,7 @@ export default function ProfilesTab({
         type: 'success'
       });
 
-      // Also update HR employee list (hl_hrm_employees_v3) so the UI reflects the new account
-      // Find if this employee already exists in HR store; if not, add a marker so it's visible
-      const existingHR = employees.find(e => e.id === emp.id);
-      if (existingHR) {
-        // Employee exists in HR - we can add a flag or note that they now have a system account
-        // The HR profile already exists, just the auth account was created
-        setEmployees(prev => prev.map(e =>
-          e.id === emp.id ? { ...e, hasSystemAccount: true } : e
-        ));
-      } else {
-        // Employee doesn't exist in HR yet - add a basic profile entry so they appear in the list
-        const newHRProfile: EmployeeProfile = {
-          id: newAccount.id,
-          name: emp.name,
-          gender: emp.gender,
-          dob: emp.dob,
-          phone: emp.phone,
-          email: emp.email,
-          cccd: emp.cccd,
-          cccdIssuedDate: emp.cccdIssuedDate,
-          cccdIssuedPlace: emp.cccdIssuedPlace,
-          address: emp.address,
-          currentAddress: emp.currentAddress,
-          emergencyContact: emp.emergencyContact,
-          department: emp.department,
-          position: emp.position,
-          startDate: emp.startDate,
-          contractType: emp.contractType,
-          contractDurationMonths: emp.contractDurationMonths,
-          status: emp.status,
-          phepNam: emp.phepNam,
-          bankAccount: emp.bankAccount,
-          bankName: emp.bankName,
-          docsCount: 0,
-          education: emp.education,
-          salaryCode: emp.salaryCode,
-          bhxhBookNo: emp.bhxhBookNo,
-          bhxhSalary: emp.bhxhSalary,
-          bhxhRate: emp.bhxhRate,
-          taxPersonalRelief: emp.taxPersonalRelief,
-          dependentCount: emp.dependentCount,
-          bhxhDate: emp.bhxhDate,
-          hasSystemAccount: true
-        };
-        setEmployees(prev => [...prev, newHRProfile]);
-        const updatedEmps = [...employees, newHRProfile];
-        localStorage.setItem('hl_hrm_employees_v3', JSON.stringify(updatedEmps));
-        dbService.employees.save(newHRProfile).catch(err =>
-          console.warn('Lỗi khi lưu nhân viên mới lên Supabase:', err));
-      }
-
-      return newAccount;
+      return updatedProfile;
     } catch (error) {
       console.error('Lỗi tạo tài khoản:', error);
       addToast({

@@ -1205,18 +1205,19 @@ export default function ProjectKanbanBoard({
   };
 
   // saveColumnSettings() → Lưu cài đặt cột đang edit (dùng các reducer từ kanbanLogic)
-  const saveColumnSettings = () => {
-    if (!editingColumnId || !editColName.trim()) return;
+  // Nhận giá trị trực tiếp từ modal để tránh race condition với React setState
+  const saveColumnSettings = (edits: { name: string; color: string; ruleType: string; ruleParam: string }) => {
+    if (!editingColumnId || !edits.name.trim()) return;
 
     const updated = columns.map(c => {
       if (c.id === editingColumnId) {
         return {
           ...c,
-          name: editColName.toUpperCase(),
-          color: editColColor,
+          name: edits.name.toUpperCase(),
+          color: edits.color,
           automation: {
-            type: editColRuleType as any,
-            param: editColRuleType === 'auto_progress' ? Number(editColRuleParam) : editColRuleParam
+            type: edits.ruleType as any,
+            param: edits.ruleType === 'auto_progress' ? Number(edits.ruleParam) : edits.ruleParam
           }
         };
       }
@@ -2360,11 +2361,7 @@ export default function ProjectKanbanBoard({
         <ColumnSettingsModal
           column={columns.find(c => c.id === editingColumnId)!}
           onSave={(edits) => {
-            setEditColName(edits.name);
-            setEditColColor(edits.color);
-            setEditColRuleType(edits.ruleType);
-            setEditColRuleParam(edits.ruleParam);
-            saveColumnSettings();
+            saveColumnSettings(edits);
           }}
           onDelete={(id) => deleteColumn(id)}
           onClose={() => setEditingColumnId(null)}

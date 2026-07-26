@@ -537,7 +537,7 @@ export default function MessagesView({
   }, [activePaneTab, allConversations, personalConversations, groupConversations, searchQuery]);
 
   const contactEmployees = useMemo(() => {
-    const filtered = employees.filter(e => e.id !== currentUser.id);
+    const filtered = employees.filter(e => e.id !== currentUser.id && e.hasSystemAccount);
     if (!searchQuery.trim()) return filtered;
     const q = searchQuery.toLowerCase();
     return filtered.filter(e => e.name.toLowerCase().includes(q) || (e.department && e.department.toLowerCase().includes(q)));
@@ -1394,7 +1394,7 @@ export default function MessagesView({
             <div className="mb-4">
               <label className="text-[11px] font-semibold text-slate-400 block mb-1">Thêm thành viên</label>
               <div className="max-h-[200px] overflow-y-auto space-y-1 border border-slate-700 rounded-lg p-2">
-                {employees.filter(e => e.id !== currentUser.id && !newGroupMembers.includes(e.id)).map(emp => (
+                {employees.filter(e => e.id !== currentUser.id && e.hasSystemAccount && !newGroupMembers.includes(e.id)).map(emp => (
                   <div key={emp.id} onClick={() => setNewGroupMembers(prev => [...prev, emp.id])}
                     className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors">
                     <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[9px] font-bold text-indigo-400 shrink-0">
@@ -1454,7 +1454,7 @@ export default function MessagesView({
             <div className="mb-4">
               <label className="text-[11px] font-semibold text-slate-400 block mb-1">Chọn nhân viên</label>
               <div className="max-h-[300px] overflow-y-auto space-y-1 border border-slate-700 rounded-lg p-2">
-                {employees.filter(e => e.id !== currentUser.id && !getUniqueParticipantIds(selectedConv).includes(e.id)).map(emp => (
+                {employees.filter(e => e.id !== currentUser.id && e.hasSystemAccount && !getUniqueParticipantIds(selectedConv).includes(e.id)).map(emp => (
                   <div key={emp.id} onClick={async () => {
                     const updated = await addMemberToConversation(selectedConv.id, emp.id);
                     if (updated) {

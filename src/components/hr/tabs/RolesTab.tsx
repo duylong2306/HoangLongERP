@@ -81,7 +81,9 @@ export default function RolesTab(props: RolesTabProps) {
   // ─── Draft states cho cơ chế Manual Save (Mỗi tab ≠ nhau) ──────────────
   const [draftRoles, setDraftRoles] = React.useState(() => [...roles]);
   const [draftMatrix, setDraftMatrix] = React.useState(() => loadProjectPermissions());
+  const [savedMatrix, setSavedMatrix] = React.useState(() => loadProjectPermissions());
   const [draftApprovalConfig, setDraftApprovalConfig] = React.useState<ApprovalPermission[]>(() => loadApprovalConfig());
+  const [savedApprovalConfig, setSavedApprovalConfig] = React.useState<ApprovalPermission[]>(() => loadApprovalConfig());
 
   // Đồng bộ draftRoles khi roles thay đổi từ parent (thêm/xóa ở modal ngoài)
   React.useEffect(() => {
@@ -90,8 +92,8 @@ export default function RolesTab(props: RolesTabProps) {
 
   // Cờ hiển thị chưa lưu (để hiện badge)
   const groupChanged = React.useMemo(() => JSON.stringify(draftRoles) !== JSON.stringify(roles), [draftRoles, roles]);
-  const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(loadProjectPermissions()), [draftMatrix]);
-  const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(loadApprovalConfig()), [draftApprovalConfig]);
+  const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(savedMatrix), [draftMatrix, savedMatrix]);
+  const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
 
   // Save handlers
   const { addToast } = useNotification();
@@ -131,6 +133,7 @@ export default function RolesTab(props: RolesTabProps) {
   const handleSaveProject = React.useCallback(async () => {
     try {
       await saveProjectPermissions(draftMatrix);
+      setSavedMatrix(JSON.parse(JSON.stringify(draftMatrix)));
       addToast({ title: '✅ Thành công', message: 'Quyền dự án đã được lưu.', type: 'success' });
     } catch (e) {
       console.error('Supabase projectPermissions save error:', e);
@@ -152,6 +155,7 @@ export default function RolesTab(props: RolesTabProps) {
     if (supabaseFailed) {
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     } else {
+      setSavedApprovalConfig(JSON.parse(JSON.stringify(draftApprovalConfig)));
       addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
     }
   }, [draftApprovalConfig, addToast]);
@@ -188,8 +192,8 @@ export default function RolesTab(props: RolesTabProps) {
     }
     if (!window.confirm('Khôi phục cấu hình về mặc định đã lưu? Các thay đổi chưa lưu sẽ bị mất.')) return;
     if (roleMainTab === 'group') setDraftRoles([...snap]);
-    else if (roleMainTab === 'task') setDraftMatrix(snap);
-    else setDraftApprovalConfig([...snap]);
+    else if (roleMainTab === 'task') { setDraftMatrix(snap); setSavedMatrix(JSON.parse(JSON.stringify(snap))); }
+    else { setDraftApprovalConfig([...snap]); setSavedApprovalConfig(JSON.parse(JSON.stringify(snap))); }
     addToast({ title: '↩️ Đã khôi phục', message: 'Đã khôi phục cấu hình mặc định.', type: 'info' });
   }, [roleMainTab, getCurrentTabDefault, addToast]);
 
@@ -198,7 +202,7 @@ export default function RolesTab(props: RolesTabProps) {
     const existing = [...draftApprovalConfig];
     const idx = existing.findIndex(p => p.documentType === docType);
     if (checked) {
-      const defaultApprover = employees[0];
+      const defaultApprover = employees.find(emp => emp.hasSystemAccount);
       if (!defaultApprover) return;
       const newPerm: ApprovalPermission = {
         id: `ap_${docType}`,
@@ -751,7 +755,7 @@ export default function RolesTab(props: RolesTabProps) {
                         {/* Dropdown Options List */}
                         <div className="space-y-1 overflow-y-auto max-h-48 pr-1 flex-1">
                           {(() => {
-                            const availableEmployees = employees.filter(emp => !activeRole.memberIds.includes(emp.id));
+                            const availableEmployees = employees.filter(emp => emp.hasSystemAccount && !activeRole.memberIds.includes(emp.id));
                             const filtered = availableEmployees.filter(emp => {
                               const query = roleSearchQuery.toLowerCase();
                               return (
@@ -1025,10 +1029,11 @@ export default function RolesTab(props: RolesTabProps) {
           <ProjectPermissionModal
             isOpen={true}
             onClose={() => setRoleMainTab('group')}
-            onSave={onSaveProjectPermissions}
+            onSave={handleSaveProject}
             mode="inline"
             value={draftMatrix}
             onChange={setDraftMatrix}
+            hasChanges={projectChanged}
           />
         </div>
       )}
@@ -1077,7 +1082,7 @@ export default function RolesTab(props: RolesTabProps) {
                               }}
                               className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
                             >
-                              {employees.map(emp => (
+                              {employees.filter(emp => emp.hasSystemAccount).map(emp => (
                                 <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
                               ))}
                             </select>
@@ -1120,7 +1125,7 @@ export default function RolesTab(props: RolesTabProps) {
                               }}
                               className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
                             >
-                              {employees.map(emp => (
+                              {employees.filter(emp => emp.hasSystemAccount).map(emp => (
                                 <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
                               ))}
                             </select>
@@ -1145,8 +1150,8 @@ export default function RolesTab(props: RolesTabProps) {
         onSave={roleMainTab === 'group' ? handleSaveGroup : roleMainTab === 'task' ? handleSaveProject : handleSaveApproval}
         onCancel={() => {
           if (roleMainTab === 'group') setDraftRoles([...roles]);
-          else if (roleMainTab === 'task') setDraftMatrix(loadProjectPermissions());
-          else setDraftApprovalConfig(loadApprovalConfig());
+          else if (roleMainTab === 'task') setDraftMatrix(JSON.parse(JSON.stringify(savedMatrix)));
+          else setDraftApprovalConfig(JSON.parse(JSON.stringify(savedApprovalConfig)));
         }}
         onSetDefault={handleSetDefault}
         onRestoreDefault={handleRestoreDefault}

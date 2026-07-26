@@ -734,10 +734,16 @@ export default function App() {
     return () => unsub();
   }, [currentUser?.id]);
 
-  const [activeTab, setActiveTab ] = useState<string>('dashboard');
+  const [activeTab, setActiveTab ] = useState<string>(() => {
+    return sessionStorage.getItem('hl_erp_active_tab') || 'dashboard';
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
+
+  useEffect(() => {
+    sessionStorage.setItem('hl_erp_active_tab', activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -3846,6 +3852,8 @@ export default function App() {
                                     setEmployees(filtered);
                                     dbService.employees.delete(emp.id);
                                     setConfirmDeleteId(null);
+                                    // Notify HR UI to reset hasSystemAccount flag
+                                    window.dispatchEvent(new CustomEvent('hl-system-account-deleted', { detail: { empId: emp.id } }));
                                     addToast({
                                       title: 'Đã xóa tài khoản',
                                       message: `Đã xóa tài khoản của nhân sự "${emp.name}" thành công.`,

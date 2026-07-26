@@ -12,6 +12,8 @@ interface AttendanceTabProps {
   setAttendanceSearchEmpId: (v: string) => void;
   attendanceFilterMonth: string;
   setAttendanceFilterMonth: (v: string) => void;
+  attendanceFilterDay: string;
+  setAttendanceFilterDay: (v: string) => void;
   attendanceFilterYear: string;
   setAttendanceFilterYear: (v: string) => void;
   attendancePage: number;
@@ -38,6 +40,7 @@ interface AttendanceTabProps {
     weekendDays: number[];
     leaves: any[];
   }>;
+  isLoadingAttendance?: boolean;
 }
 
 export default function AttendanceTab({
@@ -47,6 +50,8 @@ export default function AttendanceTab({
   setAttendanceSearchEmpId,
   attendanceFilterMonth,
   setAttendanceFilterMonth,
+  attendanceFilterDay,
+  setAttendanceFilterDay,
   attendanceFilterYear,
   setAttendanceFilterYear,
   attendancePage,
@@ -67,6 +72,7 @@ export default function AttendanceTab({
   handleDeleteAttendance,
   addToast,
   WorkdayCell,
+  isLoadingAttendance = false,
 }: AttendanceTabProps) {
   // ── Multi-row selection ──
   const [attSelectedRows, setAttSelectedRows] = useState<Set<string>>(new Set());
@@ -105,6 +111,35 @@ export default function AttendanceTab({
     setAttSelectAll(false);
     addToast({ title: '✅ Đã xóa', message: `Đã xóa ${attSelectedRows.size} bản ghi chấm công.`, type: 'success' });
   };
+
+  // Loading skeleton
+  if (isLoadingAttendance) {
+    return (
+      <div className="space-y-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-5 h-5 bg-amber-500/20 rounded animate-pulse" />
+            <div className="h-4 bg-slate-800 rounded w-48 animate-pulse" />
+          </div>
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-800/50">
+                <div className="w-4 h-4 bg-slate-800 rounded animate-pulse" />
+                <div className="h-3 bg-slate-800 rounded w-24 animate-pulse" />
+                <div className="h-3 bg-slate-800 rounded w-20 animate-pulse" />
+                <div className="h-3 bg-slate-800 rounded w-32 animate-pulse" />
+                <div className="h-3 bg-slate-800 rounded w-32 animate-pulse" />
+                <div className="h-3 bg-slate-800 rounded w-16 animate-pulse" />
+              </div>
+            ))}
+          </div>
+          <div className="text-center mt-4">
+            <p className="text-[11px] text-slate-400 animate-pulse">⏳ Đang tải dữ liệu chấm công...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -155,7 +190,25 @@ export default function AttendanceTab({
             </select>
           </div>
 
-          {/* Filter 3: Year */}
+          {/* Filter 3: Day */}
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="text-slate-400 font-bold select-none">Ngày:</span>
+            <select
+              value={attendanceFilterDay}
+              onChange={(e) => setAttendanceFilterDay(e.target.value)}
+              className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
+            >
+              <option value="all">📅 Tất cả</option>
+              {Array.from({ length: 31 }, (_, i) => {
+                const d = String(i + 1);
+                return (
+                  <option key={i} value={d}>Ngày {d.padStart(2, '0')}</option>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* Filter 4: Year */}
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className="text-slate-400 font-bold select-none">Năm:</span>
             <select
@@ -163,11 +216,12 @@ export default function AttendanceTab({
               onChange={(e) => setAttendanceFilterYear(e.target.value)}
               className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
             >
-              <option value="2024">Năm 2024</option>
-              <option value="2025">Năm 2025</option>
-              <option value="2026">Năm 2026</option>
-              <option value="2027">Năm 2027</option>
-              <option value="2028">Năm 2028</option>
+              {Array.from({ length: 5 }, (_, i) => {
+                const year = new Date().getFullYear() - 2 + i;
+                return (
+                  <option key={year} value={String(year)}>Năm {year}</option>
+                );
+              })}
             </select>
           </div>
           {canManageLockedAttendance() && (
@@ -526,9 +580,7 @@ export default function AttendanceTab({
           💡 Quy tắc thợ thô: <strong>Đủ 4 mốc chính = 1 công.</strong> Ngày thường hệ số tăng ca: <strong>1.5</strong>. Chủ nhật tính xưởng: <strong>2.0</strong> dầm sắt.
         </div>
         <button
-          onClick={() => {
-            addToast({ title: '✅ Thành công', message: '💾 Đang nạp cấu trúc excel và xuất biểu số công tháng 06/2026 rỗng. Mã code excel: XLSM-TIME-GRP', type: 'success' });
-          }}
+          onClick={handleExportAttendanceExcel}
           className="bg-slate-850 hover:bg-slate-800 text-[10px] font-bold text-slate-300 px-3 py-1.5 rounded flex items-center gap-1 cursor-pointer"
         >
           <Download className="w-3.5 h-3.5" /> Xuất bảng công Excel
