@@ -1065,40 +1065,37 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       }
     }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); });
     // Holidays
-    dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {});
+    dbService.hrmHolidays.list().then((d: any[]) => { setHolidays(d); }).catch(() => {});
     // Leaves
-    dbService.hrmLeaves.list().then((d: any[]) => { if (d?.length) setLeaves(d); }).catch(() => {});
+    dbService.hrmLeaves.list().then((d: any[]) => { setLeaves(d); }).catch(() => {});
     // Payroll
-    dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {});
+    dbService.hrmPayrollRecords.list().then((d: any[]) => { setPayroll(d); }).catch(() => {});
     // Employee Errors
-    dbService.hrmEmployeeErrors.list().then((d: any[]) => { if (d?.length) setEmployeeErrors(d); }).catch(() => {});
+    dbService.hrmEmployeeErrors.list().then((d: any[]) => { setEmployeeErrors(d); }).catch(() => {});
     // Leave Coefficients
-    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {});
+    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { setLeaveCoefficients(d); }).catch(() => {});
     // Trips
-    dbService.hrmTrips.list().then((d: any[]) => { if (d?.length) setTrips(d); }).catch(() => {});
+    dbService.hrmTrips.list().then((d: any[]) => { setTrips(d); }).catch(() => {});
     // Salary Scales
-    dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {});
+    dbService.hrmSalaryScales.list().then((d: any[]) => { setSalaryScales(d); }).catch(() => {});
     // Performance Criteria
     dbService.hrmPerformanceCriteria.list().then((d: any[]) => {
-      if (d?.length) {
-        // criteria có thể là JSON string từ Supabase → cần parse
-        const parsed = d.map((item: any) => ({
-          ...item,
-          criteria: typeof item.criteria === 'string' ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })() : (Array.isArray(item.criteria) ? item.criteria : []),
-        }));
-        setDepartmentCriteria(parsed);
-      }
+      const raw = d ?? [];
+      const parsed = raw.map((item: any) => ({
+        ...item,
+        criteria: typeof item.criteria === 'string'
+          ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })()
+          : (Array.isArray(item.criteria) ? item.criteria : []),
+      }));
+      setDepartmentCriteria(parsed);
     }).catch(() => {});
     // Travel Norms
-    dbService.travelNorms.list().then((d: any[]) => { if (d?.length) setTravelNorms(d); }).catch(() => {});
+    dbService.travelNorms.list().then((d: any[]) => { setTravelNorms(d); }).catch(() => {});
     // Attendance (load từ Supabase)
     dbService.attendance.list().then((d: any[]) => {
-      if (d && d.length > 0) {
-        setAttendance(d);
-        setIsLoadingAttendance(false);
-      } else {
-        setIsLoadingAttendance(false);
-      }
+      const data = d ?? [];
+      setAttendance(data);
+      setIsLoadingAttendance(false);
     }).catch(err => {
       console.warn('Load attendance from Supabase thất bại:', err);
       setIsLoadingAttendance(false);
@@ -1190,11 +1187,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [employeeErrors]);
 
   useEffect(() => {
-    if (salaryScales?.length) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
+    if (salaryScales) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
   }, [salaryScales]);
 
   useEffect(() => {
-    if (departmentCriteria?.length) departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
+    departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
   }, [departmentCriteria]);
 
   useEffect(() => {
