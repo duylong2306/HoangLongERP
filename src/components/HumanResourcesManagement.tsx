@@ -437,6 +437,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [roles, setRoles] = useState<Role[]>([]);
   // Ref để tránh infinite loop khi re-fetch từ Supabase
   const isSyncingRolesFromCloud = useRef(false);
+  const hasHydratedRef = useRef(false); // Đánh dấu đã load xong data từ Supabase lần đầu
 
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
   const [confirmRemoveMember, setConfirmRemoveMember] = useState<{ roleId: string; empId: string } | null>(null);
@@ -1099,6 +1100,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     }).catch(err => {
       console.warn('Load attendance from Supabase thất bại:', err);
       setIsLoadingAttendance(false);
+    }).finally(() => {
+      // Đánh dấu đã hydrate xong — các useEffect sync sẽ bỏ qua lần fire đầu
+      setTimeout(() => { hasHydratedRef.current = true; }, 500);
     });
   }, []);
 
@@ -1179,22 +1183,27 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [holidays]);
 
   useEffect(() => {
+    if (!hasHydratedRef.current) return; // Skip khi mới load từ Supabase
     if (leaveCoefficients?.length) leaveCoefficients.forEach(c => dbService.hrmLeaveCoefficients.save(c).catch(() => {}));
   }, [leaveCoefficients]);
 
   useEffect(() => {
+    if (!hasHydratedRef.current) return;
     if (employeeErrors?.length) employeeErrors.forEach(e => dbService.hrmEmployeeErrors.save(e).catch(() => {}));
   }, [employeeErrors]);
 
   useEffect(() => {
+    if (!hasHydratedRef.current) return;
     if (salaryScales) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
   }, [salaryScales]);
 
   useEffect(() => {
+    if (!hasHydratedRef.current) return;
     departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
   }, [departmentCriteria]);
 
   useEffect(() => {
+    if (!hasHydratedRef.current) return;
     if (travelNorms?.length) travelNorms.forEach(n => dbService.travelNorms.save(n).catch(() => {}));
   }, [travelNorms]);
 
@@ -1687,6 +1696,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     });
 
     setShowSalaryScaleModal(false);
+    // Đồng bộ lưu/bảo trì bậc lương lên Supabase
+    dbService.hrmSalaryScales.save(newItem).catch((err:any)=> console.warn('Lưu bậc lương trên Supabase thất bại:', err));
     setEditingSalaryScale(null);
   };
 

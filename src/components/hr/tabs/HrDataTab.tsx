@@ -578,7 +578,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="criteria_tab_trigger"
                       >
                         <Building className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'criteria' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>🎯 Tiêu Chí Hiệu Suất</span>
+                        <span>Tiêu Chí Hiệu Suất</span>
                       </button>
                     </li>
                     <li>
@@ -590,7 +590,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="salary_scales_tab_trigger"
                       >
                         <Award className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'salary_scales' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>📈 Hệ Thống Bậc Lương</span>
+                        <span>Hệ Thống Bậc Lương</span>
                       </button>
                     </li>
                     <li>
@@ -602,7 +602,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="insurance_tab_trigger"
                       >
                         <FileSpreadsheet className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'insurance' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>🛡️ BHXH & Thuế</span>
+                        <span>BHXH & Thuế</span>
                       </button>
                     </li>
                     <li>
@@ -614,7 +614,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="travel_norms_tab_trigger"
                       >
                         <MapPin className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'travel_norms' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>💼 Định mức công tác phí</span>
+                        <span>Định mức công tác phí</span>
                       </button>
                     </li>
                     <li>
