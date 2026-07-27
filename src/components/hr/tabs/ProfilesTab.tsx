@@ -983,6 +983,8 @@ export default function ProfilesTab({
                       <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Số lần phép năm được cấp:</label>
                       <input
                         type="number"
+                        step="0.5"
+                        min="0"
                         required
                         value={editingEmpData.phepNam !== undefined ? editingEmpData.phepNam : 12}
                         onChange={(e) => setEditingEmpData({ ...editingEmpData, phepNam: Number(e.target.value) })}
