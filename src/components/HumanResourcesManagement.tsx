@@ -2532,7 +2532,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       if (affectedEmp) {
         const currentPhep = affectedEmp.phepNam !== undefined ? affectedEmp.phepNam : 12;
         const leaveDays = targetLeave.daysCount !== undefined ? targetLeave.daysCount : 1;
-        const updatedEmp = { ...affectedEmp, phepNam: Math.max(0, currentPhep - leaveDays) };
+        const updatedEmp = { ...affectedEmp, phepNam: Math.max(0, Number((currentPhep - leaveDays).toFixed(1))) };
         setEmployees(prev => prev.map(emp => emp.id === affectedEmp.id ? updatedEmp : emp));
         // Đồng bộ phép năm mới lên Supabase
         dbService.employees.save(updatedEmp).catch(err =>

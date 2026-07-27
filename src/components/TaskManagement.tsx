@@ -236,7 +236,7 @@ export default function TaskManagement({
             if (changedEmp) {
               const currentPhep = (changedEmp as any).phepNam !== undefined ? (changedEmp as any).phepNam : 12;
               const leaveDays = targetLeave.daysCount !== undefined ? targetLeave.daysCount : 1;
-              const updatedEmp = { ...changedEmp, phepNam: Math.max(0, currentPhep - leaveDays) } as any;
+              const updatedEmp = { ...changedEmp, phepNam: Math.max(0, Number((currentPhep - leaveDays).toFixed(1))) } as any;
               await dbService.employees.save(updatedEmp).catch(() => {});
             }
           }
