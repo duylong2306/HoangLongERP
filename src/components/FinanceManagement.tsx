@@ -5,6 +5,10 @@ import { useNotification, isUserInRoleGroup } from '../context';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
+import SearchableCustomerSelect from './SearchableCustomerSelect';
+import SearchableSupplierSelect from './SearchableSupplierSelect';
+import ProductSearchDropdown from './ProductSearchDropdown';
+
 import {
   Plus,
   Search,
@@ -69,7 +73,6 @@ interface FinanceProps {
   currentUser: any;
   employees?: Employee[];
   salesOrders?: SalesOrder[];
-  accProducts?: AccountingProductItem[];
   onAddReceipt: (newRec: Receipt) => void;
   onAddPayment: (newPay: Payment) => void;
   onApprovePayment: (id: string, status: 'approved' | 'rejected') => void;
@@ -130,7 +133,6 @@ export default function FinanceManagement({
   currentUser,
   employees: employeesProp,
   salesOrders: salesOrdersProp = [],
-  accProducts: accProductsProp = [],
   onAddReceipt,
   onAddPayment,
   onApprovePayment,
@@ -822,6 +824,7 @@ export default function FinanceManagement({
   const [accProdEditId, setAccProdEditId] = useState<string | null>(null);
   const [accProdTenSP, setAccProdTenSP] = useState('');
   const [accProdDonGia, setAccProdDonGia] = useState<string>('');
+  const [accProdDonViTinh, setAccProdDonViTinh] = useState('');
   const [accProdDeleteId, setAccProdDeleteId] = useState<string | null>(null);
   const accProdFileInputRef = useRef<HTMLInputElement>(null);
   const [accProdLoaded, setAccProdLoaded] = useState(false);
@@ -834,6 +837,7 @@ export default function FinanceManagement({
   const [soItemSearch, setSoItemSearch] = useState<string[]>([]); // Search term for each item row
   const [soItemDropdown, setSoItemDropdown] = useState<boolean[]>([]); // Show/hide dropdown for each row
   const [soItemDropdownIdx, setSoItemDropdownIdx] = useState<number | null>(null); // Which dropdown is open
+  const soItemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [soThanhToan, setSoThanhToan] = useState<string>('0');
   const [soNotes, setSoNotes] = useState('');
   const [soDeleteId, setSoDeleteId] = useState<string | null>(null);
@@ -849,6 +853,8 @@ export default function FinanceManagement({
   const [poItems, setPoItems] = useState<PurchaseOrderItem[]>([]);
   const [poItemSearch, setPoItemSearch] = useState<string[]>([]);
   const [poItemDropdown, setPoItemDropdown] = useState<boolean[]>([]);
+  const poItemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [poItemDropdownIdx, setPoItemDropdownIdx] = useState<number | null>(null);
   const [poThanhToan, setPoThanhToan] = useState<string>('0');
   const [poNotes, setPoNotes] = useState('');
   const [poDeleteId, setPoDeleteId] = useState<string | null>(null);
@@ -941,6 +947,22 @@ export default function FinanceManagement({
   };
 
   // Handle product search/select for each row
+  // Fuzzy search helper - checks if search term is contained in product name (case insensitive, with Vietnamese normalization)
+  const fuzzyMatch = (text: string, searchTerm: string): boolean => {
+    if (!searchTerm.trim()) return true;
+    const normalizedText = text.toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D');
+    const normalizedSearch = searchTerm.toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D');
+    return normalizedText.includes(normalizedSearch);
+  };
+
   const handleSOItemSearchChange = (idx: number, value: string) => {
     setSoItemSearch(prev => {
       const updated = [...prev];
@@ -948,15 +970,15 @@ export default function FinanceManagement({
       return updated;
     });
 
-    // Show dropdown when typing
+    // Show dropdown when typing or when focused with value
     setSoItemDropdown(prev => {
       const updated = [...prev];
-      updated[idx] = value.length > 0;
+      updated[idx] = true; // Always show dropdown when user interacts
       return updated;
     });
 
     // Try to match exact from product catalog
-    const matchedProduct = accProductsProp.find(
+    const matchedProduct = accProducts.find(
       p => `${p.id} - ${p.tenSanPham}`.toLowerCase() === value.toLowerCase()
     );
     if (matchedProduct) {
@@ -967,7 +989,7 @@ export default function FinanceManagement({
           productId: matchedProduct.id,
           tenSanPham: matchedProduct.tenSanPham,
           donGia: matchedProduct.donGia || 0,
-          donViTinh: 'Cái',
+          donViTinh: matchedProduct.donViTinh || 'Cái',
           thanhTien: (updated[idx].soLuong || 1) * (matchedProduct.donGia || 0),
         };
         return updated;
@@ -997,12 +1019,12 @@ export default function FinanceManagement({
       const item = { ...updated[index] };
       if (field === 'productId') {
         // Auto-fill from product catalog
-        const product = accProductsProp.find(p => p.id === value);
+        const product = accProducts.find(p => p.id === value);
         if (product) {
           item.productId = product.id;
           item.tenSanPham = product.tenSanPham;
           item.donGia = product.donGia;
-          item.donViTinh = 'Cái';
+          item.donViTinh = product.donViTinh || 'Cái';
           item.thanhTien = item.soLuong * product.donGia;
         }
       } else if (field === 'soLuong' || field === 'donGia') {
@@ -1157,8 +1179,8 @@ export default function FinanceManagement({
 
   const handlePOItemSearchChange = (idx: number, value: string) => {
     setPoItemSearch(prev => { const u = [...prev]; u[idx] = value; return u; });
-    setPoItemDropdown(prev => { const u = [...prev]; u[idx] = value.length > 0; return u; });
-    const matchedProduct = accProductsProp.find(
+    setPoItemDropdown(prev => { const u = [...prev]; u[idx] = true; return u; }); // Always show dropdown when user interacts
+    const matchedProduct = accProducts.find(
       p => `${p.id} - ${p.tenSanPham}`.toLowerCase() === value.toLowerCase()
     );
     if (matchedProduct) {
@@ -1169,7 +1191,7 @@ export default function FinanceManagement({
           productId: matchedProduct.id,
           tenSanPham: matchedProduct.tenSanPham,
           donGia: matchedProduct.donGia || 0,
-          donViTinh: 'Cái',
+          donViTinh: matchedProduct.donViTinh || 'Cái',
           thanhTien: (updated[idx].soLuong || 1) * (matchedProduct.donGia || 0),
         };
         return updated;
@@ -1189,12 +1211,12 @@ export default function FinanceManagement({
       const updated = [...prev];
       const item = { ...updated[index] };
       if (field === 'productId') {
-        const product = accProductsProp.find(p => p.id === value);
+        const product = accProducts.find(p => p.id === value);
         if (product) {
           item.productId = product.id;
           item.tenSanPham = product.tenSanPham;
           item.donGia = product.donGia;
-          item.donViTinh = 'Cái';
+          item.donViTinh = product.donViTinh || 'Cái';
           item.thanhTien = item.soLuong * product.donGia;
         }
       } else if (field === 'soLuong' || field === 'donGia') {
@@ -1339,6 +1361,7 @@ export default function FinanceManagement({
   const resetAccProdForm = () => {
     setAccProdTenSP('');
     setAccProdDonGia('');
+    setAccProdDonViTinh('');
     setAccProdEditId(null);
     setAccProdFormMode('add');
   };
@@ -1351,11 +1374,11 @@ export default function FinanceManagement({
     }
     const donGia = accProdDonGia.trim() !== '' ? Number(accProdDonGia) : 0;
     if (accProdFormMode === 'edit' && accProdEditId) {
-      setAccProducts(prev => prev.map(p => p.id === accProdEditId ? { ...p, tenSanPham: accProdTenSP.trim(), donGia } : p));
+      setAccProducts(prev => prev.map(p => p.id === accProdEditId ? { ...p, tenSanPham: accProdTenSP.trim(), donGia, donViTinh: accProdDonViTinh.trim() || undefined } : p));
       addToast({ title: '✅ Thành công', message: 'Đã cập nhật sản phẩm.', type: 'success' });
     } else {
       const newId = generateAccProdCode();
-      const newItem: AccountingProductItem = { id: newId, tenSanPham: accProdTenSP.trim(), donGia };
+      const newItem: AccountingProductItem = { id: newId, tenSanPham: accProdTenSP.trim(), donGia, donViTinh: accProdDonViTinh.trim() || undefined };
       setAccProducts(prev => [...prev, newItem]);
       addToast({ title: '✅ Thành công', message: `Đã thêm sản phẩm ${newId}.`, type: 'success' });
     }
@@ -1368,6 +1391,7 @@ export default function FinanceManagement({
     setAccProdEditId(item.id);
     setAccProdTenSP(item.tenSanPham);
     setAccProdDonGia(String(item.donGia));
+    setAccProdDonViTinh(item.donViTinh || '');
     setShowAccProdForm(true);
   };
 
@@ -1389,8 +1413,9 @@ export default function FinanceManagement({
       'Mã Sản Phẩm': p.id,
       'Tên Sản Phẩm': p.tenSanPham,
       'Đơn Giá (đ)': p.donGia.toLocaleString('vi-VN'),
+      'Đơn Vị Tính': p.donViTinh || '',
     }));
-    exportToExcel(data, 'DanhMucSanPham', `Danh_Muc_San_Pham_${formatDateForFile()}.xlsx`, undefined, ['STT', 'Mã Sản Phẩm', 'Tên Sản Phẩm', 'Đơn Giá (đ)']);
+    exportToExcel(data, 'DanhMucSanPham', `Danh_Muc_San_Pham_${formatDateForFile()}.xlsx`, undefined, ['STT', 'Mã Sản Phẩm', 'Tên Sản Phẩm', 'Đơn Giá (đ)', 'Đơn Vị Tính']);
   };
 
   // Import Excel
@@ -1416,10 +1441,12 @@ export default function FinanceManagement({
         const tenSP = row['Tên Sản Phẩm'] || row['tenSanPham'] || row['Tên SP'] || '';
         const donGiaRaw = row['Đơn Giá'] || row['donGia'] || row['Don gia'] || '0';
         const donGia = typeof donGiaRaw === 'string' ? Number(donGiaRaw.replace(/[^0-9.-]/g, '')) : Number(donGiaRaw) || 0;
+        const donViTinh = row['Đơn Vị Tính'] || row['donViTinh'] || row['DVT'] || '';
         return {
           id: row['Mã Sản Phẩm'] || row['id'] || `SP${String(maxNum).padStart(3, '0')}`,
           tenSanPham: tenSP,
           donGia,
+          donViTinh: donViTinh || undefined,
         };
       }).filter(p => p.tenSanPham);
       setAccProducts(prev => [...prev, ...newProducts]);
@@ -3529,7 +3556,7 @@ export default function FinanceManagement({
 
             {/* MODAL: THÊM / SỬA KHÁCH HÀNG */}
             {showAddCustomerModal && (
-              <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[9999] p-4">
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-200 text-xs text-left animate-scaleIn">
                   <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                     <div className="flex items-center gap-2">
@@ -3723,6 +3750,12 @@ export default function FinanceManagement({
                             <input type="number" value={accProdDonGia} onChange={e => setAccProdDonGia(e.target.value)}
                               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 focus:outline-none"
                               placeholder="0" min="0" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-400 mb-1">Đơn vị tính</label>
+                            <input type="text" value={accProdDonViTinh} onChange={e => setAccProdDonViTinh(e.target.value)}
+                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 focus:outline-none"
+                              placeholder="Cái, Mét, KG..." />
                           </div>
                           <div className="flex gap-2 justify-end pt-2">
                             <button type="button" onClick={() => { setShowAccProdForm(false); resetAccProdForm(); }}
@@ -4625,12 +4658,7 @@ export default function FinanceManagement({
                         className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md">
                         <Download className="w-3.5 h-3.5" /> Xuất Excel
                       </button>
-                      <button type="button" onClick={() => soFileInputRef.current?.click()}
-                        className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md">
-                        <FileUp className="w-3.5 h-3.5" /> Nhập Excel
-                      </button>
-                      <input ref={soFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleSOImportExcel} />
-                    </div>
+                                          </div>
                   </div>
 
                   {/* Create Order Form Modal */}
@@ -4644,30 +4672,42 @@ export default function FinanceManagement({
 
                         {/* Customer Selection */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                          <div>
+                          <div className="relative">
                             <label className="block text-[11px] font-bold text-slate-400 mb-1">Khách hàng <span className="text-red-400">*</span></label>
-                            <select value={soCustomerId} onChange={e => setSoCustomerId(e.target.value)}
-                              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:border-orange-500 focus:outline-none">
-                              <option value="">-- Chọn khách hàng --</option>
-                              {customers.map(c => (
-                                <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                              ))}
-                            </select>
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <SearchableCustomerSelect
+                                  value={soCustomerId}
+                                  onChange={setSoCustomerId}
+                                  customers={customers}
+                                  placeholder="-- Chọn khách hàng --"
+                                  id="so-customer-select"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAddCustomerModal(true)}
+                                  className="text-sky-500 hover:text-sky-400 text-[10px] font-bold mt-1.5 flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>Tạo KH mới</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[11px] font-bold text-slate-400 mb-1">SĐT</label>
                             <input type="text" disabled value={customers.find(c => c.id === soCustomerId)?.phone || ''}
-                              className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-slate-600 text-xs cursor-not-allowed" />
+                              className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-slate-300 text-xs cursor-not-allowed" />
                           </div>
                           <div>
                             <label className="block text-[11px] font-bold text-slate-400 mb-1">Địa chỉ</label>
                             <input type="text" disabled value={customers.find(c => c.id === soCustomerId)?.address || ''}
-                              className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-slate-600 text-xs cursor-not-allowed" />
+                              className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-slate-300 text-xs cursor-not-allowed" />
                           </div>
                         </div>
 
                         {/* Order Items Table */}
-                        <div className="bg-white border border-slate-300 rounded-lg overflow-hidden mb-4">
+                        <div className="bg-white border border-slate-300 rounded-lg overflow-x-auto mb-4">
                           <table className="w-full text-[10.5px] border-collapse">
                             <thead>
                               <tr className="bg-slate-100 text-slate-600 font-extrabold uppercase text-[9.5px] tracking-wider">
@@ -4682,13 +4722,13 @@ export default function FinanceManagement({
                             </thead>
                             <tbody>
                               {soItems.map((item, idx) => {
-                                const searchVal = (soItemSearch[idx] || '').toLowerCase().trim();
-                                const filteredProducts = searchVal.length > 0
-                                  ? accProductsProp.filter(p =>
-                                      p.tenSanPham.toLowerCase().includes(searchVal) ||
-                                      p.id.toLowerCase().includes(searchVal)
-                                    ).slice(0, 8) // Limit to 8 items
-                                  : accProductsProp.slice(0, 8);
+                                const searchVal = soItemSearch[idx] || '';
+                                const filteredProducts = searchVal.trim().length > 0
+                                  ? accProducts.filter(p =>
+                                      fuzzyMatch(p.tenSanPham, searchVal) ||
+                                      fuzzyMatch(p.id, searchVal)
+                                    ).slice(0, 10)
+                                  : accProducts.slice(0, 10);
                                 const showDropdown = soItemDropdown[idx] && filteredProducts.length > 0;
 
                                 return (
@@ -4696,6 +4736,7 @@ export default function FinanceManagement({
                                   <td className="px-3 py-2 text-center text-slate-500 font-mono">{idx + 1}</td>
                                   <td className="px-3 py-2 relative">
                                     <input
+                                      ref={el => { if (el) soItemInputRefs.current[idx] = el; }}
                                       type="text"
                                       value={soItemSearch[idx] || item.tenSanPham || ''}
                                       onChange={e => handleSOItemSearchChange(idx, e.target.value)}
@@ -4705,33 +4746,27 @@ export default function FinanceManagement({
                                       placeholder="Nhập tên SP để tìm..."
                                     />
                                     {showDropdown && (
-                                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                        {filteredProducts.map(p => (
-                                          <div
-                                            key={p.id}
-                                            className="px-3 py-2 hover:bg-orange-50 cursor-pointer border-b border-slate-100 last:border-b-0"
-                                            onClick={() => {
-                                              setSoItems(prev => {
-                                                const updated = [...prev];
-                                                updated[idx] = {
-                                                  ...updated[idx],
-                                                  productId: p.id,
-                                                  tenSanPham: p.tenSanPham,
-                                                  donGia: p.donGia || 0,
-                                                  donViTinh: 'Cái',
-                                                  thanhTien: (updated[idx].soLuong || 1) * (p.donGia || 0),
-                                                };
-                                                return updated;
-                                              });
-                                              setSoItemSearch(prev => { const u = [...prev]; u[idx] = `${p.id} - ${p.tenSanPham}`; return u; });
-                                              setSoItemDropdown(prev => { const u = [...prev]; u[idx] = false; return u; });
-                                            }}
-                                          >
-                                            <div className="font-bold text-slate-800 text-[10px]">{p.tenSanPham}</div>
-                                            <div className="text-[9px] text-slate-500">Mã: {p.id} · Giá: {p.donGia?.toLocaleString('vi-VN') || 0}₫</div>
-                                          </div>
-                                        ))}
-                                      </div>
+                                      <ProductSearchDropdown
+                                        filteredProducts={filteredProducts}
+                                        onSelect={p => {
+                                          setSoItems(prev => {
+                                            const updated = [...prev];
+                                            updated[idx] = {
+                                              ...updated[idx],
+                                              productId: p.id,
+                                              tenSanPham: p.tenSanPham,
+                                              donGia: p.donGia || 0,
+                                              donViTinh: p.donViTinh || 'Cái',
+                                              thanhTien: (updated[idx].soLuong || 1) * (p.donGia || 0),
+                                            };
+                                            return updated;
+                                          });
+                                          setSoItemSearch(prev => { const u = [...prev]; u[idx] = `${p.id} - ${p.tenSanPham}`; return u; });
+                                          setSoItemDropdown(prev => { const u = [...prev]; u[idx] = false; return u; });
+                                        }}
+                                        isOpen={true}
+                                        triggerElement={soItemInputRefs.current[idx]}
+                                      />
                                     )}
                                   </td>
                                   <td className="px-3 py-2">
@@ -5009,30 +5044,42 @@ export default function FinanceManagement({
 
                         {/* Supplier Selection */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                          <div>
+                          <div className="relative">
                             <label className="block text-[11px] font-bold text-slate-400 mb-1">Nhà cung cấp <span className="text-red-400">*</span></label>
-                            <select value={poSupplierId} onChange={e => setPoSupplierId(e.target.value)}
-                              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:border-orange-500 focus:outline-none">
-                              <option value="">-- Chọn nhà cung cấp --</option>
-                              {poSupplierData.allSuppliers.map(s => (
-                                <option key={s.id} value={s.id}>{s.name} ({s.phone})</option>
-                              ))}
-                            </select>
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <SearchableSupplierSelect
+                                  value={poSupplierId}
+                                  onChange={setPoSupplierId}
+                                  suppliers={poSupplierData.allSuppliers}
+                                  placeholder="-- Chọn nhà cung cấp --"
+                                  id="po-supplier-select"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSupplierForm(true)}
+                                  className="text-purple-500 hover:text-purple-400 text-[10px] font-bold mt-1.5 flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>Tạo NCC mới</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                           <div>
                             <label className="block text-[11px] font-bold text-slate-400 mb-1">SĐT</label>
                             <input type="text" disabled value={poSupplierData.selSup?.phone || ''}
-                              className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-slate-600 text-xs cursor-not-allowed" />
+                              className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-slate-300 text-xs cursor-not-allowed" />
                           </div>
                           <div>
                             <label className="block text-[11px] font-bold text-slate-400 mb-1">Địa chỉ</label>
                             <input type="text" disabled value={poSupplierData.selSup?.address || ''}
-                              className="w-full bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-slate-600 text-xs cursor-not-allowed" />
+                              className="w-full bg-slate-850 border border-slate-700 rounded-lg px-3 py-2 text-slate-300 text-xs cursor-not-allowed" />
                           </div>
                         </div>
 
                         {/* Order Items Table */}
-                        <div className="bg-white border border-slate-300 rounded-lg overflow-hidden mb-4">
+                        <div className="bg-white border border-slate-300 rounded-lg overflow-x-auto mb-4">
                           <table className="w-full text-[10.5px] border-collapse">
                             <thead>
                               <tr className="bg-slate-100 text-slate-600 font-extrabold uppercase text-[9.5px] tracking-wider">
@@ -5047,13 +5094,13 @@ export default function FinanceManagement({
                             </thead>
                             <tbody>
                               {poItems.map((item, idx) => {
-                                const searchVal = (poItemSearch[idx] || '').toLowerCase().trim();
-                                const filteredProducts = searchVal.length > 0
-                                  ? accProductsProp.filter(p =>
-                                      p.tenSanPham.toLowerCase().includes(searchVal) ||
-                                      p.id.toLowerCase().includes(searchVal)
-                                    ).slice(0, 8)
-                                  : accProductsProp.slice(0, 8);
+                                const searchVal = poItemSearch[idx] || '';
+                                const filteredProducts = searchVal.trim().length > 0
+                                  ? accProducts.filter(p =>
+                                      fuzzyMatch(p.tenSanPham, searchVal) ||
+                                      fuzzyMatch(p.id, searchVal)
+                                    ).slice(0, 10)
+                                  : accProducts.slice(0, 10);
                                 const showDropdown = poItemDropdown[idx] && filteredProducts.length > 0;
 
                                 return (
@@ -5061,6 +5108,7 @@ export default function FinanceManagement({
                                   <td className="px-3 py-2 text-center text-slate-500 font-mono">{idx + 1}</td>
                                   <td className="px-3 py-2 relative">
                                     <input
+                                      ref={el => { if (el) poItemInputRefs.current[idx] = el; }}
                                       type="text"
                                       value={poItemSearch[idx] || item.tenSanPham || ''}
                                       onChange={e => handlePOItemSearchChange(idx, e.target.value)}
@@ -5070,33 +5118,27 @@ export default function FinanceManagement({
                                       placeholder="Nhập tên SP để tìm..."
                                     />
                                     {showDropdown && (
-                                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                        {filteredProducts.map(p => (
-                                          <div
-                                            key={p.id}
-                                            className="px-3 py-2 hover:bg-orange-50 cursor-pointer border-b border-slate-100 last:border-b-0"
-                                            onClick={() => {
-                                              setPoItems(prev => {
-                                                const updated = [...prev];
-                                                updated[idx] = {
-                                                  ...updated[idx],
-                                                  productId: p.id,
-                                                  tenSanPham: p.tenSanPham,
-                                                  donGia: p.donGia || 0,
-                                                  donViTinh: 'Cái',
-                                                  thanhTien: (updated[idx].soLuong || 1) * (p.donGia || 0),
-                                                };
-                                                return updated;
-                                              });
-                                              setPoItemSearch(prev => { const u = [...prev]; u[idx] = `${p.id} - ${p.tenSanPham}`; return u; });
-                                              setPoItemDropdown(prev => { const u = [...prev]; u[idx] = false; return u; });
-                                            }}
-                                          >
-                                            <div className="font-bold text-slate-800 text-[10px]">{p.tenSanPham}</div>
-                                            <div className="text-[9px] text-slate-500">Mã: {p.id} · Giá: {p.donGia?.toLocaleString('vi-VN') || 0}₫</div>
-                                          </div>
-                                        ))}
-                                      </div>
+                                      <ProductSearchDropdown
+                                        filteredProducts={filteredProducts}
+                                        onSelect={p => {
+                                          setPoItems(prev => {
+                                            const updated = [...prev];
+                                            updated[idx] = {
+                                              ...updated[idx],
+                                              productId: p.id,
+                                              tenSanPham: p.tenSanPham,
+                                              donGia: p.donGia || 0,
+                                              donViTinh: p.donViTinh || 'Cái',
+                                              thanhTien: (updated[idx].soLuong || 1) * (p.donGia || 0),
+                                            };
+                                            return updated;
+                                          });
+                                          setPoItemSearch(prev => { const u = [...prev]; u[idx] = `${p.id} - ${p.tenSanPham}`; return u; });
+                                          setPoItemDropdown(prev => { const u = [...prev]; u[idx] = false; return u; });
+                                        }}
+                                        isOpen={true}
+                                        triggerElement={poItemInputRefs.current[idx]}
+                                      />
                                     )}
                                   </td>
                                   <td className="px-3 py-2">
