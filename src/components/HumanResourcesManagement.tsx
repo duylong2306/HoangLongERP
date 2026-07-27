@@ -2351,7 +2351,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // ===================== BLOCK HỒ SƠ NHÂN VIÊN (profiles) =====================
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = `NV${String(employees.length + 1).padStart(3, '0')}`;
+    // Tạo ID duy nhất: tìm mã NV lớn nhất hiện có rồi +1, tránh trùng lặp
+    const existingNVIds = employees
+      .filter(emp => /^NV\d+$/.test(emp.id))
+      .map(emp => parseInt(emp.id.replace('NV', ''), 10))
+      .filter(n => !isNaN(n));
+    const maxNV = existingNVIds.length > 0 ? Math.max(...existingNVIds) : 0;
+    const id = `NV${String(maxNV + 1).padStart(3, '0')}`;
     const profile: EmployeeProfile = {
       ...newEmp,
       id,

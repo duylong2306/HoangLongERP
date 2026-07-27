@@ -14,7 +14,9 @@ import {
   ProjectStatus,
   QuoteConfig,
   AppNotification,
-  Conversation
+  Conversation,
+  SalesOrder,
+  PurchaseOrder
 } from './types';
 import {
   INITIAL_EMPLOYEES,
@@ -81,7 +83,6 @@ import {
   Info,
   Plus,
   Trash2,
-  UserPlus,
   Building,
   Lock,
   Check,
@@ -629,14 +630,16 @@ export default function App() {
               cloudData = await dbService.loadAllCore();
             } catch {
               // Fallback: query từng bảng
-              const [custs, projs, tsks, recs, pays, qtes] = await Promise.all([
+              const [custs, projs, tsks, recs, pays, qtes, pOrders] = await Promise.all([
                 dbService.customers.list(), dbService.projects.list(),
                 dbService.tasks.list(), dbService.receipts.list(),
                 dbService.payments.list(), dbService.quotes.list(),
+                dbService.purchaseOrders.list(),
               ]);
               cloudData = {
                 customers: custs, projects: projs, tasks: tsks,
                 receipts: recs, payments: pays, quotes: qtes,
+                purchase_orders: pOrders,
                 business_profile: [], shift_config: [],
               };
             }
@@ -656,6 +659,11 @@ export default function App() {
             setPayments(payRows);
             setQuotes(quoteRows);
 
+            if (cloudData.purchase_orders) {
+              const poRows = toCamel(cloudData.purchase_orders);
+              setPurchaseOrders(poRows);
+            }
+
             if (cloudData.business_profile?.[0]) {
               const bp = toCamel([cloudData.business_profile[0]])[0];
               setBusinessInfo(bp);
@@ -663,7 +671,7 @@ export default function App() {
             }
             if (cloudData.shift_config?.[0]) setHrmConfig(toCamel([cloudData.shift_config[0]])[0]);
 
-            // Save vào cache (bỏ qua sensitive tables)
+            // Save vào cache (bỏ qua sensitive tables — KHÔNG lưu sales_orders, purchase_orders vào localStorage)
             for (const t of CACHE_TABLES) {
               const key = t === 'projects' ? 'projects' : t;
               const rows = { customers: custRows, projects: projRows, tasks: taskRows, receipts: recRows, payments: payRows, quotes: quoteRows }[key];
@@ -955,6 +963,8 @@ export default function App() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
 
   // Trạng thái đồng bộ & nạp dữ liệu mẫu lên Firestore hoanglongerpdb
   const [isDbSeeding, setIsDbSeeding] = useState(false);
@@ -1012,6 +1022,12 @@ export default function App() {
 
       const qtes = await dbService.quotes.list();
       setQuotes(qtes);
+
+      const sOrders = await dbService.salesOrders.list();
+      setSalesOrders(sOrders);
+
+      const pOrders = await dbService.purchaseOrders.list();
+      setPurchaseOrders(pOrders);
 
       setDbSeedSuccess("Đồng bộ & Nạp dữ liệu mẫu lên database hoanglongerpdb thành công!");
       setTimeout(() => setDbSeedSuccess(null), 5000);
@@ -1073,15 +1089,7 @@ export default function App() {
     };
   };
 
-  // Thêm người dùng mới
-  const [newEmpName, setNewEmpName] = useState('');
-  const [newEmpEmail, setNewEmpEmail] = useState('');
-  const [newEmpPhone, setNewEmpPhone] = useState('');
-  const [newEmpDept, setNewEmpDept] = useState('Phòng Dự Án - Xây Dựng');
-  const [newEmpRole, setNewEmpRole] = useState<string>('engineer');
-  const [newEmpUsername, setNewEmpUsername] = useState('');
-  const [newEmpPassword, setNewEmpPassword] = useState('123');
-  const [newEmpRoleGroupId, setNewEmpRoleGroupId] = useState<string>('role_office');
+  // Thêm người dùng mới — form đã xóa, tạo tài khoản qua HRM
 
   // Đọc danh sách Role Groups từ localStorage hoặc Supabase cache để render dropdown
   const readHrmRoleGroups = (): { id: string; name: string }[] => {
@@ -1523,7 +1531,18 @@ export default function App() {
     const handleEmployeesUpdated = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
-        setEmployees(prev => customEvent.detail.employees || customEvent.detail);
+        const incoming = customEvent.detail.employees || customEvent.detail;
+        // Deduplicate by name: keep entry with username/hasSystemAccount if duplicate exists
+        const deduped = incoming.filter((emp: Employee, idx: number, arr: Employee[]) => {
+          const firstIdx = arr.findIndex(e => e.name.toLowerCase() === emp.name.toLowerCase());
+          if (firstIdx === idx) return true;
+          // Duplicate found, keep the one with account (username + hasSystemAccount)
+          const first = arr[firstIdx];
+          const hasAccount = (emp.username || emp.hasSystemAccount);
+          const firstHasAccount = (first.username || first.hasSystemAccount);
+          return hasAccount && !firstHasAccount;
+        });
+        setEmployees(deduped);
       }
     };
     window.addEventListener('hl-task-permissions-updated', handleTaskPermUpdated);
@@ -2130,7 +2149,7 @@ export default function App() {
   const handleAddReceipt = (newRec: Receipt) => {
     setReceipts([newRec, ...receipts]);
     dbService.receipts.save(newRec);
-    
+
     // Nếu có dự án kết nối, tăng nhẹ tiến trình ngẫu nhiên
     if (newRec.projectId) {
       const updatedProjs = projects.map(p => {
@@ -2143,6 +2162,28 @@ export default function App() {
       });
       setProjects(updatedProjs);
     }
+  };
+
+  // HANDLERS ĐƠN HÀNG BÁN
+  const handleAddSalesOrder = (order: SalesOrder) => {
+    setSalesOrders(prev => [order, ...prev]);
+    dbService.salesOrders.save(order);
+  };
+
+  const handleDeleteSalesOrder = (id: string) => {
+    setSalesOrders(prev => prev.filter(o => o.id !== id));
+    dbService.salesOrders.delete(id);
+  };
+
+  // HANDLERS ĐƠN MUA HÀNG
+  const handleAddPurchaseOrder = (order: PurchaseOrder) => {
+    setPurchaseOrders(prev => [order, ...prev]);
+    dbService.purchaseOrders.save(order);
+  };
+
+  const handleDeletePurchaseOrder = (id: string) => {
+    setPurchaseOrders(prev => prev.filter(o => o.id !== id));
+    dbService.purchaseOrders.delete(id);
   };
 
   const handleAddCustomer = (newCust: Customer) => {
@@ -3546,6 +3587,7 @@ export default function App() {
               customers={customers}
               currentUser={currentUser}
               employees={employees}
+              salesOrders={salesOrders}
               onAddReceipt={handleAddReceipt}
               onAddPayment={handleAddPayment}
               onApprovePayment={handleApprovePayment}
@@ -3553,6 +3595,11 @@ export default function App() {
               onDeleteCustomer={handleDeleteCustomer}
               onDeleteReceipt={handleDeleteReceipt}
               onDeletePayment={handleDeletePayment}
+              onAddSalesOrder={handleAddSalesOrder}
+              onDeleteSalesOrder={handleDeleteSalesOrder}
+              purchaseOrders={purchaseOrders}
+              onAddPurchaseOrder={handleAddPurchaseOrder}
+              onDeletePurchaseOrder={handleDeletePurchaseOrder}
               initialSubTab={financeSubTab}
               initialDuLieuTab={financeDuLieuTab}
             />
@@ -3618,181 +3665,7 @@ export default function App() {
           {activeTab === 'settings-accounts' && (
             <div className="space-y-6 max-w-5xl mx-auto animate-fadeIn" id="view_accounts_settings_pane">
               
-              {/* form thêm người dùng */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
-                <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-4">
-                  <UserPlus className={`w-4 h-4 ${accentTextClass}`} />
-                  <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                    👤 Thêm tài khoản người dùng mới
-                  </h3>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ position: 'relative', zIndex: 10 }}>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Họ và Tên Nhân Sự *</label>
-                    <input
-                      type="text"
-                      value={newEmpName}
-                      onChange={(e) => {
-                        try {
-                          const name = e.target.value;
-                          setNewEmpName(name);
-                          setNewEmpUsername(generateUsernameWithPhone(name, newEmpPhone));
-                        } catch (err) {
-                          console.error('Error updating name:', err);
-                        }
-                      }}
-                      placeholder="Ví dụ: Hoàng Văn Định"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none focus:border-slate-700 pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Phòng Ban / Tổ Nhóm Công Tác</label>
-                    <input
-                      type="text"
-                      value={newEmpDept}
-                      onChange={(e) => {
-                        try { setNewEmpDept(e.target.value); } catch (err) { console.error('Error updating dept:', err); }
-                      }}
-                      placeholder="Ví dụ: Tổ Mộc số 3, Ban Chỉ Huy"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số Điện Thoại Di Động</label>
-                    <input
-                      type="text"
-                      value={newEmpPhone}
-                      onChange={(e) => {
-                        try {
-                          const phone = e.target.value;
-                          setNewEmpPhone(phone);
-                          setNewEmpUsername(generateUsernameWithPhone(newEmpName, phone));
-                        } catch (err) { console.error('Error updating phone:', err); }
-                      }}
-                      placeholder="0912345xxx"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Tên Đăng Nhập (Username) *</label>
-                    <input
-                      type="text"
-                      value={newEmpUsername}
-                      onChange={(e) => {
-                        try { setNewEmpUsername(e.target.value.toLowerCase().trim()); } catch (err) { console.error('Error updating username:', err); }
-                      }}
-                      placeholder="ndlong"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-emerald-400 font-mono font-bold outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Mật Khẩu *</label>
-                    <input
-                      type="text"
-                      value={newEmpPassword}
-                      onChange={(e) => {
-                        try { setNewEmpPassword(e.target.value); } catch (err) { console.error('Error updating password:', err); }
-                      }}
-                      placeholder="123"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Nhóm Vai Trò (Phân Quyền) *</label>
-                    <select
-                      value={newEmpRoleGroupId}
-                      onChange={(e) => {
-                        try { setNewEmpRoleGroupId(e.target.value); } catch (err) { console.error('Error updating role group:', err); }
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-xs pointer-events-auto"
-                    >
-                      {hrmRoleGroups.map(g => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
-                      ))}
-                    </select>
-                    <p className="text-[9px] text-slate-500 mt-1">Nhân viên sẽ được gán vào nhóm này để nhận quyền module tương ứng</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newEmpName.trim()) {
-                        alert('Vui lòng điền họ và tên nhân sự thiết lập!');
-                        return;
-                      }
-                      const usernameToUse = newEmpUsername.trim() || generateUsernameWithPhone(newEmpName, newEmpPhone);
-                      const newId = `emp_${Date.now()}`;
-
-                      // Tạo đối tượng nhân viên mới
-                      const created: Employee = {
-                        id: newId,
-                        name: newEmpName.trim(),
-                        role: 'engineer', // Legacy field — fallback nếu Role Groups rỗng
-                        roleGroupIds: [newEmpRoleGroupId], // Nguồn sự thật chính cho phân quyền menu
-                        email: `${usernameToUse}@hoanglonglamdong.vn`,
-                        phone: newEmpPhone.trim() || '09xxxxxxxx',
-                        department: newEmpDept.trim() || 'Phòng Ban Liên Quan',
-                        username: usernameToUse,
-                        password: hashPasswordSync(newEmpPassword || '123')
-                      };
-
-                      // Thêm employee vào Role Group đã chọn (Supabase là nguồn sự thật)
-                      try {
-                        const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-                        const hrmRolesList = cached ? JSON.parse(cached) : [];
-                        if (Array.isArray(hrmRolesList)) {
-                          const targetRole = hrmRolesList.find((r: any) => r.id === newEmpRoleGroupId);
-                          if (targetRole) {
-                            targetRole.memberIds = targetRole.memberIds || [];
-                            targetRole.memberIds.push(newId);
-                            // Ghi cache localStorage (2 keys để tương thích reader cũ)
-                            const updated = JSON.stringify(hrmRolesList);
-                            localStorage.setItem('hl_cached_hrm_role_groups', updated);
-                            localStorage.setItem('hl_hrm_roles_v2', updated);
-                            // Sync lên Supabase (nguồn sự thật)
-                            dbService.hrmRoleGroups.save({
-                              id: targetRole.id,
-                              name: targetRole.name,
-                              description: targetRole.description || '',
-                              permissions: targetRole.permissions || {},
-                              memberIds: targetRole.memberIds || [],
-                            }).catch(() => {});
-                          }
-                        }
-                      } catch (e) {
-                        console.error("Lỗi khi thêm nhân viên vào Role Group:", e);
-                      }
-
-                      const updatedList = [...employees, created];
-                      setEmployees(updatedList);
-                      dbService.employees.save(created);
-                      
-                      // Reset local inputs
-                      setNewEmpName('');
-                      setNewEmpUsername('');
-                      setNewEmpPassword('123');
-                      setNewEmpPhone('');
-                      setNewEmpDept('Phòng Dự Án - Xây Dựng');
-                      setNewEmpRole('engineer');
-                      setNewEmpRoleGroupId('role_office');
-
-                      alert(`🎉 Thêm tài khoản người dùng "${created.name}" (${created.username}) thành công!`);
-                    }}
-                    className={`px-5 py-2 text-xs font-black rounded-lg flex items-center gap-1 cursor-pointer transition-all ${accentBgClass}`}
-                  >
-                    <Plus className="w-4 h-4 cursor-pointer" />
-                    Thêm Tài Khoản
-                  </button>
-                </div>
-              </div>
+              {/* Form thêm người dùng đã bị xóa — tạo tài khoản thực hiện qua Hồ sơ Nhân viên trong HRM */}
 
               {/* bảng người dùng */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">

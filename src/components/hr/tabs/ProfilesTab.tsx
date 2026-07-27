@@ -240,10 +240,20 @@ export default function ProfilesTab({
       // Save to Supabase (same ID — upsert, no duplicate)
       await dbService.employees.save(updatedProfile);
 
-      // Update local HR state
-      setEmployees(prev => prev.map(e =>
-        e.id === emp.id ? updatedProfile : e
-      ));
+      // Update local HR state — đảm bảo không tạo duplicate record
+      setEmployees(prev => {
+        const exists = prev.some(e => e.id === emp.id);
+        if (exists) {
+          return prev.map(e => e.id === emp.id ? updatedProfile : e);
+        }
+        // Nếu record không có trong state local (sync issue), thêm vào
+        return [...prev, updatedProfile];
+      });
+
+      // Đánh dấu cache bị invalidate để realtime sync lấy dữ liệu mới
+      window.dispatchEvent(new CustomEvent('hl-system-account-created', {
+        detail: { empId: emp.id, username }
+      }));
 
       // If roleGroupId provided, add employee to the role group
       if (roleGroupId) {

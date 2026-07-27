@@ -289,6 +289,8 @@ export interface Receipt {
   notes: string;
   collector: string;
   attachmentName?: string;
+  salesOrderId?: string;   // Liên kết với đơn hàng bán
+  loaiThu?: 'du_an' | 'ban_hang' | 'de_xuat'; // Phân loại phiếu thu
 }
 
 export interface Payment {
@@ -546,6 +548,69 @@ export interface ProductMaterialItem {
   ghiChu?: string; // Ghi chú chi tiết thêm
 }
 
+// ─── Accounting Product Catalog (Danh mục sản phẩm kế toán) ──────────────────
+export interface AccountingProductItem {
+  id: string;           // Mã SP — khóa chính tự sinh, vd: "SP001"
+  tenSanPham: string;   // Tên sản phẩm
+  donGia: number;       // Đơn giá (đ)
+}
+
+// ─── Sales Order (Đơn hàng bán) ──────────────────────────────────────────────
+export interface SalesOrderItem {
+  stt: number;          // Số thứ tự
+  productId: string;    // FK → AccountingProductItem.id
+  tenSanPham: string;   // Snapshot tên SP
+  donViTinh: string;    // Đơn vị tính
+  soLuong: number;      // Số lượng
+  donGia: number;       // Đơn giá
+  thanhTien: number;    // = soLuong × donGia
+}
+
+export interface SalesOrder {
+  id: string;              // Mã đơn — DH-YYYYMMDD-XXXX
+  customerId: string;      // FK → Customer.id
+  customerName: string;    // Snapshot tên KH
+  customerPhone: string;   // Snapshot SĐT
+  customerAddress: string; // Snapshot địa chỉ
+  items: SalesOrderItem[]; // Chi tiết sản phẩm
+  tongTien: number;        // Tổng tiền đơn hàng
+  thanhToanThucTe: number; // Số tiền đã thanh toán
+  congNo: number;          // Công nợ = tongTien - thanhToanThucTe
+  status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
+  receiptId?: string;      // FK → Receipt (liên kết phiếu thu)
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+// ─── Purchase Order (Đơn mua hàng) ─────────────────────────────────────────────
+export interface PurchaseOrderItem {
+  stt: number;          // Số thứ tự
+  productId: string;    // FK → AccountingProductItem.id
+  tenSanPham: string;   // Snapshot tên SP
+  donViTinh: string;    // Đơn vị tính
+  soLuong: number;      // Số lượng
+  donGia: number;       // Đơn giá
+  thanhTien: number;    // = soLuong × donGia
+}
+
+export interface PurchaseOrder {
+  id: string;               // Mã đơn — PO-YYYYMMDD-XXXX
+  supplierId: string;       // FK → Supplier.id
+  supplierName: string;     // Snapshot tên NCC
+  supplierPhone: string;    // Snapshot SĐT
+  supplierAddress: string;  // Snapshot địa chỉ
+  items: PurchaseOrderItem[]; // Chi tiết sản phẩm
+  tongTien: number;         // Tổng tiền đơn hàng
+  thanhToanThucTe: number;  // Số tiền đã thanh toán
+  congNo: number;           // Công nợ = tongTien - thanhToanThucTe
+  status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
+  paymentId?: string;       // FK → Payment (liên kết phiếu chi)
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
 // ─── Archived Quote Types ─────────────────────────────────────────────────────
 export interface ArchivedQuote {
   id: string;
@@ -729,6 +794,7 @@ export interface Liability {
   paid: number;
   remaining?: number;
   notes?: string;
+  salesOrderId?: string;   // Liên kết với đơn hàng bán
 }
 
 // ─── Chat Group Types ────────────────────────────────────────────────────────

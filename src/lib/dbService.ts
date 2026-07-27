@@ -1443,6 +1443,54 @@ export const dbService = {
     }
   },
 
+  // 14d. ACCOUNTING PRODUCT CATALOG (Danh mục sản phẩm kế toán)
+  accountingProductCatalog: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('accounting_product_catalog', []);
+    },
+    async save(item: any): Promise<void> {
+      await saveSupabase('accounting_product_catalog', item);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('accounting_product_catalog', id);
+    }
+  },
+
+  // 14e. SALES ORDERS (Đơn hàng bán — sync Supabase)
+  salesOrders: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('sales_orders', []);
+    },
+    async save(order: any): Promise<void> {
+      // Supabase không lưu array trực tiếp → items JSON stringify
+      const toSave = { ...order };
+      if (Array.isArray(toSave.items)) {
+        toSave.items = JSON.stringify(toSave.items);
+      }
+      await saveSupabase('sales_orders', toSave);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('sales_orders', id);
+    }
+  },
+
+  // 14f. PURCHASE ORDERS (Đơn mua hàng — sync Supabase)
+  purchaseOrders: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('purchase_orders', []);
+    },
+    async save(order: any): Promise<void> {
+      const toSave = { ...order };
+      if (Array.isArray(toSave.items)) {
+        toSave.items = JSON.stringify(toSave.items);
+      }
+      await saveSupabase('purchase_orders', toSave);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('purchase_orders', id);
+    }
+  },
+
   // 15. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
   attendance: {
     async list(): Promise<any[]> {
