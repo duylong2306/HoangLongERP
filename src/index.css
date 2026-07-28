@@ -179,6 +179,14 @@
   /* Rose custom shade */
   --color-rose-455: #f97ca6;    /* softer rose for text/badges */
 }
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 body {
   background-color: #f8fafc; /* Slate-50 */
   color: #1e293b;
