@@ -1400,7 +1400,7 @@ export default function FinanceManagement({
       setCustomLiabilities(prev => prev.map(l => l.id === existingLiab.id ? updatedLiab : l));
     } else {
       const newLiab: Liability = {
-        id: `liab_${Date.now()}`,
+        id: crypto.randomUUID(),
         name: selSup.name,
         category: 'Nhà Cung Cấp',
         value: tongTien,
