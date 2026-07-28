@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { dbService, invalidateCache } from './lib/dbService';
+import React, { useState, useEffect, useRef } from 'react';
+import { dbService, invalidateCache, normalizeOrderItems } from './lib/dbService';
 import { useWebPush } from './hooks/useWebPush';
 import { createGroupConversation, deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
 import {
@@ -624,16 +624,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               cloudData = await dbService.loadAllCore();
             } catch {
               // Fallback: query từng bảng
-              const [custs, projs, tsks, recs, pays, qtes, pOrders] = await Promise.all([
+              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders] = await Promise.all([
                 dbService.customers.list(), dbService.projects.list(),
                 dbService.tasks.list(), dbService.receipts.list(),
                 dbService.payments.list(), dbService.quotes.list(),
-                dbService.purchaseOrders.list(),
+                dbService.salesOrders.list(), dbService.purchaseOrders.list(),
               ]);
               cloudData = {
                 customers: custs, projects: projs, tasks: tsks,
                 receipts: recs, payments: pays, quotes: qtes,
-                purchase_orders: pOrders,
+                sales_orders: sOrders, purchase_orders: pOrders,
                 business_profile: [], shift_config: [],
               };
             }
@@ -645,6 +645,23 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             const recRows = toCamel(cloudData.receipts || []);
             const payRows = toCamel(cloudData.payments || []);
             const quoteRows = toCamel(cloudData.quotes || []);
+            // Đơn hàng bán / mua: RPC load_all_core_data() ở các bản migration cũ
+            // KHÔNG trả về 2 key này. RPC không báo lỗi trong trường hợp đó, nên
+            // phải kiểm tra tường minh và query bù, nếu không danh sách sẽ trống
+            // → generateSOCode() đếm 0 → mã đơn trùng → upsert ghi đè hàng cũ.
+            let sOrderRaw = cloudData.sales_orders;
+            let pOrderRaw = cloudData.purchase_orders;
+            if (!Array.isArray(sOrderRaw) || !Array.isArray(pOrderRaw)) {
+              console.warn('[Init] RPC load_all_core_data() thiếu sales_orders/purchase_orders — query bù trực tiếp. Hãy chạy migration 015.');
+              const [sFix, pFix] = await Promise.all([
+                Array.isArray(sOrderRaw) ? Promise.resolve(sOrderRaw) : dbService.salesOrders.list().catch(e => { console.error('[Init] Query bù sales_orders thất bại:', e); return []; }),
+                Array.isArray(pOrderRaw) ? Promise.resolve(pOrderRaw) : dbService.purchaseOrders.list().catch(e => { console.error('[Init] Query bù purchase_orders thất bại:', e); return []; }),
+              ]);
+              // dbService.*.list() đã trả về camelCase → không toCamel lần nữa
+              sOrderRaw = sFix; pOrderRaw = pFix;
+            }
+            const sOrderRows = toCamel(sOrderRaw || []).map(normalizeOrderItems);
+            const pOrderRows = toCamel(pOrderRaw || []).map(normalizeOrderItems);
 
             setCustomers(custRows);
             setProjects(projRows.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
@@ -652,11 +669,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             setReceipts(recRows);
             setPayments(payRows);
             setQuotes(quoteRows);
-
-            if (cloudData.purchase_orders) {
-              const poRows = toCamel(cloudData.purchase_orders);
-              setPurchaseOrders(poRows);
-            }
+            setSalesOrders(sOrderRows);
+            setPurchaseOrders(pOrderRows);
+            console.log('[Init] Loaded sales_orders:', sOrderRows.length, 'rows | purchase_orders:', pOrderRows.length, 'rows');
 
             if (cloudData.business_profile?.[0]) {
               const bp = toCamel([cloudData.business_profile[0]])[0];
@@ -1163,7 +1178,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   }, [activeTab]);
 
 
+  const prevBusinessInfoRef = useRef(businessInfo);
   useEffect(() => {
+    if (JSON.stringify(businessInfo) === JSON.stringify(prevBusinessInfoRef.current)) return;
+    prevBusinessInfoRef.current = businessInfo;
     setEditCorpName(businessInfo.companyName);
     setEditCorpTax(businessInfo.taxCode);
     setEditCorpRep(businessInfo.representative);
@@ -2110,16 +2128,21 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   // HANDLERS TÀI CHÍNH
-  const handleAddReceipt = (newRec: Receipt) => {
+  const handleAddReceipt = async (newRec: Receipt) => {
     setReceipts([newRec, ...receipts]);
-    dbService.receipts.save(newRec);
+    try {
+      await dbService.receipts.save(newRec);
+    } catch (err) {
+      console.error('[App] Lỗi lưu phiếu thu lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu phiếu thu ${newRec.code} lên server.`, type: 'error' });
+    }
 
     // Nếu có dự án kết nối, tăng nhẹ tiến trình ngẫu nhiên
     if (newRec.projectId) {
       const updatedProjs = projects.map(p => {
         if (p.id === newRec.projectId) {
           const nextp = { ...p, progress: Math.min(p.progress + 5, 100) };
-          dbService.projects.save(nextp);
+          dbService.projects.save(nextp).catch(e => console.error('[App] Lỗi lưu tiến trình project:', e));
           return nextp;
         }
         return p;
@@ -2129,25 +2152,55 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   // HANDLERS ĐƠN HÀNG BÁN
-  const handleAddSalesOrder = (order: SalesOrder) => {
-    setSalesOrders(prev => [order, ...prev]);
-    dbService.salesOrders.save(order);
+  /**
+   * Lưu đơn hàng bán MỚI. Dùng create() (insert) thay vì save() (upsert) để
+   * đơn mới không bao giờ ghi đè đơn cũ khi mã bị trùng — tầng DB sẽ tự cấp
+   * lại mã. Trả về đơn đã lưu (id có thể khác mã dự kiến), hoặc null nếu lỗi.
+   */
+  const handleAddSalesOrder = async (order: SalesOrder): Promise<SalesOrder | null> => {
+    try {
+      const saved = await dbService.salesOrders.create(order) as SalesOrder;
+      setSalesOrders(prev => [saved, ...prev]);
+      return saved;
+    } catch (err) {
+      console.error('[App] Lỗi lưu đơn hàng bán lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu đơn hàng ${order.id} lên server.`, type: 'error' });
+      return null;
+    }
   };
 
-  const handleDeleteSalesOrder = (id: string) => {
+  const handleDeleteSalesOrder = async (id: string) => {
     setSalesOrders(prev => prev.filter(o => o.id !== id));
-    dbService.salesOrders.delete(id);
+    try {
+      await dbService.salesOrders.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa đơn hàng bán trên Supabase:', err);
+    }
   };
 
   // HANDLERS ĐƠN MUA HÀNG
-  const handleAddPurchaseOrder = (order: PurchaseOrder) => {
-    setPurchaseOrders(prev => [order, ...prev]);
-    dbService.purchaseOrders.save(order);
+  /** Xem chú thích ở handleAddSalesOrder — cùng cơ chế chống ghi đè. */
+  const handleAddPurchaseOrder = async (order: PurchaseOrder): Promise<PurchaseOrder | null> => {
+    console.log('[App] Tạo đơn mua hàng:', order.id);
+    try {
+      const saved = await dbService.purchaseOrders.create(order) as PurchaseOrder;
+      console.log('[App] Lưu đơn mua hàng thành công:', saved.id);
+      setPurchaseOrders(prev => [saved, ...prev]);
+      return saved;
+    } catch (err) {
+      console.error('[App] Lỗi lưu đơn mua hàng lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu đơn mua ${order.id} lên server. Dữ liệu chỉ tạm thời trên trình duyệt.`, type: 'error' });
+      return null;
+    }
   };
 
-  const handleDeletePurchaseOrder = (id: string) => {
+  const handleDeletePurchaseOrder = async (id: string) => {
     setPurchaseOrders(prev => prev.filter(o => o.id !== id));
-    dbService.purchaseOrders.delete(id);
+    try {
+      await dbService.purchaseOrders.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa đơn mua hàng trên Supabase:', err);
+    }
   };
 
   const handleAddCustomer = (newCust: Customer) => {
@@ -2165,19 +2218,32 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     dbService.customers.delete(id);
   };
 
-  const handleAddPayment = (newPay: Payment) => {
+  const handleAddPayment = async (newPay: Payment) => {
     setPayments([newPay, ...payments]);
-    dbService.payments.save(newPay);
+    try {
+      await dbService.payments.save(newPay);
+    } catch (err) {
+      console.error('[App] Lỗi lưu phiếu chi lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu phiếu chi ${newPay.code} lên server.`, type: 'error' });
+    }
   };
 
-  const handleDeleteReceipt = (id: string) => {
+  const handleDeleteReceipt = async (id: string) => {
     setReceipts(prev => prev.filter(r => r.id !== id));
-    dbService.receipts.delete(id).catch(err => console.error("Lỗi xóa phiếu thu:", err));
+    try {
+      await dbService.receipts.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa phiếu thu trên Supabase:', err);
+    }
   };
 
-  const handleDeletePayment = (id: string) => {
+  const handleDeletePayment = async (id: string) => {
     setPayments(prev => prev.filter(p => p.id !== id));
-    dbService.payments.delete(id).catch(err => console.error("Lỗi xóa phiếu chi:", err));
+    try {
+      await dbService.payments.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa phiếu chi trên Supabase:', err);
+    }
   };
 
   const handleApprovePayment = (id: string, status: 'approved' | 'rejected') => {
@@ -3768,7 +3834,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           {/* TAB: CẤU HÌNH GIAO DIỆN (TÁCH RIÊNG) */}
           {activeTab === 'display-settings' && (
             <div className="space-y-6 animate-fadeIn p-4 md:p-6">
-              <DisplaySettingsPage isAdmin={currentUser?.role === 'director' || currentUser?.username === 'admin'} />
+              <DisplaySettingsPage />
             </div>
           )}
 
