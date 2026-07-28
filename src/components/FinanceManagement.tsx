@@ -954,8 +954,9 @@ export default function FinanceManagement({
   }, [poItems]);
 
   const poSupplierData = useMemo(() => {
-    const allSuppliers = suppliersExternalProp && suppliersExternalProp.length > 0
-      ? suppliersExternalProp : suppliers;
+    const allSuppliers = (suppliersExternalProp && suppliersExternalProp.length > 0)
+      ? suppliersExternalProp
+      : (suppliers && suppliers.length > 0) ? suppliers : [];
     const selSup = allSuppliers.find(s => s.id === poSupplierId);
     return { allSuppliers, selSup };
   }, [suppliersExternalProp, suppliers, poSupplierId]);
@@ -1688,6 +1689,25 @@ export default function FinanceManagement({
     localStorage.setItem('hl_acc_suppliers', JSON.stringify(suppliers));
     // Không auto-sync Supabase ở đây — chỉ sync khi user chủ động thêm/sửa/xóa (trong handler)
   }, [suppliers]);
+
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        const list = await dbService.suppliers.list();
+        if (list && list.length > 0) {
+          setSuppliers(list);
+          localStorage.setItem('hl_acc_suppliers', JSON.stringify(list));
+        }
+      } catch (e) {
+        console.warn('Load suppliers from Supabase failed:', e);
+        const saved = localStorage.getItem('hl_acc_suppliers');
+        if (saved) {
+          try { setSuppliers(JSON.parse(saved)); } catch (err) { console.error(err); }
+        }
+      }
+    };
+    loadSuppliers();
+  }, []);
 
   useEffect(() => {
     const handleSuppliersUpdated = async () => {
