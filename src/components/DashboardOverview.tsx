@@ -1126,12 +1126,18 @@ export default function DashboardOverview({
   };
 
   // Confirm Punching slot
-  const handleConfirmPunch = () => {
+  const handleConfirmPunch = async () => {
     if (!activePunchSlot) return;
 
-    // Time punch format e.g. "07:30"
-    const now = new Date();
-    const punchedTime = now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    // ─── Lấy giờ server từ Supabase RPC (chống gian lận giờ client) ───
+    const serverTs = await dbService.fetchServerTimestamp();
+    const now = serverTs ? new Date(serverTs.datetime) : new Date();
+    const punchedTime = serverTs ? serverTs.time : now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    if (serverTs) {
+      console.log('[Punch] Dùng giờ server:', serverTs.datetime);
+    } else {
+      console.warn('[Punch] Fallback giờ client — không lấy được giờ server!');
+    }
 
     // Look for record for current user on 2026-06-06
     const updated = [...attendanceList];
@@ -1274,8 +1280,8 @@ export default function DashboardOverview({
       } catch (err) {}
     }
 
-    // Save to Supabase
-    dbService.attendance.save(todayLog).catch(err =>
+    // Save to Supabase (kèm _serverTime + punchSlot để chống gian lận giờ client)
+    dbService.attendance.save({ ...todayLog, _serverTime: serverTs }, activePunchSlot as any).catch(err =>
       console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
 
     // Update local state for immediate UI feedback

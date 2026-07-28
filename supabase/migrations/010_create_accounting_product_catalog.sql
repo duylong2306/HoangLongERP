@@ -14,17 +14,31 @@ CREATE TABLE IF NOT EXISTS accounting_product_catalog (
 ALTER TABLE accounting_product_catalog ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read access
-CREATE POLICY "Allow public read access to accounting_product_catalog"
-  ON accounting_product_catalog FOR SELECT
-  TO public
-  USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE policyname = 'Allow public read access to accounting_product_catalog'
+  ) THEN
+    CREATE POLICY "Allow public read access to accounting_product_catalog"
+      ON accounting_product_catalog FOR SELECT
+      TO public
+      USING (true);
+  END IF;
+END $$;
 
 -- Allow authenticated users to insert/update/delete
-CREATE POLICY "Allow authenticated users to manage accounting_product_catalog"
-  ON accounting_product_catalog FOR ALL
-  TO authenticated
-  USING (true)
-  WITH CHECK (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE policyname = 'Allow authenticated users to manage accounting_product_catalog'
+  ) THEN
+    CREATE POLICY "Allow authenticated users to manage accounting_product_catalog"
+      ON accounting_product_catalog FOR ALL
+      TO authenticated
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END $$;
 
 -- Create index for faster searches
 CREATE INDEX IF NOT EXISTS idx_accounting_product_catalog_ten_san_pham

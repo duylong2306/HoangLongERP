@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, MapPin, X, Clock, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { dbService } from '../../lib/dbService';
 
 interface CheckInModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export interface CheckInData {
   coords: string | null;
   locationName: string | null;
   method: string;
+  // Server timestamp từ RPC (chống gian lận giờ client)
+  _serverTime?: { date: string; time: string; datetime: string; epoch_ms: number } | null;
 }
 
 type GeoStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -156,20 +159,29 @@ export default function CheckInModal({
     }
   };
 
-  const handleCheckIn = () => {
+  const handleCheckIn = async () => {
+    // Ưu tiên lấy server time từ dbService (chống gian lận giờ client)
     const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    let serverTime: { date: string; time: string; datetime: string; epoch_ms: number } | null = null;
+    try {
+      serverTime = await dbService.fetchServerTimestamp();
+    } catch (err) {
+      console.warn('[CheckInModal] Không thể lấy server time:', err);
+    }
+    const date = serverTime ? serverTime.date : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const time = serverTime ? serverTime.time : `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     onCheckIn({
       empId,
       empName,
-      date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
-      time: timeStr,
+      date,
+      time,
       shift: selectedShift,
       photo,
       coords,
       locationName,
       method: coords ? `GPS (${locationName || 'Đã xác định'})` : 'Thủ công (Không có GPS)',
+      _serverTime: serverTime,
     });
     onClose();
   };

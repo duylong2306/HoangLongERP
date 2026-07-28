@@ -149,7 +149,13 @@ export default function ProfilesTab({
     emp.name.toLowerCase().includes(employeeSearch.toLowerCase()) ||
     emp.position.toLowerCase().includes(employeeSearch.toLowerCase()) ||
     emp.department.toLowerCase().includes(employeeSearch.toLowerCase())
-  );
+  ).sort((a, b) => {
+    // Prioritize "working" status (đang làm) first
+    if (a.status === 'working' && b.status !== 'working') return -1;
+    if (a.status !== 'working' && b.status === 'working') return 1;
+    // Then sort by employee code (mã nhân viên) ascending
+    return a.id.localeCompare(b.id);
+  });
 
   const paginatedEmployees = globalPageSize === 'all'
     ? filteredEmployees

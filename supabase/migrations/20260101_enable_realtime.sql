@@ -16,18 +16,25 @@ WHERE p.pubname = 'supabase_realtime'
 ORDER BY c.relname;
 
 -- BƯỚC 2: Bật Realtime cho tất cả các bảng cần sync
--- Nếu bước 1 trả về rỗng hoặc thiếu bảng → chạy bước 2
-ALTER PUBLICATION supabase_realtime ADD TABLE public.projects;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.payments;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.receipts;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.subcontractor_advances;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.attendance_records;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.employees;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.customers;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.quotes;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.hrm_role_groups;
+-- Dùng EXCEPTION block để bỏ qua nếu bảng đã có trong publication
+DO $$
+DECLARE
+  tbl TEXT;
+  tables_to_add TEXT[] := ARRAY[
+    'projects', 'tasks', 'payments', 'receipts',
+    'subcontractor_advances', 'attendance_records', 'notifications',
+    'employees', 'customers', 'quotes', 'hrm_role_groups'
+  ];
+BEGIN
+  FOREACH tbl IN ARRAY tables_to_add LOOP
+    BEGIN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', tbl);
+      RAISE NOTICE '✅ Added: %', tbl;
+    EXCEPTION WHEN duplicate_object THEN
+      RAISE NOTICE '⏭ Already in publication: %', tbl;
+    END;
+  END LOOP;
+END $$;
 
 -- BƯỚC 3: Verify lại sau khi chạy bước 2
 SELECT

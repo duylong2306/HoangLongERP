@@ -320,12 +320,14 @@ export interface Receipt {
   attachmentName?: string;
   salesOrderId?: string;   // Liên kết với đơn hàng bán
   loaiThu?: 'du_an' | 'ban_hang' | 'de_xuat'; // Phân loại phiếu thu
+  receiptAt?: string;       // Thời gian lập phiếu thu (ISO string)
 }
 
 export interface Payment {
   id: string;
   code: string;
   date: string;
+  paymentAt?: string;      // Thời gian lập phiếu chi tùy chỉnh (ISO string)
   recipient: string; // Nhà cung cấp / nhân viên / thầu phụ
   projectId?: string;
   category: 'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance';
@@ -608,6 +610,7 @@ export interface SalesOrder {
   congNo: number;          // Công nợ = tongTien - thanhToanThucTe
   status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
   receiptId?: string;      // FK → Receipt (liên kết phiếu thu)
+  receiptAt?: string;      // Thời gian lập phiếu thu (ISO string)
   notes?: string;
   createdAt: string;
   createdBy: string;
@@ -823,6 +826,7 @@ export interface Liability {
   category: 'Thầu Phụ' | 'Nhà Cung Cấp' | 'Khác';
   value: number;
   paid: number;
+  paidAt?: string;         // Thời gian thanh toán gần nhất (ISO string)
   remaining?: number;
   notes?: string;
   salesOrderId?: string;   // Liên kết với đơn hàng bán
@@ -1155,12 +1159,14 @@ export interface Receipt {
   attachmentName?: string;
   salesOrderId?: string;   // Liên kết với đơn hàng bán
   loaiThu?: 'du_an' | 'ban_hang' | 'de_xuat'; // Phân loại phiếu thu
+  receiptAt?: string;       // Thời gian lập phiếu thu (ISO string)
 }
 
 export interface Payment {
   id: string;
   code: string;
   date: string;
+  paymentAt?: string;      // Thời gian lập phiếu chi tùy chỉnh (ISO string)
   recipient: string; // Nhà cung cấp / nhân viên / thầu phụ
   projectId?: string;
   category: 'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance';
@@ -1443,6 +1449,7 @@ export interface SalesOrder {
   congNo: number;          // Công nợ = tongTien - thanhToanThucTe
   status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
   receiptId?: string;      // FK → Receipt (liên kết phiếu thu)
+  receiptAt?: string;      // Thời gian lập phiếu thu (ISO string)
   notes?: string;
   createdAt: string;
   createdBy: string;
@@ -1657,6 +1664,7 @@ export interface Liability {
   category: 'Thầu Phụ' | 'Nhà Cung Cấp' | 'Khác';
   value: number;
   paid: number;
+  paidAt?: string;         // Thời gian thanh toán gần nhất (ISO string)
   remaining?: number;
   notes?: string;
   salesOrderId?: string;   // Liên kết với đơn hàng bán
