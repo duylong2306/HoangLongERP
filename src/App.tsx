@@ -239,8 +239,31 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
         hasSystemAccount: true
       };
     }
+    // Enrich roleGroupIds for non-admin users
+    let roleGroupIds = emp.roleGroupIds;
+    if (!roleGroupIds || roleGroupIds.length === 0) {
+      try {
+        const cached = localStorage.getItem('hl_cached_hrm_role_groups');
+        let groups: any[] = [];
+        if (cached) {
+          groups = JSON.parse(cached);
+        }
+        if (!Array.isArray(groups) || groups.length === 0) {
+          const saved = localStorage.getItem('hl_hrm_roles_v2');
+          if (saved) {
+            groups = JSON.parse(saved);
+          }
+        }
+        if (Array.isArray(groups)) {
+          roleGroupIds = groups
+            .filter(g => g.memberIds?.includes(emp.id))
+            .map((g: any) => g.id);
+        }
+      } catch { /* ignore */ }
+    }
     return {
       ...emp,
+      roleGroupIds: roleGroupIds && roleGroupIds.length > 0 ? roleGroupIds : undefined,
       username: emp.username || generateUsername(emp.name),
       password: emp.password || hashPasswordSync('123')
     };
