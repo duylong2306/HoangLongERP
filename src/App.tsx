@@ -3154,41 +3154,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
-        {/* EMERGENCY: Enhanced iPhone visibility - Large, clickable, prominent header */}
-        <header
-          className="
-            /* EMERGENCY: Sufficient bottom padding cho iPhone */
-            pb-16                          /* 64px - hiển thị rõ ràng không bị che khuất */
-
-            /* EMERGENCY: Top padding cho Dynamic Island + Status Bar */
-            pt-8                           /* 32px - perfectly sized cho iPhone */
-
-            /* Base styling với contrast cao */
-            bg-slate-900/95 border-b border-slate-700
-            px-4 md:px-8 py-4              /* Larger padding cho dễ click */
-            flex justify-between items-center shrink-0 shadow-2xl
-
-            /* EMERGENCY: z-index cao để không bị che phủ */
-            relative z-50
-
-            /* Visual enhancement cho visibility cao hơn */
-            backdrop-blur-md
-          "
-          id="top_header_bar"
-        >
+        {/* HEADER TOP-BAR - Compact mobile header - buttons at bottom border */}
+        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 py-3 flex justify-between items-center shrink-0 shadow-lg pb-0.5" id="top_header_bar">
           <div className="flex items-center gap-3">
-            {/* EMERGENCY: Hamburger Button - Enhanced visibility và kích thước */}
+            {/* Hamburger Button */}
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="md:hidden p-3 text-slate-200 hover:text-white hover:bg-slate-800/80 rounded-xl transition-all duration-200 cursor-pointer active:scale-95 min-h-[44px] min-w-[44px] flex items-center justify-center shadow-lg hover:shadow-xl"
-              title="Mở menu chính"
+              className="md:hidden p-1.5 text-slate-450 hover:text-slate-200 hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer"
+              title="Mở menu"
             >
-              {/* EMERGENCY: Hamburger icon lớn hơn */}
-              <Menu className="w-6 h-6 text-slate-100" />
+              <Menu className="w-5 h-5 text-slate-300" />
             </button>
 
-            <span className="text-base md:text-lg font-bold text-slate-100 tracking-tight font-sans truncate min-w-0 flex-1 max-w-[200px] md:max-w-xs bg-slate-800/50 rounded-lg px-3 py-2 flex items-center hover:bg-slate-700/70 transition-all duration-200">
+            <span className="text-sm md:text-base font-extrabold text-slate-100 tracking-tight font-sans truncate max-w-[150px] sm:max-w-xs md:max-w-none">
               {activeTab === 'dashboard' && displaySettings.dashboardTitle}
               {activeTab === 'projects' && 'Quản Lý Mốc Thi Công'}
               {activeTab === 'projects-construction' && 'Dự Án Xây Dựng'}
