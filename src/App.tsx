@@ -3151,7 +3151,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           </div>
         </aside>
 
-      {/* TẤM LÒNG PHẦN KIẾM CHỦ (NỘI DUNG CHÍNH BÊN PHẢI) */}
+      {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
         {/* HEADER TOP-BAR - Added bottom padding to avoid iPhone notch overlap */}
