@@ -2139,22 +2139,26 @@ export default function ProjectKanbanBoard({
                     Trưởng dự án <span className="text-rose-500 font-extrabold">*</span>
                     {columnAssignableId && <span className="text-amber-500 text-[10px] ml-1">(Cột Kanban chỉ định)</span>}
                   </label>
-                  <select
-                    required
-                    value={newProjPm}
-                    onChange={(e) => !columnAssignableId && setNewProjPm(e.target.value)}
-                    disabled={!!columnAssignableId}
-                    className={`w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none transition-colors text-[11px] ${
-                      columnAssignableId
-                        ? 'cursor-not-allowed opacity-60 border-amber-500/30'
-                        : 'cursor-pointer focus:border-emerald-500'
-                    }`}
-                  >
-                    <option value="">-- Chọn Trưởng dự án --</option>
-                    {employees.filter(emp => emp.role === 'pm' || emp.role === 'director').map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.name}</option>
-                    ))}
-                  </select>
+                  {columnAssignableId ? (
+                    <div className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2.5 text-amber-400 outline-none text-[11px] font-semibold flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center flex-shrink-0">
+                        <span className="text-[8px]">✓</span>
+                      </div>
+                      <span>{employees.find(e => e.id === newProjPm)?.name || 'Không xác định'}</span>
+                    </div>
+                  ) : (
+                    <select
+                      required
+                      value={newProjPm}
+                      onChange={(e) => setNewProjPm(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none cursor-pointer focus:border-emerald-500 transition-colors text-[11px]"
+                    >
+                      <option value="">-- Chọn Trưởng dự án --</option>
+                      {employees.filter(emp => emp.role === 'pm' || emp.role === 'director').map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 
