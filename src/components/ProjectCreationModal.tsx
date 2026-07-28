@@ -194,7 +194,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
             columnId: targetCol.id,
             name: title,
             description: `Công việc con được tạo tự động bởi quy trình khi khởi tạo vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-            assignerId: 'system',
+            assignerId: customProject.pmId || 'emp_3',
             assigneeId: assigneeId,
             involvedEmployeeIds: involvedEmployeeIds,
             department: 'Thi công',
