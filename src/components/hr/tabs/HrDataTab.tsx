@@ -96,8 +96,8 @@ interface HrDataTabProps {
   handleDeleteTravelNorm: (id: string) => void;
   setTravelNorms: React.Dispatch<React.SetStateAction<TravelAllowanceNorm[]>>;
 
-  attendanceInitDate: string;
-  setAttendanceInitDate: (v: string) => void;
+  attendanceInitDate: Date;
+  setAttendanceInitDate: (v: Date) => void;
 }
 
 export default function HrDataTab(props: HrDataTabProps) {
@@ -615,18 +615,6 @@ export default function HrDataTab(props: HrDataTabProps) {
                       >
                         <MapPin className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'travel_norms' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
                         <span>Định mức công tác phí</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('attendance_config')}
-                        aria-current={activeHrDataSubTab === 'attendance_config' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'attendance_config' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="attendance_config_tab_trigger"
-                      >
-                        <Clock className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'attendance_config' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>⚙️ Cấu hình Chấm công</span>
                       </button>
                     </li>
                   </ul>
@@ -1966,53 +1954,6 @@ export default function HrDataTab(props: HrDataTabProps) {
               </div>
             )}
 
-            {activeHrDataSubTab === 'attendance_config' && (
-              <div className="space-y-4 animate-fadeIn" id="attendance_config_subpanel">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60 shadow-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-                      <Clock className="w-5 h-5 text-amber-400" />
-                    </div>
-                    <div>
-                      <h4 className="text-white font-bold text-sm">Cấu hình Chấm công</h4>
-                      <p className="text-[11px] text-slate-400">Thiết lập ngày bắt đầu áp dụng chấm công trên hệ thống</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Info className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs text-slate-300 font-bold">Ngày khởi tạo dữ liệu chấm công</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Hệ thống chỉ tự động chốt công (KP/phép/lễ) từ ngày này trở đi.
-                    Các ngày trước ngày này sẽ không bị tạo bản ghi KP tự động.
-                  </p>
-                  <div className="flex items-center gap-4">
-                    <label className="text-[11px] text-slate-400 font-bold">Ngày bắt đầu:</label>
-                    <input
-                      type="date"
-                      value={attendanceInitDate}
-                      onChange={(e) => {
-                        setAttendanceInitDate(e.target.value);
-                        localStorage.setItem('hl_attendance_init_date', e.target.value);
-                      }}
-                      className="bg-slate-950 border border-slate-800 text-white rounded-lg px-3 py-2 text-xs font-bold cursor-pointer hover:border-amber-500 focus:outline-none focus:border-amber-500 transition-colors"
-                    />
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      (hiện tại: {attendanceInitDate})
-                    </span>
-                  </div>
-                  <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg p-3 mt-4">
-                    <p className="text-[10px] text-amber-400/80 font-medium">
-                      ⚠️ Lưu ý: Sau khi thay đổi, hệ thống sẽ áp dụng cho tất cả đợt chốt công tự động tiếp theo.
-                      Ngày đã thiết lập chỉ có hiệu lực cho tương lai, không xóa dữ liệu cũ đã chốt.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
               </div>
   );
 }

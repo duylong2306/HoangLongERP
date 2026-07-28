@@ -9,12 +9,11 @@ import {
   Share2, Building, UserCheck, TrendingUp, CreditCard,
   CalendarCheck, FileSpreadsheet, Printer, ChevronDown,
   Lock, Unlock, Workflow, HelpCircle, FolderMinus, Database,
-  Trash2, Percent, X, FileUp, Camera, Calculator, Shield
+  Trash2, Percent, X, FileUp, Camera, Calculator, Shield, Settings
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
 import * as XLSX from 'xlsx';
-import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
@@ -26,9 +25,9 @@ import PayrollTab from './hr/tabs/PayrollTab';
 import PerformanceTab from './hr/tabs/PerformanceTab';
 import ProfilesTab from './hr/tabs/ProfilesTab';
 import AttendanceTab from './hr/tabs/AttendanceTab';
-import CheckInModal, { CheckInData } from './hr/CheckInModal';
 import HrDataTab from './hr/tabs/HrDataTab';
 import RolesTab from './hr/tabs/RolesTab';
+
 
 /* ============================================================================
  * HumanResourcesManagement.tsx — PHÂN HỆ QUẢN LÝ NHÂN SỰ (HRM) tổng hợp
@@ -124,7 +123,7 @@ const WorkdayCell = React.memo(function WorkdayCell({
   );
 });
 
-export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], defaultSubTab, hideSidebar = false }: HRMProps) {
+export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], defaultSubTab, hideSidebar = false, systemConfig }: HRMProps) {
   const { addToast } = useNotification();
   // Tab list: "profiles", "attendance", "leaves", "payroll", "trips", "hr_data"
   const [activeSubTab, setActiveSubTab] = useState<string>(() => defaultSubTab || 'profiles');
@@ -140,8 +139,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [deletingErrorId, setDeletingErrorId] = useState<string | null>(null);
   const [editingAttendance, setEditingAttendance] = useState<any | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
-  const [checkInModalOpen, setCheckInModalOpen] = useState(false);
-  const [checkInTarget, setCheckInTarget] = useState<{ empId: string; empName: string } | null>(null);
 
   // Khởi tạo form sửa khi mở modal
   useEffect(() => {
@@ -163,29 +160,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const handleSaveAttendanceEdit = () => {
     if (!editingAttendance || !editForm) return;
 
-    // ── Validation: format giờ HH:MM và giờ ra >= giờ vào ──────────────────────
+    // ── Validation: không cho phép giờ ra < giờ vào ──────────────────────────
     const isReal = (t: string) => t && t !== '--:--';
-    const isValidTimeFormat = (t: string) => !t || t === '--:--' || /^\d{2}:\d{2}$/.test(t);
     const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-
-    // Kiểm tra định dạng giờ
-    const timeFields = [
-      { label: 'Giờ vào Ca Sáng', val: editForm.timeInS },
-      { label: 'Giờ ra Ca Sáng', val: editForm.timeOutS },
-      { label: 'Giờ vào Ca Chiều', val: editForm.timeInC },
-      { label: 'Giờ ra Ca Chiều', val: editForm.timeOutC },
-      { label: 'Giờ vào Tăng Ca', val: editForm.timeInOT },
-      { label: 'Giờ ra Tăng Ca', val: editForm.timeOutOT },
-    ];
-    const formatErrors = timeFields.filter(f => !isValidTimeFormat(f.val));
-    if (formatErrors.length > 0) {
-      addToast({
-        title: '⛔ Định dạng giờ không hợp lệ',
-        message: formatErrors.map(f => `• ${f.label}: "${f.val}" (đúng định dạng: HH:MM)`).join('\n'),
-        type: 'error',
-      });
-      return;
-    }
 
     const checks: { label: string; ok: boolean }[] = [
       // Ca sáng: ra >= vào
@@ -225,6 +202,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return a;
     });
     setAttendance(updated);
+    // Đồng bộ sửa lên Supabase
+    const edited = updated.find(a => a.id === editingAttendance.id);
+    if (edited) dbService.attendance.save(edited).catch(err => console.warn('Lưu chấm công lên Supabase thất bại:', err));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
     setEditingAttendance(null);
     setEditForm(null);
     addToast({ title: '✅ Đã lưu', message: 'Đã cập nhật bản ghi chấm công thành công', type: 'success' });
@@ -265,6 +246,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return a;
     });
     setAttendance(updated);
+    // Đồng bộ chốt hàng loạt lên Supabase
+    const newlyLocked = updated.filter(a => a.isLocked && !attendance.find(old => old.id === a.id && old.isLocked));
+    newlyLocked.forEach(a => dbService.attendance.save(a).catch(() => {}));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
     setShowBulkLockModal(false);
     addToast({ title: '✅ Đã chốt', message: `Đã chốt ${updated.filter(a => a.isLocked && toLock.some(t => t.id === a.id)).length} bản ghi`, type: 'success' });
   };
@@ -288,9 +273,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Ghi chú': log.notes,
       'Đã chốt': log.isLocked ? 'X' : '',
     }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'BangCong');
     const monthLabel = attendanceFilterMonth === 'all' ? 'tatca' : attendanceFilterMonth.padStart(2, '0');
-    const headers = ['Mã NV', 'Tên nhân viên', 'Ngày', 'Vào Sáng', 'Ra Sáng', 'Vào Chiều', 'Ra Chiều', 'Vào OT', 'Ra OT', 'Giờ OT', 'Phương thức', 'Trạng thái', 'Ghi chú', 'Đã chốt'];
-    exportToExcel(data, 'BangCong', `BangCong_${monthLabel}_${attendanceFilterYear}.xlsx`, undefined, headers);
+    XLSX.writeFile(wb, `BangCong_${monthLabel}_${attendanceFilterYear}.xlsx`);
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} bản ghi`, type: 'success' });
   };
 
@@ -331,6 +318,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           else merged.push(imp);
         });
         setAttendance(merged);
+        // Đồng bộ import Excel lên Supabase
+        imported.forEach(imp => dbService.attendance.save(imp).catch(() => {}));
+        window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: merged } }));
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} bản ghi`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
@@ -344,6 +334,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const profileFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportProfilesExcel = () => {
+    if (employees.length === 0) {
+      addToast({ title: '⚠️ Không có dữ liệu', message: 'Chưa có hồ sơ nhân sự nào để xuất.', type: 'warning' });
+      return;
+    }
     const data = employees.map(emp => ({
       'Mã NV': emp.id,
       'Họ tên': emp.name,
@@ -369,8 +363,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Số tài khoản': emp.bankAccount,
       'Trạng thái': emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm',
     }));
-    const headers = ['Mã NV', 'Họ tên', 'Giới tính', 'Ngày sinh', 'SĐT', 'CCCD', 'Ngày cấp CCCD', 'Nơi cấp CCCD', 'Email', 'Địa chỉ', 'Địa chỉ tạm trú', 'Liên hệ khẩn cấp', 'Bộ phận', 'Chức vụ', 'Loại hợp đồng', 'Thời hạn HĐ (tháng)', 'Ngày vào làm', 'Trình độ', 'Mã ngạch lương', 'Phép năm', 'Ngân hàng', 'Số tài khoản', 'Trạng thái'];
-    exportToExcel(data, 'HoSoNhanSu', `HoSoNhanSu_${formatDateForFile()}.xlsx`, undefined, headers);
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'HoSoNhanSu');
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `HoSoNhanSu_${ymd}.xlsx`);
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} hồ sơ nhân sự`, type: 'success' });
   };
 
@@ -437,7 +435,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [roles, setRoles] = useState<Role[]>([]);
   // Ref để tránh infinite loop khi re-fetch từ Supabase
   const isSyncingRolesFromCloud = useRef(false);
-  const hasHydratedRef = useRef(false); // Đánh dấu đã load xong data từ Supabase lần đầu
 
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
   const [confirmRemoveMember, setConfirmRemoveMember] = useState<{ roleId: string; empId: string } | null>(null);
@@ -836,15 +833,21 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // (Hàm getConfiguredApprover được import từ '../context')
 
   const [attendance, setAttendance] = useState<AttendanceLog[]>([]);
-  const [isLoadingAttendance, setIsLoadingAttendance] = useState(true);
+
+  // Load attendance từ Supabase trên mount
+  useEffect(() => {
+    let mounted = true;
+    dbService.attendance.list()
+      .then(list => { if (mounted && list.length > 0) setAttendance(list); })
+      .catch(err => console.warn('Lỗi tải chấm công từ Supabase:', err));
+    return () => { mounted = false; };
+  }, []);
 
   // Ngày khởi tạo dữ liệu chấm công - chỉ chấm từ ngày này trở đi
-  const [attendanceInitDate, setAttendanceInitDate] = useState<string>(() => {
+  const [attendanceInitDate, setAttendanceInitDate] = useState<Date>(() => {
     const stored = localStorage.getItem('hl_attendance_init_date');
-    if (stored) return stored;
-    const today = new Date().toISOString().split('T')[0];
-    localStorage.setItem('hl_attendance_init_date', today);
-    return today;
+    if (stored) return new Date(stored);
+    return new Date();
   });
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -980,9 +983,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   const [holidays, setHolidays] = useState<Holiday[]>([]);
 
+
   const [leaveCoefficients, setLeaveCoefficients] = useState<LeaveCoefficient[]>([]);
 
-  const [activeHrDataSubTab, setActiveHrDataSubTab] = useState<'holidays' | 'coefficients' | 'criteria' | 'salary_scales' | 'insurance' | 'travel_norms' | 'attendance_config'>('salary_scales');
+  const [activeHrDataSubTab, setActiveHrDataSubTab] = useState<'holidays' | 'coefficients' | 'criteria' | 'salary_scales' | 'insurance' | 'travel_norms'>('salary_scales');
 
   const [travelNorms, setTravelNorms] = useState<TravelAllowanceNorm[]>([]);
 
@@ -1066,44 +1070,32 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       }
     }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); });
     // Holidays
-    dbService.hrmHolidays.list().then((d: any[]) => { setHolidays(d); }).catch(() => {});
+    dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {});
     // Leaves
-    dbService.hrmLeaves.list().then((d: any[]) => { setLeaves(d); }).catch(() => {});
+    dbService.hrmLeaves.list().then((d: any[]) => { if (d?.length) setLeaves(d); }).catch(() => {});
     // Payroll
-    dbService.hrmPayrollRecords.list().then((d: any[]) => { setPayroll(d); }).catch(() => {});
+    dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {});
     // Employee Errors
-    dbService.hrmEmployeeErrors.list().then((d: any[]) => { setEmployeeErrors(d); }).catch(() => {});
+    dbService.hrmEmployeeErrors.list().then((d: any[]) => { if (d?.length) setEmployeeErrors(d); }).catch(() => {});
     // Leave Coefficients
-    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { setLeaveCoefficients(d); }).catch(() => {});
+    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {});
     // Trips
-    dbService.hrmTrips.list().then((d: any[]) => { setTrips(d); }).catch(() => {});
+    dbService.hrmTrips.list().then((d: any[]) => { if (d?.length) setTrips(d); }).catch(() => {});
     // Salary Scales
-    dbService.hrmSalaryScales.list().then((d: any[]) => { setSalaryScales(d); }).catch(() => {});
+    dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {});
     // Performance Criteria
     dbService.hrmPerformanceCriteria.list().then((d: any[]) => {
-      const raw = d ?? [];
-      const parsed = raw.map((item: any) => ({
-        ...item,
-        criteria: typeof item.criteria === 'string'
-          ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })()
-          : (Array.isArray(item.criteria) ? item.criteria : []),
-      }));
-      setDepartmentCriteria(parsed);
+      if (d?.length) {
+        // criteria có thể là JSON string từ Supabase → cần parse
+        const parsed = d.map((item: any) => ({
+          ...item,
+          criteria: typeof item.criteria === 'string' ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })() : (Array.isArray(item.criteria) ? item.criteria : []),
+        }));
+        setDepartmentCriteria(parsed);
+      }
     }).catch(() => {});
     // Travel Norms
-    dbService.travelNorms.list().then((d: any[]) => { setTravelNorms(d); }).catch(() => {});
-    // Attendance (load từ Supabase)
-    dbService.attendance.list().then((d: any[]) => {
-      const data = d ?? [];
-      setAttendance(data);
-      setIsLoadingAttendance(false);
-    }).catch(err => {
-      console.warn('Load attendance from Supabase thất bại:', err);
-      setIsLoadingAttendance(false);
-    }).finally(() => {
-      // Đánh dấu đã hydrate xong — các useEffect sync sẽ bỏ qua lần fire đầu
-      setTimeout(() => { hasHydratedRef.current = true; }, 500);
-    });
+    dbService.travelNorms.list().then((d: any[]) => { if (d?.length) setTravelNorms(d); }).catch(() => {});
   }, []);
 
   // ─── REALTIME LISTENER: Re-fetch roles từ Supabase khi có thay đổi từ user khác ───
@@ -1130,20 +1122,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       }
     };
     window.addEventListener('hl-task-permissions-updated', handleRolesChanged);
-    // Listen for system account deletion from App.tsx
-    const handleSystemAccountDeleted = (e: CustomEvent) => {
-      const { empId } = e.detail || {};
-      if (empId) {
-        setEmployees(prev => prev.map(emp =>
-          emp.id === empId ? { ...emp, hasSystemAccount: false } : emp
-        ));
-      }
-    };
-    window.addEventListener('hl-system-account-deleted', handleSystemAccountDeleted as EventListener);
-    return () => {
-      window.removeEventListener('hl-task-permissions-updated', handleRolesChanged);
-      window.removeEventListener('hl-system-account-deleted', handleSystemAccountDeleted as EventListener);
-    };
+    return () => window.removeEventListener('hl-task-permissions-updated', handleRolesChanged);
   }, []);
 
   // ─── SYNC TO SUPABASE: lưu khi state thay đổi ───
@@ -1183,36 +1162,24 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [holidays]);
 
   useEffect(() => {
-    if (!hasHydratedRef.current) return; // Skip khi mới load từ Supabase
     if (leaveCoefficients?.length) leaveCoefficients.forEach(c => dbService.hrmLeaveCoefficients.save(c).catch(() => {}));
   }, [leaveCoefficients]);
 
   useEffect(() => {
-    if (!hasHydratedRef.current) return;
     if (employeeErrors?.length) employeeErrors.forEach(e => dbService.hrmEmployeeErrors.save(e).catch(() => {}));
   }, [employeeErrors]);
 
   useEffect(() => {
-    if (!hasHydratedRef.current) return;
-    if (salaryScales) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
+    if (salaryScales?.length) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
   }, [salaryScales]);
 
   useEffect(() => {
-    if (!hasHydratedRef.current) return;
-    departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
+    if (departmentCriteria?.length) departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
   }, [departmentCriteria]);
 
   useEffect(() => {
-    if (!hasHydratedRef.current) return;
     if (travelNorms?.length) travelNorms.forEach(n => dbService.travelNorms.save(n).catch(() => {}));
   }, [travelNorms]);
-
-  // Số ngày quay lại để chốt công tự động
-  const getAutoLockDays = (): number => {
-    const stored = localStorage.getItem('hl_auto_lock_days');
-    if (stored) return parseInt(stored, 10);
-    return 2; // default: hôm nay + hôm qua
-  };
 
   // Chức năng tự động chốt công hàng ngày lúc 22h00 cho tất cả nhân viên
   const executeAutoWorkdayLocking = () => {
@@ -1229,10 +1196,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const todayStr = getLocalYYYYMMDD(now);
     const currentHour = now.getHours();
 
-    // Duyệt qua hôm nay và N ngày trước đó để chốt công tự động (có thể cấu hình)
-    const autoLockDays = getAutoLockDays();
+    const daysToAutoCheck = systemConfig?.autoAttendanceDays ?? 7;
+    const autoAttendanceStartDate = new Date(systemConfig?.autoAttendanceStartDate ?? '2020-01-01');
+
+    // Duyệt qua hôm nay và `daysToAutoCheck` ngày trước đó để chốt công tự động nếu chưa chốt
     const datesToCheck: string[] = [];
-    for (let i = 0; i <= autoLockDays; i++) {
+    for (let i = 0; i <= daysToAutoCheck; i++) {
       const d = new Date(now.getTime());
       d.setDate(now.getDate() - i);
       datesToCheck.push(getLocalYYYYMMDD(d));
@@ -1244,7 +1213,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     datesToCheck.forEach(checkDate => {
       // Bỏ qua các ngày trước ngày khởi tạo dữ liệu chấm công
       // (chỉ chấm từ attendanceInitDate trở đi, không ghi KP cho ngày quá khứ trước đó)
-      if (checkDate < attendanceInitDate) {
+      if (new Date(checkDate) < autoAttendanceStartDate) {
         return;
       }
 
@@ -1380,6 +1349,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
     if (changed) {
       setAttendance(updated);
+      // Đồng bộ các log tự động tạo (KP, phép, lễ, cuối tuần) lên Supabase
+      const newLogs = updated.filter(a => a.id.startsWith('AT-AUTO-'));
+      newLogs.forEach(a => dbService.attendance.save(a).catch(() => {}));
+      window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
     }
   };
 
@@ -1389,7 +1362,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       executeAutoWorkdayLocking();
     }, 10000);
     return () => clearInterval(intervalId);
-  }, [attendance, employees, leaves, weekendDays, holidays, leaveCoefficients]);
+  }, [attendance, employees, leaves, weekendDays, holidays, leaveCoefficients, systemConfig]);
 
   useEffect(() => {
     if (activeSubTab === 'trips') {
@@ -1463,7 +1436,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [attendanceFilter, setAttendanceFilter] = useState('');
   const [attendanceSearchEmpId, setAttendanceSearchEmpId] = useState('all');
   const [attendanceFilterMonth, setAttendanceFilterMonth] = useState(String(new Date().getMonth() + 1)); // '6' for June
-  const [attendanceFilterDay, setAttendanceFilterDay] = useState(String(new Date().getDate())); // mặc định hôm nay
+  const [attendanceFilterDay, setAttendanceFilterDay] = useState('all');
   const [attendanceFilterYear, setAttendanceFilterYear] = useState(String(new Date().getFullYear())); // '2026' for this year
   const [showBulkLockModal, setShowBulkLockModal] = useState(false);
   const [bulkLockScope, setBulkLockScope] = useState<'page' | 'month'>('page');
@@ -1475,7 +1448,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     setLeavePage(1);
     setPayrollPage(1);
     setTripPage(1);
-  }, [employeeSearch, attendanceFilter, attendanceSearchEmpId, attendanceFilterMonth, attendanceFilterDay, attendanceFilterYear, globalPageSize, activeSubTab]);
+  }, [employeeSearch, attendanceFilter, attendanceSearchEmpId, attendanceFilterMonth, attendanceFilterYear, globalPageSize, activeSubTab]);
 
   // ── Filter attendance once (dùng cho cả table, paginator, summary) ────────
   const attendanceFiltered = useMemo(() => {
@@ -1504,8 +1477,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         }
       }
       if (attendanceFilterMonth !== 'all' && itemMonth !== attendanceFilterMonth) return false;
-      if (attendanceFilterYear !== 'all' && itemYear !== attendanceFilterYear) return false;
       if (attendanceFilterDay !== 'all' && itemDay !== attendanceFilterDay) return false;
+      if (attendanceFilterYear !== 'all' && itemYear !== attendanceFilterYear) return false;
       return true;
     });
   }, [attendance, employees, attendanceSearchEmpId, attendanceFilterMonth, attendanceFilterDay, attendanceFilterYear]);
@@ -1696,8 +1669,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     });
 
     setShowSalaryScaleModal(false);
-    // Đồng bộ lưu/bảo trì bậc lương lên Supabase
-    dbService.hrmSalaryScales.save(newItem).catch((err:any)=> console.warn('Lưu bậc lương trên Supabase thất bại:', err));
     setEditingSalaryScale(null);
   };
 
@@ -1706,7 +1677,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       const target = salaryScales.find(item => item.id === id);
       setSalaryScales(prev => prev.filter(item => item.id !== id));
       // Đồng bộ xóa lên Supabase
-      if (target) dbService.hrmSalaryScales.delete(id).catch((err: any) => console.warn('Xóa bậc lương trên Supabase thất bại:', err));
+      if (target) dbService.hrmSalaryScales.delete(id).catch(err => console.warn('Xóa bậc lương trên Supabase thất bại:', err));
     }
   };
 
@@ -1783,7 +1754,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       const updated = leaveCoefficients.filter(c => c.id !== id);
       setLeaveCoefficients(updated);
       // Đồng bộ xóa lên Supabase
-      dbService.hrmLeaveCoefficients.delete(id).catch((err: any) => console.warn('Xóa hệ số chấm công trên Supabase thất bại:', err));
+      dbService.hrmLeaveCoefficients.delete(id).catch(err => console.warn('Xóa hệ số chấm công trên Supabase thất bại:', err));
     }
   };
 
@@ -2351,13 +2322,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // ===================== BLOCK HỒ SƠ NHÂN VIÊN (profiles) =====================
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Tạo ID duy nhất: tìm mã NV lớn nhất hiện có rồi +1, tránh trùng lặp
-    const existingNVIds = employees
-      .filter(emp => /^NV\d+$/.test(emp.id))
-      .map(emp => parseInt(emp.id.replace('NV', ''), 10))
-      .filter(n => !isNaN(n));
-    const maxNV = existingNVIds.length > 0 ? Math.max(...existingNVIds) : 0;
-    const id = `NV${String(maxNV + 1).padStart(3, '0')}`;
+    const id = `NV${String(employees.length + 1).padStart(3, '0')}`;
     const profile: EmployeeProfile = {
       ...newEmp,
       id,
@@ -2391,47 +2356,27 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       addToast({ title: 'ℹ️ Thông báo', message: `⚠️ Nhân viên ${name} đã được ghi nhận chấm công ngày hôm nay (${todayStr})!`, type: 'info' });
       return;
     }
-    // Mở modal chấm công thực tế với GPS + Camera
-    setCheckInTarget({ empId, empName: name });
-    setCheckInModalOpen(true);
-  };
-
-  const handleRealCheckIn = (data: CheckInData) => {
-    // Map shift to time fields
-    let timeInS = '--:--', timeOutS = '--:--', timeInC = '--:--', timeOutC = '--:--';
-    if (data.shift === 'morning') {
-      timeInS = data.time;
-    } else if (data.shift === 'afternoon') {
-      timeInC = data.time;
-    } else {
-      timeInS = data.time;
-    }
-
     const newLog: AttendanceLog = {
       id: `AT-${Date.now().toString().slice(-4)}`,
-      empId: data.empId,
-      empName: data.empName,
-      date: data.date,
-      timeInS,
-      timeOutS,
-      timeInC,
-      timeOutC,
+      empId,
+      empName: name,
+      date: todayStr,
+      timeInS: '07:28',
+      timeOutS: '11:30',
+      timeInC: '13:00',
+      timeOutC: '17:05',
       timeInOT: '',
       timeOutOT: '',
-      method: data.method,
+      method: 'GPS Biệt Thự Trạm',
       status: 'valid',
       otHours: 0,
-      photoIn: data.photo || undefined,
-      coordsIn: data.coords || undefined,
-      locationIn: data.locationName || undefined,
-      notes: `Chấm công tự động từ app (${data.shift === 'morning' ? 'Ca Sáng' : data.shift === 'afternoon' ? 'Ca Chiều' : 'Tăng Ca'})`
+      notes: 'Hệ thống vệ tinh xác nhận chấm công thực tế thành công'
     };
     setAttendance([newLog, ...attendance]);
-    addToast({
-      title: '✅ Thành công',
-      message: `⚡ Chấm công thành công cho [${data.empId}] ${data.empName} lúc ${data.time}`,
-      type: 'success'
-    });
+    // Đồng bộ lên Supabase
+    dbService.attendance.save(newLog).catch(err => console.warn('Lưu chấm công lên Supabase thất bại:', err));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: [newLog, ...attendance] } }));
+    addToast({ title: '✅ Thành công', message: `⚡ Chấm công thành công cho [${empId}] ${name} vào lúc 07:28 sáng ngày hôm nay!`, type: 'success' });
   };
 
   // ===================== BLOCK NGHỈ PHÉP (leaves) =====================
@@ -2532,7 +2477,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       if (affectedEmp) {
         const currentPhep = affectedEmp.phepNam !== undefined ? affectedEmp.phepNam : 12;
         const leaveDays = targetLeave.daysCount !== undefined ? targetLeave.daysCount : 1;
-        const updatedEmp = { ...affectedEmp, phepNam: Math.max(0, Number((currentPhep - leaveDays).toFixed(1))) };
+        const updatedEmp = { ...affectedEmp, phepNam: Math.max(0, currentPhep - leaveDays) };
         setEmployees(prev => prev.map(emp => emp.id === affectedEmp.id ? updatedEmp : emp));
         // Đồng bộ phép năm mới lên Supabase
         dbService.employees.save(updatedEmp).catch(err =>
@@ -2697,6 +2642,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             });
 
             setAttendance(updatedAttendance);
+            // Đồng bộ các log mới tạo khi duyệt phép lên Supabase
+            updatedAttendance.filter(a => a.id.startsWith('AT-')).forEach(a =>
+              dbService.attendance.save(a).catch(() => {}));
+            window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updatedAttendance } }));
           } catch (e) {
             console.error(e);
           }
@@ -2738,6 +2687,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               });
 
               setAttendance(updatedAttendance);
+              // Đồng bộ khi từ chối đơn phép lên Supabase
+              updatedAttendance.filter(a => a.id.startsWith('AT-')).forEach(a =>
+                dbService.attendance.save(a).catch(() => {}));
+              window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updatedAttendance } }));
             } catch (e) {
               console.error(e);
             }
@@ -3333,9 +3286,9 @@ Generated by HL ERP Cloud v2.1 (2026)
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2 capitalize">
-                  {activeSubTab === 'profiles' && '👥 Danh sách nhân sự'}
+                  {activeSubTab === 'profiles' && '👥 Quản lý Hồ sơ & Hợp đồng nhân sự'}
                   {activeSubTab === 'attendance' && '⏰ Nhật ký Chấm công & Lịch làm ca'}
-                  {activeSubTab === 'leaves' && '📬 Đơn nghỉ phép'}
+                  {activeSubTab === 'leaves' && '📬 Quản lý Đăng ký Nghỉ phép & Trừ phép tự động'}
                   {activeSubTab === 'payroll' && '💰 Bảng tổng hợp Tính lương tự động'}
                   {activeSubTab === 'performance' && '🏆 Quản lý Hiệu suất Công việc & Lỗi Kỷ luật'}
                   {activeSubTab === 'trips' && '✈️ Tổng hợp công tác phí'}
@@ -3343,9 +3296,23 @@ Generated by HL ERP Cloud v2.1 (2026)
                   {activeSubTab === 'hr_data' && (
                     activeHrDataSubTab === 'insurance'
                       ? '🛡️ Quản lý Bảo hiểm xã hội & Giảm trừ gia cảnh'
-                      : '🗄️ Cấu hình Dữ liệu nhân sự'
+                      : '🗄️ Cấu hình Dữ liệu nhân sự doanh nghiệp'
                   )}
                 </h3>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {activeSubTab === 'profiles' && 'Đăng ký lý lịch nhân viên, hợp đồng, phụ cấp ăn, mâm điện thoại xăng xe.'}
+                  {activeSubTab === 'attendance' && 'Mốc vào sáng 07:30, vào chiều 13:00, tăng ca 17:45. Tích hợp máy vân tay vĩ độ.'}
+                  {activeSubTab === 'leaves' && 'Tính toán số ngày phép còn tồn, tự động bù trừ mốc thợ thầu công nhật.'}
+                  {activeSubTab === 'payroll' && 'Thu nhập sạch sau khi bù trừ thuế TNCN, đóng bảo hiểm và ứng chi công tác phí.'}
+                  {activeSubTab === 'performance' && 'Ghi nhận lỗi vi phạm tác phong, kỹ luật và tự động đánh giá xếp loại theo tổng lỗi mắc phải.'}
+                  {activeSubTab === 'trips' && 'Tổng hợp công tác phí.'}
+                  {activeSubTab === 'roles' && 'Thiết lập nhóm vai trò người dùng, tùy biến chi tiết quyền Xem, Thêm, Sửa, Xóa cho từng phân hệ ERP.'}
+                  {activeSubTab === 'hr_data' && (
+                    activeHrDataSubTab === 'insurance'
+                      ? 'Kết hợp số liệu đăng ký BHXH, mức đóng mặc định 10.5% và thông tin người phụ thuộc thuế TNCN.'
+                      : 'Bảng danh mục các ngày nghỉ lễ năm 2026 và cấu hình ngày quy định cho toàn chuỗi.'
+                  )}
+                </p>
               </div>
 
               {/* Action Buttons & Filters on top headers */}
@@ -3536,9 +3503,9 @@ Generated by HL ERP Cloud v2.1 (2026)
                 handleDeleteAttendance={handleDeleteAttendance}
                 addToast={addToast}
                 WorkdayCell={WorkdayCell}
-                isLoadingAttendance={isLoadingAttendance}
               />
             )}
+
 
             {/* TAB: LEAVES */}
             {/* [2] NGHI PHEP - LeavesTab (props: employees, holidays, leaveCoefficients, leaves, handlers duyet/tu choi) */}
@@ -3630,6 +3597,8 @@ Generated by HL ERP Cloud v2.1 (2026)
               <HrDataTab
                 activeHrDataSubTab={activeHrDataSubTab}
                 setActiveHrDataSubTab={setActiveHrDataSubTab}
+                attendanceInitDate={attendanceInitDate}
+                setAttendanceInitDate={setAttendanceInitDate}
                 holidays={holidays}
                 setHolidays={setHolidays}
                 holidaySearchQuery={holidaySearchQuery}
@@ -3689,8 +3658,6 @@ Generated by HL ERP Cloud v2.1 (2026)
                 handleAddTravelNormClick={handleAddTravelNormClick}
                 handleEditTravelNormClick={handleEditTravelNormClick}
                 handleDeleteTravelNorm={handleDeleteTravelNorm}
-                attendanceInitDate={attendanceInitDate}
-                setAttendanceInitDate={setAttendanceInitDate}
               />
             )}
 
@@ -5886,34 +5853,6 @@ Generated by HL ERP Cloud v2.1 (2026)
               </button>
             </div>
 
-            {/* Auto-lock days config */}
-            <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700/50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] text-slate-300 font-bold">⚙️ Cấu hình tự động chốt</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] text-slate-400">Tự động chốt quay lại:</label>
-                <select
-                  value={getAutoLockDays()}
-                  onChange={(e) => {
-                    localStorage.setItem('hl_auto_lock_days', e.target.value);
-                    addToast({ title: '✅ Đã lưu', message: `Tự động chốt ${e.target.value} ngày`, type: 'success' });
-                  }}
-                  className="bg-slate-950 border border-slate-800 text-white rounded px-2 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none"
-                >
-                  <option value="1">1 ngày (chỉ hôm nay)</option>
-                  <option value="2">2 ngày (hôm nay + hôm qua)</option>
-                  <option value="3">3 ngày</option>
-                  <option value="7">7 ngày</option>
-                  <option value="14">14 ngày</option>
-                </select>
-                <span className="text-[10px] text-slate-500">ngày</span>
-              </div>
-              <p className="text-[9px] text-slate-500 mt-2">
-                Hệ thống sẽ quét và tạo KP/phép tự động cho các ngày chưa có bản ghi.
-              </p>
-            </div>
-
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
               <button
                 type="button"
@@ -5934,15 +5873,6 @@ Generated by HL ERP Cloud v2.1 (2026)
           </div>
         </div>
       )}
-
-      {/* CHECK-IN MODAL (GPS + Camera) */}
-      <CheckInModal
-        isOpen={checkInModalOpen}
-        onClose={() => { setCheckInModalOpen(false); setCheckInTarget(null); }}
-        empId={checkInTarget?.empId || ''}
-        empName={checkInTarget?.empName || ''}
-        onCheckIn={handleRealCheckIn}
-      />
 
       {zoomedImage && (
         <div

@@ -144,3 +144,32 @@ export const DEFAULT_QUOTE_CONFIG: QuoteConfig = {
 };
 
 export const INITIAL_QUOTES: Quote[] = [];
+
+export const DEFAULT_SYSTEM_CONFIG = {
+  morningIn: '07:30',
+  morningOut: '11:30',
+  afternoonIn: '13:00',
+  afternoonOut: '17:00',
+  overtimeIn: '17:45',
+  overtimeOut: '20:45',
+  autoAttendanceDays: 7,
+  autoAttendanceStartDate: '2020-01-01',
+  allowedLateMinutes: 15,
+  otMultiplier: 1.5,
+  gpsRadiusAllowed: 50,
+  weekendDays: [0, 6], // CN và T7
+  punchOpenBeforeMinutes: 15,
+  punchCloseAfterMinutes: 15,
+  punchOutOpenBeforeMinutes: 15,
+  punchOutCloseAfterMinutes: 15,
+  otPunchOpenBeforeMinutes: 15,
+  otPunchCloseAfterMinutes: 15,
+  otPunchOutOpenBeforeMinutes: 15,
+  otPunchOutCloseAfterMinutes: 15,
+  antiFakeCam: true,
+  directorBaseSalary: 0,
+  pmBaseSalary: 0,
+  accountantBaseSalary: 0,
+  staffBaseSalary: 0,
+  constructionSites: [],
+};

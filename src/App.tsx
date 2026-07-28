@@ -26,10 +26,12 @@ import {
   INITIAL_RECEIPTS,
   INITIAL_PAYMENTS,
   INITIAL_QUOTES,
-  DEFAULT_QUOTE_CONFIG
+  DEFAULT_QUOTE_CONFIG,
+  DEFAULT_SYSTEM_CONFIG
 } from './data';
 
 // CONTEXT PROVIDERS (required by child components)
+import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { isUserInRoleGroup } from './context';
@@ -55,6 +57,7 @@ import DirectorDashboard from './components/DirectorDashboard';
 import Login from './components/Login';
 import UserProfileModal from './components/UserProfileModal';
 import MessagesView from './components/MessagesView';
+import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
 import { 
@@ -98,6 +101,7 @@ import {
   X,
   Menu,
   RefreshCw,
+  Calendar,
   User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -335,10 +339,6 @@ const stripPassword = (emp: any) => {
 };
 
 export default function App() {
-  // ── Trạng thái khởi tạo: hiển thị splash screen trong khi load data từ Supabase ──
-  const [isInitializing, setIsInitializing] = useState(true);
-
-  // 1. Cấu hình Phân quyền từng vai trò
   const [toasts, setToasts] = useState<any[]>([]);
 
   const addToast = (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => {
@@ -356,6 +356,34 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const [employees, setEmployees] = useState<Employee[]>([]);
+
+  return (
+    <DisplaySettingsProvider>
+      <AppContent
+        toasts={toasts} setToasts={setToasts} addToast={addToast} removeToast={removeToast}
+        employees={employees} setEmployees={setEmployees}
+      />
+    </DisplaySettingsProvider>
+  );
+}
+
+interface AppContentProps {
+  toasts: { id: string; title: string; message: string; type?: string; duration?: number }[];
+  setToasts: React.Dispatch<React.SetStateAction<{ id: string; title: string; message: string; type?: string; duration?: number }[]>>;
+  addToast: (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
+  removeToast: (id: string) => void;
+  employees: Employee[];
+  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
+}
+
+function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEmployees }: AppContentProps) {
+  // ── Trạng thái khởi tạo: hiển thị splash screen trong khi load data từ Supabase ──
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // 1. Cấu hình Phân quyền từng vai trò
+
+  const { displaySettings } = useDisplaySettings();
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>(() => {
     const saved = localStorage.getItem('hl_role_permissions');
     if (saved) {
@@ -386,7 +414,7 @@ export default function App() {
         'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
         'subcontractor-office', 'subcontractor-management',
         'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor',
-        'system-office', 'settings-accounts', 'settings-roles', 'settings'
+        'system-office', 'settings-accounts', 'settings-roles', 'settings', 'display-settings'
       ],
       accountant: [
         'dashboard',
@@ -431,40 +459,6 @@ export default function App() {
     localStorage.setItem('hl_role_permissions', JSON.stringify(rolePermissions));
   }, [rolePermissions]);
 
-  // 2. Cấu hình Hiển thị (Màu chủ đạo, Slogan, Tên nhãn hiệu, Giao diện, Font chữ)
-  const [displaySettings, setDisplaySettings] = useState(() => {
-    const saved = localStorage.getItem('hl_display_settings');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          primaryAccent: 'emerald',
-          logoText: 'HL',
-          brandName: 'Hoàng Long',
-          brandSlogan: 'Lâm Đồng ERP',
-          dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
-          motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
-          fontFamily: 'Inter',
-          ...parsed
-        };
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return {
-      primaryAccent: 'emerald', // emerald, sky, indigo, amber, rose, violet
-      logoText: 'HL',
-      brandName: 'Hoàng Long',
-      brandSlogan: 'Lâm Đồng ERP',
-      dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
-      motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
-      fontFamily: 'Inter' // Inter, Roboto, Be Vietnam Pro, Nunito, Lora, Fira Sans
-    };
-  });
-
-  useEffect(() => {
-    localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
-  }, [displaySettings]);
 
   // Helper cho Màu chủ đạo hiển thị động
   const accentTextClass = 
@@ -694,7 +688,6 @@ export default function App() {
   }, []);
 
   // Khối Dữ Liệu Nhân Viên — KHÔNG cache localStorage để tránh lộ thông tin nhạy cảm
-  const [employees, setEmployees] = useState<Employee[]>([]);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -1042,26 +1035,9 @@ export default function App() {
   // ========== CÁC TRẠNG THÁI FORM CHO MODULE CÀI ĐẶT TÙY BIẾN =========
   const [subSettingsTab, setSubSettingsTab] = useState<'business' | 'shift' | 'display' | 'supabase'>('business');
 
-  const [hrmConfig, setHrmConfig] = useState(() => ({
-    morningIn: '07:30',
-    morningOut: '11:30',
-    afternoonIn: '13:00',
-    afternoonOut: '17:00',
-    overtimeIn: '17:45',
-    overtimeOut: '20:45',
-    gpsRadiusAllowed: 50,
-    antiFakeCam: true,
-    punchOpenBeforeMinutes: 15,
-    punchCloseAfterMinutes: 15,
-    punchOutOpenBeforeMinutes: 15,
-    punchOutCloseAfterMinutes: 15,
-    otPunchOpenBeforeMinutes: 15,
-    otPunchCloseAfterMinutes: 15,
-    otPunchOutOpenBeforeMinutes: 15,
-    otPunchOutCloseAfterMinutes: 15,
-    allowedLateMinutes: 15,
-    weekendDays: [0] as number[],
-  }));
+  const [hrmConfig, setHrmConfig] = useState(() => DEFAULT_SYSTEM_CONFIG);
+
+  // Điều chỉnh hiển thị (Display Settings)
 
   // ─── Helper tính toán phút từ chuỗi "HH:MM" ───
   const timeToMinutes = (timeStr: string): number => {
@@ -1123,11 +1099,6 @@ export default function App() {
   const [hrmRoleGroups, setHrmRoleGroups] = useState<{ id: string; name: string }[]>(() => readHrmRoleGroups());
 
   // Điều chỉnh hiển thị
-  const [editLogoText, setEditLogoText] = useState(displaySettings.logoText);
-  const [editBrandName, setEditBrandName] = useState(displaySettings.brandName);
-  const [editBrandSlogan, setEditBrandSlogan] = useState(displaySettings.brandSlogan);
-  const [editDashboardTitle, setEditDashboardTitle] = useState(displaySettings.dashboardTitle);
-  const [editMotivationQuote, setEditMotivationQuote] = useState(displaySettings.motivationQuote);
 
   // Hồ sơ doanh nghiệp
   const [editCorpName, setEditCorpName] = useState(businessInfo.companyName);
@@ -1191,13 +1162,6 @@ export default function App() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    setEditLogoText(displaySettings.logoText);
-    setEditBrandName(displaySettings.brandName);
-    setEditBrandSlogan(displaySettings.brandSlogan);
-    setEditDashboardTitle(displaySettings.dashboardTitle);
-    setEditMotivationQuote(displaySettings.motivationQuote);
-  }, [displaySettings]);
 
   useEffect(() => {
     setEditCorpName(businessInfo.companyName);
@@ -1381,7 +1345,7 @@ export default function App() {
           localStorage.setItem('hl_business_info', JSON.stringify(profile));
         }
         const config = await dbService.shiftConfig.get();
-        if (config) setHrmConfig(config);
+        if (config) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...config }));
       } catch {}
     };
 
@@ -1459,7 +1423,7 @@ export default function App() {
       } catch {}
       try {
         const config = await dbService.shiftConfig.get();
-        if (config) setHrmConfig(config);
+        if (config) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...config }));
       } catch {}
       try { setEmployees(await dbService.employees.list()); } catch {}
       try {
@@ -2398,7 +2362,7 @@ export default function App() {
     'warehouse-office': ['material-coordination', 'warehouse-suppliers', 'warehouse-management'],
     'subcontractor-office': ['subcontractor-management'],
     'library-office': ['quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'],
-    'system-office': ['settings-accounts', 'settings-roles', 'settings'],
+    'system-office': ['settings-accounts', 'settings-roles', 'settings', 'display-settings'],
     'director-office': ['director-dashboard'],
   };
 
@@ -2450,7 +2414,7 @@ export default function App() {
     if (allowedSet.size === 0) return false;
 
     // Giám đốc luôn giữ quyền Cài đặt hệ thống để không tự khóa mình ra ngoài
-    if (isAdminGroup && (tab === 'settings' || tab === 'settings-accounts' || tab === 'settings-roles')) return true;
+    if (isAdminGroup && (tab === 'settings' || tab === 'settings-accounts' || tab === 'settings-roles' || tab === 'display-settings')) return true;
 
     // Các tab thuộc phòng giám đốc chỉ có Giám đốc được xem
     if (tab.startsWith('director-') && tab !== 'director-office' && tab !== 'director-dashboard') {
@@ -2937,6 +2901,12 @@ export default function App() {
                       <Sliders className="w-5 h-5 shrink-0 text-violet-500 mr-2 transition duration-75" />
                       Cài Đặt Hệ Thống
                     </button>
+                    {isAccessible('display-settings') && (
+                      <button onClick={() => { setActiveTab('display-settings'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center px-2 py-2 mt-1 rounded-lg cursor-pointer transition-colors ${activeTab === 'display-settings' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+                        <Palette className="w-5 h-5 shrink-0 text-fuchsia-500 mr-2 transition duration-75" />
+                        Cấu Hình Giao Diện
+                      </button>
+                    )}
                   </li>
                 )}
               </ul>
@@ -3373,7 +3343,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setShowUserMenu(false); setActiveTab('settings'); setSubSettingsTab('display'); }}
+                    onClick={() => { setShowUserMenu(false); setActiveTab('display-settings'); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-indigo-400 hover:bg-indigo-950/40 cursor-pointer transition-colors"
                   >
                     <Palette className="w-4 h-4 shrink-0" />
@@ -3634,6 +3604,7 @@ export default function App() {
               projects={projects} 
               customers={customers} 
               defaultSubTab={hrSubTab}
+              systemConfig={hrmConfig}
             />
           )}
 
@@ -3650,12 +3621,13 @@ export default function App() {
                 <p className="text-[11px] text-slate-400 mb-4 leading-relaxed">
                   Thiết lập các quyền thao tác (Xem, Thêm, Sửa, Xóa) chi tiết cho từng vai trò và phòng ban được đồng bộ trực tiếp từ phân hệ Quản trị Nhân sự (HRM). Thay đổi quyền hạn tại đây sẽ áp dụng ngay lập tức cho toàn bộ người dùng trong hệ thống.
                 </p>
-                <HumanResourcesManagement 
-                  currentUser={currentUser} 
-                  projects={projects} 
-                  customers={customers} 
-                  defaultSubTab="roles" 
+                <HumanResourcesManagement
+                  currentUser={currentUser}
+                  projects={projects}
+                  customers={customers}
+                  defaultSubTab="roles"
                   hideSidebar={true}
+                  systemConfig={hrmConfig}
                 />
               </div>
             </div>
@@ -3793,6 +3765,13 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB: CẤU HÌNH GIAO DIỆN (TÁCH RIÊNG) */}
+          {activeTab === 'display-settings' && (
+            <div className="space-y-6 animate-fadeIn p-4 md:p-6">
+              <DisplaySettingsPage isAdmin={currentUser?.role === 'director' || currentUser?.username === 'admin'} />
+            </div>
+          )}
+
           {/* TAB 7: CÀI ĐẶT TÙY BIẾN TOÀN DIỆN (THEO YÊU CẦU MỚI) */}
           {activeTab === 'settings' && (
             <div className="space-y-6 animate-fadeIn" id="corporate_settings_panel">
@@ -3828,209 +3807,9 @@ export default function App() {
                 </button>
               </div>
 
-              {/* PHẦN 2: CÀI ĐẶT HIỂN THỊ */}
-              {subSettingsTab === 'display' && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg max-w-4xl space-y-6" id="view_display_settings_pane">
                   
-                  <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-                    <Palette className={`w-4 h-4 ${accentTextClass}`} />
-                    <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                      Cấu hình Giao Diện, Sắc Màu Chủ Đạo & Phông Chữ Hệ Thống
-                    </h3>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-2">
-                    {/* CHỌN TONE MÀU & FONT */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4">
-
-                      {/* 🎨 CHỌN MÀU SẮC CHỦ ĐẠO */}
-                      <div className="pt-3.5 border-t border-slate-900">
-                        <label className="block text-[11px] text-slate-300 font-black uppercase font-mono mb-2">
-                          🎨 TÔNG MÀU CHỦ ĐẠO HỆ THỐNG
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { key: 'emerald', label: 'Emerald Green', desc: 'Lâm Đồng', style: 'bg-emerald-500' },
-                            { key: 'sky', label: 'Sky Blue', desc: 'Mây Đà Lạt', style: 'bg-sky-500' },
-                            { key: 'indigo', label: 'Marine Blue', desc: 'Xanh thẳm', style: 'bg-indigo-500' },
-                            { key: 'amber', label: 'Mộc Amber', desc: 'Vân gỗ sồi', style: 'bg-amber-500' },
-                            { key: 'rose', label: 'Rose Gold', desc: 'Ấm áp', style: 'bg-rose-500' },
-                            { key: 'violet', label: 'Amethyst', desc: 'Thủy chung', style: 'bg-violet-500' }
-                          ].map((clProps) => (
-                            <button
-                              key={clProps.key}
-                              type="button"
-                              onClick={() => {
-                                setDisplaySettings({
-                                  ...displaySettings,
-                                  primaryAccent: clProps.key as any
-                                });
-                              }}
-                              className={`p-2 rounded-lg border text-center transition-all cursor-pointer group flex flex-col items-center justify-center ${
-                                displaySettings.primaryAccent === clProps.key
-                                  ? 'bg-slate-900 border-slate-500 text-white shadow font-bold scale-101'
-                                  : 'bg-slate-950/60 border-slate-850 hover:bg-slate-900 text-slate-400'
-                              }`}
-                            >
-                              <span className={`w-3.5 h-3.5 rounded-full ${clProps.style} mb-1.5 ring-2 ring-slate-950 block`}></span>
-                              <span className="text-[9.5px] font-black tracking-wide block leading-tight">{clProps.label}</span>
-                              <span className="text-[7.5px] text-slate-500 block">{clProps.desc}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* ✍️ CHỌN FONT CHỮ */}
-                      <div className="pt-3.5 border-t border-slate-900">
-                        <label className="block text-[11px] text-slate-300 font-black uppercase font-mono mb-2">
-                          ✍️ CHỌN PHÔNG CHỮ ĐỒNG NHẤT (GOOGLE FONTS VIỆT)
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { key: 'Inter', label: '1. Inter', desc: 'Sắc nét, đa năng' },
-                            { key: 'Roboto', label: '2. Roboto', desc: 'Hiện đại, dễ nhìn' },
-                            { key: 'Be Vietnam Pro', label: '3. Be Vietnam Pro', desc: 'Thiết kế cho tiếng Việt' },
-                            { key: 'Nunito', label: '4. Nunito', desc: 'Tròn trịa, thanh tao' },
-                            { key: 'Lora', label: '5. Lora (Serif)', desc: 'Có chân, chữ sách' },
-                            { key: 'Fira Sans', label: '6. Fira Sans', desc: 'Rõ ràng, chuyên nghiệp' }
-                          ].map((fontOpt) => (
-                            <button
-                              key={fontOpt.key}
-                              type="button"
-                              onClick={() => {
-                                setDisplaySettings({
-                                  ...displaySettings,
-                                  fontFamily: fontOpt.key
-                                });
-                              }}
-                              className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                                (displaySettings.fontFamily || 'Inter') === fontOpt.key
-                                  ? 'bg-slate-900 border-slate-500 text-white shadow font-bold scale-101'
-                                  : 'bg-slate-950/60 border-slate-850 hover:bg-slate-900 text-slate-400'
-                              }`}
-                              style={{ fontFamily: fontOpt.key }}
-                            >
-                              <span className="text-[10px] font-bold block">{fontOpt.label}</span>
-                              <span className="text-[7.5px] text-slate-500 block leading-tight">{fontOpt.desc}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                    </div>
-
-                    {/* chỉnh sửa text thương hiệu */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4">
-                      <label className="block text-[11px] text-slate-300 font-black uppercase font-mono">
-                        📝 Thay Đổi Danh Xưng & Khẩu Hiệu Bảng Biển
-                      </label>
-
-                      <div className="space-y-3">
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Viết Tắt Logo (2 Ký Tự)</label>
-                          <input
-                            type="text"
-                            maxLength={3}
-                            value={editLogoText}
-                            onChange={(e) => setEditLogoText(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full font-mono font-bold outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Tên Thương Hiệu Chính (Sidebar)</label>
-                          <input
-                            type="text"
-                            value={editBrandName}
-                            onChange={(e) => setEditBrandName(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Slogan Thương Hiệu Kèm Theo</label>
-                          <input
-                            type="text"
-                            value={editBrandSlogan}
-                            onChange={(e) => setEditBrandSlogan(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Khẩu Hiện Động Có Sức Truyền Cảm Hứng (Chân Sidebar)</label>
-                          <textarea
-                            value={editMotivationQuote}
-                            onChange={(e) => setEditMotivationQuote(e.target.value)}
-                            rows={2}
-                            className="bg-slate-900 border border-slate-805 text-xs text-slate-300 rounded p-1.5 px-2.5 w-full outline-none resize-none font-semibold leading-normal"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Tiêu Đề Trang Tổng Quan (Dashboard Title Banner)</label>
-                          <input
-                            type="text"
-                            value={editDashboardTitle}
-                            onChange={(e) => setEditDashboardTitle(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full outline-none"
-                          />
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-
-                  {/* ACTION SAVE */}
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-800 bg-slate-950/20 p-4 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm('Bạn có muốn khôi phục hiển thị và câu từ về định danh gốc của Hoàng Long ERP không?')) {
-                          const original = {
-                            primaryAccent: 'emerald',
-                            logoText: 'HL',
-                            brandName: 'Hoàng Long',
-                            brandSlogan: 'Lâm Đồng ERP',
-                            dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
-                            motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
-                            fontFamily: 'Inter'
-                          };
-                          setDisplaySettings(original as any);
-                          localStorage.setItem('hl_display_settings', JSON.stringify(original));
-                          alert('🌈 Trả về các thông số hiển thị mặc định của Hoàng Long ERP thành công!');
-                        }
-                      }}
-                      className="text-xs text-slate-500 hover:text-rose-500 font-bold transition-all bg-slate-100 border border-slate-200 p-2 px-4 rounded-xl"
-                    >
-                      🔄 TRẢ VỀ ĐỊNH DANH MẶC ĐỊNH
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const payload = {
-                          primaryAccent: displaySettings.primaryAccent,
-                          logoText: editLogoText.trim() || 'HL',
-                          brandName: editBrandName.trim() || 'Hoàng Long',
-                          brandSlogan: editBrandSlogan.trim() || 'Lâm Đồng ERP',
-                          dashboardTitle: editDashboardTitle.trim() || 'Hệ Thống Chỉ Số Doanh Nghiệp',
-                          motivationQuote: editMotivationQuote.trim() || '"May mắn đứng về phía người dám đương đầu."',
-                          fontFamily: displaySettings.fontFamily || 'Inter'
-                        };
-                        setDisplaySettings(payload as any);
-                        localStorage.setItem('hl_display_settings', JSON.stringify(payload));
-                        alert('💾 Đã áp dụng & lưu cấu hình toàn bộ các câu chữ thương hiệu và tone màu mới!');
-                      }}
-                      className={`px-6 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer shadow-md ${accentBgClass}`}
-                    >
-                      💾 LƯU CẤU HÌNH HIỂN THỊ
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* PHẦN 3: CÀI ĐẶT THÔNG TIN DOANH NGHIỆP */}
+                            {/* PHẦN 3: CÀI ĐẶT THÔNG TIN DOANH NGHIỆP */}
               {subSettingsTab === 'business' && (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg max-w-4xl space-y-6" id="view_business_info_pane">
                   
@@ -4461,6 +4240,55 @@ export default function App() {
                             })}
                           </tbody>
                         </table>
+                      </div>
+                    </div>
+
+                    {/* ───────── Tự động chấm công (Auto Attendance) ───────── */}
+                    <div className="pt-2 border-t border-slate-850">
+                      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                        <Calendar className={`w-4 h-4 ${accentTextClass}`} />
+                        <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
+                          TỰ ĐỘNG CHẤM CÔNG (AUTO ATTENDANCE)
+                        </h3>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/60 border border-slate-850 rounded-lg p-3 mt-3">
+                        Hệ thống sẽ tự động tạo các bản ghi chấm công (time-in/time-out) cho nhân viên dựa trên cấu hình ca và số ngày quy định. Điều này hữu ích cho việc chấm công hàng loạt hoặc cho các trường hợp đặc biệt.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số ngày tự động chấm công trước ngày hiện tại</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            value={hrmConfig.autoAttendanceDays}
+                            onChange={(e) => {
+                              const updated = { ...hrmConfig, autoAttendanceDays: parseInt(e.target.value) || 7 };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Ví dụ: 7 = tự động chấm công cho 7 ngày trước (mặc định)</p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Ngày bắt đầu áp dụng tự động chấm công</label>
+                          <input
+                            type="date"
+                            value={(typeof hrmConfig.autoAttendanceStartDate === 'string' ? hrmConfig.autoAttendanceStartDate : (hrmConfig.autoAttendanceStartDate || new Date().toISOString().split('T')[0]))}
+                            onChange={(e) => {
+                              const updated = { ...hrmConfig, autoAttendanceStartDate: e.target.value };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Hệ thống sẽ chỉ tự động chấm công từ ngày này trở đi</p>
+                        </div>
                       </div>
                     </div>
 
@@ -4896,4 +4724,4 @@ export default function App() {
       </NotificationProvider>
     </AuthProvider>
   );
-}
+} // Close AppContent function

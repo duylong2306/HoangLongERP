@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal } from '../types';
+import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
 import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover } from '../context';
 import { dbService } from '../lib/dbService';
+import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
   CheckSquare, 
   Clock, 
@@ -62,15 +63,22 @@ export default function DashboardOverview({
   onAddPayment,
 }: DashboardProps) {
 
+
   // --- PHẦN 1: BỘ LỌC CÔNG VIỆC THEO USER ĐANG ĐĂNG NHẬP (& PHÂN QUYỀN TRUY CẬP) ---
-  const getTodayString = () => {
+  const getTodayString = useCallback(() => {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const r = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${r}`;
-  };
+  }, []);
+
   const [todayVal, setTodayVal] = useState(getTodayString());
+
+  // Update todayVal when getTodayString changes (e.g. at midnight)
+  useEffect(() => {
+    setTodayVal(getTodayString());
+  }, [getTodayString]);
 
   // 1.1 Công việc cần duyệt (Tasks needing approval)
   // Director & Accountant có thể duyệt tất cả Reviewing tasks hoặc pending approvals.
@@ -313,49 +321,8 @@ export default function DashboardOverview({
 
 
   // --- PHẦN 3: HỆ THỐNG CHẤM CÔNG BIOMETRIC FACEID & GPS ---
-  interface SystemConfig {
-    morningIn: string; morningOut: string; afternoonIn: string; afternoonOut: string;
-    overtimeIn: string; overtimeOut: string;
-    gpsRadiusAllowed: number; antiFakeCam: boolean; otMultiplier: number;
-    directorBaseSalary: number; pmBaseSalary: number; accountantBaseSalary: number; staffBaseSalary: number;
-    punchOpenBeforeMinutes: number; punchCloseAfterMinutes: number;
-    punchOutOpenBeforeMinutes: number; punchOutCloseAfterMinutes: number;
-    otPunchOpenBeforeMinutes: number; otPunchCloseAfterMinutes: number;
-    otPunchOutOpenBeforeMinutes: number; otPunchOutCloseAfterMinutes: number;
-    allowedLateMinutes: number; weekendDays: number[];
-    constructionSites: string[];
-  }
-  const [config, setConfig] = useState<SystemConfig>({
-    morningIn: '07:30',
-    morningOut: '11:30',
-    afternoonIn: '13:00',
-    afternoonOut: '17:00',
-    overtimeIn: '17:45',
-    overtimeOut: '20:45',
-    gpsRadiusAllowed: 50,
-    antiFakeCam: true,
-    otMultiplier: 1.5,
-    directorBaseSalary: 45000000,
-    pmBaseSalary: 22000000,
-    accountantBaseSalary: 18000000,
-    staffBaseSalary: 14000000,
-    punchOpenBeforeMinutes: 30,
-    punchCloseAfterMinutes: 30,
-    punchOutOpenBeforeMinutes: 30,
-    punchOutCloseAfterMinutes: 30,
-    otPunchOpenBeforeMinutes: 30,
-    otPunchCloseAfterMinutes: 30,
-    otPunchOutOpenBeforeMinutes: 30,
-    otPunchOutCloseAfterMinutes: 30,
-    allowedLateMinutes: 15,
-    weekendDays: [0],
-    constructionSites: [
-      'Công trình Blue Sky',
-      'Xưởng mộc Hoàng Long',
-      'Bộ phận văn phòng chính',
-      'Biệt thự SS400 Cát Lái'
-    ]
-  });
+  // Placeholder - SystemConfig is now imported from types.ts
+  const [config, setConfig] = useState<SystemConfig>(DEFAULT_SYSTEM_CONFIG);
 
   // Load config từ Supabase khi mount
   useEffect(() => {
@@ -377,23 +344,7 @@ export default function DashboardOverview({
     };
   }, []);
 
-  const [attendanceList, setAttendanceList] = useState<any[]>(() => {
-    const wiped = localStorage.getItem('hl_hrm_attendance_force_wiped_v7');
-    if (!wiped) {
-      localStorage.removeItem('hl_hrm_attendance_v3');
-      localStorage.setItem('hl_hrm_attendance_force_wiped_v7', 'true');
-      return [];
-    }
-    const saved = localStorage.getItem('hl_hrm_attendance_v3');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.warn("Error parsing saved attendance data in dashboard overview", e);
-      }
-    }
-    return [];
-  });
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
 
   // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
   const isSyncingFromCloud = useRef(false);
@@ -412,18 +363,6 @@ export default function DashboardOverview({
       .catch(err => console.warn('Lỗi khi tải chấm công từ Supabase:', err));
     return () => { mounted = false; };
   }, []);
-
-  // Persist attendanceList changes to localStorage (LUÔN) + Supabase (CHỈ KHI user action)
-  useEffect(() => {
-    if (!attendanceList || attendanceList.length === 0) return;
-    localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(attendanceList));
-    // Nếu update đến từ cloud (Realtime/mount) → KHÔNG save lại Supabase — tránh vòng lặp
-    if (isSyncingFromCloud.current) return;
-    // Non-blocking save last record to Supabase (chỉ khi user check-in/check-out)
-    const lastRec = attendanceList[attendanceList.length - 1];
-    dbService.attendance.save(lastRec).catch(err =>
-      console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
-  }, [attendanceList]);
 
   const [selectedDayDetail, setSelectedDayDetail] = useState<{ date: string; log: any; holidayName?: string } | null>(null);
 
@@ -446,11 +385,11 @@ export default function DashboardOverview({
   }, []);
 
   // Dispatch changes made dynamically within the Dashboard module to the HRM module
-  useEffect(() => {
+  /* useEffect(() => {
     if (attendanceList) {
       window.dispatchEvent(new CustomEvent('hl_attendance_changed_from_dashboard', { detail: attendanceList }));
     }
-  }, [attendanceList]);
+  }, [attendanceList]); */
 
   const timeToMinutes = (timeStr: string): number => {
     if (!timeStr) return 0;
@@ -517,11 +456,11 @@ export default function DashboardOverview({
                     log.notes?.toLowerCase().includes('off');
     if (isLeave) return { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
 
-    const targetInS = timeToMinutes(config.morningIn || '07:30');
-    const targetOutS = timeToMinutes(config.morningOut || '11:30');
-    const targetInC = timeToMinutes(config.afternoonIn || '13:00');
-    const targetOutC = timeToMinutes(config.afternoonOut || '17:00');
-    const allowedLates = config.allowedLateMinutes ?? 15;
+    const targetInS = timeToMinutes(config?.morningIn || '07:30');
+    const targetOutS = timeToMinutes(config?.morningOut || '11:30');
+    const targetInC = timeToMinutes(config?.afternoonIn || '13:00');
+    const targetOutC = timeToMinutes(config?.afternoonOut || '17:00');
+    const allowedLates = config?.allowedLateMinutes ?? 15;
 
     // 1. Ca Sáng
     if (log.timeInS && log.timeInS !== '--:--' && log.timeInS !== '' && !['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS)) {
@@ -579,6 +518,7 @@ export default function DashboardOverview({
 
   const empId = getEmployeeId(currentUser.name);
 
+
   const [hrmEmployees, setHrmEmployees] = useState<any[]>(() => {
     const saved = localStorage.getItem('hl_hrm_employees_v3');
     return saved ? JSON.parse(saved) : [];
@@ -612,6 +552,38 @@ export default function DashboardOverview({
     return null;
   };
 
+  const handleManualReset = () => {
+    if (!confirm('Bạn có chắc chắn muốn reset dữ liệu chấm công cho ngày hiện tại (' + todayVal + ')?')) return;
+
+    const updatedList = attendanceList.map((a: any) => {
+        if (a.date === todayVal) {
+             return {
+              ...a,
+              timeInS: '--:--',
+              timeOutS: '--:--',
+              timeInC: '--:--',
+              timeOutC: '--:--',
+              timeInOT: '--:--',
+              timeOutOT: '--:--',
+              status: 'valid',
+              otHours: 0,
+              notes: 'Reset thủ công ngày ' + todayVal
+            };
+        }
+        return a;
+    });
+    setAttendanceList(updatedList);
+
+    // Save to Supabase
+    const todayRecord = updatedList.find(r => r.date === todayVal);
+    if (todayRecord) {
+      dbService.attendance.save(todayRecord).catch(err =>
+        console.warn('Lỗi khi lưu reset chấm công lên Supabase:', err));
+    }
+
+    alert('Đã reset dữ liệu chấm công ngày ' + todayVal);
+  }
+
   // Digital clock
   const [digitalTime, setDigitalTime] = useState('');
   const [digitalDate, setDigitalDate] = useState('');
@@ -629,14 +601,14 @@ export default function DashboardOverview({
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [getTodayString]);
 
   // Automatic 6 AM reset
-  useEffect(() => {
+  /* useEffect(() => {
     if (!digitalTime || !attendanceList || attendanceList.length === 0) return;
     const currTimeStr = digitalTime.substring(0, 5);
     const currMin = timeToMinutes(currTimeStr);
-    
+
     // 06:00 AM represented as 360 minutes from midnight
     if (currMin >= 360) {
       const lastResetDay = localStorage.getItem('hl_attendance_last_reset_day_v3');
@@ -706,14 +678,13 @@ export default function DashboardOverview({
         });
 
         setAttendanceList(updatedList);
-        localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(updatedList));
         localStorage.setItem('hl_attendance_last_reset_day_v3', todayVal);
         console.log(`⏱️ Đã tự động reset điểm danh đầu ca mới 6 AM ngày ${todayVal}`);
       }
     }
-  }, [digitalTime, todayVal, attendanceList]);
+  }, [digitalTime, todayVal, attendanceList]); */
 
-  const [selectedSite, setSelectedSite] = useState(config.constructionSites[0] || 'Công trình Blue Sky');
+  const [selectedSite, setSelectedSite] = useState(config?.constructionSites?.[0] || 'Công trình Blue Sky');
   const [activePunchSlot, setActivePunchSlot] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [liveGpsCoords, setLiveGpsCoords] = useState<string>('');
@@ -1206,6 +1177,7 @@ export default function DashboardOverview({
       const inSlot = activePunchSlot.replace('Out', 'In'); // timeOutS→timeInS, timeOutC→timeInC, timeOutOT→timeInOT
       const inFilled = todayLog && todayLog[inSlot] !== undefined &&
         todayLog[inSlot] !== '--:--' && todayLog[inSlot] !== '';
+      console.log('DEBUG: Ra ca check', { activePunchSlot, inSlot, todayLog, inFilled });
       if (!inFilled) {
         stopCameraStream();
         setShowPunchModal(false);
@@ -1302,8 +1274,11 @@ export default function DashboardOverview({
       } catch (err) {}
     }
 
-    // Save to local storage
-    localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(updated));
+    // Save to Supabase
+    dbService.attendance.save(todayLog).catch(err =>
+      console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
+
+    // Update local state for immediate UI feedback
     setAttendanceList(updated);
 
     // Stop camera and close
@@ -1632,14 +1607,14 @@ export default function DashboardOverview({
 
   // Real salary multiplier
   const userBaseSalary = isAdmin
-    ? config.directorBaseSalary
+    ? (config.directorBaseSalary ?? 45000000)
     : currentUser?.role === 'pm'
-      ? config.pmBaseSalary
+      ? (config.pmBaseSalary ?? 22000000)
       : isAccountant
-        ? config.accountantBaseSalary
-        : config.staffBaseSalary;
-  const standardDailyRate = userBaseSalary / 26;
-  const calcEstimatedSalary = Math.round((standardDailyRate * countAccumulatedDays) + (countOvertimeHours * (userBaseSalary / 26 / 8) * config.otMultiplier));
+        ? (config.accountantBaseSalary ?? 18000000)
+        : (config.staffBaseSalary ?? 14000000);
+  const standardDailyRate = (userBaseSalary ?? 0) / 26;
+  const calcEstimatedSalary = Math.round(((standardDailyRate ?? 0) * countAccumulatedDays) + (countOvertimeHours * ((userBaseSalary ?? 0) / 26 / 8) * (config.otMultiplier ?? 1.5)));
 
   // Get current today slots
   const userTodayLog = attendanceList.find(a => a.empName === currentUser.name && a.date === todayVal) || {
@@ -1725,6 +1700,19 @@ export default function DashboardOverview({
     // For checkout slots: time window must be open AND check-in must be completed
     const checkInVal = userTodayLog[s.checkInSlot];
     const checkInCompleted = checkInVal !== '--:--' && checkInVal !== '' && checkInVal !== undefined;
+
+    // DEBUG: Check visibility logic for "Ra ca" buttons
+    if (slot.toLowerCase().includes('out')) {
+      console.log('DEBUG: isSlotActive (Ra ca)', {
+        slot: slot,
+        isBetween: isBetween,
+        checkInSlot: s.checkInSlot,
+        checkInVal: checkInVal,
+        checkInCompleted: checkInCompleted,
+        userTodayLog: userTodayLog
+      });
+    }
+
     return checkInCompleted;
   };
 
@@ -1916,6 +1904,9 @@ export default function DashboardOverview({
               {digitalDate || 'THỨ BẢY, 6 THÁNG 6'}
             </div>
           </div>
+
+          {/* Time-travel debug controls [REMOVED] */}
+
           {/* SLOTS CHẤM CÔNG THEO TỪNG CA (MỖI CA MỘT HÀNG GỌN GÀNG, TRỰC QUAN) */}
           <div className="space-y-4" id="shift-rows-container">
             
@@ -2017,64 +2008,60 @@ export default function DashboardOverview({
               return (
                 <div
                   key={key}
-                  className={`rounded-2xl p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4 transition-all duration-300 border ${
+                  className={`rounded-2xl p-4 transition-all duration-300 border-2 ${
                     shiftActive
-                      ? 'bg-emerald-950/15 border-emerald-500/80 ring-2 ring-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.35)]'
-                      : 'bg-slate-900 border-slate-800/80 hover:border-slate-700/60'
+                      ? 'bg-white border-emerald-500 shadow-emerald-500/20 shadow-[0_0_20px_0_var(--tw-shadow-color)]'
+                      : 'bg-slate-100 border-transparent opacity-70'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center shrink-0`}>
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                          {label === 'Ca Sáng (Ca 1)' ? '🌅' : label === 'Ca Chiều (Ca 2)' ? '☀️' : '🌙'} {label}
-                        </span>
-                        {shiftActive && (
-                          <span className="bg-emerald-500 text-slate-950 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest flex items-center gap-1 animate-pulse">
-                            <span className="w-1 h-1 rounded-full bg-slate-950 animate-ping"></span>
-                            HIỆN TẠI
-                          </span>
-                        )}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center shrink-0`}>
+                        <Icon className="w-5 h-5" />
                       </div>
-                      <span className={`text-lg font-black font-mono block leading-none mt-1.5 ${
-                        key === 'morning' ? 'text-sky-400' : key === 'afternoon' ? 'text-amber-450' : 'text-purple-400'
-                      }`}>
-                        {(config as any)[configIn] || (key === 'morning' ? '07:30' : key === 'afternoon' ? '13:00' : '17:45')}
-                        {' — '}
-                        {(config as any)[configOut] || (key === 'morning' ? '11:30' : key === 'afternoon' ? '17:00' : '20:45')}
-                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] font-black uppercase tracking-wider ${shiftActive ? 'text-slate-700' : 'text-slate-500'}`}>
+                            {label === 'Ca Sáng (Ca 1)' ? '🌅' : label === 'Ca Chiều (Ca 2)' ? '☀️' : '🌙'} {label}
+                          </span>
+                          {shiftActive && (
+                            <span className="bg-emerald-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest flex items-center gap-1 animate-pulse">
+                              <span className="w-1 h-1 rounded-full bg-white/50 animate-ping"></span>
+                              HIỆN TẠI
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-lg font-black font-mono block leading-none mt-1.5 ${
+                          key === 'morning' ? (shiftActive ? 'text-sky-600' : 'text-sky-500/50') :
+                          key === 'afternoon' ? (shiftActive ? 'text-amber-600' : 'text-amber-500/50') :
+                          (shiftActive ? 'text-purple-600' : 'text-purple-500/50')
+                        }`}>
+                          {(config as any)[configIn] || (key === 'morning' ? '07:30' : key === 'afternoon' ? '13:00' : '17:45')}
+                          {' — '}
+                          {(config as any)[configOut] || (key === 'morning' ? '11:30' : key === 'afternoon' ? '17:00' : '20:45')}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* SINGLE CONTEXT-AWARE BUTTON */}
-                  <div className="sm:w-80 w-full shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (btnAction) handlePunchClick(btnAction);
-                      }}
-                      disabled={isDisabled}
-                      aria-disabled={isDisabled}
-                      className={`w-full py-3 px-4 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all group ${
-                        isDisabled
-                          ? 'bg-slate-950/50 border-slate-800 text-slate-500 cursor-not-allowed pointer-events-none select-none opacity-70'
-                          : shiftActive
-                            ? 'bg-slate-950 hover:bg-slate-850 border-slate-700 text-slate-200 cursor-pointer hover:scale-[1.01] active:scale-[0.99] hover:border-sky-500/40'
-                            : 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-pointer hover:text-slate-200 hover:border-amber-400/40 hover:bg-slate-900'
-                      }`}
-                    >
-                      <span className={`text-[11px] font-black uppercase tracking-wider ${
-                        isDisabled ? '' : 'group-hover:text-white'
-                      }`}>{btnLabel}</span>
-                      <span className={`text-[8px] font-bold ${
-                        isDisabled
-                          ? (isLockedState && btnSub.includes('Hết giờ') ? 'text-rose-500/70' : 'text-amber-500/70')
-                          : 'text-emerald-400/70'
-                      }`}>{btnSub}</span>
-                    </button>
+                     <div className="w-full sm:w-80 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (btnAction) handlePunchClick(btnAction);
+                        }}
+                        disabled={isDisabled}
+                        aria-disabled={isDisabled}
+                        className={`w-full py-3 px-4 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all group ${
+                          isDisabled
+                            ? (inCompleted && outCompleted)
+                               ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' // Punched
+                               : 'bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed' // Disabled
+                            : 'bg-emerald-500 hover:bg-emerald-600 border-emerald-600 text-white cursor-pointer shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-[0.98]' // Active
+                        }`}
+                      >
+                        <span className={`text-sm font-black uppercase tracking-wider`}>{btnLabel}</span>
+                        <span className={`text-[10px] font-bold ${isDisabled ? 'text-slate-500' : 'text-emerald-100'}`}>{btnSub}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -3388,7 +3375,7 @@ export default function DashboardOverview({
                   </div>
                 )}
                 <span className="block text-[10px] text-slate-500 mt-1 italic">
-                  * Số tiền ứng tối đa đề xuất: &lt;= 50% mức lương cơ bản ({userBaseSalary.toLocaleString('vi-VN')} đ)
+                  * Số tiền ứng tối đa đề xuất: &lt;= 50% mức lương cơ bản ({(userBaseSalary ?? 0).toLocaleString('vi-VN')} đ)
                 </span>
               </div>
 

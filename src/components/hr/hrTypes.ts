@@ -22,6 +22,7 @@ export interface HRMProps {
   customers?: any[];
   defaultSubTab?: string;
   hideSidebar?: boolean;
+  systemConfig: import('../../types').SystemConfig; // Add SystemConfig here
 }
 
 export interface TravelAllowanceNorm {
