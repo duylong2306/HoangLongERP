@@ -373,8 +373,10 @@ export const saveProjectPermissions = async (matrix: ProjectPermissionMatrix): P
 // Lưu cùng matrix chính vào Supabase qua dbService.projectPermissions
 
 export interface RoleGroupProjectMatrix {
-  /** Mỗi HRM Role Group ID = danh sách project actions được phép */
+  /** Mỗi HRM Role Group ID = danh sách project actions được phép (global cho tất cả dự án) */
   roleGroupActions: Record<string, ProjectAction[]>;
+  /** Per-project overrides: dự án ID → role group ID → actions. Cho phép cấp quyền khác biệt cho từng dự án */
+  perProjectOverrides?: Record<string, Record<string, ProjectAction[]>>;
 }
 
 export const loadRoleGroupProjectMatrix = (): RoleGroupProjectMatrix => {
