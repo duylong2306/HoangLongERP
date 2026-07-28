@@ -629,16 +629,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               cloudData = await dbService.loadAllCore();
             } catch {
               // Fallback: query từng bảng
-              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders] = await Promise.all([
+              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders, sups] = await Promise.all([
                 dbService.customers.list(), dbService.projects.list(),
                 dbService.tasks.list(), dbService.receipts.list(),
                 dbService.payments.list(), dbService.quotes.list(),
                 dbService.salesOrders.list(), dbService.purchaseOrders.list(),
+                dbService.suppliers.list().catch(() => []),
               ]);
               cloudData = {
                 customers: custs, projects: projs, tasks: tsks,
                 receipts: recs, payments: pays, quotes: qtes,
                 sales_orders: sOrders, purchase_orders: pOrders,
+                suppliers: sups,
                 business_profile: [], shift_config: [],
               };
             }
@@ -668,6 +670,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             const sOrderRows = toCamel(sOrderRaw || []).map(normalizeOrderItems);
             const pOrderRows = toCamel(pOrderRaw || []).map(normalizeOrderItems);
 
+            const supRows = toCamel(cloudData.suppliers || []);
             setCustomers(custRows);
             setProjects(projRows.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
             setTasks(taskRows);
@@ -676,7 +679,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             setQuotes(quoteRows);
             setSalesOrders(sOrderRows);
             setPurchaseOrders(pOrderRows);
-            console.log('[Init] Loaded sales_orders:', sOrderRows.length, 'rows | purchase_orders:', pOrderRows.length, 'rows');
+            setSuppliers(supRows);
+            console.log('[Init] Loaded sales_orders:', sOrderRows.length, 'rows | purchase_orders:', pOrderRows.length, 'rows | suppliers:', supRows.length, 'rows');
 
             if (cloudData.business_profile?.[0]) {
               const bp = toCamel([cloudData.business_profile[0]])[0];
@@ -978,6 +982,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
 
   // Trạng thái đồng bộ & nạp dữ liệu mẫu lên Firestore hoanglongerpdb
   const [isDbSeeding, setIsDbSeeding] = useState(false);
