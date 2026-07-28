@@ -221,7 +221,7 @@ const ADMIN_EMPLOYEE: Employee = {
   phone: '0000000000',
   department: 'Ban Giám Đốc',
   username: 'admin',
-  password: hashPasswordSync('admin'),
+  password: 'admin',
   roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
   status: 'working',
   hasSystemAccount: true

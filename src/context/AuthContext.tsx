@@ -29,18 +29,20 @@ const ADMIN_EMPLOYEE: Employee = {
   id: 'emp_admin',
   name: 'Administrator',
   role: 'director',
-  roleGroupIds: ['role_admin'],
+  roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
   email: 'admin@hoanglong.vn',
   phone: '0000000000',
   department: 'Ban Giám Đốc',
   username: 'admin',
-  password: 'admin'
+  password: 'admin',
+  status: 'working',
+  hasSystemAccount: true
 };
 
 export function ensureAdminAndPasswords(emps: Employee[]): Employee[] {
   const mapped: Employee[] = emps.map(emp => {
     if (emp.username === 'admin' || emp.id === 'emp_admin') {
-      return { ...emp, username: 'admin', password: 'admin', role: 'director' as const, roleGroupIds: ['role_admin'] };
+      return { ...emp, username: 'admin', password: 'admin', role: 'director' as const, roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'], hasSystemAccount: true };
     }
     // Backfill roleGroupIds từ memberIds của Role Groups (tương thích dữ liệu cũ)
     let roleGroupIds = emp.roleGroupIds;
