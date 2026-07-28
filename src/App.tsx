@@ -1367,6 +1367,98 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       } catch {}
     };
 
+    // ─── Handlers cho bảng còn thiếu (sales_orders, purchase_orders, HRM, accounting, etc.) ──
+    const fireSalesOrdersEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-sales-orders-updated')); } catch {}
+    };
+    const firePurchaseOrdersEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated')); } catch {}
+    };
+    const fireHrmApprovalConfigEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-approval-config-updated')); } catch {}
+    };
+    const fireHrmLeavesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-leaves-updated')); } catch {}
+    };
+    const fireHrmPayrollRecordsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-payroll-records-updated')); } catch {}
+    };
+    const fireHrmEmployeeErrorsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+    };
+    const fireHrmHolidaysEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-holidays-updated')); } catch {}
+    };
+    const fireHrmTripsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-trips-updated')); } catch {}
+    };
+    const fireHrmPerformanceCriteriaEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-performance-criteria-updated')); } catch {}
+    };
+    const fireHrmSalarySalesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-salary-scales-updated')); } catch {}
+    };
+    const fireDisplaySettingsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-display-settings-updated')); } catch {}
+    };
+    const fireDocumentTemplatesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-document-templates-updated')); } catch {}
+    };
+    const fireQuotationConfigsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-quotation-configs-updated')); } catch {}
+    };
+    const fireKanbanColumnsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-kanban-columns-updated')); } catch {}
+    };
+    const fireProjectPermissionsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-project-permissions-updated')); } catch {}
+    };
+    const fireProjectPermissionOverridesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-project-permission-overrides-updated')); } catch {}
+    };
+    const fireProductPricesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-product-prices-updated')); } catch {}
+    };
+    const fireProductMaterialsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-product-materials-updated')); } catch {}
+    };
+    const fireAccountingProductCatalogEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-accounting-product-catalog-updated')); } catch {}
+    };
+    const fireAccountingLiabilitiesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated')); } catch {}
+    };
+    const fireAccountingReceivablesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-accounting-receivables-updated')); } catch {}
+    };
+    const fireAccountingSubContractsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-accounting-sub-contracts-updated')); } catch {}
+    };
+    const fireSubcontractorCatalogEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-subcontractor-catalog-updated')); } catch {}
+    };
+    const fireConstructionNormsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-construction-norms-updated')); } catch {}
+    };
+    const fireTravelNormsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-travel-norms-updated')); } catch {}
+    };
+    const fireChatMessagesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-chat-messages-updated')); } catch {}
+    };
+    const fireConversationsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-conversations-updated')); } catch {}
+    };
+    const fireHrmLeaveCoefficientsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-leave-coefficients-updated')); } catch {}
+    };
+    const fireHrmDefaultSnapshotsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-default-snapshots-updated')); } catch {}
+    };
+    const fireFcmTokensEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-fcm-tokens-updated')); } catch {}
+    };
+
     console.log('[Realtime] Creating channel...');
     const channel = sb
       .channel('app-realtime-sync-v2')
@@ -1390,9 +1482,48 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, fireEmployeesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'business_profile' }, fireConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fireConfigEvent)
+      // ── Orders (critical - realtime for instant updates) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' }, fireSalesOrdersEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, firePurchaseOrdersEvent)
+      // ── HRM Configuration & Payroll ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_approval_config' }, fireHrmApprovalConfigEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leave_coefficients' }, fireHrmLeaveCoefficientsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_payroll_records' }, fireHrmPayrollRecordsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_employee_errors' }, fireHrmEmployeeErrorsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_holidays' }, fireHrmHolidaysEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_trips' }, fireHrmTripsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_performance_criteria' }, fireHrmPerformanceCriteriaEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_salary_scales' }, fireHrmSalarySalesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_default_snapshots' }, fireHrmDefaultSnapshotsEvent)
+      // ── Configuration ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_settings' }, fireDisplaySettingsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'document_templates' }, fireDocumentTemplatesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotation_configs' }, fireQuotationConfigsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kanban_columns' }, fireKanbanColumnsEvent)
+      // ── Permissions ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_permissions' }, fireProjectPermissionsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_permission_overrides' }, fireProjectPermissionOverridesEvent)
+      // ── Products & Accounting ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_prices' }, fireProductPricesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_materials' }, fireProductMaterialsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_product_catalog' }, fireAccountingProductCatalogEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts' }, fireAccountingSubContractsEvent)
+      // ── Warehouse ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_catalog_items' }, fireSubcontractorCatalogEvent)
+      // ── Norms ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'construction_norms' }, fireConstructionNormsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'travel_norms' }, fireTravelNormsEvent)
+      // ── Communication ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, fireChatMessagesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, fireConversationsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fcm_tokens' }, fireFcmTokensEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => window.dispatchEvent(new CustomEvent('hl-notifications-updated')))
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Channel ready. Listening for 16 tables');
+          console.log('[Realtime] ✅ Channel ready. Listening for 45+ tables');
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.error('[Realtime] ❌ Connection issue:', status, err);
         } else if (status === 'CLOSED') {

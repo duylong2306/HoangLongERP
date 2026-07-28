@@ -21,9 +21,32 @@ DO $$
 DECLARE
   tbl TEXT;
   tables_to_add TEXT[] := ARRAY[
-    'projects', 'tasks', 'payments', 'receipts',
-    'subcontractor_advances', 'attendance_records', 'notifications',
-    'employees', 'customers', 'quotes', 'hrm_role_groups'
+    -- Core entities
+    'projects', 'tasks', 'payments', 'receipts', 'quotes', 'customers', 'employees',
+    -- Notifications & Documents
+    'notifications', 'chat_messages', 'conversations', 'document_templates',
+    -- HRM & Attendance
+    'attendance_records', 'hrm_role_groups', 'hrm_approval_config', 'hrm_leaves',
+    'hrm_leave_coefficients', 'hrm_payroll_records', 'hrm_employee_errors',
+    'hrm_holidays', 'hrm_trips', 'hrm_performance_criteria', 'hrm_salary_scales',
+    'hrm_default_snapshots', 'hrm_task_permissions',
+    -- Warehouse & Inventory
+    'suppliers', 'inventory', 'warehouse_logs', 'subcontractor_advances',
+    'subcontractor_catalog_items',
+    -- Orders & Products
+    'sales_orders', 'purchase_orders', 'product_prices', 'product_materials',
+    'accounting_product_catalog',
+    -- Accounting
+    'accounting_liabilities', 'accounting_receivables', 'accounting_sub_contracts',
+    -- Configuration
+    'business_profile', 'shift_config', 'display_settings', 'quotation_configs',
+    'kanban_columns',
+    -- Archived & Templates
+    'archived_quotes', 'construction_norms', 'travel_norms',
+    -- Permissions
+    'project_permissions', 'project_permission_overrides',
+    -- Communication
+    'fcm_tokens'
   ];
 BEGIN
   FOREACH tbl IN ARRAY tables_to_add LOOP
