@@ -78,6 +78,7 @@ const actionGroups: {
     group: '✅ CÔNG VIỆC',
     icon: <CheckSquare className="w-4 h-4" />,
     actions: [
+      { action: 'viewTask', label: 'Xem danh sách công việc' },
       { action: 'createTask', label: 'Tạo công việc' },
       { action: 'editTask', label: 'Sửa công việc' },
       { action: 'deleteTask', label: 'Xóa công việc' },

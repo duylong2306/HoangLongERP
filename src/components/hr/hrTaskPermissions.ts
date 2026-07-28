@@ -185,7 +185,7 @@ export const canViewTask = (
   if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
 
   // Check role group permissions via project permissions matrix
-  // If user's role group has 'viewProjectFinance' or related task-view action, allow
+  // If user's role group has 'viewTask' action, allow
   try {
     const { dbService } = require('../../lib/dbService');
     const saved = localStorage.getItem('hl_project_permissions_v1');
@@ -194,7 +194,7 @@ export const canViewTask = (
       const rgMatrix = parsed.roleGroupMatrix || {};
       const empGroupIds = currentUser.roleGroupIds || [];
       for (const groupId of empGroupIds) {
-        if (rgMatrix.roleGroupActions?.[groupId]?.includes('viewProjectFinance')) {
+        if (rgMatrix.roleGroupActions?.[groupId]?.includes('viewTask')) {
           return true;
         }
       }
