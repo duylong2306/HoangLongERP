@@ -57,6 +57,29 @@ export function rowToCamel(row: any): any {
   return n;
 }
 
+/**
+ * Chuẩn hóa cột `items` của sales_orders / purchase_orders về đúng array.
+ * Dữ liệu cũ đã bị JSON.stringify trước khi ghi vào cột JSONB nên đọc ra
+ * là string thay vì array → UI crash khi gọi .map(). Hàm này parse lại,
+ * đảm bảo items LUÔN là array kể cả khi null/lỗi format.
+ */
+export function normalizeOrderItems(order: any): any {
+  if (!order) return order;
+  let items = order.items;
+  // Có thể bị stringify nhiều lần → parse cho tới khi ra array
+  let guard = 0;
+  while (typeof items === 'string' && guard < 5) {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      items = [];
+      break;
+    }
+    guard++;
+  }
+  return { ...order, items: Array.isArray(items) ? items : [] };
+}
+
 // NOTE: The helper that returned static initial data has been removed because the app now relies on Supabase for all defaults.
 // function getInitialDataForTable(tableName: string): any[] {
 //   switch (tableName) {
@@ -172,6 +195,65 @@ async function saveSupabase(tableName: string, item: any): Promise<void> {
   }
 }
 
+/**
+ * Insert helper — dùng cho bản ghi MỚI.
+ *
+ * Khác `saveSupabase` (upsert): nếu id đã tồn tại thì insert sẽ báo lỗi
+ * unique violation (code 23505) thay vì âm thầm ghi đè hàng cũ. Đây là lớp
+ * bảo vệ cuối cho lỗi "tạo đơn mới nhưng chỉ cập nhật hàng dữ liệu cũ".
+ * Trả về true nếu insert thành công, false nếu id đã tồn tại.
+ */
+async function insertSupabase(tableName: string, item: any): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    console.error(`[DB] Supabase client is NULL — cannot insert ${tableName}. Check VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in .env`);
+    throw new Error(`Supabase chưa được cấu hình — không thể lưu ${tableName}`);
+  }
+  const snakeItem = keysToSnake(item);
+  console.log(`[DB] Inserting into ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
+  const { data, error } = await supabase.from(tableName).insert(snakeItem).select();
+  if (error) {
+    if (error.code === '23505') {
+      console.warn(`[DB] ⚠️ ${tableName}: id "${item.id}" đã tồn tại — không ghi đè.`);
+      return false;
+    }
+    console.error(`[DB] ❌ Supabase insert error for ${tableName}:`, error.message, error.details, error.hint);
+    throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
+  }
+  console.log(`[DB] ✅ Inserted into ${tableName}:`, data?.length, 'row(s)');
+  invalidateCache(tableName);
+  return true;
+}
+
+/**
+ * Tạo đơn hàng MỚI với mã đảm bảo không trùng.
+ *
+ * Nếu mã do client sinh ra đã tồn tại (vì danh sách phía client chưa load đủ,
+ * hoặc 2 người tạo đơn cùng lúc), hàm tăng số thứ tự cuối của mã rồi thử lại
+ * thay vì ghi đè hàng cũ. Trả về đơn đã lưu (có thể mang id mới).
+ */
+async function createOrderUnique(tableName: string, order: any): Promise<any> {
+  const match = /^(.*-)(\d+)$/.exec(String(order.id ?? ''));
+  let candidate = { ...order };
+
+  for (let attempt = 0; attempt < 25; attempt++) {
+    if (await insertSupabase(tableName, candidate)) return candidate;
+
+    if (!match) {
+      // Mã không theo định dạng <head>-<số> → không thể tự tăng
+      throw new Error(`Mã "${order.id}" đã tồn tại trong ${tableName} và không thể tự cấp lại.`);
+    }
+    const head = match[1];
+    const width = match[2].length;
+    const next = parseInt(match[2], 10) + attempt + 1;
+    const newId = `${head}${String(next).padStart(width, '0')}`;
+    // Giữ liên kết nội bộ (notes/receipt) trỏ đúng mã mới
+    candidate = { ...candidate, id: newId };
+    console.warn(`[DB] ${tableName}: mã trùng → thử lại với "${newId}"`);
+  }
+  throw new Error(`Không thể cấp mã đơn duy nhất cho ${tableName} sau 25 lần thử.`);
+}
+
 // Delete helper
 async function deleteSupabase(tableName: string, id: string): Promise<void> {
   const supabase = getSupabase();
@@ -210,6 +292,21 @@ export const dbService = {
 
     // RPC trả về JSON object { employees: [...], customers: [...], ... }
     return typeof data === 'string' ? JSON.parse(data) : data;
+  },
+
+  // ─── SERVER TIMESTAMP: Lấy giờ server PostgreSQL (chống gian lận giờ client) ──
+  // Trả về { date: 'YYYY-MM-DD', time: 'HH:MI', datetime: 'ISO8601', epoch_ms: number }
+  async fetchServerTimestamp(): Promise<{ date: string; time: string; datetime: string; epoch_ms: number } | null> {
+    const supabase = getSupabase();
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.rpc('get_server_timestamp');
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('[DB] Không thể lấy giờ server, fallback về giờ client:', err);
+      return null;
+    }
   },
 
   // 1. EMPLOYEES
@@ -556,19 +653,10 @@ export const dbService = {
           weekendDays: data.weekend_days,
           autoAttendanceDays: data.auto_attendance_days,
           autoAttendanceStartDate: data.auto_attendance_start_date,
-          antiFakeCam: data.anti_fake_cam,
           directorBaseSalary: data.director_base_salary,
           pmBaseSalary: data.pm_base_salary,
           accountantBaseSalary: data.accountant_base_salary,
           staffBaseSalary: data.staff_base_salary,
-          punchOpenBeforeMinutes: data.punch_open_before_minutes,
-          punchCloseAfterMinutes: data.punch_close_after_minutes,
-          punchOutOpenBeforeMinutes: data.punch_out_open_before_minutes,
-          punchOutCloseAfterMinutes: data.punch_out_close_after_minutes,
-          otPunchOpenBeforeMinutes: data.ot_punch_open_before_minutes,
-          otPunchCloseAfterMinutes: data.ot_punch_close_after_minutes,
-          otPunchOutOpenBeforeMinutes: data.ot_punch_out_open_before_minutes,
-          otPunchOutCloseAfterMinutes: data.ot_punch_out_close_after_minutes,
           constructionSites: data.construction_sites
         } : null;
       } catch (e) {
@@ -610,14 +698,6 @@ export const dbService = {
           pm_base_salary: config.pmBaseSalary,
           accountant_base_salary: config.accountantBaseSalary,
           staff_base_salary: config.staffBaseSalary,
-          punch_open_before_minutes: config.punchOpenBeforeMinutes,
-          punch_close_after_minutes: config.punchCloseAfterMinutes,
-          punch_out_open_before_minutes: config.punchOutOpenBeforeMinutes,
-          punch_out_close_after_minutes: config.punchOutCloseAfterMinutes,
-          ot_punch_open_before_minutes: config.otPunchOpenBeforeMinutes,
-          ot_punch_close_after_minutes: config.otPunchCloseAfterMinutes,
-          ot_punch_out_open_before_minutes: config.otPunchOutOpenBeforeMinutes,
-          ot_punch_out_close_after_minutes: config.otPunchOutCloseAfterMinutes,
           construction_sites: config.constructionSites
         });
         if (error) console.warn('Supabase shift_config save error:', error.message);
@@ -1491,15 +1571,19 @@ export const dbService = {
   // 14e. SALES ORDERS (Đơn hàng bán — sync Supabase)
   salesOrders: {
     async list(): Promise<any[]> {
-      return querySupabase<any>('sales_orders', []);
+      const rows = await querySupabase<any>('sales_orders', []);
+      return rows.map(normalizeOrderItems);
     },
     async save(order: any): Promise<void> {
-      // Supabase không lưu array trực tiếp → items JSON stringify
-      const toSave = { ...order };
-      if (Array.isArray(toSave.items)) {
-        toSave.items = JSON.stringify(toSave.items);
-      }
-      await saveSupabase('sales_orders', toSave);
+      // items là cột JSONB → truyền thẳng array, KHÔNG stringify.
+      // (keysToSnake không đệ quy vào value nên key camelCase bên trong
+      //  items vẫn được giữ nguyên. Stringify sẽ khiến Postgres lưu thành
+      //  JSON scalar string → đọc ra không phải array → crash khi .map)
+      await saveSupabase('sales_orders', order);
+    },
+    /** Tạo đơn MỚI — không bao giờ ghi đè đơn cũ; tự cấp lại mã nếu trùng. */
+    async create(order: any): Promise<any> {
+      return createOrderUnique('sales_orders', order);
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('sales_orders', id);
@@ -1509,14 +1593,15 @@ export const dbService = {
   // 14f. PURCHASE ORDERS (Đơn mua hàng — sync Supabase)
   purchaseOrders: {
     async list(): Promise<any[]> {
-      return querySupabase<any>('purchase_orders', []);
+      const rows = await querySupabase<any>('purchase_orders', []);
+      return rows.map(normalizeOrderItems);
     },
     async save(order: any): Promise<void> {
-      const toSave = { ...order };
-      if (Array.isArray(toSave.items)) {
-        toSave.items = JSON.stringify(toSave.items);
-      }
-      await saveSupabase('purchase_orders', toSave);
+      await saveSupabase('purchase_orders', order);
+    },
+    /** Tạo đơn MỚI — không bao giờ ghi đè đơn cũ; tự cấp lại mã nếu trùng. */
+    async create(order: any): Promise<any> {
+      return createOrderUnique('purchase_orders', order);
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('purchase_orders', id);
