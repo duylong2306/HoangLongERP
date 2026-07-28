@@ -184,6 +184,25 @@ export const canViewTask = (
   // Admin/Director luôn thấy mọi thứ
   if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
 
+  // Check role group permissions via project permissions matrix
+  // If user's role group has 'viewProjectFinance' or related task-view action, allow
+  try {
+    const { dbService } = require('../../lib/dbService');
+    const saved = localStorage.getItem('hl_project_permissions_v1');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const rgMatrix = parsed.roleGroupMatrix || {};
+      const empGroupIds = currentUser.roleGroupIds || [];
+      for (const groupId of empGroupIds) {
+        if (rgMatrix.roleGroupActions?.[groupId]?.includes('viewProjectFinance')) {
+          return true;
+        }
+      }
+    }
+  } catch (e) {
+    // Fallback — continue to context check
+  }
+
   const roleScope = getTaskRoleScope(currentUser, task, project);
   const allowedRoles = matrix.actions.view || [];
   return allowedRoles.includes(roleScope);
