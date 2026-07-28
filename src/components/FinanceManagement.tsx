@@ -65,6 +65,27 @@ const getAbbreviation = (name: string): string => {
   return initials;
 };
 
+/**
+ * Sinh mã đơn dạng <prefix>-YYYYMMDD-XXXX chống trùng.
+ *
+ * Trước đây hàm này đếm số đơn trong ngày (`length + 1`) — sai 2 trường hợp:
+ *  1. Danh sách chưa load xong / load lỗi → đếm 0 → mã trùng → upsert GHI ĐÈ
+ *     hàng cũ thay vì thêm hàng mới.
+ *  2. Đã xóa đơn giữa ngày → số đếm tụt xuống → trùng mã đơn còn lại.
+ * Nay lấy số thứ tự LỚN NHẤT đang tồn tại rồi +1, nên không bao giờ lùi lại.
+ */
+const generateOrderCode = (prefix: string, existingIds: string[]): string => {
+  const now = new Date();
+  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const head = `${prefix}-${datePart}-`;
+  const maxSeq = existingIds.reduce((max, id) => {
+    if (!id || !id.startsWith(head)) return max;
+    const seq = parseInt(id.slice(head.length), 10);
+    return Number.isFinite(seq) && seq > max ? seq : max;
+  }, 0);
+  return `${head}${String(maxSeq + 1).padStart(4, '0')}`;
+};
+
 interface FinanceProps {
   receipts: Receipt[];
   payments: Payment[];
@@ -81,11 +102,13 @@ interface FinanceProps {
   onDeleteReceipt?: (id: string) => void;
   onDeletePayment?: (id: string) => void;
   onDeleteMaterial?: (id: string) => void;
-  onAddSalesOrder?: (order: SalesOrder) => void;
+  /** Trả về đơn đã lưu — id có thể khác nếu mã bị trùng và được cấp lại. */
+  onAddSalesOrder?: (order: SalesOrder) => Promise<SalesOrder | null> | void;
   onDeleteSalesOrder?: (id: string) => void;
   purchaseOrders?: PurchaseOrder[];
   suppliers?: SupplierPartner[];
-  onAddPurchaseOrder?: (order: PurchaseOrder) => void;
+  /** Trả về đơn đã lưu — id có thể khác nếu mã bị trùng và được cấp lại. */
+  onAddPurchaseOrder?: (order: PurchaseOrder) => Promise<PurchaseOrder | null> | void;
   onDeletePurchaseOrder?: (id: string) => void;
   initialSubTab?: string;
   initialDuLieuTab?: string;
@@ -649,11 +672,18 @@ export default function FinanceManagement({
       };
     });
 
-    const customs = customReceivables.map(r => ({
-      ...r,
-      remaining: (r.contractValue || 0) - (r.collected || 0),
-      isAuto: false,
-    }));
+    const customs = customReceivables.map(r => {
+      const soMatch = r.projectName.match(/ĐH\s+(\S+)/);
+      const salesOrderId = soMatch ? soMatch[1] : null;
+      const salesRecs = salesOrderId ? receipts.filter(rec => rec.salesOrderId === salesOrderId) : [];
+      const collected = salesRecs.reduce((s, rec) => s + rec.amount, 0);
+      return {
+        ...r,
+        collected: collected || (r.collected || 0),
+        remaining: (r.contractValue || 0) - (collected || (r.collected || 0)),
+        isAuto: false,
+      };
+    });
 
     return [...auto, ...customs];
   }, [projects, customers, receipts, customReceivables]);
@@ -839,12 +869,14 @@ export default function FinanceManagement({
   const [soItemDropdownIdx, setSoItemDropdownIdx] = useState<number | null>(null); // Which dropdown is open
   const soItemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [soThanhToan, setSoThanhToan] = useState<string>('0');
+  const [soReceiptAt, setSoReceiptAt] = useState<string>(() => new Date().toISOString().slice(0, 16));
   const [soNotes, setSoNotes] = useState('');
   const [soDeleteId, setSoDeleteId] = useState<string | null>(null);
   const [soViewOrder, setSoViewOrder] = useState<SalesOrder | null>(null);
   const [pageSO, setPageSO] = useState(1);
   const [pageSizeSO, setPageSizeSO] = useState(10);
   const soFileInputRef = useRef<HTMLInputElement>(null);
+  const [isSavingSO, setIsSavingSO] = useState(false);
 
   // ── Đơn mua hàng (Purchase Orders) ──
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(purchaseOrdersProp);
@@ -856,12 +888,14 @@ export default function FinanceManagement({
   const poItemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [poItemDropdownIdx, setPoItemDropdownIdx] = useState<number | null>(null);
   const [poThanhToan, setPoThanhToan] = useState<string>('0');
+  const [poReceiptAt, setPoReceiptAt] = useState<string>(() => new Date().toISOString().slice(0, 16));
   const [poNotes, setPoNotes] = useState('');
   const [poDeleteId, setPoDeleteId] = useState<string | null>(null);
   const [poViewOrder, setPoViewOrder] = useState<PurchaseOrder | null>(null);
   const [pagePO, setPagePO] = useState(1);
   const [pageSizePO, setPageSizePO] = useState(10);
   const poFileInputRef = useRef<HTMLInputElement>(null);
+  const [isSavingPO, setIsSavingPO] = useState(false);
 
   // Reset receipt/payment selections when switching between nhap_thu and nhap_chi
   useEffect(() => {
@@ -898,10 +932,26 @@ export default function FinanceManagement({
     setSalesOrders(salesOrdersProp);
   }, [salesOrdersProp]);
 
+  // ── Mặc định Thanh toán thực tế = Tổng tiền khi items thay đổi ──
+  useEffect(() => {
+    const tong = calcTongTien(soItems);
+    if (tong > 0 && (Number(soThanhToan) === 0 || soThanhToan === '0')) {
+      setSoThanhToan(String(tong));
+    }
+  }, [soItems]);
+
   // ── Đơn mua hàng: Sync purchaseOrders when prop changes ──
   useEffect(() => {
     setPurchaseOrders(purchaseOrdersProp);
   }, [purchaseOrdersProp]);
+
+  // ── Mặc định Thanh toán thực tế = Tổng tiền khi items thay đổi (Mua hàng) ──
+  useEffect(() => {
+    const tong = calcPOTongTien(poItems);
+    if (tong > 0 && (Number(poThanhToan) === 0 || poThanhToan === '0')) {
+      setPoThanhToan(String(tong));
+    }
+  }, [poItems]);
 
   const poSupplierData = useMemo(() => {
     const allSuppliers = suppliersExternalProp && suppliersExternalProp.length > 0
@@ -912,11 +962,7 @@ export default function FinanceManagement({
 
   // ── Đơn hàng bán: Handlers ──
   const generateSOCode = (): string => {
-    const now = new Date();
-    const datePart = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
-    // Count existing orders today
-    const todayCount = salesOrders.filter(o => o.id && o.id.startsWith(`DH-${datePart}`)).length;
-    return `DH-${datePart}-${String(todayCount + 1).padStart(4, '0')}`;
+    return generateOrderCode('DH', salesOrders.map(o => o.id));
   };
 
   const calcTongTien = (items: SalesOrderItem[]): number => {
@@ -1042,11 +1088,13 @@ export default function FinanceManagement({
     setSoCustomerId('');
     setSoItems([]);
     setSoThanhToan('0');
+    setSoReceiptAt(new Date().toISOString().slice(0, 16));
     setSoNotes('');
     setShowSalesOrderForm(false);
   };
 
-  const handleSOCreate = () => {
+  const handleSOCreate = async () => {
+    if (isSavingSO) return;   // chặn double-click tạo 2 đơn trùng
     if (!soCustomerId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn khách hàng.', type: 'warning' });
       return;
@@ -1079,33 +1127,64 @@ export default function FinanceManagement({
       createdBy: currentUser?.name || 'Kế toán',
     };
 
-    // Tạo phiếu thu tự động
     const receiptId = `rec_${Date.now()}`;
+    const receiptAtISO = soReceiptAt ? new Date(soReceiptAt).toISOString() : new Date().toISOString();
+    newOrder.receiptId = receiptId;
+
+    // Lưu đơn TRƯỚC để biết mã cuối cùng: nếu mã bị trùng, tầng DB sẽ cấp lại
+    // mã mới → phiếu thu & công nợ phải trỏ theo mã đó, không phải mã dự kiến.
+    setIsSavingSO(true);
+    let savedOrder: SalesOrder;
+    try {
+      const result = await onAddSalesOrder?.(newOrder);
+      if (result === null) {
+        // Lưu thất bại — không tạo phiếu thu/công nợ mồ côi
+        addToast({ title: '❌ Lỗi lưu', message: 'Không thể lưu đơn hàng lên server. Chưa tạo phiếu thu.', type: 'error' });
+        return;
+      }
+      // Prop có thể là handler đồng bộ (trả void) → fallback về đơn dự kiến
+      savedOrder = (result as SalesOrder | null | undefined) ?? newOrder;
+    } finally {
+      setIsSavingSO(false);
+    }
+
+    // Tạo phiếu thu tự động (dùng mã đơn thực tế đã lưu)
     const newReceipt: Receipt = {
       id: receiptId,
       code: `PT-BH-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${String(Math.floor(Math.random() * 900 + 100))}`,
-      date: new Date().toISOString().split('T')[0],
+      date: new Date(receiptAtISO).toISOString().split('T')[0],
       customerId: customer.id,
       amount: thanhToan,
       paymentMethod: 'transfer',
-      notes: `Thanh toán đơn hàng ${newOrder.id} - ${customer.name}`,
+      notes: `Thanh toán đơn hàng ${savedOrder.id} - ${customer.name}`,
       collector: currentUser?.name || 'Kế toán',
-      salesOrderId: newOrder.id,
+      salesOrderId: savedOrder.id,
       loaiThu: 'ban_hang',
+      receiptAt: receiptAtISO,
     };
-    newOrder.receiptId = receiptId;
-
-    onAddSalesOrder?.(newOrder);
     onAddReceipt(newReceipt);
+
+    // Tự động cập nhật Công nợ Phải Thu
+    const newReceivable = {
+      id: crypto.randomUUID(),
+      projectName: `ĐH ${savedOrder.id}`,
+      investor: customer.name,
+      field: 'Bán hàng',
+      contractValue: tongTien,
+      collected: 0,
+      remaining: tongTien,
+      notes: `Từ đơn hàng ${savedOrder.id}`,
+      isAuto: false,
+    };
+    setCustomReceivables(prev => [...prev, newReceivable]);
     resetSOForm();
-    addToast({ title: '✅ Thành công', message: `Đã tạo đơn hàng ${newOrder.id} và phiếu thu ${newReceipt.code}.`, type: 'success' });
+    addToast({ title: '✅ Thành công', message: `Đã tạo đơn hàng ${savedOrder.id} và phiếu thu ${newReceipt.code}.`, type: 'success' });
   };
 
   const handleSODelete = (id: string) => {
     setSalesOrders(prev => prev.filter(o => o.id !== id));
     setSoDeleteId(null);
-    onDeleteSalesOrder?.(id);
-    dbService.salesOrders.delete(id).catch(() => {});
+    onDeleteSalesOrder?.(id);  // App.tsx xử lý dbService.salesOrders.delete
     addToast({ title: '🗑️ Đã xóa', message: `Đã xóa đơn hàng ${id}.`, type: 'info' });
   };
 
@@ -1144,10 +1223,7 @@ export default function FinanceManagement({
 
   // ── Đơn mua hàng: Handlers ──
   const generatePOCode = (): string => {
-    const now = new Date();
-    const datePart = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
-    const todayCount = purchaseOrders.filter(o => o.id && o.id.startsWith(`PO-${datePart}`)).length;
-    return `PO-${datePart}-${String(todayCount + 1).padStart(4, '0')}`;
+    return generateOrderCode('PO', purchaseOrders.map(o => o.id));
   };
 
   const calcPOTongTien = (items: PurchaseOrderItem[]): number => {
@@ -1234,11 +1310,13 @@ export default function FinanceManagement({
     setPoSupplierId('');
     setPoItems([]);
     setPoThanhToan('0');
+    setPoReceiptAt(new Date().toISOString().slice(0, 16));
     setPoNotes('');
     setShowPurchaseForm(false);
   };
 
-  const handlePOCreate = () => {
+  const handlePOCreate = async () => {
+    if (isSavingPO) return;   // chặn double-click tạo 2 đơn trùng
     const { selSup } = poSupplierData;
     if (!selSup) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn nhà cung cấp.', type: 'warning' });
@@ -1267,36 +1345,57 @@ export default function FinanceManagement({
       createdBy: currentUser?.name || 'Kế toán',
     };
 
+    const paymentId = thanhToan > 0 ? `pay_${Date.now()}` : undefined;
+    if (paymentId) newOrder.paymentId = paymentId;
+
+    // Lưu đơn TRƯỚC để biết mã cuối cùng: nếu mã bị trùng, tầng DB sẽ cấp lại
+    // mã mới → phiếu chi & công nợ phải trỏ theo mã đó, không phải mã dự kiến.
+    setIsSavingPO(true);
+    let savedOrder: PurchaseOrder;
+    try {
+      const result = await onAddPurchaseOrder?.(newOrder);
+      if (result === null) {
+        // Lưu thất bại — không tạo phiếu chi/công nợ mồ côi
+        addToast({ title: '❌ Lỗi lưu', message: 'Không thể lưu đơn mua lên server. Chưa tạo phiếu chi.', type: 'error' });
+        return;
+      }
+      // Prop có thể là handler đồng bộ (trả void) → fallback về đơn dự kiến
+      savedOrder = (result as PurchaseOrder | null | undefined) ?? newOrder;
+    } finally {
+      setIsSavingPO(false);
+    }
+
     // Tạo phiếu chi tự động nếu thanh toán > 0
-    if (thanhToan > 0) {
-      const paymentId = `pay_${Date.now()}`;
+    if (paymentId) {
+      const paymentAtISO = poReceiptAt ? new Date(poReceiptAt).toISOString() : new Date().toISOString();
       const newPayment: Payment = {
         id: paymentId,
         code: `PC-MH-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${String(Math.floor(Math.random() * 900 + 100))}`,
         date: new Date().toISOString().split('T')[0],
+        paymentAt: paymentAtISO,
         recipient: selSup.name,
         amount: thanhToan,
         paymentMethod: 'transfer',
         category: 'supplier_payment',
-        notes: `Thanh toán đơn mua ${newOrder.id} - ${selSup.name}`,
+        notes: `Thanh toán đơn mua ${savedOrder.id} - ${selSup.name}`,
         proposer: currentUser?.name || 'Kế toán',
         approver: 'Trương Hữu Long (Giám đốc)',
         status: (currentUser && isUserInRoleGroup(currentUser.id, 'role_admin')) ? 'approved' : 'pending',
       };
-      newOrder.paymentId = paymentId;
       onAddPayment(newPayment);
     }
 
     // Cập nhật công nợ nhà cung cấp
-    const allSup = suppliersExternalProp && suppliersExternalProp.length > 0 ? suppliersExternalProp : suppliers;
+    const paidAtISO = poReceiptAt ? new Date(poReceiptAt).toISOString() : new Date().toISOString();
     const existingLiab = customLiabilities.find(l => l.name === selSup.name && l.category === 'Nhà Cung Cấp');
     if (existingLiab) {
       const updatedLiab: Liability = {
         ...existingLiab,
         value: existingLiab.value + tongTien,
-        paid: existingLiab.paid + thanhToan,
-        remaining: (existingLiab.value + tongTien) - (existingLiab.paid + thanhToan),
-        notes: existingLiab.notes ? `${existingLiab.notes}; Đơn mua ${newOrder.id}` : `Từ đơn mua ${newOrder.id}`,
+        paid: existingLiab.paid,
+        paidAt: paidAtISO,
+        remaining: (existingLiab.value + tongTien) - existingLiab.paid,
+        notes: existingLiab.notes ? `${existingLiab.notes}; Đơn mua ${savedOrder.id}` : `Từ đơn mua ${savedOrder.id}`,
       };
       setCustomLiabilities(prev => prev.map(l => l.id === existingLiab.id ? updatedLiab : l));
     } else {
@@ -1305,24 +1404,23 @@ export default function FinanceManagement({
         name: selSup.name,
         category: 'Nhà Cung Cấp',
         value: tongTien,
-        paid: thanhToan,
-        remaining: congNo,
-        notes: `Từ đơn mua ${newOrder.id}`,
+        paid: 0,
+        paidAt: paidAtISO,
+        remaining: tongTien,
+        notes: `Từ đơn mua ${savedOrder.id}`,
         salesOrderId: undefined,
       };
       setCustomLiabilities(prev => [...prev, newLiab]);
     }
 
-    onAddPurchaseOrder?.(newOrder);
     resetPOForm();
-    addToast({ title: '✅ Thành công', message: `Đã tạo đơn mua ${newOrder.id}${thanhToan > 0 ? ` và phiếu chi ${newOrder.paymentId}` : ''}.`, type: 'success' });
+    addToast({ title: '✅ Thành công', message: `Đã tạo đơn mua ${savedOrder.id}${thanhToan > 0 ? ` và phiếu chi ${paymentId}` : ''}.`, type: 'success' });
   };
 
   const handlePODelete = (id: string) => {
     setPurchaseOrders(prev => prev.filter(o => o.id !== id));
     setPoDeleteId(null);
-    onDeletePurchaseOrder?.(id);
-    dbService.purchaseOrders.delete(id).catch(() => {});
+    onDeletePurchaseOrder?.(id);  // App.tsx xử lý dbService.purchaseOrders.delete
     addToast({ title: '🗑️ Đã xóa', message: `Đã xóa đơn mua ${id}.`, type: 'info' });
   };
 
@@ -1586,10 +1684,7 @@ export default function FinanceManagement({
 
   useEffect(() => {
     localStorage.setItem('hl_acc_suppliers', JSON.stringify(suppliers));
-    // Đồng bộ Supabase
-    suppliers.forEach(s => {
-      dbService.suppliers.save(s).catch(() => {});
-    });
+    // Không auto-sync Supabase ở đây — chỉ sync khi user chủ động thêm/sửa/xóa (trong handler)
   }, [suppliers]);
 
   useEffect(() => {
@@ -1613,10 +1708,7 @@ export default function FinanceManagement({
 
   useEffect(() => {
     localStorage.setItem('hl_acc_inventory', JSON.stringify(inventory));
-    // Đồng bộ Supabase
-    inventory.forEach(i => {
-      dbService.inventory.save(i).catch(() => {});
-    });
+    // Không auto-sync Supabase — chỉ sync khi user chủ động thêm/sửa/xóa
   }, [inventory]);
 
   useEffect(() => {
@@ -1974,6 +2066,8 @@ export default function FinanceManagement({
       };
 
       setSuppliers([...suppliers, newSup]);
+      // Explicit Supabase sync
+      dbService.suppliers.save(newSup).catch(e => console.error('[Finance] Lỗi sync supplier lên Supabase:', e));
       setShowSupplierForm(false);
       resetSupForm();
       addToast({ title: '✅ Thành công', message: `🤝 Đã thêm thầu phụ mới ${newSup.name} với Mã: ${newSup.id} thành công.`, type: 'success' });
@@ -4817,6 +4911,11 @@ export default function FinanceManagement({
                               <input type="number" value={soThanhToan} onChange={e => setSoThanhToan(e.target.value)}
                                 className="w-40 bg-white border border-slate-300 rounded px-2 py-1 text-slate-900 text-[11px] text-right font-mono focus:border-orange-500 focus:outline-none" min="0" />
                             </div>
+                            <div className="flex justify-between text-[11px] items-center">
+                              <span className="text-slate-600 font-bold">Thời gian lập phiếu:</span>
+                              <input type="datetime-local" value={soReceiptAt} onChange={e => setSoReceiptAt(e.target.value)}
+                                className="w-40 bg-white border border-slate-300 rounded px-2 py-1 text-slate-900 text-[11px] focus:border-orange-500 focus:outline-none" />
+                            </div>
                             <div className="flex justify-between text-[11px] border-t border-slate-200 pt-2">
                               <span className="text-red-500 font-bold">Công nợ:</span>
                               <span className="text-red-500 font-extrabold font-mono">{(calcTongTien(soItems) - (Number(soThanhToan) || 0)).toLocaleString('vi-VN')} ₫</span>
@@ -4849,9 +4948,9 @@ export default function FinanceManagement({
                             className="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition-colors flex items-center gap-2">
                             <Printer className="w-4 h-4" /> Xem & In
                           </button>
-                          <button type="button" onClick={handleSOCreate}
-                            className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-md flex items-center gap-2">
-                            <Check className="w-4 h-4" /> Lưu & Tạo phiếu thu
+                          <button type="button" onClick={handleSOCreate} disabled={isSavingSO}
+                            className="bg-orange-600 hover:bg-orange-500 disabled:bg-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-md flex items-center gap-2">
+                            <Check className="w-4 h-4" /> {isSavingSO ? 'Đang lưu...' : 'Lưu & Tạo phiếu thu'}
                           </button>
                         </div>
                       </div>
@@ -4924,10 +5023,10 @@ export default function FinanceManagement({
                             <th className="p-3 w-10 text-center">STT</th>
                             <th className="p-3 w-[150px]">Mã ĐH</th>
                             <th className="p-3">Khách hàng</th>
-                            <th className="p-3 w-[120px]">SĐT</th>
                             <th className="p-3 w-[130px] text-right">Tổng tiền</th>
                             <th className="p-3 w-[130px] text-right">Đã TT</th>
-                            <th className="p-3 w-[130px] text-right">Công nợ</th>
+                            <th className="p-3 w-[130px]">Ngày Tạo</th>
+                            <th className="p-3 w-[130px]">Người Tạo</th>
                             <th className="p-3 w-[100px] text-center">Trạng thái</th>
                             <th className="p-3 w-[90px] text-center sticky right-0 bg-slate-950 z-10 shadow-[-3px_0_6px_rgba(0,0,0,0.3)] border-l border-slate-800">Thao tác</th>
                           </tr>
@@ -4944,10 +5043,10 @@ export default function FinanceManagement({
                                 <td className="p-3 text-center text-slate-500 text-[10px] font-mono">{startSO + idx + 1}</td>
                                 <td className="p-3 font-mono font-bold text-blue-400 text-[11px] cursor-pointer hover:underline" onClick={() => setSoViewOrder(o)}>{o.id}</td>
                                 <td className="p-3 font-extrabold text-white text-[11px]">{o.customerName}</td>
-                                <td className="p-3 text-slate-300 font-mono text-[10px]">{o.customerPhone}</td>
                                 <td className="p-3 text-right font-mono text-white text-[11px]">{o.tongTien.toLocaleString('vi-VN')}</td>
                                 <td className="p-3 text-right font-mono text-emerald-400 text-[11px]">{o.thanhToanThucTe.toLocaleString('vi-VN')}</td>
-                                <td className="p-3 text-right font-mono text-red-400 font-bold text-[11px]">{o.congNo.toLocaleString('vi-VN')}</td>
+                                <td className="p-3 font-mono text-slate-300 text-[10px]">{o.createdAt?.split('T')[0]}</td>
+                                <td className="p-3 text-slate-300 text-[10px]">{o.createdBy}</td>
                                 <td className="p-3 text-center">
                                   <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${statusBadge}`}>{statusText}</span>
                                 </td>
@@ -4971,7 +5070,7 @@ export default function FinanceManagement({
                               </tr>
                             );
                           }) : (
-                            <tr><td colSpan={9} className="p-8 text-center text-slate-500 text-xs">Chưa có đơn hàng nào. Nhấn "Tạo đơn hàng" để bắt đầu.</td></tr>
+                            <tr><td colSpan={8} className="p-8 text-center text-slate-500 text-xs">Chưa có đơn hàng nào. Nhấn "Tạo đơn hàng" để bắt đầu.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -5189,6 +5288,11 @@ export default function FinanceManagement({
                               <input type="number" value={poThanhToan} onChange={e => setPoThanhToan(e.target.value)}
                                 className="w-40 bg-white border border-slate-300 rounded px-2 py-1 text-slate-900 text-[11px] text-right font-mono focus:border-orange-500 focus:outline-none" min="0" />
                             </div>
+                            <div className="flex justify-between text-[11px] items-center">
+                              <span className="text-slate-600 font-bold">Thời gian lập phiếu:</span>
+                              <input type="datetime-local" value={poReceiptAt} onChange={e => setPoReceiptAt(e.target.value)}
+                                className="w-40 bg-white border border-slate-300 rounded px-2 py-1 text-slate-900 text-[11px] focus:border-orange-500 focus:outline-none" />
+                            </div>
                             <div className="flex justify-between text-[11px] border-t border-slate-200 pt-2">
                               <span className="text-red-500 font-bold">Công nợ:</span>
                               <span className="text-red-500 font-extrabold font-mono">{(calcPOTongTien(poItems) - (Number(poThanhToan) || 0)).toLocaleString('vi-VN')} ₫</span>
@@ -5220,9 +5324,9 @@ export default function FinanceManagement({
                             className="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition-colors flex items-center gap-2">
                             <Printer className="w-4 h-4" /> Xem & In
                           </button>
-                          <button type="button" onClick={handlePOCreate}
-                            className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-md flex items-center gap-2">
-                            <Check className="w-4 h-4" /> Lưu & Tạo phiếu chi
+                          <button type="button" onClick={handlePOCreate} disabled={isSavingPO}
+                            className="bg-purple-600 hover:bg-purple-500 disabled:bg-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold px-6 py-2 rounded-lg cursor-pointer transition-colors shadow-md flex items-center gap-2">
+                            <Check className="w-4 h-4" /> {isSavingPO ? 'Đang lưu...' : 'Lưu & Tạo phiếu chi'}
                           </button>
                         </div>
                       </div>
@@ -5295,10 +5399,10 @@ export default function FinanceManagement({
                             <th className="p-3 w-10 text-center">STT</th>
                             <th className="p-3 w-[150px]">Mã ĐM</th>
                             <th className="p-3">Nhà cung cấp</th>
-                            <th className="p-3 w-[120px]">SĐT</th>
                             <th className="p-3 w-[130px] text-right">Tổng tiền</th>
                             <th className="p-3 w-[130px] text-right">Đã TT</th>
-                            <th className="p-3 w-[130px] text-right">Công nợ</th>
+                            <th className="p-3 w-[130px]">Ngày Tạo</th>
+                            <th className="p-3 w-[130px]">Người Tạo</th>
                             <th className="p-3 w-[100px] text-center">Trạng thái</th>
                             <th className="p-3 w-[90px] text-center sticky right-0 bg-slate-950 z-10 shadow-[-3px_0_6px_rgba(0,0,0,0.3)] border-l border-slate-800">Thao tác</th>
                           </tr>
@@ -5315,10 +5419,10 @@ export default function FinanceManagement({
                                 <td className="p-3 text-center text-slate-500 text-[10px] font-mono">{startPO + idx + 1}</td>
                                 <td className="p-3 font-mono font-bold text-purple-400 text-[11px] cursor-pointer hover:underline" onClick={() => setPoViewOrder(o)}>{o.id}</td>
                                 <td className="p-3 font-extrabold text-white text-[11px]">{o.supplierName}</td>
-                                <td className="p-3 text-slate-300 font-mono text-[10px]">{o.supplierPhone}</td>
                                 <td className="p-3 text-right font-mono text-white text-[11px]">{o.tongTien.toLocaleString('vi-VN')}</td>
                                 <td className="p-3 text-right font-mono text-emerald-400 text-[11px]">{o.thanhToanThucTe.toLocaleString('vi-VN')}</td>
-                                <td className="p-3 text-right font-mono text-red-400 font-bold text-[11px]">{o.congNo.toLocaleString('vi-VN')}</td>
+                                <td className="p-3 font-mono text-slate-300 text-[10px]">{o.createdAt?.split('T')[0]}</td>
+                                <td className="p-3 text-slate-300 text-[10px]">{o.createdBy}</td>
                                 <td className="p-3 text-center">
                                   <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${statusBadge}`}>{statusText}</span>
                                 </td>
@@ -5342,7 +5446,7 @@ export default function FinanceManagement({
                               </tr>
                             );
                           }) : (
-                            <tr><td colSpan={9} className="p-8 text-center text-slate-500 text-xs">Chưa có đơn mua hàng nào. Nhấn "Tạo đơn mua" để bắt đầu.</td></tr>
+                            <tr><td colSpan={8} className="p-8 text-center text-slate-500 text-xs">Chưa có đơn mua hàng nào. Nhấn "Tạo đơn mua" để bắt đầu.</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -5575,7 +5679,7 @@ export default function FinanceManagement({
                         <th className="px-3 py-2">Công trình liên đới</th>
                         <th className="px-3 py-2">Chú giải</th>
                         <th className="px-3 py-2 text-right">Tổng thực thu</th>
-                        <th className="px-3 py-2 text-center w-12">In</th>
+                        <th className="px-3 py-2 text-center">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5601,16 +5705,32 @@ export default function FinanceManagement({
                             <td className="px-3 py-2.5 text-slate-450 truncate max-w-[220px]">{rec.notes}</td>
                             <td className="px-3 py-2.5 text-right font-bold text-emerald-400 font-mono">+{rec.amount.toLocaleString('vi-VN')} đ</td>
                             <td className="px-3 py-2.5 text-center">
-                              <button
-                                onClick={() => triggerDownloadTxt(
-                                  `Phieu_Thu_${rec.code}`,
-                                  `===========================================\nPHIẾU THU TIỀN TẠM ỨNG CHỦ ĐẦU TƯ\nMã phiếu: ${rec.code}\nNgày giao dịch: ${rec.date}\nC CDT: ${customers.find(c => c.id === rec.customerId)?.name || 'Không rõ'}\nDự án: ${projName}\nSố tiền: ${rec.amount.toLocaleString('vi-VN')} VND\nNội dung: ${rec.notes}\nNgười lập: ${rec.collector}`,
-                                  rec.code
-                                )}
-                                className="bg-slate-850 hover:bg-slate-800 text-[9.5px] text-slate-400 hover:text-white px-1.5 py-0.5 rounded cursor-pointer"
-                              >
-                                Tải
-                              </button>
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() => {
+                                    // Open receipt detail/print modal
+                                    const so = receipts.find(r => r.id === rec.id)?.salesOrderId;
+                                    if (so) {
+                                      const order = salesOrders.find(o => o.id === so);
+                                      if (order) setSoViewOrder(order);
+                                    }
+                                  }}
+                                  title="Xem đơn hàng"
+                                  className="p-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-950 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    // Print receipt PDF
+                                    window.open(`/receipt-print/${rec.code}`, '_blank');
+                                  }}
+                                  title="In phiếu thu PDF"
+                                  className="p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
