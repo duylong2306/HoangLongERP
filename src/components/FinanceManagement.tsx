@@ -1648,7 +1648,7 @@ export default function FinanceManagement({
 
   // Form Inputs - HĐ Thầu phụ
   const [formSubProj, setFormSubProj] = useState(activeSubTab || projects[0]?.id || '');
-  const [formSubPartner, setFormSubPartner] = useState(suppliers[0]?.id || '');
+  const [formSubPartner, setFormSubPartner] = useState('');
   const [formSubScope, setFormSubScope] = useState('');
   const [formSubValue, setFormSubValue] = useState<number>(0);
 
