@@ -693,7 +693,6 @@ export const dbService = {
           weekend_days: config.weekendDays,
           auto_attendance_days: config.autoAttendanceDays,
           auto_attendance_start_date: config.autoAttendanceStartDate,
-          anti_fake_cam: config.antiFakeCam,
           director_base_salary: config.directorBaseSalary,
           pm_base_salary: config.pmBaseSalary,
           accountant_base_salary: config.accountantBaseSalary,
