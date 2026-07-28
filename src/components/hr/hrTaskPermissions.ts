@@ -168,6 +168,10 @@ export const getTaskRoleScope = (
 /** Admin/root luôn full quyền */
 const IS_ADMIN = (uid: string) => uid === 'NV_ADMIN' || uid === 'emp_admin';
 
+const IS_DIRECTOR = (uid: string): boolean => {
+  return isUserInRoleGroup(uid, 'role_admin');
+};
+
 // Kiểm tra user có được xem task này không (dùng action matrix 'view')
 export const canViewTask = (
   currentUser: Employee | undefined,
@@ -177,8 +181,8 @@ export const canViewTask = (
 ): boolean => {
   if (!currentUser) return false;
 
-  // Admin luôn thấy mọi thứ
-  if (IS_ADMIN(currentUser.id)) return true;
+  // Admin/Director luôn thấy mọi thứ
+  if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
 
   const roleScope = getTaskRoleScope(currentUser, task, project);
   const allowedRoles = matrix.actions.view || [];
@@ -195,8 +199,8 @@ export const canDoTaskAction = (
 ): boolean => {
   if (!currentUser) return false;
 
-  // Admin luôn được làm mọi action
-  if (IS_ADMIN(currentUser.id)) return true;
+  // Admin/Director luôn được làm mọi action
+  if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
 
   const roleScope = getTaskRoleScope(currentUser, task, project);
   const allowedRoles = matrix.actions[action] || [];
