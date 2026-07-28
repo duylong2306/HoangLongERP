@@ -1016,7 +1016,7 @@ export default function ProjectKanbanBoard({
                 columnId: targetCol.id,
                 name: title,
                 description: `Công việc con được tạo tự động bởi quy trình khi di chuyển vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-                assignerId: customProject.pmId || 'emp_3',
+                assignerId: proj.pmId || 'emp_3',
                 assigneeId: assigneeId,
                 involvedEmployeeIds: involvedEmployeeIds,
                 department: 'Thi công',
