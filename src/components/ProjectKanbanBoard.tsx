@@ -724,6 +724,7 @@ export default function ProjectKanbanBoard({
   );
   const [newProjValue, setNewProjValue] = useState(0); // Ẩn và mặc định là 0
   const [newProjPm, setNewProjPm] = useState('emp_3');
+  const [columnAssignableId, setColumnAssignableId] = useState<string>('');
   const [newProjAddress, setNewProjAddress] = useState('');
   const [newProjStart, setNewProjStart] = useState(''); // Mặc định để trống hoàn toàn
   const [newProjDuration, setNewProjDuration] = useState<number | ''>(''); // Hạn hợp đồng tính theo ngày
@@ -765,12 +766,24 @@ export default function ProjectKanbanBoard({
       sector === 'furniture' ? 'furniture' : sector === 'mechanical' ? 'mechanical' : 'construction'
     );
     setNewProjValue(0); // Ẩn và mặc định 0
-    setNewProjPm(employees.filter(e => e.role === 'pm' || e.role === 'director')[0]?.id || 'emp_3');
+
+    const targetColId = colId || columns[0]?.id || 'col_design';
+    const targetCol = columns.find(c => c.id === targetColId);
+    const assignableId = targetCol?.automation?.assignId || '';
+
+    if (assignableId) {
+      setColumnAssignableId(assignableId);
+      setNewProjPm(assignableId);
+    } else {
+      setColumnAssignableId('');
+      setNewProjPm(employees.filter(e => e.role === 'pm' || e.role === 'director')[0]?.id || 'emp_3');
+    }
+
     setNewProjAddress(customers[0]?.address || '');
     setNewProjStart(''); // Mặc định để trống hoàn toàn
     setNewProjDuration(''); // Mặc định để trống
     setNewProjNotes('Tạo mới từ bảng Kanban.');
-    setNewProjColumnId(colId || columns[0]?.id || 'col_design');
+    setNewProjColumnId(targetColId);
     setShowAddProjectModal(true);
   };
 
@@ -2008,6 +2021,7 @@ export default function ProjectKanbanBoard({
               onAddProject(customProject);
               setSearchTerm('');
               setSelectedPmId('all');
+              setColumnAssignableId('');
               setShowAddProjectModal(false);
             }} 
             className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 text-xs shadow-2xl animate-scaleIn text-slate-200"
@@ -2022,9 +2036,12 @@ export default function ProjectKanbanBoard({
                   <p className="text-[10px] text-slate-500">Thiết lập chi tiết dự án trước khi đưa vào dải Kanban</p>
                 </div>
               </div>
-              <button 
-                type="button" 
-                onClick={() => setShowAddProjectModal(false)} 
+              <button
+                type="button"
+                onClick={() => {
+                  setColumnAssignableId('');
+                  setShowAddProjectModal(false);
+                }}
                 className="text-slate-500 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-slate-800 transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -2118,14 +2135,22 @@ export default function ProjectKanbanBoard({
                 </div>
 
                 <div>
-                  <label className="block text-slate-350 font-bold mb-1 col-span-1">PM chuyên trách phụ trách <span className="text-rose-500 font-extrabold">*</span></label>
+                  <label className="block text-slate-350 font-bold mb-1 col-span-1">
+                    Trưởng dự án <span className="text-rose-500 font-extrabold">*</span>
+                    {columnAssignableId && <span className="text-amber-500 text-[10px] ml-1">(Cột Kanban chỉ định)</span>}
+                  </label>
                   <select
                     required
                     value={newProjPm}
-                    onChange={(e) => setNewProjPm(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none cursor-pointer focus:border-emerald-500 transition-colors text-[11px]"
+                    onChange={(e) => !columnAssignableId && setNewProjPm(e.target.value)}
+                    disabled={!!columnAssignableId}
+                    className={`w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none transition-colors text-[11px] ${
+                      columnAssignableId
+                        ? 'cursor-not-allowed opacity-60 border-amber-500/30'
+                        : 'cursor-pointer focus:border-emerald-500'
+                    }`}
                   >
-                    <option value="">-- Chọn PM phụ trách --</option>
+                    <option value="">-- Chọn Trưởng dự án --</option>
                     {employees.filter(emp => emp.role === 'pm' || emp.role === 'director').map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.name}</option>
                     ))}
@@ -2202,7 +2227,10 @@ export default function ProjectKanbanBoard({
             <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => setShowAddProjectModal(false)}
+                onClick={() => {
+                  setColumnAssignableId('');
+                  setShowAddProjectModal(false);
+                }}
                 className="bg-slate-800 hover:bg-slate-755 text-slate-300 font-extrabold text-[11px] px-4 py-2 rounded-lg cursor-pointer transition-colors"
               >
                 Hủy bỏ
