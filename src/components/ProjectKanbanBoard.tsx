@@ -754,6 +754,18 @@ export default function ProjectKanbanBoard({
     }
   }, [newProjCustomer, customers, prevCustId]);
 
+  // Sync columnAssignableId và newProjPm khi modal mở hoặc cột thay đổi
+  useEffect(() => {
+    if (showAddProjectModal && newProjColumnId) {
+      const targetCol = columns.find(c => c.id === newProjColumnId);
+      const assignableId = targetCol?.automation?.assignId || '';
+      if (assignableId) {
+        setColumnAssignableId(assignableId);
+        setNewProjPm(assignableId);
+      }
+    }
+  }, [showAddProjectModal, newProjColumnId, columns]);
+
   // ===========================================================================
   // openAddProjectModal(colId?) → Mở modal thêm dự án, gán cột mặc định nếu có colId
   // ===========================================================================
