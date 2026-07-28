@@ -221,7 +221,10 @@ const ADMIN_EMPLOYEE: Employee = {
   phone: '0000000000',
   department: 'Ban Giám Đốc',
   username: 'admin',
-  password: 'admin'
+  password: hashPasswordSync('admin'),
+  roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
+  status: 'working',
+  hasSystemAccount: true
 };
 
 const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
@@ -229,9 +232,11 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
     if (emp.username === 'admin' || emp.id === 'emp_admin') {
       return {
         ...emp,
+        ...ADMIN_EMPLOYEE,
+        id: 'emp_admin',
         username: 'admin',
-        password: 'admin',
-        role: 'director' as const
+        roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
+        hasSystemAccount: true
       };
     }
     return {

@@ -689,7 +689,7 @@ export default function ProfilesTab({
                       type="button"
                       onClick={() => {
                         if (emp.id === 'NV_ADMIN' || emp.id === 'emp_admin' || emp.name === 'Administrator') {
-                          addToast({ title: '🗑️ Đã xóa', message: 'Không thể xóa hồ sơ nhân sự của Quản trị viên hệ thống (admin)!', type: 'info' });
+                          addToast({ title: '🔒 Bị khóa', message: 'Không thể xóa tài khoản quản trị viên hệ thống (admin). Tài khoản này được bảo vệ và không thể xóa.', type: 'warning' });
                           return;
                         }
                         if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa vĩnh viễn hồ sơ nhân sự của ${emp.name} (${emp.id}) không?\nHành động này không thể hoàn tác.`)) {
