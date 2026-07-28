@@ -759,6 +759,7 @@ export default function ProjectKanbanBoard({
     if (showAddProjectModal && newProjColumnId) {
       const targetCol = columns.find(c => c.id === newProjColumnId);
       const assignableId = targetCol?.automation?.assignId || '';
+      console.log('[ProjectKanban] Modal opened:', { newProjColumnId, targetCol: targetCol?.name, assignableId, newProjPm });
       if (assignableId) {
         setColumnAssignableId(assignableId);
         setNewProjPm(assignableId);
@@ -2151,13 +2152,17 @@ export default function ProjectKanbanBoard({
                     Trưởng dự án <span className="text-rose-500 font-extrabold">*</span>
                     {columnAssignableId && <span className="text-amber-500 text-[10px] ml-1">(Cột Kanban chỉ định)</span>}
                   </label>
-                  {columnAssignableId ? (
-                    <div className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2.5 text-amber-400 outline-none text-[11px] font-semibold flex items-center gap-2">
-                      <div className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center flex-shrink-0">
-                        <span className="text-[8px]">✓</span>
+                  {(() => {
+                    console.log('[ProjectKanban] Render PM field:', { columnAssignableId, newProjPm, pmName: employees.find(e => e.id === newProjPm)?.name });
+                    return columnAssignableId ? (
+                      <div className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2.5 text-amber-400 outline-none text-[11px] font-semibold flex items-center gap-2">
+                        <div className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center flex-shrink-0">
+                          <span className="text-[8px]">✓</span>
+                        </div>
+                        <span>{employees.find(e => e.id === newProjPm)?.name || 'Không xác định'}</span>
                       </div>
-                      <span>{employees.find(e => e.id === newProjPm)?.name || 'Không xác định'}</span>
-                    </div>
+                    ) : null;
+                  })()}
                   ) : (
                     <select
                       required
