@@ -187,7 +187,6 @@ export const canViewTask = (
   // Check role group permissions via project permissions matrix
   // If user's role group has 'viewTask' action, allow
   try {
-    const { dbService } = require('../../lib/dbService');
     const saved = localStorage.getItem('hl_project_permissions_v1');
     if (saved) {
       const parsed = JSON.parse(saved);
