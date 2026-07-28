@@ -3189,18 +3189,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             </button>
 
             <span className="text-base md:text-lg font-bold text-slate-100 tracking-tight font-sans truncate min-w-0 flex-1 max-w-[200px] md:max-w-xs bg-slate-800/50 rounded-lg px-3 py-2 flex items-center hover:bg-slate-700/70 transition-all duration-200">
-          </div>
-          {activeTab === 'dashboard' && displaySettings.dashboardTitle}
-          {activeTab === 'projects' && 'Quản Lý Mốc Thi Công'}
-          {activeTab === 'projects-construction' && 'Dự Án Xây Dựng'}
-          {activeTab === 'projects-furniture' && 'Dự Án Nội Thất'}
-          {activeTab === 'projects-mechanical' && 'Dự Án Cơ Khí'}
-          {activeTab === 'tasks' && 'Việc Của Tôi'}
-          {activeTab === 'quotes-construction' && 'Hồ Sơ Xây Dựng'}
-          {activeTab === 'quotes' && 'Hồ Sơ Nội Thất'}
-          {activeTab === 'quotes-mechanical' && 'Hồ Sơ Cơ Khí'}
-          {activeTab === 'quotes-subcontractor' && 'Hồ Sơ Thầu Phụ'}
-          {activeTab === 'subcontractor-management' && 'Quản Lý Thầu Phụ'}
               {activeTab === 'dashboard' && displaySettings.dashboardTitle}
               {activeTab === 'projects' && 'Quản Lý Mốc Thi Công'}
               {activeTab === 'projects-construction' && 'Dự Án Xây Dựng'}
