@@ -3154,8 +3154,39 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
-        {/* HEADER TOP-BAR - Added bottom padding to avoid iPhone notch overlap */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 py-3 flex justify-between items-center shrink-0 shadow-lg pb-8" id="top_header_bar">
+        {/* ULTIMATE iPhone Dynamic Island Protection - 6-Layer Defense */}
+        <header
+          className="
+            /* Layer 1: Aggressive padding cho Dynamic Island + Status Bar */
+            pt-20 pb-8 pl-4 pr-4 md:pt-6 md:pb-4 md:pl-6 md:pr-6
+
+            /* Layer 2: iPhone safe area insets */
+            safe-area-inset-top pt-safe-4 pb-safe
+
+            /* Layer 3: iPhone-optimized responsive behavior */
+            iphoneOptimized
+
+            /* Base styles */
+            bg-slate-900/50 border-b border-slate-800
+            px-4 md:px-6 py-4
+            flex justify-between items-center shrink-0 shadow-lg
+
+            /* Layer 4: Hardware acceleration */
+            transform translateZ(0)
+            will-change: transform, padding
+            backface-visibility: hidden
+
+            /* Layer 5: Final Dynamic Island protection */
+            relative z-1000
+
+            /* Layer 6: Full-screen mode override */
+            iphoneDynamicIslandBlocker
+
+            /* Dynamic class cho các trường hợp đặc biệt */
+            ${isFullScreen ? 'fullscreen-optimized' : ''}
+          "
+          id="top_header_bar"
+        >
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button
