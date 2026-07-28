@@ -3760,6 +3760,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               currentUser={currentUser}
               employees={employees}
               salesOrders={salesOrders}
+              suppliers={suppliers}
+              purchaseOrders={purchaseOrders}
               onAddReceipt={handleAddReceipt}
               onAddPayment={handleAddPayment}
               onApprovePayment={handleApprovePayment}
@@ -3769,7 +3771,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onDeletePayment={handleDeletePayment}
               onAddSalesOrder={handleAddSalesOrder}
               onDeleteSalesOrder={handleDeleteSalesOrder}
-              purchaseOrders={purchaseOrders}
               onAddPurchaseOrder={handleAddPurchaseOrder}
               onDeletePurchaseOrder={handleDeletePurchaseOrder}
               initialSubTab={financeSubTab}

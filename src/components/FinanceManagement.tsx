@@ -1308,9 +1308,9 @@ export default function FinanceManagement({
 
   const resetPOForm = () => {
     setPoSupplierId('');
-    setPoItems([]);
-    setPoItemSearch([]);
-    setPoItemDropdown([]);
+    setPoItems([{ stt: 1, productId: '', tenSanPham: '', donViTinh: '', soLuong: 1, donGia: 0, thanhTien: 0 }]);
+    setPoItemSearch(['']);
+    setPoItemDropdown([false]);
     setPoThanhToan('0');
     setPoReceiptAt(new Date().toISOString().slice(0, 16));
     setPoNotes('');
