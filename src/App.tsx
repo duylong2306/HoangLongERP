@@ -3153,9 +3153,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
       {/* TẤM LÒNG PHẦN KIẾM CHỦ (NỘI DUNG CHÍNH BÊN PHẢI) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
-        
-        {/* HEADER TOP-BAR */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 py-3 flex justify-between items-center shrink-0 shadow-lg" id="top_header_bar">
+
+        {/* HEADER TOP-BAR - Added bottom padding to avoid iPhone notch overlap */}
+        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 py-3 flex justify-between items-center shrink-0 shadow-lg pb-8" id="top_header_bar">
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button

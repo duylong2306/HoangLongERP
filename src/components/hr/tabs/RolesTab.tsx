@@ -139,6 +139,83 @@ export default function RolesTab(props: RolesTabProps) {
       supabaseFailed = true;
       console.error('Supabase hrmRoleGroups save unexpected error:', e);
     }
+
+    // --- ĐỒNG BỘ role_group_ids CỦA EMPLOYEE VÀO SUPABASE (chỉ thêm, KHÔNG xóa) ---
+    try {
+      // B1: Lấy danh sách ID nhân sự đã CÓ TRƯỚC đó từ Supabase
+      const currentEmployeesFromSupabase = await dbService.employees.list();
+      // B2: Lấy danh sách ID nhân sự trong draftRoles (sau khi thay đổi)
+      const newMemberIds = updated.flatMap((r: any) => r.memberIds || []);
+
+      // B3: Chỉ cập nhật các nhân viên mới (không có sẵn -> có mới)
+      const employeeIdsToAdd = newMemberIds.filter(id =>
+        !currentEmployeesFromSupabase.some(emp => (emp.roleGroupIds || []).includes(id))
+      );
+
+      // B4: Cập nhật role_group_ids cho từng nhân viên mới
+      await Promise.all(
+        employeeIdsToAdd.map(async (empId: string) => {
+          // Tìm thông tin nhân viên từ draftRoles để tính toán roleGroupIds
+          const roleIds: string[] = [];
+          updated.forEach((role: any) => {
+            if (role.memberIds?.includes(empId)) {
+              roleIds.push(role.id);
+            }
+          });
+
+          // Lấy thông tin nhân viên đầy đủ từ danh sách nhân viên hiện tại
+          const emp = currentEmployeesFromSupabase.find(e => e.id === empId);
+          if (emp) {
+            await dbService.employees.save({
+              ...emp,
+              roleGroupIds: roleIds,
+            });
+          }
+        })
+      );
+    } catch (e) {
+      console.error('Lỗi đồng bộ role_group_ids cho nhân viên mới:', e);
+    }
+
+    // --- ĐỒNG BỘ role_group_ids CHO CÁC NHÂN SỰ ĐÃ XÓA KHỎI NHÓM ---
+    try {
+      // 1. Lấy danh sách nhân sự đã gán trong draftRoles (sau khi thay đổi)
+      const currentMemberIds = new Set(updated.flatMap((r: any) => r.memberIds || []));
+
+      // 2. Lấy danh sách nhân sự từ Supabase
+      const currentEmployeesFromSupabase = await dbService.employees.list();
+
+      const employeesToUpdate: { empId: string; roleGroupIds: string[] }[] = [];
+      for (const emp of currentEmployeesFromSupabase) {
+        if (!emp.id) continue;
+        const previousRoleGroupIds = emp.roleGroupIds || [];
+
+        // Tìm các role mà nhân viên đã từng thuộc về nhưng giờ không còn
+        const rolesToRemove = previousRoleGroupIds.filter((roleId: string) => {
+          const role = updated.find((r: any) => r.id === roleId);
+          return role && !currentMemberIds.has(emp.id);
+        });
+
+        if (rolesToRemove.length > 0) {
+          // Giữ lại các role chưa xóa
+          const remainingRoleGroupIds = previousRoleGroupIds.filter((rId: string) => !rolesToRemove.includes(rId));
+          employeesToUpdate.push({ empId: emp.id, roleGroupIds: remainingRoleGroupIds });
+        }
+      }
+
+      // 3. Cập nhật Supabase
+      await Promise.all(
+        employeesToUpdate.map(({ empId, roleGroupIds }) =>
+          dbService.employees.save({
+            id: empId,
+            roleGroupIds,
+          })
+        )
+      );
+    } catch (e) {
+      console.error('Lỗi đồng bộ role_group_ids khi xóa nhân sự khỏi nhóm:', e);
+    }
+
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
     if (supabaseFailed) {
