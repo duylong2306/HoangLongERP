@@ -193,13 +193,18 @@ export const canViewTask = (
       const parsed = JSON.parse(saved);
       const rgMatrix = parsed.roleGroupMatrix || {};
       const empGroupIds = currentUser.roleGroupIds || [];
+      console.log('🔍 canViewTask check - User groups:', empGroupIds, 'rgMatrix:', rgMatrix);
       for (const groupId of empGroupIds) {
-        if (rgMatrix.roleGroupActions?.[groupId]?.includes('viewTask')) {
+        const actions = rgMatrix.roleGroupActions?.[groupId];
+        console.log(`  Group ${groupId} has actions:`, actions);
+        if (actions?.includes('viewTask')) {
+          console.log(`  ✅ User allowed - group ${groupId} has viewTask`);
           return true;
         }
       }
     }
   } catch (e) {
+    console.warn('canViewTask role group check failed:', e);
     // Fallback — continue to context check
   }
 

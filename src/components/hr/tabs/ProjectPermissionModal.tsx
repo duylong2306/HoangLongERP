@@ -209,7 +209,9 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   };
 
   const handleSaveRoleGroup = async () => {
+    console.log('💾 Saving role group matrix:', rgMatrix);
     await saveRoleGroupProjectMatrix(rgMatrix);
+    console.log('📦 After save, checking localStorage:', localStorage.getItem('hl_project_permissions_v1'));
     setSavedRgMatrix(JSON.parse(JSON.stringify(rgMatrix)));
     addToast({ title: '✅ Thành công', message: 'Quyền nhóm HRM đã được lưu.', type: 'success' });
   };

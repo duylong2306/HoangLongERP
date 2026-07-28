@@ -313,6 +313,8 @@ export const loadProjectPermissions = (): ProjectPermissionMatrix => {
         ...parsed,
         actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, ...(parsed.actions || {}) },
         visibility: { ...DEFAULT_PROJECT_PERMISSIONS.visibility, ...(parsed.visibility || {}) },
+        // Preserve roleGroupMatrix from saved data
+        roleGroupMatrix: parsed.roleGroupMatrix,
       };
     }
   } catch (e) {
