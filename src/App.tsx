@@ -3155,7 +3155,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
         {/* HEADER TOP-BAR - Tall header with 39px top padding to avoid iPhone Dynamic Island. Content/scontrols aligned at bottom via items-end */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[39px] pb-2 flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
+        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[45px] pb-[45px] flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button
@@ -3246,7 +3246,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               ];
 
               return (
-                <div className="relative" id="notification_bell_root">
+                <div className="flex items-center gap-2">
+                  {/* Nút reload trang */}
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors flex items-center justify-center h-8.5 w-8.5"
+                    title="Tải lại trang"
+                    id="reload_page_btn"
+                  >
+                    <RefreshCw className="w-4 h-4 text-emerald-400" />
+                  </button>
+
+                  <div className="relative" id="notification_bell_root">
                   <button
                     onClick={() => setShowNotificationsPanel(!showNotificationsPanel)}
                     className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors relative flex items-center justify-center h-8.5 w-8.5"
@@ -3536,6 +3547,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                     </div>
                   )}
                 </div>
+              </div>
               );
             })()}
 
@@ -3562,7 +3574,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 mt-2 w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
+                <div className="absolute right-0 bottom-[45px] w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
                   <button
                     type="button"
                     onClick={() => { setShowUserMenu(false); setShowProfileModal(true); }}
