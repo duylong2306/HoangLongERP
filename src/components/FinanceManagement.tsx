@@ -248,7 +248,6 @@ export default function FinanceManagement({
   const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean => {
     // Đọc từ in-memory cache (đã load từ Supabase)
     let rolesList: any[] = loadHrmRoleGroups();
-    }
     if (rolesList.length === 0) return true; // Mặc định có quyền nếu chưa cấu hình
     try {
       
