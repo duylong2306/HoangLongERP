@@ -344,11 +344,31 @@ export default function DashboardOverview({
     };
   }, []);
 
+  // Helper: chuẩn hóa giá trị thời gian (xử lý object timestamp cũ)
+  const normalizeTime = (v: any): string => {
+    if (!v || v === '--:--' || v === '') return '--:--';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && v.time) return v.time;
+    return String(v);
+  };
+  const normalizeRecord = (r: any) => ({
+    ...r,
+    timeInS: normalizeTime(r.timeInS),
+    timeOutS: normalizeTime(r.timeOutS),
+    timeInC: normalizeTime(r.timeInC),
+    timeOutC: normalizeTime(r.timeOutC),
+    timeInOT: normalizeTime(r.timeInOT),
+    timeOutOT: normalizeTime(r.timeOutOT),
+  });
+
   const [attendanceList, setAttendanceList] = useState<any[]>(() => {
     // Load từ localStorage cache trước để tránh flash nút sai khi load trang
     try {
       const cached = localStorage.getItem('hl_attendance_cache');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed.map(normalizeRecord);
+      }
     } catch {}
     return [];
   });

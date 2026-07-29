@@ -1607,6 +1607,14 @@ export const dbService = {
     }
   },
 
+  // Helper: chuẩn hóa giá trị thời gian, xử lý cả trường hợp bị lưu object timestamp
+  const normalizeTime = (v: any): string => {
+    if (!v || v === '--:--' || v === '') return '--:--';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && v.time) return v.time; // object cũ: {date, time, datetime, epoch_ms}
+    return String(v);
+  };
+
   // 15. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
   attendance: {
     async list(): Promise<any[]> {
@@ -1626,12 +1634,12 @@ export const dbService = {
           empId: r.emp_id,
           empName: r.emp_name,
           date: r.date,
-          timeInS: r.time_in_s,
-          timeOutS: r.time_out_s,
-          timeInC: r.time_in_c,
-          timeOutC: r.time_out_c,
-          timeInOT: r.time_in_ot,
-          timeOutOT: r.time_out_ot,
+          timeInS: normalizeTime(r.time_in_s),
+          timeOutS: normalizeTime(r.time_out_s),
+          timeInC: normalizeTime(r.time_in_c),
+          timeOutC: normalizeTime(r.time_out_c),
+          timeInOT: normalizeTime(r.time_in_ot),
+          timeOutOT: normalizeTime(r.time_out_ot),
           method: r.method,
           status: r.status,
           otHours: r.ot_hours,
