@@ -169,7 +169,7 @@ export const getTaskRoleScope = (
 const IS_ADMIN = (uid: string) => uid === 'NV_ADMIN' || uid === 'emp_admin';
 
 const IS_DIRECTOR = (uid: string): boolean => {
-  return isUserInRoleGroup(uid, 'role_admin');
+  return isUserInRoleGroup(uid, 'role_admin'); // superadmin cũng true nhờ isUserInRoleGroup
 };
 
 // Kiểm tra user có được xem task này không (dùng action matrix 'view')

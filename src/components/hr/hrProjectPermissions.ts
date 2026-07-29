@@ -253,7 +253,7 @@ export const getProjectRoleScopes = (
   const scopes: ProjectRoleScope[] = [];
 
   // 1. Director (Role Group: role_admin)
-  if (isUserInRoleGroup(currentUser.id, 'role_admin')) scopes.push('director');
+  if (isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_superadmin')) scopes.push('director');
 
   // 2. Kế Toán (Role Group: role_accounting)
   if (isUserInRoleGroup(currentUser.id, 'role_accounting')) scopes.push('accountant');
@@ -432,6 +432,7 @@ export const can = (
 ): boolean => {
   if (!currentUser) return false;
   if (IS_ADMIN(currentUser.id)) return true;
+  if (isUserInRoleGroup(currentUser.id, 'role_superadmin')) return true;
 
   const matrix = matrixOverride || loadProjectPermissions();
 
@@ -488,7 +489,7 @@ export const getVisibility = (
   task?: Task
 ): VisibilityMode => {
   if (!currentUser) return 'readonly';
-  if (IS_ADMIN(currentUser.id)) return 'all';
+  if (IS_ADMIN(currentUser.id) || isUserInRoleGroup(currentUser.id, 'role_superadmin')) return 'all';
 
   const scopes = getProjectRoleScopes(currentUser, project, task);
   const matrix = loadProjectPermissions();
