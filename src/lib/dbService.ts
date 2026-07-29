@@ -1,4 +1,5 @@
 import { getSupabase } from './supabase';
+import { ensureProjectChatGroup } from './chatStore';
 import {
   Employee,
   Customer,
@@ -784,6 +785,11 @@ export const dbService = {
     },
     async save(project: Project): Promise<void> {
       await saveSupabase('projects', project);
+      // Tự động tạo NHÓM CHAT DỰ ÁN khi khởi tạo/cập nhật dự án
+      // (idempotent: không tạo trùng, đồng bộ thành viên khi dự án thay đổi)
+      ensureProjectChatGroup(project).catch(err =>
+        console.error('ensureProjectChatGroup error:', err)
+      );
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('projects', id);

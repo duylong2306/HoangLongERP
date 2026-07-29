@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote } from '../types';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
@@ -28,47 +28,11 @@ import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
+import { sendGroupChatMessage } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
-import { createGroupConversation, addMessage, getConversations } from '../lib/chatStore';
 
 export type { KanbanColumn } from '../lib/kanbanLogic';
-
-/**
- * Tự động gửi tin nhắn vào nhóm chat của công việc (conv_task_<taskId>).
- * Nếu nhóm chưa tồn tại thì tạo mới từ danh sách người liên quan.
- * (Dùng chung với TaskManagement để thay thế note workLogs bằng chat thật.)
- */
-function postTaskChat(
-  taskId: string,
-  senderId: string,
-  senderName: string,
-  senderRole: string,
-  content: string,
-  members: string[],
-  taskName?: string,
-  projectName?: string
-) {
-  const convId = `conv_task_${taskId}`;
-  const convs = getConversations();
-  const exists = convs.some(c => c.id === convId);
-  if (!exists && members.length > 0) {
-    createGroupConversation(
-      `${projectName ? projectName.substring(0, 30) + ' - ' : ''}${taskName ? taskName.substring(0, 30) : 'Công việc'}`,
-      Array.from(new Set(members.filter(Boolean))),
-      senderId,
-      taskId
-    );
-  }
-  addMessage({
-    conversationId: convId,
-    senderId,
-    senderName,
-    senderRole: (senderRole || 'member') as any,
-    content,
-    system: true
-  });
-}
 
 // PROPS (Interface) - Định nghĩa các props component nhận từ parent (App.tsx / SectorKanbanWrapper)
 // =================================================================================================
@@ -126,6 +90,23 @@ export default function ProjectKanbanBoard({
   onRedirectToSubcontractor
 }: ProjectKanbanBoardProps) {
   const { addToast } = useNotification(); // Toast thông báo từ context
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN ───────────────────────────────────
+  // Hàm bọc quanh sendGroupChatMessage (lib/chatStore). Truyền sẵn MÃ NHÓM CHAT
+  // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
+  // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
+  // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
+  const notifyProjectChat = (content: string) => {
+    const pid = selectedProject?.id;
+    if (!pid || !currentUser) return;
+    sendGroupChatMessage({
+      conversationId: `conv_project_${pid}`,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderRole: currentUser.role,
+      content,
+    });
+  };
 
   // ===========================================================================
   // SECTION: PHÂN QUYỀN NGƯỜI DÙNG (RBAC) — Quyền Dự Án
@@ -713,6 +694,9 @@ export default function ProjectKanbanBoard({
 
     setIsEditingDetails(false);
     addToast({ title: '✅ Thành công', message: '💾 Đã cập nhật và lưu trữ thông tin công trình thành công!', type: 'success' });
+
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    notifyProjectChat(`💾 ${currentUser?.name || 'Người dùng'} đã cập nhật & lưu thông tin dự án "${selectedProject?.name || ''}".`);
   };
 
   // 3.5. States for project creation modal in Kanban
@@ -879,6 +863,12 @@ export default function ProjectKanbanBoard({
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
 
+    // 📣 Thông báo THAY ĐỔI TRƯỞNG DỰ ÁN vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    if (updates.pmId && updates.pmId !== proj.pmId) {
+      const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mớí';
+      notifyProjectChat(`👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`);
+    }
+
     const finalStatus = updates.status !== undefined ? updates.status : proj.status;
     const finalProgress = updates.progress !== undefined ? updates.progress : proj.progress;
     const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
@@ -909,7 +899,7 @@ export default function ProjectKanbanBoard({
       if (targetCol && finalTargetColId !== originalColId) {
         // Validation check for blocking tasks: Đang làm (doing), Chờ duyệt (reviewing), Trễ hạn (overdue)
         const projTasks = (updatedTasksList || tasks).filter(t => t.projectId === projectId);
-        const blockingTasks = projTasks.filter(t => 
+        const blockingTasks = projTasks.filter(t =>
           t.status === 'doing' || t.status === 'reviewing' || t.status === 'overdue'
         );
 
@@ -922,7 +912,7 @@ export default function ProjectKanbanBoard({
           return;
         }
 
-        // Auto-delete todo tasks ("Chưa làm")
+        // Auto-delete todo tasks ("Chưa làm") - pass task IDs to parent callback
         const todoTasks = projTasks.filter(t => t.status === 'todo');
         if (todoTasks.length > 0) {
           const todoIds = todoTasks.map(t => t.id);
@@ -1139,6 +1129,54 @@ export default function ProjectKanbanBoard({
     }
     onUpdateProject(projectId, updates);
   };
+
+  // ===========================================================================
+  // checkAutoMoveProject() → Kiểm tra và thực hiện auto-move project khi tất cả task hoàn thành
+  // Được gọi từ useEffect khi tasks thay đổi
+  // ===========================================================================
+  const checkAutoMoveProject = useCallback((projectId: string) => {
+    const proj = projects.find(p => p.id === projectId);
+    if (!proj) return;
+
+    const projTasks = tasks.filter(t => t.projectId === projectId);
+    if (projTasks.length === 0) return;
+
+    // Check if all tasks are completed
+    const allCompleted = projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
+    if (!allCompleted) return;
+
+    // Trigger auto-move using the existing updateProjectWithRule logic
+    // This will handle: blocking tasks check, delete todo tasks, run target column automation
+    const currentColId = getProjectColumnId(proj, columns);
+    const currentCol = columns.find(c => c.id === currentColId);
+
+    if (currentCol?.automation?.statusUpdate) {
+      const targetColId = currentCol.automation.statusUpdate;
+      if (targetColId && targetColId !== currentColId) {
+        // Call updateProjectWithRule to handle the full automation
+        updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
+      }
+    } else if (currentColId !== 'col_done') {
+      // Fallback to col_done if no statusUpdate automation
+      updateProjectWithRule(projectId, { kanbanColumnId: 'col_done' }, tasks);
+    }
+  }, [projects, tasks, columns, getProjectColumnId, updateProjectWithRule]);
+
+  // ===========================================================================
+  // Auto-move check when tasks change
+  // ===========================================================================
+  useEffect(() => {
+    if (!tasks || tasks.length === 0) return;
+
+    // Check each project in this sector for auto-move conditions
+    const projectsInSector = projects.filter(p => p.type === sector || (p as any).sector === sector);
+    projectsInSector.forEach(proj => {
+      // Small delay to avoid race conditions with rapid task updates
+      setTimeout(() => {
+        checkAutoMoveProject(proj.id);
+      }, 100);
+    });
+  }, [tasks, checkAutoMoveProject, projects, sector]);
 
   // ===========================================================================
   // localUpdateTask() → Cập nhật Task qua callback onUpdateTask rồi đồng bộ local state tasks
@@ -1575,7 +1613,7 @@ export default function ProjectKanbanBoard({
         }
       ],
 
-      // 2. DỮ LIỆU ĐỒNG BỘ: NHẬT KÝ KHAI TẠO đã được thay thế bằng chat (postTaskChat) ở dưới.
+      // 2. DỮ LIỆU ĐỒNG BỘ: NHẬT KÝ KHAI TẠO (không còn gửi thông báo vào nhóm chat công việc).
 
       // 3. ĐỀ XUẤT TÀI CHÍNH: để trống, người dùng tự tạo khi cần
       advanceRequests: [],
@@ -1586,24 +1624,8 @@ export default function ProjectKanbanBoard({
 
     onAddTask(childTask);
 
-    // 🤖 Auto-post to task chat group (người gửi = người thao tác)
-    const members: string[] = [
-      currentUser?.id,
-      childTask.assignerId,
-      childTask.assigneeId,
-      ...(childTask.involvedEmployeeIds || []),
-      selectedProject.pmId
-    ].filter((v): v is string => Boolean(v));
-    postTaskChat(
-      childTask.id,
-      currentUser?.id || 'emp_1',
-      currentUser?.name || 'Người dùng',
-      currentUser?.role || 'member',
-      `🆕 ${currentUser?.name || 'Người dùng'} đã tạo công việc con: "${subTaskName}" cho dự án "${selectedProject.name}".`,
-      members,
-      subTaskName,
-      selectedProject.name
-    );
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    notifyProjectChat(`📝 ${currentUser?.name || 'Người dùng'} đã khởi tạo Công Việc Con "${childTask.name}" cho dự án "${selectedProject?.name || ''}".`);
 
     // Mở ngay lập tức giao diện chi tiết công việc của công việc con vừa được tạo
     setOverlayTaskId(childTask.id);

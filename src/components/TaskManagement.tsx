@@ -9,43 +9,6 @@ import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
-import { createGroupConversation, addMessage, getConversations } from '../lib/chatStore';
-
-/**
- * Tự động gửi tin nhắn vào nhóm chat của công việc (conv_task_<taskId>).
- * Nếu nhóm chưa tồn tại thì tạo mới từ danh sách người liên quan.
- * Tin nhắn được gắn cờ system: true (hoạt động tự động, không phải chat tay).
- */
-function postTaskChat(
-  taskId: string,
-  senderId: string,
-  senderName: string,
-  senderRole: string,
-  content: string,
-  members: string[],
-  taskName?: string,
-  projectName?: string
-) {
-  const convId = `conv_task_${taskId}`;
-  const convs = getConversations();
-  const exists = convs.some(c => c.id === convId);
-  if (!exists && members.length > 0) {
-    createGroupConversation(
-      `${projectName ? projectName.substring(0, 30) + ' - ' : ''}${taskName ? taskName.substring(0, 30) : 'Công việc'}`,
-      Array.from(new Set(members.filter(Boolean))),
-      senderId,
-      taskId
-    );
-  }
-  addMessage({
-    conversationId: convId,
-    senderId,
-    senderName,
-    senderRole: (senderRole || 'member') as any,
-    content,
-    system: true
-  });
-}
 
 interface TaskManagementProps {
   tasks: Task[];
@@ -503,19 +466,6 @@ export default function TaskManagement({
     };
 
     onAddTask(newlyCreatedTask);
-
-    // Tự động gửi tin nhắn vào nhóm chat của công việc (người gửi = người thao tác)
-    const proj = projects.find(p => p.id === newTaskProj);
-    postTaskChat(
-      newlyCreatedTask.id,
-      currentUser.id,
-      currentUser.name,
-      currentUser.role || 'member',
-      `🆕 ${currentUser.name} đã tạo công việc mới: "${newTaskName}".`,
-      [currentUser.id, newTaskAssignee, ...(newInvolvedIds || []), proj?.pmId].filter(Boolean) as string[],
-      newTaskName,
-      proj?.name
-    );
 
     // Reset form states
     setNewTaskName('');
@@ -1066,18 +1016,7 @@ export default function TaskManagement({
                                 notes: `${currentUser.name} đã Từ Chối duyệt kết quả thông qua cổng duyệt nhanh.`
                               }]
                             });
-                            // 🤖 Auto-post to task chat group
-                            const proj = projects.find(p => p.id === t.projectId);
-                            postTaskChat(
-                              t.id,
-                              currentUser.id,
-                              currentUser.name,
-                              currentUser.role || 'member',
-                              `❌ ${currentUser.name} đã Từ Chối duyệt kết quả công việc "${t.name}".`,
-                              [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                              t.name,
-                              proj?.name
-                            );
+                            // 🤖 (Đã loại bỏ: thông báo công việc gửi về nhóm chat)
                           }}
                           className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                         >
@@ -1099,18 +1038,7 @@ export default function TaskManagement({
                                 notes: `${currentUser.name} đã Phê Duyệt kết quả hoàn thành sản phẩm mốc nghiệm thu.`
                               }]
                             });
-                            // 🤖 Auto-post to task chat group
-                            const proj = projects.find(p => p.id === t.projectId);
-                            postTaskChat(
-                              t.id,
-                              currentUser.id,
-                              currentUser.name,
-                              currentUser.role || 'member',
-                              `✅ ${currentUser.name} đã Phê Duyệt hoàn thành công việc "${t.name}".`,
-                              [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                              t.name,
-                              proj?.name
-                            );
+                            // 🤖 (Đã loại bỏ: thông báo công việc gửi về nhóm chat)
                           }}
                           className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-2.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer"
                         >
@@ -1507,18 +1435,7 @@ export default function TaskManagement({
                                             notes: `${currentUser.name} đã Nhận Việc từ danh sách việc.`
                                           }]
                                         });
-                                        // 🤖 Auto-post to task chat group
-                                        const proj = projects.find(p => p.id === t.projectId);
-                                        postTaskChat(
-                                          t.id,
-                                          currentUser.id,
-                                          currentUser.name,
-                                          currentUser.role || 'member',
-                                          `🙋 ${currentUser.name} đã Nhận Việc "${t.name}".`,
-                                          [currentUser.id, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                                          t.name,
-                                          proj?.name
-                                        );
+                                        // 🤖 (Đã loại bỏ: thông báo công việc gửi về nhóm chat)
                                       }}
                                       className="bg-sky-600 hover:bg-sky-500 text-slate-950 text-[10.5px] font-black px-2.5 py-1 rounded cursor-pointer transition flex-1 sm:flex-initial"
                                     >
@@ -1562,18 +1479,6 @@ export default function TaskManagement({
                                               notes: `${currentUser.name} đã Từ Chối duyệt kết quả, yêu cầu người phụ trách xem lại sản phẩm.`
                                             }]
                                           });
-                                          // 🤖 Auto-post to task chat group
-                                          const proj = projects.find(p => p.id === t.projectId);
-                                          postTaskChat(
-                                            t.id,
-                                            currentUser.id,
-                                            currentUser.name,
-                                            currentUser.role || 'member',
-                                            `❌ ${currentUser.name} đã Từ Chối duyệt kết quả công việc "${t.name}".`,
-                                            [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                                            t.name,
-                                            proj?.name
-                                          );
                                         }}
                                         className="bg-rose-600 hover:bg-rose-500 text-white text-[10.5px] font-bold px-2 py-1 rounded cursor-pointer transition"
                                       >
@@ -1595,18 +1500,6 @@ export default function TaskManagement({
                                               notes: `${currentUser.name} đã Xét Duyệt hoàn thành xuất sắc công việc.`
                                             }]
                                           });
-                                          // 🤖 Auto-post to task chat group
-                                          const proj = projects.find(p => p.id === t.projectId);
-                                          postTaskChat(
-                                            t.id,
-                                            currentUser.id,
-                                            currentUser.name,
-                                            currentUser.role || 'member',
-                                            `✅ ${currentUser.name} đã Xét Duyệt hoàn thành công việc "${t.name}".`,
-                                            [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                                            t.name,
-                                            proj?.name
-                                          );
                                         }}
                                         className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-[10.5px] font-black px-2 py-1 rounded cursor-pointer transition"
                                       >

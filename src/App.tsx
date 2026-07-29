@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems } from './lib/dbService';
 import { useWebPush } from './hooks/useWebPush';
-import { createGroupConversation, deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
+import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
 import {
   Employee,
   Customer,
@@ -1583,7 +1583,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         if (cloudRoles && cloudRoles.length > 0) {
           // Luôn merge role_superadmin vào cache
           if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
-            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: [], permissions: {} });
+            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: ['emp_admin', 'NV_ADMIN', 'admin'], permissions: {} });
           }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
           setRoleGroupsCache(cloudRoles);
@@ -1637,7 +1637,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         if (cloudRoles && cloudRoles.length > 0) {
           // Luôn merge role_superadmin vào cache (bảo vệ khỏi DB chưa có)
           if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
-            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: [], permissions: {} });
+            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: ['emp_admin', 'NV_ADMIN', 'admin'], permissions: {} });
           }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
           setRoleGroupsCache(cloudRoles);
@@ -1851,6 +1851,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     // 1. Cập nhật state dự án dùng functional update để tránh stale closure
     setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
 
+    // 1b. Xóa luôn nhóm chat dự án tương ứng (conv_project_<id>)
+    deleteConversation(`conv_project_${id}`);
+
     // 2. Cập nhật state công việc dùng functional update, đồng thời xóa các tài liệu tương ứng trong Firebase
     setTasks(prevTasks => {
       const associatedTasks = prevTasks.filter(t => t.projectId === id);
@@ -1881,30 +1884,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }).catch(err => {
       console.error("Lỗi khi thêm công việc mới:", err);
     });
-
-    // Auto-create task chat group
-    try {
-      if (!currentUser) return;
-      const project = projects.find(p => p.id === newTask.projectId);
-      const memberIds = Array.from(new Set([
-        newTask.assignerId,
-        newTask.assigneeId,
-        ...(newTask.involvedEmployeeIds || []),
-        ...(newTask.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]),
-        project?.pmId,
-        ...(project?.involvedEmployeeIds || []),
-        currentUser?.id
-      ].filter((id): id is string => Boolean(id))));
-
-      if (!currentUser) return;
-      createGroupConversation(
-        `${project?.name?.substring(0, 30)} - ${newTask.name.substring(0, 30)}`,
-        memberIds,
-        currentUser.id,
-        newTask.id,
-        newTask.projectId
-      );
-    } catch (e) { console.error('Auto-create chat group failed:', e); }
   };
 
   const handleUpdateTask = (id: string, updates: Partial<Task>) => {
@@ -2013,223 +1992,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         });
 
         // TỰ ĐỘNG CHUYỂN CỘT KHI HOÀN THÀNH:
+        // Delegate to ProjectKanbanBoard via callback to use centralized updateProjectWithRule logic
         const projectId = changedTask.projectId;
         if (projectId) {
-          const updatedTasks = prev.map(t => t.id === id ? changedTask : t);
-          const projTasks = updatedTasks.filter(t => t.projectId === projectId);
-          if (projTasks.length > 0) {
-            const allCompleted = projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
-            if (allCompleted) {
-              // Wait a brief moment to avoid state updates collision or race conditions
-              setTimeout(() => {
-                const proj = projects.find(p => p.id === projectId);
-                if (proj) {
-                  // Determine sector and loading key
-                  const sector = proj.type === 'furniture' ? 'furniture' : proj.type === 'construction' ? 'construction' : 'mechanical';
-                  const storageKey = `hl_kanban_cols_${sector}`;
-                  const saved = localStorage.getItem(storageKey);
-                  let columnsList: any[] = [];
-                  if (saved) {
-                    try {
-                      columnsList = JSON.parse(saved);
-                    } catch (e) {}
-                  }
-                  if (!columnsList || columnsList.length === 0) {
-                    columnsList = [
-                      { id: 'col_design', name: 'YÊU CẦU THIẾT KẾ', color: 'bg-indigo-650', iconColor: 'text-indigo-400', automation: { type: 'auto_progress', param: 10 } },
-                      { id: 'col_bid', name: 'ĐẤU THẦU', color: 'bg-sky-600', iconColor: 'text-sky-450', automation: { type: 'auto_pm', param: 'emp_3' } },
-                      { id: 'col_waiting', name: 'CHỜ KẾT QUẢ', color: 'bg-blue-700', iconColor: 'text-blue-450', automation: { type: 'none' } },
-                      { id: 'col_active', name: 'GIỚI ĐOẠN THI CÔNG', color: 'bg-amber-500', iconColor: 'text-amber-400', automation: { type: 'auto_progress', param: 40 } },
-                      { id: 'col_accept', name: 'NGHIỆM THU', color: 'bg-emerald-600', iconColor: 'text-emerald-450', automation: { type: 'auto_approval', param: 'director' } },
-                      { id: 'col_fix', name: 'XỬ LÝ - KHẮC PHỤC', color: 'bg-purple-600', iconColor: 'text-purple-400', automation: { type: 'auto_progress', param: 90 } },
-                      { id: 'col_done', name: 'HOÀN THÀNH', color: 'bg-pink-600', iconColor: 'text-pink-400', automation: { type: 'auto_complete' } },
-                    ];
-                  }
-
-                  const getProjColumnId = (p: Project): string => {
-                    if ((p as any).kanbanColumnId) {
-                      if (columnsList.some(c => c.id === (p as any).kanbanColumnId)) {
-                        return (p as any).kanbanColumnId;
-                      }
-                    }
-                    if (p.status === 'completed') return 'col_done';
-                    if (p.status === 'new') return 'col_design';
-                    if (p.progress >= 90) return 'col_fix';
-                    if (p.progress >= 70) return 'col_accept';
-                    if (p.progress > 0) return 'col_active';
-                    return 'col_design';
-                  };
-
-                  const currentColId = getProjColumnId(proj);
-                  const currentColObj = columnsList.find(c => c.id === currentColId);
-                  const targetColId = currentColObj?.automation?.statusUpdate;
-
-                  if (targetColId && targetColId !== currentColId) {
-                    const targetColObj = columnsList.find(c => c.id === targetColId);
-                    const updates: Partial<Project> = {
-                      kanbanColumnId: targetColId,
-                    };
-
-                    const generatedTasks: Task[] = [];
-
-                    if (targetColObj?.automation) {
-                      const rule = targetColObj.automation;
-
-                      // 1. PM assignment
-                      if (rule.assignId) {
-                        updates.pmId = rule.assignId;
-                      }
-
-                      // 2. Status update
-                      if (rule.statusUpdate && rule.statusUpdate !== 'col_done' && !columnsList.some((c: any) => c.id === rule.statusUpdate)) {
-                        updates.status = rule.statusUpdate as any;
-                      }
-
-                      // 2.2 Text styling
-                      if (rule.textStyleStyleItalic !== undefined) updates.styleItalic = rule.textStyleStyleItalic;
-                      if (rule.textStyleStyleBold !== undefined) updates.styleBold = rule.textStyleStyleBold;
-                      if (rule.textStyleStyleStrike !== undefined) updates.styleStrike = rule.textStyleStyleStrike;
-                      if (rule.textStyleStyleColor !== undefined) updates.styleColor = rule.textStyleStyleColor;
-
-                      // 6. Subtasks creation
-                      const tasksToAdd: string[] = [];
-                      if (rule.subtaskTitles && rule.subtaskTitles.length > 0) {
-                        rule.subtaskTitles.forEach((title: string) => {
-                          if (title && title.trim()) {
-                            tasksToAdd.push(title.trim());
-                          }
-                        });
-                      } else if (rule.subtaskTitle && rule.subtaskTitle.trim()) {
-                        tasksToAdd.push(rule.subtaskTitle.trim());
-                      }
-
-                      if (tasksToAdd.length > 0) {
-                        const nowTimestamp = Date.now();
-                        tasksToAdd.forEach((title, idx) => {
-                          const newTaskId = `task_auto_${nowTimestamp}_${idx}`;
-                          const dayOffset = rule.dueDateDaysOffset || 7;
-                          const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
-                          
-                          const assigneeId = subtaskAuto.assignId || rule.assignId || proj.pmId || 'emp_3';
-                          const involvedEmployeeIds = Array.from(new Set([
-                            ...(proj.involvedEmployeeIds || []),
-                            ...(rule.involvedId ? [rule.involvedId] : []),
-                            ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-                            ...(subtaskAuto.involvedEmployeeIds || [])
-                          ]));
-
-                          const approvals = subtaskAuto.isApprovalEnabled !== false && subtaskAuto.approvalRole && subtaskAuto.approvalRole !== 'none' ? [{
-                            id: `app_sub_auto_${nowTimestamp}_${idx}`,
-                            levelName: `Quy trình duyệt: ${subtaskAuto.approvalRole === 'director' ? 'Giám Đốc (Trương Hữu Long)' : subtaskAuto.approvalRole === 'accountant' ? 'Kế Toán trưởng (Lê Thị Mai)' : 'PM chuyên trách'}`,
-                            approverId: subtaskAuto.approvalRole === 'director' ? 'emp_1' : subtaskAuto.approvalRole === 'accountant' ? 'emp_2' : (proj.pmId || 'emp_3'),
-                            status: 'pending' as const
-                          }] : undefined;
-
-                          const autoTask: Task = {
-                            id: newTaskId,
-                            code: `CV-AUTO-${Math.floor(Math.random() * 900) + 100}`,
-                            projectId: projectId,
-                            columnId: targetColId,
-                            name: title,
-                            description: `Công việc con được tạo tự động bởi quy trình khi di chuyển vào phân đoạn ${targetColObj.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-                            assignerId: 'system',
-                            assigneeId: assigneeId,
-                            involvedEmployeeIds: involvedEmployeeIds,
-                            department: 'Thi công',
-                            deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                            priority: 'medium',
-                            status: 'todo',
-                            completionRate: 0,
-                            notes: 'Nhiệm vụ tự trị Hoàng Long vách mộc',
-                            workLogs: [
-                              {
-                                id: `wl_auto_${nowTimestamp}`,
-                                actorId: 'system',
-                                actorName: 'Hệ thống tự động',
-                                action: 'Cấp phát nhiệm vụ tự động',
-                                timestamp: new Date().toISOString().split('T')[0],
-                                notes: `Khởi tạo công việc từ quy trình tự động phân đoạn ${targetColObj.name}.`
-                              }
-                            ],
-                            styleItalic: subtaskAuto.textStyleStyleItalic,
-                            styleBold: subtaskAuto.textStyleStyleBold,
-                            styleStrike: subtaskAuto.textStyleStyleStrike,
-                            styleColor: subtaskAuto.textStyleStyleColor,
-                            checklistTexts: subtaskAuto.checklistTexts || [],
-                            approvals: approvals,
-                            isApprovalEnabled: subtaskAuto.isApprovalEnabled !== false,
-                            isApprovalRequired: subtaskAuto.isApprovalRequired !== false,
-                            isDocGenerationEnabled: subtaskAuto.isDocGenerationEnabled !== false,
-                            isCostEnabled: subtaskAuto.isCostEnabled !== false,
-                            isMaterialEnabled: subtaskAuto.isMaterialEnabled !== false
-                          };
-
-                          generatedTasks.push(autoTask);
-
-                          // Thiết kế Hồ sơ
-                          if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
-                            const docTitle = subtaskAuto.docTitle || `Hồ sơ ${subtaskAuto.docTemplateId === 'quotation' ? 'Báo giá thầu' : subtaskAuto.docTemplateId === 'contract' ? 'Hợp đồng kinh tế' : subtaskAuto.docTemplateId === 'acceptance' ? 'Biên bản nghiệm thu' : 'Biên bản thanh lý'}`;
-                            const subtaskDoc: ProjectDoc = {
-                              id: `doc_sub_auto_${nowTimestamp}_${idx}`,
-                              type: subtaskAuto.docTemplateId as any,
-                              name: docTitle,
-                              code: `HS-AUTO-${Math.floor(Math.random() * 900) + 100}`,
-                              createdAt: new Date().toISOString().split('T')[0],
-                              status: 'draft',
-                              templateName: 'Hồ sơ thiết lập tự động từ công việc con',
-                              customFields: [
-                                { label: 'Công việc liên kết', value: title }
-                              ]
-                            };
-                            if (!updates.documents) {
-                              updates.documents = [...(proj.documents || [])];
-                            }
-                            updates.documents.push(subtaskDoc);
-                          }
-                        });
-                      }
-                    }
-
-                    const nextp = {
-                      ...proj,
-                      ...updates,
-                    };
-
-                    // 1. Save updated project to DB
-                    dbService.projects.save(nextp).catch(err => {
-                      console.error("Lỗi khi lưu tự động cập nhật dự án:", err);
-                    });
-
-                    // 2. Set Projects State
-                    setProjects(prevProjects => prevProjects.map(p => p.id === proj.id ? nextp : p));
-
-                    // 3. Save tasks securely to prevent duplicates
-                    if (generatedTasks.length > 0) {
-                      setTasks(prevTasks => {
-                        // De-duplicate guard to strictly ensure no identical todo task name on the target column
-                        const nonDuplicateGenerated = generatedTasks.filter(gt => 
-                          !prevTasks.some(pt => pt.projectId === projectId && pt.name === gt.name && pt.columnId === targetColId && pt.status === 'todo')
-                        );
-
-                        nonDuplicateGenerated.forEach(task => {
-                          dbService.tasks.save(task).catch(err => {
-                            console.error("Lỗi khi lưu tự động tạo công việc từ quy trình:", err);
-                          });
-                        });
-
-                        return [...nonDuplicateGenerated, ...prevTasks];
-                      });
-                    }
-
-                    const targetColName = targetColObj?.name || targetColId;
-                    setTimeout(() => {
-                      alert(`[Quy trình Tự động]: Toàn bộ công việc con (${projTasks.length}/${projTasks.length} việc con) đã hoàn thành.\nHệ thống tự động chuyển dự án [${proj.name}] từ cột [${currentColObj?.name || currentColId}] sang cột phân đoạn mới [${targetColName}] thành công!\nCác quy tắc tự động (quy trình phê duyệt, cán bộ PM phụ trách, định dạng phông chữ, thêm công việc con mới...) của phân đoạn mới [${targetColName}] đã được kích hoạt và áp dụng đầy đủ.`);
-                    }, 50);
-                  }
-                }
-              }, 500);
-            }
-          }
+          // The callback will be invoked by the Kanban board component that has the project
+          // We don't need to do anything here - the Kanban board will handle auto-move
+          // when it receives the updated task list via props
         }
 
         return prev.map(t => t.id === id ? changedTask : t);
@@ -3668,7 +3436,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
           {/* TAB 2.1: PHÒNG DỰ ÁN - XÂY DỰNG */}
           {activeTab === 'projects-construction' && (
-            <ProjectKanbanBoard 
+            <ProjectKanbanBoard
               sector="construction"
               projects={projects}
               customers={customers}
@@ -3693,7 +3461,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
           {/* TAB 2.2: PHÒNG DỰ ÁN - NỘI THẤT */}
           {activeTab === 'projects-furniture' && (
-            <ProjectKanbanBoard 
+            <ProjectKanbanBoard
               sector="furniture"
               projects={projects}
               customers={customers}
@@ -3718,7 +3486,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
           {/* TAB 2.3: PHÒNG DỰ ÁN - CƠ KHÍ */}
           {activeTab === 'projects-mechanical' && (
-            <ProjectKanbanBoard 
+            <ProjectKanbanBoard
               sector="mechanical"
               projects={projects}
               customers={customers}

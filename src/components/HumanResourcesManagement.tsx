@@ -1053,7 +1053,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     dbService.hrmRoleGroups.list().then((cloudRoles: any[]) => {
       if (cloudRoles && cloudRoles.length > 0) {
         if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
-          cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: [], permissions: {} });
+          cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: ['emp_admin', 'NV_ADMIN', 'admin'], permissions: {} });
         }
         setRoles(cloudRoles.map((r: any) => ({
           id: r.id, name: r.name, description: r.description || '',

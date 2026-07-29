@@ -452,9 +452,11 @@ export function isUserInRoleGroup(empId: string | undefined, groupId: string): b
   const groups = loadHrmRoleGroups();
   const group = groups.find(g => g.id === groupId);
   if (group ? group.memberIds.includes(empId) : false) return true;
-  // Super admin: thuộc mọi role group (chỉ kiểm tra từ in-memory cache, KHÔNG dùng localStorage)
+  // Super admin: thuộc mọi role group
   const superGroup = groups.find(g => g.id === 'role_superadmin');
   if (superGroup?.memberIds?.includes(empId)) return true;
+  // Fallback: tài khoản admin đặc biệt luôn full quyền
+  if (empId === 'emp_admin' || empId === 'NV_ADMIN' || empId === 'admin') return true;
   return false;
 }
 

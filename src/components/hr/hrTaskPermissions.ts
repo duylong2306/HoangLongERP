@@ -225,8 +225,39 @@ export const canDoTaskAction = (
   // Admin/Director luôn được làm mọi action
   if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
 
+  // Superadmin check (dự phòng cho user không trong role_admin nhưng là superadmin)
+  if (isUserInRoleGroup(currentUser.id, 'role_superadmin')) return true;
+
   const roleScope = getTaskRoleScope(currentUser, task, project);
   const allowedRoles = matrix.actions[action] || [];
+  if (allowedRoles.includes(roleScope)) return true;
 
-  return allowedRoles.includes(roleScope);
+  // Kiểm tra roleGroupMatrix từ Quyền Dự Án (Hệ thống mới — tab "Vai trò nhóm HRM")
+  // Cho phép HRM Role Group cấp quyền đặc biệt trong mọi task
+  try {
+    const saved = localStorage.getItem('hl_project_permissions_v1');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const rgMatrix = parsed.roleGroupMatrix;
+      if (rgMatrix?.roleGroupActions) {
+        const empGroupIds = currentUser.roleGroupIds || [];
+        for (const groupId of empGroupIds) {
+          const groupActions = rgMatrix.roleGroupActions[groupId] || [];
+          // Map TaskAction → ProjectAction nếu tên khác nhau
+          const mappedAction = action === 'assignSubWorkers' ? 'assignSubWorker' : action;
+          if (groupActions.includes(mappedAction)) return true;
+          // manageSubTask → kiểm tra nhiều quyền mission
+          if (action === 'manageSubTask') {
+            if (groupActions.includes('createMission') ||
+                groupActions.includes('editMission') ||
+                groupActions.includes('deleteMission')) return true;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('canDoTaskAction roleGroupMatrix check failed:', e);
+  }
+
+  return false;
 };

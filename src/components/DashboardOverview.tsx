@@ -351,15 +351,18 @@ export default function DashboardOverview({
     if (typeof v === 'object' && v.time) return v.time;
     return String(v);
   };
-  const normalizeRecord = (r: any) => ({
-    ...r,
-    timeInS: normalizeTime(r.timeInS),
-    timeOutS: normalizeTime(r.timeOutS),
-    timeInC: normalizeTime(r.timeInC),
-    timeOutC: normalizeTime(r.timeOutC),
-    timeInOT: normalizeTime(r.timeInOT),
-    timeOutOT: normalizeTime(r.timeOutOT),
-  });
+  const normalizeRecord = (r: any) => {
+    const { _serverTime, ...rest } = r; // Loại bỏ _serverTime object khỏi bản ghi lưu cache/localStorage
+    return {
+      ...rest,
+      timeInS: normalizeTime(rest.timeInS),
+      timeOutS: normalizeTime(rest.timeOutS),
+      timeInC: normalizeTime(rest.timeInC),
+      timeOutC: normalizeTime(rest.timeOutC),
+      timeInOT: normalizeTime(rest.timeInOT),
+      timeOutOT: normalizeTime(rest.timeOutOT),
+    };
+  };
 
   const [attendanceList, setAttendanceList] = useState<any[]>(() => {
     // Load từ localStorage cache trước để tránh flash nút sai khi load trang
@@ -390,7 +393,7 @@ export default function DashboardOverview({
       .then(list => {
         if (mounted && Array.isArray(list) && list.length > 0) {
           isSyncingFromCloud.current = true;
-          setAttendanceList(list);
+          setAttendanceList(list.map(normalizeRecord));
           requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
         }
       })
@@ -608,7 +611,7 @@ export default function DashboardOverview({
         }
         return a;
     });
-    setAttendanceList(updatedList);
+    setAttendanceList(updatedList.map(normalizeRecord));
 
     // Save to Supabase
     const todayRecord = updatedList.find(r => r.date === todayVal);
@@ -713,7 +716,7 @@ export default function DashboardOverview({
           return a;
         });
 
-        setAttendanceList(updatedList);
+    setAttendanceList(updatedList.map(normalizeRecord));
         localStorage.setItem('hl_attendance_last_reset_day_v3', todayVal);
         console.log(`⏱️ Đã tự động reset điểm danh đầu ca mới 6 AM ngày ${todayVal}`);
       }
@@ -1320,8 +1323,9 @@ export default function DashboardOverview({
     dbService.attendance.save({ ...todayLog, _serverTime: serverTs }, activePunchSlot as any).catch(err =>
       console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
 
-    // Update local state for immediate UI feedback
-    setAttendanceList(updated);
+    // Update local state for immediate UI feedback (loại bỏ _serverTime trước khi set state để tránh cache object)
+    const { _serverTime, ...logForState } = todayLog;
+    setAttendanceList(updated.map(l => l.id === todayLog.id ? logForState : l));
 
     // Stop camera and close
     stopCameraStream();
@@ -1991,7 +1995,7 @@ export default function DashboardOverview({
 
               if (!inCompleted) {
                 // Chưa vào ca → button VÀO
-                if (isSlotActive(slotIn)) {
+                if (isSlotActive(slotIn) || isSlotActive(slotOut)) {
                   // Trong khung giờ → cho phép chấm
                   btnLabel = key === 'overtime' ? '🌙 VÀO TĂNG CA' : `🟢 VÀO ${key === 'morning' ? 'SÁNG' : 'CHIỀU'}`;
                   btnSub = '🕐 Trong khung giờ';
@@ -2036,10 +2040,12 @@ export default function DashboardOverview({
                   isLockedState = true;
                 }
               } else {
-                // Cả vào + ra đều đã chấm
+                // Cả vào + ra đều đã chấm - chuẩn hóa thời gian hiển thị
+                const displayIn = normalizeTime(inVal);
+                const displayOut = normalizeTime(outVal);
                 btnLabel = key === 'overtime'
-                  ? `✅ Tăng ca: ${inVal} → ${outVal}`
-                  : `✅ ${key === 'morning' ? 'Sáng' : 'Chiều'}: ${inVal} → ${outVal}`;
+                  ? `✅ Tăng ca: ${displayIn} → ${displayOut}`
+                  : `✅ ${key === 'morning' ? 'Sáng' : 'Chiều'}: ${displayIn} → ${displayOut}`;
                 btnSub = 'Đã chốt';
                 btnAction = '';
                 isDisabled = true;
@@ -2340,7 +2346,9 @@ export default function DashboardOverview({
                         key={`day-${d}`}
                         onClick={() => {
                           if (log) {
-                            setSelectedDayDetail({ date: dateStr, log, holidayName: holidayMatch?.name });
+                            // Normalize time fields before passing to detail view
+                            const normalizedLog = normalizeRecord(log);
+                            setSelectedDayDetail({ date: dateStr, log: normalizedLog, holidayName: holidayMatch?.name });
                           }
                         }}
                         className={`h-12 flex flex-col items-center justify-between py-1 rounded text-[10px] font-mono transition-all relative ${cellClass} ${
@@ -2503,12 +2511,16 @@ export default function DashboardOverview({
                   <span className="text-[10px] text-slate-400 font-mono">Định mức: {config.morningIn} - {config.morningOut}</span>
                 </div>
                 {(() => {
-                  if (selectedDayDetail.log.timeInS === 'OFF') {
+                  const log = selectedDayDetail.log;
+                  const timeInS = normalizeTime(log.timeInS);
+                  const timeOutS = normalizeTime(log.timeOutS);
+
+                  if (log.timeInS === 'OFF') {
                     return <div className="text-rose-455 font-bold text-center py-1">Đăng ký nghỉ phép / Off</div>;
                   }
 
-                  const hasInS = !(!selectedDayDetail.log.timeInS || selectedDayDetail.log.timeInS === '--:--' || selectedDayDetail.log.timeInS === '');
-                  const hasOutS = !(!selectedDayDetail.log.timeOutS || selectedDayDetail.log.timeOutS === '--:--' || selectedDayDetail.log.timeOutS === '');
+                  const hasInS = !(!log.timeInS || log.timeInS === '--:--' || log.timeInS === '');
+                  const hasOutS = !(!log.timeOutS || log.timeOutS === '--:--' || log.timeOutS === '');
 
                   const isMissingS = !hasInS && !hasOutS;
                   const isFaultyS = hasInS && !hasOutS;
@@ -2527,9 +2539,9 @@ export default function DashboardOverview({
                       <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono items-center">
                         <div>
                           <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                          <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInS}</strong>
+                          <strong className="text-white font-mono text-sm">{timeInS}</strong>
                           {(() => {
-                            const inMin = timeToMinutes(selectedDayDetail.log.timeInS);
+                            const inMin = timeToMinutes(timeInS);
                             const limitMin = timeToMinutes(config.morningIn || '07:30');
                             const allowedLates = config.allowedLateMinutes ?? 15;
                             return inMin > (limitMin + allowedLates) ? (
@@ -2556,9 +2568,9 @@ export default function DashboardOverview({
                     <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono">
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInS}</strong>
+                        <strong className="text-white font-mono text-sm">{timeInS}</strong>
                         {(() => {
-                          const inMin = timeToMinutes(selectedDayDetail.log.timeInS);
+                          const inMin = timeToMinutes(timeInS);
                           const limitMin = timeToMinutes(config.morningIn || '07:30');
                           const allowedLates = config.allowedLateMinutes ?? 15;
                           return inMin > (limitMin + allowedLates) ? (
@@ -2570,7 +2582,7 @@ export default function DashboardOverview({
                       </div>
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeOutS || '--:--'}</strong>
+                        <strong className="text-white font-mono text-sm">{timeOutS || '--:--'}</strong>
                       </div>
                     </div>
                   );
@@ -2645,12 +2657,16 @@ export default function DashboardOverview({
                 </div>
                 
                 {(() => {
-                  if (selectedDayDetail.log.timeInS === 'OFF') {
+                  const log = selectedDayDetail.log;
+                  const timeInC = normalizeTime(log.timeInC);
+                  const timeOutC = normalizeTime(log.timeOutC);
+
+                  if (log.timeInS === 'OFF') {
                     return <div className="text-rose-455 font-bold text-center py-1">Đăng ký nghỉ phép / Off</div>;
                   }
 
-                  const hasInC = !(!selectedDayDetail.log.timeInC || selectedDayDetail.log.timeInC === '--:--' || selectedDayDetail.log.timeInC === '');
-                  const hasOutC = !(!selectedDayDetail.log.timeOutC || selectedDayDetail.log.timeOutC === '--:--' || selectedDayDetail.log.timeOutC === '');
+                  const hasInC = !(!log.timeInC || log.timeInC === '--:--' || log.timeInC === '');
+                  const hasOutC = !(!log.timeOutC || log.timeOutC === '--:--' || log.timeOutC === '');
 
                   const isMissingC = !hasInC && !hasOutC;
                   const isFaultyC = hasInC && !hasOutC;
@@ -2669,9 +2685,9 @@ export default function DashboardOverview({
                       <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono items-center">
                         <div>
                           <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                          <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInC}</strong>
+                          <strong className="text-white font-mono text-sm">{timeInC}</strong>
                           {(() => {
-                            const inMin = timeToMinutes(selectedDayDetail.log.timeInC);
+                            const inMin = timeToMinutes(timeInC);
                             const limitMin = timeToMinutes(config.afternoonIn || '13:00');
                             const allowedLates = config.allowedLateMinutes ?? 15;
                             return inMin > (limitMin + allowedLates) ? (
@@ -2698,9 +2714,9 @@ export default function DashboardOverview({
                     <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono">
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInC}</strong>
+                        <strong className="text-white font-mono text-sm">{timeInC}</strong>
                         {(() => {
-                          const inMin = timeToMinutes(selectedDayDetail.log.timeInC);
+                          const inMin = timeToMinutes(timeInC);
                           const limitMin = timeToMinutes(config.afternoonIn || '13:00');
                           const allowedLates = config.allowedLateMinutes ?? 15;
                           return inMin > (limitMin + allowedLates) ? (
@@ -2712,7 +2728,7 @@ export default function DashboardOverview({
                       </div>
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeOutC || '--:--'}</strong>
+                        <strong className="text-white font-mono text-sm">{timeOutC || '--:--'}</strong>
                       </div>
                     </div>
                   );
@@ -2789,11 +2805,11 @@ export default function DashboardOverview({
                   <div className="grid grid-cols-2 gap-2 text-purple-200">
                     <div>
                       <span className="text-purple-400/60 block text-[10px]">Giờ vào OT:</span>
-                      <strong className="font-mono text-sm">{selectedDayDetail.log.timeInOT || '--:--'}</strong>
+                      <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeInOT) || '--:--'}</strong>
                     </div>
                     <div>
                       <span className="text-purple-400/60 block text-[10px]">Giờ ra OT:</span>
-                      <strong className="font-mono text-sm">{selectedDayDetail.log.timeOutOT || '--:--'}</strong>
+                      <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeOutOT) || '--:--'}</strong>
                     </div>
                   </div>
                 </div>
@@ -2924,9 +2940,9 @@ export default function DashboardOverview({
                   <tbody>
                     <tr className="border-b border-slate-800 hover:bg-slate-850/40 transition-colors bg-emerald-950/10">
                       <td className="p-3 font-black text-emerald-400">{todayVal} (Hôm nay)</td>
-                      <td className="p-3 font-mono text-slate-300 font-bold">{userTodayLog.timeInS || '--:--'} - {userTodayLog.timeOutS || '--:--'}</td>
-                      <td className="p-3 font-mono text-slate-300 font-bold">{userTodayLog.timeInC || '--:--'} - {userTodayLog.timeOutC || '--:--'}</td>
-                      <td className="p-3 font-mono text-slate-300 font-bold">{userTodayLog.timeInOT || '--:--'} - {userTodayLog.timeOutOT || '--:--'}</td>
+                      <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInS) || '--:--'} - {normalizeTime(userTodayLog.timeOutS) || '--:--'}</td>
+                      <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInC) || '--:--'} - {normalizeTime(userTodayLog.timeOutC) || '--:--'}</td>
+                      <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInOT) || '--:--'} - {normalizeTime(userTodayLog.timeOutOT) || '--:--'}</td>
                       <td className="p-3 text-slate-400 leading-tight">
                         <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                           <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black px-1.5 py-0.2 rounded uppercase tracking-wide">
@@ -2985,9 +3001,9 @@ export default function DashboardOverview({
                     {currentLogs.filter(a => a.date !== todayVal).map((log, index) => (
                       <tr key={index} className="border-b border-slate-800/60 hover:bg-slate-850/20 transition-colors">
                         <td className="p-3 font-bold text-slate-300 font-mono">{log.date}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.timeInS || '07:25'} - {log.timeOutS || '11:32'}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.timeInC || '12:55'} - {log.timeOutC || '17:05'}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.timeInOT && log.timeInOT !== '--:--' ? `${log.timeInOT} - ${log.timeOutOT}` : 'Không OT'}</td>
+                        <td className="p-3 font-mono text-slate-400">{normalizeTime(log.timeInS) || '07:25'} - {normalizeTime(log.timeOutS) || '11:32'}</td>
+                        <td className="p-3 font-mono text-slate-400">{normalizeTime(log.timeInC) || '12:55'} - {normalizeTime(log.timeOutC) || '17:05'}</td>
+                        <td className="p-3 font-mono text-slate-400">{log.timeInOT && log.timeInOT !== '--:--' ? `${normalizeTime(log.timeInOT)} - ${normalizeTime(log.timeOutOT)}` : 'Không OT'}</td>
                         <td className="p-3 text-slate-400">
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {(() => {

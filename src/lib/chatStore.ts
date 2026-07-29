@@ -194,6 +194,89 @@ export async function createGroupConversation(
   return newConv;
 }
 
+/**
+ * Tự động tạo (hoặc đồng bộ) NHÓM CHAT DỰ ÁN mỗi khi một dự án được khởi tạo.
+ * - id xác định: conv_project_<projectId> → idempotent, không tạo trùng lặp.
+ * - Thành viên: pmId + involvedEmployeeIds của dự án.
+ * - Nếu nhóm đã tồn tại, đồng bộ thêm thành viên mới (không xóa ai).
+ */
+export async function ensureProjectChatGroup(
+  project: { id: string; name: string; pmId?: string; involvedEmployeeIds?: string[] }
+): Promise<Conversation | null> {
+  if (!project || !project.id) return null;
+
+  const convId = `conv_project_${project.id}`;
+  const existing = conversationsCache.get(convId);
+
+  const memberIds = Array.from(new Set(
+    [project.pmId, ...(project.involvedEmployeeIds || [])].filter(Boolean) as string[]
+  ));
+
+  if (existing) {
+    // Đồng bộ thành viên mới (không xóa ai đã có)
+    const missing = memberIds.filter(id => !existing.participantIds.includes(id));
+    if (missing.length === 0) return existing;
+    const updated = {
+      ...existing,
+      participantIds: [...existing.participantIds, ...missing],
+    };
+    conversationsCache.set(convId, updated);
+    await pushConversation(updated);
+    return updated;
+  }
+
+  const colors = ['#2AABEE','#E74C3C','#27AE60','#F39C12','#8E44AD','#16A085'];
+  const newConv: Conversation = {
+    id: convId,
+    type: 'group',
+    name: `📁 ${project.name}`,
+    avatar: (project.name || 'DA').substring(0, 2).toUpperCase(),
+    color: colors[Math.floor(Math.random() * colors.length)],
+    participantIds: memberIds,
+    createdBy: project.pmId || '',
+    createdAt: new Date().toISOString(),
+    unreadCount: 0,
+    projectId: project.id,
+    pinned: true,
+  };
+
+  conversationsCache.set(convId, newConv);
+  await pushConversation(newConv);
+  return newConv;
+}
+
+/**
+ * Gửi một tin nhắn vào một nhóm chat bất kỳ — truyền sẵn MÃ NHÓM CHAT
+ * để đảm bảo tin nhắn đến đúng nhóm (ví dụ NHÓM CHAT DỰ ÁN: conv_project_<projectId>).
+ *
+ * @param conversationId - Mã cuộc hội thoại đích, VD: `conv_project_${project.id}`
+ * @param senderId       - ID người gửi
+ * @param senderName     - Tên người gửi (hiển thị trong tin nhắn)
+ * @param senderRole     - Vai trò người gửi (tuỳ chọn)
+ * @param content        - Nội dung tin nhắn (tùy biến tự do)
+ * @returns Tin nhắn vừa tạo, hoặc null nếu nhóm chat không tồn tại
+ */
+export async function sendGroupChatMessage(params: {
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  senderRole?: string;
+  content: string;
+}): Promise<ChatMessage | null> {
+  // Chỉ gửi khi nhóm chat thực sự tồn tại
+  const exists = getConversations().some(c => c.id === params.conversationId);
+  if (!exists) return null;
+
+  return await addMessage({
+    conversationId: params.conversationId,
+    senderId: params.senderId,
+    senderName: params.senderName,
+    senderRole: (params.senderRole || 'member') as any,
+    content: params.content,
+    system: false,
+  });
+}
+
 export async function deleteConversation(convId: string): Promise<void> {
   const sb = getSupabase();
   if (!sb) return;

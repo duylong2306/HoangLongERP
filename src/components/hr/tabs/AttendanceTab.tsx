@@ -462,11 +462,11 @@ export default function AttendanceTab({
               <th className="pb-2.5">Ngày</th>
               <th className="pb-2.5">
                 Ca Sáng (Vào → Ra)
-                <div className="font-normal text-[8.5px] text-slate-500 mt-0.5">Chuẩn: {readHrmConfigFromStorage().morningIn} → {readHrmConfigFromStorage().morningOut}</div>
+                <div className="font-normal text-[8.5px] text-slate-500 mt-0.5 font-mono">Chuẩn: {readHrmConfigFromStorage().morningIn} → {readHrmConfigFromStorage().morningOut}</div>
               </th>
               <th className="pb-2.5">
                 Ca Chiều (Vào → Ra)
-                <div className="font-normal text-[8.5px] text-slate-500 mt-0.5">Chuẩn: {readHrmConfigFromStorage().afternoonIn} → {readHrmConfigFromStorage().afternoonOut}</div>
+                <div className="font-normal text-[8.5px] text-slate-500 mt-0.5 font-mono">Chuẩn: {readHrmConfigFromStorage().afternoonIn} → {readHrmConfigFromStorage().afternoonOut}</div>
               </th>
               <th className="pb-2.5">Tăng Ca</th>
               <th className="pb-2.5 text-center font-bold text-amber-500">Chốt công</th>

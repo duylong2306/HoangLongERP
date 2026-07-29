@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, Conversation, ChatMessage } from '../types';
+import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
@@ -22,10 +22,7 @@ interface TravelAllowanceNorm {
 }
 import { useNotification, isUserInRoleGroup } from '../context';
 import { dbService } from '../lib/dbService';
-import {
-  getConversations, getMessages, addMessage, createGroupConversation,
-  markConversationRead, addMemberToConversation
-} from '../lib/chatStore';
+import { sendGroupChatMessage } from '../lib/chatStore';
 
 interface TaskDetailModalProps {
   taskId: string;
@@ -114,6 +111,23 @@ export default function TaskDetailModal({
   }, []);
 
   const project = projects.find(p => p.id === selectedTask.projectId);
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN ───────────────────────────────────
+  // Hàm bọc quanh sendGroupChatMessage (lib/chatStore). Truyền sẵn MÃ NHÓM CHAT
+  // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
+  // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
+  // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
+  const notifyProjectChat = (content: string) => {
+    if (!selectedTask.projectId) return;
+    sendGroupChatMessage({
+      conversationId: `conv_project_${selectedTask.projectId}`,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderRole: currentUser.role,
+      content,
+    });
+  };
+
   const assignee = employees.find(e => e.id === selectedTask.assigneeId);
   const assigner = employees.find(e => e.id === selectedTask.assignerId);
 
@@ -161,189 +175,6 @@ export default function TaskDetailModal({
   const [advProposalCreator, setAdvProposalCreator] = useState('Kế Toán');
   const [advProposalDate, setAdvProposalDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
-  // ─── Chat Group for this task ───────────────────────────────────────────────────
-  const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
-  const taskGroupId = `conv_task_${selectedTask.id}`;
-  const taskGroup = useMemo(() => {
-    const convs = getConversations();
-    return convs.find(c => c.id === taskGroupId);
-  }, [selectedTask.id, conversations]);
-
-  const [showTaskChatAddMember, setShowTaskChatAddMember] = useState(false);
-
-  // Add member function for task chat
-  const addMemberToTaskChat = (memberId: string) => {
-    if (!taskGroup || taskGroup.type !== 'task') return false;
-    const updated = addMemberToConversation(taskGroup.id, memberId);
-    if (updated) {
-      setConversations(getConversations());
-      return true;
-    }
-    return false;
-  };
-
-  // Create task chat group if doesn't exist
-  const ensureTaskChatGroup = useCallback(async () => {
-    let group = taskGroup;
-    if (!group) {
-      const memberIds = Array.from(new Set([
-        selectedTask.assignerId,
-        selectedTask.assigneeId,
-        ...(selectedTask.involvedEmployeeIds || []),
-        currentUser.id,
-        ...(selectedTask.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]),
-        ...(project?.involvedEmployeeIds || []),
-        project?.pmId,
-      ].filter((id): id is string => Boolean(id))));
-
-      const created = await createGroupConversation(
-        `${project?.name?.substring(0, 30)} - ${selectedTask.name.substring(0, 30)}`,
-        memberIds,
-        currentUser.id,
-        selectedTask.id,
-        selectedTask.projectId
-      );
-      setConversations(getConversations());
-      return created;
-    }
-    return group;
-  }, [selectedTask.id, selectedTask.assigneeId, selectedTask.assignerId, selectedTask.involvedEmployeeIds, selectedTask.missions, project?.pmId, project?.involvedEmployeeIds, project?.name, currentUser.id, conversations, taskGroup]);
-
-  const createTaskChatGroup = async () => ensureTaskChatGroup();
-
-  // Tự động đồng bộ thành viên vào nhóm chat từ Công việc (loại trùng lặp).
-  // Chỉ thêm những người CHƯA có trong nhóm; không xóa ai.
-  const syncTaskChatMembers = useCallback(() => {
-    const convs = getConversations();
-    const group = convs.find(c => c.id === taskGroupId);
-    if (!group || group.type !== 'task') return;
-
-    // Tập hợp tất cả thành viên liên quan đến Công việc (trùng chỉ lấy 1 lần)
-    const desiredIds = Array.from(new Set([
-      selectedTask.assignerId,
-      selectedTask.assigneeId,
-      ...(selectedTask.involvedEmployeeIds || []),
-      ...(selectedTask.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]),
-      ...(project?.involvedEmployeeIds || []),
-      project?.pmId,
-    ].filter((id): id is string => Boolean(id))));
-
-    const existingIds = new Set(group.participantIds.filter(Boolean));
-    let changed = false;
-    desiredIds.forEach(id => {
-      if (!existingIds.has(id)) {
-        const updated = addMemberToConversation(taskGroupId, id);
-        if (updated) changed = true;
-      }
-    });
-    if (changed) setConversations(getConversations());
-  }, [selectedTask.assignerId, selectedTask.assigneeId, selectedTask.involvedEmployeeIds, selectedTask.missions, project?.pmId, project?.involvedEmployeeIds, taskGroupId]);
-
-  // Post activity to task chat group (only if group exists)
-  const postToTaskChat = useCallback((content: string) => {
-    const convs = getConversations();
-    const exists = convs.some(c => c.id === taskGroupId);
-    if (!exists) return;
-    addMessage({
-      conversationId: taskGroupId,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderRole: currentUser.role || 'member',
-      content,
-      system: true,
-    });
-    setConversations(getConversations());
-    setChatMessages(getMessages(taskGroupId));
-  }, [taskGroupId, currentUser.id, currentUser.name, currentUser.role]);
-
-  // Wrapper: update task + auto-post activity to task chat group if exists
-  const updateTaskWithChat = useCallback((id: string, updates: Partial<Task>) => {
-    onUpdateTask(id, updates);
-
-    // Tự động đồng bộ thành viên mới (nếu có) vào nhóm chat Công việc
-    syncTaskChatMembers();
-
-    // Post status change
-    if (updates.status && updates.status !== selectedTask.status) {
-      const statusLabels: Record<string, string> = {
-        todo: 'Chưa làm', doing: 'Đang làm', reviewing: 'Chờ duyệt',
-        completed: 'Hoàn thành', overdue: 'Trễ hạn'
-      };
-      postToTaskChat(`🔄 ${currentUser.name} đã chuyển trạng thái công việc thành: ${statusLabels[updates.status] || updates.status}`);
-    }
-
-    // Post progress change
-    if (updates.completionRate !== undefined && updates.completionRate !== selectedTask.completionRate) {
-      postToTaskChat(`📈 ${currentUser.name} đã cập nhật tiến độ: ${updates.completionRate}%`);
-    }
-
-    // Post approval changes
-    if (updates.approvals && updates.approvals !== selectedTask.approvals) {
-      const newStep = updates.approvals[updates.approvals.length - 1];
-      if (newStep) {
-        const statusText = newStep.status === 'approved' ? 'đã duyệt' : newStep.status === 'rejected' ? 'đã từ chối' : 'chờ duyệt';
-        postToTaskChat(`✅ ${currentUser.name} ${statusText} bước: ${newStep.levelName}`);
-      }
-    }
-
-    // Post mission (nhiệm vụ con) add/edit/delete changes
-    if (updates.missions) {
-      const oldMissions = selectedTask.missions || [];
-      const oldIds = new Set(oldMissions.map(m => m.id));
-      const newIds = new Set(updates.missions.map(m => m.id));
-
-      // Added missions
-      updates.missions.filter(m => !oldIds.has(m.id)).forEach(m => {
-        postToTaskChat(`📝 ${currentUser.name} đã thêm nhiệm vụ con: "${m.name}"`);
-      });
-
-      // Deleted missions
-      oldMissions.filter(m => !newIds.has(m.id)).forEach(m => {
-        postToTaskChat(`🗑️ ${currentUser.name} đã xóa nhiệm vụ con: "${m.name}"`);
-      });
-
-      // Updated missions (changed content/assignee/members)
-      updates.missions.filter(m => oldIds.has(m.id)).forEach(m => {
-        const old = oldMissions.find(o => o.id === m.id);
-        if (old && (
-          old.name !== m.name ||
-          old.mainAssigneeId !== m.mainAssigneeId ||
-          JSON.stringify(old.memberIds || []) !== JSON.stringify(m.memberIds || [])
-        )) {
-          postToTaskChat(`✏️ ${currentUser.name} đã cập nhật nhiệm vụ con: "${m.name}"`);
-        }
-      });
-    }
-
-    // Post subcontractor link change
-    if (updates.subcontractorId !== undefined && updates.subcontractorId !== selectedTask.subcontractorId) {
-      const subName = updates.subcontractorName || updates.subcontractorId || 'n/a';
-      if (updates.subcontractorId) {
-        postToTaskChat(`🔗 ${currentUser.name} đã liên kết thầu phụ: "${subName}"`);
-      } else {
-        postToTaskChat(`🔗 ${currentUser.name} đã hủy liên kết thầu phụ`);
-      }
-    }
-
-    // Post advance request add/remove
-    if (updates.advanceRequests) {
-      const oldReqs = selectedTask.advanceRequests || [];
-      const oldIds = new Set(oldReqs.map(r => r.id));
-      const newIds = new Set(updates.advanceRequests.map(r => r.id));
-      updates.advanceRequests.filter(r => !oldIds.has(r.id)).forEach(r => {
-        postToTaskChat(`💰 ${currentUser.name} đã đề xuất tạm ứng: ${Number(r.amount || 0).toLocaleString('vi-VN')} đ — "${r.title}"`);
-      });
-      oldReqs.filter(r => !newIds.has(r.id)).forEach(r => {
-        postToTaskChat(`💰 ${currentUser.name} đã thu hồi đề xuất tạm ứng: "${r.title}"`);
-      });
-    }
-
-    // Post new comment (tự động log bình luận)
-    if (updates.comments && updates.comments.length > (selectedTask.comments?.length || 0)) {
-      const last = updates.comments[updates.comments.length - 1];
-      postToTaskChat(`💬 ${currentUser.name}: ${last.content}`);
-    }
-  }, [onUpdateTask, selectedTask.status, selectedTask.completionRate, selectedTask.approvals, selectedTask.missions, selectedTask.advanceRequests, selectedTask.comments, selectedTask.subcontractorId, selectedTask.subcontractorName, postToTaskChat, currentUser.name, syncTaskChatMembers]);
 
   const [customDialog, setCustomDialog] = useState<{
     show: boolean;
@@ -509,6 +340,19 @@ export default function TaskDetailModal({
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
+  // Helper để lấy deadline mặc định cho nhiệm vụ mới: ưu tiên deadline của task cha, fallback today+10
+  const getDefaultMissionDeadline = (): string => {
+    if (selectedTask?.deadline) {
+      // Lấy date part từ deadline của task cha, dùng 23:59 để cho phép toàn bộ ngày
+      const taskDeadline = new Date(selectedTask.deadline);
+      const year = taskDeadline.getFullYear();
+      const month = String(taskDeadline.getMonth() + 1).padStart(2, '0');
+      const day = String(taskDeadline.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}T23:59`;
+    }
+    return getTodayPlusTenDaysISO();
+  };
+
   // ===========================================================================
   // IMPORT / EXPORT EXCEL CHO NHIỆM VỤ CHI TIẾT (missions)
   // ===========================================================================
@@ -617,7 +461,7 @@ export default function TaskDetailModal({
 
         // Gộp với missions hiện tại (giữ nguyên các nhiệm vụ cũ, thêm mới từ Excel)
         const currentMissions = selectedTask.missions || [];
-        updateTaskWithChat(selectedTask.id, {
+        onUpdateTask(selectedTask.id, {
           missions: [...currentMissions, ...imported]
         });
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} nhiệm vụ chi tiết từ Excel.`, type: 'success' });
@@ -632,7 +476,7 @@ export default function TaskDetailModal({
   const [newMissionName, setNewMissionName] = useState('');
   const [selectedMissionMemberIds, setSelectedMissionMemberIds] = useState<string[]>([]);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
-  const [newMissionDeadline, setNewMissionDeadline] = useState(getTodayPlusTenDaysISO());
+  const [newMissionDeadline, setNewMissionDeadline] = useState(() => getDefaultMissionDeadline());
 
   // Hidden file input for importing Nhiệm vụ chi tiết (missions) from Excel
   const missionExcelInputRef = useRef<HTMLInputElement>(null);
@@ -761,7 +605,7 @@ export default function TaskDetailModal({
   useEffect(() => {
     loadSubmittedViolations();
 
-    setNewMissionDeadline(getTodayPlusTenDaysISO());
+    setNewMissionDeadline(getDefaultMissionDeadline());
 
     const proj = projects.find(p => p.id === selectedTask.projectId);
     setViolationRows([
@@ -1047,7 +891,6 @@ export default function TaskDetailModal({
     localStorage.setItem('hl_hrm_employee_errors_v3', JSON.stringify(updatedErrors));
     loadSubmittedViolations();
 
-    postToTaskChat(`⚠️ ${currentUser.name} đã ghi nhận vi phạm cho: [${loggedNames.join(', ')}]`);
 
     if (detailCameraStream) {
       detailCameraStream.getTracks().forEach(track => track.stop());
@@ -1056,6 +899,8 @@ export default function TaskDetailModal({
     setCameraRowId(null);
 
     addToast({ title: '✅ Thành công', message: 'Đã gửi vi phạm thành công!', type: 'success' });
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    notifyProjectChat(`⚠️ ${currentUser.name} đã ghi nhận vi phạm cho: [${loggedNames.join(', ')}] trong công việc "${selectedTask.name}".`);
     const proj = projects.find(p => p.id === selectedTask.projectId);
     setViolationRows([
       { 
@@ -1099,12 +944,14 @@ export default function TaskDetailModal({
       createdAt: timestamp
     };
 
-    updateTaskWithChat(selectedTask.id, {
+    onUpdateTask(selectedTask.id, {
       status: 'reviewing',
       completionRate: 90,
       approvals: updatedApprovals,
       comments: [newComment, ...(selectedTask.comments || [])]
     });
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    notifyProjectChat(`🔔 ${currentUser.name} đã gửi Yêu cầu phê duyệt công việc "${selectedTask.name}" (Người duyệt: ${approverName}).`);
 
     setShowApprovalWarning(false);
     addToast({ title: '✅ Thành công', message: 'Đã gửi yêu cầu phê duyệt liên thông tự động thành công!', type: 'success' });
@@ -1126,6 +973,12 @@ export default function TaskDetailModal({
       completionRate: allApproved ? 100 : selectedTask.completionRate,
     };
     onUpdateTask?.(selectedTask.id, updatedTask as any);
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    if (decision === 'approved') {
+      notifyProjectChat(`✅ ${currentUser.name} đã DUYỆT bước phê duyệt công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`);
+    } else {
+      notifyProjectChat(`❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`);
+    }
     addToast({
       title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
       message: decision === 'approved' ? 'Bước duyệt đã được phê duyệt.' : 'Bước duyệt đã bị từ chối.',
@@ -1175,7 +1028,7 @@ export default function TaskDetailModal({
 
     const prevRequests = selectedTask.advanceRequests || [];
 
-    updateTaskWithChat(selectedTask.id, {
+    onUpdateTask(selectedTask.id, {
       advanceRequests: [...prevRequests, newRequest]
     });
 
@@ -1190,7 +1043,7 @@ export default function TaskDetailModal({
     const updated = prevRequests.map(r => r.id === reqId ? { ...r, status: action } : r);
     const item = prevRequests.find(r => r.id === reqId);
 
-    updateTaskWithChat(selectedTask.id, {
+    onUpdateTask(selectedTask.id, {
       advanceRequests: updated
     });
   };
@@ -1324,41 +1177,6 @@ export default function TaskDetailModal({
     );
   };
 
-  // Load chat messages from central store for this task group
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  useEffect(() => {
-    setChatMessages(getMessages(taskGroupId));
-  }, [taskGroupId, taskGroup]);
-  const combinedItems = [
-    ...(selectedTask.comments || []).map(c => ({
-      id: c.id,
-      type: 'comment' as const,
-      timestamp: c.createdAt,
-      displayTime: formatDateTime(c.createdAt),
-      senderName: c.senderName,
-      senderRole: c.senderRole,
-      content: c.content,
-      attachmentName: c.attachmentName,
-      attachmentSize: c.attachmentSize,
-      attachmentUrl: c.attachmentUrl
-    })),
-    ...chatMessages.map(m => ({
-      id: m.id,
-      type: 'comment' as const,
-      timestamp: m.createdAt,
-      displayTime: formatDateTime(m.createdAt),
-      senderName: m.senderName || 'Không xác định',
-      senderRole: m.senderRole,
-      content: m.content,
-      system: m.system || false,
-      attachmentName: undefined,
-      attachmentSize: undefined,
-      attachmentUrl: undefined
-    }))
-  ];
-
-  // Oldest on top, newest on bottom for chat-like interface
-  combinedItems.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   return (
     <div 
@@ -1520,7 +1338,7 @@ export default function TaskDetailModal({
                                 updatedCompleted = [...currentCompleted, chk];
                               }
 
-                              updateTaskWithChat(selectedTask.id, {
+                              onUpdateTask(selectedTask.id, {
                                 completedChecklistTexts: updatedCompleted
                               });
                             }}
@@ -1587,21 +1405,23 @@ export default function TaskDetailModal({
                       )
                     ) : (
                       <div className={`flex items-center gap-2 max-w-full overflow-hidden ${
-                        (selectedTask.status === 'completed' || selectedTask.status === 'doing' || (currentUser.id !== assigner?.id && currentUser.id !== selectedTask.assignerId)) ? 'opacity-65' : ''
+                        (selectedTask.status === 'completed' || !canEditTask) ? 'opacity-65' : ''
                       }`}>
                         {assignee && renderInitialsAvatar(assignee, { showNameLabel: false })}
                         <select
-                          disabled={selectedTask.status === 'completed' || selectedTask.status === 'doing' || (currentUser.id !== assigner?.id && currentUser.id !== selectedTask.assignerId)}
+                          disabled={selectedTask.status === 'completed' || !canEditTask}
                           value={selectedTask.assigneeId || ''}
                           onChange={(e) => {
                             const val = e.target.value;
                             const empName = employees.find(emp => emp.id === val)?.name || 'Chưa gán';
-                            updateTaskWithChat(selectedTask.id, {
+                            onUpdateTask(selectedTask.id, {
                               assigneeId: val
                             });
+                            // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                            notifyProjectChat(`👤 ${currentUser.name} đã chuyển Phụ Trách Chính công việc "${selectedTask.name}" sang ${empName}.`);
                           }}
                           className={`bg-transparent text-slate-205 text-[11px] outline-none font-bold flex-1 max-w-[110px] ${
-                            (selectedTask.status === 'completed' || selectedTask.status === 'doing' || (currentUser.id !== assigner?.id && currentUser.id !== selectedTask.assignerId)) ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer'
+                            (selectedTask.status === 'completed' || !canEditTask) ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer'
                           }`}
                         >
                           {employees.map(emp => (
@@ -1621,7 +1441,7 @@ export default function TaskDetailModal({
                           showNameLabel: false,
                           onDelete: (isReadOnly || selectedTask.status === 'completed') ? undefined : () => {
                             const updatedIds = (selectedTask.involvedEmployeeIds || []).filter(id => id !== emp.id);
-                            updateTaskWithChat(selectedTask.id, {
+                            onUpdateTask(selectedTask.id, {
                               involvedEmployeeIds: updatedIds
                             });
                           }
@@ -1640,7 +1460,7 @@ export default function TaskDetailModal({
                               if (!val) return;
                               const empName = employees.find(emp => emp.id === val)?.name || '';
                               const updatedIds = [...(selectedTask.involvedEmployeeIds || []), val];
-                              updateTaskWithChat(selectedTask.id, {
+                              onUpdateTask(selectedTask.id, {
                                 involvedEmployeeIds: updatedIds
                               });
                             }}
@@ -1698,7 +1518,7 @@ export default function TaskDetailModal({
                         const matchedSup = suppliersList.find((s: any) => s.id === val);
                         const matchedName = matchedSup ? matchedSup.name : '';
 
-                        updateTaskWithChat(selectedTask.id, {
+                        onUpdateTask(selectedTask.id, {
                           subcontractorId: val,
                           subcontractorName: matchedName
                         });
@@ -1819,7 +1639,7 @@ export default function TaskDetailModal({
                 </div>
               </div>
 
-              {(canAssignMembers || canAssignSubWorkers) && selectedTask.status !== 'completed' && (
+              {(canAssignMembers || canAssignSubWorkers || canManageSubTask) && selectedTask.status !== 'completed' && (
                 <div className="bg-slate-900/40 border border-slate-850/50 p-3.5 rounded-xl space-y-3.5">
                   <div className="flex justify-between items-center pb-1">
                     <span className="text-[10px] font-extrabold uppercase text-amber-400 block tracking-wide">
@@ -1864,15 +1684,22 @@ export default function TaskDetailModal({
                     onClick={() => {
                       if (!newMissionName.trim()) return;
 
-                      const finalDeadline = newMissionDeadline 
-                        ? new Date(newMissionDeadline).toISOString() 
+                      const finalDeadline = newMissionDeadline
+                        ? new Date(newMissionDeadline).toISOString()
                         : (selectedTask.deadline || new Date().toISOString());
 
                       if (selectedTask.deadline) {
                         const mDeadlineDate = new Date(finalDeadline);
                         const tDeadlineDate = new Date(selectedTask.deadline);
-                        if (mDeadlineDate.getTime() > tDeadlineDate.getTime() && tDeadlineDate.getTime() > Date.now()) {
-                          addToast({ title: '⚠️ Thông báo', message: `Hạn hoàn thành nhiệm vụ không được lớn hơn Hạn bàn giao của công việc con (${formatDateTime(selectedTask.deadline)})!`, type: 'warning' });
+                        // Chỉ so sánh DATE (bỏ qua giờ): task deadline được coi là 23:59:59 của ngày đó
+                        const taskEndOfDay = new Date(tDeadlineDate);
+                        taskEndOfDay.setHours(23, 59, 59, 999);
+                        if (mDeadlineDate.getTime() > taskEndOfDay.getTime() && tDeadlineDate.getTime() > Date.now()) {
+                          addToast({
+                            title: '⚠️ Không thể tạo nhiệm vụ',
+                            message: `Hạn hoàn thành nhiệm vụ (${formatDateTime(finalDeadline)}) không được lớn hơn Hạn bàn giao của công việc cha (${formatDateTime(selectedTask.deadline)})! Vui lòng chọn ngày sớm hơn hoặc cùng ngày.`,
+                            type: 'warning'
+                          });
                           return;
                         }
                       }
@@ -1889,14 +1716,16 @@ export default function TaskDetailModal({
                       };
                       const currentMissions = selectedTask.missions || [];
 
-                      updateTaskWithChat(selectedTask.id, {
+                      onUpdateTask(selectedTask.id, {
                         missions: [...currentMissions, newMission]
                       });
+                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                      notifyProjectChat(`📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`);
 
                       // Reset inputs
                       setNewMissionName('');
                       setSelectedMissionMemberIds([]);
-                      setNewMissionDeadline(getTodayPlusTenDaysISO());
+                      setNewMissionDeadline(getDefaultMissionDeadline());
                     }}
                     disabled={!newMissionName.trim()}
                     className={`w-full py-2.5 px-3 rounded-xl font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition ${
@@ -1926,7 +1755,7 @@ export default function TaskDetailModal({
                         : formatDateTime(new Date(parseInt(mission.id.replace('mission_', '')) || Date.now()).toISOString());
                       const isMissionAssigneeInline = mission.memberIds?.includes(currentUser.id) || false;
                       const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
-                      const hasMissionPermission = canReceive || canAssignMembers || isMissionMainAssignee;
+                      const hasMissionPermission = canReceive || canAssignMembers || canManageSubTask || isMissionMainAssignee;
 
                       return (
                         <div 
@@ -2023,7 +1852,9 @@ export default function TaskDetailModal({
                                           }
                                           return m;
                                         });
-                                        updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                        onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                        notifyProjectChat(`🔓 ${currentUser.name} đã bỏ Phụ Trách Chính Nhiệm Vụ "${mission.name}".`);
                                       }}
                                     >
                                       <div
@@ -2070,7 +1901,10 @@ export default function TaskDetailModal({
                                             }
                                             return m;
                                           });
-                                          updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                          onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                          // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                          const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
+                                          notifyProjectChat(`👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`);
                                         }}
                                         className="absolute inset-0 opacity-0 cursor-pointer w-5.5 h-5.5 rounded-full"
                                       >
@@ -2115,7 +1949,10 @@ export default function TaskDetailModal({
                                           }
                                           return m;
                                         });
-                                        updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                        onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                        const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
+                                        notifyProjectChat(`➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`);
                                       }}
                                     >
                                       <div
@@ -2158,7 +1995,10 @@ export default function TaskDetailModal({
                                         }
                                         return m;
                                       });
-                                      updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                      onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                      const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
+                                      notifyProjectChat(`➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`);
                                     }}
                                     className="absolute inset-0 opacity-0 cursor-pointer w-5.5 h-5.5 rounded-full"
                                   >
@@ -2184,9 +2024,11 @@ export default function TaskDetailModal({
                                     e.stopPropagation();
                                     if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
                                       const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
-                                      updateTaskWithChat(selectedTask.id, {
+                                      onUpdateTask(selectedTask.id, {
                                         missions: updatedMissions
                                       });
+                                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                      notifyProjectChat(`🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`);
                                     }
                                   }}
                                   className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
@@ -2703,102 +2545,6 @@ export default function TaskDetailModal({
             )}
           </div>
 
-          {/* NHÓM CHAT CÔNG VIỆC CON */}
-          <div className="bg-slate-950 border border-slate-850 p-3.5 rounded-xl flex-1 flex flex-col min-h-[300px] mt-4">
-            {!taskGroup ? (
-              /* Chưa có nhóm chat → nút tạo nhanh */
-              <div className="flex-1 flex flex-col items-center justify-center gap-4 py-8">
-                <div className="w-16 h-16 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-                  <MessageSquare className="w-7 h-7 text-indigo-400" />
-                </div>
-                <div className="text-center">
-                  <p className="text-[12px] text-slate-300 font-bold">Nhóm chat công việc</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Tạo nhóm để thảo luận và theo dõi cập nhật tự động</p>
-                </div>
-                <button
-                  onClick={async () => { const g = await createTaskChatGroup(); if (g) addToast({ title: '✅ Đã tạo', message: `Nhóm "${g.name}" sẵn sàng`, type: 'success' }); }}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-all cursor-pointer shadow-lg flex items-center gap-2"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  Tạo nhóm hội thoại của Tin Nhắn
-                </button>
-                <p className="text-[9px] text-slate-600 text-center max-w-[280px]">
-                  Nhóm sẽ bao gồm: những người liên quan của dự án, người được giao, người giao việc, PM. Mọi thay đổi sẽ được tự động cập nhật vào Tin Nhắn.
-                </p>
-              </div>
-            ) : (
-              /* Đã có nhóm chat → hiển thị khung chat mini */
-              <>
-                <div className="flex justify-between items-center border-b border-slate-900 pb-2 shrink-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-[9px] shrink-0"
-                      style={{ backgroundColor: taskGroup.color, color: '#FFFFFF' }}>
-                      {taskGroup.avatar}
-                    </div>
-                    <div className="min-w-0">
-                      <span className="font-extrabold uppercase text-[10px] text-indigo-400 tracking-wider flex items-center gap-1">
-                        <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-                        NHÓM CHAT
-                      </span>
-                      <p className="text-[8px] text-slate-500 truncate">{taskGroup.participantIds.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).length} thành viên</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => setShowTaskChatAddMember(true)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-indigo-400 hover:text-white hover:bg-indigo-500/20 transition-all cursor-pointer border border-indigo-500/30"
-                      title="Thêm thành viên nhanh"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-[8px] bg-indigo-950/40 text-indigo-300 font-bold px-1.5 py-0.5 rounded border border-indigo-900/30 whitespace-nowrap">
-                      #{selectedTask.name.substring(0, 15)}..
-                    </span>
-                  </div>
-                </div>
-
-                {/* Message Feed - combined comments + system logs */}
-                <div className="flex-1 overflow-y-auto my-2 pr-1 space-y-1.5 max-h-[320px]" id="task_chat_scroller">
-                  {combinedItems.length === 0 ? (
-                    <div className="text-center py-8 text-slate-600 text-[10px]">Chưa có thảo luận.</div>
-                  ) : (
-                    combinedItems.map(item => {
-                      // System message from chat store (task activity)
-                      if ((item as any).system) {
-                        return (
-                          <div key={item.id} className="flex items-center gap-1.5 text-[9px] text-indigo-300 px-2 py-0.5 bg-indigo-950/20 rounded-lg mx-auto text-center max-w-[95%]">
-                            <Zap className="w-3 h-3 shrink-0" />
-                            <span><strong className="text-indigo-200">{item.senderName}</strong> • {item.content}</span>
-                          </div>
-                        );
-                      }
-                      const isMe = item.senderName === currentUser.name;
-                      return (
-                        <div key={item.id} className={`flex gap-1.5 items-start ${isMe ? 'flex-row-reverse' : ''}`}>
-                          <div className="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center font-black text-[7px] text-slate-300 shrink-0">
-                            {item.senderName?.substring(0, 2).toUpperCase() || '??'}
-                          </div>
-                          <div className={`max-w-[88%] ${isMe ? 'text-right' : ''}`}>
-                            <div className={`px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed ${
-                              isMe ? 'bg-indigo-600 text-white rounded-tr-md' : 'bg-slate-900 text-slate-300 rounded-tl-md border border-slate-850/60'
-                            }`}>
-                              <p className="whitespace-pre-wrap">{item.content}</p>
-                            </div>
-                            <span className="text-[7px] text-slate-600 mt-0.5 block">{item.displayTime}</span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Read-only footer: tất cả tin nhắn đều tự động từ các thao tác */}
-                <div className="mt-auto border-t border-slate-900 pt-2 text-center text-[9px] text-slate-500 font-bold">
-                  🔒 Nhóm chat tự động cập nhật theo mọi thao tác trên công việc
-                </div>
-              </>
-            )}
-          </div>
 
         </div>
 
@@ -3171,10 +2917,12 @@ export default function TaskDetailModal({
                   <button
                     type="button"
                     onClick={() => {
-                      updateTaskWithChat(selectedTask.id, {
+                      onUpdateTask(selectedTask.id, {
                         status: 'doing',
                         completionRate: 20
                       });
+                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                      notifyProjectChat(`🙋 ${currentUser.name} đã Nhận Việc "${selectedTask.name}".`);
                     }}
                     className="bg-sky-600 hover:bg-sky-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
                   >
@@ -3198,10 +2946,12 @@ export default function TaskDetailModal({
                     <button
                       type="button"
                       onClick={() => {
-                        updateTaskWithChat(selectedTask.id, {
+                        onUpdateTask(selectedTask.id, {
                           status: 'completed',
                           completionRate: 100
                         });
+                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                        notifyProjectChat(`🎉 ${currentUser.name} (Phụ Trách Chính) đã HOÀN THÀNH công việc "${selectedTask.name}".`);
                       }}
                       className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
                     >
@@ -3239,10 +2989,12 @@ export default function TaskDetailModal({
                     <button
                       type="button"
                       onClick={() => {
-                        updateTaskWithChat(selectedTask.id, {
+                        onUpdateTask(selectedTask.id, {
                           status: 'doing',
                           completionRate: 50
                         });
+                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                        notifyProjectChat(`❌ ${currentUser.name} đã TỪ CHỐI duyệt công việc "${selectedTask.name}".`);
                       }}
                       className="bg-rose-600 hover:bg-rose-500 text-white font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-sm"
                     >
@@ -3252,10 +3004,12 @@ export default function TaskDetailModal({
                     <button
                       type="button"
                       onClick={() => {
-                        updateTaskWithChat(selectedTask.id, {
+                        onUpdateTask(selectedTask.id, {
                           status: 'completed',
                           completionRate: 100
                         });
+                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                        notifyProjectChat(`✅ ${currentUser.name} đã XÉT DUYỆT hoàn thành công việc "${selectedTask.name}".`);
                       }}
                       className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
                     >
@@ -3286,53 +3040,6 @@ export default function TaskDetailModal({
 
       </div>
 
-      {/* QUICK ADD MEMBER TO TASK CHAT GROUP */}
-      {showTaskChatAddMember && taskGroup && (
-        <div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] text-slate-100 font-sans"
-          onClick={(e) => { e.stopPropagation(); setShowTaskChatAddMember(false); }}
-        >
-          <div
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">👥 Thêm thành viên vào nhóm chat</h3>
-              <button onClick={() => setShowTaskChatAddMember(false)} className="text-slate-400 hover:text-white cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="max-h-[400px] overflow-y-auto space-y-1 border border-slate-700 rounded-lg p-2">
-              {employees.filter(e => !taskGroup.participantIds.includes(e.id)).map(emp => (
-                <div key={emp.id} onClick={() => {
-                  const ok = addMemberToTaskChat(emp.id);
-                  if (ok) {
-                    addToast({ title: '✅ Đã thêm', message: `${emp.name} đã vào nhóm chat`, type: 'success' });
-                  }
-                }}
-                  className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-                >
-                  <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[9px] font-bold text-indigo-400 shrink-0">
-                    {emp.name.substring(0, 2).toUpperCase()}
-                  </div>
-                  <span className="text-[12px] text-white flex-1">{emp.name}</span>
-                  <span className="text-[9px] text-slate-500">{emp.department}</span>
-                  <Plus className="w-3.5 h-3.5 text-emerald-500" />
-                </div>
-              ))}
-              {employees.filter(e => !taskGroup.participantIds.includes(e.id)).length === 0 && (
-                <p className="text-[12px] text-slate-500 text-center py-4">Tất cả nhân viên đã có trong nhóm</p>
-              )}
-            </div>
-            <div className="flex justify-end">
-              <button onClick={() => setShowTaskChatAddMember(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-400 text-[12px] font-semibold rounded-lg hover:bg-slate-700 transition-all cursor-pointer">
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showApprovalWarning && (
         <div 
@@ -3413,7 +3120,7 @@ export default function TaskDetailModal({
         const isMissionCompleted = mission.status === 'completed';
         const isMissionAssignee = mission.memberIds?.includes(currentUser.id) || false;
         const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
-        const hasMissionPermission = canReceive || canAssignMembers || isMissionMainAssignee;
+        const hasMissionPermission = canReceive || canAssignMembers || canManageSubTask || isMissionMainAssignee;
 
         return (
           <div 
@@ -3497,7 +3204,10 @@ export default function TaskDetailModal({
                               }
                               return m;
                             });
-                            updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                            onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                            // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                            const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
+                            notifyProjectChat(`➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`);
                           }}
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full rounded"
                         >
@@ -3537,7 +3247,10 @@ export default function TaskDetailModal({
                                   }
                                   return m;
                                 });
-                                updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
+                                notifyProjectChat(`➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`);
                               }}
                               className="text-slate-500 hover:text-rose-400 font-extrabold text-[9px] pl-1 cursor-pointer border-none bg-transparent"
                               title={`Xóa ${emp.name}`}
@@ -3596,7 +3309,7 @@ export default function TaskDetailModal({
                                       }
                                       return m;
                                     });
-                                    updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                    onUpdateTask(selectedTask.id, { missions: updatedMissions });
                                   }}
                                   className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-150/80 rounded transition cursor-pointer shrink-0"
                                   title="Xóa công tác phí"
@@ -3708,7 +3421,7 @@ export default function TaskDetailModal({
                                   return m;
                                 });
 
-                                updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                onUpdateTask(selectedTask.id, { missions: updatedMissions });
 
                                 // Reset form states
                                 setAllowanceNormId('');
@@ -3856,9 +3569,11 @@ export default function TaskDetailModal({
                       }
 
                       // Push task update
-                      updateTaskWithChat(selectedTask.id, {
+                      onUpdateTask(selectedTask.id, {
                         missions: updatedMissions
                       });
+                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                      notifyProjectChat(`✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`);
 
                       // Clear states
                       setSelectedMissionId(null);
@@ -3884,9 +3599,11 @@ export default function TaskDetailModal({
                     onClick={() => {
                       if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
                         const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== selectedMissionId);
-                        updateTaskWithChat(selectedTask.id, {
+                        onUpdateTask(selectedTask.id, {
                           missions: updatedMissions
                         });
+                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                        notifyProjectChat(`🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`);
 
                         setSelectedMissionId(null);
                         setMissionAttachedFile(null);
