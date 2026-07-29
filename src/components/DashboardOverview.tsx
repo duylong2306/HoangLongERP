@@ -1937,8 +1937,8 @@ export default function DashboardOverview({
               const { key, slotIn, slotOut, configIn, configOut, icon: Icon, label, color } = item;
               const inVal = userTodayLog[slotIn];
               const outVal = userTodayLog[slotOut];
-              const inCompleted = inVal !== '--:--' && inVal !== '';
-              const outCompleted = outVal !== '--:--' && outVal !== '';
+              const inCompleted = inVal !== '--:--' && inVal !== '' && inVal != null;
+              const outCompleted = outVal !== '--:--' && outVal !== '' && outVal != null;
               const shiftActive = isShiftActive(key as any);
 
               // ─── Tính toán trạng thái nút theo khung giờ cấu hình ───

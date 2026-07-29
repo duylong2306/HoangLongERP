@@ -1698,7 +1698,8 @@ export const dbService = {
         // Nhưng để giữ tương thích, ta thêm logic: Nếu record có trường `_serverTime` (do client lấy trước), dùng nó.
 
         if (record._serverTime) {
-          row[slotMap[punchSlot]] = record._serverTime;
+          // Chỉ lấy chuỗi thời gian "HH:mm" từ object server timestamp, không lưu toàn bộ object
+          row[slotMap[punchSlot]] = record._serverTime.time;
         } else {
           // Fallback: dùng giờ client nhưng log cảnh báo
           console.warn('[Attendance] Saving with CLIENT time (fallback). Implement server-time fetch for production.');
