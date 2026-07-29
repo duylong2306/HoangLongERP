@@ -2612,6 +2612,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const isAccessible = (tab: string): boolean => {
     if (!currentUser) return false;
     if (currentUser.username === 'admin') return true;
+    // Super admin bypass — toàn quyền truy cập mọi tab
+    if (isUserInRoleGroup(currentUser.id, 'role_superadmin')) return true;
 
     // ── Nguồn sự thật chính: HRM Role Groups (hl_cached_hrm_role_groups / hl_hrm_roles_v2) ──
     const isAdminGroup = isUserInRoleGroup(currentUser.id, 'role_admin');
