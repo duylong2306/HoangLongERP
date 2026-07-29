@@ -273,6 +273,14 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
   }
 }
 
+// Helper: chuẩn hóa giá trị thời gian, xử lý cả trường hợp bị lưu object timestamp
+function normalizeTime(v: any): string {
+  if (!v || v === '--:--' || v === '') return '--:--';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object' && v.time) return v.time; // object cũ: {date, time, datetime, epoch_ms}
+  return String(v);
+}
+
 export const dbService = {
   /** Populate cache từ data bên ngoài (dùng khi RPC đã fetch sẵn) */
   populateCache(tableName: string, data: any[]) {
@@ -1606,14 +1614,6 @@ export const dbService = {
       await deleteSupabase('purchase_orders', id);
     }
   },
-
-  // Helper: chuẩn hóa giá trị thời gian, xử lý cả trường hợp bị lưu object timestamp
-  const normalizeTime = (v: any): string => {
-    if (!v || v === '--:--' || v === '') return '--:--';
-    if (typeof v === 'string') return v;
-    if (typeof v === 'object' && v.time) return v.time; // object cũ: {date, time, datetime, epoch_ms}
-    return String(v);
-  };
 
   // 15. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
   attendance: {
