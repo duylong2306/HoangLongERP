@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems } from './lib/dbService';
 import { useWebPush } from './hooks/useWebPush';
 import { createGroupConversation, deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
@@ -782,9 +782,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return () => unsub();
   }, [currentUser?.id]);
 
-  const [activeTab, setActiveTab ] = useState<string>(() => {
+  const [activeTab, setActiveTabState] = useState<string>(() => {
     return sessionStorage.getItem('hl_erp_active_tab') || 'dashboard';
   });
+  const [tabHistory, setTabHistory] = useState<string[]>([]);
+  // Wrapper setActiveTab tự động lưu tab hiện tại vào history trước khi chuyển tab
+  const setActiveTab = useCallback((tab: string) => {
+    setTabHistory(prev => activeTab !== tab ? [...prev, activeTab] : prev);
+    setActiveTabState(tab);
+  }, [activeTab]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
@@ -3155,7 +3161,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
         {/* HEADER TOP-BAR - Tall header with 39px top padding to avoid iPhone Dynamic Island. Content/scontrols aligned at bottom via items-end */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[45px] pb-[45px] flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
+        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[50px] pb-[10px] flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button
@@ -3607,7 +3613,33 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         </header>
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
-        <main className="flex-1 p-4 sm:p-6 overflow-y-auto" id="main_content_scroller">
+        <main
+          className="flex-1 p-4 sm:p-6 overflow-y-auto"
+          id="main_content_scroller"
+          onTouchStart={(e) => {
+            const el = e.currentTarget;
+            el.dataset.touchStartX = String(e.touches[0].clientX);
+            el.dataset.touchStartY = String(e.touches[0].clientY);
+          }}
+          onTouchEnd={(e) => {
+            const el = e.currentTarget;
+            const startX = parseFloat(el.dataset.touchStartX || '0');
+            const startY = parseFloat(el.dataset.touchStartY || '0');
+            const endX = e.changedTouches[0].clientX;
+            const endY = e.changedTouches[0].clientY;
+            const dx = endX - startX;
+            const dy = endY - startY;
+            // Swipe right > 80px, ít di chuyển dọc (< 50px), chỉ trên mobile
+            if (dx > 80 && Math.abs(dy) < 50 && window.innerWidth < 768) {
+              setTabHistory(prev => {
+                if (prev.length === 0) return prev;
+                const last = prev[prev.length - 1];
+                setActiveTabState(last);
+                return prev.slice(0, -1);
+              });
+            }
+          }}
+        >
           {!isAccessible(activeTab) ? (
             <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center space-y-4 animate-fadeIn" id="access_denied_pane">
               <div className="w-20 h-20 rounded-full bg-rose-950/40 border border-rose-800/60 flex items-center justify-center">
