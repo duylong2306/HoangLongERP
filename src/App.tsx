@@ -3154,8 +3154,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
-        {/* HEADER TOP-BAR - Compact mobile header - buttons at bottom border */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 py-3 flex justify-between items-center shrink-0 shadow-lg pb-0.5" id="top_header_bar">
+        {/* HEADER TOP-BAR - Tall header with 39px top padding to avoid iPhone Dynamic Island. Content/scontrols aligned at bottom via items-end */}
+        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[39px] pb-2 flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button
