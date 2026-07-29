@@ -766,6 +766,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Web Push notification registration
   useWebPush(currentUser?.id ?? null);
 
+  // ─── Super Admin check: query Supabase DB trực tiếp, KHÔNG dùng localStorage ──
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  useEffect(() => {
+    if (!currentUser?.id) { setIsSuperAdmin(false); return; }
+    dbService.checkSuperAdmin(currentUser.id).then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
+  }, [currentUser?.id]);
+
   // ─── Load chat conversations từ sớm để sidebar badge hoạt động ──────────────
   const [, forceChatUpdate] = useState(0);
 
@@ -2612,8 +2619,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const isAccessible = (tab: string): boolean => {
     if (!currentUser) return false;
     if (currentUser.username === 'admin') return true;
-    // Super admin bypass — toàn quyền truy cập mọi tab dựa trên roleGroupIds của user
-    if (currentUser.roleGroupIds?.includes('role_superadmin')) return true;
+    // Super admin bypass — query trực tiếp Supabase DB (không dùng localStorage)
+    if (isSuperAdmin) return true;
 
     // ── Nguồn sự thật chính: HRM Role Groups (hl_cached_hrm_role_groups / hl_hrm_roles_v2) ──
     const isAdminGroup = isUserInRoleGroup(currentUser.id, 'role_admin');

@@ -1744,6 +1744,26 @@ export const dbService = {
     }
   },
 
+  /**
+   * Kiểm tra user có phải Super Admin không — query trực tiếp Supabase, KHÔNG dùng localStorage.
+   * Fail-secure: network error → false.
+   */
+  async checkSuperAdmin(empId: string): Promise<boolean> {
+    const supabase = getSupabase();
+    if (!supabase) return false;
+    try {
+      const { data, error } = await supabase
+        .from('hrm_role_groups')
+        .select('member_ids')
+        .eq('id', 'role_superadmin')
+        .single();
+      if (error) return false;
+      return data?.member_ids?.includes(empId) ?? false;
+    } catch {
+      return false; // fail secure
+    }
+  },
+
   // Clean initialization helper to bootstrap full local database on the first sync if cloud db is empty
   async bootstrapFirstTime(force = false): Promise<void> {
     const supabase = getSupabase();

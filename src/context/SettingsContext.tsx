@@ -338,16 +338,7 @@ export function loadHrmRoleGroups(): HrmRoleGroup[] {
   } catch (e) {
     console.error('Lỗi đọc hl_hrm_roles_v2:', e);
   }
-  // Fallback cuối: danh sách role mặc định
-  return [
-    { id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: [], permissions: {} },
-    { id: 'role_admin', name: 'Ban Giám Đốc (Admin)', memberIds: [], permissions: {} },
-    { id: 'role_accounting', name: 'Kế toán viên', memberIds: [], permissions: {} },
-    { id: 'role_office', name: 'Nhân viên Văn phòng', memberIds: [], permissions: {} },
-    { id: 'role_technical', name: 'Nhân viên Kỹ thuật', memberIds: [], permissions: {} },
-    { id: 'role_factory_mwood', name: 'Tổ xưởng Mộc', memberIds: [], permissions: {} },
-    { id: 'role_factory_mmetal', name: 'Tổ xưởng Cơ khí', memberIds: [], permissions: {} },
-  ];
+  return [];
 }
 
 /**
@@ -467,27 +458,7 @@ export function isUserInRoleGroup(empId: string | undefined, groupId: string): b
   if (!empId) return false;
   const groups = loadHrmRoleGroups();
   const group = groups.find(g => g.id === groupId);
-  // Kiểm tra từ phía group → employee
-  if (group ? group.memberIds.includes(empId) : false) return true;
-  // Kiểm tra từ phía employee → group: nếu emp có groupId trong roleGroupIds
-  try {
-    const empData = localStorage.getItem('hl_hrm_employees_v3');
-    if (empData) {
-      const emps = JSON.parse(empData);
-      const emp = Array.isArray(emps) ? emps.find((e: any) => e.id === empId) : null;
-      if (emp?.roleGroupIds?.includes(groupId)) return true;
-    }
-  } catch {}
-  // Super admin bypass: nếu user có role_superadmin, coi như thuộc mọi group
-  try {
-    const empData = localStorage.getItem('hl_hrm_employees_v3');
-    if (empData) {
-      const emps = JSON.parse(empData);
-      const emp = Array.isArray(emps) ? emps.find((e: any) => e.id === empId) : null;
-      if (emp?.roleGroupIds?.includes('role_superadmin')) return true;
-    }
-  } catch {}
-  return false;
+  return group ? group.memberIds.includes(empId) : false;
 }
 
 /**
