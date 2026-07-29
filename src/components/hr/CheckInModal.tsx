@@ -152,9 +152,9 @@ export default function CheckInModal({
 
   const getShiftTimeRange = (shift: string) => {
     switch (shift) {
-      case 'morning': return '06:30 → 11:30';
-      case 'afternoon': return '13:00 → 17:30';
-      case 'overtime': return '17:30 → 22:00';
+      case 'morning': return '07:30 → 11:30';
+      case 'afternoon': return '13:00 → 17:00';
+      case 'overtime': return '17:45 → 20:45';
       default: return '';
     }
   };
