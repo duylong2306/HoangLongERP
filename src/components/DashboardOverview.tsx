@@ -406,7 +406,9 @@ export default function DashboardOverview({
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
         isSyncingFromCloud.current = true;
-        setAttendanceList(customEvent.detail.attendance || customEvent.detail);
+        const rawList = customEvent.detail.attendance || customEvent.detail;
+        // Normalize time fields (phòng trường hợp data từ HRM chứa object timestamp thay vì string)
+        setAttendanceList(Array.isArray(rawList) ? rawList.map(normalizeRecord) : []);
         requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
       }
     };
