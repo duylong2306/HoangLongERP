@@ -2,7 +2,7 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Hoàng Long ERP - Hệ thống Thiết kế & Dự toán Nội thất</title>
 
     <!-- PWA Manifest -->
@@ -16,6 +16,17 @@
 
     <!-- Icons (SVG scales to any size) -->
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+
+    <!-- Orientation: cho phép quay ngang trên mobile, header tự điều chỉnh notch -->
+    <style>
+      /* Khi xoay ngang trên mobile: giảm padding-top header (notch ở cạnh) */
+      @media (orientation: landscape) and (max-width: 932px) {
+        #top_header_bar {
+          padding-top: 8px !important;
+          padding-bottom: 8px !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
