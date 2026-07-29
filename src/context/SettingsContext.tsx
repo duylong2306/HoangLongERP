@@ -458,7 +458,10 @@ export function isUserInRoleGroup(empId: string | undefined, groupId: string): b
   if (!empId) return false;
   const groups = loadHrmRoleGroups();
   const group = groups.find(g => g.id === groupId);
-  return group ? group.memberIds.includes(empId) : false;
+  if (group ? group.memberIds.includes(empId) : false) return true;
+  // Super admin bypass: nếu user có role_superadmin, coi như thuộc mọi group
+  const superGroup = groups.find(g => g.id === 'role_superadmin');
+  return superGroup ? superGroup.memberIds.includes(empId) : false;
 }
 
 /**

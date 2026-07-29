@@ -222,7 +222,7 @@ const ADMIN_EMPLOYEE: Employee = {
   department: 'Ban Giám Đốc',
   username: 'admin',
   password: 'admin',
-  roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
+  roleGroupIds: ['role_superadmin', 'role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
   status: 'working',
   hasSystemAccount: true
 };
@@ -235,7 +235,7 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
         ...ADMIN_EMPLOYEE,
         id: 'emp_admin',
         username: 'admin',
-        roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
+        roleGroupIds: ['role_superadmin', 'role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
         hasSystemAccount: true
       };
     }
@@ -303,6 +303,7 @@ async function loadAllRoleGroups(): Promise<{ id: string; name: string }[]> {
     }
   } catch {}
   return [
+    { id: 'role_superadmin', name: 'Siêu Admin (Super Admin)' },
     { id: 'role_admin', name: 'Ban Giám Đốc (Admin)' },
     { id: 'role_accounting', name: 'Kế toán viên' },
     { id: 'role_office', name: 'Nhân viên Văn phòng' },
