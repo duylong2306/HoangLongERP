@@ -316,28 +316,21 @@ export function useSettings(): SettingsContextValue {
 // Các interface HrmRoleGroup, ApprovalPermission đã được chuyển sang ../types
 export type { HrmRoleGroup, HrmApprovalConfig as ApprovalPermission } from '../types';
 
-/** Đọc danh sách Role Groups từ localStorage (fallback) hoặc Supabase */
+// In-memory cache: được populate từ Supabase khi app mount, KHÔNG đọc từ localStorage
+let _roleGroupsCache: HrmRoleGroup[] | null = null;
+
+/**
+ * Gọi từ App.tsx sau khi fetch role groups từ Supabase để populate in-memory cache.
+ * Đây là nguồn duy nhất cho phân quyền — không dùng localStorage.
+ */
+export function setRoleGroupsCache(groups: HrmRoleGroup[]): void {
+  _roleGroupsCache = groups;
+}
+
+/** Đọc danh sách Role Groups từ in-memory cache (đã load từ Supabase) */
 export function loadHrmRoleGroups(): HrmRoleGroup[] {
-  // Ưu tiên cache local để tránh async
-  try {
-    const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) return parsed as HrmRoleGroup[];
-    }
-  } catch (e) {
-    console.error('Lỗi đọc cache hrm_role_groups:', e);
-  }
-  // Fallback: đọc từ localStorage cũ
-  try {
-    const saved = localStorage.getItem('hl_hrm_roles_v2');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed as HrmRoleGroup[];
-    }
-  } catch (e) {
-    console.error('Lỗi đọc hl_hrm_roles_v2:', e);
-  }
+  if (_roleGroupsCache) return _roleGroupsCache;
+  // Chưa load xong từ Supabase → fail-secure: trả về []
   return [];
 }
 

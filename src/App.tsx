@@ -34,7 +34,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups } from './context';
 import { hashPasswordSync } from './lib/passwordUtils';
 
 // COMPONENTS
@@ -138,24 +138,15 @@ const generateUsernameWithPhone = (name: string, phone: string): string => {
 
 const getEmployeePermissionGroupName = (emp: any): string => {
   try {
-    // 1. Đọc từ cache của dbService trước (từ Supabase)
-    const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-    let hrmRoles: any[] = [];
-    if (cached) {
-      hrmRoles = JSON.parse(cached);
-    }
-    // 2. Nếu không có cache, fallback sang localStorage cũ
-    if (!Array.isArray(hrmRoles) || hrmRoles.length === 0) {
-      const rolesSaved = localStorage.getItem('hl_hrm_roles_v2');
-      hrmRoles = rolesSaved ? JSON.parse(rolesSaved) : [];
-    }
+    // Đọc từ in-memory cache (đã load từ Supabase)
+    const hrmRoles = loadHrmRoleGroups();
 
-    if (Array.isArray(hrmRoles)) {
+    if (Array.isArray(hrmRoles) && hrmRoles.length > 0) {
       const foundRole = hrmRoles.find((r: any) => r.memberIds && r.memberIds.includes(emp.id));
       if (foundRole) return foundRole.name;
     }
 
-    // 3. Try mapping from old role field
+    // Try mapping from old role field
     if (emp.role === 'director' || emp.username === 'admin') return 'Ban Giám Đốc (Admin)';
     if (emp.role === 'accountant') return 'Kế toán viên';
     if (emp.role === 'pm') return 'Quản lý dự án';
@@ -178,17 +169,8 @@ const getEmployeePermissionGroupName = (emp: any): string => {
 const getAllowedTabsFromRoleGroups = (emp: Employee | null): string[] => {
   if (!emp) return [];
   try {
-    // 1. Đọc từ cache của dbService trước
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    let groups: any[] = [];
-    if (supCached) {
-      groups = JSON.parse(supCached);
-    }
-    // 2. Fallback sang localStorage cũ
-    if (!Array.isArray(groups) || groups.length === 0) {
-      const saved = localStorage.getItem('hl_hrm_roles_v2');
-      groups = saved ? JSON.parse(saved) : [];
-    }
+    // Đọc từ in-memory cache (đã load từ Supabase)
+    const groups = loadHrmRoleGroups();
     if (!Array.isArray(groups) || groups.length === 0) return [];
 
     const userGroups = groups.filter(g =>
@@ -208,7 +190,7 @@ const getAllowedTabsFromRoleGroups = (emp: Employee | null): string[] => {
 
     return Array.from(allowed);
   } catch (e) {
-    console.error('Lỗi đọc phân quyền từ hl_hrm_roles_v2:', e);
+    console.error('Lỗi đọc phân quyền từ Role Groups cache:', e);
     return [];
   }
 };
@@ -243,17 +225,7 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
     let roleGroupIds = emp.roleGroupIds;
     if (!roleGroupIds || roleGroupIds.length === 0) {
       try {
-        const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-        let groups: any[] = [];
-        if (cached) {
-          groups = JSON.parse(cached);
-        }
-        if (!Array.isArray(groups) || groups.length === 0) {
-          const saved = localStorage.getItem('hl_hrm_roles_v2');
-          if (saved) {
-            groups = JSON.parse(saved);
-          }
-        }
+        const groups = loadHrmRoleGroups();
         if (Array.isArray(groups)) {
           roleGroupIds = groups
             .filter(g => g.memberIds?.includes(emp.id))
@@ -292,16 +264,11 @@ async function loadAllRoleGroups(): Promise<{ id: string; name: string }[]> {
     console.warn('Supabase hrm_role_groups load error:', e);
   }
 
-  // Fallback: đọc từ localStorage
-  try {
-    const saved = localStorage.getItem('hl_hrm_roles_v2');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        return parsed.map((r: any) => ({ id: r.id, name: r.name }));
-      }
-    }
-  } catch {}
+  // Fallback: đọc từ in-memory cache (đã load từ Supabase)
+  const cached = loadHrmRoleGroups();
+  if (cached && cached.length > 0) {
+    return cached.map((r: any) => ({ id: r.id, name: r.name }));
+  }
   return [
     { id: 'role_superadmin', name: 'Siêu Admin (Super Admin)' },
     { id: 'role_admin', name: 'Ban Giám Đốc (Admin)' },
@@ -1129,24 +1096,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Thêm người dùng mới — form đã xóa, tạo tài khoản qua HRM
 
-  // Đọc danh sách Role Groups từ localStorage hoặc Supabase cache để render dropdown
+  // Đọc danh sách Role Groups từ in-memory cache (đã load từ Supabase)
   const readHrmRoleGroups = (): { id: string; name: string }[] => {
     try {
-      // Ưu tiên cache từ Supabase
-      const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-      if (supCached) {
-        const parsed = JSON.parse(supCached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((r: any) => ({ id: r.id, name: r.name }));
-        }
-      }
-      // Fallback
-      const saved = localStorage.getItem('hl_hrm_roles_v2');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((r: any) => ({ id: r.id, name: r.name }));
-        }
+      const groups = loadHrmRoleGroups();
+      if (Array.isArray(groups) && groups.length > 0) {
+        return groups.map((r: any) => ({ id: r.id, name: r.name }));
       }
     } catch {}
     return [
@@ -1626,9 +1581,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         const cloudRoles = await dbService.hrmRoleGroups.list();
         if (cloudRoles && cloudRoles.length > 0) {
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
-          const updated = JSON.stringify(cloudRoles);
-          localStorage.setItem('hl_cached_hrm_role_groups', updated);
-          localStorage.setItem('hl_hrm_roles_v2', updated);
+          setRoleGroupsCache(cloudRoles);
         }
       } catch {}
     };

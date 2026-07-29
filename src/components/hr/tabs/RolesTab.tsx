@@ -5,7 +5,7 @@ import ProjectPermissionModal from './ProjectPermissionModal';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission } from '../../../context';
+import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { dbService } from '../../../lib/dbService';
 
@@ -121,6 +121,7 @@ export default function RolesTab(props: RolesTabProps) {
     // Ghi cache localStorage trước (offline-safe)
     localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
     localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
+    setRoleGroupsCache(updated); // sync in-memory cache
     setRoles(updated);
     syncHrmPermissionsToApp(updated);
     // Đồng bộ lên Supabase (chờ tất cả hoàn tất)
@@ -441,6 +442,7 @@ export default function RolesTab(props: RolesTabProps) {
                           setRoles(updated);
                           localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
                           localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
+                          setRoleGroupsCache(updated);
                           dbService.hrmRoleGroups.delete(r.id).catch(err => {
                             console.error('Supabase hrmRoleGroups delete error:', err);
                           });

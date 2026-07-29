@@ -4,6 +4,7 @@ import { Role, EmployeeProfile } from '../hrTypes';
 import { SalaryScale } from '../../../types';
 import { dbService } from '../../../lib/dbService';
 import { hashPasswordSync } from '../../../lib/passwordUtils';
+import { loadHrmRoleGroups, setRoleGroupsCache } from '../../../context';
 
 type ToastInput = { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number };
 
@@ -263,18 +264,8 @@ export default function ProfilesTab({
 
       // If roleGroupId provided, add employee to the role group
       if (roleGroupId) {
-        // Đọc từ cache Supabase trước, fallback localStorage cũ
-        let rolesList: any[] = [];
-        const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-        if (supCached) {
-          try { rolesList = JSON.parse(supCached); } catch {}
-        }
-        if (rolesList.length === 0) {
-          const hrmRoles = localStorage.getItem('hl_hrm_roles_v2');
-          if (hrmRoles) {
-            try { rolesList = JSON.parse(hrmRoles); } catch {}
-          }
-        }
+        // Đọc từ in-memory cache (đã load từ Supabase)
+        let rolesList: any[] = loadHrmRoleGroups();
         if (Array.isArray(rolesList)) {
           const targetRole = rolesList.find((r: any) => r.id === roleGroupId);
           if (targetRole) {
@@ -283,6 +274,7 @@ export default function ProfilesTab({
             const updated = JSON.stringify(rolesList);
             localStorage.setItem('hl_cached_hrm_role_groups', updated);
             localStorage.setItem('hl_hrm_roles_v2', updated);
+            setRoleGroupsCache(rolesList);
             // Đồng bộ lên Supabase
             dbService.hrmRoleGroups.save({
               id: targetRole.id,
@@ -319,23 +311,8 @@ export default function ProfilesTab({
   const handleBulkCreateSystemAccounts = async () => {
     if (selectedRows.size === 0) return;
 
-    // Đọc danh sách role groups từ Supabase cache trước
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const rolesData = localStorage.getItem('hl_hrm_roles_v2');
-      if (rolesData) {
-        try {
-          const parsed = JSON.parse(rolesData);
-          if (Array.isArray(parsed)) rolesList = parsed;
-        } catch (e) {
-          console.error('Error parsing roles:', e);
-        }
-      }
-    }
+    // Đọc danh sách role groups từ in-memory cache (đã load từ Supabase)
+    let rolesList: any[] = loadHrmRoleGroups();
     const availableRoles: { id: string; name: string }[] = rolesList.map((r: any) => ({ id: r.id, name: r.name }));
 
     const selectedEmployees = employees.filter(e => selectedRows.has(e.id));
@@ -367,23 +344,8 @@ export default function ProfilesTab({
 
   // Tạo tài khoản nhanh cho nhân viên đang xem chi tiết (single)
   const handleSingleCreateSystemAccount = async (emp: EmployeeProfile) => {
-    // Đọc danh sách role groups từ Supabase cache trước
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const rolesData = localStorage.getItem('hl_hrm_roles_v2');
-      if (rolesData) {
-        try {
-          const parsed = JSON.parse(rolesData);
-          if (Array.isArray(parsed)) rolesList = parsed;
-        } catch (e) {
-          console.error('Error parsing roles:', e);
-        }
-      }
-    }
+    // Đọc danh sách role groups từ in-memory cache (đã load từ Supabase)
+    let rolesList: any[] = loadHrmRoleGroups();
     const availableRoles: { id: string; name: string }[] = rolesList.map((r: any) => ({ id: r.id, name: r.name }));
 
     setBulkRoleModal({

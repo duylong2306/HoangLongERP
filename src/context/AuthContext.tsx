@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import { Employee, HrmRoleGroup } from '../types';
 import { dbService } from '../lib/dbService';
-import { generateUsername } from './SettingsContext';
+import { generateUsername, loadHrmRoleGroups } from './SettingsContext';
 
 /** Bỏ password khỏi user object — KHÔNG lưu password hash vào storage */
 const stripPassword = (emp: any) => {
@@ -48,25 +48,14 @@ export function ensureAdminAndPasswords(emps: Employee[]): Employee[] {
     let roleGroupIds = emp.roleGroupIds;
     if (!roleGroupIds || roleGroupIds.length === 0) {
       try {
-        // Đọc từ cache của dbService trước (nếu có)
-        const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-        let groups: any[] = [];
-        if (cached) {
-          groups = JSON.parse(cached);
-        }
-        if (!Array.isArray(groups) || groups.length === 0) {
-          const saved = localStorage.getItem('hl_hrm_roles_v2');
-          if (saved) {
-            groups = JSON.parse(saved);
-          }
-        }
+        // Đọc từ in-memory cache (đã load từ Supabase)
+        const groups = loadHrmRoleGroups();
         if (Array.isArray(groups)) {
           roleGroupIds = groups
             .filter(g => g.memberIds?.includes(emp.id))
             .map((g: any) => g.id);
         }
       } catch { /* ignore */ }
-      // Fallback cuối cùng: nếu vẫn rỗng, giữ nguyên legacy role để isAccessible fallback hoạt động
     }
     return {
       ...emp,

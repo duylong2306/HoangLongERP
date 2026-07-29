@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService } from '../lib/dbService';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem } from '../types';
-import { useNotification, isUserInRoleGroup } from '../context';
+import { useNotification, isUserInRoleGroup, loadHrmRoleGroups } from '../context';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
@@ -246,16 +246,8 @@ export default function FinanceManagement({
   };
   // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM
   const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean => {
-    // Ưu tiên cache từ Supabase
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const savedRoles = localStorage.getItem('hl_hrm_roles_v2');
-      if (!savedRoles) return true;
-      try { rolesList = JSON.parse(savedRoles); } catch {}
+    // Đọc từ in-memory cache (đã load từ Supabase)
+    let rolesList: any[] = loadHrmRoleGroups();
     }
     if (rolesList.length === 0) return true; // Mặc định có quyền nếu chưa cấu hình
     try {

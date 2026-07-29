@@ -2,7 +2,8 @@
 import { Quote, Customer, Project, QuoteItem, QuoteConfig, ArchivedQuote } from '../types';
 import { dbService } from '../lib/dbService';
 import {
-  useNotification
+  useNotification,
+  loadHrmRoleGroups
 } from '../context';
 import {
   Calculator,
@@ -699,16 +700,7 @@ export default function QuotationSystem({
   const { addToast } = useNotification();
   // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM (từ Supabase cache trước)
   const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean => {
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const savedRoles = localStorage.getItem('hl_hrm_roles_v2');
-      if (!savedRoles) return true;
-      try { rolesList = JSON.parse(savedRoles); } catch {}
-    }
+    let rolesList: any[] = loadHrmRoleGroups();
     if (rolesList.length === 0) return true;
     try {
       
