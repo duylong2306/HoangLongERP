@@ -344,7 +344,21 @@ export default function DashboardOverview({
     };
   }, []);
 
-  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [attendanceList, setAttendanceList] = useState<any[]>(() => {
+    // Load từ localStorage cache trước để tránh flash nút sai khi load trang
+    try {
+      const cached = localStorage.getItem('hl_attendance_cache');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
+
+  // Cache attendanceList xuống localStorage mỗi khi có thay đổi
+  useEffect(() => {
+    try {
+      localStorage.setItem('hl_attendance_cache', JSON.stringify(attendanceList));
+    } catch {}
+  }, [attendanceList]);
 
   // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
   const isSyncingFromCloud = useRef(false);
