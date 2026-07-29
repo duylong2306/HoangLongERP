@@ -1105,6 +1105,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       }
     } catch {}
     return [
+      { id: 'role_superadmin', name: 'Siêu Admin (Super Admin)' },
       { id: 'role_admin', name: 'Ban Giám Đốc (Admin)' },
       { id: 'role_accounting', name: 'Kế toán viên' },
       { id: 'role_office', name: 'Nhân viên Văn phòng' },
@@ -1580,6 +1581,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       try {
         const cloudRoles = await dbService.hrmRoleGroups.list();
         if (cloudRoles && cloudRoles.length > 0) {
+          // Luôn merge role_superadmin vào cache
+          if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
+            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: [], permissions: {} });
+          }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
           setRoleGroupsCache(cloudRoles);
         }
@@ -1630,11 +1635,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       try {
         const cloudRoles = await dbService.hrmRoleGroups.list();
         if (cloudRoles && cloudRoles.length > 0) {
+          // Luôn merge role_superadmin vào cache (bảo vệ khỏi DB chưa có)
+          if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
+            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: [], permissions: {} });
+          }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
-          // Cập nhật cache localStorage để các component khác dùng
-          const updated = JSON.stringify(cloudRoles);
-          localStorage.setItem('hl_cached_hrm_role_groups', updated);
-          localStorage.setItem('hl_hrm_roles_v2', updated);
+          setRoleGroupsCache(cloudRoles);
+          localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(cloudRoles));
+          localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(cloudRoles));
         }
       } catch {
         // Fallback về localStorage nếu Supabase lỗi
