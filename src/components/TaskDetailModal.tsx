@@ -2678,19 +2678,13 @@ export default function TaskDetailModal({
                 {selectedTask.status !== 'todo' && (
                   <>
                     {selectedTask.isDocGenerationEnabled === true && (() => {
-                      // Khớp hồ sơ lưu trữ theo dự án: ưu tiên projectId, fallback projectName,
-                      // và dự phòng sang selectedTask.projectId (công việc con có thể chưa gắn projectId trực tiếp)
+                      // Khớp hồ sơ lưu trữ theo dự án: ưu tiên projectId, fallback projectName.
+                      // (Không lọc theo _sectorType để tránh loại nhầm hồ sơ đã gắn đúng dự án)
                       const targetProjectId = project?.id || selectedTask?.projectId;
                       const projectArchivedQuotes = archivedQuotesList.filter(q => {
-                        const matchProject = targetProjectId
-                          ? q.projectId === targetProjectId
-                          : (project?.name ? q.projectName === project.name : false);
-                        if (!matchProject) return false;
-                        // Lọc theo lĩnh vực chỉ khi đã biết type dự án
-                        if (project?.type) {
-                          return q._sectorType === project.type || (!q._sectorType && project.type === 'general');
-                        }
-                        return true;
+                        if (targetProjectId) return q.projectId === targetProjectId;
+                        if (project?.name) return q.projectName === project.name;
+                        return false;
                       });
                       const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                       const hasQuoteFile = latestArchivedQuote;
