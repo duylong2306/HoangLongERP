@@ -2246,7 +2246,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     setQuotes([newQuote, ...quotes]);
     dbService.quotes.save(newQuote);
-    
+
+    // Đồng bộ vào bảng archived_quotes (Lưu trữ hồ sơ) để Menu Hồ Sơ Dự Án đọc trạng thái theo dự án.
+    // (Đảm bảo hồ sơ luôn tồn tại với projectId + sector dù luồng lưu ở estimator có sai khác)
+    try {
+      const aqSector = newQuote.code?.startsWith('BGXD-') ? 'construction'
+        : newQuote.code?.startsWith('BGME-') ? 'mechanical' : 'furniture';
+      dbService.archivedQuotes.save({ ...newQuote, sector: aqSector })
+        .catch((e: any) => console.warn('Lưu archived_quotes thất bại:', e));
+    } catch (e) {
+      console.warn('Lưu archived_quotes thất bại:', e);
+    }
+
     // Tự sinh dự án tương ứng và trả file/hồ sơ về dự án
     if (newQuote.projectId) {
       const updatedProjs = projects.map(p => {
