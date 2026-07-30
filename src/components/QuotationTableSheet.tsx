@@ -5,7 +5,7 @@ import ContractDocument from './ContractDocument';
 import AcceptanceDocument from './AcceptanceDocument';
 import LiquidationDocument from './LiquidationDocument';
 import FinalQuoteDocument from './FinalQuoteDocument';
-import { dbService } from '../lib/dbService';
+import { dbService, invalidateCache } from '../lib/dbService';
 
 // Helper function to read Vietnamese numbers aloud in text format
 export function docSoTiengViet(number: number): string {
@@ -264,12 +264,14 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
 
             // ─── 4b. Lưu Công nợ Thu vào accounting_receivables ───
             const projectId = matchedProj.id;
-            const recId = `rec_auto_${projectId}`;
             const sectorLabel = quoteData.sector === 'construction' ? 'Xây dựng'
               : quoteData.sector === 'mechanical' ? 'Cơ khí' : 'Nội thất';
             try {
-              await dbService.accountingReceivables.save({
-                id: recId,
+              // Invalidate cache rồi query để tìm record auto cũ theo projectId
+              invalidateCache('accounting_receivables');
+              const existingRecs = await dbService.accountingReceivables.list();
+              const existingAuto = existingRecs.find((r: any) => r.projectId === projectId && r.isAuto === true);
+              const recPayload: any = {
                 projectName: quoteData.projectName || '',
                 investor: quoteData.customerName || '',
                 field: sectorLabel,
@@ -279,8 +281,14 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 notes: '',
                 isAuto: true,
                 projectId,
-              });
-              console.log('[DEBUG Duyệt BG] ✅ Đã lưu Công nợ Thu vào accounting_receivables:', { recId, projectName: quoteData.projectName, contractValue: grandTotal });
+              };
+              if (existingAuto) {
+                recPayload.id = existingAuto.id;
+              } else {
+                recPayload.id = crypto.randomUUID();
+              }
+              await dbService.accountingReceivables.save(recPayload);
+              console.log('[DEBUG Duyệt BG] ✅ Đã lưu Công nợ Thu vào accounting_receivables:', { id: recPayload.id, projectName: quoteData.projectName, contractValue: grandTotal });
             } catch (err) {
               console.error('[DEBUG Duyệt BG] ❌ Lỗi lưu Công nợ Thu:', err);
             }
