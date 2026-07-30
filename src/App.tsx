@@ -16,7 +16,8 @@ import {
   AppNotification,
   Conversation,
   SalesOrder,
-  PurchaseOrder
+  PurchaseOrder,
+  SubcontractorAdvanceProposal
 } from './types';
 import {
   INITIAL_EMPLOYEES,
@@ -620,18 +621,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               cloudData = await dbService.loadAllCore();
             } catch {
               // Fallback: query từng bảng
-              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders, sups] = await Promise.all([
+              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders, sups, advances] = await Promise.all([
                 dbService.customers.list(), dbService.projects.list(),
                 dbService.tasks.list(), dbService.receipts.list(),
                 dbService.payments.list(), dbService.quotes.list(),
                 dbService.salesOrders.list(), dbService.purchaseOrders.list(),
                 dbService.suppliers.list().catch(() => []),
+                dbService.subcontractorAdvances.list(),
               ]);
               cloudData = {
                 customers: custs, projects: projs, tasks: tsks,
                 receipts: recs, payments: pays, quotes: qtes,
                 sales_orders: sOrders, purchase_orders: pOrders,
                 suppliers: sups,
+                subcontractor_advances: advances,
                 business_profile: [], shift_config: [],
               };
             }
@@ -662,11 +665,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             const pOrderRows = toCamel(pOrderRaw || []).map(normalizeOrderItems);
 
             const supRows = toCamel(cloudData.suppliers || []);
+            const advRows = toCamel(cloudData.subcontractor_advances || []);
             setCustomers(custRows);
             setProjects(projRows.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
             setTasks(taskRows);
             setReceipts(recRows);
             setPayments(payRows);
+            setSubcontractorAdvances(advRows);
             setQuotes(quoteRows);
             setSalesOrders(sOrderRows);
             setPurchaseOrders(pOrderRows);
@@ -993,6 +998,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [tasks, setTasks] = useState<Task[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -1233,6 +1239,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Sync projects from Supabase when updated elsewhere
   useEffect(() => {
     const handleProjectsUpdated = async () => {
+      // Đọc ngay từ localStorage để đồng bộ tức thì (vd: duyệt báo giá → Công nợ Thu)
+      try {
+        const localData = localStorage.getItem('hl_erp_projects');
+        if (localData) {
+          const localProjs = JSON.parse(localData);
+          const filteredLocal = localProjs.filter((p: any) => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+          setProjects(filteredLocal);
+        }
+      } catch {}
+      // Sau đó đồng bộ từ DB để có dữ liệu mới nhất
       try {
         const projs = await dbService.projects.list();
         const filteredProjs = projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
@@ -1285,6 +1301,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
     window.addEventListener('hl-payments-updated', handlePaymentsUpdated);
     return () => window.removeEventListener('hl-payments-updated', handlePaymentsUpdated);
+  }, []);
+
+  // Sync subcontractor advances from Supabase when updated elsewhere
+  useEffect(() => {
+    const handleAdvancesUpdated = async () => {
+      try {
+        const list = await dbService.subcontractorAdvances.list();
+        setSubcontractorAdvances(list || []);
+      } catch (err) {
+        console.error("Lỗi đồng bộ đề xuất thu chi:", err);
+      }
+    };
+    window.addEventListener('hl-subcontractor-advances-updated', handleAdvancesUpdated);
+    return () => window.removeEventListener('hl-subcontractor-advances-updated', handleAdvancesUpdated);
   }, []);
 
   // ─── Supabase Realtime: lắng nghe thay đổi 17 bảng (primary sync, polling chỉ là backup) ───
@@ -3564,6 +3594,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onRedirectToQuote={handleRedirectToQuote}
               onRedirectToSubcontractor={handleRedirectToSubcontractor}
               onRedirectToHrLeaves={() => { setActiveTab('employees'); setHrSubTab('leaves'); }}
+              subcontractorAdvances={subcontractorAdvances}
             />
           )}
 

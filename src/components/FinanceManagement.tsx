@@ -2936,7 +2936,7 @@ export default function FinanceManagement({
               const getStatusBadge = (status: SubcontractorAdvanceProposal['status']) => {
                 switch (status) {
                   case 'pending_approval':
-                    return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold">Chờ Duyệt (Kế toán)</span>;
+                    return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold">Chờ Duyệt</span>;
                   case 'pending_payment':
                     return <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold">Chờ Lập Phiếu (KT)</span>;
                   case 'rejected':
@@ -2957,7 +2957,7 @@ export default function FinanceManagement({
                       <span className="text-xl font-black text-white font-mono block mt-1">{totalCount}</span>
                     </div>
                     <div className="p-4 bg-amber-950/20 border border-amber-900/40 rounded-xl relative overflow-hidden">
-                      <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider block font-sans">Chờ Duyệt (Kế toán)</span>
+                      <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider block font-sans">Chờ Duyệt</span>
                       <span className="text-xl font-black text-amber-400 font-mono block mt-1">{pendingApprovalCount}</span>
                     </div>
                     <div className="p-4 bg-orange-950/20 border border-orange-900/40 rounded-xl relative overflow-hidden">
@@ -6391,16 +6391,14 @@ export default function FinanceManagement({
                             const rawTotal = foundProj.baoGiaFile?.totalAmount || foundProj.contractValue || 0;
                             const discountPercent = foundProj.baoGiaFile?.discountPercent || 0;
                             const discountValue = rawTotal * (discountPercent / 100);
-                            const subtotalAfterDiscount = rawTotal - discountValue;
-                            const vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-                            const grandTotal = subtotalAfterDiscount + vatAmount;
+                            const grandTotal = rawTotal - discountValue;
                             const colVal = receipts.filter(r => r.projectId === selectedReceivableProjId).reduce((s, r) => s + r.amount, 0);
                             const remainingVal = grandTotal - colVal;
 
                             return (
                               <div className="p-3 bg-white border border-dashed border-amber-200 rounded space-y-1 my-3 font-sans text-[11px]">
                                 <div className="flex justify-between">
-                                  <span>Giá trị HĐ (đã trừ CK &amp; cộng VAT):</span>
+                                  <span>Giá trị HĐ (đã trừ CK):</span>
                                   <strong className="font-mono">{grandTotal.toLocaleString('vi-VN')} VND</strong>
                                 </div>
                                 <div className="flex justify-between text-emerald-700">
@@ -7180,7 +7178,7 @@ export default function FinanceManagement({
                     <span>{(() => {
                       switch (viewingProposalDetail.status) {
                         case 'pending_approval':
-                          return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Duyệt (Kế toán)</span>;
+                          return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Duyệt</span>;
                         case 'pending_payment':
                           return <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold font-sans">Chờ Lập Phiếu (KT)</span>;
                         case 'rejected':

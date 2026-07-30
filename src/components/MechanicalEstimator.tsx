@@ -330,7 +330,7 @@ export default function MechanicalEstimator({
     generalPercent: 12,  // Chi phí máy hàn hơi, máy cắt plasma CNC
     profitPercent: 15,   // Lợi nhuận gộp cơ tính
     wastagePercent: 7,   // Hao hụt mạt kim loại rỉ sét đầu thừa đuôi thẹo
-    vatPercent: 8,       // Mặc định VAT 8%
+    vatPercent: 0,       // VAT đã loại bỏ theo yêu cầu
   });
   
   const [showConfig, setShowConfig] = useState(false);

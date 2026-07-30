@@ -1183,7 +1183,7 @@ export default function TaskManagement({
                   {
                     payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length
                     +
-                    subcontractorAdvances.filter(a => a.status === 'pending_approval' && a.approverName === currentUser.name).length
+                    subcontractorAdvances.filter(a => a.status === 'pending_approval').length
                   } chờ duyệt
                 </span>
               </div>
@@ -1193,7 +1193,7 @@ export default function TaskManagement({
               {/* Combine payments and subcontractor advances */}
               {(() => {
                 const pendingPayments = payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name));
-                const pendingAdvances = subcontractorAdvances.filter(a => a.status === 'pending_approval' && a.approverName === currentUser.name);
+                const pendingAdvances = subcontractorAdvances.filter(a => a.status === 'pending_approval');
                 const allPending = [
                   ...pendingPayments.map(p => ({ type: 'payment' as const, data: p })),
                   ...pendingAdvances.map(a => ({ type: 'advance' as const, data: a }))
@@ -1285,7 +1285,10 @@ export default function TaskManagement({
                           </div>
                           <p>Thầu phụ: <strong className="text-slate-355">{a.subcontractorName}</strong></p>
                           <p>Người lập: <strong className="text-slate-355">{a.creatorName || 'Kế Toán'}</strong></p>
-                          <p className="text-sky-400 font-bold text-[9px] uppercase">Đề Xuất Thu Chi / Tạm Ứng</p>
+                          <p className="text-sky-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                            <span>Đề Xuất Thu Chi / Tạm Ứng</span>
+                            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
+                          </p>
 
                           <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
                             "Diễn giải: {a.reason}"

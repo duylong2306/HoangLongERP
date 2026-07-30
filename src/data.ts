@@ -140,7 +140,7 @@ export const DEFAULT_QUOTE_CONFIG: QuoteConfig = {
   generalPercent: 8,    // 8% chi phí chung quản lý vận hành xưởng
   profitPercent: 15,    // 15% biên lợi nhuận ròng dự kiến
   wastagePercent: 5,     // 5% hao hụt cốt gỗ, phụ gia
-  vatPercent: 8,        // 8% thuế VAT
+  vatPercent: 0,        // VAT đã loại bỏ theo yêu cầu
 };
 
 export const INITIAL_QUOTES: Quote[] = [];

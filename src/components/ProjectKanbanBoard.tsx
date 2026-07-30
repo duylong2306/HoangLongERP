@@ -656,9 +656,7 @@ export default function ProjectKanbanBoard({
         const rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
         const discountPercent = latestArchivedQuote.discountPercent || 0;
         const discountValue = rawTotal * (discountPercent / 100);
-        const subtotalAfterDiscount = rawTotal - discountValue;
-        const vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-        finalVal = subtotalAfterDiscount + vatAmount;
+        finalVal = rawTotal - discountValue;
       }
       setEditContractValue(finalVal);
       setEditCustomerId(selectedProject.customerId || '');
@@ -2899,15 +2897,12 @@ export default function ProjectKanbanBoard({
                         let rawTotal = 0;
                         let discountPercent = 0;
                         let discountValue = 0;
-                        let vatAmount = 0;
 
                         if (latestArchivedQuote) {
                           rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
                           discountPercent = latestArchivedQuote.discountPercent || 0;
                           discountValue = rawTotal * (discountPercent / 100);
-                          const subtotalAfterDiscount = rawTotal - discountValue;
-                          vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-                          grandTotal = subtotalAfterDiscount + vatAmount;
+                          grandTotal = rawTotal - discountValue;
                         } else {
                           grandTotal = selectedProject.contractValue || editContractValue || 0;
                         }
@@ -2942,10 +2937,6 @@ export default function ProjectKanbanBoard({
                                       <span className="font-mono">-{discountValue.toLocaleString('vi-VN')} đ</span>
                                     </div>
                                   )}
-                                  <div className="flex justify-between">
-                                    <span>Thuế VAT (8%):</span>
-                                    <span className="font-mono text-slate-700 font-semibold">+{vatAmount.toLocaleString('vi-VN')} đ</span>
-                                  </div>
                                 </div>
                               </>
                             ) : (

@@ -420,7 +420,7 @@ export default function ConstructionTakeoff({
     const localItems = sessionStorage.getItem('hl_construction_items') ? JSON.parse(sessionStorage.getItem('hl_construction_items')!) : [];
     const localNotes = sessionStorage.getItem('hl_construction_notes') || '';
     const localPaymentTerms = sessionStorage.getItem('hl_construction_payment_terms') || '';
-    const localConfig = sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 8 };
+    const localConfig = sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 0 };
 
     const quoteId = loadedQuote ? loadedQuote.id : `archived_quote_${Date.now()}`;
     const quoteCode = loadedQuote ? loadedQuote.code : `BGXD-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 100)}`;
@@ -983,7 +983,7 @@ export default function ConstructionTakeoff({
             tongDienTichXayDung: parseFloat(sessionStorage.getItem('hl_construction_chieu_dai') || '0') * parseFloat(sessionStorage.getItem('hl_construction_chieu_rong') || '0') * parseInt(sessionStorage.getItem('hl_construction_so_tang') || '0'),
             date: new Date().toISOString().split('T')[0],
             items: sessionStorage.getItem('hl_construction_items') ? JSON.parse(sessionStorage.getItem('hl_construction_items')!) : [],
-            config: sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 8 },
+            config: sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 0 },
             notes: sessionStorage.getItem('hl_construction_notes') || '',
             paymentTerms: sessionStorage.getItem('hl_construction_payment_terms') || '',
             customerName: customerName,

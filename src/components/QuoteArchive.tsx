@@ -338,7 +338,7 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
                 <th className="px-4 py-3.5">Khách Hàng</th>
                 <th className="px-4 py-3.5">Dự Án Liên Kết</th>
                 <th className="px-4 py-3.5">Ngày Lập</th>
-                <th className="px-4 py-3.5 text-right">Tổng Tiền (Gồm VAT)</th>
+                <th className="px-4 py-3.5 text-right">Tổng Tiền</th>
                 <th className="px-4 py-3.5 text-center">Hành Động</th>
               </tr>
             </thead>
@@ -347,9 +347,9 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
                 const badge = getSectorLabel(item.sector);
                 const linkedProj = projectsList.find(p => p.id === item.projectId);
                 
-                // Calculate total including VAT (or fall back to totalAmount)
+                // Tổng tiền (không tính VAT)
                 const originalTotal = item.totalAmount || 0;
-                const grandTotal = originalTotal * 1.08; // Include VAT just in case
+                const grandTotal = originalTotal;
 
                 return (
                   <tr 

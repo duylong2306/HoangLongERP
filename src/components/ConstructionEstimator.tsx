@@ -367,7 +367,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     generalPercent: 8,   // Chi phí quản lý & vận hành giàn giáo
     profitPercent: 12,   // Lợi nhuận thầu định mức
     wastagePercent: 10,  // Hao hụt hao phí vật tư gạch đá cát xi măng
-    vatPercent: 8,       // Mặc định VAT 8%
+    vatPercent: 0,       // VAT đã loại bỏ theo yêu cầu
   });
 
   const [showConfig, setShowConfig] = useState(false);
