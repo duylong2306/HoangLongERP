@@ -103,19 +103,19 @@ export default function DashboardOverview({
   // 1.2 Công việc cần làm (My Tasks to do)
   const myTasks = tasks.filter(t => {
     const isAssignee = t.assigneeId === currentUser.id;
-    const isInvolved = t.involvedEmployeeIds?.includes(currentUser.id);
+    const isMissionMember = t.missions?.some(m => m.mainAssigneeId === currentUser.id || (m.memberIds || []).includes(currentUser.id));
     const isNotCompleted = t.status !== 'completed';
-    return (isAssignee || isInvolved) && isNotCompleted;
+    return (isAssignee || isMissionMember) && isNotCompleted;
   });
 
   // 1.3 Công việc quá hạn (Overdue tasks)
   const myOverdueTasks = tasks.filter(t => {
     const isAssignee = t.assigneeId === currentUser.id;
-    const isInvolved = t.involvedEmployeeIds?.includes(currentUser.id);
+    const isMissionMember = t.missions?.some(m => m.mainAssigneeId === currentUser.id || (m.memberIds || []).includes(currentUser.id));
     const isCompleted = t.status === 'completed';
     const isOverdueStatus = t.status === 'overdue';
     const isPastDeadline = t.deadline < todayVal;
-    return (isAssignee || isInvolved) && !isCompleted && (isOverdueStatus || isPastDeadline);
+    return (isAssignee || isMissionMember) && !isCompleted && (isOverdueStatus || isPastDeadline);
   });
 
 

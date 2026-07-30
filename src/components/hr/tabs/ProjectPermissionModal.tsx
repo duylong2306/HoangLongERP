@@ -108,8 +108,6 @@ const actionGroups: {
     icon: <Users className="w-4 h-4" />,
     actions: [
       { action: 'assignMembers', label: 'Phân công người tham gia' },
-      { action: 'addInvolved', label: 'Thêm người liên quan' },
-      { action: 'removeInvolved', label: 'Xóa người liên quan' },
     ],
   },
   {
@@ -169,7 +167,6 @@ const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; c
   assigner: { label: 'Người Giao Việc', desc: 'task.assignerId — người khởi tạo & giao việc', color: 'text-sky-400 bg-sky-500/10' },
   assignee: { label: 'Phụ Trách CV', desc: 'task.assigneeId — phụ trách thực hiện công việc', color: 'text-amber-400 bg-amber-500/10' },
   missionAssignee: { label: 'Phụ Trách NV', desc: 'mission.mainAssigneeId — phụ trách nhiệm vụ con', color: 'text-teal-400 bg-teal-500/10' },
-  involved: { label: 'Người Liên Quan', desc: 'project/task.involvedEmployeeIds — nhân sự hỗ trợ', color: 'text-cyan-400 bg-cyan-500/10' },
   accountant: { label: 'Kế Toán', desc: 'Role Group role_accounting — nhân viên kế toán', color: 'text-indigo-400 bg-indigo-500/10' },
   teamMember: { label: 'Thành Viên', desc: 'mission.memberIds — thành viên nhóm / fallback', color: 'text-slate-400 bg-slate-500/10' },
 };

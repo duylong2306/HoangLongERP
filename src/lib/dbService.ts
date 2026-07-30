@@ -323,7 +323,8 @@ export const dbService = {
     async list(): Promise<Employee[]> {
       return querySupabase<Employee>('employees', INITIAL_EMPLOYEES);
     },
-    async save(employee: Employee): Promise<void> {
+    // Cho phép lưu bản ghi đầy đủ hoặc cập nhật một phần (upsert chỉ ghi đè các cột được truyền).
+    async save(employee: Partial<Employee> & { id: string }): Promise<void> {
       await saveSupabase('employees', employee);
     },
     async delete(id: string): Promise<void> {
@@ -1020,6 +1021,21 @@ export const dbService = {
         if (error) throw new Error(`Xóa archived_quotes thất bại: ${error.message}`);
       } catch (e) {
         console.error('Supabase archived_quotes delete error:', e);
+        throw e;
+      }
+    },
+    async deleteByProjectId(projectId: string): Promise<void> {
+      if (!projectId) return;
+      const supabase = getSupabase();
+      if (!supabase) {
+        console.warn('Supabase chưa cấu hình — không xóa được archived_quotes theo dự án');
+        return;
+      }
+      try {
+        const { error } = await supabase.from('archived_quotes').delete().eq('project_id', projectId);
+        if (error) throw new Error(`Xóa archived_quotes theo dự án thất bại: ${error.message}`);
+      } catch (e) {
+        console.error('Supabase archived_quotes deleteByProjectId error:', e);
         throw e;
       }
     },

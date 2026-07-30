@@ -18,7 +18,6 @@ import { dbService } from '../../lib/dbService';
 //   assigner        → "Người Giao Việc"     (task.assignerId)
 //   assignee        → "Phụ Trách Công Việc" (task.assigneeId)
 //   missionAssignee → "Phụ Trách Nhiệm Vụ"  (task.missions[].mainAssigneeId)
-//   involved        → "Người Liên Quan"      (project.involvedEmployeeIds / task.involvedEmployeeIds)
 //   accountant      → "Kế Toán"             (Role Group: role_accounting)
 //   teamMember      → "Thành Viên Nhóm"     (mission.memberIds / fallback)
 export type ProjectRoleScope =
@@ -27,7 +26,6 @@ export type ProjectRoleScope =
   | 'assigner'         // Người Giao Việc (task.assignerId)
   | 'assignee'         // Phụ Trách Công Việc (task.assigneeId)
   | 'missionAssignee'  // Phụ Trách Nhiệm Vụ (task.missions[].mainAssigneeId)
-  | 'involved'         // Người Liên Quan (project.involvedEmployeeIds / task.involvedEmployeeIds)
   | 'accountant'       // Kế Toán (role_accounting)
   | 'teamMember';      // Thành Viên Nhóm (mission.memberIds / fallback)
 
@@ -55,6 +53,7 @@ export type ProjectAction =
   | 'moveCard'               // Kéo thẻ qua / giữa các cột
   | 'assignCardMember'       // Gán thành viên cho thẻ dự án
   // CÔNG VIỆC (TASK)
+  | 'viewTask'               // Xem danh sách công việc
   | 'createTask'             // Tạo công việc mới
   | 'editTask'               // Sửa thông tin công việc
   | 'deleteTask'             // Xóa công việc
@@ -74,8 +73,6 @@ export type ProjectAction =
   | 'recordTravelAllowance'  // Ghi nhận công tác phí nhiệm vụ
   // PHÂN CÔNG & THAM GIA
   | 'assignMembers'          // Thêm/xóa người tham gia công việc
-  | 'addInvolved'            // Thêm người liên quan
-  | 'removeInvolved'         // Xóa người liên quan
   // TÀI CHÍNH
   | 'proposeAdvance'         // Đề xuất tạm ứng
   | 'settlePayment'          // Quyết toán thanh toán
@@ -139,7 +136,6 @@ export const ROLE_HIERARCHY: ProjectRoleScope[] = [
   'assigner',
   'assignee',
   'missionAssignee',
-  'involved',
   'teamMember',
   'accountant',
 ];
@@ -173,6 +169,7 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
     assignCardMember: ['director', 'pm', 'assigner', 'assignee'],
 
     // CÔNG VIỆC
+    viewTask:      ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'accountant', 'teamMember'],
     createTask:    ['director', 'pm', 'assigner', 'assignee', 'teamMember'],
     editTask:      ['director', 'pm', 'assigner'],
     deleteTask:    ['director', 'pm'],
@@ -194,8 +191,6 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
 
     // PHÂN CÔNG
     assignMembers: ['director', 'pm', 'assigner', 'assignee'],
-    addInvolved:    ['director', 'pm', 'assigner', 'assignee'],
-    removeInvolved: ['director', 'pm', 'assigner'],
 
     // TÀI CHÍNH
     proposeAdvance:   ['director', 'pm', 'assignee', 'teamMember'],
@@ -209,7 +204,7 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
     // HỒ SƠ LIÊN THÔNG
     openToolApproval:   ['director', 'pm', 'assigner', 'assignee'],
     openToolCost:       ['director', 'pm', 'assigner', 'accountant'],
-    openToolMaterial:   ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'involved'],
+    openToolMaterial:   ['director', 'pm', 'assigner', 'assignee', 'missionAssignee'],
     openToolQuotation:  ['director', 'pm', 'assigner'],
     openToolContract:   ['director', 'pm', 'assigner', 'accountant'],
     openToolAcceptance: ['director', 'pm', 'assigner'],
@@ -217,12 +212,12 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
     manageDocs:         ['director', 'pm', 'assigner', 'accountant'],
 
     // BÌNH LUẬN & CHAT
-    addComment: ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'involved', 'teamMember'],
+    addComment: ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'teamMember'],
     deleteComment: ['director', 'pm', 'assigner'],
-    taskChat:   ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'involved', 'teamMember'],
+    taskChat:   ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'teamMember'],
 
     // TỆP ĐÍNH KÈM
-    uploadAttachment: ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'involved', 'teamMember'],
+    uploadAttachment: ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'teamMember'],
     deleteAttachment: ['director', 'pm', 'assigner'],
   },
   visibility: {
@@ -231,7 +226,6 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
     assigner: 'all',
     assignee: 'related',
     missionAssignee: 'related',
-    involved: 'related',
     teamMember: 'related',
     accountant: 'readonly',
   },
@@ -261,9 +255,6 @@ export const getProjectRoleScopes = (
   if (project) {
     // 3. Trưởng Dự Án (PM)
     if (project.pmId === currentUser.id) scopes.push('pm');
-
-    // 4. Người Liên Quan dự án
-    if (project.involvedEmployeeIds?.includes(currentUser.id)) scopes.push('involved');
   }
 
   if (task) {
@@ -275,9 +266,6 @@ export const getProjectRoleScopes = (
 
     // 7. Phụ Trách Nhiệm Vụ
     if (task.missions?.some(m => m.mainAssigneeId === currentUser.id)) scopes.push('missionAssignee');
-
-    // 8. Người Liên Quan công việc
-    if (task.involvedEmployeeIds?.includes(currentUser.id)) scopes.push('involved');
   }
 
   // Nếu không rơi vào vai trò đặc thù nào → coi là thành viên nhóm

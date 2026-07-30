@@ -29,7 +29,6 @@ interface MockProject {
   notes?: string;
   image?: string;
   documents?: any[];
-  involvedEmployeeIds?: string[];
   kanbanColumnId?: string;
   styleItalic?: boolean;
   styleBold?: boolean;

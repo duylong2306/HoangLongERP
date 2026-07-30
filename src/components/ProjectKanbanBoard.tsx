@@ -255,7 +255,7 @@ export default function ProjectKanbanBoard({
   const [showAutoWorkflowModal, setShowAutoWorkflowModal] = useState(false);
   const [activeWorkflowColId, setActiveWorkflowColId] = useState<string>('col_design');
   const [selectedActionType, setSelectedActionType] = useState<
-    'assignee' | 'status' | 'approval' | 'subtask' | 'involved' | 'textStyle'
+    'assignee' | 'status' | 'approval' | 'subtask' | 'textStyle'
   >('assignee');
   const [activeSubtaskRuleIndex, setActiveSubtaskRuleIndex] = useState<number | null>(null);
 
@@ -983,12 +983,6 @@ export default function ProjectKanbanBoard({
               const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
               
               const assigneeId = subtaskAuto.assignId || rule.assignId || proj.pmId || 'emp_3';
-              const involvedEmployeeIds = Array.from(new Set([
-                ...(proj.involvedEmployeeIds || []),
-                ...(rule.involvedId ? [rule.involvedId] : []),
-                ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-                ...(subtaskAuto.involvedEmployeeIds || [])
-              ]));
 
               // Send approval request
               let approvals = undefined;
@@ -1014,7 +1008,6 @@ export default function ProjectKanbanBoard({
                 description: `Công việc con được tạo tự động bởi quy trình khi di chuyển vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
                 assignerId: proj.pmId || 'emp_3',
                 assigneeId: assigneeId,
-                involvedEmployeeIds: involvedEmployeeIds,
                 department: 'Thi công',
                 deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                 priority: 'medium',
@@ -1075,18 +1068,6 @@ export default function ProjectKanbanBoard({
             }
           } else if (rule.checklistText) {
             ruleLogs.push(`Thêm mục checklist yêu cầu: ${rule.checklistText}`);
-          }
-
-          // 9. Thêm người liên quan (Cộng sự bám sát)
-          const ruleInvolvedIds = rule.involvedEmployeeIds || (rule.involvedId ? [rule.involvedId] : []);
-          if (ruleInvolvedIds.length > 0) {
-            const currentInvolved = proj.involvedEmployeeIds || [];
-            const addedIds = ruleInvolvedIds.filter(id => !currentInvolved.includes(id));
-            if (addedIds.length > 0) {
-              updates.involvedEmployeeIds = [...currentInvolved, ...addedIds];
-              const names = addedIds.filter(Boolean).map(id => employees.find(e => e.id === id)?.name || 'Người hỗ trợ').join(', ');
-              ruleLogs.push(`Thêm cộng sự hỗ trợ liên quan: ${names}`);
-            }
           }
 
           // Fallback log
@@ -1342,7 +1323,6 @@ export default function ProjectKanbanBoard({
   });
   const [subTaskPriority, setSubTaskPriority] = useState<TaskPriority>('medium');
   const [showSubtaskForm, setShowSubtaskForm] = useState(false);
-  const [subTaskInvolved, setSubTaskInvolved] = useState<string[]>([]);
   const [subTaskIsApprovalEnabled, setSubTaskIsApprovalEnabled] = useState(false);
   const [subTaskIsCostEnabled, setSubTaskIsCostEnabled] = useState(false);
   const [subTaskIsMaterialEnabled, setSubTaskIsMaterialEnabled] = useState(false);
@@ -1385,7 +1365,6 @@ export default function ProjectKanbanBoard({
   const [editSubSubcontractorSettlerId, setEditSubSubcontractorSettlerId] = useState('');
   const [editSubSubcontractorId, setEditSubSubcontractorId] = useState('');
   const [editSubSubcontractorName, setEditSubSubcontractorName] = useState('');
-  const [editSubInvolved, setEditSubInvolved] = useState<string[]>([]);
   // Đầu mục đo kiểm / Checklist kỹ thuật (sửa công việc con)
   const [editSubChecklistTexts, setEditSubChecklistTexts] = useState<string[]>([]);
   
@@ -1409,7 +1388,6 @@ export default function ProjectKanbanBoard({
     setEditSubSubcontractorEnabled(!!task.isSubcontractorEnabled);
     setEditSubSubcontractorId(task.subcontractorId || '');
     setEditSubSubcontractorName(task.subcontractorName || '');
-    setEditSubInvolved(task.involvedEmployeeIds || []);
     setEditSubDefaultApproverId(task.defaultApproverId || '');
     setEditSubCostApproverId(task.costApproverId || '');
     setEditSubCostSettlerId(task.costSettlerId || '');
@@ -1474,15 +1452,12 @@ export default function ProjectKanbanBoard({
       }
     }
 
-    const finalInvolved = editSubInvolved.filter(id => id !== editSubAssigneeId);
-    
     const updates: Partial<Task> = {
       name: editSubName,
       deadline: editSubDeadline,
       priority: 'medium', // Default priority since field was removed
       assignerId: editSubAssignerId,
       assigneeId: editSubAssigneeId,
-      involvedEmployeeIds: finalInvolved,
       isApprovalEnabled: editSubIsApprovalEnabled,
       isApprovalRequired: editSubIsApprovalEnabled,
       isCostEnabled: editSubIsCostEnabled,
@@ -1558,9 +1533,6 @@ export default function ProjectKanbanBoard({
     const codeNum = tasks.length + 1;
     const paddingCode = codeNum < 10 ? `00${codeNum}` : codeNum < 100 ? `0${codeNum}` : `${codeNum}`;
     
-    // Filter out assignee if they are somehow added in the involved list
-    const finalInvolved = subTaskInvolved.filter(id => id !== subTaskAssigneeId);
-
     const childTask: Task = {
       id: `task_child_${Date.now()}`,
       code: `CV-${paddingCode}`,
@@ -1579,7 +1551,6 @@ export default function ProjectKanbanBoard({
       completionRate: 0,
       
       // Configuration for automations
-      involvedEmployeeIds: finalInvolved,
       isApprovalEnabled: subTaskIsApprovalEnabled,
       isApprovalRequired: subTaskIsApprovalEnabled,
       isCostEnabled: subTaskIsCostEnabled,
@@ -1640,7 +1611,6 @@ export default function ProjectKanbanBoard({
     setSubTaskName('');
     setSubTaskAssignerId(currentUser?.id || '');
     setSubTaskAssigneeId('emp_4');
-    setSubTaskInvolved([]);
     setSubTaskIsApprovalEnabled(false);
     setSubTaskIsCostEnabled(false);
     setSubTaskIsMaterialEnabled(false);
@@ -1943,12 +1913,6 @@ export default function ProjectKanbanBoard({
                     const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
                     
                     const assigneeId = subtaskAuto.assignId || rule.assignId || customProject.pmId || 'emp_3';
-                    const involvedEmployeeIds = Array.from(new Set([
-                      ...(customProject.involvedEmployeeIds || []),
-                      ...(rule.involvedId ? [rule.involvedId] : []),
-                      ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-                      ...(subtaskAuto.involvedEmployeeIds || [])
-                    ]));
 
                     // Send approval request
                     let approvals = undefined;
@@ -1974,7 +1938,6 @@ export default function ProjectKanbanBoard({
                       description: `Công việc con được tạo tự động bởi quy trình khi khởi tạo vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
                       assignerId: customProject.pmId || 'emp_3',
                       assigneeId: assigneeId,
-                      involvedEmployeeIds: involvedEmployeeIds,
                       department: 'Thi công',
                       deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                       priority: 'medium',
@@ -2030,17 +1993,6 @@ export default function ProjectKanbanBoard({
                   ruleLogs.push(`Thêm mục checklist yêu cầu: ${rule.checklistText}`);
                 }
 
-                // rule 9: Add involved person (Cộng sự bám sát)
-                const ruleInvolvedIds = rule.involvedEmployeeIds || (rule.involvedId ? [rule.involvedId] : []);
-                if (ruleInvolvedIds.length > 0) {
-                  const currentInvolved = customProject.involvedEmployeeIds || [];
-                  const addedIds = ruleInvolvedIds.filter(id => !currentInvolved.includes(id));
-                  if (addedIds.length > 0) {
-                    customProject.involvedEmployeeIds = [...currentInvolved, ...addedIds];
-                    const names = addedIds.filter(Boolean).map(id => employees.find(e => e.id === id)?.name || 'Người hỗ trợ').join(', ');
-                    ruleLogs.push(`Thêm cộng sự hỗ trợ liên quan: ${names}`);
-                  }
-                }
               }
 
               const ruleLogged = ruleLogs.join('. ') || '';
@@ -2468,8 +2420,7 @@ export default function ProjectKanbanBoard({
               col.automation?.statusUpdate,
               (col.automation?.textStyleStyleItalic || col.automation?.textStyleStyleBold || col.automation?.textStyleStyleStrike || col.automation?.textStyleStyleColor),
               col.automation?.approvalRole && col.automation.approvalRole !== 'none',
-              col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t)),
-              col.automation?.involvedId || (col.automation?.involvedEmployeeIds && col.automation.involvedEmployeeIds.length > 0)
+              col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t))
             ].some(Boolean);
 
             return (
@@ -2692,7 +2643,6 @@ export default function ProjectKanbanBoard({
                           progress: selectedProject.progress,
                           notes: selectedProject.notes,
                           documents: selectedProject.documents || [],
-                          involvedEmployeeIds: selectedProject.involvedEmployeeIds || [],
                         },
                         tasks: projTasks.map(t => ({
                           id: t.id,
@@ -3216,81 +3166,6 @@ export default function ProjectKanbanBoard({
                               </>
                             );
                           })()}
-                        </div>
-
-                        {/* 2. NGƯỜI LIÊN QUAN / HỖ TRỢ */}
-                        <div className="bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex flex-col justify-between hover:border-slate-800 transition-colors">
-                          <div>
-                            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">NGƯỜI LIÊN QUAN & HỖ TRỢ</span>
-                            
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {/* List support member avatars */}
-                              {(!selectedProject.involvedEmployeeIds || selectedProject.involvedEmployeeIds.length === 0) ? (
-                                <span className="text-slate-600 text-[10px] italic py-1 block">Chưa có người hỗ trợ...</span>
-                              ) : (
-                                selectedProject.involvedEmployeeIds.map(empId => {
-                                  const emp = employees.find(e => e.id === empId);
-                                  if (!emp) return null;
-                                  
-                                  const parts = emp.name.split(' ');
-                                  const initials = parts.length >= 2
-                                    ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                    : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                                    
-                                  return (
-                                    <div key={empId} className="relative group/member shrink-0">
-                                      {/* Interactive avatar that deletes on click */}
-                                      <div 
-                                        className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-white text-[10px] shadow border border-sky-450/10 cursor-pointer transition-transform hover:scale-105"
-                                        title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                        onClick={() => {
-                                          const current = selectedProject.involvedEmployeeIds || [];
-                                          updateProjectWithRule(selectedProject.id, { involvedEmployeeIds: current.filter(id => id !== empId) });
-                                        }}
-                                      >
-                                        {initials}
-                                        {/* Action indicator over face */}
-                                        <div className="absolute inset-0 bg-rose-950/80 rounded-full flex items-center justify-center text-rose-400 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                          ✕
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })
-                              )}
-
-                              {/* Plus visual as an interactive creator */}
-                              <div className="relative shrink-0">
-                                <div className="w-8 h-8 rounded-full border border-dashed border-slate-700 hover:border-emerald-500/70 bg-slate-950/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                                  <Plus className="w-3.5 h-3.5" />
-                                </div>
-                                <select
-                                  value=""
-                                  onChange={(e) => {
-                                    const empId = e.target.value;
-                                    if (empId) {
-                                      const current = selectedProject.involvedEmployeeIds || [];
-                                      if (!current.includes(empId)) {
-                                        updateProjectWithRule(selectedProject.id, { involvedEmployeeIds: [...current, empId] });
-                                      }
-                                    }
-                                  }}
-                                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                                  title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                                >
-                                  <option value="">-- Thêm người --</option>
-                                  {employees
-                                    .filter(emp => emp.id !== selectedProject.pmId && !(selectedProject.involvedEmployeeIds || []).includes(emp.id))
-                                    .map(emp => (
-                                      <option key={emp.id} value={emp.id}>
-                                        {emp.name} ({emp.department})
-                                      </option>
-                                    ))
-                                  }
-                                </select>
-                              </div>
-                            </div>
-                          </div>
                         </div>
 
                       </div>
@@ -4435,7 +4310,6 @@ export default function ProjectKanbanBoard({
             : selectedActionType === 'status' ? !!activeCol.automation.statusUpdate
             : selectedActionType === 'approval' ? (!!activeCol.automation.approvalRole && activeCol.automation.approvalRole !== 'none')
             : selectedActionType === 'subtask' ? (!!activeCol.automation.subtaskTitle || (activeCol.automation.subtaskTitles && activeCol.automation.subtaskTitles.some(t => !!t)))
-            : selectedActionType === 'involved' ? (!!activeCol.automation.involvedId || (activeCol.automation.involvedEmployeeIds && activeCol.automation.involvedEmployeeIds.length > 0))
             : selectedActionType === 'textStyle' ? (activeCol.automation.textStyleStyleItalic !== undefined || activeCol.automation.textStyleStyleBold !== undefined || activeCol.automation.textStyleStyleStrike !== undefined || activeCol.automation.textStyleStyleColor !== undefined)
             : false)
           : false;
@@ -4486,15 +4360,6 @@ export default function ProjectKanbanBoard({
             iconColor: 'text-pink-400',
             isActive: (auto: any) => !!auto?.subtaskTitle || (auto?.subtaskTitles && auto.subtaskTitles.some((t: any) => !!t)),
           },
-          involved: {
-            title: 'Thêm người liên quan',
-            description: 'Chỉ định cộng sự, thiết kế giám bám sát.',
-            helpText: 'Tự động liên kết thêm thành viên hỗ trợ chuyên biệt vào danh sách đồng tham gia dự án.',
-            icon: Users,
-            iconBg: 'bg-green-500/10 border border-green-500/30',
-            iconColor: 'text-green-400',
-            isActive: (auto: any) => !!auto?.involvedId || (auto?.involvedEmployeeIds && auto.involvedEmployeeIds.length > 0),
-          },
         };
 
         const handleToggleAction = () => {
@@ -4513,10 +4378,6 @@ export default function ProjectKanbanBoard({
               updates.subtaskTitle = undefined;
               updates.subtaskTitles = undefined;
             }
-            else if (selectedActionType === 'involved') {
-              updates.involvedId = undefined;
-              updates.involvedEmployeeIds = [];
-            }
             else if (selectedActionType === 'textStyle') {
               updates.textStyleStyleItalic = undefined;
               updates.textStyleStyleBold = undefined;
@@ -4531,11 +4392,6 @@ export default function ProjectKanbanBoard({
             else if (selectedActionType === 'subtask') {
               updates.subtaskTitle = 'Khảo sát hiện trạng công xưởng thực tế';
               updates.subtaskTitles = ['Khảo sát hiện trạng công xưởng thực tế'];
-            }
-            else if (selectedActionType === 'involved') {
-              const defaultEmpId = employees[1]?.id || 'emp_4';
-              updates.involvedId = defaultEmpId;
-              updates.involvedEmployeeIds = [defaultEmpId];
             }
             else if (selectedActionType === 'textStyle') {
               updates.textStyleStyleBold = true;
@@ -4759,9 +4615,7 @@ export default function ProjectKanbanBoard({
 
                           {/* Preview Badges for Configured Automation Details */}
                           {(() => {
-                            const selectedInvolvedIds = subtaskAuto.involvedEmployeeIds || (subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []);
                             const hasAssignee = !!subtaskAuto.assignId;
-                            const hasInvolved = selectedInvolvedIds.length > 0;
                             const hasApproval = subtaskAuto.isApprovalEnabled === true;
                             const hasCost = subtaskAuto.isCostEnabled === true;
                             const hasMaterial = subtaskAuto.isMaterialEnabled === true;
@@ -4769,18 +4623,13 @@ export default function ProjectKanbanBoard({
                             const hasSubcontractor = subtaskAuto.isSubcontractorEnabled === true;
                             const hasCheck = subtaskAuto.checklistTexts && subtaskAuto.checklistTexts.length > 0;
 
-                            if (!hasAssignee && !hasInvolved && !hasApproval && !hasCost && !hasMaterial && !hasDocs && !hasSubcontractor && !hasCheck) return null;
+                            if (!hasAssignee && !hasApproval && !hasCost && !hasMaterial && !hasDocs && !hasSubcontractor && !hasCheck) return null;
 
                             return (
                               <div className="flex flex-wrap gap-1.5 items-center px-7 text-[9.5px] text-slate-400 select-none pb-1">
                                 {hasAssignee && (
                                   <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     👤 Thợ: {employees.find(e => e.id === subtaskAuto.assignId)?.name || 'Mặc định'}
-                                  </span>
-                                )}
-                                {hasInvolved && (
-                                  <span className="bg-sky-950/40 text-sky-400 border border-sky-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-0.5">
-                                    👥 +{selectedInvolvedIds.length} Phụ Trách Nhiệm Vụ hỗ trợ
                                   </span>
                                 )}
                                 {hasApproval && (
@@ -4916,88 +4765,6 @@ export default function ProjectKanbanBoard({
                                 })()}
                               </div>
 
-                              {/* 2. Người liên quan & Hỗ trợ */}
-                              <div className="bg-slate-900 border border-slate-805/60 p-3 rounded-xl flex flex-col justify-between hover:border-slate-700 transition-colors text-left min-h-[72px]">
-                                <div>
-                                  <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">NGƯỜI LIÊN QUAN & HỖ TRỢ</span>
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    {(() => {
-                                      const currentInvolved = subtaskAuto.involvedEmployeeIds || (subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []);
-                                      return (
-                                        <>
-                                          {currentInvolved.length === 0 ? (
-                                            <span className="text-slate-650 text-[10px] italic py-1 block">Chưa gán người hỗ trợ...</span>
-                                          ) : (
-                                            currentInvolved.map((empId: string) => {
-                                              const emp = employees.find(e => e.id === empId);
-                                              if (!emp) return null;
-                                              const parts = emp.name.split(' ');
-                                              const initials = parts.length >= 2
-                                                ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                                : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                                              return (
-                                                <div key={empId} className="relative group/member shrink-0">
-                                                  <div 
-                                                    className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-indigo-650 flex items-center justify-center font-bold text-white text-[10px] shadow border border-sky-450/10 cursor-pointer transition-transform hover:scale-105"
-                                                    title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                                    onClick={() => {
-                                                      const nextInvolved = currentInvolved.filter((id: string) => id !== empId);
-                                                      updateSubtaskAutomation(index, {
-                                                        involvedEmployeeIds: nextInvolved,
-                                                        involvedId: nextInvolved[0] || undefined
-                                                      });
-                                                    }}
-                                                  >
-                                                    {initials}
-                                                    <div className="absolute inset-0 bg-rose-950/80 rounded-full flex items-center justify-center text-rose-450 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                                      ✕
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                              );
-                                            })
-                                          )}
-
-                                          {/* Plus visual as an interactive creator */}
-                                          <div className="relative shrink-0">
-                                            <div className="w-8 h-8 rounded-full border border-dashed border-slate-705 hover:border-emerald-500/70 bg-slate-950/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                                              <Plus className="w-3.5 h-3.5" />
-                                            </div>
-                                            <select
-                                              value=""
-                                              onChange={(e) => {
-                                                const empId = e.target.value;
-                                                if (empId) {
-                                                  const nextInvolved = [...currentInvolved];
-                                                  if (!nextInvolved.includes(empId)) {
-                                                    const updated = [...nextInvolved, empId];
-                                                    updateSubtaskAutomation(index, {
-                                                      involvedEmployeeIds: updated,
-                                                      involvedId: updated[0] || undefined
-                                                    });
-                                                  }
-                                                }
-                                              }}
-                                              className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                                              title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                                            >
-                                              <option value="">-- Thêm người hỗ trợ --</option>
-                                              {employees
-                                                .filter(emp => emp.id !== subtaskAuto.assignId && !currentInvolved.includes(emp.id))
-                                                .map(emp => (
-                                                  <option key={emp.id} value={emp.id}>
-                                                    {emp.name} ({emp.department})
-                                                  </option>
-                                                ))
-                                              }
-                                            </select>
-                                          </div>
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                              </div>
                             </div>
 
                             {/* Gửi yêu cầu phê duyệt */}
@@ -5414,94 +5181,6 @@ export default function ProjectKanbanBoard({
 
 
 
-            case 'involved': {
-              const currentInvolved = auto?.involvedEmployeeIds || (auto?.involvedId ? [auto.involvedId] : []);
-              return (
-                <div className="space-y-4 text-left">
-                  <span className="block text-slate-300 font-bold text-xs uppercase tracking-wider">Cộng sự bám sát thi công phụ</span>
-                  
-                  <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl flex flex-col justify-between hover:border-slate-700 transition-colors text-left min-h-[72px]">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">DANH SÁCH CỘNG SỰ BÁM SÁT ({currentInvolved.length})</span>
-                      
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {currentInvolved.length === 0 ? (
-                          <span className="text-slate-600 text-[10px] italic py-1 block">Chưa gán người hỗ trợ...</span>
-                        ) : (
-                          currentInvolved.map((empId: string) => {
-                            const emp = employees.find(e => e.id === empId);
-                            if (!emp) return null;
-                            
-                            const parts = emp.name.split(' ');
-                            const initials = parts.length >= 2
-                              ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                              : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                              
-                            return (
-                              <div key={empId} className="relative group/member shrink-0">
-                                {/* Interactive avatar that deletes on click */}
-                                <div 
-                                  className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-[10px] shadow border border-white/10 cursor-pointer transition-transform hover:scale-105"
-                                  title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                  onClick={() => {
-                                    const nextInvolved = currentInvolved.filter((id: string) => id !== empId);
-                                    updateColAutomation(activeWorkflowColId, {
-                                      involvedEmployeeIds: nextInvolved,
-                                      involvedId: nextInvolved[0] || undefined
-                                    });
-                                  }}
-                                >
-                                  {initials}
-                                  {/* Action indicator over face */}
-                                  <div className="absolute inset-0 bg-rose-950/80 rounded-full flex items-center justify-center text-rose-450 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                    ✕
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-
-                        {/* Plus visual as an interactive creator */}
-                        <div className="relative shrink-0">
-                          <div className="w-8 h-8 rounded-full border border-dashed border-slate-705 hover:border-emerald-500/70 bg-slate-900/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                            <Plus className="w-3.5 h-3.5" />
-                          </div>
-                          <select
-                            value=""
-                            onChange={(e) => {
-                              const empId = e.target.value;
-                              if (empId) {
-                                const nextInvolved = [...currentInvolved];
-                                if (!nextInvolved.includes(empId)) {
-                                  const updated = [...nextInvolved, empId];
-                                  updateColAutomation(activeWorkflowColId, {
-                                    involvedEmployeeIds: updated,
-                                    involvedId: updated[0] || undefined
-                                  });
-                                }
-                              }
-                            }}
-                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                            title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                          >
-                            <option value="">-- Thêm người hỗ trợ --</option>
-                            {employees
-                              .filter(emp => emp.id !== auto?.assignId && !currentInvolved.includes(emp.id))
-                              .map(emp => (
-                                <option key={emp.id} value={emp.id}>
-                                  {emp.name} ({emp.department})
-                                </option>
-                              ))
-                            }
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
 
             case 'textStyle':
               return (
@@ -5612,8 +5291,7 @@ export default function ProjectKanbanBoard({
                     (col.automation?.textStyleStyleItalic || col.automation?.textStyleStyleBold || col.automation?.textStyleStyleStrike || col.automation?.textStyleStyleColor),
                     col.automation?.approvalRole && col.automation.approvalRole !== 'none',
                     col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t)),
-                    col.automation?.checklistText || (col.automation?.checklistTexts && col.automation.checklistTexts.some(t => !!t)),
-                    col.automation?.involvedId || (col.automation?.involvedEmployeeIds && col.automation.involvedEmployeeIds.length > 0)
+                    col.automation?.checklistText || (col.automation?.checklistTexts && col.automation.checklistTexts.some(t => !!t))
                   ].filter(Boolean).length;
 
                   return (

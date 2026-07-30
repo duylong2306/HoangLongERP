@@ -32,7 +32,7 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
   openEditColumn,
   setConfirmDialog
 }) => {
-  const [selectedActionType, setSelectedActionType] = useState<'assignee' | 'status' | 'approval' | 'subtask' | 'involved' | 'textStyle'>('assignee');
+  const [selectedActionType, setSelectedActionType] = useState<'assignee' | 'status' | 'approval' | 'subtask' | 'textStyle'>('assignee');
   const [activeSubtaskRuleIndex, setActiveSubtaskRuleIndex] = useState<number | null>(null);
   const { addToast } = useNotification();
 
@@ -44,7 +44,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
       : selectedActionType === 'status' ? !!activeCol.automation.statusUpdate
       : selectedActionType === 'approval' ? (!!activeCol.automation.approvalRole && activeCol.automation.approvalRole !== 'none')
       : selectedActionType === 'subtask' ? (!!activeCol.automation.subtaskTitle || (activeCol.automation.subtaskTitles && activeCol.automation.subtaskTitles.some(t => !!t)))
-      : selectedActionType === 'involved' ? (!!activeCol.automation.involvedId || (activeCol.automation.involvedEmployeeIds && activeCol.automation.involvedEmployeeIds.length > 0))
       : selectedActionType === 'textStyle' ? (activeCol.automation.textStyleStyleItalic !== undefined || activeCol.automation.textStyleStyleBold !== undefined || activeCol.automation.textStyleStyleStrike !== undefined || activeCol.automation.textStyleStyleColor !== undefined)
       : false)
     : false;
@@ -95,15 +94,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
       iconColor: 'text-pink-400',
       isActive: (auto: any) => !!auto?.subtaskTitle || (auto?.subtaskTitles && auto.subtaskTitles.some((t: any) => !!t)),
     },
-    involved: {
-      title: 'Thêm người liên quan',
-      description: 'Chỉ định cộng sự, thiết kế giám bám sát.',
-      helpText: 'Tự động liên kết thêm thành viên hỗ trợ chuyên biệt vào danh sách đồng tham gia dự án.',
-      icon: Users,
-      iconBg: 'bg-green-500/10 border border-green-500/30',
-      iconColor: 'text-green-400',
-      isActive: (auto: any) => !!auto?.involvedId || (auto?.involvedEmployeeIds && auto.involvedEmployeeIds.length > 0),
-    },
   };
 
   const updateColAutomation = (colId: string, updates: Partial<NonNullable<KanbanColumn['automation']>>) => {
@@ -143,10 +133,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
         updates.subtaskTitle = undefined;
         updates.subtaskTitles = undefined;
       }
-      else if (selectedActionType === 'involved') {
-        updates.involvedId = undefined;
-        updates.involvedEmployeeIds = [];
-      }
       else if (selectedActionType === 'textStyle') {
         updates.textStyleStyleItalic = undefined;
         updates.textStyleStyleBold = undefined;
@@ -161,11 +147,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
       else if (selectedActionType === 'subtask') {
         updates.subtaskTitle = 'Khảo sát hiện trạng công xưởng thực tế';
         updates.subtaskTitles = ['Khảo sát hiện trạng công xưởng thực tế'];
-      }
-      else if (selectedActionType === 'involved') {
-        const defaultEmpId = employees[1]?.id || 'emp_4';
-        updates.involvedId = defaultEmpId;
-        updates.involvedEmployeeIds = [defaultEmpId];
       }
       else if (selectedActionType === 'textStyle') {
         updates.textStyleStyleBold = true;
@@ -389,9 +370,7 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
 
                     {/* Preview Badges for Configured Automation Details */}
                     {(() => {
-                      const selectedInvolvedIds = subtaskAuto.involvedEmployeeIds || (subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []);
                       const hasAssignee = !!subtaskAuto.assignId;
-                      const hasInvolved = selectedInvolvedIds.length > 0;
                       const hasApproval = subtaskAuto.isApprovalEnabled === true;
                       const hasCost = subtaskAuto.isCostEnabled === true;
                       const hasMaterial = subtaskAuto.isMaterialEnabled === true;
@@ -399,18 +378,13 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                       const hasSubcontractor = subtaskAuto.isSubcontractorEnabled === true;
                       const hasCheck = subtaskAuto.checklistTexts && subtaskAuto.checklistTexts.length > 0;
 
-                      if (!hasAssignee && !hasInvolved && !hasApproval && !hasCost && !hasMaterial && !hasDocs && !hasSubcontractor && !hasCheck) return null;
+                      if (!hasAssignee && !hasApproval && !hasCost && !hasMaterial && !hasDocs && !hasSubcontractor && !hasCheck) return null;
 
                       return (
                         <div className="flex flex-wrap gap-1.5 items-center px-7 text-[9.5px] text-slate-400 select-none pb-1">
                           {hasAssignee && (
                             <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                               👤 Thợ: {employees.find(e => e.id === subtaskAuto.assignId)?.name || 'Mặc định'}
-                            </span>
-                          )}
-                          {hasInvolved && (
-                            <span className="bg-sky-950/40 text-sky-400 border border-sky-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-0.5">
-                              👥 +{selectedInvolvedIds.length} Phụ Trách Nhiệm Vụ hỗ trợ
                             </span>
                           )}
                           {hasApproval && (
@@ -543,87 +517,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                           })()}
                         </div>
 
-                        {/* 2. Người liên quan & Hỗ trợ */}
-                        <div className="bg-slate-900 border border-slate-805/60 p-3 rounded-xl flex flex-col justify-between hover:border-slate-700 transition-colors text-left min-h-[72px]">
-                          <div>
-                            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">NGƯỜI LIÊN QUAN & HỖ TRỢ</span>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {(() => {
-                                const currentInvolved = subtaskAuto.involvedEmployeeIds || (subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []);
-                                return (
-                                  <>
-                                    {currentInvolved.length === 0 ? (
-                                      <span className="text-slate-650 text-[10px] italic py-1 block">Chưa gán người hỗ trợ...</span>
-                                    ) : (
-                                      currentInvolved.map((empId: string) => {
-                                        const emp = employees.find(e => e.id === empId);
-                                        if (!emp) return null;
-                                        const parts = emp.name.split(' ');
-                                        const initials = parts.length >= 2
-                                          ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                          : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                                        return (
-                                          <div key={empId} className="relative group/member shrink-0">
-                                            <div 
-                                              className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-indigo-650 flex items-center justify-center font-bold text-white text-[10px] shadow border border-sky-450/10 cursor-pointer transition-transform hover:scale-105"
-                                              title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                              onClick={() => {
-                                                const nextInvolved = currentInvolved.filter((id: string) => id !== empId);
-                                                updateSubtaskAutomation(index, {
-                                                  involvedEmployeeIds: nextInvolved,
-                                                  involvedId: nextInvolved[0] || undefined
-                                                });
-                                              }}
-                                            >
-                                              {initials}
-                                              <div className="absolute inset-0 bg-rose-955/80 rounded-full flex items-center justify-center text-rose-455 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                                ✕
-                                              </div>
-                                            </div>
-                                          </div>
-                                        );
-                                      })
-                                    )}
-
-                                    <div className="relative shrink-0">
-                                      <div className="w-8 h-8 rounded-full border border-dashed border-slate-705 hover:border-emerald-500/70 bg-slate-955/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                                        <Plus className="w-3.5 h-3.5" />
-                                      </div>
-                                      <select
-                                        value=""
-                                        onChange={(e) => {
-                                          const empId = e.target.value;
-                                          if (empId) {
-                                            const nextInvolved = [...currentInvolved];
-                                            if (!nextInvolved.includes(empId)) {
-                                              const updated = [...nextInvolved, empId];
-                                              updateSubtaskAutomation(index, {
-                                                involvedEmployeeIds: updated,
-                                                involvedId: updated[0] || undefined
-                                              });
-                                            }
-                                          }
-                                        }}
-                                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                                        title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                                      >
-                                        <option value="">-- Thêm người hỗ trợ --</option>
-                                        {employees
-                                          .filter(emp => emp.id !== subtaskAuto.assignId && !currentInvolved.includes(emp.id))
-                                          .map(emp => (
-                                            <option key={emp.id} value={emp.id}>
-                                              {emp.name} ({emp.department})
-                                            </option>
-                                          ))
-                                        }
-                                      </select>
-                                    </div>
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        </div>
                       </div>
 
                       {/* Gửi yêu cầu phê duyệt */}
@@ -981,74 +874,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
         );
       }
 
-      case 'involved':
-        return (
-          <div className="space-y-2 text-left">
-            <label className="block text-slate-355 font-bold mb-1">Cộng sự hỗ trợ bổ sung</label>
-            <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(() => {
-                  const selectedInvolvedIds = auto.involvedEmployeeIds || (auto.involvedId ? [auto.involvedId] : []);
-                  return (
-                    <>
-                      {selectedInvolvedIds.length === 0 ? (
-                        <p className="text-[10px] text-slate-500 italic">Chưa chỉ định người hỗ trợ nào ở phân đoạn này...</p>
-                      ) : (
-                        selectedInvolvedIds.map((empId: string) => {
-                          const emp = employees.find(e => e.id === empId);
-                          if (!emp) return null;
-                          return (
-                            <div key={empId} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 flex items-center gap-1.5 text-[10px] text-slate-300">
-                              <span>👤 {emp.name} ({emp.department})</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = selectedInvolvedIds.filter((id: string) => id !== empId);
-                                  updateColAutomation(activeWorkflowColId, {
-                                    involvedEmployeeIds: updated,
-                                    involvedId: updated[0] || undefined
-                                  });
-                                }}
-                                className="text-slate-500 hover:text-rose-400 p-0.5 rounded cursor-pointer transition-colors"
-                                title="Hủy liên kết thành viên này"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          );
-                        })
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              <div className="border-t border-slate-801 pt-2">
-                <SearchableEmployeeSelect
-                  value=""
-                  onChange={(val) => {
-                    if (val) {
-                      const selectedInvolvedIds = auto.involvedEmployeeIds || (auto.involvedId ? [auto.involvedId] : []);
-                      if (!selectedInvolvedIds.includes(val)) {
-                        const updated = [...selectedInvolvedIds, val];
-                        updateColAutomation(activeWorkflowColId, {
-                          involvedEmployeeIds: updated,
-                          involvedId: updated[0] || undefined
-                        });
-                      }
-                    }
-                  }}
-                  employees={employees}
-                  placeholder="-- Nhấp chọn thành viên hỗ trợ --"
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-slate-500">
-              Cộng sự liên quan được bổ nhiệm sẽ tự động nhận quyền theo dõi tiến trình dự án trên trang cá nhân của họ.
-            </p>
-          </div>
-        );
-
       case 'textStyle':
         return (
           <div className="space-y-3.5 text-left">
@@ -1148,8 +973,7 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
               (col.automation?.textStyleStyleItalic || col.automation?.textStyleStyleBold || col.automation?.textStyleStyleStrike || col.automation?.textStyleStyleColor),
               col.automation?.approvalRole && col.automation.approvalRole !== 'none',
               col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t)),
-              col.automation?.checklistText || (col.automation?.checklistTexts && col.automation.checklistTexts.some(t => !!t)),
-              col.automation?.involvedId || (col.automation?.involvedEmployeeIds && col.automation.involvedEmployeeIds.length > 0)
+              col.automation?.checklistText || (col.automation?.checklistTexts && col.automation.checklistTexts.some(t => !!t))
             ].filter(Boolean).length;
 
             return (

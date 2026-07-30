@@ -24,6 +24,7 @@ interface TaskManagementProps {
   quotes?: Quote[];
   onRedirectToQuote?: (projectId: string) => void;
   onRedirectToSubcontractor?: (projectId: string, subcontractorId: string, workName: string) => void;
+  onRedirectToHrLeaves?: () => void; // Điều hướng sang menu Phòng Nhân Sự > Đơn nghỉ phép
   subcontractorAdvances?: SubcontractorAdvanceProposal[]; // Đề xuất tạm ứng / Thu Chi từ Tài Chính
 }
 
@@ -41,6 +42,7 @@ export default function TaskManagement({
   quotes,
   onRedirectToQuote,
   onRedirectToSubcontractor,
+  onRedirectToHrLeaves,
   subcontractorAdvances = []
 }: TaskManagementProps) {
   const { addToast } = useNotification();
@@ -49,7 +51,7 @@ export default function TaskManagement({
   const [filterEmployee, setFilterEmployee] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // Phạm vi SCOPE: "assigned" (Công việc được giao), "all" (Công việc liên quan) hoặc "toreview" (Công việc phải duyệt)
+  // Phạm vi SCOPE: "assigned" (Công việc được giao), "all" (Nhiệm vụ liên quan) hoặc "toreview" (Công việc phải duyệt)
   const [taskScope, setTaskScope] = useState<'assigned' | 'all' | 'toreview'>('assigned');
 
   // Trạng thái cho Chi tiết công việc chọn Xem
@@ -107,8 +109,7 @@ export default function TaskManagement({
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('medium');
   const [newTaskDept, setNewTaskDept] = useState('Phòng Kỹ Thuật');
 
-  // Trạng thái phụ tạo mẻ công việc mới: Người liên quan và Cấp duyệt ban đầu
-  const [newInvolvedIds, setNewInvolvedIds] = useState<string[]>([]);
+  // Trạng thái phụ tạo mẻ công việc mới: Cấp duyệt ban đầu
   const [newApprovals, setNewApprovals] = useState<{ levelName: string; approverId: string }[]>([]);
   const [tempLevelName, setTempLevelName] = useState('');
   const [tempApproverId, setTempApproverId] = useState(employees[0]?.id || '');
@@ -411,8 +412,7 @@ export default function TaskManagement({
       priority: newTaskPriority,
       status: 'todo',
       completionRate: 0,
-      involvedEmployeeIds: newInvolvedIds.length > 0 ? newInvolvedIds : undefined,
-      
+
       // Khai mốc duyệt ngầm định
       approvals: newApprovals.length > 0 ? newApprovals.map((ap, i) => ({
         id: `app_${Date.now()}_${i}`,
@@ -470,7 +470,6 @@ export default function TaskManagement({
     // Reset form states
     setNewTaskName('');
     setNewTaskDesc('');
-    setNewInvolvedIds([]);
     setNewApprovals([]);
     setShowForm(false);
   };
@@ -495,56 +494,28 @@ export default function TaskManagement({
         return false;
       }
     } else {
-      // taskScope === 'all' đại diện cho Công việc liên quan:
-      // Chỉ hiển thị cho những người hỗ trợ liên quan, KHÔNG hiển thị cho người giao việc và người nhận việc
-      const isAssignee = task.assigneeId === currentUser?.id || task.assigneeId === currentUser?.name || hasMainAssigneeMission;
-      const isAssigner = task.assignerId === currentUser?.id || 
-                         task.assignerId === currentUser?.name ||
-                         task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-
-      if (isAssignee || isAssigner) {
-        return false;
-      }
-
-      const projectOfTask = projects.find(p => p.id === task.projectId);
-      const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser?.id);
-      const isTaskInvolved = task.involvedEmployeeIds?.includes(currentUser?.id) || 
-                             task.involvedEmployeeIds?.includes(currentUser?.name) ||
-                             hasMemberMission;
-
-      if (!isProjectInvolved && !isTaskInvolved) {
-        return false;
-      }
+      // taskScope === 'all' đại diện cho Nhiệm vụ liên quan:
+      // được render riêng bằng bảng relatedMissions bên dưới nên loại toàn bộ khỏi danh sách công việc
+      return false;
     }
 
     const matchProj = filterProject === 'all' || task.projectId === filterProject;
-    const matchEmp = filterEmployee === 'all' || task.assigneeId === filterEmployee || task.involvedEmployeeIds?.includes(filterEmployee);
+    const matchEmp = filterEmployee === 'all' || task.assigneeId === filterEmployee;
     const matchStatus = taskScope === 'toreview' ? true : (filterStatus === 'all' || task.status === filterStatus);
     return matchProj && matchEmp && matchStatus;
   });
 
-  // Đếm số lượng công việc liên quan để hiển thị ở tab badge
-  const relatedTasksCount = tasks.filter(task => {
-    const hasMainAssigneeMission = task.missions?.some(m => m.mainAssigneeId === currentUser?.id);
-    const hasMemberMission = task.missions?.some(m => m.memberIds?.includes(currentUser?.id));
-
-    const isAssignee = task.assigneeId === currentUser?.id || task.assigneeId === currentUser?.name || hasMainAssigneeMission;
-    const isAssigner = task.assignerId === currentUser?.id || 
-                       task.assignerId === currentUser?.name ||
-                       task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-
-    if (isAssignee || isAssigner) {
-      return false;
-    }
-
-    const projectOfTask = projects.find(p => p.id === task.projectId);
-    const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser?.id);
-    const isTaskInvolved = task.involvedEmployeeIds?.includes(currentUser?.id) || 
-                           task.involvedEmployeeIds?.includes(currentUser?.name) ||
-                           hasMemberMission;
-
-    return isProjectInvolved || isTaskInvolved;
-  }).length;
+  // NHIỆM VỤ LIÊN QUAN: liệt kê các Nhiệm vụ (mission trong Công việc) mà user được gán
+  // với vai trò Phụ trách chính (mainAssigneeId) hoặc Nhân sự tham gia (memberIds)
+  const relatedMissions = tasks.flatMap(task =>
+    (task.missions || [])
+      .filter(m => m.mainAssigneeId === currentUser?.id || (m.memberIds || []).includes(currentUser?.id))
+      .map(m => {
+        const project = projects.find(p => p.id === task.projectId);
+        const customer = project && customers ? customers.find(c => c.id === project.customerId) : null;
+        return { task, mission: m, project, customer };
+      })
+  ).filter(x => filterProject === 'all' || x.task.projectId === filterProject);
 
   // Đếm số lượng công việc phải duyệt của tôi
   const toReviewTasksCount = tasks.filter(t => 
@@ -567,31 +538,13 @@ export default function TaskManagement({
     + leaves.filter(l => l.status === 'pending').length 
     + payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length;
 
-  // 3. Công việc liên quan chưa hoàn thành (status !== 'completed')
-  const relatedUncompletedCount = tasks.filter(task => {
-    if (task.status === 'completed') {
-      return false;
-    }
-    const hasMainAssigneeMission = task.missions?.some(m => m.mainAssigneeId === currentUser?.id);
-    const hasMemberMission = task.missions?.some(m => m.memberIds?.includes(currentUser?.id));
-
-    const isAssignee = task.assigneeId === currentUser?.id || task.assigneeId === currentUser?.name || hasMainAssigneeMission;
-    const isAssigner = task.assignerId === currentUser?.id || 
-                       task.assignerId === currentUser?.name ||
-                       task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-
-    if (isAssignee || isAssigner) {
-      return false;
-    }
-
-    const projectOfTask = projects.find(p => p.id === task.projectId);
-    const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser?.id);
-    const isTaskInvolved = task.involvedEmployeeIds?.includes(currentUser?.id) || 
-                           task.involvedEmployeeIds?.includes(currentUser?.name) ||
-                           hasMemberMission;
-
-    return isProjectInvolved || isTaskInvolved;
-  }).length;
+  // 3. Nhiệm vụ liên quan chưa hoàn thành (mission.status !== 'completed')
+  const relatedUncompletedCount = tasks.reduce((count, task) =>
+    count + (task.missions || []).filter(m =>
+      m.status !== 'completed' &&
+      (m.mainAssigneeId === currentUser?.id || (m.memberIds || []).includes(currentUser?.id))
+    ).length
+  , 0);
 
   // Nhóm công việc theo từng Dự Án
   const groupedTasks: Record<string, Task[]> = {};
@@ -664,7 +617,7 @@ export default function TaskManagement({
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Công việc liên quan</span>
+          <span>Nhiệm vụ liên quan</span>
           {relatedUncompletedCount > 0 && (
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
               {relatedUncompletedCount}
@@ -725,7 +678,7 @@ export default function TaskManagement({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-slate-300 font-bold mb-1">Độ ưu tiên</label>
               <select
@@ -761,34 +714,6 @@ export default function TaskManagement({
               />
             </div>
 
-            <div>
-              <label className="block text-slate-300 font-bold mb-1">Nhân sự liên quan hỗ trợ giám sát</label>
-              <div className="flex gap-1 flex-wrap border border-slate-800 rounded p-1.5 bg-slate-955 min-h-[32px]">
-                {employees
-                  .filter(e => e.id !== newTaskAssignee)
-                  .map(emp => {
-                    const isSelected = newInvolvedIds.includes(emp.id);
-                    return (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        onClick={() => {
-                          if (isSelected) {
-                            setNewInvolvedIds(newInvolvedIds.filter(id => id !== emp.id));
-                          } else {
-                            setNewInvolvedIds([...newInvolvedIds, emp.id]);
-                          }
-                        }}
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
-                          isSelected ? `${accentBgClass} border-transparent` : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white border-slate-800'
-                        }`}
-                      >
-                        {isSelected ? '✓ ' : '+ '}{emp.name}
-                      </button>
-                    );
-                  })}
-              </div>
-            </div>
           </div>
 
           <div>
@@ -935,8 +860,101 @@ export default function TaskManagement({
         </span>
       </div>
 
-      {/* 3 COLUMNS APPROVAL BOARD FOR 'toreview' OR NORMAL LIST FOR OTHERS */}
-      {taskScope === 'toreview' ? (
+      {/* BẢNG NHIỆM VỤ LIÊN QUAN: Các nhiệm vụ user được gán vai trò Phụ trách chính / Nhân sự */}
+      {taskScope === 'all' ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-md">
+          <div className="bg-slate-950 px-4 py-3 border-b border-slate-850 flex items-center justify-between">
+            <span className="font-extrabold text-[12px] text-white uppercase tracking-wider flex items-center gap-2">
+              <Users className={`w-4 h-4 ${accentTextClass}`} />
+              Nhiệm vụ liên quan của tôi
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono font-bold">
+              {relatedMissions.length} nhiệm vụ được gán
+            </span>
+          </div>
+
+          {relatedMissions.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 italic text-xs">
+              Bạn chưa được gán vào nhiệm vụ nào với vai trò Phụ trách chính hoặc Nhân sự tham gia.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="bg-slate-950/70 text-slate-400 uppercase text-[9.5px] tracking-wider border-b border-slate-850">
+                    <th className="p-3 font-extrabold">Tên dự án</th>
+                    <th className="p-3 font-extrabold">Khách hàng</th>
+                    <th className="p-3 font-extrabold">Tên công việc</th>
+                    <th className="p-3 font-extrabold">Tên nhiệm vụ</th>
+                    <th className="p-3 font-extrabold">Vai trò</th>
+                    <th className="p-3 font-extrabold">Thời hạn</th>
+                    <th className="p-3 font-extrabold">Trạng thái</th>
+                    <th className="p-3 font-extrabold text-center">Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850">
+                  {relatedMissions.map(({ task, mission, project, customer }) => {
+                    const isMain = mission.mainAssigneeId === currentUser?.id;
+                    const isMissionOverdue = mission.status !== 'completed' && mission.deadline && new Date(mission.deadline) < new Date();
+                    return (
+                      <tr key={`${task.id}_${mission.id}`} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3 font-bold text-slate-200 max-w-[180px] truncate">
+                          {project ? project.name : 'Nhiệm vụ chung nội bộ'}
+                        </td>
+                        <td className="p-3 text-slate-300 max-w-[140px] truncate">
+                          {customer?.name || '—'}
+                        </td>
+                        <td className="p-3 text-slate-300 max-w-[180px] truncate font-semibold">
+                          {task.name}
+                        </td>
+                        <td className="p-3 text-slate-100 font-bold max-w-[200px] truncate">
+                          {mission.name}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase border ${
+                            isMain
+                              ? 'bg-amber-950/40 text-amber-400 border-amber-500/30'
+                              : 'bg-sky-950/40 text-sky-400 border-sky-500/30'
+                          }`}>
+                            {isMain ? 'Phụ trách chính' : 'Nhân sự'}
+                          </span>
+                        </td>
+                        <td className={`p-3 font-mono font-bold ${isMissionOverdue ? 'text-rose-400' : 'text-slate-300'}`}>
+                          {mission.deadline || task.deadline || '—'}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase border ${
+                            mission.status === 'completed'
+                              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30'
+                              : isMissionOverdue
+                                ? 'bg-rose-950/40 text-rose-400 border-rose-500/30'
+                                : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}>
+                            {mission.status === 'completed' ? 'Hoàn thành' : isMissionOverdue ? 'Quá hạn' : 'Đang thực hiện'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTaskId(task.id)}
+                            title="Xem chi tiết Công việc chứa nhiệm vụ này"
+                            className="bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800 p-1.5 rounded-lg cursor-pointer transition inline-flex items-center justify-center"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) :
+
+      /* 3 COLUMNS APPROVAL BOARD FOR 'toreview' OR NORMAL LIST FOR OTHERS */
+      taskScope === 'toreview' ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-2">
           {/* CỘT PHÒNG DỰ ÁN */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col h-[750px] shadow-lg">
@@ -1066,9 +1084,21 @@ export default function TaskManagement({
                   Phòng Nhân sự
                 </h3>
               </div>
-              <span className="bg-pink-955 border border-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                {leaves.filter(l => l.status === 'pending').length} chờ duyệt
-              </span>
+              <div className="flex items-center gap-2">
+                {onRedirectToHrLeaves && (
+                  <button
+                    type="button"
+                    onClick={onRedirectToHrLeaves}
+                    title="Mở danh sách Đơn nghỉ phép trong menu Phòng Nhân Sự"
+                    className="text-pink-400 hover:text-pink-300 text-[10px] bg-pink-950/30 border border-pink-500/20 px-2 py-0.5 rounded hover:bg-pink-950/60 font-bold cursor-pointer transition active:scale-95 flex items-center gap-1"
+                  >
+                    <Eye className="w-3 h-3" /> Đơn nghỉ phép
+                  </button>
+                )}
+                <span className="bg-pink-955 border border-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                  {leaves.filter(l => l.status === 'pending').length} chờ duyệt
+                </span>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">

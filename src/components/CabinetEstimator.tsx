@@ -72,7 +72,6 @@ export const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><
 <p>{{BANG_CHI_TIET_BÁO_GIÁ}}</p>
 <p>Tổng giá trị hợp đồng: <strong>{{TONG_CONG}}</strong> VND</p>
 <p>Viết bằng chữ: <em>{{TONG_CONG_CHU}}</em></p>
-<p>Đơn giá chưa bao gồm thuế VAT</p>
 
 <p><strong>Điều 4. Cách thức thanh toán hợp đồng thi công nội thất theo từng giai đoạn (tiền mặt hoặc chuyển khoản)</strong></p>
 <p>Khi hợp đồng được ký kết, để đảm bảo vốn sản xuất, Bên A ứng trước cho Bên B 50% kinh phí trên tổng giá trị hợp đồng</p>
@@ -998,12 +997,13 @@ export default function CabinetEstimator({
   };
 
   // Tổng cộng hóa đơn
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ — thành tiền = tổng tiền gốc.
   const subtotal = quoteItems.reduce((acc, i) => acc + i.totalPrice, 0);
-  const discountVal = subtotal * (config.discountPercent / 100);
-  const totalQuoteAmount = subtotal - discountVal;
-  const vatPercent = config.vatPercent !== undefined ? config.vatPercent : 8;
-  const vatAmount = totalQuoteAmount * (vatPercent / 100);
-  const totalWithVat = totalQuoteAmount + vatAmount;
+  const discountVal = 0;
+  const totalQuoteAmount = subtotal;
+  const vatPercent = 0;
+  const vatAmount = 0;
+  const totalWithVat = subtotal;
 
   const handleSendToProject = () => {
     if (!selectedProjectId) {
@@ -1089,7 +1089,7 @@ export default function CabinetEstimator({
           size: `${Math.round(110 + Math.random() * 30)} KB`,
           createdAt: new Date().toLocaleDateString('vi-VN'),
           totalAmount: totalQuoteAmount,
-          discountPercent: config.discountPercent,
+          discountPercent: 0,
           items: quoteItems,
           customerName: customerName || 'Khách hàng',
           customerPhone: customerPhone || 'Chưa cung cấp',
@@ -1097,7 +1097,7 @@ export default function CabinetEstimator({
           paymentTerms: paymentTerms,
           quoteNotes: quoteNotes,
           code: itemCode,
-          content: `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc\n\nBẢNG BÁO GIÁ CHI TIẾT NỘI THẤT NĂM 2026\n--------------------------------------\nSố báo giá: ${itemCode}\nKhách hàng: ${customerName || 'Khách hàng'}\nSố điện thoại: ${customerPhone || 'Không có'}\nĐịa chỉ: ${customerAddress || 'Không có'}\nDự án liên kết: ${p.name}\n\nDANH SÁCH HẠNG MỤC SẢN PHẨM SƠ BỘ:\n${quoteItems.map((item, index) => `${index + 1}. ${item.productName} - Số lượng: ${item.qty} - Thành tiền: ${item.totalPrice.toLocaleString('vi-VN')} đ`).join('\n')}\n\n--------------------------------------\nTỔNG CỘNG CHƯA CHIẾT KHẤU: ${subtotal.toLocaleString('vi-VN')} đ\nCHIẾT KHẤU GIẢM GIÁ (${config.discountPercent}%): -${discountVal.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ THÔ: ${totalQuoteAmount.toLocaleString('vi-VN')} đ\nVAT (${vatPercent}%): ${vatAmount.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ TOÀN BỘ (ĐÃ BAO GỒM VAT): ${totalWithVat.toLocaleString('vi-VN')} đ\n\nNơi nhận: Khách hàng\nĐại diện bàn giao báo giá.`
+          content: `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc\n\nBẢNG BÁO GIÁ CHI TIẾT NỘI THẤT NĂM 2026\n--------------------------------------\nSố báo giá: ${itemCode}\nKhách hàng: ${customerName || 'Khách hàng'}\nSố điện thoại: ${customerPhone || 'Không có'}\nĐịa chỉ: ${customerAddress || 'Không có'}\nDự án liên kết: ${p.name}\n\nDANH SÁCH HẠNG MỤC SẢN PHẨM SƠ BỘ:\n${quoteItems.map((item, index) => `${index + 1}. ${item.productName} - Số lượng: ${item.qty} - Thành tiền: ${item.totalPrice.toLocaleString('vi-VN')} đ`).join('\n')}\n\n--------------------------------------\nTỔNG CỘNG GIÁ TRỊ HẠNG MỤC: ${subtotal.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ TOÀN BỘ: ${totalWithVat.toLocaleString('vi-VN')} đ\n\nNơi nhận: Khách hàng\nĐại diện bàn giao báo giá.`
         };
 
         // Fire and forget dbService save
@@ -2035,59 +2035,6 @@ export default function CabinetEstimator({
               </div>
             </div>
 
-            {/* Chiết khấu và VAT */}
-            <div className="flex flex-col sm:flex-row justify-end items-center gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs w-full">
-              {/* Chiết khấu (%) */}
-              <div className="w-full sm:w-[180px] text-left">
-                <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                  <span>Chiết khấu (%)</span>
-                  <span className="text-emerald-650 font-black text-[8px] bg-emerald-50 px-1 hover:bg-emerald-100 rounded border border-emerald-200 flex items-center gap-0.5">
-                    % GIẢM
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={config.discountPercent}
-                  disabled={isLocked}
-                  onChange={(e) => {
-                    const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                    handleConfigChange('discountPercent', val);
-                  }}
-                  className={`w-full rounded-lg p-2.5 border text-slate-900 outline-none text-xs font-semibold transition-all font-mono ${
-                    isLocked ? 'bg-slate-50 border-slate-200 text-slate-550 cursor-not-allowed border-dashed' : 'bg-white border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-                  }`}
-                  placeholder="Nhập % chiết khấu..."
-                />
-              </div>
-
-              {/* Thuế VAT (%) */}
-              <div className="w-full sm:w-[180px] text-left">
-                <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                  <span>Thuế VAT (%)</span>
-                  <span className="text-emerald-650 font-black text-[8px] bg-emerald-50 px-1 hover:bg-emerald-100 rounded border border-emerald-200 flex items-center gap-0.5">
-                    % VAT
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={config.vatPercent !== undefined ? config.vatPercent : 8}
-                  disabled={isLocked}
-                  onChange={(e) => {
-                    const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                    handleConfigChange('vatPercent', val);
-                  }}
-                  className={`w-full rounded-lg p-2.5 border text-slate-900 outline-none text-xs font-semibold transition-all font-mono ${
-                    isLocked ? 'bg-slate-50 border-slate-200 text-slate-550 cursor-not-allowed border-dashed' : 'bg-white border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-                  }`}
-                  placeholder="Nhập % VAT..."
-                />
-              </div>
-            </div>
-
             {/* THÊM SẢN PHẨM FORM */}
             {!isLocked && (
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40">
@@ -2667,19 +2614,10 @@ export default function CabinetEstimator({
             <div className="grid grid-cols-2 text-xs text-slate-600 gap-y-1.5">
               <span>Hạng tổng thô các mục:</span>
               <span className="text-right font-mono font-bold text-slate-800">{subtotal.toLocaleString('vi-VN')} đ</span>
-              
-              <span>Tổng Chiết Khấu ({config.discountPercent}%):</span>
-              <span className="text-right font-mono font-bold text-rose-600">-{discountVal.toLocaleString('vi-VN')} đ</span>
-              
-              <span>Tổng giá trị thô:</span>
-              <span className="text-right font-mono font-semibold text-slate-700">{totalQuoteAmount.toLocaleString('vi-VN')} đ</span>
-
-              <span>Thuế VAT ({vatPercent}%):</span>
-              <span className="text-right font-mono font-bold text-emerald-650">+{vatAmount.toLocaleString('vi-VN')} đ</span>
 
               <div className="col-span-2 border-t border-slate-100 my-1.5"></div>
-              
-              <span className="text-sm font-bold text-slate-800">TỔNG GIÁ TRỊ TOÀN BỘ (ĐÃ CÓ VAT):</span>
+
+              <span className="text-sm font-bold text-slate-800">TỔNG GIÁ TRỊ TOÀN BỘ:</span>
               <span className="text-right text-base font-extrabold text-emerald-600 font-mono">{totalWithVat.toLocaleString('vi-VN')} đ</span>
             </div>
 

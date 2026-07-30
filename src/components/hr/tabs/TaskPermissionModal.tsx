@@ -59,7 +59,6 @@ export default function TaskPermissionModal({ isOpen, onClose, roleId, roleName,
     assigner: { label: 'Người Giao Việc', desc: 'Người khởi tạo & giao công việc (task.assignerId)', color: 'text-sky-400 bg-sky-500/10' },
     assignee: { label: 'Phụ Trách Công Việc', desc: 'Phụ Trách Công Việc chịu trách nhiệm toàn bộ công việc (task.assigneeId)', color: 'text-amber-400 bg-amber-500/10' },
     missionAssignee: { label: 'Phụ Trách Nhiệm Vụ', desc: 'Phụ Trách Nhiệm Vụ thực hiện nhiệm vụ con (task.missions[].mainAssigneeId)', color: 'text-orange-400 bg-orange-500/10' },
-    involved: { label: 'Người Tham Gia', desc: 'Nhân sự hỗ trợ liên quan (task.involvedEmployeeIds)', color: 'text-teal-400 bg-teal-500/10' },
     accountant: { label: 'Kế Toán', desc: 'Nhân viên kế toán phụ trách thu chi (role === accountant)', color: 'text-sky-400 bg-sky-500/10' },
     none: { label: 'Không Liên Quan', desc: 'Không có quyền mặc định với công việc này', color: 'text-slate-500 bg-slate-500/10' },
   };

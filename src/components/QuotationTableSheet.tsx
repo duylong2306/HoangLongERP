@@ -106,9 +106,10 @@ interface QuotationTableSheetProps {
     estimatorMode?: string;
   };
   initialTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  onApproved?: (updated: any) => void;
 }
 
-export default function QuotationTableSheet({ quoteData, initialTab }: QuotationTableSheetProps) {
+export default function QuotationTableSheet({ quoteData, initialTab, onApproved }: QuotationTableSheetProps) {
   // If items list is missing, we try to create an item list from fallback or text content parsed
   let items = quoteData.items || [];
   
@@ -166,20 +167,12 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
   }
 
   // Financial values
-  const totalAmount = quoteData.totalAmount || items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-  const discountPercent = quoteData.discountPercent || 0;
-  
-  // Calculate Subtotal back from totalAmount and discount
-  // totalAmount = subtotal * (1 - discountPercent/100)
-  const subtotalBeforeDiscount = discountPercent > 0 
-    ? Math.round(totalAmount / (1 - discountPercent / 100))
-    : items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    
-  const discountValue = subtotalBeforeDiscount * (discountPercent / 100);
-  const subtotalAfterDiscount = subtotalBeforeDiscount - discountValue;
-  const sheetVatPercent = quoteData.config?.vatPercent !== undefined ? quoteData.config.vatPercent : 8;
-  const vatAmount = Math.round(subtotalAfterDiscount * (sheetVatPercent / 100)); // Dynamic VAT
-  const grandTotal = subtotalAfterDiscount + vatAmount;
+  const itemsTotal = items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ Xây dựng / Nội thất / Cơ khí.
+  // Thành tiền = tổng tiền gốc (tổng các hạng mục), không cộng VAT, không trừ chiết khấu.
+  const totalAmount = quoteData.totalAmount || itemsTotal;
+  const discountPercent = 0;
+  const grandTotal = totalAmount;
 
   const [isApproved, setIsApproved] = useState<boolean>(() => {
     return !!(quoteData as any).isApproved;
@@ -187,21 +180,38 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
 
   const handleApproveQuote = async () => {
     try {
+      const approvedAt = new Date().toLocaleString('vi-VN');
+      const approvedBy = 'Trương Hữu Long (Giám Đốc)';
+
+      // 1. Ghi trạng thái duyệt xuống DB (archived_quotes)
       if ((quoteData as any).id) {
-        await dbService.updateQuoteDocHtml((quoteData as any).id, { isApproved: true });
-        (quoteData as any).isApproved = true;
+        await dbService.updateQuoteDocHtml((quoteData as any).id, {
+          isApproved: true,
+          approvedAt,
+          approvedBy
+        });
       }
 
+      // 2. Luôn cập nhật giao diện (không phụ thuộc vào việc có liên kết dự án hay không)
+      (quoteData as any).isApproved = true;
+      setIsApproved(true);
+
+      // 3. Báo component cha cập nhật danh sách & badge trạng thái
+      if (onApproved) {
+        onApproved({ ...quoteData, isApproved: true, approvedAt, approvedBy });
+      }
+
+      // 4. Đồng bộ trạng thái duyệt vào dự án lưu trên localStorage (nếu có liên kết)
       const saved = localStorage.getItem('hl_erp_projects');
       if (saved) {
         const projs = JSON.parse(saved);
         let found = false;
         const updatedProjs = projs.map((p: any) => {
-          const isMatch = 
+          const isMatch =
             (p.baoGiaFile?.code && quoteData.code && p.baoGiaFile.code === quoteData.code) ||
             (p.id && (quoteData as any).projectId && p.id === (quoteData as any).projectId) ||
             (p.name && quoteData.projectName && p.name === quoteData.projectName);
-          
+
           if (isMatch) {
             found = true;
             return {
@@ -216,8 +226,8 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                 items: p.baoGiaFile?.items || quoteData.items || items || [],
                 content: p.baoGiaFile?.content || quoteData.content || '',
                 isApproved: true,
-                approvedAt: new Date().toLocaleString('vi-VN'),
-                approvedBy: 'Trương Hữu Long (Giám Đốc)'
+                approvedAt,
+                approvedBy
               }
             };
           }
@@ -227,8 +237,8 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
         if (found) {
           localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjs));
           setIsApproved(true);
-          
-          const matchedProj = updatedProjs.find((p: any) => 
+
+          const matchedProj = updatedProjs.find((p: any) =>
             (p.baoGiaFile?.code && quoteData.code && p.baoGiaFile.code === quoteData.code) ||
             (p.id && (quoteData as any).projectId && p.id === (quoteData as any).projectId) ||
             (p.name && quoteData.projectName && p.name === quoteData.projectName)
@@ -238,7 +248,7 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
               console.error("Lỗi đồng bộ duyệt báo giá lên Firestore:", err);
             });
           }
-          
+
           window.dispatchEvent(new CustomEvent('hl-projects-updated'));
         }
       }
@@ -1025,51 +1035,7 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
             })}
 
             {/* FINANCIAL SUMMARY TOTALS */}
-            {/* 1. Subtotal trước chiết khấu */}
-            {discountPercent > 0 && (
-              <tr className="bg-slate-50 font-bold">
-                <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right uppercase tracking-wider text-[10px] text-slate-500">
-                  Cộng gộp (Chưa chiết khấu):
-                </td>
-                <td className="py-2.5 px-3 border border-slate-200 text-right font-bold text-slate-600 font-mono">
-                  {subtotalBeforeDiscount.toLocaleString('vi-VN')} đ
-                </td>
-              </tr>
-            )}
-
-            {/* 2. Chiết khấu giảm giá */}
-            {discountPercent > 0 && (
-              <tr className="bg-slate-50 font-bold">
-                <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right uppercase tracking-wider text-[10px] text-rose-650">
-                  Chiết khấu giảm giá ({discountPercent}%):
-                </td>
-                <td className="py-2.5 px-3 border border-slate-200 text-right font-black text-rose-600 font-mono">
-                  -{discountValue.toLocaleString('vi-VN')} đ
-                </td>
-              </tr>
-            )}
-
-            {/* 3. Cộng tiền trước VAT (CỘNG) */}
-            <tr className="bg-[#00a651] text-white font-bold uppercase text-[11px] tracking-wider text-center">
-              <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right">
-                CỘNG (Hạng mục thi công đã chiết khấu):
-              </td>
-              <td className="py-2.5 px-3 border border-slate-200 text-right font-black font-mono">
-                {subtotalAfterDiscount.toLocaleString('vi-VN')} đ
-              </td>
-            </tr>
-
-            {/* 4. VAT */}
-            <tr className="bg-[#00a651] text-white font-bold uppercase text-[11px] tracking-wider text-center bg-opacity-90">
-              <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right">
-                THUẾ GIÁ TRỊ GIA TĂNG (VAT {sheetVatPercent}%):
-              </td>
-              <td className="py-2.5 px-3 border border-slate-200 text-right font-black font-mono">
-                {vatAmount.toLocaleString('vi-VN')} đ
-              </td>
-            </tr>
-
-            {/* 5. TỔNG CỘNG THANH TOÁN */}
+            {/* TỔNG CỘNG THANH TOÁN (đã loại bỏ chiết khấu thầu & thuế VAT) */}
             <tr className="bg-[#00a651] text-white font-black uppercase text-[12px] tracking-widest text-center">
               <td colSpan={7} className="py-3 px-4 border border-slate-200 text-right">
                 TỔNG CỘNG GIÁ TRỊ QUYẾT TOÁN THANH TOÁN:

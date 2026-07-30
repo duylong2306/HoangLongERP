@@ -1886,6 +1886,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }).catch(err => {
       console.error("Lỗi khi xóa dự án:", err);
     });
+
+    // 4. Xóa toàn bộ hồ sơ lưu trữ liên quan (Nội thất gỗ / Xây dựng / Cơ khí) theo projectId
+    dbService.archivedQuotes.deleteByProjectId(id).then(() => {
+      // Thông báo để các màn hình Lưu Trữ Hồ Sơ tự làm mới danh sách
+      window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
+    }).catch(err => {
+      console.error("Lỗi khi xóa hồ sơ lưu trữ liên quan dự án:", err);
+    });
   };
 
   // HANDLERS CÔNG VIỆC
@@ -1912,13 +1920,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           const recipientIds: string[] = [];
           if (newComment.senderId !== oldTask.assigneeId) recipientIds.push(oldTask.assigneeId);
           if (newComment.senderId !== oldTask.assignerId) recipientIds.push(oldTask.assignerId);
-          if (oldTask.involvedEmployeeIds) {
-            oldTask.involvedEmployeeIds.forEach(ieId => {
-              if (ieId !== newComment.senderId && !recipientIds.includes(ieId)) {
-                recipientIds.push(ieId);
-              }
-            });
-          }
 
           recipientIds.forEach(recId => {
             const rec = employees.find(e => e.id === recId);
@@ -1943,7 +1944,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         // B. THÔNG BÁO THÔNG TIN TRONG CÔNG VIỆC CON CÓ LIÊN QUAN (TRẠNG THÁI, TIẾN ĐỘ)
         if (updates.status && updates.status !== oldTask.status) {
           const statusMap: Record<string, string> = { todo: 'Chưa làm', in_progress: 'Đang làm', review: 'Đợi duyệt', completed: 'Hoàn thành' };
-          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId, ...(oldTask.involvedEmployeeIds || [])]))
+          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId]))
             .filter(recId => recId !== currentUser?.id);
 
           recipientIds.forEach(recId => {
@@ -1965,7 +1966,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         }
 
         if (updates.completionRate !== undefined && updates.completionRate !== oldTask.completionRate) {
-          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId, ...(oldTask.involvedEmployeeIds || [])]))
+          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId]))
             .filter(recId => recId !== currentUser?.id);
 
           recipientIds.forEach(recId => {
@@ -2442,18 +2443,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name)
     );
 
-    // 3. Công việc liên quan chưa hoàn thành
+    // 3. Nhiệm vụ liên quan chưa hoàn thành (user là Phụ trách chính / Nhân sự của nhiệm vụ)
     let isRelated = false;
     if (t.status !== 'completed') {
-      const isAssignerGeneric = t.assignerId === currentUser?.id || 
-                                 t.assignerId === currentUser?.name ||
-                                 t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-      if (!isAssignee && !isAssignerGeneric) {
-        const projectOfTask = projects.find(p => p.id === t.projectId);
-        const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser!.id);
-        const isTaskInvolved = t.involvedEmployeeIds?.includes(currentUser!.id) || t.involvedEmployeeIds?.includes(currentUser!.name);
-        isRelated = !!(isProjectInvolved || isTaskInvolved);
-      }
+      isRelated = !!t.missions?.some(m =>
+        m.status !== 'completed' &&
+        (m.mainAssigneeId === currentUser!.id || (m.memberIds || []).includes(currentUser!.id))
+      );
     }
 
     return isAssignee || isToReview || isRelated;
@@ -2500,7 +2496,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     <AuthProvider employees={employees} addToast={addToast}>
       <NotificationProvider employees={employees} currentUser={currentUser}>
         <div
-          className="flex h-screen w-screen bg-slate-950 overflow-hidden text-slate-200 font-sans transition-all duration-200"
+          className="flex min-h-screen w-full lg:h-screen lg:w-screen bg-slate-950 lg:overflow-hidden text-slate-200 font-sans transition-all duration-200"
           style={{ fontFamily: currentFont }}
           id="erp_container"
         >
@@ -2920,7 +2916,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         </aside>
 
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
+      <div className="flex-1 flex flex-col min-w-0 lg:overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
         {/* HEADER TOP-BAR - Tall header with 39px top padding to avoid iPhone Dynamic Island. Content/scontrols aligned at bottom via items-end */}
         <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[50px] pb-[10px] flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
@@ -3042,22 +3038,22 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
                   {showNotificationsPanel && (
                     <div
-                      className="absolute right-0 mt-3 w-[92vw] sm:w-[460px] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4.5 z-50 text-slate-200 font-sans top-full flex flex-col gap-3.5 ring-1 ring-slate-800"
+                      className="absolute right-0 mt-2 sm:mt-3 w-[86vw] max-w-[330px] sm:w-[460px] sm:max-w-none bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl shadow-2xl p-2.5 sm:p-4.5 z-50 text-slate-200 font-sans top-full flex flex-col gap-2 sm:gap-3.5 ring-1 ring-slate-800"
                       id="notification_popover"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Header */}
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-emerald-500/10 rounded-lg">
-                            <Bell className="w-4 h-4 text-emerald-400" />
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2 sm:pb-3 gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                          <div className="p-1 sm:p-1.5 bg-emerald-500/10 rounded-lg shrink-0">
+                            <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
                           </div>
-                          <div>
-                            <span className="font-extrabold text-sm text-white block">Thông báo & Tin nhắn</span>
-                            <span className="text-[10px] text-slate-500 font-medium">Được đồng bộ theo thời gian thực</span>
+                          <div className="min-w-0">
+                            <span className="font-extrabold text-[11.5px] sm:text-sm text-white block truncate">Thông báo & Tin nhắn</span>
+                            <span className="hidden sm:block text-[10px] text-slate-500 font-medium">Được đồng bộ theo thời gian thực</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
                           {/* Nút ẩn/hiện badge */}
                           <button
                             type="button"
@@ -3066,7 +3062,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                               setShowBadgeCounts(next);
                               localStorage.setItem('hl_show_badge_counts', next ? 'true' : 'false');
                             }}
-                            className={`p-1.5 rounded-lg cursor-pointer transition-all ${
+                            className={`p-1 sm:p-1.5 text-[11px] sm:text-sm rounded-lg cursor-pointer transition-all ${
                               showBadgeCounts ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-600 bg-slate-850'
                             }`}
                             title={showBadgeCounts ? 'Ẩn số chưa đọc' : 'Hiện số chưa đọc'}
@@ -3080,9 +3076,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                 const updated = notifications.map(n => n.recipientId === currentUser.id ? { ...n, read: true } : n);
                                 setNotifications(updated);
                               }}
-                              className="text-[10px] bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
+                              title="Đánh dấu đã đọc tất cả"
+                              className="text-[9px] sm:text-[10px] bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap"
                             >
-                              Đọc tất cả
+                              <span className="sm:hidden">✓</span>
+                              <span className="hidden sm:inline">Đọc tất cả</span>
                             </button>
                           )}
                           <button
@@ -3091,15 +3089,32 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                               const remainder = notifications.filter(n => n.recipientId !== currentUser.id);
                               setNotifications(remainder);
                             }}
-                            className="text-[10px] bg-rose-950/40 hover:bg-rose-900/45 text-rose-400 border border-rose-900/30 font-extrabold px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
+                            title="Xóa tất cả thông báo"
+                            className="text-[9px] sm:text-[10px] bg-rose-950/40 hover:bg-rose-900/45 text-rose-400 border border-rose-900/30 font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap"
                           >
-                            Xóa tất cả
+                            <span className="sm:hidden">🗑</span>
+                            <span className="hidden sm:inline">Xóa tất cả</span>
                           </button>
                         </div>
                       </div>
 
-                      {/* 4 tab bộ lọc — kiểu tab gạch chân ngang (Flowbite) */}
-                      <ul className="flex flex-nowrap -mb-px text-sm font-medium text-center">
+                      {/* MOBILE: 4 bộ lọc gom thành dropdown cho gọn */}
+                      <div className="sm:hidden">
+                        <select
+                          value={popoverFilter}
+                          onChange={(e) => setPopoverFilter(e.target.value as typeof popoverFilter)}
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-emerald-500/60"
+                        >
+                          {popoverTabs.map(tab => (
+                            <option key={tab.id} value={tab.id} className="bg-slate-950 text-slate-200">
+                              {tab.label}{showBadgeCounts && tab.count > 0 ? ` (${tab.count > 99 ? '99+' : tab.count})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* DESKTOP: 4 tab bộ lọc — kiểu tab gạch chân ngang (Flowbite) */}
+                      <ul className="hidden sm:flex flex-nowrap -mb-px text-sm font-medium text-center">
                         {popoverTabs.map(tab => {
                           const isActive = popoverFilter === tab.id;
                           return (
@@ -3127,7 +3142,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                       </ul>
 
                       {/* Danh sách hội thoại + thông báo đã lọc */}
-                      <div className="max-h-[360px] overflow-y-auto pr-1 scrollbar-thin">
+                      <div className="max-h-[52vh] sm:max-h-[360px] overflow-y-auto pr-1 scrollbar-thin">
                         {(() => {
                           // Lấy conversations của user
                           const allConvs = getUserConversations(getConversations(), currentUser?.id || '');
@@ -3197,14 +3212,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                     setActiveTab('messages');
                                     if (mobileMenuOpen) setMobileMenuOpen(false);
                                   }}
-                                  className={`flex items-center gap-3 px-2.5 py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
+                                  className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-2.5 py-2 sm:py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
                                     unread > 0
                                       ? 'bg-emerald-500/5 border-l-emerald-500 hover:bg-slate-800/60'
                                       : 'border-l-transparent hover:bg-slate-800/60'
                                   }`}
                                 >
                                   <div className="relative shrink-0">
-                                    <div className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-xs shadow-md text-white"
+                                    <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs shadow-md text-white"
                                       style={{ backgroundColor: avatarColor }}>
                                       {avatarText}
                                     </div>
@@ -3212,14 +3227,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-semibold text-[13px] truncate ${unread > 0 ? 'text-white' : 'text-slate-300'}`}>
+                                      <span className={`font-semibold text-[12px] sm:text-[13px] truncate ${unread > 0 ? 'text-white' : 'text-slate-300'}`}>
                                         {displayName}
                                       </span>
                                       {conv.lastMessageAt && (
-                                        <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">{formatTime(conv.lastMessageAt)}</span>
+                                        <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono shrink-0 ml-2">{formatTime(conv.lastMessageAt)}</span>
                                       )}
                                     </div>
-                                    <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                    <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5 truncate">
                                       {isGroup ? 'Nhóm' : (otherEmp?.department || 'Nhân viên')}
                                     </p>
                                   </div>
@@ -3270,19 +3285,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                       setActiveTab('dashboard');
                                     }
                                   }}
-                                  className={`flex items-center gap-3 px-2.5 py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
+                                  className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-2.5 py-2 sm:py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
                                     isUnread
                                       ? 'bg-emerald-500/5 border-l-emerald-500 hover:bg-slate-800/60'
                                       : 'border-l-transparent hover:bg-slate-800/60'
                                   }`}
                                 >
                                   <div className="relative shrink-0">
-                                    <div className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-xs shadow-md text-white"
+                                    <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs shadow-md text-white"
                                       style={{ backgroundColor: getAvatarColor(senderName) }}>
                                       {avatarText}
                                     </div>
                                     {notif.category && (
-                                      <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[7px] border-2 border-slate-900"
+                                      <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[6px] sm:text-[7px] border-2 border-slate-900"
                                         style={{
                                           backgroundColor: notif.category === 'chat' ? '#6366F1' : notif.category === 'attendance' ? '#F59E0B' : notif.category === 'finance' ? '#10B981' : '#3B82F6'
                                         }}>
@@ -3292,14 +3307,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-semibold text-[13px] truncate ${isUnread ? 'text-white' : 'text-slate-300'}`}>
+                                      <span className={`font-semibold text-[12px] sm:text-[13px] truncate ${isUnread ? 'text-white' : 'text-slate-300'}`}>
                                         {senderName}
                                       </span>
-                                      <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
+                                      <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono shrink-0 ml-2">
                                         {formatTime(notif.createdAt)}
                                       </span>
                                     </div>
-                                    <p className={`text-[12px] mt-0.5 truncate leading-tight ${isUnread ? 'text-white font-semibold' : 'text-slate-400'}`}>
+                                    <p className={`text-[11px] sm:text-[12px] mt-0.5 truncate leading-tight ${isUnread ? 'text-white font-semibold' : 'text-slate-400'}`}>
                                       {notif.title || notif.content}
                                     </p>
                                   </div>
@@ -3376,7 +3391,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
         <main
-          className="flex-1 p-4 sm:p-6 overflow-y-auto"
+          className="flex-1 p-3 sm:p-6 lg:overflow-y-auto"
           id="main_content_scroller"
           onTouchStart={(e) => {
             const el = e.currentTarget;
@@ -3548,6 +3563,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               quotes={quotes}
               onRedirectToQuote={handleRedirectToQuote}
               onRedirectToSubcontractor={handleRedirectToSubcontractor}
+              onRedirectToHrLeaves={() => { setActiveTab('employees'); setHrSubTab('leaves'); }}
             />
           )}
 

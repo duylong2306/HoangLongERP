@@ -359,8 +359,8 @@ export default function ConstructionFinalQuote({
       const localConfig = sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0 };
       
       const subtotal = localItems.reduce((acc: number, item: any) => acc + (item.totalPrice || 0), 0);
-      const discountVal = Math.round(subtotal * ((localConfig.discountPercent || 0) / 100));
-      const totalQuoteAmount = subtotal - discountVal;
+      // Chiết khấu thầu (%) đã được loại bỏ khỏi hồ sơ Xây dựng.
+      const totalQuoteAmount = subtotal;
 
       if (totalQuoteAmount > 0) return totalQuoteAmount;
 

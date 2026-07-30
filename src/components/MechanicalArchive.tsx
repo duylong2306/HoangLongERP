@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { dbService } from '../lib/dbService';
 import { Employee, Project, ArchivedQuote } from '../types';
 import { useNotification } from '../context';
@@ -31,15 +31,18 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
   const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>('quote');
 
   // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
+  // Lưu ý: KHÔNG đưa selectedQuote vào dependency để tránh popup bị mở lại ngay sau khi đóng.
+  const openedPreselectedRef = useRef<string | null>(null);
   useEffect(() => {
     if (preselectedProjectId && archivedList.length > 0) {
       const q = archivedList.find(x => x.projectId === preselectedProjectId);
-      if (q && (!selectedQuote || selectedQuote.id !== q.id)) {
+      if (q && openedPreselectedRef.current !== preselectedProjectId) {
+        openedPreselectedRef.current = preselectedProjectId;
         setSelectedQuote(q);
         if (initialDetailTab) setActiveDetailTab(initialDetailTab);
       }
     }
-  }, [preselectedProjectId, archivedList, initialDetailTab, selectedQuote]);
+  }, [preselectedProjectId, archivedList, initialDetailTab]);
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
 
   // States for Quick Project Creation from Quote detail
@@ -94,13 +97,11 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
         status: 'new',
         progress: 0,
         kanbanColumnId: quickProjKanbanColId,
-        involvedEmployeeIds: ['emp_3', 'emp_1'],
         baoGiaFile: {
           name: `${selectedQuote.code || 'BAO_GIA'}.pdf`,
           size: '1.2 MB',
           createdAt: new Date().toLocaleDateString('vi-VN'),
           totalAmount: selectedQuote.totalAmount || 0,
-          discountPercent: selectedQuote.config?.discountPercent || 0,
           items: selectedQuote.items || []
         }
       };
@@ -258,7 +259,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                 <th className="px-4 py-3">Chi Tiết Sản Phẩm Thép / Hàn</th>
                 <th className="px-4 py-3 text-right">Tổng Khối Lượng</th>
                 <th className="px-4 py-3">Ngày Lập</th>
-                <th className="px-4 py-3 text-right">Tổng Tiền (Gồm VAT)</th>
+                <th className="px-4 py-3 text-right">Tổng Tiền</th>
                 <th className="px-4 py-3 text-center">Trạng Thái Hồ Sơ</th>
                 <th className="px-4 py-3 text-center">Hành Động</th>
               </tr>
@@ -484,7 +485,14 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
             </div>
 
             <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
-              <QuotationTableSheet quoteData={selectedQuote} initialTab={activeDetailTab} />
+              <QuotationTableSheet
+                quoteData={selectedQuote}
+                initialTab={activeDetailTab}
+                onApproved={(updated) => {
+                  setSelectedQuote(prev => prev ? { ...prev, ...updated } : prev);
+                  setArchivedList(prev => prev.map(q => (q.id === updated.id ? { ...q, ...updated } : q)));
+                }}
+              />
             </div>
 
             <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center gap-4">

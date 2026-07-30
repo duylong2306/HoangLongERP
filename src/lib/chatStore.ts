@@ -197,11 +197,11 @@ export async function createGroupConversation(
 /**
  * Tự động tạo (hoặc đồng bộ) NHÓM CHAT DỰ ÁN mỗi khi một dự án được khởi tạo.
  * - id xác định: conv_project_<projectId> → idempotent, không tạo trùng lặp.
- * - Thành viên: pmId + involvedEmployeeIds của dự án.
+ * - Thành viên: pmId của dự án.
  * - Nếu nhóm đã tồn tại, đồng bộ thêm thành viên mới (không xóa ai).
  */
 export async function ensureProjectChatGroup(
-  project: { id: string; name: string; pmId?: string; involvedEmployeeIds?: string[] }
+  project: { id: string; name: string; pmId?: string }
 ): Promise<Conversation | null> {
   if (!project || !project.id) return null;
 
@@ -209,7 +209,7 @@ export async function ensureProjectChatGroup(
   const existing = conversationsCache.get(convId);
 
   const memberIds = Array.from(new Set(
-    [project.pmId, ...(project.involvedEmployeeIds || [])].filter(Boolean) as string[]
+    [project.pmId].filter(Boolean) as string[]
   ));
 
   if (existing) {

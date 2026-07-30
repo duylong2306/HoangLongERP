@@ -278,7 +278,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
                 {/* Motivational quote */}
                 <div className="px-3 py-2.5 border-t border-slate-800/50">
                   <p className="text-[7.5px] text-slate-500 italic leading-relaxed line-clamp-2">
-                    {displaySettings.motionQuote || '"May mắn đứng về phía người dám đương đầu."'}
+                    {displaySettings.motivationQuote || '"May mắn đứng về phía người dám đương đầu."'}
                   </p>
                 </div>
 

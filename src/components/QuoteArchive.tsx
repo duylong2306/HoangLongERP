@@ -100,7 +100,6 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
         status: 'new',
         progress: 0,
         kanbanColumnId: quickProjKanbanColId,
-        involvedEmployeeIds: ['emp_3', 'emp_1'],
         baoGiaFile: {
           name: `${selectedQuote.code || 'BAO_GIA'}.pdf`,
           size: '1.2 MB',

@@ -20,8 +20,6 @@ export interface KanbanColumnAutomation {
   dueDateDaysOffset?: number;
   checklistText?: string;
   checklistTexts?: string[];
-  involvedId?: string;
-  involvedEmployeeIds?: string[];
   descriptionToAdd?: string;
   sendEmailTo?: string;
   textStyleStyleItalic?: boolean;

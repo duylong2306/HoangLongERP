@@ -19,7 +19,6 @@ import { dbService } from '../../lib/dbService';
 //   assigner        → "Người Giao Việc"
 //   assignee        → "Phụ Trách Công Việc"
 //   missionAssignee → "Phụ Trách Nhiệm Vụ"
-//   involved        → "Người Liên Quan"
 //   accountant      → "Kế Toán"
 //   none            → "Không Liên Quan"
 export type RoleScope =
@@ -28,7 +27,6 @@ export type RoleScope =
   | 'pm'               // Trưởng Dự Án (project.pmId)
   | 'assignee'         // Phụ Trách Công Việc (task.assigneeId)
   | 'missionAssignee'  // Phụ Trách Nhiệm Vụ (task.missions[].mainAssigneeId)
-  | 'involved'         // Người Liên Quan (task.involvedEmployeeIds)
   | 'accountant'       // Kế Toán (role hệ thống)
   | 'none';            // Không Liên Quan
 
@@ -58,7 +56,7 @@ export interface TaskPermissionMatrix {
 
 export const DEFAULT_TASK_PERMISSIONS: TaskPermissionMatrix = {
   actions: {
-    view:             ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'involved', 'accountant'],
+    view:             ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'accountant'],
     receiveTask:      ['assignee', 'missionAssignee'],
     completeTask:     ['assignee', 'missionAssignee'],
     approveResult:    ['director', 'pm', 'assigner'],
@@ -158,9 +156,6 @@ export const getTaskRoleScope = (
 
   // 6. Kế Toán (Role Group: role_accounting)
   if (isUserInRoleGroup(currentUser.id, ROLE_GROUP_ACCOUNTING)) return 'accountant';
-
-  // 7. Người Tham Gia
-  if (task.involvedEmployeeIds?.includes(currentUser.id)) return 'involved';
 
   return 'none';
 };

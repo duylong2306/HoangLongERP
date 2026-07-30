@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { dbService } from '../lib/dbService';
 import { Employee, Project, ArchivedQuote, ProjectType } from '../types';
 import { useNotification, isUserInRoleGroup } from '../context';
@@ -58,15 +58,18 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
   }, [selectedQuote]);
 
   // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
+  // Lưu ý: KHÔNG đưa selectedQuote vào dependency để tránh popup bị mở lại ngay sau khi đóng.
+  const openedPreselectedRef = useRef<string | null>(null);
   useEffect(() => {
     if (preselectedProjectId && archivedList.length > 0) {
       const q = archivedList.find(x => x.projectId === preselectedProjectId);
-      if (q && (!selectedQuote || selectedQuote.id !== q.id)) {
+      if (q && openedPreselectedRef.current !== preselectedProjectId) {
+        openedPreselectedRef.current = preselectedProjectId;
         setSelectedQuote(q);
         if (initialDetailTab) setActiveDetailTab(initialDetailTab);
       }
     }
-  }, [preselectedProjectId, archivedList, initialDetailTab, selectedQuote]);
+  }, [preselectedProjectId, archivedList, initialDetailTab]);
 
   const handleQuickCreateProject = async () => {
     if (!selectedQuote) return;
@@ -93,13 +96,11 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
         status: 'new',
         progress: 0,
         kanbanColumnId: quickProjKanbanColId,
-        involvedEmployeeIds: ['emp_3', 'emp_1'],
         baoGiaFile: {
           name: `${selectedQuote.code || 'BAO_GIA'}.pdf`,
           size: '1.2 MB',
           createdAt: new Date().toLocaleDateString('vi-VN'),
           totalAmount: selectedQuote.totalAmount || 0,
-          discountPercent: selectedQuote.config?.discountPercent || 0,
           items: selectedQuote.items || []
         }
       };
@@ -258,7 +259,7 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
                 <th className="px-4 py-3">Khách Hàng</th>
                 <th className="px-4 py-3">Vật Liệu Hoàn Thiện / Hạng Mục Gỗ</th>
                 <th className="px-4 py-3">Ngày Lập</th>
-                <th className="px-4 py-3 text-right">Tổng Tiền (Gồm VAT)</th>
+                <th className="px-4 py-3 text-right">Tổng Tiền</th>
                 <th className="px-4 py-3 text-center">Trạng Thế Hồ Sơ</th>
                 <th className="px-4 py-3 text-center">Hành Động</th>
               </tr>
@@ -476,7 +477,14 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
             </div>
 
             <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
-              <QuotationTableSheet quoteData={selectedQuote} initialTab={activeDetailTab} />
+              <QuotationTableSheet
+                quoteData={selectedQuote}
+                initialTab={activeDetailTab}
+                onApproved={(updated) => {
+                  setSelectedQuote(prev => prev ? { ...prev, ...updated } : prev);
+                  setArchivedList(prev => prev.map(q => (q.id === updated.id ? { ...q, ...updated } : q)));
+                }}
+              />
             </div>
 
             <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center gap-4">

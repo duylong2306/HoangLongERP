@@ -661,9 +661,6 @@ export default function TaskDetailModal({
     if (selectedTask.assigneeId) {
       relatedIds.add(selectedTask.assigneeId);
     }
-    if (selectedTask.involvedEmployeeIds) {
-      selectedTask.involvedEmployeeIds.forEach(id => relatedIds.add(id));
-    }
     if (selectedTask.missions) {
       selectedTask.missions.forEach(mission => {
         if (mission.mainAssigneeId) {
@@ -1132,9 +1129,6 @@ export default function TaskDetailModal({
     }
   };
 
-  const involvedEmployees = employees.filter(emp => selectedTask.involvedEmployeeIds?.includes(emp.id));
-  const nonInvolvedEmployees = employees.filter(emp => emp.id !== selectedTask.assigneeId && !selectedTask.involvedEmployeeIds?.includes(emp.id));
-
   const managementGroup = employees.filter(e => e.role === 'director' || e.role === 'pm' || e.role === 'accountant');
   const finalManagementGroup = managementGroup.length > 0 ? managementGroup : employees;
 
@@ -1436,50 +1430,6 @@ export default function TaskDetailModal({
                         </select>
                       </div>
                     )}
-                  </div>
-
-                  {/* 3. THỢ THI CÔNG LIÊN ĐỚI LÀM CHUNG */}
-                  <div className="space-y-1.5">
-                    <span className="block text-slate-500 text-[9.5px] font-bold uppercase tracking-wider">Nhân Sự Liên Quan</span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {involvedEmployees.map(emp => 
-                        renderInitialsAvatar(emp, {
-                          showNameLabel: false,
-                          onDelete: (isReadOnly || selectedTask.status === 'completed') ? undefined : () => {
-                            const updatedIds = (selectedTask.involvedEmployeeIds || []).filter(id => id !== emp.id);
-                            onUpdateTask(selectedTask.id, {
-                              involvedEmployeeIds: updatedIds
-                            });
-                          }
-                        })
-                      )}
-                      
-                      {!isReadOnly && selectedTask.status !== 'completed' && nonInvolvedEmployees.length > 0 && (
-                        <div className="relative shrink-0">
-                          <button className="w-9 h-9 rounded-full bg-slate-900 border border-slate-800 hover:border-emerald-500 flex items-center justify-center text-slate-400 hover:text-emerald-400 transition cursor-pointer shadow">
-                            <Plus className="w-4 h-4" />
-                          </button>
-                          <select
-                            value=""
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (!val) return;
-                              const empName = employees.find(emp => emp.id === val)?.name || '';
-                              const updatedIds = [...(selectedTask.involvedEmployeeIds || []), val];
-                              onUpdateTask(selectedTask.id, {
-                                involvedEmployeeIds: updatedIds
-                              });
-                            }}
-                            className="absolute inset-0 opacity-0 cursor-pointer w-9 h-9 rounded-full"
-                          >
-                            <option value="">+ Thêm...</option>
-                            {nonInvolvedEmployees.map(emp => (
-                              <option key={emp.id} value={emp.id} className="bg-slate-950 text-slate-100">{emp.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                    </div>
                   </div>
 
                 </div>

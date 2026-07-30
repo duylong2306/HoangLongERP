@@ -976,25 +976,23 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     <div className="space-y-4" id="accounting_product_catalog_panel">
       {/* Upper stats bar & Category Filtering */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-3" id="catalog_filters_section">
-        {/* Category Tabs */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-extrabold uppercase text-slate-400 tracking-wider mr-2">Bộ lọc danh mục:</span>
-          {uniqueCategories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => {
-                setSelectedCategory(cat);
-                setCurrentPage(1);
-              }}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
-                selectedCategory === cat
-                  ? 'bg-orange-600 font-extrabold text-white border border-orange-500/20 shadow'
-                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-850 border border-transparent'
-              }`}
-            >
-              {cat === 'all' ? 'Tất cả' : cat}
-            </button>
-          ))}
+        {/* Category Filter Dropdown */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-extrabold uppercase text-slate-400 tracking-wider whitespace-nowrap">Bộ lọc danh mục:</span>
+          <select
+            value={selectedCategory}
+            onChange={(e) => {
+              setSelectedCategory(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="bg-slate-900 text-xs font-bold text-slate-200 border border-slate-800 rounded-lg px-3 py-1.5 outline-none cursor-pointer focus:border-orange-500 transition-colors"
+          >
+            {uniqueCategories.map(cat => (
+              <option key={cat} value={cat} className="bg-slate-950 text-slate-200">
+                {cat === 'all' ? 'Tất cả' : cat}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Action Controls */}

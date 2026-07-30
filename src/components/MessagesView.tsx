@@ -594,8 +594,8 @@ export default function MessagesView({
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[500px] bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden font-sans shadow-2xl relative" id="messenger_container">
 
-      {/* ===== TAB MENU COLUMN (trái, hẹp) ===== */}
-      <div className={`w-[110px] shrink-0 border-r border-slate-800 bg-slate-900 flex flex-col p-2 gap-1.5 ${mobileView === 'detail' ? 'hidden md:flex' : 'flex'}`}>
+      {/* ===== TAB MENU COLUMN (trái, hẹp) — ẩn trên mobile, dùng dropdown thay thế ===== */}
+      <div className="w-[110px] shrink-0 border-r border-slate-800 bg-slate-900 hidden md:flex flex-col p-2 gap-1.5">
         {paneTabs.map(tab => (
           <button key={tab.id}
             onClick={() => { setActivePaneTab(tab.id); setSearchQuery(''); }}
@@ -624,7 +624,22 @@ export default function MessagesView({
         {/* Header */}
         <div className="p-3 border-b border-slate-800 bg-slate-900">
           <div className="flex items-center justify-between mb-2">
-            <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            {/* Mobile: dropdown thay thế tab column */}
+            <div className="sm:hidden flex-1">
+              <select
+                value={activePaneTab}
+                onChange={(e) => { setActivePaneTab(e.target.value as ActivePaneTab); setSearchQuery(''); }}
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-[13px] font-bold rounded-lg px-3 py-2 outline-none cursor-pointer appearance-none"
+              >
+                {paneTabs.map(tab => (
+                  <option key={tab.id} value={tab.id}>
+                    {tab.label}{showBadgeCounts && tab.count > 0 ? ` (${tab.count > 99 ? '99+' : tab.count})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {/* Desktop: title */}
+            <h1 className="hidden sm:flex text-base font-bold text-white tracking-tight items-center gap-2">
               <MessageSquare className="w-5 h-5 text-indigo-400" />
               <span>Tin nhắn</span>
             </h1>

@@ -231,7 +231,6 @@ const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><strong>
 <p>{{BANG_CHI_TIET_BÁO_GIÁ}}</p>
 <p>Tổng giá trị hợp đồng: <strong>{{TONG_CONG}}</strong> VND</p>
 <p>Viết bằng chữ: <em>{{TONG_CONG_CHU}}</em></p>
-<p>Đơn giá chưa bao gồm thuế VAT</p>
 
 <p><strong>Điều 4. Cách thức thanh toán hợp đồng thi công nội thất theo từng giai đoạn (tiền mặt hoặc chuyển khoản)</strong></p>
 <p>Khi hợp đồng được ký kết, để đảm bảo vốn sản xuất, Bên A ứng trước cho Bên B 50% kinh phí trên tổng giá trị hợp đồng</p>
@@ -288,12 +287,13 @@ interface ContractDocumentProps {
 export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   const { addToast } = useNotification();
   const items = quoteData.items || [];
-  const discountPercent = quoteData.discountPercent || 0;
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ.
+  const discountPercent = 0;
   const rawTotal = items.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0);
-  const discountValue = rawTotal * (discountPercent / 100);
-  const subtotalAfterDiscount = rawTotal - discountValue;
-  const vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-  const grandTotal = subtotalAfterDiscount + vatAmount;
+  const discountValue = 0;
+  const subtotalAfterDiscount = rawTotal;
+  const vatAmount = 0;
+  const grandTotal = rawTotal;
 
   // Detect sector
   const isMechanical = quoteData.sector === 'mechanical';
@@ -348,10 +348,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   // Use contractItems for table generation
   const tableItems = isConstruction && quoteData.selectedFinalResult ? contractItems : items;
   const tableRawTotal = tableItems.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0);
-  const tableDiscountValue = tableRawTotal * (discountPercent / 100);
-  const tableSubtotalAfterDiscount = tableRawTotal - tableDiscountValue;
-  const tableVatAmount = Math.round(tableSubtotalAfterDiscount * 0.08);
-  const tableGrandTotal = tableSubtotalAfterDiscount + tableVatAmount;
+  const tableGrandTotal = tableRawTotal; // Không cộng VAT, không trừ chiết khấu
 
   const sector = isMechanical ? 'mechanical' : isConstruction ? 'construction' : 'furniture';
   const fallbackTemplate = isMechanical 
@@ -425,21 +422,9 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
             </tr>
           `).join('')}
           <tr style="font-weight: bold; background-color: #fcfcfc;">
-            <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Cộng thành tiền trước chiết khấu:</td>
-            <td style="padding: 8px; border: 1px solid #000000; text-align: right;">${tableRawTotal.toLocaleString('vi-VN')}</td>
-            ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000; text-align: center;">100%</td>` : ''}
-          </tr>
-          ${tableDiscountValue > 0 ? `
-            <tr style="font-weight: bold; background-color: #fcfcfc;">
-              <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Chiết khấu (${discountPercent}%):</td>
-              <td style="padding: 8px; border: 1px solid #000000; text-align: right;">-${tableDiscountValue.toLocaleString('vi-VN')}</td>
-              ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000;"></td>` : ''}
-            </tr>
-          ` : ''}
-          <tr style="font-weight: bold; background-color: #fcfcfc;">
             <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Tổng cộng thanh toán:</td>
             <td style="padding: 8px; border: 1px solid #000000; text-align: right; font-size: 13px;">${tableGrandTotal.toLocaleString('vi-VN')}</td>
-            ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000;"></td>` : ''}
+            ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000; text-align: center;">100%</td>` : ''}
           </tr>
         </tbody>
       </table>

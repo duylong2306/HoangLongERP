@@ -131,10 +131,11 @@ interface AcceptanceDocumentProps {
 export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProps) {
   const { addToast } = useNotification();
   const items = quoteData.items || [];
-  const discountPercent = quoteData.discountPercent || 0;
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ.
+  const discountPercent = 0;
   const rawTotal = items.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0);
-  const discountValue = rawTotal * (discountPercent / 100);
-  const grandTotal = rawTotal - discountValue;
+  const discountValue = 0;
+  const grandTotal = rawTotal;
 
   const isMechanical = quoteData.sector === 'mechanical';
   const isConstruction = quoteData.sector === 'construction';

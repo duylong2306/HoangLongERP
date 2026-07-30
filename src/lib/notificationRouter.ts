@@ -130,11 +130,6 @@ export function resolveStakeholders(event: NotificationEvent): string[] {
         if (project?.pmId) add(project.pmId);
       }
 
-      // 4. Những người involved
-      if (metadata.involvedIds?.length) {
-        metadata.involvedIds.forEach((id: string) => add(id));
-      }
-
       // 5. Approvers
       if (metadata.approverIds?.length) {
         metadata.approverIds.forEach((id: string) => add(id));
@@ -228,7 +223,7 @@ export function resolveStakeholders(event: NotificationEvent): string[] {
           // PM
           add(project.pmId);
 
-          // Members (involvedEmployeeIds)
+          // Members
           if ((project as any).memberIds) {
             (project as any).memberIds.forEach((id: string) => add(id));
           }

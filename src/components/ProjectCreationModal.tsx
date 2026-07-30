@@ -165,12 +165,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
           const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
           
           const assigneeId = subtaskAuto.assignId || rule.assignId || customProject.pmId || 'emp_3';
-          const involvedEmployeeIds = Array.from(new Set([
-            ...(customProject.involvedEmployeeIds || []),
-            ...(rule.involvedId ? [rule.involvedId] : []),
-            ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-            ...(subtaskAuto.involvedEmployeeIds || [])
-          ]));
 
           // Send approval request
           let approvals = undefined;
@@ -196,7 +190,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
             description: `Công việc con được tạo tự động bởi quy trình khi khởi tạo vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
             assignerId: customProject.pmId || 'emp_3',
             assigneeId: assigneeId,
-            involvedEmployeeIds: involvedEmployeeIds,
             department: 'Thi công',
             deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             priority: 'medium',
@@ -262,17 +255,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
         ruleLogs.push(`Thêm mục checklist yêu cầu: ${rule.checklistText}`);
       }
 
-      // rule 9: Add involved person
-      const ruleInvolvedIds = rule.involvedEmployeeIds || (rule.involvedId ? [rule.involvedId] : []);
-      if (ruleInvolvedIds.length > 0) {
-        const currentInvolved = customProject.involvedEmployeeIds || [];
-        const addedIds = ruleInvolvedIds.filter(id => !currentInvolved.includes(id));
-        if (addedIds.length > 0) {
-          customProject.involvedEmployeeIds = [...currentInvolved, ...addedIds];
-          const names = addedIds.filter(Boolean).map(id => employees.find(e => e.id === id)?.name || 'Người hỗ trợ').join(', ');
-          ruleLogs.push(`Thêm cộng sự hỗ trợ liên quan: ${names}`);
-        }
-      }
     }
 
     const ruleLogged = ruleLogs.join('. ') || '';
