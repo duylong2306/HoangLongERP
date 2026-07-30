@@ -270,16 +270,19 @@ export default function HrDataTab(props: HrDataTabProps) {
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
-          const wb = XLSX.read(ev.target?.result, { type: 'binary' });
+          const data = ev.target?.result;
+          if (!data) { reject(new Error('Không đọc được dữ liệu file')); return; }
+          const wb = XLSX.read(data, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
           const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
           resolve(rows);
         } catch (err) {
+          console.error('[Import Excel] Lỗi parse:', err);
           reject(err);
         }
       };
       reader.onerror = () => reject(new Error('Không thể đọc file'));
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
     });
   };
 
