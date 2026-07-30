@@ -2678,10 +2678,20 @@ export default function TaskDetailModal({
                 {selectedTask.status !== 'todo' && (
                   <>
                     {selectedTask.isDocGenerationEnabled === true && (() => {
-                      const projectArchivedQuotes = archivedQuotesList.filter(q => 
-                        q.projectId === project?.id && 
-                        (q._sectorType === project?.type || (!q._sectorType && project?.type === 'general'))
-                      );
+                      // Khớp hồ sơ lưu trữ theo dự án: ưu tiên projectId, fallback projectName,
+                      // và dự phòng sang selectedTask.projectId (công việc con có thể chưa gắn projectId trực tiếp)
+                      const targetProjectId = project?.id || selectedTask?.projectId;
+                      const projectArchivedQuotes = archivedQuotesList.filter(q => {
+                        const matchProject = targetProjectId
+                          ? q.projectId === targetProjectId
+                          : (project?.name ? q.projectName === project.name : false);
+                        if (!matchProject) return false;
+                        // Lọc theo lĩnh vực chỉ khi đã biết type dự án
+                        if (project?.type) {
+                          return q._sectorType === project.type || (!q._sectorType && project.type === 'general');
+                        }
+                        return true;
+                      });
                       const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                       const hasQuoteFile = latestArchivedQuote;
 
@@ -2752,10 +2762,11 @@ export default function TaskDetailModal({
                       // Điều hướng Menu Hồ Sơ Dự Án sang Lưu Trữ Hồ Sơ theo lĩnh vực (Xây dựng / Nội thất / Cơ khí)
                       const quoteLocked = quoteStatusText === 'Chưa Lập';
                       const goArchive = () => {
+                        const targetProjectId = project?.id || selectedTask?.projectId;
                         window.dispatchEvent(new CustomEvent('hl-switch-tab', {
                           detail: {
                             tab: sectorArchiveTab(project?.type),
-                            projectId: project?.id,
+                            projectId: targetProjectId,
                             customerId: project?.customerId,
                           },
                         }));
