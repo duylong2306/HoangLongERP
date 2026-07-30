@@ -2689,21 +2689,6 @@ export default function TaskDetailModal({
                       const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                       const hasQuoteFile = latestArchivedQuote;
 
-                      // [DEBUG Menu Hồ Sơ Dự Án] — xem trong Console (F12) để chẩn đoán
-                      console.log('[DEBUG MenuHSD]', {
-                        selectedTaskId: selectedTask?.id,
-                        selectedTaskProjectId: selectedTask?.projectId,
-                        projectId: project?.id,
-                        projectType: project?.type,
-                        targetProjectId,
-                        archivedCount: archivedQuotesList.length,
-                        matchedCount: projectArchivedQuotes.length,
-                        quotesSample: archivedQuotesList.slice(0, 8).map((q: any) => ({
-                          pid: q.projectId, pname: q.projectName, sector: (q as any).sector, _sectorType: (q as any)._sectorType, code: q.code
-                        })),
-                        latestArchivedQuote
-                      });
-
                       // Status configurations
                       let quoteStatusText = "Chưa Lập";
                       let quoteStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
@@ -2758,13 +2743,15 @@ export default function TaskDetailModal({
 
                       // Điều hướng Menu Hồ Sơ Dự Án sang Lưu Trữ Hồ Sơ theo lĩnh vực (Xây dựng / Nội thất / Cơ khí)
                       const quoteLocked = quoteStatusText === 'Chưa Lập';
-                      const goArchive = () => {
+                      const goArchive = (docType: 'quote' | 'contract' | 'acceptance' | 'liquidation' = 'quote') => {
                         const targetProjectId = project?.id || selectedTask?.projectId;
                         window.dispatchEvent(new CustomEvent('hl-switch-tab', {
                           detail: {
                             tab: sectorArchiveTab(project?.type),
                             projectId: targetProjectId,
                             customerId: project?.customerId,
+                            quotesSubTab: 'archive',
+                            docType,
                           },
                         }));
                         onClose();
@@ -2779,7 +2766,7 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={goArchive}
+                            onClick={() => goArchive('quote')}
                             className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-indigo-400 hover:text-indigo-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
                           >
                             <div className="flex items-center gap-2">
@@ -2793,7 +2780,7 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={goArchive}
+                            onClick={() => goArchive('contract')}
                             disabled={quoteLocked}
                             className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-400 hover:text-rose-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
@@ -2808,7 +2795,7 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={goArchive}
+                            onClick={() => goArchive('acceptance')}
                             disabled={quoteLocked}
                             className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
@@ -2823,7 +2810,7 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={goArchive}
+                            onClick={() => goArchive('liquidation')}
                             disabled={quoteLocked}
                             className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-amber-400 hover:text-amber-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >

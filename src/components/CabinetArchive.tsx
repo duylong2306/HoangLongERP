@@ -16,9 +16,11 @@ interface CabinetArchiveProps {
   currentUser: Employee;
   canEdit?: boolean;
   canDelete?: boolean;
+  preselectedProjectId?: string;
+  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
 }
 
-export default function CabinetArchive({ currentUser, canEdit = true, canDelete = true }: CabinetArchiveProps) {
+export default function CabinetArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab }: CabinetArchiveProps) {
   const [archivedList, setArchivedList] = useState<ArchivedQuote[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -48,12 +50,23 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
 
   useEffect(() => {
     if (selectedQuote) {
-      const candidateName = selectedQuote.projectName || 
-                            (selectedQuote.projectId && !selectedQuote.projectId.startsWith('proj_') && !selectedQuote.projectId.startsWith('q_') ? selectedQuote.projectId : '') || 
+      const candidateName = selectedQuote.projectName ||
+                            (selectedQuote.projectId && !selectedQuote.projectId.startsWith('proj_') && !selectedQuote.projectId.startsWith('q_') ? selectedQuote.projectId : '') ||
                             `Dự án ${selectedQuote.customerName || 'vãng lai'} - Lập Nội thất gỗ`;
       setQuickProjName(candidateName);
     }
   }, [selectedQuote]);
+
+  // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
+  useEffect(() => {
+    if (preselectedProjectId && archivedList.length > 0) {
+      const q = archivedList.find(x => x.projectId === preselectedProjectId);
+      if (q && (!selectedQuote || selectedQuote.id !== q.id)) {
+        setSelectedQuote(q);
+        if (initialDetailTab) setActiveDetailTab(initialDetailTab);
+      }
+    }
+  }, [preselectedProjectId, archivedList, initialDetailTab, selectedQuote]);
 
   const handleQuickCreateProject = async () => {
     if (!selectedQuote) return;

@@ -683,6 +683,8 @@ interface QuotationSystemProps {
   preselectedCustomerId?: string;
   preselectedProjectId?: string;
   initialTab?: 'dashboard' | 'furniture' | 'construction' | 'mechanical' | 'subcontractor';
+  initialSubTab?: string;
+  preselectedDocType?: string;
   currentUser?: any;
 }
 
@@ -695,6 +697,8 @@ export default function QuotationSystem({
   preselectedCustomerId,
   preselectedProjectId,
   initialTab = 'construction',
+  initialSubTab,
+  preselectedDocType,
   currentUser
 }: QuotationSystemProps) {
   const { addToast } = useNotification();
@@ -764,14 +768,23 @@ export default function QuotationSystem({
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'furniture' | 'construction' | 'mechanical' | 'subcontractor'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'sent' | 'approved' | 'rejected'>('all');
-  const [furnitureSubTab, setFurnitureSubTab] = useState<'estimator' | 'catalog' | 'archive' | 'template'>('estimator');
+  const [furnitureSubTab, setFurnitureSubTab] = useState<'estimator' | 'catalog' | 'archive' | 'template'>(initialSubTab as any || 'estimator');
   const [subcontractorSubTab, setSubcontractorSubTab] = useState<'estimator' | 'archive' | 'template'>('estimator');
   const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
-  const [constructionSubTab, setConstructionSubTab] = useState<'quotes_folder' | 'norms' | 'archive' | 'template'>('quotes_folder');
+  const [constructionSubTab, setConstructionSubTab] = useState<'quotes_folder' | 'norms' | 'archive' | 'template'>(initialSubTab as any || 'quotes_folder');
   const [quotesFolderTab, setQuotesFolderTab] = useState<'estimator' | 'takeoff' | 'final_quote'>('estimator');
   const [normsInnerTab, setNormsInnerTab] = useState<'price' | 'composition' | 'material_labor'>('price');
   const [constructionSearchTerm, setConstructionSearchTerm] = useState('');
-  const [mechanicalSubTab, setMechanicalSubTab] = useState<'estimator' | 'archive' | 'template'>('estimator');
+  const [mechanicalSubTab, setMechanicalSubTab] = useState<'estimator' | 'archive' | 'template'>(initialSubTab as any || 'estimator');
+
+  // Khi điều hướng từ Menu Hồ Sơ Dự Án, mở thẳng sub-tab Lưu Trữ (archive)
+  useEffect(() => {
+    if (initialSubTab) {
+      setFurnitureSubTab(initialSubTab as any);
+      setConstructionSubTab(initialSubTab as any);
+      setMechanicalSubTab(initialSubTab as any);
+    }
+  }, [initialSubTab]);
 
   // --- SHARED STATES FOR CONSTRUCTION PROJECT & CUSTOMER ---
   const [selectedCustomerId, setSelectedCustomerId] = useState(preselectedCustomerId || '');
@@ -1664,7 +1677,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <CabinetArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} />
+              <CabinetArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} />
             )}
           </div>
         )}
@@ -2834,7 +2847,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <ConstructionArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} />
+              <ConstructionArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} />
             )}
           </div>
         )}
@@ -3011,7 +3024,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <MechanicalArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} />
+              <MechanicalArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} />
             )}
           </div>
         )}

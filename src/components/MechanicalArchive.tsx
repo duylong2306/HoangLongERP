@@ -17,9 +17,11 @@ interface MechanicalArchiveProps {
   currentUser: Employee;
   canEdit?: boolean;
   canDelete?: boolean;
+  preselectedProjectId?: string;
+  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
 }
 
-export default function MechanicalArchive({ currentUser, canEdit = true, canDelete = true }: MechanicalArchiveProps) {
+export default function MechanicalArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab }: MechanicalArchiveProps) {
   const { addToast } = useNotification();
   const [archivedList, setArchivedList] = useState<ArchivedQuote[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
@@ -27,6 +29,17 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<ArchivedQuote | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>('quote');
+
+  // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
+  useEffect(() => {
+    if (preselectedProjectId && archivedList.length > 0) {
+      const q = archivedList.find(x => x.projectId === preselectedProjectId);
+      if (q && (!selectedQuote || selectedQuote.id !== q.id)) {
+        setSelectedQuote(q);
+        if (initialDetailTab) setActiveDetailTab(initialDetailTab);
+      }
+    }
+  }, [preselectedProjectId, archivedList, initialDetailTab, selectedQuote]);
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
 
   // States for Quick Project Creation from Quote detail

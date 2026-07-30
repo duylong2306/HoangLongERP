@@ -783,6 +783,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [financeDuLieuTab, setFinanceDuLieuTab] = useState<string>('khach_hang');
   const [preselectedCustomerId, setPreselectedCustomerId] = useState<string>('');
   const [preselectedProjectId, setPreselectedProjectId] = useState<string>('');
+  const [preselectedQuotesSubTab, setPreselectedQuotesSubTab] = useState<string | null>(null);
+  const [preselectedDocType, setPreselectedDocType] = useState<string | null>(null);
+
+  // Reset sub-tab/preselect khi rời khỏi module báo giá để tránh stale "archive"
+  useEffect(() => {
+    if (!['quotes', 'quotes-construction', 'quotes-mechanical', 'quotes-subcontractor'].includes(activeTab)) {
+      setPreselectedQuotesSubTab(null);
+      setPreselectedDocType(null);
+    }
+  }, [activeTab]);
 
   // Thu gọn sidebar & hệ thống thông báo tin nhắn mới
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -1205,12 +1215,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         if (typeof customEv.detail === 'string') {
           setActiveTab(customEv.detail);
         } else if (typeof customEv.detail === 'object') {
-          const { tab, projectId, customerId, financeSubTab, financeDuLieuTab } = customEv.detail;
+          const { tab, projectId, customerId, financeSubTab, financeDuLieuTab, quotesSubTab, docType } = customEv.detail;
           if (tab) setActiveTab(tab);
           if (projectId) setPreselectedProjectId(projectId);
           if (customerId) setPreselectedCustomerId(customerId);
           if (financeSubTab) setFinanceSubTab(financeSubTab);
           if (financeDuLieuTab) setFinanceDuLieuTab(financeDuLieuTab);
+          setPreselectedQuotesSubTab(quotesSubTab || null);
+          setPreselectedDocType(docType || null);
         }
       }
     };
@@ -3549,6 +3561,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onUpdateQuoteStatus={handleUpdateQuoteStatus}
               preselectedCustomerId={preselectedCustomerId}
               preselectedProjectId={preselectedProjectId}
+              initialSubTab={preselectedQuotesSubTab || undefined}
+              preselectedDocType={preselectedDocType || undefined}
               currentUser={currentUser}
               initialTab={
                 activeTab === 'quotes-construction' 
