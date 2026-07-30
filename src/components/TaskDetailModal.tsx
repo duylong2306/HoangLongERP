@@ -2720,51 +2720,39 @@ export default function TaskDetailModal({
                       let contractStatusText = "Chưa Lập";
                       let contractStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
                       if (hasQuoteFile) {
-                        if (!latestArchivedQuote.isApproved) {
+                        // Hồ sơ Hợp Đồng tự sinh từ Báo Giá → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if (latestArchivedQuote.contractApproved) {
+                          contractStatusText = "Đã Duyệt";
+                          contractStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
                           contractStatusText = "Chờ Duyệt";
                           contractStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                        } else if (latestArchivedQuote.contractHtml) {
-                          if (latestArchivedQuote.contractApproved) {
-                            contractStatusText = "Đã Duyệt";
-                            contractStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
-                          } else {
-                            contractStatusText = "Chờ Duyệt";
-                            contractStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                          }
                         }
                       }
 
                       let acceptanceStatusText = "Chưa Lập";
                       let acceptanceStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
                       if (hasQuoteFile) {
-                        if (!latestArchivedQuote.isApproved) {
+                        // Hồ sơ Nghiệm Thu tự sinh từ Báo Giá → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if (latestArchivedQuote.acceptanceApproved) {
+                          acceptanceStatusText = "Đã Duyệt";
+                          acceptanceStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
                           acceptanceStatusText = "Chờ Duyệt";
                           acceptanceStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                        } else if (latestArchivedQuote.acceptanceHtml) {
-                          if (latestArchivedQuote.acceptanceApproved) {
-                            acceptanceStatusText = "Đã Duyệt";
-                            acceptanceStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
-                          } else {
-                            acceptanceStatusText = "Chờ Duyệt";
-                            acceptanceStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                          }
                         }
                       }
 
                       let liquidationStatusText = "Chưa Lập";
                       let liquidationStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
                       if (hasQuoteFile) {
-                        if (!latestArchivedQuote.isApproved) {
+                        // Hồ sơ Thanh Lý tự sinh từ Báo Giá → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if (latestArchivedQuote.liquidationApproved) {
+                          liquidationStatusText = "Đã Duyệt";
+                          liquidationStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
                           liquidationStatusText = "Chờ Duyệt";
                           liquidationStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                        } else if (latestArchivedQuote.liquidationHtml) {
-                          if (latestArchivedQuote.liquidationApproved) {
-                            liquidationStatusText = "Đã Duyệt";
-                            liquidationStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
-                          } else {
-                            liquidationStatusText = "Chờ Duyệt";
-                            liquidationStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                          }
                         }
                       }
 
