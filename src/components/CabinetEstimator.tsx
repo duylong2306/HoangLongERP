@@ -1225,6 +1225,15 @@ export default function CabinetEstimator({
         totalAmount: totalQuoteAmount
       };
 
+      // [DEBUG SaveQuote] — xem trong Console (F12) để chẩn đoán liên kết dự án
+      console.log('[DEBUG SaveQuote]', {
+        selectedProjectId,
+        savedProjectId: archivedRecord.projectId,
+        savedProjectName: archivedRecord.projectName,
+        sector: archivedRecord.sector,
+        preselectedProjectId
+      });
+
       try {
         await dbService.archivedQuotes.save({ ...archivedRecord, sector: 'furniture' });
         

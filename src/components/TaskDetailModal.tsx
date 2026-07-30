@@ -2695,6 +2695,21 @@ export default function TaskDetailModal({
                       const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                       const hasQuoteFile = latestArchivedQuote;
 
+                      // [DEBUG Menu Hồ Sơ Dự Án] — xem trong Console (F12) để chẩn đoán
+                      console.log('[DEBUG MenuHSD]', {
+                        selectedTaskId: selectedTask?.id,
+                        selectedTaskProjectId: selectedTask?.projectId,
+                        projectId: project?.id,
+                        projectType: project?.type,
+                        targetProjectId,
+                        archivedCount: archivedQuotesList.length,
+                        matchedCount: projectArchivedQuotes.length,
+                        quotesSample: archivedQuotesList.slice(0, 8).map((q: any) => ({
+                          pid: q.projectId, pname: q.projectName, sector: (q as any).sector, _sectorType: (q as any)._sectorType, code: q.code
+                        })),
+                        latestArchivedQuote
+                      });
+
                       // Status configurations
                       let quoteStatusText = "Chưa Lập";
                       let quoteStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
