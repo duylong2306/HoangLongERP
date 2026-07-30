@@ -592,32 +592,42 @@ export default function FinanceManagement({
     });
   }, [customLiabilities]);
 
-  // ── Custom Receivables (Công nợ phải thu thủ công / import từ Excel) ────────
+  // ── All Receivables (Công nợ phải thu: auto từ duyệt BG + thủ công / import Excel) ────────
   const [customReceivables, setCustomReceivables] = useState<any[]>([]);
 
-  // Load data từ Supabase khi mount
+  // Load data từ Supabase khi mount + lắng nghe realtime event
   useEffect(() => {
     let active = true;
     const fetchReceivables = async () => {
       try {
         const list = await dbService.accountingReceivables.list();
-        if (active) setCustomReceivables(list);
+        if (active) {
+          console.log(`[Công Nợ Thu] 📥 Đã tải ${list.length} khoản thu từ accounting_receivables (${list.filter((r: any) => r.isAuto).length} auto, ${list.filter((r: any) => !r.isAuto).length} thủ công)`);
+          setCustomReceivables(list);
+        }
       } catch (err) {
         console.error("Lỗi khi tải công nợ phải thu:", err);
       }
     };
     fetchReceivables();
-    return () => { active = false; };
+
+    // Lắng nghe realtime khi có thay đổi từ trình duyệt khác
+    const handleRealtime = () => fetchReceivables();
+    window.addEventListener('hl-accounting-receivables-updated', handleRealtime);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-accounting-receivables-updated', handleRealtime);
+    };
   }, []);
 
-  // Sync lên Supabase khi data thay đổi (skip lần đầu mount)
+  // Sync lên Supabase khi data thay đổi (skip lần đầu mount) — chỉ sync items thủ công
   const isFirstRenderReceivables = useRef(true);
   useEffect(() => {
     if (isFirstRenderReceivables.current) {
       isFirstRenderReceivables.current = false;
       return;
     }
-    customReceivables.forEach(r => {
+    customReceivables.filter(r => !r.isAuto).forEach(r => {
       dbService.accountingReceivables.save(r).catch(() => {});
     });
   }, [customReceivables]);
@@ -633,37 +643,24 @@ export default function FinanceManagement({
   const [recvNotes, setRecvNotes] = useState('');
   const [receivableToDelete, setReceivableToDelete] = useState<any | null>(null);
 
-  // Combined receivables list (auto-calculated from projects + custom/imported)
+  // Combined receivables list (auto từ accounting_receivables + thủ công)
   const mergedReceivables = useMemo(() => {
-    const auto = projects.filter(p => p.baoGiaFile?.isApproved === true).map(p => {
-      const custName = customers.find(c => c.id === p.customerId)?.name || 'Vãng lai';
-      const projRecs = receipts.filter(r => r.projectId === p.id);
-      const collected = projRecs.reduce((s, r) => s + r.amount, 0);
-      const rawTotal = p.baoGiaFile?.totalAmount || p.contractValue || 0;
-      const discountPercent = p.baoGiaFile?.discountPercent || 0;
-      const discountValue = rawTotal * (discountPercent / 100);
-      const subtotalAfterDiscount = rawTotal - discountValue;
-      const vatAmount = Math.round(subtotalAfterDiscount * 0.08);
-      const grandTotal = subtotalAfterDiscount + vatAmount;
-      const remaining = grandTotal - collected;
-      let typeLabel = 'Tổng hợp';
-      if (p.type === 'construction') typeLabel = 'Xây dựng';
-      else if (p.type === 'furniture') typeLabel = 'Nội thất';
-      else if (p.type === 'mechanical') typeLabel = 'Cơ khí';
-      return {
-        id: p.id,
-        projectName: p.name,
-        investor: custName,
-        field: typeLabel,
-        contractValue: grandTotal,
-        collected,
-        remaining,
-        notes: p.notes || '',
-        isAuto: true,
-      };
+    // Tách auto và manual từ dữ liệu DB
+    const dbAuto = customReceivables.filter(r => r.isAuto === true);
+    const dbCustoms = customReceivables.filter(r => !r.isAuto);
+
+    console.log(`[Công Nợ Thu] 🔍 mergedReceivables: ${dbAuto.length} auto (DB), ${dbCustoms.length} thủ công`);
+
+    // Auto items: re-compute collected từ receipts (real-time)
+    const auto = dbAuto.map(r => {
+      const projRecs = receipts.filter(rec => rec.projectId === r.projectId);
+      const collected = projRecs.reduce((s, rec) => s + rec.amount, 0);
+      const remaining = (r.contractValue || 0) - collected;
+      return { ...r, collected, remaining };
     });
 
-    const customs = customReceivables.map(r => {
+    // Manual items: re-compute collected từ sales order receipts
+    const customs = dbCustoms.map(r => {
       const soMatch = r.projectName.match(/ĐH\s+(\S+)/);
       const salesOrderId = soMatch ? soMatch[1] : null;
       const salesRecs = salesOrderId ? receipts.filter(rec => rec.salesOrderId === salesOrderId) : [];
@@ -677,7 +674,7 @@ export default function FinanceManagement({
     });
 
     return [...auto, ...customs];
-  }, [projects, customers, receipts, customReceivables]);
+  }, [customReceivables, receipts]);
 
   // Form states for manual liabilities
   const [showLiabModal, setShowLiabModal] = useState(false);

@@ -3953,6 +3953,10 @@ export default function ProjectKanbanBoard({
                                                     contractStatusText = "Chờ Duyệt";
                                                     contractStatusColor = "text-amber-400 bg-amber-950/20";
                                                   }
+                                                } else {
+                                                  // BG đã duyệt nhưng HĐ chưa lưu/tạo → vẫn "Chờ Duyệt", không phải "Chưa Lập"
+                                                  contractStatusText = "Chờ Duyệt";
+                                                  contractStatusColor = "text-amber-400 bg-amber-950/20";
                                                 }
                                               }
 
@@ -3970,6 +3974,10 @@ export default function ProjectKanbanBoard({
                                                     acceptanceStatusText = "Chờ Duyệt";
                                                     acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
                                                   }
+                                                } else {
+                                                  // BG đã duyệt nhưng NT chưa lưu/tạo → vẫn "Chờ Duyệt"
+                                                  acceptanceStatusText = "Chờ Duyệt";
+                                                  acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
                                                 }
                                               }
 
@@ -3987,6 +3995,10 @@ export default function ProjectKanbanBoard({
                                                     liquidationStatusText = "Chờ Duyệt";
                                                     liquidationStatusColor = "text-amber-400 bg-amber-950/20";
                                                   }
+                                                } else {
+                                                  // BG đã duyệt nhưng TL chưa lưu/tạo → vẫn "Chờ Duyệt"
+                                                  liquidationStatusText = "Chờ Duyệt";
+                                                  liquidationStatusColor = "text-amber-400 bg-amber-950/20";
                                                 }
                                               }
 

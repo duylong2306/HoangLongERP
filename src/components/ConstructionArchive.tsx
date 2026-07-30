@@ -306,13 +306,13 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                             label: 'Hợp Đồng',
                             code: item.code ? 'HĐ-' + item.code.replace('BGXD-', '') : 'HỒ SƠ HỢP ĐỒNG',
                             color: 'text-sky-400 bg-sky-950/40 border-sky-900/30',
-                            statusLabel: !item.isApproved 
-                              ? 'Chờ Duyệt' 
-                              : (!item.contractHtml ? 'Chưa Lập' : (itemAny.contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
+                            statusLabel: !item.isApproved
+                              ? 'Chờ Duyệt'
+                              : (!item.contractHtml ? 'Chờ Duyệt' : (itemAny.contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
                             statusColor: !item.isApproved
                               ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                               : (!item.contractHtml
-                                ? 'bg-white text-slate-500 border-slate-300 shadow-sm'
+                                ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                                 : (itemAny.contractApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
                           },
                           {
@@ -320,13 +320,13 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                             label: 'Nghiệm Thu',
                             code: item.code ? 'NT-' + item.code.replace('BGXD-', '') : 'BIÊN BẢN NGHIỆM THU',
                             color: 'text-amber-400 bg-amber-950/40 border-amber-900/30',
-                            statusLabel: !item.isApproved 
-                              ? 'Chờ Duyệt' 
-                              : (!item.acceptanceHtml ? 'Chưa Lập' : (itemAny.acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
+                            statusLabel: !item.isApproved
+                              ? 'Chờ Duyệt'
+                              : (!item.acceptanceHtml ? 'Chờ Duyệt' : (itemAny.acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
                             statusColor: !item.isApproved
                               ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                               : (!item.acceptanceHtml
-                                ? 'bg-white text-slate-500 border-slate-300 shadow-sm'
+                                ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                                 : (itemAny.acceptanceApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
                           },
                           {
@@ -334,13 +334,13 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                             label: 'Thanh Lý',
                             code: item.code ? 'TL-' + item.code.replace('BGXD-', '') : 'BIÊN BẢN THANH LÝ',
                             color: 'text-purple-400 bg-purple-950/40 border-purple-900/30',
-                            statusLabel: !item.isApproved 
-                              ? 'Chờ Duyệt' 
-                              : (!item.liquidationHtml ? 'Chưa Lập' : (itemAny.liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
+                            statusLabel: !item.isApproved
+                              ? 'Chờ Duyệt'
+                              : (!item.liquidationHtml ? 'Chờ Duyệt' : (itemAny.liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
                             statusColor: !item.isApproved
                               ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                               : (!item.liquidationHtml
-                                ? 'bg-white text-slate-500 border-slate-300 shadow-sm'
+                                ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                                 : (itemAny.liquidationApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
                           }
                         ];

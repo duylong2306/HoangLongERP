@@ -1239,22 +1239,31 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Sync projects from Supabase when updated elsewhere
   useEffect(() => {
     const handleProjectsUpdated = async () => {
+      console.log('[SYNC Projects] 🔔 Nhận sự kiện hl-projects-updated');
       // Đọc ngay từ localStorage để đồng bộ tức thì (vd: duyệt báo giá → Công nợ Thu)
       try {
         const localData = localStorage.getItem('hl_erp_projects');
         if (localData) {
           const localProjs = JSON.parse(localData);
           const filteredLocal = localProjs.filter((p: any) => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+          const approvedLocal = filteredLocal.filter((p: any) => p.baoGiaFile?.isApproved === true);
+          console.log(`[SYNC Projects] 📦 localStorage: ${filteredLocal.length} dự án, ${approvedLocal.length} đã duyệt BG`,
+            approvedLocal.map((p: any) => ({ id: p.id, name: p.name, totalAmount: p.baoGiaFile?.totalAmount })));
           setProjects(filteredLocal);
+        } else {
+          console.log('[SYNC Projects] ⚠️ Không tìm thấy hl_erp_projects trong localStorage');
         }
       } catch {}
       // Sau đó đồng bộ từ DB để có dữ liệu mới nhất
       try {
         const projs = await dbService.projects.list();
         const filteredProjs = projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+        const approvedProjs = filteredProjs.filter(p => p.baoGiaFile?.isApproved === true);
+        console.log(`[SYNC Projects] ☁️ Supabase: ${filteredProjs.length} dự án, ${approvedProjs.length} đã duyệt BG`,
+          approvedProjs.map((p: any) => ({ id: p.id, name: p.name, totalAmount: p.baoGiaFile?.totalAmount, 'baoGiaFile?': !!p.baoGiaFile })));
         setProjects(filteredProjs);
       } catch (err) {
-        console.error("Lỗi đồng bộ dự án:", err);
+        console.error("[SYNC Projects] Lỗi đồng bộ dự án:", err);
       }
     };
     window.addEventListener('hl-projects-updated', handleProjectsUpdated);

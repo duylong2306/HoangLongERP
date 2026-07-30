@@ -51,9 +51,16 @@ export function keysToSnake(obj: any): any {
 
 export function rowToCamel(row: any): any {
   if (!row) return row;
+  if (Array.isArray(row)) return row.map(rowToCamel);
+  if (typeof row !== 'object') return row;
   const n: any = {};
   Object.keys(row).forEach(k => {
-    n[snakeToCamel(k)] = row[k];
+    const val = row[k];
+    // Đệ quy vào object con để chuyển snake_case → camelCase
+    // (xử lý JSONB columns như bao_gia_file có keys bị keysToSnake biến đổi)
+    n[snakeToCamel(k)] = (val !== null && typeof val === 'object')
+      ? rowToCamel(val)
+      : val;
   });
   return n;
 }

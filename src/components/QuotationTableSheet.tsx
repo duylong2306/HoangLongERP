@@ -201,56 +201,102 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
         onApproved({ ...quoteData, isApproved: true, approvedAt, approvedBy });
       }
 
-      // 4. Đồng bộ trạng thái duyệt vào dự án lưu trên localStorage (nếu có liên kết)
-      const saved = localStorage.getItem('hl_erp_projects');
-      if (saved) {
-        const projs = JSON.parse(saved);
-        let found = false;
-        const updatedProjs = projs.map((p: any) => {
-          const isMatch =
-            (p.baoGiaFile?.code && quoteData.code && p.baoGiaFile.code === quoteData.code) ||
-            (p.id && (quoteData as any).projectId && p.id === (quoteData as any).projectId) ||
-            (p.name && quoteData.projectName && p.name === quoteData.projectName);
+      // 4. Đồng bộ trạng thái duyệt vào dự án trên Supabase (bỏ localStorage hoàn toàn)
+      console.log('[DEBUG Duyệt BG] quoteData:', {
+        id: (quoteData as any).id,
+        code: quoteData.code,
+        projectId: (quoteData as any).projectId,
+        projectName: quoteData.projectName,
+        totalAmount: quoteData.totalAmount,
+      });
 
-          if (isMatch) {
-            found = true;
-            return {
-              ...p,
-              baoGiaFile: {
-                ...p.baoGiaFile,
-                name: p.baoGiaFile?.name || `${quoteData.code || 'BAO_GIA'}.pdf`,
-                size: p.baoGiaFile?.size || '1.2 MB',
-                createdAt: p.baoGiaFile?.createdAt || quoteData.createdAt || new Date().toLocaleDateString('vi-VN'),
-                totalAmount: p.baoGiaFile?.totalAmount || quoteData.totalAmount || totalAmount || 0,
-                discountPercent: p.baoGiaFile?.discountPercent !== undefined ? p.baoGiaFile.discountPercent : (quoteData.config?.discountPercent || discountPercent || 0),
-                items: p.baoGiaFile?.items || quoteData.items || items || [],
-                content: p.baoGiaFile?.content || quoteData.content || '',
-                isApproved: true,
-                approvedAt,
-                approvedBy
-              }
-            };
-          }
-          return p;
-        });
+      // Helper: tạo object baoGiaFile cập nhật
+      const buildUpdatedBaoGiaFile = (existingBaoGia: any) => ({
+        ...(existingBaoGia || {}),
+        name: existingBaoGia?.name || `${quoteData.code || 'BAO_GIA'}.pdf`,
+        size: existingBaoGia?.size || '1.2 MB',
+        createdAt: existingBaoGia?.createdAt || quoteData.createdAt || new Date().toLocaleDateString('vi-VN'),
+        totalAmount: existingBaoGia?.totalAmount || quoteData.totalAmount || totalAmount || 0,
+        discountPercent: existingBaoGia?.discountPercent !== undefined ? existingBaoGia.discountPercent : (quoteData.config?.discountPercent || discountPercent || 0),
+        items: existingBaoGia?.items || quoteData.items || items || [],
+        content: existingBaoGia?.content || quoteData.content || '',
+        isApproved: true,
+        approvedAt,
+        approvedBy
+      });
 
-        if (found) {
-          localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjs));
-          setIsApproved(true);
+      const projectId = (quoteData as any).projectId;
+      const projectName = quoteData.projectName;
+      const baoGiaCode = quoteData.code;
 
-          const matchedProj = updatedProjs.find((p: any) =>
-            (p.baoGiaFile?.code && quoteData.code && p.baoGiaFile.code === quoteData.code) ||
-            (p.id && (quoteData as any).projectId && p.id === (quoteData as any).projectId) ||
-            (p.name && quoteData.projectName && p.name === quoteData.projectName)
-          );
+      if (projectId || projectName || baoGiaCode) {
+        try {
+          // Fetch projects từ Supabase
+          const allProjs = await dbService.projects.list();
+          console.log(`[DEBUG Duyệt BG] Supabase: ${allProjs.length} dự án`);
+
+          const matchedProj = allProjs.find((p: any) => {
+            if (projectId && p.id === projectId) return true;
+            if (baoGiaCode && p.baoGiaFile?.code === baoGiaCode) return true;
+            if (projectName && p.name === projectName) return true;
+            return false;
+          });
+
           if (matchedProj) {
-            await dbService.projects.save(matchedProj).catch(err => {
-              console.error("Lỗi đồng bộ duyệt báo giá lên Firestore:", err);
-            });
-          }
+            console.log(`[DEBUG Duyệt BG] ✅ Tìm thấy dự án "${matchedProj.name}" (id=${matchedProj.id})`);
 
-          window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+            const updatedProj = {
+              ...matchedProj,
+              baoGiaFile: buildUpdatedBaoGiaFile(matchedProj.baoGiaFile)
+            };
+
+            console.log('[DEBUG Duyệt BG] 🔄 Đồng bộ dự án lên Supabase...', {
+              id: updatedProj.id,
+              name: updatedProj.name,
+              'baoGiaFile?.isApproved': updatedProj.baoGiaFile?.isApproved,
+              'baoGiaFile?.totalAmount': updatedProj.baoGiaFile?.totalAmount,
+            });
+
+            await dbService.projects.save(updatedProj).catch(err => {
+              console.error("Lỗi đồng bộ duyệt báo giá lên Supabase:", err);
+            });
+            console.log('[DEBUG Duyệt BG] ✅ Đã đồng bộ dự án lên Supabase thành công');
+
+            // ─── 4b. Lưu Công nợ Thu vào accounting_receivables ───
+            const projectId = matchedProj.id;
+            const recId = `rec_auto_${projectId}`;
+            const sectorLabel = quoteData.sector === 'construction' ? 'Xây dựng'
+              : quoteData.sector === 'mechanical' ? 'Cơ khí' : 'Nội thất';
+            try {
+              await dbService.accountingReceivables.save({
+                id: recId,
+                projectName: quoteData.projectName || '',
+                investor: quoteData.customerName || '',
+                field: sectorLabel,
+                contractValue: grandTotal,
+                collected: 0,
+                remaining: grandTotal,
+                notes: '',
+                isAuto: true,
+                projectId,
+              });
+              console.log('[DEBUG Duyệt BG] ✅ Đã lưu Công nợ Thu vào accounting_receivables:', { recId, projectName: quoteData.projectName, contractValue: grandTotal });
+            } catch (err) {
+              console.error('[DEBUG Duyệt BG] ❌ Lỗi lưu Công nợ Thu:', err);
+            }
+
+            setIsApproved(true);
+            console.log('[DEBUG Duyệt BG] 🚀 Phát sự kiện hl-projects-updated');
+            window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+          } else {
+            console.warn('[DEBUG Duyệt BG] ❌ KHÔNG tìm thấy dự án phù hợp trên Supabase!');
+            console.warn('[DEBUG Duyệt BG] Thông tin:', { projectId, projectName, baoGiaCode });
+          }
+        } catch (e) {
+          console.error('[DEBUG Duyệt BG] Lỗi khi cập nhật dự án trên Supabase:', e);
         }
+      } else {
+        console.warn('[DEBUG Duyệt BG] ⚠️ Không có projectId/projectName/baoGiaCode → không đồng bộ vào dự án');
       }
     } catch (e) {
       console.error("Lỗi khi duyệt báo giá:", e);
