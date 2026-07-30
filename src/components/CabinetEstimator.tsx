@@ -596,13 +596,17 @@ export default function CabinetEstimator({
   useEffect(() => {
     if (!loadedQuote && !isCabinetSaved) {
       setQuoteItems([]);
-      setSelectedCustomerId('');
-      setSelectedProjectId('');
-      setProjectName('');
-      setCustomerName('');
-      setCustomerAddress('');
-      setCustomerPhone('');
       setQuoteNotes('');
+      // Giữ lại dự án/khách hàng đã được điều hướng sẵn từ Công việc (trường hợp "Báo Giá (Chưa Lập)")
+      // để không ghi đè lên lựa chọn dự án được truyền vào qua preselectedProjectId.
+      if (!preselectedProjectId) {
+        setSelectedCustomerId('');
+        setSelectedProjectId('');
+        setProjectName('');
+        setCustomerName('');
+        setCustomerAddress('');
+        setCustomerPhone('');
+      }
       setPaymentTerms(`<p><strong>1. Thời gian thực hiện:</strong> 10-12 ngày.</p>
 <p><strong>2. Bảo hành:</strong> Bảo hành 1 năm. Lỗi phụ kiện thay mới.</p>
 <p><strong>3. Thanh toán:</strong></p>
@@ -622,7 +626,7 @@ export default function CabinetEstimator({
       setCompanyContactInfo(`<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
       setIsSentToProject(false);
     }
-  }, [loadedQuote, isCabinetSaved]);
+  }, [loadedQuote, isCabinetSaved, preselectedProjectId]);
 
   // --- HỆ THỐNG THÊM SẢN PHẨM TỪ DANH MỤC TIÊU CHUẨN ---
   const [catalogProducts, setCatalogProducts] = useState<ProductCatalogItem[]>([]);
@@ -1790,6 +1794,7 @@ export default function CabinetEstimator({
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-2 gap-2">
               <span className="font-extrabold text-slate-900 text-sm tracking-wide">BẢNG BÁO GIÁ</span>
             </div>
+            
 
             {/* Thông tin metadata của Báo giá */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs text-left">

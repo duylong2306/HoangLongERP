@@ -537,9 +537,13 @@ export default function MechanicalEstimator({
     if (!loadedQuote && !isMechSavedVal) {
       // Clear when loading is blank and not saved
       setQuoteItems([]);
-      setProjectName('');
-      setSelectedProjectId('');
       setQuoteNotes('');
+      // Giữ lại dự án đã được điều hướng sẵn từ Công việc (trường hợp "Báo Giá (Chưa Lập)")
+      // để không ghi đè lên lựa chọn dự án được truyền vào qua preselectedProjectId.
+      if (!preselectedProjectId) {
+        setProjectName('');
+        setSelectedProjectId('');
+      }
       setPaymentTerms(`<p><strong>1. Thời gian thực hiện:</strong> 10-12 ngày.</p>
 <p><strong>2. Bảo hành:</strong> Bảo hành 1 năm. Lỗi phụ kiện thay mới.</p>
 <p><strong>3. Thanh toán:</strong></p>
@@ -558,7 +562,7 @@ export default function MechanicalEstimator({
       setCompanyAddressInfo(`<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
       setCompanyContactInfo(`<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
     }
-  }, [loadedQuote, isMechSavedVal]);
+  }, [loadedQuote, isMechSavedVal, preselectedProjectId]);
 
   const [quoteNotes, setQuoteNotes] = useState('');
   const [paymentTerms, setPaymentTerms] = useState(() => localStorage.getItem('hl_mechanical_payment_terms') || DEFAULT_MECH_PAYMENT_TERMS);

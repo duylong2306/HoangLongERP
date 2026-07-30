@@ -2381,8 +2381,8 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
 
                       <button
                         type="button"
-                        onClick={() => {
-                          // Sign approval actions 
+                        onClick={async () => {
+                          // Sign approval actions
                           const dName = activeConnectedTool === 'contract' ? `Hợp đồng thi công ${ctDocSector === 'furniture' ? 'mọc nội thất' : ctDocSector === 'construction' ? 'xây dựng thô' : 'cơ khí'} tùy biến` :
                                         activeConnectedTool === 'acceptance' ? `Biên bản nghiệm thu khối lượng hoàn thành ${ctDocAcceptRate}%` :
                                         `Hồ sơ quyết toán thanh lý công trình bàn giao mộc`;
@@ -2416,7 +2416,56 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                           }
 
                           updateProjectWithRule(selectedProject.id, updates);
-                          addToast({ title: '✍️ Thành công', message: 'Đã ký số thầu & đóng dấu thợ đỏ Hoàng Long thành công! Tài liệu đã được lưu trong hồ sơ dự án.', type: 'success' });
+
+                          // ── ĐỒNG BỘ VÀO LƯU TRỮ HỒ SƠ THEO LĨNH VỰC (Nội thất / Xây dựng / Cơ khí) ──
+                          // Menu "Hồ Sơ Dự Án" và "Lưu Trữ Hồ Sơ Nội Thất / Xây Dựng / Cơ Khí"
+                          // (CabinetArchive / ConstructionArchive / MechanicalArchive) đều đọc từ
+                          // bảng archived_quotes qua các trường contractHtml / acceptanceHtml / liquidationHtml.
+                          // Nếu chỉ lưu vào project.documents thì hồ sơ sẽ không xuất hiện ở Lưu Trữ Hồ Sơ.
+                          try {
+                            const docSector = ctDocSector; // 'furniture' | 'construction' | 'mechanical'
+                            const htmlField = activeConnectedTool === 'contract' ? 'contractHtml'
+                              : activeConnectedTool === 'acceptance' ? 'acceptanceHtml' : 'liquidationHtml';
+                            const approvedField = activeConnectedTool === 'contract' ? 'contractApproved'
+                              : activeConnectedTool === 'acceptance' ? 'acceptanceApproved' : 'liquidationApproved';
+
+                            const sectorQuotes = await dbService.archivedQuotes.list(docSector);
+                            const targetQuote = sectorQuotes.find(q => q.projectId === selectedProject.id);
+
+                            if (targetQuote) {
+                              await dbService.updateQuoteDocHtml(targetQuote.id, {
+                                [htmlField]: ctDocCustomText,
+                                [approvedField]: true,
+                              });
+                            } else {
+                              // Chưa có hồ sơ lưu trữ cho dự án này → tạo mới để liên kết
+                              const cust = customers.find(c => c.id === selectedProject.customerId);
+                              const savedFields: any = {
+                                id: `aq_${Date.now()}`,
+                                sector: docSector,
+                                code: `DA-${docSector === 'furniture' ? 'NT' : docSector === 'construction' ? 'XD' : 'CK'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 101)}`,
+                                projectId: selectedProject.id,
+                                projectName: selectedProject.name,
+                                customerId: selectedProject.customerId,
+                                customerName: cust?.name || '',
+                                createdAt: new Date().toISOString().split('T')[0],
+                                isApproved: false,
+                              };
+                              savedFields[htmlField] = ctDocCustomText;
+                              savedFields[approvedField] = true;
+                              await dbService.archivedQuotes.save(savedFields);
+                            }
+
+                            // Làm mới Menu Hồ Sơ Dự Án & Lưu Trữ Hồ Sơ tương ứng
+                            window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
+                            const sectorEvent = docSector === 'furniture' ? 'cabinet' : docSector === 'construction' ? 'construction' : 'mechanical';
+                            window.dispatchEvent(new CustomEvent(`hl-archived-${sectorEvent}-quotes-updated`));
+                          } catch (syncErr) {
+                            console.warn('Lỗi đồng bộ hồ sơ lưu trữ:', syncErr);
+                          }
+
+                          const sectorLabel = ctDocSector === 'furniture' ? 'Nội thất' : ctDocSector === 'construction' ? 'Xây dựng' : 'Cơ khí';
+                          addToast({ title: '✍️ Thành công', message: `Đã ký số & đóng dấu mộc đỏ Hoàng Long! Tài liệu đã lưu vào hồ sơ dự án và Lưu Trữ Hồ Sơ ${sectorLabel}.`, type: 'success' });
                           setActiveConnectedTool(null);
                         }}
                         className="bg-rose-600 hover:bg-rose-500 text-white font-extrabold py-2 rounded-xl text-center cursor-pointer transition-all hover:scale-[1.01] shadow-md flex items-center justify-center gap-1.5 text-[10.5px]"

@@ -24,6 +24,12 @@ import { useNotification, isUserInRoleGroup } from '../context';
 import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage } from '../lib/chatStore';
 
+// Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
+const sectorArchiveTab = (type?: string): string =>
+  type === 'construction' ? 'quotes-construction'
+  : type === 'mechanical' ? 'quotes-mechanical'
+  : 'quotes'; // furniture / general / mặc định → Hồ Sơ Nội Thất
+
 interface TaskDetailModalProps {
   taskId: string;
   onClose: () => void;
@@ -2743,6 +2749,19 @@ export default function TaskDetailModal({
                         }
                       }
 
+                      // Điều hướng Menu Hồ Sơ Dự Án sang Lưu Trữ Hồ Sơ theo lĩnh vực (Xây dựng / Nội thất / Cơ khí)
+                      const quoteLocked = quoteStatusText === 'Chưa Lập';
+                      const goArchive = () => {
+                        window.dispatchEvent(new CustomEvent('hl-switch-tab', {
+                          detail: {
+                            tab: sectorArchiveTab(project?.type),
+                            projectId: project?.id,
+                            customerId: project?.customerId,
+                          },
+                        }));
+                        onClose();
+                      };
+
                       return (
                         <div className="space-y-2 pt-4 border-t border-slate-900/60" id="project_docs_menu">
                           <span className="font-black text-[10px] text-slate-450 flex items-center justify-between uppercase tracking-wider border-b border-white/5 pb-1 select-none">
@@ -2752,10 +2771,7 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('quotation');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
+                            onClick={goArchive}
                             className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-indigo-400 hover:text-indigo-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
                           >
                             <div className="flex items-center gap-2">
@@ -2769,11 +2785,9 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('contract');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-400 hover:text-rose-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            onClick={goArchive}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-400 hover:text-rose-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
                               <Briefcase className="w-4 h-4 text-rose-400" />
@@ -2786,11 +2800,9 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('acceptance');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            onClick={goArchive}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
                               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -2803,11 +2815,9 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('liquidation');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-amber-400 hover:text-amber-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            onClick={goArchive}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-amber-400 hover:text-amber-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
                               <Award className="w-4 h-4 text-amber-400" />

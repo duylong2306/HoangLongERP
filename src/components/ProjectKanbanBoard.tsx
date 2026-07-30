@@ -34,6 +34,12 @@ import ColumnSettingsModal from './kanban/ColumnSettingsModal';
 
 export type { KanbanColumn } from '../lib/kanbanLogic';
 
+// Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
+const sectorArchiveTab = (type?: string): string =>
+  type === 'construction' ? 'quotes-construction'
+  : type === 'mechanical' ? 'quotes-mechanical'
+  : 'quotes'; // furniture / general / mặc định → Hồ Sơ Nội Thất
+
 // PROPS (Interface) - Định nghĩa các props component nhận từ parent (App.tsx / SectorKanbanWrapper)
 // =================================================================================================
 // sector: 'construction' | 'furniture' | 'mechanical' → Phân hệ (Xây dựng/Nội thất/Cơ khí)
@@ -4054,7 +4060,7 @@ export default function ProjectKanbanBoard({
                                             const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                                             const hasQuoteFile = latestArchivedQuote;
 
-                                            if (hasQuoteFile) {
+                                            // Tính trạng thái hồ sơ (luôn tính, kể cả khi chưa có báo giá)
                                               let quoteStatusText = "Chưa Lập";
                                               let quoteStatusColor = "text-slate-500 bg-white/5";
                                               if (hasQuoteFile) {
@@ -4118,16 +4124,24 @@ export default function ProjectKanbanBoard({
                                                 }
                                               }
 
+                                              // Khi Báo Giá chưa lập → khóa HĐ / Nghiệm thu / Thanh lý
+                                              const quoteLocked = quoteStatusText === 'Chưa Lập';
+                                              const goArchive = () => {
+                                                window.dispatchEvent(new CustomEvent('hl-switch-tab', {
+                                                  detail: {
+                                                    tab: sectorArchiveTab(selectedProject.type),
+                                                    projectId: selectedProject.id,
+                                                    customerId: selectedProject.customerId,
+                                                  },
+                                                }));
+                                                setActivePopover(null);
+                                              };
+
                                               return (
                                                 <>
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('quote');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
+                                                    onClick={goArchive}
                                                     className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
                                                   >
                                                     <div className="flex items-center gap-1.5">
@@ -4139,13 +4153,9 @@ export default function ProjectKanbanBoard({
 
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('contract');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
-                                                    className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                                                    onClick={goArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-rose-400 hover:bg-rose-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <Briefcase className="w-3.5 h-3.5 text-rose-400" />
@@ -4156,13 +4166,9 @@ export default function ProjectKanbanBoard({
 
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('acceptance');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
-                                                    className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-emerald-400 hover:bg-emerald-500/10 cursor-pointer"
+                                                    onClick={goArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-emerald-400 hover:bg-emerald-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -4173,13 +4179,9 @@ export default function ProjectKanbanBoard({
 
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('liquidation');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
-                                                    className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                                                    onClick={goArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-amber-400 hover:bg-amber-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <Award className="w-3.5 h-3.5 text-amber-400" />
@@ -4189,30 +4191,6 @@ export default function ProjectKanbanBoard({
                                                   </button>
                                                 </>
                                               );
-                                            } else {
-                                              const isDocGenerationEnabled = task.status !== 'completed';
-                                              return (
-                                                <button
-                                                  type="button"
-                                                  disabled={!isDocGenerationEnabled}
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setActivePopover(null);
-                                                    if (isDocGenerationEnabled && onRedirectToQuote) {
-                                                      onRedirectToQuote(task.projectId!);
-                                                    }
-                                                  }}
-                                                  className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-colors ${
-                                                    isDocGenerationEnabled 
-                                                      ? 'text-indigo-400 hover:bg-indigo-500/10 cursor-pointer' 
-                                                      : 'text-slate-600 cursor-not-allowed'
-                                                  }`}
-                                                >
-                                                  <FileText className="w-3.5 h-3.5 text-indigo-400" />
-                                                  <span>Khai Báo Giá (Chưa lập)</span>
-                                                </button>
-                                              );
-                                            }
                                           })()}
                                         </div>
                                        </>
