@@ -1527,6 +1527,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
       // ── Supporting tables (fire events) ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, fireSuppliersEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_subcontractors' }, fireSuppliersEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fireInventoryEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs' }, fireWarehouseLogsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'archived_quotes' }, fireArchivedQuotesEvent)
@@ -2801,13 +2802,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             </button>
                           </li>
                         )}
-                        {isAccessible('warehouse-suppliers') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('warehouse-suppliers'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-suppliers' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Nhà cung cấp vật tư
-                            </button>
-                          </li>
-                        )}
                         {isAccessible('warehouse-management') && (
                           <li>
                             <button onClick={() => { setActiveTab('warehouse-management'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-management' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
@@ -3396,7 +3390,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 bottom-[45px] w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
+                <div className="absolute right-0 top-full mt-1 w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
                   <button
                     type="button"
                     onClick={() => { setShowUserMenu(false); setShowProfileModal(true); }}

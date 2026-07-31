@@ -24,11 +24,11 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
   const [showPrintPreview, setShowPrintPreview] = useState<boolean>(false);
 
-  // Load suppliers list from Supabase
+  // Load suppliers list from Supabase (bảng thầu phụ riêng)
   useEffect(() => {
     const loadSuppliers = async () => {
       try {
-        const data = await dbService.suppliers.list();
+        const data = await dbService.accountingSubcontractors.list();
         setSuppliers(data);
       } catch (err) {
         console.error("Lỗi load thầu phụ từ Supabase:", err);

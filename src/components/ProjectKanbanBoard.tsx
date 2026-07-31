@@ -1421,33 +1421,6 @@ export default function ProjectKanbanBoard({
       addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Quy trình Phê duyệt, vui lòng chọn Người phê duyệt mặc định.', type: 'error' });
       return;
     }
-    // Conditional validation for cost
-    if (editSubIsCostEnabled) {
-      if (!editSubCostApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!editSubCostSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-    // Conditional validation for subcontractor
-    if (editSubSubcontractorEnabled) {
-      if (!editSubSubcontractorId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Thầu Phụ từ Dữ Liệu Kế Toán.', type: 'error' });
-        return;
-      }
-      if (!editSubSubcontractorApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!editSubSubcontractorSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-
     const updates: Partial<Task> = {
       name: editSubName,
       deadline: editSubDeadline,
@@ -1498,33 +1471,6 @@ export default function ProjectKanbanBoard({
       addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Quy trình Phê duyệt, vui lòng chọn Người phê duyệt mặc định.', type: 'error' });
       return;
     }
-    // Conditional validation for cost
-    if (subTaskIsCostEnabled) {
-      if (!subTaskCostApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!subTaskCostSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-    // Conditional validation for subcontractor
-    if (subTaskSubcontractorEnabled) {
-      if (!subTaskSubcontractorId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Thầu Phụ từ Dữ Liệu Kế Toán.', type: 'error' });
-        return;
-      }
-      if (!subTaskSubcontractorApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!subTaskSubcontractorSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-
     // Create a real Task in global state matching the design
     const codeNum = tasks.length + 1;
     const paddingCode = codeNum < 10 ? `00${codeNum}` : codeNum < 100 ? `0${codeNum}` : `${codeNum}`;
@@ -3340,23 +3286,21 @@ export default function ProjectKanbanBoard({
                                   {subTaskIsCostEnabled && (
                                     <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                       <div className="space-y-1">
-                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                         <SearchableEmployeeSelect
                                           value={subTaskCostApproverId || ''}
                                           onChange={(val) => setSubTaskCostApproverId(val || '')}
                                           employees={employees}
                                           placeholder="-- Mặc định (Giám đốc / PM) --"
-                                          required
                                         />
                                       </div>
                                       <div className="space-y-1">
-                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                         <SearchableEmployeeSelect
                                           value={subTaskCostSettlerId || ''}
                                           onChange={(val) => setSubTaskCostSettlerId(val || '')}
                                           employees={employees}
                                           placeholder="-- Mặc định (Kế toán) --"
-                                          required
                                         />
                                       </div>
                                     </div>
@@ -3451,7 +3395,7 @@ export default function ProjectKanbanBoard({
                                     <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
                                       {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
                                       <div>
-                                        <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                                        <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                                         <select
                                           value={subTaskSubcontractorId || ''}
                                           onChange={(e) => {
@@ -3477,7 +3421,6 @@ export default function ProjectKanbanBoard({
                                               }
                                             }
                                           }}
-                                          required
                                           className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                                         >
                                           <option value="">-- Chọn đối tác thầu phụ --</option>
@@ -3506,23 +3449,21 @@ export default function ProjectKanbanBoard({
                                       {/* Approver & Settler dropdowns (theo mẫu popup) */}
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <div className="space-y-1">
-                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                           <SearchableEmployeeSelect
                                             value={subTaskSubcontractorApproverId || ''}
                                             onChange={(val) => setSubTaskSubcontractorApproverId(val || '')}
                                             employees={employees}
                                             placeholder="-- Mặc định (Giám đốc) --"
-                                            required
                                           />
                                         </div>
                                         <div className="space-y-1">
-                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                           <SearchableEmployeeSelect
                                             value={subTaskSubcontractorSettlerId || ''}
                                             onChange={(val) => setSubTaskSubcontractorSettlerId(val || '')}
                                             employees={employees}
                                             placeholder="-- Mặc định (Kế toán) --"
-                                            required
                                           />
                                         </div>
                                       </div>
@@ -4844,23 +4785,21 @@ export default function ProjectKanbanBoard({
                               {subtaskAuto.isCostEnabled === true && (
                                 <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div className="space-y-1">
-                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                     <SearchableEmployeeSelect
                                       value={subtaskAuto.costApproverId || ''}
                                       onChange={(val) => updateSubtaskAutomation(index, { costApproverId: val || undefined })}
                                       employees={employees}
                                       placeholder="-- Mặc định (Giám đốc / PM) --"
-                                      required
                                     />
                                   </div>
                                   <div className="space-y-1">
-                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                     <SearchableEmployeeSelect
                                       value={subtaskAuto.costSettlerId || ''}
                                       onChange={(val) => updateSubtaskAutomation(index, { costSettlerId: val || undefined })}
                                       employees={employees}
                                       placeholder="-- Mặc định (Kế toán) --"
-                                      required
                                     />
                                   </div>
                                 </div>
@@ -4961,7 +4900,7 @@ export default function ProjectKanbanBoard({
                                 <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
                                   {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
                                   <div>
-                                    <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                                    <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                                     <select
                                       value={subtaskAuto.subcontractorId || ''}
                                       onChange={(e) => {
@@ -4987,7 +4926,6 @@ export default function ProjectKanbanBoard({
                                           }
                                         }
                                       }}
-                                      required
                                       className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                                     >
                                       <option value="">-- Chọn đối tác thầu phụ --</option>
@@ -5016,23 +4954,21 @@ export default function ProjectKanbanBoard({
                                   {/* Approver & Settler dropdowns (theo mẫu popup) */}
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="space-y-1">
-                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                       <SearchableEmployeeSelect
                                         value={subtaskAuto.subcontractorApproverId || ''}
                                         onChange={(val) => updateSubtaskAutomation(index, { subcontractorApproverId: val || undefined })}
                                         employees={employees}
                                         placeholder="-- Mặc định (Giám đốc) --"
-                                        required
                                       />
                                     </div>
                                     <div className="space-y-1">
-                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                       <SearchableEmployeeSelect
                                         value={subtaskAuto.subcontractorSettlerId || ''}
                                         onChange={(val) => updateSubtaskAutomation(index, { subcontractorSettlerId: val || undefined })}
                                         employees={employees}
                                         placeholder="-- Mặc định (Kế toán) --"
-                                        required
                                       />
                                     </div>
                                   </div>
@@ -5137,30 +5073,6 @@ export default function ProjectKanbanBoard({
                                 if (subtaskAuto.isApprovalEnabled === true && !subtaskAuto.defaultApproverId) {
                                   addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Quy trình Phê duyệt, vui lòng chọn Người phê duyệt mặc định.', type: 'error' });
                                   return;
-                                }
-                                if (subtaskAuto.isCostEnabled === true) {
-                                  if (!subtaskAuto.costApproverId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-                                    return;
-                                  }
-                                  if (!subtaskAuto.costSettlerId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-                                    return;
-                                  }
-                                }
-                                if (subtaskAuto.isSubcontractorEnabled === true) {
-                                  if (!subtaskAuto.subcontractorId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Thầu Phụ từ Dữ Liệu Kế Toán.', type: 'error' });
-                                    return;
-                                  }
-                                  if (!subtaskAuto.subcontractorApproverId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-                                    return;
-                                  }
-                                  if (!subtaskAuto.subcontractorSettlerId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-                                    return;
-                                  }
                                 }
                                 setActiveSubtaskRuleIndex(null);
                               }}
@@ -5894,23 +5806,21 @@ export default function ProjectKanbanBoard({
                       {editSubIsCostEnabled && (
                         <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                             <SearchableEmployeeSelect
                               value={editSubCostApproverId || ''}
                               onChange={(val) => setEditSubCostApproverId(val || '')}
                               employees={employees}
                               placeholder="-- Mặc định (Giám đốc / PM) --"
-                              required
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                             <SearchableEmployeeSelect
                               value={editSubCostSettlerId || ''}
                               onChange={(val) => setEditSubCostSettlerId(val || '')}
                               employees={employees}
                               placeholder="-- Mặc định (Kế toán) --"
-                              required
                             />
                           </div>
                         </div>
@@ -6005,7 +5915,7 @@ export default function ProjectKanbanBoard({
                         <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
                           {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
                           <div>
-                            <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                            <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                             <select
                               value={editSubSubcontractorId || ''}
                               onChange={(e) => {
@@ -6031,7 +5941,6 @@ export default function ProjectKanbanBoard({
                                   }
                                 }
                               }}
-                              required
                               className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                             >
                               <option value="">-- Chọn đối tác thầu phụ --</option>
@@ -6060,23 +5969,21 @@ export default function ProjectKanbanBoard({
                           {/* Approver & Settler dropdowns (theo mẫu popup) */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1">
-                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                               <SearchableEmployeeSelect
                                 value={editSubSubcontractorApproverId || ''}
                                 onChange={(val) => setEditSubSubcontractorApproverId(val || '')}
                                 employees={employees}
                                 placeholder="-- Mặc định (Giám đốc) --"
-                                required
                               />
                             </div>
                             <div className="space-y-1">
-                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                               <SearchableEmployeeSelect
                                 value={editSubSubcontractorSettlerId || ''}
                                 onChange={(val) => setEditSubSubcontractorSettlerId(val || '')}
                                 employees={employees}
                                 placeholder="-- Mặc định (Kế toán) --"
-                                required
                               />
                             </div>
                           </div>

@@ -8,6 +8,8 @@ import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from
 import SearchableCustomerSelect from './SearchableCustomerSelect';
 import SearchableSupplierSelect from './SearchableSupplierSelect';
 import ProductSearchDropdown from './ProductSearchDropdown';
+import SubcontractorDirectory from './SubcontractorDirectory';
+import WarehouseSuppliers from './WarehouseSuppliers';
 
 import {
   Plus,
@@ -721,7 +723,8 @@ export default function FinanceManagement({
   }, [approvedSubContracts, customLiabilities, payments]);
 
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>(() => {
-    const saved = localStorage.getItem('hl_acc_suppliers');
+    // NCC vật tư — localStorage riêng (tách khỏi thầu phụ `hl_acc_suppliers`)
+    const saved = localStorage.getItem('hl_acc_material_suppliers');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -805,23 +808,20 @@ export default function FinanceManagement({
     return `CTP_${String(maxNum + 1).padStart(3, '0')}`;
   };
 
-  const [duLieuTab, setDuLieuTab] = useState<'khach_hang' | 'ncc_thau_phu' | 'vat_tu' | 'danh_muc_san_pham'>(
-    (initialDuLieuTab as 'khach_hang' | 'ncc_thau_phu' | 'vat_tu' | 'danh_muc_san_pham') || 'khach_hang'
+  type DuLieuTab = 'khach_hang' | 'ncc_thau_phu' | 'vat_tu' | 'danh_muc_san_pham' | 'nha_cung_cap_vat_tu';
+  const [duLieuTab, setDuLieuTab] = useState<DuLieuTab>(
+    (initialDuLieuTab as DuLieuTab) || 'khach_hang'
   );
 
   useEffect(() => {
     if (initialDuLieuTab) {
-      setDuLieuTab(initialDuLieuTab as 'khach_hang' | 'ncc_thau_phu' | 'vat_tu' | 'danh_muc_san_pham');
+      setDuLieuTab(initialDuLieuTab as DuLieuTab);
     }
   }, [initialDuLieuTab]);
 
   // Pagination & selection states for "Dữ liệu kế toán" tabs
   const [pageCust, setPageCust] = useState(1);
   const [pageSizeCust, setPageSizeCust] = useState(5);
-
-  const [pageSup, setPageSup] = useState(1);
-  const [pageSizeSup, setPageSizeSup] = useState(5);
-  const [selectedSupDetail, setSelectedSupDetail] = useState<SupplierPartner | null>(null);
 
   const [pageMat, setPageMat] = useState(1);
   const [pageSizeMat, setPageSizeMat] = useState(5);
@@ -1560,7 +1560,6 @@ export default function FinanceManagement({
   const [showRecForm, setShowRecForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
   const [showSubContractForm, setShowSubContractForm] = useState(false);
-  const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
 
   // Form Inputs - Thu
@@ -1641,25 +1640,6 @@ export default function FinanceManagement({
   const [formSubScope, setFormSubScope] = useState('');
   const [formSubValue, setFormSubValue] = useState<number>(0);
 
-  // Form Inputs - Thêm đối tác / Thầu phụ
-  const [editingSupId, setEditingSupId] = useState<string | null>(null);
-  const [formSupName, setFormSupName] = useState('');
-  const [formSupRep, setFormSupRep] = useState('');
-  const [formSupGender, setFormSupGender] = useState('Nam');
-  const [formSupBirthDate, setFormSupBirthDate] = useState('');
-  const [formSupCccd, setFormSupCccd] = useState('');
-  const [formSupCccdDate, setFormSupCccdDate] = useState('');
-  const [formSupCccdPlace, setFormSupCccdPlace] = useState('');
-  const [formSupEmail, setFormSupEmail] = useState('');
-  const [formSupBankAccount, setFormSupBankAccount] = useState('');
-  const [formSupBankName, setFormSupBankName] = useState('');
-  const [formSupPhone, setFormSupPhone] = useState('');
-  const [formSupField, setFormSupField] = useState('Thợ thầu thi công');
-  const [formSupAddress, setFormSupAddress] = useState('');
-  const [formSupTaxCode, setFormSupTaxCode] = useState('');
-  const [formSupNote, setFormSupNote] = useState('');
-  const [isRepManuallyEdited, setIsRepManuallyEdited] = useState(false);
-
   // Form Inputs - Thêm vật tư
   const [formMatCode, setFormMatCode] = useState('');
   const [formMatName, setFormMatName] = useState('');
@@ -1674,7 +1654,7 @@ export default function FinanceManagement({
   }, [subContracts]);
 
   useEffect(() => {
-    localStorage.setItem('hl_acc_suppliers', JSON.stringify(suppliers));
+    localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(suppliers));
     // Không auto-sync Supabase ở đây — chỉ sync khi user chủ động thêm/sửa/xóa (trong handler)
   }, [suppliers]);
 
@@ -1684,11 +1664,11 @@ export default function FinanceManagement({
         const list = await dbService.suppliers.list();
         if (list && list.length > 0) {
           setSuppliers(list);
-          localStorage.setItem('hl_acc_suppliers', JSON.stringify(list));
+          localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(list));
         }
       } catch (e) {
         console.warn('Load suppliers from Supabase failed:', e);
-        const saved = localStorage.getItem('hl_acc_suppliers');
+        const saved = localStorage.getItem('hl_acc_material_suppliers');
         if (saved) {
           try { setSuppliers(JSON.parse(saved)); } catch (err) { console.error(err); }
         }
@@ -1704,7 +1684,7 @@ export default function FinanceManagement({
         if (list && list.length > 0) setSuppliers(list);
       } catch (e) {
         // Fallback localStorage
-        const saved = localStorage.getItem('hl_acc_suppliers');
+        const saved = localStorage.getItem('hl_acc_material_suppliers');
         if (saved) {
           try { setSuppliers(JSON.parse(saved)); } catch (err) { console.error(err); }
         }
@@ -1742,10 +1722,8 @@ export default function FinanceManagement({
 
   useEffect(() => {
     setPageCust(1);
-    setPageSup(1);
     setPageMat(1);
     setSelectedCustDetail(null);
-    setSelectedSupDetail(null);
     setSelectedMatDetail(null);
   }, [duLieuTab, searchTerm]);
 
@@ -1985,123 +1963,6 @@ export default function FinanceManagement({
     setSubContracts([newSub, ...subContracts]);
     setShowSubContractForm(false);
     addToast({ title: '✅ Thành công', message: `✍️ Ký số điện tử Hợp đồng thầu phụ mã ${newSub.code} thành công.`, type: 'success' });
-  };
-
-  const handleAddSupplierSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formSupName || !formSupPhone || !formSupAddress || !formSupRep) {
-      addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng điền đầy đủ các thông tin bắt buộc (Tên thầu phụ, Người đại diện, Điện thoại, Địa chỉ)!', type: 'warning' });
-      return;
-    }
-
-    if (editingSupId) {
-      const updated = suppliers.map(s => {
-        if (s.id === editingSupId) {
-          return {
-            ...s,
-            name: formSupName,
-            representative: formSupRep,
-            gender: formSupGender,
-            birthDate: formSupBirthDate,
-            cccd: formSupCccd,
-            cccdDate: formSupCccdDate,
-            cccdPlace: formSupCccdPlace,
-            address: formSupAddress,
-            phone: formSupPhone,
-            email: formSupEmail,
-            taxCode: formSupTaxCode,
-            bankAccount: formSupBankAccount,
-            bankName: formSupBankName,
-            field: formSupField,
-            note: formSupNote,
-            region: formSupAddress, // sync legacy field
-            bankNo: formSupBankAccount
-          };
-        }
-        return s;
-      });
-      setSuppliers(updated);
-
-      if (selectedSupDetail && selectedSupDetail.id === editingSupId) {
-        setSelectedSupDetail({
-          id: editingSupId,
-          name: formSupName,
-          representative: formSupRep,
-          gender: formSupGender,
-          birthDate: formSupBirthDate,
-          cccd: formSupCccd,
-          cccdDate: formSupCccdDate,
-          cccdPlace: formSupCccdPlace,
-          address: formSupAddress,
-          phone: formSupPhone,
-          email: formSupEmail,
-          taxCode: formSupTaxCode,
-          bankAccount: formSupBankAccount,
-          bankName: formSupBankName,
-          field: formSupField,
-          note: formSupNote,
-          region: formSupAddress,
-          bankNo: formSupBankAccount
-        });
-      }
-
-      setEditingSupId(null);
-      setShowSupplierForm(false);
-      resetSupForm();
-      addToast({ title: '✅ Thành công', message: `✅ Đã cập nhật thông tin thầu phụ ${formSupName} thành công.`, type: 'success' });
-    } else {
-      const abbrev = getAbbreviation(formSupName) || 'TP';
-      const orderIndex = suppliers.length + 1;
-      const generatedId = `${abbrev}_${orderIndex}`;
-
-      const newSup: SupplierPartner = {
-        id: generatedId,
-        name: formSupName,
-        representative: formSupRep || formSupName,
-        gender: formSupGender,
-        birthDate: formSupBirthDate,
-        cccd: formSupCccd,
-        cccdDate: formSupCccdDate,
-        cccdPlace: formSupCccdPlace,
-        address: formSupAddress,
-        phone: formSupPhone,
-        email: formSupEmail,
-        taxCode: formSupTaxCode,
-        bankAccount: formSupBankAccount,
-        bankName: formSupBankName,
-        field: formSupField,
-        note: formSupNote,
-        region: formSupAddress,
-        bankNo: formSupBankAccount
-      };
-
-      setSuppliers([...suppliers, newSup]);
-      // Explicit Supabase sync
-      dbService.suppliers.save(newSup).catch(e => console.error('[Finance] Lỗi sync supplier lên Supabase:', e));
-      setShowSupplierForm(false);
-      resetSupForm();
-      addToast({ title: '✅ Thành công', message: `🤝 Đã thêm thầu phụ mới ${newSup.name} với Mã: ${newSup.id} thành công.`, type: 'success' });
-    }
-  };
-
-  const resetSupForm = () => {
-    setFormSupName('');
-    setFormSupRep('');
-    setFormSupGender('Nam');
-    setFormSupBirthDate('');
-    setFormSupCccd('');
-    setFormSupCccdDate('');
-    setFormSupCccdPlace('');
-    setFormSupEmail('');
-    setFormSupBankAccount('');
-    setFormSupBankName('');
-    setFormSupPhone('');
-    setFormSupField('Thợ thầu thi công');
-    setFormSupAddress('');
-    setFormSupTaxCode('');
-    setFormSupNote('');
-    setEditingSupId(null);
-    setIsRepManuallyEdited(false);
   };
 
   const handleCloseCustomerModal = () => {
@@ -2842,6 +2703,8 @@ export default function FinanceManagement({
                   {activeSubTab === 'tong_hop_mang' && '📈 Tổng quan mảng'}
                   {activeSubTab === 'du_lieu_ke_toan' && (
                     duLieuTab === 'khach_hang' ? '👥 Danh mục Khách hàng' :
+                    duLieuTab === 'ncc_thau_phu' ? '📋 DANH SÁCH THẦU PHỤ' :
+                    duLieuTab === 'nha_cung_cap_vat_tu' ? '🚚 Nhà cung cấp vật tư' :
                     duLieuTab === 'vat_tu' ? '📦 Quản Lý kho' :
                     '📁 Cấu hình Dữ liệu Kế toán'
                   )}
@@ -2898,8 +2761,35 @@ export default function FinanceManagement({
                   )}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => setDuLieuTab('ncc_thau_phu')}
+                  className={`pb-3 text-xs font-extrabold uppercase tracking-widest relative transition-all outline-none whitespace-nowrap cursor-pointer ${
+                    duLieuTab === 'ncc_thau_phu'
+                      ? 'text-orange-600 font-black'
+                      : 'text-slate-500 hover:text-orange-600'
+                  }`}
+                >
+                  📋 DANH SÁCH THẦU PHỤ
+                  {duLieuTab === 'ncc_thau_phu' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-orange-500 rounded-full" />
+                  )}
+                </button>
 
-
+                <button
+                  type="button"
+                  onClick={() => setDuLieuTab('nha_cung_cap_vat_tu')}
+                  className={`pb-3 text-xs font-extrabold uppercase tracking-widest relative transition-all outline-none whitespace-nowrap cursor-pointer ${
+                    duLieuTab === 'nha_cung_cap_vat_tu'
+                      ? 'text-orange-600 font-black'
+                      : 'text-slate-500 hover:text-orange-600'
+                  }`}
+                >
+                  🚚 Nhà cung cấp vật tư
+                  {duLieuTab === 'nha_cung_cap_vat_tu' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-orange-500 rounded-full" />
+                  )}
+                </button>
 
 
               </div>
@@ -3946,615 +3836,19 @@ export default function FinanceManagement({
               );
             })()}
 
-            {/* TAB 4: DANH MỤC THẦU PHỤ */}
-            {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'ncc_thau_phu' && (() => {
-              return null;
-              const filteredSuppliers = suppliers.filter(s => 
-                s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                s.field.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                (s.phone && s.phone.includes(searchTerm)) || 
-                (s.representative && s.representative.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                s.id.toLowerCase().includes(searchTerm.toLowerCase())
-              );
+            {/* TAB 4: DANH SÁCH THẦU PHỤ (bảng riêng accounting_subcontractors) */}
+            {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'ncc_thau_phu' && (
+              <SubcontractorDirectory
+                currentUser={currentUser}
+                canEdit={canEdit}
+                canDelete={canDelete}
+              />
+            )}
 
-              const limitSup = pageSizeSup === -1 ? filteredSuppliers.length : pageSizeSup;
-              const totalPagesSup = Math.ceil(filteredSuppliers.length / limitSup) || 1;
-              const adjustedPageSup = Math.min(pageSup, totalPagesSup);
-              const startIndexSup = (adjustedPageSup - 1) * limitSup;
-              const endIndexSup = startIndexSup + limitSup;
-              const paginatedSuppliers = filteredSuppliers.slice(startIndexSup, endIndexSup);
-
-              const handleNameChange = (val: string) => {
-                setFormSupName(val);
-                if (!isRepManuallyEdited) {
-                  setFormSupRep(val);
-                }
-              };
-
-              const handleRepChange = (val: string) => {
-                setFormSupRep(val);
-                setIsRepManuallyEdited(true);
-              };
-
-              return (
-                <div className="space-y-4">
-                  
-                  <div className="flex justify-between items-center border-b border-slate-850 pb-2">
-                    <span className="font-bold text-slate-300 uppercase tracking-wide text-[11px]">Danh Mục Thầu Phụ ({filteredSuppliers.length})</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!canCreate) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền KHỞI TẠO thầu phụ mới.', type: 'error' });
-                          return;
-                        }
-                        if (showSupplierForm && editingSupId) {
-                          // If editing, clear edit and show add
-                          resetSupForm();
-                        } else {
-                          setShowSupplierForm(!showSupplierForm);
-                        }
-                      }}
-                      className={`font-bold text-[10px] px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 ${canCreate ? 'bg-orange-600 hover:bg-orange-553 text-white cursor-pointer' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
-                    >
-                      {editingSupId ? '✏️ Đang sửa thầu phụ' : '+ Thêm thầu phụ mới'}
-                    </button>
-                  </div>
-
-                  <div id="subcontractor_form_anchor" />
-
-                  {showSupplierForm && (
-                    <form onSubmit={handleAddSupplierSubmit} className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-3 animate-scaleIn">
-                      <h4 className="text-white font-bold text-xs uppercase tracking-wide border-b border-slate-800 pb-1 text-left">
-                        {editingSupId ? `✏️ Cập nhật thông tin Thầu phụ: ${editingSupId}` : '🤝 Đăng ký Thầu phụ mới'}
-                      </h4>
-
-                      {/* Row 1: Tên thầu phụ, Họ tên Bên B, Giới tính */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Tên Thầu Phụ <span className="text-red-400">*</span>:</label>
-                          <input
-                            type="text"
-                            required
-                            value={formSupName}
-                            onChange={(e) => handleNameChange(e.target.value)}
-                            placeholder="Nhập tên tổ đội / thầu phụ khoán..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Người Đại Diện / Bên B <span className="text-red-400">*</span>:</label>
-                          <input
-                            type="text"
-                            required
-                            value={formSupRep}
-                            onChange={(e) => handleRepChange(e.target.value)}
-                            placeholder="Họ tên người nhận khoán..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Giới tính Bên B:</label>
-                          <select
-                            value={formSupGender}
-                            onChange={(e) => setFormSupGender(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          >
-                            <option value="Nam">Nam</option>
-                            <option value="Nữ">Nữ</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Row 2: Ngày sinh, Điện thoại, Email */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Ngày sinh Bên B:</label>
-                          <input
-                            type="date"
-                            value={formSupBirthDate}
-                            onChange={(e) => setFormSupBirthDate(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Số Điện Thoại <span className="text-red-400">*</span>:</label>
-                          <input
-                            type="text"
-                            required
-                            value={formSupPhone}
-                            onChange={(e) => setFormSupPhone(e.target.value)}
-                            placeholder="Nhập số điện thoại..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Email Bên B:</label>
-                          <input
-                            type="email"
-                            value={formSupEmail}
-                            onChange={(e) => setFormSupEmail(e.target.value)}
-                            placeholder="Email liên hệ..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Row 3: CCCD, Ngày cấp, Nơi cấp */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Số CCCD Bên B:</label>
-                          <input
-                            type="text"
-                            value={formSupCccd}
-                            onChange={(e) => setFormSupCccd(e.target.value)}
-                            placeholder="Nhập số CCCD..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Ngày cấp CCCD:</label>
-                          <input
-                            type="date"
-                            value={formSupCccdDate}
-                            onChange={(e) => setFormSupCccdDate(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Nơi cấp CCCD:</label>
-                          <input
-                            type="text"
-                            value={formSupCccdPlace}
-                            onChange={(e) => setFormSupCccdPlace(e.target.value)}
-                            placeholder="Ví dụ: Cục Cảnh sát QLHC về TTXH..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Row 4: Địa chỉ thường trú, Lĩnh vực */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10.5px] text-left">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Địa chỉ thường trú <span className="text-red-400">*</span>:</label>
-                          <input
-                            type="text"
-                            required
-                            value={formSupAddress}
-                            onChange={(e) => setFormSupAddress(e.target.value)}
-                            placeholder="Nhập địa chỉ đăng ký thường trú..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Lĩnh vực hoạt động:</label>
-                          <input
-                            type="text"
-                            value={formSupField}
-                            onChange={(e) => setFormSupField(e.target.value)}
-                            placeholder="Ví dụ: Thợ dán mâm Acrylic, sắt móng thô..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Row 5: MST cá nhân, Số tài khoản, Ngân hàng */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">MST cá nhân Bên B:</label>
-                          <input
-                            type="text"
-                            value={formSupTaxCode}
-                            onChange={(e) => setFormSupTaxCode(e.target.value)}
-                            placeholder="Nhập mã số thuế cá nhân..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Số tài khoản Bên B:</label>
-                          <input
-                            type="text"
-                            value={formSupBankAccount}
-                            onChange={(e) => setFormSupBankAccount(e.target.value)}
-                            placeholder="Nhập số tài khoản ngân hàng..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Mở tại ngân hàng:</label>
-                          <input
-                            type="text"
-                            value={formSupBankName}
-                            onChange={(e) => setFormSupBankName(e.target.value)}
-                            placeholder="Ví dụ: Vietcombank - CN Lâm Đồng..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Row 6: Ghi chú */}
-                      <div className="text-[10.5px] text-left">
-                        <label className="block text-slate-400 font-semibold mb-1">Ghi chú:</label>
-                        <input
-                          type="text"
-                          value={formSupNote}
-                          onChange={(e) => setFormSupNote(e.target.value)}
-                          placeholder="Ghi chú về kinh nghiệm, năng lực hoặc đội thợ..."
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-                        />
-                      </div>
-
-                      <div className="flex justify-end gap-2 pt-1">
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            setShowSupplierForm(false);
-                            resetSupForm();
-                          }} 
-                          className="bg-slate-850 hover:bg-slate-800 px-3 py-1 rounded text-slate-300 font-bold cursor-pointer text-[10.5px]"
-                        >
-                          Hủy
-                        </button>
-                        <button type="submit" className="bg-orange-600 hover:bg-orange-550 text-white px-3.5 py-1 rounded font-bold text-[10.5px] cursor-pointer">
-                          {editingSupId ? 'Lưu cập nhật' : 'Thêm Thầu phụ'}
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-                    
-                    {/* Left Table Panel */}
-                    <div className={`${selectedSupDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider font-sans">
-                              <th className="p-3 pl-4">Mã Thầu Phụ</th>
-                              <th className="p-3">Tên Thầu Phụ</th>
-                              <th className="p-3">Người Đại Diện</th>
-                              <th className="p-3">Lĩnh vực hoạt động</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/60">
-                            {paginatedSuppliers.length === 0 ? (
-                              <tr>
-                                <td colSpan={4} className="p-8 text-center text-slate-500 italic">
-                                  Không tìm thấy thầu phụ nào phù hợp.
-                                </td>
-                              </tr>
-                            ) : (
-                              paginatedSuppliers.map(s => (
-                                <tr 
-                                  key={s.id} 
-                                  onClick={() => setSelectedSupDetail(s)}
-                                  className={`hover:bg-slate-800/40 cursor-pointer transition-colors ${
-                                    selectedSupDetail?.id === s.id ? 'bg-orange-600/10 border-l-2 border-orange-500' : ''
-                                  }`}
-                                >
-                                  {/* Subcontractor ID */}
-                                  <td className="p-3 pl-4 font-mono font-bold text-yellow-500 text-[10px] uppercase">
-                                    {s.id}
-                                  </td>
-
-                                  {/* Subcontractor Name */}
-                                  <td className="p-3">
-                                    <div className="font-extrabold text-white text-[12.5px]">
-                                      {s.name}
-                                    </div>
-                                    <div className="text-[10px] text-slate-500 mt-0.5">
-                                      Địa chỉ: <span className="text-slate-350">{s.address || s.region || 'Không có'}</span>
-                                    </div>
-                                  </td>
-
-                                  {/* Representative */}
-                                  <td className="p-3 text-slate-300 font-medium">
-                                    {s.representative || s.name}
-                                  </td>
-
-                                  {/* Field / Contact */}
-                                  <td className="p-3">
-                                    <span className="text-orange-400 font-extrabold text-[11px] block">{s.field || 'Chưa phân loại'}</span>
-                                    {s.phone && (
-                                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                                        ĐT: {s.phone}
-                                      </div>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Pagination block */}
-                      <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-900/60 p-3 rounded-xl border border-slate-800 gap-3 text-[11px] text-slate-400">
-                        <div className="flex items-center gap-2">
-                          <span>Số dòng hiển thị:</span>
-                          <select
-                            value={pageSizeSup}
-                            onChange={(e) => {
-                              setPageSizeSup(Number(e.target.value));
-                              setPageSup(1);
-                            }}
-                            className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none cursor-pointer focus:border-orange-500 font-bold"
-                          >
-                            <option value={5}>5 dòng</option>
-                            <option value={10}>10 dòng</option>
-                            <option value={20}>20 dòng</option>
-                            <option value={-1}>Tất cả</option>
-                          </select>
-                          <span>trong tổng số {filteredSuppliers.length} dòng</span>
-                        </div>
-
-                        {pageSizeSup !== -1 && totalPagesSup > 1 && (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={adjustedPageSup === 1}
-                              onClick={() => setPageSup(prev => Math.max(prev - 1, 1))}
-                              className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-slate-300 hover:text-white disabled:opacity-35 disabled:pointer-events-none font-bold transition-all cursor-pointer"
-                            >
-                              ◀ Trước
-                            </button>
-                            <span className="font-mono text-slate-300 px-1">
-                              Trang {adjustedPageSup} / {totalPagesSup}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={adjustedPageSup === totalPagesSup}
-                              onClick={() => setPageSup(prev => Math.min(prev + 1, totalPagesSup))}
-                              className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-slate-300 hover:text-white disabled:opacity-35 disabled:pointer-events-none font-bold transition-all cursor-pointer"
-                            >
-                              Sau ▶
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Right Detail Panel */}
-                    {selectedSupDetail && (() => {
-                      const linkedSubs = subContracts.filter(sub => sub.subcontractorId === selectedSupDetail!.id);
-                      return (
-                        <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-scaleIn space-y-4 text-left text-xs">
-                          <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                            <div className="flex items-center gap-2">
-                              <span className="p-2 rounded bg-yellow-500/10 text-yellow-500">
-                                <Briefcase className="w-4 h-4" />
-                              </span>
-                              <div>
-                                <span className="font-mono text-[9px] text-yellow-500 font-extrabold uppercase tracking-wider">
-                                  {selectedSupDetail!.id.toUpperCase()}
-                                </span>
-                                <h3 className="font-extrabold text-white text-sm mt-0.5">
-                                  Hồ sơ Thầu phụ khoán
-                                </h3>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedSupDetail(null)}
-                              className="text-slate-400 hover:text-white bg-slate-850 p-1.5 rounded-lg transition-colors cursor-pointer"
-                              title="Đóng xem chi tiết"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          <div className="space-y-4">
-                            <div className="p-4 bg-slate-950/60 rounded-xl space-y-3 border border-slate-850">
-                              <div>
-                                <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Tên thầu phụ</span>
-                                <strong className="text-white text-sm block font-extrabold mt-1">{selectedSupDetail!.name}</strong>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Người đại diện (Bên B)</span>
-                                  <span className="text-white mt-1 block font-bold text-[11px]">{selectedSupDetail!.representative || selectedSupDetail!.name}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Giới tính</span>
-                                  <span className="text-white mt-1 block font-medium text-[11px]">{selectedSupDetail!.gender || 'Nam'}</span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ngày sinh</span>
-                                  <span className="text-white mt-1 block font-mono text-[11px]">{selectedSupDetail!.birthDate ? new Date(selectedSupDetail!.birthDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số điện thoại</span>
-                                  <span className="text-slate-205 mt-1 block font-mono font-bold text-[11px]">{selectedSupDetail!.phone || 'Chưa cập nhật'}</span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-850/50">
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số CCCD</span>
-                                  <span className="text-slate-300 mt-1 block font-mono text-[11px]">{selectedSupDetail!.cccd || 'Chưa cập nhật'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ngày cấp</span>
-                                  <span className="text-slate-300 mt-1 block font-mono text-[11.5px]">{selectedSupDetail!.cccdDate ? new Date(selectedSupDetail!.cccdDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Nơi cấp</span>
-                                  <span className="text-slate-300 mt-1 block text-[11.5px] truncate" title={selectedSupDetail!.cccdPlace}>{selectedSupDetail!.cccdPlace || 'Chưa cập nhật'}</span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Địa chỉ thường trú</span>
-                                  <span className="text-slate-300 mt-1 block font-medium flex items-center gap-1">
-                                    <MapPin className="w-3 h-3 text-slate-400 inline shrink-0" /> <span className="truncate">{selectedSupDetail!.address || 'Trống'}</span>
-                                  </span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Email Bên B</span>
-                                  <span className="text-slate-300 mt-1 block font-mono text-[11px] truncate" title={selectedSupDetail!.email}>{selectedSupDetail!.email || 'Chưa cập nhật'}</span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">MST cá nhân</span>
-                                  <span className="text-slate-300 mt-1 block font-mono text-[11px]">{selectedSupDetail!.taxCode || 'Chưa cập nhật'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Lĩnh vực</span>
-                                  <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-500">
-                                    {selectedSupDetail!.field || 'Chưa phân loại'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số tài khoản</span>
-                                  <span className="text-slate-300 mt-1 block font-mono text-[11px]">{selectedSupDetail!.bankAccount || 'Chưa cập nhật'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Tại ngân hàng</span>
-                                  <span className="text-slate-300 mt-1 block text-[11px] truncate" title={selectedSupDetail!.bankName}>{selectedSupDetail!.bankName || 'Chưa cập nhật'}</span>
-                                </div>
-                              </div>
-
-                              <div className="pt-2 border-t border-slate-850/50">
-                                <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ghi chú</span>
-                                <span className="text-slate-300 mt-1 block text-[10.5px] max-h-12 overflow-y-auto" title={selectedSupDetail!.note}>
-                                  {selectedSupDetail!.note || 'Không có ghi chú'}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Linked Contracts section */}
-                            <div className="space-y-2">
-                              <div className="flex justify-between items-center px-1">
-                                <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Hợp đồng thầu phụ liên quan ({linkedSubs.length})</span>
-                              </div>
-                              
-                              {linkedSubs.length === 0 ? (
-                                <div className="p-3 bg-slate-950/30 rounded-xl text-center text-slate-500 italic">
-                                  Chưa có hợp đồng giao khoán nào.
-                                </div>
-                              ) : (
-                                <div className="max-h-[160px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                                  {linkedSubs.map(sub => {
-                                    const projName = projects.find(p => p.id === sub.projectId)?.name || 'Dự án khác';
-                                    return (
-                                      <div key={sub.id} className="p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-[11px] hover:bg-slate-950/80 transition-colors">
-                                        <div className="flex justify-between font-mono font-bold text-[10px] text-orange-400">
-                                          <span>{sub.code}</span>
-                                          <span className={`text-[8.5px] px-1.5 rounded uppercase ${
-                                            sub.status === 'completed' 
-                                              ? 'bg-emerald-500/10 text-emerald-400' 
-                                              : sub.status === 'active' 
-                                                ? 'bg-sky-500/10 text-sky-400' 
-                                                : 'bg-slate-800 text-slate-400'
-                                          }`}>
-                                            {sub.status === 'completed' ? 'Xong' : sub.status === 'active' ? 'Chạy' : 'Nháp'}
-                                          </span>
-                                        </div>
-                                        <p className="text-white font-medium mt-1 line-clamp-1">{sub.scope}</p>
-                                        <div className="flex justify-between text-[9.5px] text-slate-500 mt-1">
-                                          <span className="truncate max-w-[120px]">DA: <strong className="text-slate-400">{projName}</strong></span>
-                                          <strong className="text-slate-205 font-mono">{sub.value.toLocaleString('vi-VN')} đ</strong>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Actions */}
-                            <div className="pt-3 border-t border-slate-800 grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!canCreate) {
-                                    addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA thông tin thầu phụ.', type: 'error' });
-                                    return;
-                                  }
-                                  setEditingSupId(selectedSupDetail!.id);
-                                  setFormSupName(selectedSupDetail!.name);
-                                  setFormSupRep(selectedSupDetail!.representative || selectedSupDetail!.name);
-                                  setFormSupGender(selectedSupDetail!.gender || 'Nam');
-                                  setFormSupBirthDate(selectedSupDetail!.birthDate || '');
-                                  setFormSupCccd(selectedSupDetail!.cccd || selectedSupDetail!.taxCode || '');
-                                  setFormSupCccdDate(selectedSupDetail!.cccdDate || '');
-                                  setFormSupCccdPlace(selectedSupDetail!.cccdPlace || '');
-                                  setFormSupEmail(selectedSupDetail!.email || '');
-                                  setFormSupBankAccount(selectedSupDetail!.bankAccount || selectedSupDetail!.bankNo || '');
-                                  setFormSupBankName(selectedSupDetail!.bankName || '');
-                                  setFormSupPhone(selectedSupDetail!.phone);
-                                  setFormSupField(selectedSupDetail!.field || '');
-                                  setFormSupAddress(selectedSupDetail!.address || selectedSupDetail!.region || '');
-                                  setFormSupTaxCode(selectedSupDetail!.taxCode || '');
-                                  setFormSupNote(selectedSupDetail!.note || '');
-                                  setIsRepManuallyEdited(true);
-                                  setShowSupplierForm(true);
-                                  document.getElementById('subcontractor_form_anchor')?.scrollIntoView({ behavior: 'smooth' });
-                                }}
-                                className="bg-amber-600 hover:bg-amber-550 text-white font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                              >
-                                <Edit className="w-3.5 h-3.5" /> Sửa thầu phụ
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!canCreate) {
-                                    addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA thầu phụ.', type: 'error' });
-                                    return;
-                                  }
-                                  
-                                  const hasLinkedContracts = linkedSubs.length > 0;
-                                  let confirmMessage = `⚠️ CẢNH BÁO QUAN TRỌNG:\n\nHành động xóa này không thể hoàn tác!\nBạn có thực sự chắc chắn muốn xóa Thầu phụ "${selectedSupDetail!.name}" (Mã: ${selectedSupDetail!.id}) ra khỏi hệ thống danh mục không?`;
-                                  
-                                  if (hasLinkedContracts) {
-                                    confirmMessage = `🚨 CẢNH BÁO NGUY HIỂM CAO ĐỘ:\n\nThầu phụ "${selectedSupDetail!.name}" đang liên kết với ${linkedSubs.length} Hợp đồng thầu phụ đang lưu vết trong sổ sách kế toán!\n\nNếu xóa thầu phụ này, các hợp đồng liên quan sẽ bị lỗi hiển thị thầu phụ.\nBạn có THỰC SỰ CHẮC CHẮN MUỐN TIẾP TỤC XÓA và tự chịu trách nhiệm về tính toàn vẹn dữ liệu không?`;
-                                  }
-
-                                  if (confirm(confirmMessage)) {
-                                    if (hasLinkedContracts) {
-                                      // Secondary confirm for high-risk operations with linked contracts
-                                      const secondConfirm = confirm(`XÁC NHẬN LẦN CUỐI:\n\nNhấn OK để thực sự xóa sạch thông tin của thầu phụ "${selectedSupDetail!.name}".\nNhấn Cancel để hủy bỏ.`);
-                                      if (!secondConfirm) return;
-                                    }
-                                    
-                                    setSuppliers(suppliers.filter(s => s.id !== selectedSupDetail!.id));
-                                    setSelectedSupDetail(null);
-                                    addToast({ title: '✅ Thành công', message: `✅ Đã xóa thầu phụ "${selectedSupDetail!.name}" thành công.`, type: 'success' });
-                                  }
-                                }}
-                                className="bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/30 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" /> Xóa thầu phụ
-                              </button>
-                            </div>
-
-                            <div className="pt-1 flex justify-end">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSupDetail(null)}
-                                className="bg-slate-800 hover:bg-slate-755 text-slate-205 font-bold px-4 py-1.5 rounded-xl transition-colors cursor-pointer w-full text-center"
-                              >
-                                Đóng chi tiết
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              );
-            })()}
+            {/* TAB 4.5: NHÀ CUNG CẤP VẬT TƯ (bảng suppliers) */}
+            {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'nha_cung_cap_vat_tu' && (
+              <WarehouseSuppliers />
+            )}
 
             {/* TAB 6: VẬT TƯ */}
             {(activeSubTab === 'vat_tu' || (activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'vat_tu')) && (
@@ -5166,7 +4460,7 @@ export default function FinanceManagement({
                                 />
                                 <button
                                   type="button"
-                                  onClick={() => setShowSupplierForm(true)}
+                                  onClick={() => { setActiveSubTab('du_lieu_ke_toan'); setDuLieuTab('nha_cung_cap_vat_tu'); }}
                                   className="text-purple-500 hover:text-purple-400 text-[10px] font-bold mt-1.5 flex items-center gap-1"
                                 >
                                   <Plus className="w-3 h-3" />

@@ -1388,6 +1388,29 @@ export const dbService = {
     }
   },
 
+  // 11.5 ACCOUNTING SUBCONTRACTORS (DANH SÁCH THẦU PHỤ — bảng riêng, tách khỏi suppliers/NCC)
+  accountingSubcontractors: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('accounting_subcontractors', []);
+    },
+    async save(supplier: any): Promise<void> {
+      await saveSupabase('accounting_subcontractors', supplier);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: supplier }));
+      } catch (e) {
+        console.warn('Failed to dispatch subcontractors event:', e);
+      }
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('accounting_subcontractors', id);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
+      } catch (e) {
+        console.warn('Failed to dispatch subcontractors event:', e);
+      }
+    }
+  },
+
   // 12. INVENTORY (Đồng bộ Supabase)
   inventory: {
     async list(): Promise<any[]> {

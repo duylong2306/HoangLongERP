@@ -695,6 +695,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // Employee Performance Violations/Errors States
   const [employeeErrors, setEmployeeErrors] = useState<EmployeeErrorLog[]>([]);
+  // Ref tránh vòng lặp khi refresh từ event 'hl-hrm-employee-errors-updated':
+  // trong lúc setEmployeeErrors từ cloud thì effect sync không được save ngược lại
+  const isSyncingEmployeeErrorsFromCloud = useRef(false);
 
   const [errorSearchEmpId, setErrorSearchEmpId] = useState<string>('all');
   const [errorFilterMonth, setErrorFilterMonth] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
@@ -1041,6 +1044,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       criteria: getDeduplicatedCriteria([])
     }
   ]);
+  // Ref tránh "mount-save" ghi đè: state khởi tạo có sẵn 1 phần tử (dept_all với criteria rỗng),
+  // nên nếu không có guard, sync effect sẽ save RỖNG lên Supabase ngay khi trang load,
+  // xoá sạch 36 tiêu chí vừa lưu. Các state khác khởi tạo [] nên không dính lỗi này.
+  const isSyncingCriteriaFromCloud = useRef(false);
 
   // =====================================================================
   // CLOUD SYNC — Load dữ liệu từ Supabase khi mount + storage listener
@@ -1079,7 +1086,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     // Payroll
     dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {});
     // Employee Errors
-    dbService.hrmEmployeeErrors.list().then((d: any[]) => { if (d?.length) setEmployeeErrors(d); }).catch(() => {});
+    isSyncingEmployeeErrorsFromCloud.current = true;
+    dbService.hrmEmployeeErrors.list().then((d: any[]) => {
+      if (d?.length) setEmployeeErrors(d);
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingEmployeeErrorsFromCloud.current = false; }, 500);
+    });
     // Leave Coefficients
     dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {});
     // Trips
@@ -1087,6 +1099,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     // Salary Scales
     dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {});
     // Performance Criteria
+    isSyncingCriteriaFromCloud.current = true;
     dbService.hrmPerformanceCriteria.list().then((d: any[]) => {
       if (d?.length) {
         // criteria có thể là JSON string từ Supabase → cần parse
@@ -1096,7 +1109,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         }));
         setDepartmentCriteria(parsed);
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      // Cho phép sync trở lại sau khi load xong (tránh mount-save rỗng ghi đè dữ liệu cloud)
+      setTimeout(() => { isSyncingCriteriaFromCloud.current = false; }, 500);
+    });
     // Travel Norms
     dbService.travelNorms.list().then((d: any[]) => { if (d?.length) setTravelNorms(d); }).catch(() => {});
   }, []);
@@ -1126,6 +1142,25 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     };
     window.addEventListener('hl-task-permissions-updated', handleRolesChanged);
     return () => window.removeEventListener('hl-task-permissions-updated', handleRolesChanged);
+  }, []);
+
+  // ─── LISTENER: Vi phạm gửi từ Công việc (TaskDetailModal) → refresh Nhật ký lỗi ───
+  useEffect(() => {
+    const handleEmployeeErrorsUpdated = async () => {
+      try {
+        isSyncingEmployeeErrorsFromCloud.current = true;
+        const cloudErrors = await dbService.hrmEmployeeErrors.list();
+        if (cloudErrors && cloudErrors.length > 0) {
+          setEmployeeErrors(cloudErrors);
+        }
+      } catch (e) {
+        console.error('Realtime employee-errors sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingEmployeeErrorsFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-employee-errors-updated', handleEmployeeErrorsUpdated);
+    return () => window.removeEventListener('hl-hrm-employee-errors-updated', handleEmployeeErrorsUpdated);
   }, []);
 
   // ─── SYNC TO SUPABASE: lưu khi state thay đổi ───
@@ -1169,6 +1204,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [leaveCoefficients]);
 
   useEffect(() => {
+    if (isSyncingEmployeeErrorsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (employeeErrors?.length) employeeErrors.forEach(e => dbService.hrmEmployeeErrors.save(e).catch(() => {}));
   }, [employeeErrors]);
 
@@ -1177,7 +1213,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [salaryScales]);
 
   useEffect(() => {
-    if (departmentCriteria?.length) departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
+    if (isSyncingCriteriaFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud (tránh mount-save rỗng ghi đè)
+    if (departmentCriteria?.length) departmentCriteria.forEach((c: any) => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
   }, [departmentCriteria]);
 
   useEffect(() => {
@@ -3407,22 +3444,6 @@ Generated by HL ERP Cloud v2.1 (2026)
                   </div>
                 )}
 
-                {activeSubTab === 'leaves' && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        const configuredApprover = getConfiguredApprover('leave');
-                        if (configuredApprover) {
-                          setNewLeave(prev => ({ ...prev, approverName: configuredApprover.name, approverId: configuredApprover.id, approverPosition: configuredApprover.position || '' }));
-                        }
-                        setShowLeaveModal(true);
-                      }}
-                      className="bg-pink-600 hover:bg-pink-550 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Tạo Đơn Phép
-                    </button>
-                  </div>
-                )}
 
                 
               </div>

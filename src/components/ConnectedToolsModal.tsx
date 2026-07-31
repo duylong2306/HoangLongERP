@@ -210,7 +210,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
   const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = React.useState(false);
 
   const [suppliers, setSuppliers] = React.useState<Supplier[]>(() => {
-    const saved = localStorage.getItem('hl_acc_suppliers');
+    const saved = localStorage.getItem('hl_acc_material_suppliers');
     if (saved) {
       try { return JSON.parse(saved); } catch(e) {}
     }
@@ -1543,7 +1543,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                               };
                               const updatedSups = [...suppliers, newSup];
                               setSuppliers(updatedSups);
-                              localStorage.setItem('hl_acc_suppliers', JSON.stringify(updatedSups));
+                              localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(updatedSups));
                               dbService.suppliers.save(newSup).catch(() => {});
                               window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: updatedSups }));
 
@@ -1800,7 +1800,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                                 };
                                 const updatedSups = [...suppliers, autoSup];
                                 setSuppliers(updatedSups);
-                                localStorage.setItem('hl_acc_suppliers', JSON.stringify(updatedSups));
+                                localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(updatedSups));
                                 dbService.suppliers.save(autoSup).catch(() => {});
                                 window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: updatedSups }));
 

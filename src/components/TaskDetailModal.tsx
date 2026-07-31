@@ -550,24 +550,39 @@ export default function TaskDetailModal({
   }, []);
 
   const [submittedViolations, setSubmittedViolations] = useState<{ id: string; criterionId: string; employeeIds: string[]; notes: string; images: string[]; createdAt: string }[]>([]);
+  // Toàn bộ lỗi vi phạm load trực tiếp từ Supabase (không dùng localStorage)
+  const [cloudErrors, setCloudErrors] = useState<any[]>([]);
 
-  const loadSubmittedViolations = () => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_employee_errors_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const matched = parsed.filter((item: any) => 
-            item.taskId === selectedTask.id || (item.notes && item.notes.includes(selectedTask.name))
-          );
-          setSubmittedViolations(matched);
-        }
-      } else {
-        setSubmittedViolations([]);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  const loadSubmittedViolations = (source?: any[]) => {
+    const errors = source ?? cloudErrors;
+    const matched = (errors || []).filter((item: any) =>
+      item.taskId === selectedTask.id || (item.notes && item.notes.includes(selectedTask.name))
+    );
+    setSubmittedViolations(matched);
+  };
+
+  // Load lỗi vi phạm từ Supabase khi mở modal (nguồn dữ liệu chính)
+  useEffect(() => {
+    let mounted = true;
+    dbService.hrmEmployeeErrors.list()
+      .then((d: any[]) => {
+        if (!mounted) return;
+        setCloudErrors(d || []);
+        loadSubmittedViolations(d || []);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  // Đồng bộ lỗi vi phạm lên Supabase để xuất hiện trong Nhật ký lỗi vi phạm (HR).
+  // Lưu nguyên taskId/autoSource (cột task_id / auto_source đã có từ migration 017).
+  const syncEmployeeErrorsToSupabase = (errors: any[]) => {
+    errors.forEach((err) => {
+      dbService.hrmEmployeeErrors.save(err)
+        .catch((e) => console.warn('Sync lỗi vi phạm lên Supabase thất bại:', e?.message || e));
+    });
+    // Báo cho màn hình HR refresh danh sách (nếu đang mở cùng trình duyệt)
+    try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
   };
 
   const convertToDatetimeLocal = (isoString?: string): string => {
@@ -628,7 +643,39 @@ export default function TaskDetailModal({
     ]);
   }, [selectedTask.id, selectedTask.deadline]);
 
+  // Load tiêu chí từ Supabase (nguồn chính xác) — trước đây chỉ đọc localStorage
+  // 'hl_hrm_performance_criteria_v1' nhưng không có nơi nào ghi key này nên luôn rỗng.
+  const [cloudCriteria, setCloudCriteria] = React.useState<{ id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[]>([]);
+  React.useEffect(() => {
+    let mounted = true;
+    dbService.hrmPerformanceCriteria.list()
+      .then((d: any[]) => {
+        if (!mounted) return;
+        const flat: { id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[] = [];
+        d.forEach((dept: any) => {
+          const criteriaArr = typeof dept.criteria === 'string'
+            ? (() => { try { return JSON.parse(dept.criteria); } catch { return []; } })()
+            : (Array.isArray(dept.criteria) ? dept.criteria : []);
+          criteriaArr.forEach((crit: any) => {
+            flat.push({
+              id: crit.id,
+              content: crit.content,
+              category: (crit.category || 'readiness') as 'readiness' | 'progress' | 'reporting',
+              deptName: dept.departmentName
+            });
+          });
+        });
+        setCloudCriteria(flat);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
   const allCriteria = React.useMemo(() => {
+    // Ưu tiên dữ liệu vừa fetch từ Supabase
+    if (cloudCriteria.length > 0) return cloudCriteria;
+
+    // Fallback sang localStorage (dữ liệu cũ trước khi có Supabase)
     const flat: { id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[] = [];
     try {
       const saved = localStorage.getItem('hl_hrm_performance_criteria_v1');
@@ -654,7 +701,7 @@ export default function TaskDetailModal({
     }
 
     return flat;
-  }, []);
+  }, [cloudCriteria]);
 
   const relatedEmployees = React.useMemo(() => {
     const relatedIds = new Set<string>();
@@ -677,16 +724,14 @@ export default function TaskDetailModal({
   useEffect(() => {
     if (selectedTask.status === 'completed') return;
     try {
-      let existingErrors: any[] = [];
-      const saved = localStorage.getItem('hl_hrm_employee_errors_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          existingErrors = parsed;
-        }
-      }
+      // Nguồn dữ liệu trực tiếp từ Supabase (đã load khi mở modal)
+      let existingErrors: any[] = cloudErrors || [];
+      // Sắp xếp để các phần tử mới (unshift vào đầu) không ghi đè lẫn nhau khi chống trùng
+      existingErrors = existingErrors.slice();
 
       let hasChanged = false;
+      // Theo dõi các log tự động mới tạo để đồng bộ lên Supabase
+      const newlyCreatedLogs: any[] = [];
       const proj = projects.find(p => p.id === selectedTask.projectId);
       const projName = proj?.name || 'Không rõ';
 
@@ -735,6 +780,7 @@ export default function TaskDetailModal({
                 taskId: selectedTask.id,
                 autoSource: autoKey
               });
+              newlyCreatedLogs.push(existingErrors[0]);
               hasChanged = true;
             }
           }
@@ -792,6 +838,7 @@ export default function TaskDetailModal({
                       taskId: selectedTask.id,
                       autoSource: autoKey
                     });
+                    newlyCreatedLogs.push(existingErrors[0]);
                     hasChanged = true;
                   }
                 }
@@ -802,16 +849,18 @@ export default function TaskDetailModal({
       }
 
       if (hasChanged) {
-        localStorage.setItem('hl_hrm_employee_errors_v3', JSON.stringify(existingErrors));
-        // Reload local list and notify HRM component to re-read from localStorage
-        loadSubmittedViolations();
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new CustomEvent('hl_hrm_employee_errors_updated'));
+        // Đồng bộ lên Supabase (nguồn dữ liệu chính — không ghi localStorage)
+        syncEmployeeErrorsToSupabase(newlyCreatedLogs);
+        // Cập nhật state cục bộ + lịch sử hiển thị
+        setCloudErrors(existingErrors);
+        loadSubmittedViolations(existingErrors);
       }
     } catch (err) {
       console.error("Autologging error logs failed:", err);
     }
-  }, [selectedTask, employees, projects, allCriteria]);
+    // cloudErrors trong deps để khi load xong từ Supabase, effect chạy lại
+    // và check autoSource đúng → không tạo log trùng.
+  }, [selectedTask, employees, projects, allCriteria, cloudErrors]);
 
   const isMissionAssignee = selectedTask.missions?.some(m => m.mainAssigneeId === currentUser.id || m.memberIds?.includes(currentUser.id)) || false;
 
@@ -828,18 +877,8 @@ export default function TaskDetailModal({
       }
     }
 
-    let existingErrors: any[] = [];
-    try {
-      const saved = localStorage.getItem('hl_hrm_employee_errors_v3');
-      if (saved) {
-        existingErrors = JSON.parse(saved);
-        if (!Array.isArray(existingErrors)) {
-          existingErrors = [];
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    // Nguồn dữ liệu trực tiếp từ Supabase (đã load khi mở modal)
+    const existingErrors = cloudErrors || [];
 
     const newLogsToInsert: any[] = [];
     const loggedNames: string[] = [];
@@ -891,8 +930,11 @@ export default function TaskDetailModal({
     });
 
     const updatedErrors = [...newLogsToInsert, ...existingErrors];
-    localStorage.setItem('hl_hrm_employee_errors_v3', JSON.stringify(updatedErrors));
-    loadSubmittedViolations();
+    // Đồng bộ lên Supabase (nguồn dữ liệu chính — không ghi localStorage)
+    syncEmployeeErrorsToSupabase(newLogsToInsert);
+    // Cập nhật state cục bộ + lịch sử hiển thị
+    setCloudErrors(updatedErrors);
+    loadSubmittedViolations(updatedErrors);
 
 
     if (detailCameraStream) {
@@ -2030,7 +2072,7 @@ export default function TaskDetailModal({
                       const queryNorm = removeVietnameseTones(row.searchQuery);
                       const critNorm = removeVietnameseTones(crit.content);
                       return critNorm.includes(queryNorm);
-                    }).slice(0, 7);
+                    });
 
                     return (
                       <div key={row.id} className="relative p-4 border border-slate-900 rounded-xl bg-slate-950/40 space-y-3">
@@ -2094,7 +2136,7 @@ export default function TaskDetailModal({
 
                           {/* Suggestions block */}
                           {row.isSearchOpen && filteredCriteria.length > 0 && (
-                            <div className="absolute z-55 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-850 rounded-xl shadow-2xl p-1">
+                            <div className="absolute z-55 left-0 right-0 mt-1 max-h-60 overflow-y-auto overscroll-contain bg-slate-950 border border-slate-850 rounded-xl shadow-2xl p-1">
                               {filteredCriteria.map(crit => {
                                 let catText = 'Tác phong';
                                 let catColor = 'text-purple-400 bg-purple-950/40 border-purple-900/30';

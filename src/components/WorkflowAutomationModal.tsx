@@ -595,23 +595,21 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                         {subtaskAuto.isCostEnabled === true && (
                           <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
                             <div className="space-y-1">
-                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                               <SearchableEmployeeSelect
                                 value={subtaskAuto.costApproverId || ''}
                                 onChange={(val) => updateSubtaskAutomation(index, { costApproverId: val || undefined })}
                                 employees={employees}
                                 placeholder="-- Mặc định (Giám đốc / PM) --"
-                                required
                               />
                             </div>
                             <div className="space-y-1">
-                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                               <SearchableEmployeeSelect
                                 value={subtaskAuto.costSettlerId || ''}
                                 onChange={(val) => updateSubtaskAutomation(index, { costSettlerId: val || undefined })}
                                 employees={employees}
                                 placeholder="-- Mặc định (Kế toán) --"
-                                required
                               />
                             </div>
                           </div>
@@ -685,7 +683,7 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                           <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
                             {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
                             <div>
-                              <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                               <select
                                 value={subtaskAuto.subcontractorId || ''}
                                 onChange={(e) => {
@@ -713,7 +711,6 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                                   }
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
-                                required
                               >
                                 <option value="">-- Chọn đối tác thầu phụ --</option>
                                 {(() => {
@@ -741,23 +738,21 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                             {/* Approver & Settler dropdowns (theo mẫu popup) */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div className="space-y-1">
-                                <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                 <SearchableEmployeeSelect
                                   value={subtaskAuto.subcontractorApproverId || ''}
                                   onChange={(val) => updateSubtaskAutomation(index, { subcontractorApproverId: val || undefined })}
                                   employees={employees}
                                   placeholder="-- Mặc định (Giám đốc) --"
-                                  required
                                 />
                               </div>
                               <div className="space-y-1">
-                                <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                 <SearchableEmployeeSelect
                                   value={subtaskAuto.subcontractorSettlerId || ''}
                                   onChange={(val) => updateSubtaskAutomation(index, { subcontractorSettlerId: val || undefined })}
                                   employees={employees}
                                   placeholder="-- Mặc định (Kế toán) --"
-                                  required
                                 />
                               </div>
                             </div>

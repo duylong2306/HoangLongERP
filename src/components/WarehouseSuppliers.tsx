@@ -82,10 +82,13 @@ export default function WarehouseSuppliers() {
   const loadSuppliers = async () => {
     try {
       const data = await dbService.suppliers.list();
-      setSuppliers(data.map((s: any) => ({
+      const normalized = data.map((s: any) => ({
         ...s,
         debt: typeof s.debt === 'number' ? s.debt : 0
-      })));
+      }));
+      setSuppliers(normalized);
+      // Đồng bộ localStorage riêng của NCC (tách khỏi thầu phụ `hl_acc_suppliers`)
+      localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(normalized));
     } catch (e) {
       console.error(e);
     }
@@ -97,6 +100,11 @@ export default function WarehouseSuppliers() {
     window.addEventListener('hl-suppliers-updated', syncSuppliers);
     return () => window.removeEventListener('hl-suppliers-updated', syncSuppliers);
   }, []);
+
+  // Persist mỗi khi data đổi (thêm/sửa/xóa/điều chỉnh công nợ/import)
+  useEffect(() => {
+    localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(suppliers));
+  }, [suppliers]);
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -314,7 +322,7 @@ export default function WarehouseSuppliers() {
         <div>
           <h2 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
-            Danh Mục Nhà Cung Cấp Vật Tư (KHO)
+            Danh Mục Nhà Cung Cấp Vật Tư
           </h2>
         </div>
         <div className="flex items-center gap-2">
