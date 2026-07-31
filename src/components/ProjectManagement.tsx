@@ -1134,7 +1134,12 @@ export default function ProjectManagement({
                 ) : (
                   <div className="bg-red-50 border border-red-250 p-2.5 rounded-lg space-y-2 text-left">
                     <p className="text-[11px] text-red-700 font-bold leading-normal">
-                      ⚠️ Bạn có chắc chắn muốn xóa dự án này khỏi hệ thống? Thao tác này sẽ xóa vĩnh viễn toàn bộ hồ sơ của dự án và toàn bộ các nhiệm vụ, công việc thi công liên quan!
+                      ⚠️ Bạn có chắc chắn muốn xóa dự án này khỏi hệ thống?
+                    </p>
+                    <p className="text-[10px] text-slate-600 font-semibold leading-normal">
+                      Toàn bộ dữ liệu phát sinh sẽ bị xóa vĩnh viễn khỏi cơ sở dữ liệu và không thể khôi phục:
+                      Công việc (kể cả đã hoàn thành), Nhiệm vụ, Nhóm chat, Ghi nhận vi phạm, Công tác phí,
+                      Báo giá, Hợp đồng, Nghiệm thu, Thanh lý, HĐ thầu, Công nợ, Đề xuất, Phiếu thu, Phiếu chi.
                     </p>
                     <div className="flex gap-1.5">
                       <button

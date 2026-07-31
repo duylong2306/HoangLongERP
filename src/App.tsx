@@ -341,7 +341,13 @@ export default function App() {
   const addToast = (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => {
     const id = `${Date.now()}_${Math.random()}`;
     const duration = toast.duration === undefined ? 5000 : toast.duration;
-    setToasts(prev => [...prev, { ...toast, id, duration }]);
+    // Đẩy cập nhật state vào microtask thay vì chạy ngay. Tránh warning
+    // "Cannot update a component while rendering a different component" khi
+    // addToast tình cờ bị gọi trong lúc một component khác đang ở pha render
+    // (ví dụ bên trong .map() hoặc hàm tính toán chạy lúc render).
+    queueMicrotask(() => {
+      setToasts(prev => [...prev, { ...toast, id, duration }]);
+    });
     if (duration > 0) {
       setTimeout(() => {
         setToasts(prev => prev.filter(t => t.id !== id));
@@ -1814,18 +1820,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   // HANDLERS DỰ ÁN
-  const handleAddProject = (newProj: Project) => {
+  const handleAddProject = async (newProj: Project) => {
     setProjects([newProj, ...projects]);
-    dbService.projects.save(newProj).then(() => {
+    try {
+      await dbService.projects.save(newProj);
       window.dispatchEvent(new CustomEvent('hl-projects-updated'));
-    }).catch(err => {
+    } catch (err) {
       console.error('Lỗi lưu project lên Supabase:', err);
       addToast({
         title: '⚠️ Lưu dự án thất bại',
         message: `Không thể đồng bộ "${newProj.name}" lên đám mây: ${err.message}`,
         type: 'error'
       });
-    });
+    }
 
     // Phát thông báo Toast nổi
     addToast({
@@ -1866,10 +1873,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           const finalStatus = updates.status !== undefined ? updates.status : p.status;
           const finalProgress = updates.progress !== undefined ? updates.progress : p.progress;
           const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
+          // Chỉ ép về col_done khi dự án VỪA hoàn thành MÀ chưa nằm ở cột nào
+          // (cả trong update lẫn trong dữ liệu hiện tại). Nếu dự án đã có cột
+          // (ví dụ cột đã cấu hình "chuyển cột khi hoàn thành"), TUYỆT ĐỐI không
+          // ghi đè — nếu không mỗi lần cập nhật/save sẽ kéo thẻ về col_done gây
+          // hiện tượng "chạy lung tung", không theo đúng cấu hình.
           const nextp = {
             ...p,
             ...updates,
-            ...(isCompleted && !updates.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
+            ...(isCompleted && !updates.kanbanColumnId && !p.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
           };
           
           // Trigger the Firestore save as a side-effect outside state rendering if possible,
@@ -1907,41 +1919,61 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   };
 
-  const handleDeleteProject = (id: string) => {
-    // 1. Cập nhật state dự án dùng functional update để tránh stale closure
+  /**
+   * XÓA DỰ ÁN — cuốn sạch mọi dữ liệu phát sinh trên Supabase.
+   *
+   * Toàn bộ việc dọn database do dbService.projects.deleteCascade() lo:
+   * Công Việc, Nhiệm Vụ, Nhóm chat + tin nhắn, Ghi nhận vi phạm, Công tác phí,
+   * Báo giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, HĐ Thầu, Công Nợ, Đề Xuất,
+   * Phiếu Thu, Phiếu Chi... Ở đây chỉ đồng bộ lại state và báo kết quả.
+   */
+  const handleDeleteProject = async (id: string) => {
+    const projectName = projects.find(p => p.id === id)?.name || id;
+
+    // 1. Gỡ khỏi giao diện ngay (optimistic) để thao tác thấy tức thì
     setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
+    setTasks(prevTasks => prevTasks.filter(t => t.projectId !== id));
 
-    // 1b. Xóa luôn nhóm chat dự án tương ứng (conv_project_<id>)
-    deleteConversation(`conv_project_${id}`);
+    try {
+      // 2. Dọn sạch database — con trước, cha sau
+      const report = await dbService.projects.deleteCascade(id);
 
-    // 2. Cập nhật state công việc dùng functional update, đồng thời xóa các tài liệu tương ứng trong Firebase
-    setTasks(prevTasks => {
-      const associatedTasks = prevTasks.filter(t => t.projectId === id);
-      const associatedTaskIds = associatedTasks.map(t => t.id);
+      // 3. Báo cho mọi màn hình đang mở tự làm mới danh sách
+      [
+        'hl-projects-updated',
+        'hl-tasks-updated',
+        'hl-archived-quotes-updated',
+        'hl-subcontractor-advances-updated',
+        'hl-accounting-receivables-updated',
+        'hl-conversations-updated',
+      ].forEach(evt => window.dispatchEvent(new CustomEvent(evt)));
 
-      if (associatedTaskIds.length > 0) {
-        dbService.tasks.deleteMultiple(associatedTaskIds).catch(err => {
-          console.error("Lỗi khi xóa các công việc con liên quan đến dự án:", err);
-        });
+      addToast({
+        title: '🗑️ Đã xóa dự án',
+        message: report.total > 0
+          ? `Dự án "${projectName}" và ${report.total} bản ghi liên quan đã bị xóa vĩnh viễn.`
+          : `Dự án "${projectName}" đã bị xóa vĩnh viễn.`,
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('Lỗi khi xóa dự án:', err);
+      addToast({
+        title: '❌ Xóa dự án thất bại',
+        message: `Không thể xóa "${projectName}": ${err instanceof Error ? err.message : String(err)}. Danh sách sẽ được tải lại.`,
+        type: 'error'
+      });
+      // Khôi phục state từ server để giao diện không lệch với database
+      try {
+        const [freshProjects, freshTasks] = await Promise.all([
+          dbService.projects.list(),
+          dbService.tasks.list(),
+        ]);
+        setProjects(freshProjects);
+        setTasks(freshTasks);
+      } catch (reloadErr) {
+        console.error('Không tải lại được dữ liệu sau khi xóa dự án thất bại:', reloadErr);
       }
-
-      return prevTasks.filter(t => t.projectId !== id);
-    });
-
-    // 3. Xóa dự án trong Firebase
-    dbService.projects.delete(id).then(() => {
-      window.dispatchEvent(new CustomEvent('hl-projects-updated'));
-    }).catch(err => {
-      console.error("Lỗi khi xóa dự án:", err);
-    });
-
-    // 4. Xóa toàn bộ hồ sơ lưu trữ liên quan (Nội thất gỗ / Xây dựng / Cơ khí) theo projectId
-    dbService.archivedQuotes.deleteByProjectId(id).then(() => {
-      // Thông báo để các màn hình Lưu Trữ Hồ Sơ tự làm mới danh sách
-      window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
-    }).catch(err => {
-      console.error("Lỗi khi xóa hồ sơ lưu trữ liên quan dự án:", err);
-    });
+    }
   };
 
   // HANDLERS CÔNG VIỆC

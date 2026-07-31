@@ -12,7 +12,7 @@ interface ProjectCreationModalProps {
   employees: Employee[];
   customers: Customer[];
   onAddTask: (task: Task) => void;
-  onAddProject: (project: Project) => void;
+  onAddProject: (project: Project) => Promise<void> | void;
   onAddCustomer: (customer: Customer) => void;
 }
 
@@ -73,7 +73,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProjName.trim()) return;
 
@@ -111,6 +111,10 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
     };
     (customProject as any).kanbanColumnId = newProjColumnId;
 
+    // Danh sách task tự động sẽ được tạo — chỉ lưu SAU khi dự án cha đã
+    // commit lên Supabase (tránh vi phạm FK tasks_project_id_fkey).
+    const autoTasks: Task[] = [];
+
     // 2. Run target column automation rules when initializing
     const targetCol = columns.find(c => c.id === newProjColumnId);
     let ruleLogs: string[] = [];
@@ -122,13 +126,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
         customProject.pmId = rule.assignId;
         const empName = employees.find(e => e.id === rule.assignId)?.name || 'Trưởng Dự Án mới';
         ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
-      }
-
-      // rule 2: Status update
-      if (rule.statusUpdate) {
-        customProject.status = rule.statusUpdate as any;
-        const statusLabel = rule.statusUpdate === 'active' ? 'Đang thực hiện' : rule.statusUpdate === 'completed' ? 'Hoàn thành' : rule.statusUpdate === 'suspended' ? 'Tạm khiển' : rule.statusUpdate;
-        ruleLogs.push(`Chuyển trạng thái dự án sang: ${statusLabel}`);
       }
 
       // rule 2.2: Style and formatting
@@ -219,7 +216,9 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
             isMaterialEnabled: subtaskAuto.isMaterialEnabled === true,
             isSubcontractorEnabled: subtaskAuto.isSubcontractorEnabled === true
           };
-          onAddTask(autoTask);
+          // Thu tạm task tự động — chưa lưu ngay. Phải đợi dự án cha
+          // được commit lên Supabase (FK tasks_project_id_fkey) rồi mới lưu.
+          autoTasks.push(autoTask);
 
           // Auto Document Generation
           if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
@@ -273,7 +272,13 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
     };
     customProject.documents = [autoComment];
 
-    onAddProject(customProject);
+    // 1) Lưu dự án cha lên Supabase và đợi commit xong (để có bản ghi
+    //    projects tồn tại trước khi task con trỏ FK tới).
+    await onAddProject(customProject);
+
+    // 2) Sau khi dự án đã có trên Supabase, mới tạo các task tự động.
+    autoTasks.forEach(t => onAddTask(t));
+
     onClose();
   };
 

@@ -262,6 +262,245 @@ async function createOrderUnique(tableName: string, order: any): Promise<any> {
   throw new Error(`Không thể cấp mã đơn duy nhất cho ${tableName} sau 25 lần thử.`);
 }
 
+// ─── Cascade delete helpers ──────────────────────────────────────────────
+// Schema mỗi môi trường một khác (bảng/cột có thể chưa tồn tại), nên các
+// helper dưới đây LUÔN thất bại êm: log cảnh báo rồi trả 0, không ném lỗi,
+// để một bảng lỗi không chặn việc dọn các bảng còn lại.
+
+/** Mã lỗi Postgres nghĩa là "bảng/cột không tồn tại" → bỏ qua, không phải lỗi thật */
+function isMissingSchemaError(error: { code?: string; message?: string }): boolean {
+  return error.code === '42P01'          // undefined_table
+      || error.code === '42703'          // undefined_column
+      || error.code === 'PGRST204'       // PostgREST: column not found in schema cache
+      || /does not exist/i.test(error.message || '');
+}
+
+// ─── Biết trước bảng nào có cột nào ──────────────────────────────────────
+// Gọi DELETE lên một cột không tồn tại trả HTTP 400 và trình duyệt log đỏ
+// ngay ở tầng network — JS KHÔNG nuốt được. Nên phải biết TRƯỚC rồi mới bắn.
+//
+// PostgREST có phơi OpenAPI spec ở gốc /rest/v1/ nhưng Supabase đời mới chỉ
+// cho service_role đọc (anon nhận 401), nên không dùng được từ trình duyệt.
+// Thay vào đó migration 20260731_project_cascade_delete.sql tạo RPC
+// `hl_link_columns()` trả về đúng danh sách (bảng, cột) liên kết.
+
+export interface LinkColumnMap {
+  /** Bảng có cột project_id */
+  byProject: Set<string>;
+  /** Bảng có cột task_id */
+  byTask: Set<string>;
+  /** Bảng lưu object trong cột `data jsonb`, không có cột liên kết thật */
+  byJsonb: Set<string>;
+}
+
+/**
+ * Danh sách đã ĐỐI CHIẾU với database thật (07/2026).
+ * Dùng khi RPC hl_link_columns chưa tồn tại (migration chưa được áp).
+ * Chỉ liệt kê bảng CHẮC CHẮN có cột đó — thà bỏ sót còn hơn bắn request lỗi.
+ */
+const VERIFIED_LINK_COLUMNS: LinkColumnMap = {
+  byProject: new Set([
+    'tasks',
+    'receipts',                     // Phiếu Thu
+    'payments',                     // Phiếu Chi
+    'quotes',                       // Báo Giá
+    'archived_quotes',              // Hợp Đồng / Nghiệm Thu / Thanh Lý
+    'subcontractor_advances',       // Đề Xuất tạm ứng thầu phụ
+    'accounting_receivables',       // Công Nợ phải thu
+    'project_permission_overrides', // Phân quyền riêng của dự án
+    'conversations',                // Nhóm chat
+  ]),
+  byTask: new Set([
+    'quotes',
+    'subcontractor_advances',
+    'notifications',
+    'hrm_employee_errors',          // Ghi nhận vi phạm kỷ luật & hiệu suất
+    'conversations',
+  ]),
+  byJsonb: new Set([
+    'hrm_travel_expenses',          // Công tác phí — chỉ lưu projectName/taskName
+    'accounting_sub_contracts',     // HĐ Thầu
+  ]),
+};
+
+// Ghi chú đã kiểm chứng trên database thật (07/2026):
+//   • accounting_liabilities (Công Nợ phải trả) chỉ có cột id, name, created_at
+//     — KHÔNG có bất kỳ liên kết nào tới dự án, nên không thể cascade. Muốn
+//     xóa theo dự án thì phải bổ sung cột project_id cho bảng này trước.
+//   • hrm_trips, purchase_orders, sales_orders, warehouse_logs cũng không có
+//     cột liên kết dự án → cố tình bỏ khỏi danh sách để khỏi quét vô ích.
+
+let _linkColumnsPromise: Promise<LinkColumnMap> | null = null;
+
+/**
+ * Hỏi database xem bảng nào có project_id / task_id / data jsonb.
+ * Ưu tiên RPC (tự bắt kịp bảng mới thêm về sau); RPC chưa có thì dùng
+ * danh sách đã đối chiếu ở trên.
+ */
+async function getLinkColumns(): Promise<LinkColumnMap> {
+  if (_linkColumnsPromise) return _linkColumnsPromise;
+
+  _linkColumnsPromise = (async () => {
+    const supabase = getSupabase();
+    if (!supabase) return VERIFIED_LINK_COLUMNS;
+
+    try {
+      const { data, error } = await supabase.rpc('hl_link_columns');
+      if (error || !Array.isArray(data) || data.length === 0) {
+        if (error) {
+          console.warn(
+            '[DB] RPC hl_link_columns chưa có (chạy migration 20260731 để bật) — dùng danh sách mặc định:',
+            error.message
+          );
+        }
+        return VERIFIED_LINK_COLUMNS;
+      }
+
+      const map: LinkColumnMap = {
+        byProject: new Set<string>(),
+        byTask: new Set<string>(),
+        byJsonb: new Set<string>(),
+      };
+      data.forEach((row: any) => {
+        const table = row?.table_name;
+        if (!table) return;
+        if (row.has_project_id) map.byProject.add(table);
+        if (row.has_task_id) map.byTask.add(table);
+        if (row.has_jsonb_data && !row.has_project_id && !row.has_task_id) {
+          map.byJsonb.add(table);
+        }
+      });
+      console.log(
+        `[DB] Schema liên kết: ${map.byProject.size} bảng project_id, ` +
+        `${map.byTask.size} bảng task_id, ${map.byJsonb.size} bảng jsonb`
+      );
+      return map;
+    } catch (err) {
+      console.warn('[DB] Ngoại lệ khi gọi hl_link_columns — dùng danh sách mặc định:', err);
+      return VERIFIED_LINK_COLUMNS;
+    }
+  })();
+
+  return _linkColumnsPromise;
+}
+
+/** Xóa mọi dòng của `tableName` có `column` nằm trong `values`. Trả về số dòng đã xóa. */
+async function deleteWhereIn(tableName: string, column: string, values: string[]): Promise<number> {
+  if (values.length === 0) return 0;
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  try {
+    const { data, error } = await supabase.from(tableName).delete().in(column, values).select('id');
+    if (error) {
+      if (!isMissingSchemaError(error)) {
+        console.warn(`[DB] cascade: xóa ${tableName}.${column} lỗi:`, error.message);
+      }
+      return 0;
+    }
+    const n = data?.length ?? 0;
+    if (n > 0) invalidateCache(tableName);
+    return n;
+  } catch (err) {
+    console.warn(`[DB] cascade: ngoại lệ khi xóa ${tableName}.${column}:`, err);
+    return 0;
+  }
+}
+
+/** Thông tin nhận dạng dự án dùng để đối chiếu trong các bảng jsonb */
+export interface CascadeMatchKeys {
+  projectId: string;
+  taskIds: Set<string>;
+  /** Tên dự án — cần vì có bảng chỉ lưu tên, không lưu id */
+  projectName: string;
+  /** Tên các công việc thuộc dự án */
+  taskNames: Set<string>;
+}
+
+/**
+ * Xóa cho các bảng lưu cả object trong cột `data jsonb`
+ * (hrm_travel_expenses = Công tác phí, accounting_sub_contracts = HĐ Thầu):
+ * không có cột project_id thật nên FK CASCADE không với tới được.
+ * Đọc toàn bộ về rồi lọc ngay trong JSON.
+ *
+ * ⚠️ Một số bảng CHỈ lưu tên chứ không lưu id — ví dụ hrm_travel_expenses chỉ
+ * có `projectName` / `taskName`. Với những dòng đó buộc phải đối chiếu bằng
+ * tên, nên hai dự án TRÙNG TÊN sẽ xóa nhầm của nhau. Mỗi lần khớp bằng tên
+ * đều được log ra Console để còn kiểm chứng.
+ */
+async function deleteJsonbLinked(tableName: string, keys: CascadeMatchKeys): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  try {
+    const { data, error } = await supabase.from(tableName).select('*');
+    if (error) {
+      if (!isMissingSchemaError(error)) {
+        console.warn(`[DB] cascade: đọc ${tableName} lỗi:`, error.message);
+      }
+      return 0;
+    }
+
+    let matchedByName = 0;
+    const victims = (data || [])
+      .filter((row: any) => {
+        // Object thật có thể nằm trong cột `data`, hoặc chính là dòng phẳng
+        const d = row?.data && typeof row.data === 'object' ? row.data : row;
+
+        // Ưu tiên đối chiếu bằng id — chắc chắn, không nhầm lẫn
+        const pid = d?.projectId ?? d?.project_id ?? row?.project_id;
+        const tid = d?.taskId ?? d?.task_id ?? row?.task_id;
+        if (pid && pid === keys.projectId) return true;
+        if (tid && keys.taskIds.has(tid)) return true;
+
+        // Không có id thì mới đành đối chiếu bằng tên
+        const pname = d?.projectName ?? d?.project_name;
+        const tname = d?.taskName ?? d?.task_name;
+        const hitByName =
+          (!!keys.projectName && !!pname && pname === keys.projectName) ||
+          (!!tname && keys.taskNames.has(tname));
+        if (hitByName) matchedByName++;
+        return hitByName;
+      })
+      .map((row: any) => row?.id)
+      .filter(Boolean);
+
+    if (victims.length === 0) return 0;
+
+    const { error: delErr } = await supabase.from(tableName).delete().in('id', victims);
+    if (delErr) {
+      console.warn(`[DB] cascade: xóa ${tableName} (jsonb) lỗi:`, delErr.message);
+      return 0;
+    }
+    if (matchedByName > 0) {
+      console.warn(
+        `[DB] cascade: ${tableName} — ${matchedByName}/${victims.length} dòng khớp bằng TÊN ` +
+        `(bảng này không lưu id dự án). Kiểm tra lại nếu có dự án trùng tên.`
+      );
+    }
+    invalidateCache(tableName);
+    return victims.length;
+  } catch (err) {
+    console.warn(`[DB] cascade: ngoại lệ khi quét ${tableName}:`, err);
+    return 0;
+  }
+}
+
+/** Bảng KHÔNG dọn theo vòng quét cột, vì đã xử lý riêng đúng thứ tự */
+const CASCADE_SKIP_TABLES = new Set([
+  'projects',      // chính nó — xóa cuối cùng
+  'tasks',         // xóa sau khi dọn xong con của nó
+  'conversations', // xử lý riêng cùng chat_messages
+  'chat_messages',
+]);
+
+export interface ProjectCascadeReport {
+  projectId: string;
+  taskIds: string[];
+  /** Số dòng đã xóa, gom theo tên bảng */
+  deleted: Record<string, number>;
+  /** Tổng số dòng dữ liệu phát sinh đã dọn (không tính chính dòng dự án) */
+  total: number;
+}
+
 // Delete helper
 async function deleteSupabase(tableName: string, id: string): Promise<void> {
   const supabase = getSupabase();
@@ -836,6 +1075,145 @@ export const dbService = {
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('projects', id);
+    },
+
+    /**
+     * XÓA DỰ ÁN + TOÀN BỘ DỮ LIỆU PHÁT SINH.
+     *
+     * Xóa sạch mọi thứ sinh ra từ dự án: Công Việc (kèm Nhiệm Vụ nằm trong
+     * JSON của task), Nhóm chat + tin nhắn, Ghi nhận vi phạm, Công tác phí,
+     * Báo giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, HĐ Thầu, Công Nợ, Đề Xuất,
+     * Phiếu Thu, Phiếu Chi...
+     *
+     * Chạy được kể cả khi migration 20260731_project_cascade_delete.sql CHƯA
+     * được áp lên database: hàm tự dọn con trước rồi mới xóa cha. Khi migration
+     * đã áp thì các lệnh dọn này chỉ là no-op (0 dòng) vì Postgres đã cascade.
+     *
+     * Xóa con trước cha là bắt buộc — nếu FK còn ở chế độ RESTRICT/NO ACTION,
+     * xóa dự án trước sẽ bị Postgres từ chối.
+     */
+    async deleteCascade(projectId: string): Promise<ProjectCascadeReport> {
+      const report: ProjectCascadeReport = { projectId, taskIds: [], deleted: {}, total: 0 };
+      if (!projectId) return report;
+
+      const supabase = getSupabase();
+      if (!supabase) {
+        throw new Error('Supabase chưa được cấu hình — không thể xóa dự án');
+      }
+
+      const bump = (table: string, n: number) => {
+        if (n > 0) {
+          report.deleted[table] = (report.deleted[table] || 0) + n;
+          report.total += n;
+        }
+      };
+
+      // ── 0. Biết trước bảng nào có cột nào, TRƯỚC khi bắn request ────────
+      // DELETE/SELECT lên cột không tồn tại trả HTTP 400 và trình duyệt log
+      // đỏ ngay ở tầng network — JS không nuốt được.
+      const links = await getLinkColumns();
+
+      // ── 1. Gom Công Việc + tên dự án ─────────────────────────────────────
+      // Lấy cả TÊN vì có bảng (Công tác phí) chỉ lưu projectName/taskName
+      // chứ không lưu id — phải đọc trước khi xóa, sau đó là mất dấu.
+      let taskIds: string[] = [];
+      const taskNames = new Set<string>();
+      try {
+        const { data, error } = await supabase
+          .from('tasks').select('id, name').eq('project_id', projectId);
+        if (error) {
+          console.warn('[DB] cascade: không đọc được danh sách tasks:', error.message);
+        } else {
+          (data || []).forEach((r: any) => {
+            if (r?.id) taskIds.push(r.id);
+            if (r?.name) taskNames.add(r.name);
+          });
+        }
+      } catch (err) {
+        console.warn('[DB] cascade: ngoại lệ khi đọc tasks:', err);
+      }
+      report.taskIds = taskIds;
+      const taskIdSet = new Set(taskIds);
+
+      let projectName = '';
+      try {
+        const { data } = await supabase
+          .from('projects').select('name').eq('id', projectId).maybeSingle();
+        projectName = (data as any)?.name || '';
+      } catch {
+        // Không lấy được tên thì bỏ qua phần đối chiếu theo tên
+      }
+
+      const matchKeys: CascadeMatchKeys = {
+        projectId,
+        taskIds: taskIdSet,
+        projectName,
+        taskNames,
+      };
+
+      // ── 2. Dọn nhóm chat (dự án + từng công việc) và tin nhắn bên trong ──
+      // Nhóm chat được đặt id theo quy ước conv_project_<id> / conv_task_<id>,
+      // đồng thời có thể có cột project_id/task_id → gom cả hai nguồn.
+      const convIds = new Set<string>([
+        `conv_project_${projectId}`,
+        ...taskIds.map(tid => `conv_task_${tid}`),
+      ]);
+      const convCols = ['id'];
+      if (links.byProject.has('conversations')) convCols.push('project_id');
+      if (links.byTask.has('conversations')) convCols.push('task_id');
+      if (convCols.length > 1) {
+        try {
+          const { data, error } = await supabase
+            .from('conversations')
+            .select(convCols.join(', '));
+          if (!error) {
+            (data || []).forEach((row: any) => {
+              if (row?.project_id === projectId) convIds.add(row.id);
+              if (row?.task_id && taskIdSet.has(row.task_id)) convIds.add(row.id);
+            });
+          }
+        } catch {
+          // Quy ước id conv_project_<id> / conv_task_<id> ở trên đã đủ dùng
+        }
+      }
+      const convIdList = Array.from(convIds);
+      bump('chat_messages', await deleteWhereIn('chat_messages', 'conversation_id', convIdList));
+      bump('conversations', await deleteWhereIn('conversations', 'id', convIdList));
+
+      // ── 3. Chốt danh sách bảng cần dọn ──────────────────────────────────
+      const notSkipped = (t: string) => !CASCADE_SKIP_TABLES.has(t);
+      const projectLinked = Array.from(links.byProject).filter(notSkipped);
+      const taskLinked = Array.from(links.byTask).filter(notSkipped);
+      const jsonbLinked = Array.from(links.byJsonb).filter(notSkipped);
+
+      // ── 4. Dọn dữ liệu gắn theo từng Công Việc ───────────────────────────
+      if (taskIds.length > 0) {
+        for (const table of taskLinked) {
+          bump(table, await deleteWhereIn(table, 'task_id', taskIds));
+        }
+      }
+
+      // ── 5. Dọn dữ liệu gắn thẳng vào Dự Án ───────────────────────────────
+      for (const table of projectLinked) {
+        bump(table, await deleteWhereIn(table, 'project_id', [projectId]));
+      }
+
+      // ── 6. Bảng lưu dạng `data jsonb` — FK không với tới, quét thủ công ──
+      for (const table of jsonbLinked) {
+        bump(table, await deleteJsonbLinked(table, matchKeys));
+      }
+
+      // ── 7. Xóa Công Việc (Nhiệm Vụ nằm trong JSON nên chết theo) ─────────
+      bump('tasks', await deleteWhereIn('tasks', 'project_id', [projectId]));
+
+      // ── 8. Cuối cùng mới xóa chính dòng Dự Án ────────────────────────────
+      await deleteSupabase('projects', projectId);
+
+      console.log(
+        `[DB] 🗑️ Đã xóa dự án ${projectId} — dọn ${report.total} dòng dữ liệu phát sinh`,
+        report.deleted
+      );
+      return report;
     }
   },
 

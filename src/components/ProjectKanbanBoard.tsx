@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate } from '../types';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
@@ -876,28 +876,38 @@ export default function ProjectKanbanBoard({
 
     const finalStatus = updates.status !== undefined ? updates.status : proj.status;
     const finalProgress = updates.progress !== undefined ? updates.progress : proj.progress;
-    const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
-    
-    let targetColId = updates.kanbanColumnId || getProjectColumnId(proj, columns);
+    const wasCompleted = (proj.status === 'completed') || (proj.progress === 100);
+    const isNowCompleted = (finalStatus === 'completed') || (finalProgress === 100);
+    // CHỈ tự động chuyển cột khi dự án VỪA chuyển sang trạng thái hoàn thành
+    // (transition false -> true). Không áp dụng cho dự án đã hoàn thành từ trước,
+    // nếu không mỗi lần cập nhật / lưu chi tiết / kéo thả, thẻ lại bị ép về cột
+    // hoàn thành gây hiện tượng "chạy lung tung", không theo đúng cấu hình.
+    const justCompleted = !wasCompleted && isNowCompleted;
 
-    if (isCompleted) {
-      const currentColId = updates.kanbanColumnId || getProjectColumnId(proj, columns);
-      const currentCol = columns.find(c => c.id === currentColId);
+    // Cột HIỆN TẠI của dự án (trước khi cập nhật) — là gốc để tính quy tắc
+    // "chuyển cột khi hoàn thành". Phải lấy từ vị trí thực của dự án, KHÔNG dùng
+    // updates.kanbanColumnId (đó là cột đích được truyền vào, không phải cột gốc).
+    const originalColId = getProjectColumnId(proj, columns);
+    // Cột được yêu cầu chuyển tới (nếu caller truyền vào, ví dụ checkAutoMoveProject)
+    const requestedColId = updates.kanbanColumnId;
+
+    let targetColId = requestedColId || originalColId;
+
+    if (justCompleted) {
+      const currentCol = columns.find(c => c.id === originalColId);
       if (currentCol?.automation?.statusUpdate) {
-        const autoTargetId = currentCol.automation.statusUpdate;
-        if (autoTargetId && autoTargetId !== currentColId) {
+        const autoTargetId = currentCol.automation.statusUpdate as string;
+        if (autoTargetId && autoTargetId !== originalColId) {
           targetColId = autoTargetId;
           updates.kanbanColumnId = autoTargetId;
         }
       } else {
-        if (currentColId !== 'col_done') {
+        if (originalColId !== 'col_done') {
           targetColId = 'col_done';
           updates.kanbanColumnId = 'col_done';
         }
       }
     }
-
-    const originalColId = getProjectColumnId(proj, columns);
     if (updates.kanbanColumnId || targetColId !== originalColId) {
       const finalTargetColId = updates.kanbanColumnId || targetColId;
       const targetCol = columns.find(c => c.id === finalTargetColId);
@@ -939,13 +949,6 @@ export default function ProjectKanbanBoard({
             updates.pmId = rule.assignId;
             const empName = employees.find(e => e.id === rule.assignId)?.name || 'Trưởng Dự Án mới';
             ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
-          }
-
-          // 2. Chuyển trạng thái công việc
-          if (rule.statusUpdate) {
-            updates.status = rule.statusUpdate as any;
-            const statusLabel = rule.statusUpdate === 'active' ? 'Đang thực hiện' : rule.statusUpdate === 'completed' ? 'Hoàn thành' : rule.statusUpdate === 'suspended' ? 'Tạm khiển' : rule.statusUpdate;
-            ruleLogs.push(`Chuyển trạng thái dự án sang: ${statusLabel}`);
           }
 
           // 2.2 Kiểu văn bản (In đậm, in nghiêng, gạch giữa, màu chữ)
@@ -1121,6 +1124,17 @@ export default function ProjectKanbanBoard({
   // checkAutoMoveProject() → Kiểm tra và thực hiện auto-move project khi tất cả task hoàn thành
   // Được gọi từ useEffect khi tasks thay đổi
   // ===========================================================================
+  // Lưu trạng thái "tất cả công việc con đã hoàn thành" của mỗi dự án ở lần
+  // chạy trước (dùng để phát hiện transition false -> true).
+  const prevAllCompletedRef = useRef<Map<string, boolean>>(new Map());
+  // Đánh dấu dự án ĐÃ được tự động chuyển cột khi hoàn thành. Quan trọng: marker
+  // này "dính" (sticky) — KHÔNG bị xoá khi công việc con bị tạo/mở lại (ví dụ cột
+  // đích có tự động thêm công việc con, làm allCompleted tạm thời = false). Nhờ vậy
+  // triệt tiêu hoàn toàn vòng lặp "nhảy qua lại" giữa các cột (cột cấu hình <-> col_done)
+  // khi cấu hình tạo thành vòng lặp hoặc do tự động thêm công việc con. Chỉ bị xoá khi
+  // người dùng KÉO THẺ thủ công (moveProjectToColumn).
+  const autoMovedDoneRef = useRef<Set<string>>(new Set());
+
   const checkAutoMoveProject = useCallback((projectId: string) => {
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
@@ -1130,22 +1144,35 @@ export default function ProjectKanbanBoard({
 
     // Check if all tasks are completed
     const allCompleted = projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
+    const wasCompleted = prevAllCompletedRef.current.get(projectId) ?? false;
+    prevAllCompletedRef.current.set(projectId, allCompleted);
     if (!allCompleted) return;
+
+    // Đã tự động chuyển rồi (sticky) → không chuyển nữa, dù công việc con có được
+    // tạo/mở lại gây false->true giả. Đây là chốt chặn vòng lặp "chạy lung tung".
+    if (autoMovedDoneRef.current.has(projectId)) return;
+    // Đã ở trạng thái hoàn thành từ trước → không tự động chuyển nữa (tránh nhảy cột).
+    if (wasCompleted) return;
 
     // Trigger auto-move using the existing updateProjectWithRule logic
     // This will handle: blocking tasks check, delete todo tasks, run target column automation
     const currentColId = getProjectColumnId(proj, columns);
     const currentCol = columns.find(c => c.id === currentColId);
 
+    let targetColId: string | undefined;
     if (currentCol?.automation?.statusUpdate) {
-      const targetColId = currentCol.automation.statusUpdate;
-      if (targetColId && targetColId !== currentColId) {
-        // Call updateProjectWithRule to handle the full automation
-        updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
+      const cand = currentCol.automation.statusUpdate;
+      if (cand && cand !== currentColId) {
+        targetColId = cand;
       }
     } else if (currentColId !== 'col_done') {
       // Fallback to col_done if no statusUpdate automation
-      updateProjectWithRule(projectId, { kanbanColumnId: 'col_done' }, tasks);
+      targetColId = 'col_done';
+    }
+
+    if (targetColId) {
+      autoMovedDoneRef.current.add(projectId);
+      updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
     }
   }, [projects, tasks, columns, getProjectColumnId, updateProjectWithRule]);
 
@@ -1154,6 +1181,23 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
+
+    // Ghi nhận trạng thái "đã hoàn thành" cho các dự án chưa được theo dõi
+    // (ví dụ: dự án đã hoàn thành từ trước khi vừa tải trang, hoặc dự án mới tạo).
+    // Việc này giúp không tự động đẩy thẻ đã hoàn thành từ trước về col_done ngay
+    // khi mở trang, đồng thời không cản trở tự động chuyển khi công việc thực sự
+    // chuyển từ "chưa xong" sang "đã xong" trong phiên làm việc.
+    projects.forEach(p => {
+      if (!prevAllCompletedRef.current.has(p.id)) {
+        const pts = tasks.filter(t => t.projectId === p.id);
+        if (pts.length > 0) {
+          prevAllCompletedRef.current.set(
+            p.id,
+            pts.every(t => t.status === 'completed' || t.completionRate === 100)
+          );
+        }
+      }
+    });
 
     // Check each project in this sector for auto-move conditions
     const projectsInSector = projects.filter(p => p.type === sector || (p as any).sector === sector);
@@ -1207,6 +1251,9 @@ export default function ProjectKanbanBoard({
   // Moving logic that delegates to the centralized update function
   // moveProjectToColumn() → Di chuyển project sang column (gọi updateProjectWithRule với kanbanColumnId)
   const moveProjectToColumn = (projectId: string, columnId: string) => {
+    // Thao tác thủ công → xoá marker auto-move để lần hoàn thành sau (nếu có)
+    // vẫn có thể tự động chuyển tiếp theo cấu hình.
+    autoMovedDoneRef.current.delete(projectId);
     updateProjectWithRule(projectId, { kanbanColumnId: columnId });
   };
 
@@ -1861,13 +1908,6 @@ export default function ProjectKanbanBoard({
                   customProject.pmId = rule.assignId;
                   const empName = employees.find(e => e.id === rule.assignId)?.name || 'Trưởng Dự Án mới';
                   ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
-                }
-
-                // rule 2: Status update
-                if (rule.statusUpdate) {
-                  customProject.status = rule.statusUpdate as any;
-                  const statusLabel = rule.statusUpdate === 'active' ? 'Đang thực hiện' : rule.statusUpdate === 'completed' ? 'Hoàn thành' : rule.statusUpdate === 'suspended' ? 'Tạm khiển' : rule.statusUpdate;
-                  ruleLogs.push(`Chuyển trạng thái dự án sang: ${statusLabel}`);
                 }
 
                 // rule 2.2: Kiểu văn bản (In đậm, in nghiêng, gạch giữa, màu chữ)
@@ -2703,8 +2743,10 @@ export default function ProjectKanbanBoard({
                     </button>
 
                     {isConfirmingDelete && (() => {
+                      // Không còn chặn xóa khi dự án vẫn còn công việc (kể cả công việc
+                      // đã hoàn thành). Xóa dự án sẽ cuốn sạch mọi dữ liệu phát sinh
+                      // trên Supabase — xem dbService.projects.deleteCascade().
                       const projectTaskCount = tasks.filter(t => t.projectId === selectedProject.id).length;
-                      const hasTasks = projectTaskCount > 0;
                       return (
                         <div
                           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-xs p-4"
@@ -2714,45 +2756,35 @@ export default function ProjectKanbanBoard({
                             className="bg-slate-900 border border-red-800 p-4 rounded-xl shadow-2xl w-80 max-w-[90vw] animate-scaleIn text-left"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {hasTasks ? (
-                              <>
-                                <p className="text-red-400 font-bold text-[10.5px] leading-relaxed font-sans">
-                                  ⛔ Không thể xóa dự án "{selectedProject.name}" vì vẫn còn <strong>{projectTaskCount}</strong> công việc trong danh sách. Vui lòng xóa hết toàn bộ công việc trước khi xóa dự án.
-                                </p>
-                                <div className="flex justify-end mt-3">
-                                  <button
-                                    onClick={() => setIsConfirmingDelete(false)}
-                                    className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-[10px] py-1.5 px-4 rounded-lg cursor-pointer transition-colors text-center font-sans"
-                                  >
-                                    Đã hiểu
-                                  </button>
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-red-400 font-bold text-[10.5px] leading-relaxed font-sans">
-                                  ⚠️ Cảnh báo: Bạn có chắc chắn muốn xóa dự án này? Toàn bộ hồ sơ liên hợp, thẻ thông tin và các nhiệm vụ, công việc thi công trực thuộc dự án sẽ bị xóa vĩnh viễn và không thể khôi phục!
-                                </p>
-                                <div className="flex gap-2 mt-3">
-                                  <button
-                                    onClick={() => {
-                                      onDeleteProject(selectedProject.id);
-                                      setSelectedProjectId(null);
-                                      setIsConfirmingDelete(false);
-                                    }}
-                                    className="flex-1 bg-red-600 hover:bg-red-500 text-white font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
-                                  >
-                                    Xóa vĩnh viễn
-                                  </button>
-                                  <button
-                                    onClick={() => setIsConfirmingDelete(false)}
-                                    className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
-                                  >
-                                    Hủy bỏ
-                                  </button>
-                                </div>
-                              </>
-                            )}
+                            <p className="text-red-400 font-bold text-[10.5px] leading-relaxed font-sans">
+                              ⚠️ Cảnh báo: Bạn có chắc chắn muốn xóa dự án "{selectedProject.name}"?
+                              {projectTaskCount > 0 && (
+                                <> Kèm theo <strong>{projectTaskCount}</strong> công việc trực thuộc (cả công việc đã hoàn thành).</>
+                              )}
+                            </p>
+                            <p className="text-slate-400 font-semibold text-[10px] leading-relaxed font-sans mt-2">
+                              Toàn bộ dữ liệu phát sinh sẽ bị xóa vĩnh viễn khỏi cơ sở dữ liệu và không thể khôi phục:
+                              Công việc, Nhiệm vụ, Nhóm chat, Ghi nhận vi phạm, Công tác phí, Báo giá, Hợp đồng,
+                              Nghiệm thu, Thanh lý, HĐ thầu, Công nợ, Đề xuất, Phiếu thu, Phiếu chi.
+                            </p>
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                onClick={() => {
+                                  onDeleteProject(selectedProject.id);
+                                  setSelectedProjectId(null);
+                                  setIsConfirmingDelete(false);
+                                }}
+                                className="flex-1 bg-red-600 hover:bg-red-500 text-white font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
+                              >
+                                Xóa vĩnh viễn
+                              </button>
+                              <button
+                                onClick={() => setIsConfirmingDelete(false)}
+                                className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
+                              >
+                                Hủy bỏ
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -4212,13 +4244,12 @@ export default function ProjectKanbanBoard({
                                 <div className="relative">
                                   <button
                                     type="button"
-                                    disabled={task.status === 'completed'}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setOpenMenuTaskId(openMenuTaskId === task.id ? null : task.id);
                                     }}
-                                    className="p-1 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-900/40 text-slate-400 hover:text-slate-300 disabled:text-slate-600 rounded border border-slate-800 disabled:border-slate-850 transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center"
-                                    title={task.status === 'completed' ? "Công việc đã hoàn thành (Khóa thao tác)" : "Thao tác"}
+                                    className="p-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-300 rounded border border-slate-800 transition duration-150 cursor-pointer flex items-center justify-center"
+                                    title="Thao tác"
                                   >
                                     <MoreVertical className="w-3.5 h-3.5" />
                                   </button>
