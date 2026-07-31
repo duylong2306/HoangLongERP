@@ -534,6 +534,41 @@ export const dbService = {
     }
   },
 
+  // 1.10b. HRM TRAVEL EXPENSES SUMMARY (Tổng hợp Công Tác Phí từ nhiệm vụ hoàn thành)
+  // Lưu các mục THCTP (Tổng hợp Công Tác Phí) sinh ra khi Xác Nhận Hoàn Thành một
+  // nhiệm vụ thi công có Công Tác Phí chuyến đi. Dùng cột data jsonb (pattern giống hrm_trips).
+  hrmTravelExpenses: {
+    async list(): Promise<any[]> {
+      const rows = await querySupabase<any>('hrm_travel_expenses', []);
+      return Array.isArray(rows) ? rows.map((r: any) => (r && r.data ? r.data : r)) : [];
+    },
+    async save(item: any, opts?: { rowId?: string }): Promise<void> {
+      if (!item) {
+        throw new Error('hrmTravelExpenses.save: thiếu item');
+      }
+      // ⚠️ CỘT id CỦA BẢNG hrm_travel_expenses LÀ uuid (xem migration 021).
+      // KHÔNG được dùng mã THCTP (vd: "THCTP-1699000000000-0") làm id — Postgres sẽ
+      // báo "invalid input syntax for type uuid" và upsert THẤT BẠI SILENT (chỉ
+      // log warn), khiến dữ liệu CHỈ lưu localStorage mà KHÔNG lên Supabase.
+      // → Sinh UUID hợp lệ cho khóa chính; giữ nguyên item.id (mã THCTP hiển thị)
+      // bên trong cột data jsonb (được rowToCamel đảo ngược lại khi đọc).
+      // `opts.rowId` (nếu có) dùng để upsert LẶP LẠI an toàn (idempotent) cùng 1
+      // khoản CTP — tránh tạo dòng trùng khi vừa lưu lúc "Thêm" vừa lưu lúc "Hoàn
+      // thành".
+      let rowId = opts?.rowId;
+      if (!rowId) {
+        rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+          ? crypto.randomUUID()
+          : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+      }
+      // Lưu toàn bộ object vào cột data jsonb, dùng rowId làm khóa chính uuid
+      await saveSupabase('hrm_travel_expenses', { id: rowId, data: item });
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('hrm_travel_expenses', id);
+    }
+  },
+
   // 1.11. HRM PERFORMANCE CRITERIA (Tiêu chí đánh giá)
   hrmPerformanceCriteria: {
     async list(): Promise<any[]> {
@@ -1765,6 +1800,23 @@ export const dbService = {
           console.warn('[Attendance] Saving with CLIENT time (fallback). Implement server-time fetch for production.');
           row[slotMap[punchSlot]] = record[punchSlot];
         }
+
+        // Bổ sung: ghi đầy đủ các slot KHÁC nếu record đã có giá trị thực.
+        // Tránh lỗi: lần chấm đầu (Vào) chưa kịp lưu lên DB, lần chấm sau (Ra) lưu được →
+        // INSERT tạo row chỉ có 1 cột time → bảng "Chấm công ngày" hiển thị thiếu/mất dữ liệu.
+        const otherSlots: Array<[keyof typeof slotMap, string]> = [
+          ['timeInS', 'time_in_s'],
+          ['timeOutS', 'time_out_s'],
+          ['timeInC', 'time_in_c'],
+          ['timeOutC', 'time_out_c'],
+          ['timeInOT', 'time_in_ot'],
+          ['timeOutOT', 'time_out_ot'],
+        ];
+        for (const [recKey, colKey] of otherSlots) {
+          if (colKey === slotMap[punchSlot]) continue; // slot chính đã set ở trên
+          const v = normalizeTime(record[recKey]);
+          if (v !== '--:--') row[colKey] = v;
+        }
       } else {
         // Update thủ công/admin: ghi toàn bộ các trường time từ record
         row.time_in_s = record.timeInS;
@@ -1813,6 +1865,78 @@ export const dbService = {
       return data?.member_ids?.includes(empId) ?? false;
     } catch {
       return false; // fail secure
+    }
+  },
+
+  /**
+   * Upload một hình ảnh Báo cáo nhiệm vụ thi công lên Supabase Storage.
+   * Trả về public URL của ảnh. Nếu Supabase chưa cấu hình hoặc upload thất bại
+   * (ví dụ bucket chưa tồn tại), tự động fallback về data URL base64 để chức
+   * năng vẫn hoạt động offline / local.
+   */
+  async uploadMissionReportImage(
+    taskId: string,
+    missionId: string,
+    file: File
+  ): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      // Không có Supabase → dùng data URL local
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'mission-report-images';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeTask = String(taskId || 'task').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeMission = String(missionId || 'mission').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `${safeTask}/${safeMission}_${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    const localFallback = (): Promise<{ url: string; stored: 'local' }> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string'
+        ? resolve({ url: reader.result, stored: 'local' })
+        : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      // Bucket chưa tồn tại → thử tự tạo (nếu role được phép) rồi upload lại 1 lần
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 10485760,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' };
+        } catch (createErr: any) {
+          console.warn('[uploadMissionReportImage] Không tự tạo được bucket (cần chạy migration tạo bucket):', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadMissionReportImage] Upload Supabase thất bại, lưu cục bộ (data URL):', msg);
+      return await localFallback();
     }
   },
 

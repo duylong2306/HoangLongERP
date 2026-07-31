@@ -17,6 +17,8 @@ export interface KanbanColumnAutomation {
   subtaskTitle?: string;
   subtaskTitles?: string[];
   subtaskAutomations?: any[];
+  /** Cấu hình trước NHIỆM VỤ CHI TIẾT cho từng công việc con (SubTaskMissionTemplate[]) */
+  subTaskMissions?: any[];
   dueDateDaysOffset?: number;
   checklistText?: string;
   checklistTexts?: string[];

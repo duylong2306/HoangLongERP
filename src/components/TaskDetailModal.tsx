@@ -5,7 +5,7 @@ import {
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
   DollarSign, Plus, ArrowRight, CheckCircle2,
   AlertTriangle, Briefcase, FileText, Zap, Edit2, Shield, Award, ListTodo, Search, Camera,
-  Download, Upload, FileSpreadsheet, UserCheck
+  Download, Upload, FileSpreadsheet, UserCheck, Image as ImageIcon
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
@@ -493,8 +493,115 @@ export default function TaskDetailModal({
   const [missionAttachedFile, setMissionAttachedFile] = useState<{ name: string; size: string } | null>(null);
   const [missionImagePreview, setMissionImagePreview] = useState<string | null>(null);
 
+  // Hình ảnh báo cáo nhiệm vụ thi công (bắt buộc) — URL từ Supabase Storage hoặc data URL
+  const [missionReportImages, setMissionReportImages] = useState<string[]>([]);
+  const [missionReportCameraOpen, setMissionReportCameraOpen] = useState(false);
+  const missionReportVideoRef = useRef<HTMLVideoElement>(null);
+  const missionReportImageInputRef = useRef<HTMLInputElement>(null);
+  const missionReportCameraStreamRef = useRef<MediaStream | null>(null);
+
+  const stopMissionReportCamera = () => {
+    if (missionReportCameraStreamRef.current) {
+      missionReportCameraStreamRef.current.getTracks().forEach(t => t.stop());
+      missionReportCameraStreamRef.current = null;
+    }
+    setMissionReportCameraOpen(false);
+  };
+
+  const openMissionReportCamera = async () => {
+    try {
+      stopMissionReportCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      missionReportCameraStreamRef.current = stream;
+      setMissionReportCameraOpen(true);
+      setTimeout(() => {
+        if (missionReportVideoRef.current) {
+          missionReportVideoRef.current.srcObject = stream;
+          missionReportVideoRef.current.play().catch(() => { /* noop */ });
+        }
+      }, 150);
+    } catch (err) {
+      addToast({ title: '⚠️ Không thể mở camera', message: 'Vui lòng cấp quyền camera hoặc tải ảnh lên từ thiết bị.', type: 'warning' });
+    }
+  };
+
+  const captureMissionReportImage = () => {
+    const video = missionReportVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `baocao_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      try {
+        const { url, stored } = await dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file);
+        setMissionReportImages(prev => [...prev, url]);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo cáo đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      } catch (e) {
+        addToast({ title: '⛔ Lỗi', message: 'Không thể xử lý ảnh báo cáo.', type: 'error' });
+      }
+      stopMissionReportCamera();
+    }, 'image/jpeg');
+  };
+
+  const handleMissionReportImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file)
+      .then(({ url, stored }) => {
+        setMissionReportImages(prev => [...prev, url]);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo cáo đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      })
+      .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể xử lý ảnh báo cáo.', type: 'error' }));
+    e.target.value = '';
+  };
+
+  const removeMissionReportImage = (idx: number) => {
+    setMissionReportImages(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const resetMissionReportState = () => {
+    setMissionReportImages([]);
+    stopMissionReportCamera();
+  };
+
   // States inside detail modal of a mission for Travel Allowance recording
   const [allowanceMemberId, setAllowanceMemberId] = useState('');
+  // Bản sao cục bộ các Công Tác Phí đã ghi nhận, key theo missionId.
+  // Quan trọng: selectedTask được tính lại từ props `tasks` mỗi render, và có
+  // những lúc `tasks` bị thay thế bởi dữ liệu tải từ Supabase (sự kiện
+  // hl-tasks-updated) làm mất travelAllowances vừa thêm. Lưu cục bộ đảm bảo
+  // dữ liệu CTP không bao giờ bị mất trước khi "Xác Nhận Hoàn Thành".
+  // Để chống cả trường hợp modal bị remount (state React reset), ta persist
+  // xuống localStorage theo missionId — survive reload/remount/refresh.
+  const [localTravelAllowances, setLocalTravelAllowances] = useState<Record<string, any[]>>(() => {
+    try {
+      const raw = localStorage.getItem('hl_local_travel_allowances_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  // Ghi mirror xuống localStorage mỗi khi thay đổi (an toàn nếu JSON lỗi)
+  useEffect(() => {
+    try {
+      localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(localTravelAllowances));
+    } catch {
+      /* ignore quota / serialization errors */
+    }
+  }, [localTravelAllowances]);
   const [allowanceNormId, setAllowanceNormId] = useState('');
   const [allowanceCustomContent, setAllowanceCustomContent] = useState('');
   const [allowanceCustomQty, setAllowanceCustomQty] = useState(1);
@@ -1219,6 +1326,43 @@ export default function TaskDetailModal({
     );
   };
 
+  // ─── ĐỒNG BỘ CÔNG TÁC PHÍ LÊN SUPABASE (hrm_travel_expenses) ───────────────
+  // GỌI NGAY KHI "Thêm công tác phí" để dữ liệu được lưu TỨC THÌ, KHÔNG phụ
+  // thuộc vào bước "Xác Nhận Hoàn Thành" (vốn dễ bị mất do task reload từ
+  // Supabase làm rỗng mảng missions giữa lúc ghi nhận và lúc hoàn thành).
+  // `ta.rowId` (UUID) đảm bảo upsert lặp lại an toàn, không tạo dòng trùng.
+  const persistTravelExpense = (ta: any, missionName: string) => {
+    if (!ta) return;
+    const project = projects.find(p => p.id === selectedTask.projectId);
+    const customer = customers?.find(c => c.id === project?.customerId);
+    const emp = employees.find(e => e.id === ta.memberId);
+    let rowId: string = ta.rowId;
+    if (!rowId) {
+      rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+    }
+    const summaryItem = {
+      id: ta.id || `THCTP-${Date.now()}`,
+      rowId,
+      code: ta.code || `THCTP-${ta.id || Date.now()}`,
+      status: 'pending',
+      completedDate: new Date().toLocaleDateString('vi-VN'),
+      projectName: project?.name || 'Chưa rõ',
+      customerName: customer?.name || 'Khách hàng lẻ',
+      taskName: selectedTask.name,
+      missionName,
+      employeeName: emp?.name || 'Chưa gán',
+      content: ta.content || 'Công tác phí',
+      amount: ta.amount || 0,
+      createdAt: new Date().toISOString(),
+      taskId: selectedTask.id,
+      missionId: selectedMissionId || undefined,
+    };
+    dbService.hrmTravelExpenses.save(summaryItem, { rowId })
+      .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu Supabase (thêm CTP) thất bại:', e?.message || e));
+  };
+
 
   return (
     <div 
@@ -1762,6 +1906,7 @@ export default function TaskDetailModal({
                             setSelectedMissionId(mission.id);
                             setMissionReportText(mission.workReports || '');
                             setMissionEvidenceText(mission.evidence || '');
+                            setMissionReportImages(mission.reportImages && mission.reportImages.length > 0 ? [...mission.reportImages] : []);
                             if (mission.evidence && (mission.evidence.startsWith('data:image/') || mission.evidence.startsWith('blob:') || mission.evidence.startsWith('http'))) {
                               setMissionImagePreview(mission.evidence);
                             } else {
@@ -3126,9 +3271,10 @@ export default function TaskDetailModal({
               e.stopPropagation();
               setSelectedMissionId(null);
               setMissionAttachedFile(null);
+              resetMissionReportState();
             }}
           >
-            <div 
+            <div
               className="bg-slate-950 border-l border-slate-850 w-full max-w-md h-full flex flex-col shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
@@ -3146,6 +3292,7 @@ export default function TaskDetailModal({
                   onClick={() => {
                     setSelectedMissionId(null);
                     setMissionAttachedFile(null);
+                    resetMissionReportState();
                   }}
                   className="p-1 px-2 rounded-lg bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white border border-slate-800 transition cursor-pointer text-[10.5px] font-bold"
                 >
@@ -3306,6 +3453,12 @@ export default function TaskDetailModal({
                                       }
                                       return m;
                                     });
+                                    // Đồng bộ bản sao cục bộ (ghi đồng bộ xuống localStorage)
+                                    setLocalTravelAllowances(prev => {
+                                      const next = { ...prev, [mission.id]: (prev[mission.id] || []).filter(ta => ta.id !== item.id) };
+                                      try { localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(next)); } catch {}
+                                      return next;
+                                    });
                                     onUpdateTask(selectedTask.id, { missions: updatedMissions });
                                   }}
                                   className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-150/80 rounded transition cursor-pointer shrink-0"
@@ -3398,6 +3551,9 @@ export default function TaskDetailModal({
 
                                 const newAllowance = {
                                   id: `ta_${Date.now()}`,
+                                  rowId: (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+                                    ? crypto.randomUUID()
+                                    : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`,
                                   memberId: finalMemId,
                                   normId: allowanceNormId,
                                   code: selectedNorm.code,
@@ -3419,6 +3575,18 @@ export default function TaskDetailModal({
                                 });
 
                                 onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                // Lưu cục bộ để không bị mất khi `tasks` reload từ Supabase.
+                                // Ghi ĐỒNG BỘ xuống localStorage ngay tại đây (không chỉ qua useEffect)
+                                // để chắc chắn sống sót kể cả khi modal bị remount ngay sau đó.
+                                setLocalTravelAllowances(prev => {
+                                  const next = { ...prev, [mission.id]: [...(prev[mission.id] || []), newAllowance] };
+                                  try { localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(next)); } catch {}
+                                  return next;
+                                });
+                                // ─── LƯU TỨC THÌ LÊN SUPABASE (bảng hrm_travel_expenses) ───
+                                // Đảm bảo dữ liệu CTP đã nhập được lưu lên Supabase ngay lập tức,
+                                // không chờ đến bước "Xác Nhận Hoàn Thành" (tránh mất do task reload).
+                                persistTravelExpense(newAllowance, mission.name);
 
                                 // Reset form states
                                 setAllowanceNormId('');
@@ -3482,6 +3650,110 @@ export default function TaskDetailModal({
                     )}
                   </div>
                 </div>
+
+                {/* 2. Hình ảnh báo cáo (bắt buộc) */}
+                <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-200 font-extrabold text-[10px] uppercase tracking-wider flex items-center gap-1">
+                      <Camera className="w-3.5 h-3.5 text-emerald-400" /> HÌNH ẢNH BÁO CÁO (BẮT BUỘC):
+                    </span>
+                    <span className={`text-[8.5px] px-1.5 py-0.5 rounded border ${missionReportImages.length > 0 ? 'text-emerald-400 bg-emerald-950/30 border-emerald-900/40' : 'text-rose-400 bg-rose-950/30 border-rose-900/40'}`}>
+                      {missionReportImages.length > 0 ? `Đã có ${missionReportImages.length} ảnh` : 'Cần ít nhất 1 ảnh'}
+                    </span>
+                  </div>
+
+                  {isMissionCompleted ? (
+                    mission.reportImages && mission.reportImages.length > 0 ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                        {mission.reportImages.map((src, i) => (
+                          <a key={i} href={src} target="_blank" rel="noreferrer" className="block">
+                            <img src={src} alt={`Hình báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800 hover:border-emerald-500/40 transition cursor-pointer" />
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="block text-[10px] text-slate-500 italic">Nhiệm vụ này chưa có hình ảnh báo cáo.</span>
+                    )
+                  ) : (
+                    <>
+                      {/* Preview danh sách ảnh đã chụp / upload */}
+                      {missionReportImages.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                          {missionReportImages.map((src, i) => (
+                            <div key={i} className="relative group">
+                              <img src={src} alt={`Hình báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800" />
+                              {hasMissionPermission && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeMissionReportImage(i)}
+                                  className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white text-[9px] p-1 px-1.5 rounded border border-slate-850 cursor-pointer font-bold"
+                                  title="Xóa ảnh này"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Nút chụp / tải ảnh */}
+                      {hasMissionPermission && (
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={openMissionReportCamera}
+                            disabled={missionReportCameraOpen}
+                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                          >
+                            <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                            {missionReportCameraOpen ? 'Đang mở camera...' : 'Chụp từ Camera'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => missionReportImageInputRef.current?.click()}
+                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-indigo-400" />
+                            Tải ảnh lên
+                          </button>
+                          <input
+                            ref={missionReportImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handleMissionReportImageUpload}
+                            className="hidden"
+                          />
+                        </div>
+                      )}
+
+                      {/* Khung camera live */}
+                      {missionReportCameraOpen && (
+                        <div className="relative rounded-lg overflow-hidden border border-emerald-900/40 bg-black mt-2 aspect-video flex flex-col items-center justify-center">
+                          <video ref={missionReportVideoRef} className="w-full h-full object-cover" playsInline muted />
+                          <div className="absolute bottom-1.5 left-0 right-0 flex justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={captureMissionReportImage}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer flex items-center gap-1"
+                            >
+                              <Camera className="w-3.5 h-3.5" /> Chụp hình
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopMissionReportCamera}
+                              className="bg-black/60 hover:bg-black/90 text-white text-[9px] p-1 px-2 rounded border border-slate-850 cursor-pointer font-bold"
+                            >
+                              ✕ Hủy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
               </div>
 
               {/* Footer actions */}
@@ -3491,6 +3763,7 @@ export default function TaskDetailModal({
                   onClick={() => {
                     setSelectedMissionId(null);
                     setMissionAttachedFile(null);
+                    resetMissionReportState();
                   }}
                   className="px-4 py-2 border border-slate-800 hover:border-slate-755 text-slate-400 hover:text-slate-100 rounded-xl text-[10.5px] font-bold transition cursor-pointer"
                 >
@@ -3501,14 +3774,34 @@ export default function TaskDetailModal({
                   <button
                     type="button"
                     disabled={
-                      !hasMissionPermission || 
-                      !missionReportText.trim() || 
-                      missionReportText.trim().length < 10
+                      !hasMissionPermission ||
+                      !missionReportText.trim() ||
+                      missionReportText.trim().length < 10 ||
+                      missionReportImages.length === 0
                     }
                     onClick={() => {
-                      if (!missionReportText.trim()) return;
+                      if (!missionReportText.trim() || missionReportImages.length === 0) return;
 
                       const currentMission = (selectedTask.missions || []).find(m => m.id === selectedMissionId);
+
+                      // Gộp Công Tác Phí từ hai nguồn:
+                      //  - currentMission.travelAllowances: nguồn từ selectedTask (có thể bị mất
+                      //    nếu `tasks` reload từ Supabase giữa lúc ghi nhận và lúc hoàn thành).
+                      //  - localTravelAllowances[selectedMissionId]: bản sao cục bộ luôn giữ nguyên.
+                      // Loại trùng theo id để tránh ghi kép.
+                      const dedupeById = (arr: any[]) => {
+                        const seen = new Set<string>();
+                        return (arr || []).filter(ta => {
+                          if (!ta || !ta.id) return false;
+                          if (seen.has(ta.id)) return false;
+                          seen.add(ta.id);
+                          return true;
+                        });
+                      };
+                      const mergedCtp = dedupeById([
+                        ...(currentMission?.travelAllowances || []),
+                        ...(localTravelAllowances[selectedMissionId || ''] || [])
+                      ]);
 
                       // Mark current mission as completed in original task list
                       const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -3517,18 +3810,20 @@ export default function TaskDetailModal({
                             ...m,
                             status: 'completed' as const,
                             workReports: missionReportText.trim(),
-                            evidence: '',
+                            evidence: missionReportImages[0] || '',
+                            reportImages: [...missionReportImages],
+                            travelAllowances: mergedCtp.length > 0 ? mergedCtp : m.travelAllowances,
                             completedAt: new Date().toISOString()
                           };
                         }
                         return m;
                       });
 
-                      // Gửi toàn bộ thông tin Công Tác Phí qua Menu Công tác phí
-                      if (currentMission && currentMission.travelAllowances && currentMission.travelAllowances.length > 0) {
+                      // Gửi toàn bộ thông tin Công Tác Phí qua Menu Công tác phí (HR System)
+                      if (mergedCtp.length > 0) {
                         const project = projects.find(p => p.id === selectedTask.projectId);
                         const customer = customers?.find(c => c.id === project?.customerId);
-                        
+
                         const completedDate = new Date().toLocaleDateString('vi-VN');
                         const projectName = project?.name || 'Chưa rõ';
                         const customerName = customer?.name || 'Khách hàng lẻ';
@@ -3538,17 +3833,30 @@ export default function TaskDetailModal({
                         const savedSummary = localStorage.getItem('hl_travel_expenses_summary_v4');
                         let summaryList = savedSummary ? JSON.parse(savedSummary) : [];
 
-                        currentMission.travelAllowances.forEach((ta) => {
+                        mergedCtp.forEach((ta, taIdx) => {
                           const emp = employees.find(e => e.id === ta.memberId);
                           const employeeName = emp?.name || 'Chưa gán';
                           const content = ta.content || 'Công tác phí';
                           const amount = ta.amount || 0;
-                          
-                          const nextIdx = summaryList.length + 1;
-                          const code = `THCTP-${String(nextIdx).padStart(3, '0')}`;
+
+                          // id duy nhất (mã hiển thị) + code hiển thị THCTP-XXX.
+                          // `rowId` (UUID) dùng làm khóa chính Supabase — ưu tiên ta.rowId
+                          // (đã sinh lúc "Thêm công tác phí") để upsert lặp lại an toàn, không
+                          // tạo dòng trùng với bản ghi đã lưu tức thì ở bước thêm.
+                          const uniqueId = `THCTP-${Date.now()}-${taIdx}`;
+                          const code = `THCTP-${String(summaryList.length + 1).padStart(3, '0')}`;
+                          let rowId: string = ta.rowId;
+                          if (!rowId) {
+                            rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+                              ? crypto.randomUUID()
+                              : `te_${Date.now()}_${taIdx}_${Math.floor(Math.random() * 1e9)}`;
+                          }
 
                           const newSummaryItem = {
-                            id: code,
+                            id: uniqueId,
+                            rowId,
+                            code,
+                            status: 'completed',
                             completedDate,
                             projectName,
                             customerName,
@@ -3556,18 +3864,38 @@ export default function TaskDetailModal({
                             missionName,
                             employeeName,
                             content,
-                            amount
+                            amount,
+                            createdAt: new Date().toISOString()
                           };
 
                           summaryList.push(newSummaryItem);
+
+                          // Gửi lên Supabase (bảng hrm_travel_expenses) — best-effort, không chặn luồng.
+                          // Truyền rowId để upsert cùng dòng đã lưu lúc "Thêm" (idempotent).
+                          dbService.hrmTravelExpenses.save(newSummaryItem, { rowId })
+                            .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu Supabase thất bại (vẫn lưu localStorage):', e?.message || e));
                         });
 
                         localStorage.setItem('hl_travel_expenses_summary_v4', JSON.stringify(summaryList));
+                        window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
                       }
 
                       // Push task update
                       onUpdateTask(selectedTask.id, {
                         missions: updatedMissions
+                      });
+                      // 🎉 Thông báo Toast khi Xác Nhận Hoàn Thành nhiệm vụ thành công
+                      addToast({
+                        title: '✅ Hoàn thành nhiệm vụ',
+                        message: `Đã xác nhận hoàn thành nhiệm vụ "${mission?.name || selectedMissionId}"${mergedCtp.length > 0 ? ` và lưu ${mergedCtp.length} công tác phí.` : '.'}`,
+                        type: 'success'
+                      });
+                      // Xoá bản sao cục bộ cho nhiệm vụ vừa hoàn thành (đã nằm trong missions của task)
+                      setLocalTravelAllowances(prev => {
+                        if (!prev[selectedMissionId || '']) return prev;
+                        const nxt = { ...prev };
+                        delete nxt[selectedMissionId || ''];
+                        return nxt;
                       });
                       // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                       notifyProjectChat(`✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`);
@@ -3575,6 +3903,7 @@ export default function TaskDetailModal({
                       // Clear states
                       setSelectedMissionId(null);
                       setMissionAttachedFile(null);
+                      resetMissionReportState();
                     }}
                     className={`px-5 py-2.5 rounded-xl font-bold text-[10.5px] uppercase tracking-wider flex items-center gap-1.5 transition ${
                       hasMissionPermission && 
@@ -3604,6 +3933,7 @@ export default function TaskDetailModal({
 
                         setSelectedMissionId(null);
                         setMissionAttachedFile(null);
+                        resetMissionReportState();
                       }
                     }}
                     className="px-3.5 py-2 rounded-xl border border-rose-950 hover:bg-rose-950/20 text-rose-400 text-[10.5px] font-bold transition cursor-pointer ml-auto"

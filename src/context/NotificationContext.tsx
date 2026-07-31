@@ -234,10 +234,20 @@ const FALLBACK_TOAST = {
   setNotificationFilter: () => {},
 };
 
+// Chỉ cảnh báo 1 lần mỗi phiên để tránh spam console khi HMR (Fast Refresh)
+// tạm thời làm mismatch định danh context ở môi trường dev.
+let notificationContextWarned = false;
+
 export function useNotification(): NotificationContextValue {
   const ctx = useContext(NotificationContext);
   if (!ctx) {
-    console.warn('[useNotification] Context null — trả về fallback an toàn');
+    if (!notificationContextWarned) {
+      notificationContextWarned = true;
+      console.warn(
+        '[useNotification] Context null — component render ngoài NotificationProvider, ' +
+        'trả về fallback an toàn (toast sẽ không hiển thị). Thường chỉ xảy ra tạm thời khi HMR dev; hãy F5 nếu persistent.'
+      );
+    }
     return FALLBACK_TOAST as NotificationContextValue;
   }
   return ctx;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote } from '../types';
+import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate } from '../types';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
 import {
@@ -31,6 +31,7 @@ import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
+import MissionConfigEditor from './MissionConfigEditor';
 
 export type { KanbanColumn } from '../lib/kanbanLogic';
 
@@ -1017,6 +1018,7 @@ export default function ProjectKanbanBoard({
                 styleStrike: subtaskAuto.textStyleStyleStrike,
                 styleColor: subtaskAuto.textStyleStyleColor,
                 checklistTexts: subtaskAuto.checklistTexts || [],
+                missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map(templateToMission) : undefined,
                 approvals: approvals,
                 isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                 isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -1335,6 +1337,8 @@ export default function ProjectKanbanBoard({
   const [subTaskSubcontractorSettlerId, setSubTaskSubcontractorSettlerId] = useState('');
   // Đầu mục đo kiểm / Checklist kỹ thuật (công việc con)
   const [subTaskChecklistTexts, setSubTaskChecklistTexts] = useState<string[]>([]);
+  // NHIỆM VỤ CHI TIẾT cấu hình trước (công việc con mới)
+  const [subTaskMissionConfigs, setSubTaskMissionConfigs] = useState<SubTaskMissionTemplate[]>([]);
 
   // Additional subtask form states for synchronized linkage
   const [subTaskAssignerId, setSubTaskAssignerId] = useState(currentUser?.id || '');
@@ -1363,6 +1367,8 @@ export default function ProjectKanbanBoard({
   const [editSubSubcontractorName, setEditSubSubcontractorName] = useState('');
   // Đầu mục đo kiểm / Checklist kỹ thuật (sửa công việc con)
   const [editSubChecklistTexts, setEditSubChecklistTexts] = useState<string[]>([]);
+  // NHIỆM VỤ CHI TIẾT cấu hình trước (sửa công việc con)
+  const [editSubMissionConfigs, setEditSubMissionConfigs] = useState<SubTaskMissionTemplate[]>([]);
   
   // Track open menu for subtask cards
   const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
@@ -1370,6 +1376,21 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   // CÁC HÀM QUẢN LÝ CÔNG VIỆC CON (Subtask)
   // ===========================================================================
+
+  // templateToMission() → Chuyển NHIỆM VỤ CHI TIẾT cấu hình trước thành
+  // SubTaskMission thật (status 'todo', chưa có báo cáo/bằng chứng).
+  const templateToMission = (t: SubTaskMissionTemplate): SubTaskMission => ({
+    id: `mission_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    name: t.name,
+    memberIds: t.memberIds || [],
+    mainAssigneeId: t.mainAssigneeId,
+    status: 'todo',
+    workReports: '',
+    evidence: '',
+    createdAt: new Date().toISOString(),
+    deadline: t.deadline || undefined,
+  });
+
   const handleStartEditSubTask = (task: Task) => {
     setEditingSubTask(task);
     setEditSubName(task.name);
@@ -1392,6 +1413,13 @@ export default function ProjectKanbanBoard({
     setEditSubSubcontractorApproverId(task.subcontractorApproverId || '');
     setEditSubSubcontractorSettlerId(task.subcontractorSettlerId || '');
     setEditSubChecklistTexts(task.checklistTexts || []);
+    setEditSubMissionConfigs((task.missions || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      deadline: m.deadline ? m.deadline.split('T')[0] : m.deadline,
+      mainAssigneeId: m.mainAssigneeId,
+      memberIds: m.memberIds || [],
+    })));
     setOpenMenuTaskId(null);
   };
 
@@ -1444,6 +1472,25 @@ export default function ProjectKanbanBoard({
       subcontractorSettlerId: editSubSubcontractorSettlerId || undefined,
       checklistTexts: editSubChecklistTexts.length > 0 ? [...editSubChecklistTexts] : undefined,
     };
+
+    // NHIỆM VỤ CHI TIẾT: merge giữ tiến độ nếu có cấu hình, KHÔNG xóa nhiệm vụ thật nếu config rỗng
+    if (editSubMissionConfigs.length > 0) {
+      const existingMissions = editingSubTask.missions || [];
+      const mergedMissions = editSubMissionConfigs.map(cfg => {
+        const existing = existingMissions.find(m => m.id === cfg.id || m.name === cfg.name);
+        if (existing) {
+          return {
+            ...existing,
+            name: cfg.name,
+            deadline: cfg.deadline || existing.deadline,
+            mainAssigneeId: cfg.mainAssigneeId ?? existing.mainAssigneeId,
+            memberIds: cfg.memberIds ?? existing.memberIds,
+          };
+        }
+        return templateToMission(cfg);
+      });
+      updates.missions = mergedMissions;
+    }
 
     onUpdateTask(editingSubTask.id, updates);
     setEditingSubTask(null);
@@ -1509,6 +1556,7 @@ export default function ProjectKanbanBoard({
       subcontractorApproverId: subTaskSubcontractorApproverId || undefined,
       subcontractorSettlerId: subTaskSubcontractorSettlerId || undefined,
       checklistTexts: subTaskChecklistTexts.length > 0 ? [...subTaskChecklistTexts] : undefined,
+      missions: subTaskMissionConfigs.length > 0 ? subTaskMissionConfigs.map(templateToMission) : undefined,
 
       // 1. DỮ LIỆU ĐỒNG BỘ: QUY TRÌNH DUYỆT NHIỀU CẤP ("VÕ VĂN NAM -> PHẠM ANH TUẤN -> TRƯƠNG HỮU LONG")
       approvals: [
@@ -1568,6 +1616,7 @@ export default function ProjectKanbanBoard({
     setSubTaskSubcontractorApproverId('');
     setSubTaskSubcontractorSettlerId('');
     setSubTaskChecklistTexts([]);
+    setSubTaskMissionConfigs([]);
     setShowSubtaskForm(false);
   };
 
@@ -1891,6 +1940,7 @@ export default function ProjectKanbanBoard({
                       styleStrike: subtaskAuto.textStyleStyleStrike,
                       styleColor: subtaskAuto.textStyleStyleColor,
                       checklistTexts: subtaskAuto.checklistTexts || [],
+                      missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map(templateToMission) : undefined,
                       approvals: approvals,
                       isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                       isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -3561,6 +3611,14 @@ export default function ProjectKanbanBoard({
                             </div>
                           </div>
 
+                          {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+                          <MissionConfigEditor
+                            value={subTaskMissionConfigs}
+                            onChange={setSubTaskMissionConfigs}
+                            employees={employees}
+                            defaultDeadlineHint={subTaskDeadline}
+                          />
+
                           {/* End scrollable form content */}
                           </div>
 
@@ -5064,6 +5122,13 @@ export default function ProjectKanbanBoard({
                             </div>
                           </div>
 
+                          {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+                          <MissionConfigEditor
+                            value={subtaskAuto.subTaskMissions || []}
+                            onChange={(next) => updateSubtaskAutomation(index, { subTaskMissions: next })}
+                            employees={employees}
+                          />
+
                           {/* Modal Footer */}
                           <div className="bg-slate-950 px-5 py-3 border-t border-slate-800 flex justify-end shrink-0">
                             <button
@@ -5651,7 +5716,7 @@ export default function ProjectKanbanBoard({
       {/* Sub-task Edit Modal */}
       {editingSubTask && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[200] p-4 animate-fadeIn overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-5 md:p-6 text-slate-200 shadow-2xl space-y-4 animate-scaleIn my-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-5 md:p-6 text-slate-200 shadow-2xl space-y-4 animate-scaleIn my-8">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <CheckSquare className="w-5 h-5 text-emerald-400" />
@@ -6080,6 +6145,13 @@ export default function ProjectKanbanBoard({
                   </div>
                 </div>
               </div>
+
+              {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+              <MissionConfigEditor
+                value={editSubMissionConfigs}
+                onChange={setEditSubMissionConfigs}
+                employees={employees}
+              />
             </div>
 
             <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">

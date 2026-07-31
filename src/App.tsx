@@ -996,6 +996,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Phản chiếu tasks mới nhất để handler sự kiện đọc được giá trị cập nhật mà
+  // không phải chạy side-effect bên trong hàm updater của setState.
+  const tasksRef = useRef<Task[]>(tasks);
+  tasksRef.current = tasks;
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
@@ -1446,6 +1450,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireHrmTripsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-hrm-trips-updated')); } catch {}
     };
+    const fireHrmTravelExpensesEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')); } catch {}
+    };
     const fireHrmPerformanceCriteriaEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-hrm-performance-criteria-updated')); } catch {}
     };
@@ -1548,6 +1555,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_employee_errors' }, fireHrmEmployeeErrorsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_holidays' }, fireHrmHolidaysEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_trips' }, fireHrmTripsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_travel_expenses' }, fireHrmTravelExpensesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_performance_criteria' }, fireHrmPerformanceCriteriaEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_salary_scales' }, fireHrmSalarySalesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_default_snapshots' }, fireHrmDefaultSnapshotsEvent)

@@ -281,6 +281,20 @@ export interface Task {
   missions?: SubTaskMission[];
 }
 
+/**
+ * Bản mẫu (template) của một NHIỆM VỤ CHI TIẾT — dùng để cấu hình trước các
+ * nhiệm vụ trong 3 cửa sổ (Tạo thẻ việc con, Sửa công việc con, Cấu hình Quy
+ * trình tự động công việc con). Khi công việc con được tạo/auto-tạo, các template
+ * này được chuyển thành `SubTaskMission` thật trong `Task.missions`.
+ */
+export interface SubTaskMissionTemplate {
+  id: string;
+  name: string;
+  deadline?: string;      // tùy chọn, rỗng = thừa hưởng hạn của công việc con
+  mainAssigneeId?: string;
+  memberIds?: string[];
+}
+
 export interface SubTaskMission {
   id: string;
   name: string;
@@ -289,6 +303,7 @@ export interface SubTaskMission {
   status: 'todo' | 'completed';
   workReports: string; // Báo cáo công việc đã làm (bắt buộc)
   evidence: string; // Bằng chứng công việc hoàn thành (bắt buộc)
+  reportImages?: string[]; // Hình ảnh báo cáo (bắt buộc) — URL từ Supabase Storage hoặc data URL dự phòng
   completedAt?: string;
   createdAt?: string;
   deadline?: string;

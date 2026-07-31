@@ -1404,14 +1404,52 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     return () => clearInterval(intervalId);
   }, [attendance, employees, leaves, weekendDays, holidays, leaveCoefficients, systemConfig]);
 
-  useEffect(() => {
-    if (activeSubTab === 'trips') {
-      const saved = localStorage.getItem('hl_travel_expenses_summary_v4');
-      if (saved) {
-        setTravelExpensesSummary(JSON.parse(saved));
-      }
+  // Loại bỏ các mục trùng lặp (cùng rowId / cùng id) để tránh React warning
+  // "Encountered two children with the same key" và tính tổng bị sai. Giữ lại
+  // mục cuối cùng gặp (mới nhất) cho mỗi khóa.
+  const dedupeTravelExpenses = (arr: any[]): any[] => {
+    const seen = new Map<string, any>();
+    for (const item of (arr || [])) {
+      const key = item?.rowId || item?.id;
+      if (key) seen.set(key, item);
     }
+    return Array.from(seen.values());
+  };
+
+  // Load Tổng hợp Công Tác Phí: ưu tiên Supabase, fallback localStorage
+  const loadTravelExpensesSummary = useCallback(() => {
+    if (activeSubTab !== 'trips') return;
+    dbService.hrmTravelExpenses.list()
+      .then((data: any[]) => {
+        if (data && data.length > 0) {
+          const deduped = dedupeTravelExpenses(data);
+          setTravelExpensesSummary(deduped);
+          try { localStorage.setItem('hl_travel_expenses_summary_v4', JSON.stringify(deduped)); } catch { /* noop */ }
+        } else {
+          const saved = localStorage.getItem('hl_travel_expenses_summary_v4');
+          const local = dedupeTravelExpenses(saved ? JSON.parse(saved) : []);
+          setTravelExpensesSummary(local);
+        }
+      })
+      .catch((err) => {
+        console.warn('[TravelExpense][HR] Lỗi tải Supabase, fallback localStorage:', err?.message || err);
+        const saved = localStorage.getItem('hl_travel_expenses_summary_v4');
+        setTravelExpensesSummary(dedupeTravelExpenses(saved ? JSON.parse(saved) : []));
+      });
   }, [activeSubTab]);
+
+  useEffect(() => {
+    loadTravelExpensesSummary();
+  }, [loadTravelExpensesSummary]);
+
+  // Làm mới ngay khi có nhiệm vụ hoàn thành gửi Công Tác Phí (cùng trình duyệt)
+  useEffect(() => {
+    const handler = () => {
+      loadTravelExpensesSummary();
+    };
+    window.addEventListener('hl-hrm-travel-expenses-updated', handler);
+    return () => window.removeEventListener('hl-hrm-travel-expenses-updated', handler);
+  }, [loadTravelExpensesSummary]);
 
   // Form states
   const [showEmpModal, setShowEmpModal] = useState(false);
@@ -2397,7 +2435,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return;
     }
     const newLog: AttendanceLog = {
-      id: `AT-${Date.now().toString().slice(-4)}`,
+      // id duy nhất: gồm mã NV + ngày + 5 số cuối timestamp → tránh trùng id (id cũ chỉ 4 số cuối Date.now
+      // rất dễ trùng khi nhiều NV chấm công cùng lúc → upsert ghi đè → mất dữ liệu trên bảng Chấm công ngày)
+      id: `AT-${empId}-${todayStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}`,
       empId,
       empName: name,
       date: todayStr,
@@ -2642,7 +2682,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   }
 
                   const simulatedLog: AttendanceLog = {
-                    id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`,
+                    id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
@@ -2661,7 +2701,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   updatedAttendance.unshift(simulatedLog);
                 } else {
                   const simulatedLog: AttendanceLog = {
-                    id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`,
+                    id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
@@ -2706,7 +2746,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   };
                 } else {
                   const simulatedLog: AttendanceLog = {
-                    id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`,
+                    id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,

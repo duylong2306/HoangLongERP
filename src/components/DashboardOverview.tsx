@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
-import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover } from '../context';
+import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, useNotification } from '../context';
 import { dbService } from '../lib/dbService';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
@@ -65,6 +65,8 @@ export default function DashboardOverview({
 
 
   // --- PHẦN 1: BỘ LỌC CÔNG VIỆC THEO USER ĐANG ĐĂNG NHẬP (& PHÂN QUYỀN TRUY CẬP) ---
+  const { addToast } = useNotification();
+
   const getTodayString = useCallback(() => {
     const d = new Date();
     const y = d.getFullYear();
@@ -1168,6 +1170,17 @@ export default function DashboardOverview({
   const handleConfirmPunch = async () => {
     if (!activePunchSlot) return;
 
+    // Nhãn tiếng Việt cho từng slot điểm danh (hiển thị trong toast)
+    const slotLabelMap: Record<string, string> = {
+      timeInS: 'VÀO SÁNG',
+      timeOutS: 'RA SÁNG',
+      timeInC: 'VÀO CHIỀU',
+      timeOutC: 'RA CHIỀU',
+      timeInOT: 'VÀO TĂNG CA',
+      timeOutOT: 'RA TĂNG CA',
+    };
+    const slotLabel = slotLabelMap[activePunchSlot] || activePunchSlot.toUpperCase();
+
     // ─── Lấy giờ server từ Supabase RPC (chống gian lận giờ client) ───
     const serverTs = await dbService.fetchServerTimestamp();
     const now = serverTs ? new Date(serverTs.datetime) : new Date();
@@ -1190,7 +1203,7 @@ export default function DashboardOverview({
       stopCameraStream();
       setShowPunchModal(false);
       setActivePunchSlot(null);
-      alert('🔒 Bản ghi chấm công ngày hôm nay đã được chốt (khóa). Vui lòng liên hệ HR/Admin nếu cần điều chỉnh.');
+      addToast({ title: '🔒 Bản ghi đã chốt', message: 'Bản ghi chấm công ngày hôm nay đã được khóa. Vui lòng liên hệ HR/Admin nếu cần điều chỉnh.', type: 'warning' });
       return;
     }
 
@@ -1201,7 +1214,7 @@ export default function DashboardOverview({
       stopCameraStream();
       setShowPunchModal(false);
       setActivePunchSlot(null);
-      alert(`⚠️ Bạn đã chấm ${activePunchSlot.toUpperCase()} lúc ${todayLog![activePunchSlot]} rồi. Không thể chấm lại slot này.`);
+      addToast({ title: '⚠️ Đã chấm rồi', message: `Bạn đã chấm [${slotLabel}] lúc ${todayLog![activePunchSlot]} rồi. Không thể chấm lại slot này.`, type: 'warning' });
       return;
     }
 
@@ -1212,7 +1225,7 @@ export default function DashboardOverview({
       stopCameraStream();
       setShowPunchModal(false);
       setActivePunchSlot(null);
-      alert(`⛔ Ngoài khung giờ cho phép chấm công [${activePunchSlot.toUpperCase()}]. Khung giờ: ${sessionGuardCheck.sessionStartStr} - ${sessionGuardCheck.sessionEndStr}.`);
+      addToast({ title: '⛔ Ngoài khung giờ', message: `Không thể chấm [${slotLabel}]. Khung giờ cho phép: ${sessionGuardCheck.sessionStartStr} - ${sessionGuardCheck.sessionEndStr}.`, type: 'warning' });
       return;
     }
 
@@ -1227,14 +1240,16 @@ export default function DashboardOverview({
         stopCameraStream();
         setShowPunchModal(false);
         setActivePunchSlot(null);
-        alert(`⚠️ Chưa chấm ${inSlot.toUpperCase()} (vào ca). Vui lòng chấm vào ca trước khi chấm ra ca.`);
+        addToast({ title: '⚠️ Chưa chấm vào ca', message: `Bạn chưa chấm [${slotLabelMap[inSlot] || inSlot.toUpperCase()}] (vào ca). Vui lòng chấm vào ca trước khi chấm ra ca.`, type: 'warning' });
         return;
       }
     }
 
     if (!todayLog) {
       todayLog = {
-        id: `AT-${Date.now().toString().slice(-4)}`,
+        // id duy nhất: gồm mã NV + ngày + 5 số cuối timestamp → tránh 2 NV điểm danh cùng lúc
+        // bị trùng id (id cũ chỉ là 4 số cuối Date.now, rất dễ trùng → upsert ghi đè → mất dữ liệu)
+        id: `AT-${empId}-${todayVal.replace(/-/g, '')}-${Date.now().toString().slice(-5)}`,
         empId: empId,
         empName: currentUser.name,
         date: todayVal,
@@ -1319,10 +1334,6 @@ export default function DashboardOverview({
       } catch (err) {}
     }
 
-    // Save to Supabase (kèm _serverTime + punchSlot để chống gian lận giờ client)
-    dbService.attendance.save({ ...todayLog, _serverTime: serverTs }, activePunchSlot as any).catch(err =>
-      console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
-
     // Update local state for immediate UI feedback (loại bỏ _serverTime trước khi set state để tránh cache object)
     const { _serverTime, ...logForState } = todayLog;
     setAttendanceList(updated.map(l => l.id === todayLog.id ? logForState : l));
@@ -1331,7 +1342,26 @@ export default function DashboardOverview({
     stopCameraStream();
     setShowPunchModal(false);
     setActivePunchSlot(null);
-    alert(`🎉 Đã chấm công [${activePunchSlot.toUpperCase()}] thành công lúc ${punchedTime} tại ${selectedSite}!`);
+
+    // ─── Lưu lên Supabase và báo kết quả cho người dùng ───
+    // (kèm _serverTime + punchSlot để chống gian lận giờ client)
+    try {
+      await dbService.attendance.save({ ...todayLog, _serverTime: serverTs }, activePunchSlot as any);
+      addToast({
+        title: '✅ Điểm danh thành công',
+        message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime} tại ${selectedSite}.`,
+        type: 'success',
+      });
+    } catch (err) {
+      console.error('Lỗi khi lưu chấm công lên Supabase:', err);
+      const errMsg = err instanceof Error ? err.message : 'Lỗi không xác định';
+      addToast({
+        title: '❌ Lưu điểm danh thất bại',
+        message: `Chấm [${slotLabel}] lúc ${punchedTime} KHÔNG được lưu lên hệ thống. Vui lòng chụp màn hình và liên hệ Admin. Chi tiết: ${errMsg}`,
+        type: 'error',
+        duration: 8000,
+      });
+    }
   };
 
   // Submit Leave Request

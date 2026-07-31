@@ -3,6 +3,8 @@ import { FileSpreadsheet, Trash2 } from 'lucide-react';
 
 interface TripItem {
   id: string;
+  rowId?: string;
+  code?: string;
   employeeId?: string;
   empId?: string;
   employeeName: string;
@@ -115,9 +117,9 @@ export default function TripsTab({
                     }
                     return true;
                   })
-                  .map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-850/40 transition">
-                      <td className="py-2.5 px-3 font-mono font-bold text-amber-400">{item.id}</td>
+                  .map((item, idx) => (
+                    <tr key={item.rowId || item.id || idx} className="hover:bg-slate-850/40 transition">
+                      <td className="py-2.5 px-3 font-mono font-bold text-amber-400">{item.code || item.id}</td>
                       <td className="py-2.5 px-3 text-slate-350">{item.completedDate}</td>
                       <td className="py-2.5 px-3 font-medium text-white max-w-[150px] truncate" title={item.projectName}>{item.projectName}</td>
                       <td className="py-2.5 px-3 text-slate-400 max-w-[120px] truncate" title={item.customerName}>{item.customerName}</td>
