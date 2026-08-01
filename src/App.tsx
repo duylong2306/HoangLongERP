@@ -1340,6 +1340,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return () => window.removeEventListener('hl-hrm-leaves-updated', loadLeaves);
   }, []);
 
+  // Điều hướng mở thẳng 1 hội thoại (ví dụ nhóm chat dự án) từ bất kỳ component
+  // con nào qua CustomEvent 'hl-open-conversation' { conversationId }.
+  useEffect(() => {
+    const handleOpenConversation = (e: Event) => {
+      const convId = (e as CustomEvent).detail?.conversationId;
+      if (!convId) return;
+      setInitialConvId(convId);
+      setMessengerInitialTab('group');
+      setActiveTab('messages');
+    };
+    window.addEventListener('hl-open-conversation', handleOpenConversation);
+    return () => window.removeEventListener('hl-open-conversation', handleOpenConversation);
+  }, []);
+
   // Sync subcontractor advances from Supabase when updated elsewhere
   useEffect(() => {
     const handleAdvancesUpdated = async () => {
@@ -2601,7 +2615,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   return (
     <AuthProvider employees={employees} addToast={addToast}>
-      <NotificationProvider employees={employees} currentUser={currentUser}>
+      <NotificationProvider employees={employees} currentUser={currentUser} toasts={toasts} addToast={addToast} removeToast={removeToast}>
         <div
           className="flex min-h-screen w-full lg:h-screen lg:w-screen bg-slate-950 lg:overflow-hidden text-slate-200 font-sans transition-all duration-200"
           style={{ fontFamily: currentFont }}

@@ -64,28 +64,43 @@ export function NotificationProvider({
   children,
   employees,
   currentUser,
+  toasts: externalToasts,
+  addToast: externalAddToast,
+  removeToast: externalRemoveToast,
 }: {
   children: ReactNode;
   employees: Employee[];
   currentUser: Employee | null;
+  // Hệ thống toast THỰC TẾ được render ở App.tsx. Truyền vào đây để mọi
+  // component dùng useNotification().addToast hiển thị được toast. Nếu không
+  // truyền (ví dụ dùng Provider độc lập trong test) sẽ fallback state nội bộ.
+  toasts?: Toast[];
+  addToast?: (toast: ToastInput) => void;
+  removeToast?: (id: string) => void;
 }) {
-  // ── Toasts ──
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  // ── Toasts: state nội bộ dự phòng khi KHÔNG có hệ thống toast bên ngoài ──
+  const [internalToasts, setInternalToasts] = useState<Toast[]>([]);
 
-  const addToast = useCallback((toast: ToastInput) => {
+  const internalAddToast = useCallback((toast: ToastInput) => {
     const id = `${Date.now()}_${Math.random()}`;
     const duration = toast.duration === undefined ? 5000 : toast.duration;
-    setToasts(prev => [...prev, { ...toast, id, duration, type: toast.type || 'info' }]);
+    setInternalToasts(prev => [...prev, { ...toast, id, duration, type: toast.type || 'info' }]);
     if (duration > 0) {
       setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id));
+        setInternalToasts(prev => prev.filter(t => t.id !== id));
       }, duration);
     }
   }, []);
 
-  const removeToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+  const internalRemoveToast = useCallback((id: string) => {
+    setInternalToasts(prev => prev.filter(t => t.id !== id));
   }, []);
+
+  // Ưu tiên hệ thống toast từ App (được render thật ở App.tsx). Nhờ vậy mọi
+  // useNotification().addToast trong toàn app đều hiển thị đúng.
+  const toasts = externalToasts ?? internalToasts;
+  const addToast = externalAddToast ?? internalAddToast;
+  const removeToast = externalRemoveToast ?? internalRemoveToast;
 
   // ── Notifications ──
   const [notifications, setNotifications] = useState<AppNotification[]>(SEED_NOTIFICATIONS);

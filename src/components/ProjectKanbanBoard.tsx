@@ -159,6 +159,10 @@ export default function ProjectKanbanBoard({
         // addMemberToConversation tự bỏ qua nếu id đã có trong nhóm (không trùng)
         await addMemberToConversation(convId, id);
       }
+      // Đảm bảo người đang bấm nút cũng là thành viên để có thể mở/xem nhóm chat
+      if (currentUser?.id) {
+        await addMemberToConversation(convId, currentUser.id);
+      }
 
       addToast({
         title: '✅ Đồng bộ thành công',
@@ -166,6 +170,9 @@ export default function ProjectKanbanBoard({
         type: 'success',
       });
       notifyProjectChat(`👥 ${currentUser?.name || 'Hệ thống'} đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`);
+
+      // Điều hướng về chi tiết tin nhắn của nhóm chat dự án vừa đồng bộ
+      window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
     } catch (e: any) {
       addToast({
         title: '⚠️ Lỗi đồng bộ',
