@@ -3928,7 +3928,7 @@ export default function TaskDetailModal({
                         const projectName = project?.name || 'Chưa rõ';
                         const customerName = customer?.name || 'Khách hàng lẻ';
                         const taskName = selectedTask.name;
-                        const missionName = currentMission.name;
+                        const missionName = currentMission?.name || '';
 
                         const savedSummary = localStorage.getItem('hl_travel_expenses_summary_v4');
                         let summaryList = savedSummary ? JSON.parse(savedSummary) : [];
