@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { Employee, AppNotification } from '../types';
 import { dbService } from '../lib/dbService';
+import { buildPushUrl } from '../lib/pushDeepLink';
 
 // ─── Toast Types ──────────────────────────────────────────────────────────────
 
@@ -169,9 +170,18 @@ export function NotificationProvider({
             userIds: [recipient.id],
             title: newNotif.title || 'Thông báo mới',
             body: newNotif.content || '',
+            // Deep link: bấm vào thông báo phải mở ĐÚNG chi tiết công việc/hội thoại.
             data: {
-              url: '/',
+              url: buildPushUrl({
+                taskId: newNotif.taskId,
+                taskCode: newNotif.taskId ? undefined : newNotif.subTaskCode,
+                conversationId: newNotif.conversationId,
+                category: newNotif.category,
+              }),
               type: newNotif.category,
+              taskId: newNotif.taskId,
+              taskCode: newNotif.subTaskCode,
+              conversationId: newNotif.conversationId,
               sourceId: newNotif.subTaskCode,
               tag: `system-${newNotif.category}`,
             },

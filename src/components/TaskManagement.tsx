@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Task, Project, Employee, TaskPriority, TaskStatus, Customer, Quote, LeaveRequest, Payment, SubcontractorAdvanceProposal } from '../types';
 import {
   Plus, Check, Clock, Filter, CheckSquare, Eye, Users, ShieldCheck,
@@ -26,6 +26,10 @@ interface TaskManagementProps {
   onRedirectToSubcontractor?: (projectId: string, subcontractorId: string, workName: string) => void;
   onRedirectToHrLeaves?: () => void; // Điều hướng sang menu Phòng Nhân Sự > Đơn nghỉ phép
   subcontractorAdvances?: SubcontractorAdvanceProposal[]; // Đề xuất tạm ứng / Thu Chi từ Tài Chính
+  /** Công việc cần bung modal chi tiết ngay khi vào tab (deep link từ thông báo đẩy). */
+  initialTaskId?: string;
+  /** Gọi lại sau khi đã mở `initialTaskId`, để App reset state deep link. */
+  onInitialTaskOpened?: () => void;
 }
 
 export default function TaskManagement({
@@ -43,7 +47,9 @@ export default function TaskManagement({
   onRedirectToQuote,
   onRedirectToSubcontractor,
   onRedirectToHrLeaves,
-  subcontractorAdvances = []
+  subcontractorAdvances = [],
+  initialTaskId,
+  onInitialTaskOpened
 }: TaskManagementProps) {
   const { addToast } = useNotification();
   // Bộ lọc
@@ -56,6 +62,24 @@ export default function TaskManagement({
 
   // Trạng thái cho Chi tiết công việc chọn Xem
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  // ── Deep link từ thông báo đẩy ──────────────────────────────────────────
+  // App truyền `initialTaskId` khi người dùng bấm vào thông báo đẩy của một
+  // công việc → bung thẳng modal chi tiết. Đồng thời nới bộ lọc về "tất cả"
+  // để công việc đó chắc chắn nằm trong danh sách phía sau modal (VD việc do
+  // người khác làm sẽ không có trong scope mặc định "Công việc được giao").
+  useEffect(() => {
+    if (!initialTaskId) return;
+    const task = tasks.find(t => t.id === initialTaskId);
+    if (!task) return;
+
+    setSelectedTaskId(initialTaskId);
+    if (task.assigneeId !== currentUser?.id) setTaskScope('all');
+    setFilterProject('all');
+    setFilterEmployee('all');
+    setFilterStatus('all');
+    onInitialTaskOpened?.();
+  }, [initialTaskId, tasks, currentUser?.id, onInitialTaskOpened]);
 
   // States to view leave request or payment details under "Việc của tôi"
   const [viewingLeave, setViewingLeave] = useState<LeaveRequest | null>(null);

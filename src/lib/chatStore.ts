@@ -1,5 +1,6 @@
 import { Conversation, ChatMessage } from '../types';
 import { getSupabase } from './supabase';
+import { buildPushUrl } from './pushDeepLink';
 
 // =====================================================================
 // KIẾN TRÚC SUPABASE-ONLY + IN-MEMORY CACHE
@@ -378,7 +379,11 @@ async function notifyChatPush(msg: ChatMessage, conv?: Conversation): Promise<vo
         title: msg.senderName || 'Tin nhắn mới',
         body: msg.content,
         data: {
-          url: `/messages?conversation=${conv.id}`,
+          // ⚠️ TRƯỚC ĐÂY: '/messages?conversation=...'. Host phục vụ file tĩnh và
+          // KHÔNG có SPA fallback → mở '/messages' trả về 404 (rõ nhất trên điện
+          // thoại, vì app thường đã đóng nên service worker phải mở tab mới).
+          // Nay dùng buildPushUrl → '/?conversation=...' (luôn là đường dẫn gốc).
+          url: buildPushUrl({ conversationId: conv.id }),
           type: 'chat.message',
           conversationId: conv.id,
           senderId: msg.senderId,

@@ -108,6 +108,15 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase } from './lib/supabase';
+import {
+  buildPushUrl,
+  parsePushData,
+  readDeepLinkFromLocation,
+  clearDeepLinkFromLocation,
+  hasDeepLinkTarget,
+  NOTIFICATION_CLICK_MESSAGE,
+  type PushDeepLink,
+} from './lib/pushDeepLink';
 import { createClient } from '@supabase/supabase-js';
 
 const generateUsername = (name: string): string => {
@@ -857,16 +866,74 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Hiển thị badge đếm số chưa đọc trên tab
   const [showBadgeCounts, setShowBadgeCounts] = useState<boolean>(() => localStorage.getItem('hl_show_badge_counts') !== 'false');
 
-  // Deep-link từ FCM push notification: /messages?conversation=xxx
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const convId = params.get('conversation');
-    if (convId) {
-      setInitialConvId(convId);
+  // ═══════════════════════════════════════════════════════════════════════
+  // DEEP LINK TỪ THÔNG BÁO ĐẨY (Web Push)
+  // Bấm vào thông báo → mở ĐÚNG chi tiết công việc / hội thoại tương ứng.
+  // Hai đường vào (xem src/lib/pushDeepLink.ts):
+  //   1. App đang mở  → service worker postMessage sang đây (không reload).
+  //   2. App chưa mở  → SW openWindow('/?taskId=...') → đọc từ location.search.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Công việc cần bung modal chi tiết (truyền xuống <TaskManagement initialTaskId>)
+  const [deepLinkTaskId, setDeepLinkTaskId] = useState<string | null>(null);
+  // Deep link công việc đang chờ `tasks` tải xong để tra ID/mã
+  const [pendingTaskLink, setPendingTaskLink] = useState<PushDeepLink | null>(null);
+
+  const handlePushDeepLink = useCallback((link: PushDeepLink) => {
+    // Ưu tiên 1: hội thoại chat
+    if (link.conversationId) {
       setActiveTab('messages');
-      // Xoá query param khỏi URL để không mở lại khi reload
-      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+      setInitialConvId(link.conversationId);
+      return;
     }
+
+    // Ưu tiên 2: công việc — chuyển tab NGAY, còn modal chi tiết đợi `tasks`
+    // tải xong mới bung (xử lý ở effect resolver bên dưới).
+    if (link.taskId || link.taskCode) {
+      setActiveTab('tasks');
+      setPendingTaskLink(link);
+      return;
+    }
+
+    // Ưu tiên 3: dự án
+    if (link.projectId) {
+      setActiveTab('projects-construction');
+      return;
+    }
+
+    // Không có đích cụ thể → điều hướng thô theo phân loại
+    switch (link.category) {
+      case 'tasks':
+      case 'approval':   setActiveTab('tasks'); break;
+      case 'finance':    setActiveTab('finance'); break;
+      case 'hr':
+      case 'employees':  setActiveTab('employees'); break;
+      case 'projects':   setActiveTab('projects-construction'); break;
+      case 'chat':       setActiveTab('messages'); break;
+      default:           setActiveTab('dashboard'); break;
+    }
+  }, [setActiveTab]);
+
+  // (1) App ĐANG MỞ: nhận message từ service worker khi người dùng bấm thông báo
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data?.type !== NOTIFICATION_CLICK_MESSAGE) return;
+      handlePushDeepLink(parsePushData(event.data.data));
+    };
+    navigator.serviceWorker.addEventListener('message', onSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onSwMessage);
+  }, [handlePushDeepLink]);
+
+  // (2) App MỞ MỚI từ thông báo: đọc deep link trên query string rồi dọn URL
+  useEffect(() => {
+    const link = readDeepLinkFromLocation();
+    if (hasDeepLinkTarget(link)) {
+      handlePushDeepLink(link);
+    }
+    // Xoá query param để F5 không mở lại modal cũ
+    clearDeepLinkFromLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     // Trả về mảng rỗng - dữ liệu thông báo sẽ được nạp từ Supabase trong useEffect
@@ -958,9 +1025,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             userIds: [recipient.id],
             title: newNotif.title || 'Thông báo mới',
             body: newNotif.content || '',
+            // Deep link: bấm vào thông báo phải mở ĐÚNG chi tiết công việc/hội thoại.
+            // (Trước đây url luôn là '/' và taskId bị bỏ rơi → chỉ mở được trang chủ.)
             data: {
-              url: '/',
+              url: buildPushUrl({
+                taskId: newNotif.taskId,
+                taskCode: newNotif.taskId ? undefined : newNotif.subTaskCode,
+                conversationId: newNotif.conversationId,
+                category: newNotif.category,
+              }),
               type: newNotif.category,
+              taskId: newNotif.taskId,
+              taskCode: newNotif.subTaskCode,
+              conversationId: newNotif.conversationId,
               sourceId: newNotif.subTaskCode,
               tag: `system-${newNotif.category}`,
             },
@@ -1007,6 +1084,36 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // không phải chạy side-effect bên trong hàm updater của setState.
   const tasksRef = useRef<Task[]>(tasks);
   tasksRef.current = tasks;
+
+  // ── Resolver deep link công việc ────────────────────────────────────────
+  // Thông báo đẩy có thể mang `taskId` (chuẩn) hoặc chỉ có `taskCode`
+  // (`subTaskCode`, VD 'CV-001') với các thông báo cũ. Đợi `tasks` tải xong
+  // rồi tra ra ID thật để bung modal chi tiết.
+  useEffect(() => {
+    if (!pendingTaskLink) return;
+    if (tasks.length === 0) return; // chưa tải xong → chờ effect chạy lại
+
+    const { taskId, taskCode } = pendingTaskLink;
+    const task =
+      (taskId && tasks.find(t => t.id === taskId)) ||
+      (taskCode && tasks.find(t => t.code === taskCode)) ||
+      // Thông báo cũ có thể nhét MÃ vào ô taskId (hoặc ngược lại) → thử chéo
+      (taskId && tasks.find(t => t.code === taskId)) ||
+      (taskCode && tasks.find(t => t.id === taskCode)) ||
+      null;
+
+    if (task) {
+      setDeepLinkTaskId(task.id);
+    } else {
+      addToast({
+        title: '🔍 Không mở được chi tiết',
+        message: `Không tìm thấy công việc ${taskId || taskCode} (có thể đã bị xoá hoặc bạn không có quyền xem).`,
+        type: 'warning',
+      });
+    }
+    setPendingTaskLink(null);
+  }, [pendingTaskLink, tasks, addToast]);
+
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   // Đơn nghỉ phép (dùng để cộng vào badge "Việc của tôi" – nhánh Công việc phải duyệt)
@@ -2046,7 +2153,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                   title: `💬 Tin nhắn mới từ ${newComment.senderName}`,
                   content: `[Công việc con ${oldTask.code}]: "${newComment.content}"`,
                   detailedContent: `Nội dung cuộc hội thoại trong công việc con "${oldTask.name}" (${oldTask.code}):\n\nNgười gửi: ${newComment.senderName} (${newComment.senderRole})\nThời gian: ${new Date(newComment.createdAt).toLocaleString('vi-VN')}\n\nTin nhắn: "${newComment.content}"`,
-                  subTaskCode: oldTask.code
+                  subTaskCode: oldTask.code,
+                  taskId: oldTask.id // deep link: bấm thông báo mở đúng chi tiết công việc
                 });
               }, 10);
             }
@@ -2071,7 +2179,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                 title: `📋 Cập nhật công việc con`,
                 content: `Trạng thái công việc "${oldTask.name}" đổi thành: ${statusMap[updates.status || ''] || updates.status}`,
                 detailedContent: `Mã công việc: ${oldTask.code}\nTên công việc: ${oldTask.name}\nPhòng ban: ${oldTask.department}\nHạn hoàn thành: ${oldTask.deadline}\n\nNgười cập nhật: ${currentUser.name}\nTrạng thái mới: ${statusMap[updates.status || ''] || updates.status}\nTiến độ hiện tại: ${changedTask.completionRate}%`,
-                subTaskCode: oldTask.code
+                subTaskCode: oldTask.code,
+                taskId: oldTask.id // deep link: bấm thông báo mở đúng chi tiết công việc
               });
             }, 10);
           });
@@ -2093,7 +2202,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                 title: `📈 Cập nhật tiến độ`,
                 content: `Tiến độ việc "${oldTask.name}" tăng lên ${updates.completionRate}%`,
                 detailedContent: `Mã công việc: ${oldTask.code}\nTên công việc: ${oldTask.name}\nTiến độ cũ: ${oldTask.completionRate}%\nTiến độ mới: ${updates.completionRate}%\n\nNgười cập nhật: ${currentUser.name}`,
-                subTaskCode: oldTask.code
+                subTaskCode: oldTask.code,
+                taskId: oldTask.id // deep link: bấm thông báo mở đúng chi tiết công việc
               });
             }, 10);
           });
@@ -3376,28 +3486,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                     setShowNotificationsPanel(false);
                                     if (mobileMenuOpen) setMobileMenuOpen(false);
 
-                                    // Nếu có conversationId → mở thẳng vào Messenger hội thoại đó
-                                    if (notif.conversationId) {
-                                      setActiveTab('messages');
-                                      setInitialConvId(notif.conversationId);
-                                      return;
-                                    }
-
-                                    // Điều hướng đến phân hệ liên quan theo category
+                                    // Dùng CHUNG bộ điều hướng với thông báo đẩy để
+                                    // bấm chuông và bấm push cho ra cùng một kết quả:
+                                    // thông báo công việc → mở thẳng modal chi tiết.
                                     const cat = notif.category;
-                                    if (cat === 'tasks' || cat === 'approval') {
-                                      setActiveTab('tasks');
-                                    } else if (cat === 'projects') {
-                                      setActiveTab('projects-construction');
-                                    } else if (cat === 'finance') {
-                                      setActiveTab('finance');
-                                    } else if (cat === 'hr') {
-                                      setActiveTab('employees');
-                                    } else if (cat === 'attendance') {
-                                      setActiveTab('dashboard');
-                                    } else {
-                                      setActiveTab('dashboard');
-                                    }
+                                    handlePushDeepLink({
+                                      taskId: notif.taskId,
+                                      taskCode:
+                                        (cat === 'tasks' || cat === 'approval') && !notif.taskId
+                                          ? notif.subTaskCode
+                                          : undefined,
+                                      conversationId: notif.conversationId,
+                                      category: cat === 'attendance' ? 'dashboard' : cat,
+                                    });
                                   }}
                                   className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-2.5 py-2 sm:py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
                                     isUnread
@@ -3679,6 +3780,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onRedirectToSubcontractor={handleRedirectToSubcontractor}
               onRedirectToHrLeaves={() => { setActiveTab('employees'); setHrSubTab('leaves'); }}
               subcontractorAdvances={subcontractorAdvances}
+              initialTaskId={deepLinkTaskId ?? undefined}
+              onInitialTaskOpened={() => setDeepLinkTaskId(null)}
             />
           )}
 

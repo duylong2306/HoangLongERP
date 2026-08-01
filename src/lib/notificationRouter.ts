@@ -5,6 +5,7 @@ import {
   INITIAL_PROJECTS
 } from '../data';
 import { getSupabase } from './supabase';
+import { buildPushUrl } from './pushDeepLink';
 
 // Gửi push notification qua Web Push API (VAPID) sau khi đã viết notification in-app.
 // Hàm async, không block UI. Bỏ qua lỗi nếu Supabase chưa cấu hình.
@@ -19,10 +20,18 @@ async function sendWebPush(
     if (!supabase || !recipientIds.length) return;
 
     const metadata = event.metadata || {};
-    const url =
-      (metadata.projectId && `/projects/${metadata.projectId}`) ||
-      (metadata.taskId && `/tasks/${metadata.taskId}`) ||
-      '/';
+
+    // ⚠️ TRƯỚC ĐÂY: projectId được ưu tiên TRƯỚC taskId, nên thông báo công việc
+    // thuộc một dự án lại dẫn về trang dự án thay vì chi tiết công việc. Ngoài ra
+    // '/tasks/<id>' là route KHÔNG tồn tại (app điều hướng bằng state, không router)
+    // nên mở ra chỉ thấy trang chủ. Nay dùng buildPushUrl → '/?taskId=<id>'.
+    const isTaskEvent = event.sourceModule === 'tasks';
+    const url = buildPushUrl({
+      taskId: metadata.taskId || (isTaskEvent ? event.sourceId : undefined),
+      projectId: metadata.projectId,
+      conversationId: metadata.conversationId,
+      category: getCategory(event),
+    });
 
     // Get config from env or localStorage
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://sujhvotnlbsgavoenuma.supabase.co';
@@ -39,11 +48,13 @@ async function sendWebPush(
         title,
         body: content,
         data: {
+          ...metadata,
           url,
           type: event.type,
           sourceId: event.sourceId,
           sourceModule: event.sourceModule,
-          ...metadata,
+          // Đặt SAU ...metadata để không bị metadata ghi đè nhầm
+          taskId: metadata.taskId || (isTaskEvent ? event.sourceId : undefined),
         },
       }),
     });
