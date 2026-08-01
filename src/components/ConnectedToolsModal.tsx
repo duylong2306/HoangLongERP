@@ -5,6 +5,7 @@ import {
 import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProposal, ApprovalStep, Supplier, InventoryItem } from '../types';
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
+import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
 
 export interface ConnectedToolsModalProps {
@@ -533,13 +534,12 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
     if (activeConnectedTool === 'cost') {
       const generatedId = `DX-EXP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-4)}`;
       setCtCostProposalId(generatedId);
-      
-      const director = employees.find(e => e.role === 'director');
-      const pm = employees.find(e => e.role === 'pm');
-      const accountant = employees.find(e => e.role === 'accountant');
-      
-      setCtCostApproverId(activeTask?.costApproverId || director?.id || pm?.id || employees[0]?.id || '');
-      setCtCostSettlerId(activeTask?.costSettlerId || accountant?.id || director?.id || employees[0]?.id || '');
+
+      // Người xét duyệt / quyết toán: lấy đúng từ cấu hình của công việc con
+      // (Sửa công việc con / Tạo thẻ việc con chi tiết / Cấu hình Quy trình tự động).
+      // Nếu chưa cấu hình → để trống, bắt buộc người dùng chọn trước khi gửi.
+      setCtCostApproverId(activeTask?.costApproverId || '');
+      setCtCostSettlerId(activeTask?.costSettlerId || '');
       setCtCostDescription('Đề xuất chi phí mua sắm lẻ phát sinh phục vụ thi công công trình');
       setCtCostProposalDate(new Date().toISOString().split('T')[0]);
       setCtExpenseRows([{ id: `row_init_${Date.now()}`, item: '', amount: 0, recipientId: employees[0]?.id || '', note: '' }]);
@@ -724,9 +724,9 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
             </div>
             <div>
               <h3 className="font-extrabold text-[15px] text-white">
-                {(activeConnectedTool as any) === 'approval' && 'YÊU CẦU PHÊ DUYỆT LIÊN THÔNG'}
-                {activeConnectedTool === 'cost' && 'ĐỀ XUẤT TẠM ỨNG'}
-                {activeConnectedTool === 'material' && 'ĐỀ XUẤT CUNG ỨNG VẬT TƯ & VÂN GỖ'}
+                {(activeConnectedTool as any) === 'approval' && 'YÊU CẦU PHÊ DUYỆT'}
+                {activeConnectedTool === 'cost' && 'ĐỀ XUẤT CHI PHÍ THI CÔNG'}
+                {activeConnectedTool === 'material' && 'ĐỀ XUẤT CUNG ỨNG VẬT TƯ'}
                 {activeConnectedTool === 'quotation' && 'LẬP BÁO GIÁ THẦU DỰ ÁN'}
                 {activeConnectedTool === 'contract' && 'BIÊN SOẠN HỢP ĐỒNG KINH TẾ'}
                 {activeConnectedTool === 'acceptance' && 'BIÊN BẢN NGHIỆM THU TIẾN ĐỘ'}
@@ -1061,11 +1061,6 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                       </div>
                     )}
                   </div>
-
-                  <div className="text-[10px] text-slate-500 border-t border-slate-800 pt-3 flex items-center justify-between">
-                    <span>Thiết bị thử nghiệm SMS Gateway:</span>
-                    <span className="font-mono text-emerald-400">● Live (Đồng bộ)</span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1074,8 +1069,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
           {/* 2. ĐỀ XUẤT TẠM ỨNG */}
           {activeConnectedTool === 'cost' && (() => {
             const activeTask = tasks.find(t => t.id === connectedTaskId || t.id === overlayTaskId);
-            const managementGroup = employees.filter(e => e.role === 'director' || e.role === 'pm' || e.role === 'accountant');
-            
+
             return (
               <div className="space-y-4">
                 <div className="bg-slate-950/40 p-5 border border-slate-800 rounded-xl space-y-4">
@@ -1251,28 +1245,22 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                   {/* Người xét duyệt & Người quyết toán */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[10px] text-slate-400 block font-bold mb-1">Người xét duyệt (Nhóm quản trị):</label>
-                      <select 
+                      <label className="text-[10px] text-slate-400 block font-bold mb-1">Người xét duyệt (Nhóm quản trị): <span className="text-rose-400">*</span></label>
+                      <SearchableEmployeeSelect
                         value={ctCostApproverId}
-                        onChange={(e) => setCtCostApproverId(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-white rounded-lg p-2 text-[11px] font-bold cursor-pointer outline-none focus:border-emerald-500"
-                      >
-                        {managementGroup.map(emp => (
-                          <option key={emp.id} value={emp.id}>{emp.name} ({emp.department} - {emp.role === 'director' ? 'Giám đốc' : emp.role === 'pm' ? 'Trưởng Dự Án' : 'Kế Toán'})</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setCtCostApproverId(val)}
+                        employees={employees}
+                        placeholder="-- Chưa cấu hình, vui lòng chọn người xét duyệt --"
+                      />
                     </div>
                     <div>
-                      <label className="text-[10px] text-slate-400 block font-bold mb-1">Người quyết toán (Nhóm quản trị):</label>
-                      <select 
+                      <label className="text-[10px] text-slate-400 block font-bold mb-1">Người quyết toán (Nhóm quản trị): <span className="text-rose-400">*</span></label>
+                      <SearchableEmployeeSelect
                         value={ctCostSettlerId}
-                        onChange={(e) => setCtCostSettlerId(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-white rounded-lg p-2 text-[11px] font-bold cursor-pointer outline-none focus:border-emerald-500"
-                      >
-                        {managementGroup.map(emp => (
-                          <option key={emp.id} value={emp.id}>{emp.name} ({emp.department} - {emp.role === 'director' ? 'Giám đốc' : emp.role === 'pm' ? 'Trưởng Dự Án' : 'Kế Toán'})</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setCtCostSettlerId(val)}
+                        employees={employees}
+                        placeholder="-- Chưa cấu hình, vui lòng chọn người quyết toán --"
+                      />
                     </div>
                   </div>
 
@@ -1284,6 +1272,10 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                         onClick={() => {
                           if (!ctCost) {
                             addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền GỬI ĐỀ XUẤT CHI PHÍ qua Công cụ liên thông.', type: 'error' });
+                            return;
+                          }
+                          if (!ctCostApproverId || !ctCostSettlerId) {
+                            addToast({ title: '⛔ Thiếu thông tin bắt buộc', message: 'Vui lòng chọn đầy đủ "Người xét duyệt (Nhóm quản trị)" và "Người quyết toán (Nhóm quản trị)" trước khi gửi đề xuất.', type: 'error' });
                             return;
                           }
                           setConfirmDialog({

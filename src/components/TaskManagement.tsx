@@ -140,12 +140,11 @@ export default function TaskManagement({
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
 
-  // Tải leaves & payments từ Supabase khi mount hoặc chuyển tab
+  // Tải leaves & payments từ Supabase ngay khi mount (để badge "Công việc phải duyệt"
+  // hiển thị đúng số ngay từ đầu, không phải chờ mở tab), và tải lại khi chuyển tab.
   React.useEffect(() => {
-    if (taskScope === 'toreview') {
-      dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
-      dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
-    }
+    dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
+    dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
   }, [taskScope]);
 
   const handleApproveLeave = async (id: string, status: 'approved' | 'rejected') => {
@@ -592,6 +591,23 @@ export default function TaskManagement({
         </button>
         <button
           type="button"
+          onClick={() => setTaskScope('all')}
+          className={`py-2 px-3 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer ${
+            taskScope === 'all'
+              ? `${accentBgClass} shadow-sm`
+              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Nhiệm vụ được giao</span>
+          {relatedUncompletedCount > 0 && (
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
+              {relatedUncompletedCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           onClick={() => setTaskScope('toreview')}
           className={`py-2 px-3 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer ${
             taskScope === 'toreview'
@@ -604,23 +620,6 @@ export default function TaskManagement({
           {toReviewUncompletedCount > 0 && (
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
               {toReviewUncompletedCount}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTaskScope('all')}
-          className={`py-2 px-3 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer ${
-            taskScope === 'all'
-              ? `${accentBgClass} shadow-sm`
-              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Nhiệm vụ liên quan</span>
-          {relatedUncompletedCount > 0 && (
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
-              {relatedUncompletedCount}
             </span>
           )}
         </button>
@@ -866,7 +865,7 @@ export default function TaskManagement({
           <div className="bg-slate-950 px-4 py-3 border-b border-slate-850 flex items-center justify-between">
             <span className="font-extrabold text-[12px] text-white uppercase tracking-wider flex items-center gap-2">
               <Users className={`w-4 h-4 ${accentTextClass}`} />
-              Nhiệm vụ liên quan của tôi
+              Nhiệm vụ được giao của tôi
             </span>
             <span className="text-[10px] text-slate-400 font-mono font-bold">
               {relatedMissions.length} nhiệm vụ được gán
@@ -928,20 +927,52 @@ export default function TaskManagement({
                               ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30'
                               : isMissionOverdue
                                 ? 'bg-rose-950/40 text-rose-400 border-rose-500/30'
-                                : 'bg-slate-800 text-slate-300 border-slate-700'
+                                : mission.status === 'doing'
+                                  ? 'bg-sky-950/40 text-sky-400 border-sky-500/30'
+                                  : 'bg-slate-800 text-slate-300 border-slate-700'
                           }`}>
-                            {mission.status === 'completed' ? 'Hoàn thành' : isMissionOverdue ? 'Quá hạn' : 'Đang thực hiện'}
+                            {mission.status === 'completed'
+                              ? 'Hoàn thành'
+                              : isMissionOverdue
+                                ? 'Quá hạn'
+                                : mission.status === 'doing'
+                                  ? 'Đang làm'
+                                  : 'Chưa làm'}
                           </span>
                         </td>
                         <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTaskId(task.id)}
-                            title="Xem chi tiết Công việc chứa nhiệm vụ này"
-                            className="bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800 p-1.5 rounded-lg cursor-pointer transition inline-flex items-center justify-center"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Nút NHẬN NV: chỉ hiện cho Phụ trách chính khi nhiệm vụ Chưa làm */}
+                            {isMain && mission.status === 'todo' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updatedMissions = (task.missions || []).map(m =>
+                                    m.id === mission.id ? { ...m, status: 'doing' as const } : m
+                                  );
+                                  onUpdateTask(task.id, { missions: updatedMissions });
+                                  addToast({
+                                    title: '✅ Đã nhận nhiệm vụ',
+                                    message: `Nhiệm vụ "${mission.name}" đã chuyển sang trạng thái Đang làm.`,
+                                    type: 'success',
+                                  });
+                                }}
+                                title="Nhận nhiệm vụ này (chuyển sang Đang làm)"
+                                className="bg-sky-600 hover:bg-sky-500 text-white border border-sky-500/40 px-2 py-1 rounded-lg cursor-pointer transition inline-flex items-center gap-1 text-[10px] font-bold"
+                              >
+                                <Check className="w-3 h-3" />
+                                Nhận NV
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTaskId(task.id)}
+                              title="Xem chi tiết Công việc chứa nhiệm vụ này"
+                              className="bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800 p-1.5 rounded-lg cursor-pointer transition inline-flex items-center justify-center"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

@@ -300,7 +300,9 @@ export interface SubTaskMission {
   name: string;
   memberIds: string[]; // Danh sách thành viên tham gia nhiệm vụ (avatar)
   mainAssigneeId?: string; // Người phụ trách chính nhiệm vụ
-  status: 'todo' | 'completed';
+  // 'todo' = Chưa làm (mới khởi tạo), 'doing' = Đang làm (Phụ trách đã Nhận NV),
+  // 'completed' = Hoàn thành (đã Xác nhận hoàn thành)
+  status: 'todo' | 'doing' | 'completed';
   workReports: string; // Báo cáo công việc đã làm (bắt buộc)
   evidence: string; // Bằng chứng công việc hoàn thành (bắt buộc)
   reportImages?: string[]; // Hình ảnh báo cáo (bắt buộc) — URL từ Supabase Storage hoặc data URL dự phòng

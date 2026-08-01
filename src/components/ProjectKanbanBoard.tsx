@@ -28,7 +28,7 @@ import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
-import { sendGroupChatMessage } from '../lib/chatStore';
+import { sendGroupChatMessage, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
 import MissionConfigEditor from './MissionConfigEditor';
@@ -113,6 +113,68 @@ export default function ProjectKanbanBoard({
       senderRole: currentUser.role,
       content,
     });
+  };
+
+  // ─── ĐỒNG BỘ NHÂN SỰ DỰ ÁN VÀO NHÓM CHAT ─────────────────────────────────
+  // Gom toàn bộ nhân sự đang tham gia dự án: Trưởng dự án (pmId), nhân sự trong
+  // từng Công Việc (người giao + phụ trách chính) và trong từng Nhiệm Vụ
+  // (phụ trách chính + thành viên). Mỗi user chỉ thêm 1 lần (Set khử trùng),
+  // rồi thêm vào nhóm chat dự án (conv_project_<id>). Hiển thị Toast kết quả.
+  const [isSyncingChatMembers, setIsSyncingChatMembers] = useState(false);
+  const handleSyncProjectMembersToChat = async () => {
+    if (!selectedProject?.id || isSyncingChatMembers) return;
+    setIsSyncingChatMembers(true);
+    try {
+      const memberIds = new Set<string>();
+      // 1. Trưởng dự án
+      if (selectedProject.pmId) memberIds.add(selectedProject.pmId);
+      // 2. Nhân sự trong toàn bộ Công Việc & Nhiệm Vụ của dự án
+      tasks
+        .filter(t => t.projectId === selectedProject.id)
+        .forEach(t => {
+          if (t.assigneeId) memberIds.add(t.assigneeId);
+          if (t.assignerId) memberIds.add(t.assignerId);
+          (t.missions || []).forEach(m => {
+            if (m.mainAssigneeId) memberIds.add(m.mainAssigneeId);
+            (m.memberIds || []).forEach(id => id && memberIds.add(id));
+          });
+        });
+
+      // Chỉ giữ lại các id là nhân viên hợp lệ
+      const validIds = Array.from(memberIds).filter(id => employees.some(e => e.id === id));
+
+      if (validIds.length === 0) {
+        addToast({
+          title: 'ℹ️ Chưa có nhân sự',
+          message: 'Dự án chưa có nhân sự nào trong công việc hoặc nhiệm vụ để đồng bộ.',
+          type: 'warning',
+        });
+        return;
+      }
+
+      // Đảm bảo nhóm chat dự án tồn tại, sau đó thêm từng thành viên (không trùng)
+      const convId = `conv_project_${selectedProject.id}`;
+      await ensureProjectChatGroup({ id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId });
+      for (const id of validIds) {
+        // addMemberToConversation tự bỏ qua nếu id đã có trong nhóm (không trùng)
+        await addMemberToConversation(convId, id);
+      }
+
+      addToast({
+        title: '✅ Đồng bộ thành công',
+        message: `Đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`,
+        type: 'success',
+      });
+      notifyProjectChat(`👥 ${currentUser?.name || 'Hệ thống'} đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`);
+    } catch (e: any) {
+      addToast({
+        title: '⚠️ Lỗi đồng bộ',
+        message: `Không thể đồng bộ nhân sự vào nhóm chat: ${e?.message || e}`,
+        type: 'error',
+      });
+    } finally {
+      setIsSyncingChatMembers(false);
+    }
   };
 
   // ===========================================================================
@@ -334,13 +396,11 @@ export default function ProjectKanbanBoard({
       setCtCostProposalId(generatedId);
       
       const activeTask = tasks.find(t => t.id === connectedTaskId || t.id === overlayTaskId);
-      
-      const director = employees.find(e => e.role === 'director');
-      const pm = employees.find(e => e.role === 'pm');
-      const accountant = employees.find(e => e.role === 'accountant');
-      
-      setCtCostApproverId(activeTask?.costApproverId || director?.id || pm?.id || employees[0]?.id || '');
-      setCtCostSettlerId(activeTask?.costSettlerId || accountant?.id || director?.id || employees[0]?.id || '');
+
+      // Lấy đúng người xét duyệt / quyết toán từ cấu hình của công việc con.
+      // Nếu chưa cấu hình → để trống, bắt buộc chọn trước khi gửi đề xuất.
+      setCtCostApproverId(activeTask?.costApproverId || '');
+      setCtCostSettlerId(activeTask?.costSettlerId || '');
       setCtCostDescription('Đề xuất chi phí mua sắm lẻ phát sinh phục vụ thi công công trình');
       setCtCostProposalDate(new Date().toISOString().split('T')[0]);
     }
@@ -3184,6 +3244,39 @@ export default function ProjectKanbanBoard({
                             );
                           })()}
                         </div>
+
+                        {/* 2. NÚT ĐỒNG BỘ NHÂN SỰ VÀO NHÓM CHAT */}
+                        <button
+                          type="button"
+                          onClick={handleSyncProjectMembersToChat}
+                          disabled={isSyncingChatMembers}
+                          title="Thêm toàn bộ nhân sự trong công việc và nhiệm vụ của dự án vào nhóm chat (mỗi người 1 lần)"
+                          className={`bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative transition-colors text-left ${
+                            isSyncingChatMembers
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'hover:border-sky-500/40 hover:bg-slate-900 cursor-pointer group'
+                          }`}
+                        >
+                          <div className="relative shrink-0 w-11 h-11">
+                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-slate-950 shadow-md border border-sky-400/20 group-hover:scale-105 transition-all">
+                              {isSyncingChatMembers
+                                ? <RotateCcw className="w-5 h-5 animate-spin" />
+                                : <MessageSquare className="w-5 h-5" />}
+                            </div>
+                            <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-sky-400 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
+                              <Users className="w-2.5 h-2.5" />
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Nhóm chat dự án</span>
+                            <span className="text-slate-200 font-bold text-xs block group-hover:text-sky-400 transition-colors">
+                              {isSyncingChatMembers ? 'Đang đồng bộ...' : 'Đồng Bộ Nhân Sự Vào Nhóm Chát'}
+                            </span>
+                            <span className="block text-[9.5px] text-slate-400 font-mono truncate">
+                              Thêm nhân sự công việc & nhiệm vụ
+                            </span>
+                          </div>
+                        </button>
 
                       </div>
                     </div>

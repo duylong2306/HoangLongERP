@@ -334,10 +334,8 @@ export default function TaskDetailModal({
   }, [projects, selectedTask.projectId]);
   
   // States for sub-task missions (Nhiệm vụ trong công việc con)
-  const getTodayPlusTenDaysISO = (): string => {
-    const d = new Date();
-    d.setDate(d.getDate() + 10);
-    d.setHours(12, 0, 0, 0);
+  // Định dạng một Date sang chuỗi input datetime-local (YYYY-MM-DDTHH:mm) theo giờ địa phương
+  const toDateTimeLocalInput = (d: Date): string => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
@@ -346,17 +344,29 @@ export default function TaskDetailModal({
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
-  // Helper để lấy deadline mặc định cho nhiệm vụ mới: ưu tiên deadline của task cha, fallback today+10
+  // Trả về input datetime-local = (ngày của `base`) + `addDays` ngày, đặt giờ mặc định 18:00
+  const dateAt18 = (base: Date, addDays: number = 0): string => {
+    const d = new Date(base);
+    d.setDate(d.getDate() + addDays);
+    d.setHours(18, 0, 0, 0);
+    return toDateTimeLocalInput(d);
+  };
+
+  // Quy tắc Hạn hoàn thành mặc định của thẻ ⚡ Tạo nhiệm vụ:
+  //  - Chưa có nhiệm vụ nào: lấy ngày hiện tại, giờ mặc định 18:00.
+  //  - Đã có nhiệm vụ trước đó: lấy ngày của nhiệm vụ mới nhất + 1 ngày, giờ 18:00.
   const getDefaultMissionDeadline = (): string => {
-    if (selectedTask?.deadline) {
-      // Lấy date part từ deadline của task cha, dùng 23:59 để cho phép toàn bộ ngày
-      const taskDeadline = new Date(selectedTask.deadline);
-      const year = taskDeadline.getFullYear();
-      const month = String(taskDeadline.getMonth() + 1).padStart(2, '0');
-      const day = String(taskDeadline.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}T23:59`;
+    const missions = selectedTask?.missions || [];
+    if (missions.length === 0) {
+      return dateAt18(new Date(), 0);
     }
-    return getTodayPlusTenDaysISO();
+    // Nhiệm vụ "trước đó" = nhiệm vụ có hạn muộn nhất trong số đã tạo
+    const latest = missions.reduce((acc, m) => {
+      const t = m.deadline ? new Date(m.deadline).getTime() : 0;
+      return t > acc ? t : acc;
+    }, 0);
+    const base = latest > 0 ? new Date(latest) : new Date();
+    return dateAt18(base, 1);
   };
 
   // ===========================================================================
@@ -393,7 +403,7 @@ export default function TaskDetailModal({
       'STT': idx + 1,
       'Tên nhiệm vụ': m.name || '',
       'Hạn hoàn thành': m.deadline ? formatDateTime(m.deadline) : '',
-      'Trạng thái': m.status === 'completed' ? 'Hoàn thành' : 'Chưa làm',
+      'Trạng thái': m.status === 'completed' ? 'Hoàn thành' : m.status === 'doing' ? 'Đang làm' : 'Chưa làm',
       'Người phụ trách chính': empNameById(m.mainAssigneeId),
       'Thành viên': (m.memberIds || []).map(id => empNameById(id)).join(', '),
       'Báo cáo': m.workReports || '',
@@ -452,7 +462,11 @@ export default function TaskDetailModal({
             name: name || `Nhiệm vụ ${idx + 1}`,
             memberIds,
             mainAssigneeId,
-            status: statusRaw === 'hoàn thành' || statusRaw === 'completed' || statusRaw === 'xong' ? 'completed' : 'todo',
+            status: statusRaw === 'hoàn thành' || statusRaw === 'completed' || statusRaw === 'xong'
+              ? 'completed'
+              : statusRaw === 'đang làm' || statusRaw === 'doing' || statusRaw === 'đang thực hiện'
+                ? 'doing'
+                : 'todo',
             workReports: String(r['Báo cáo'] || ''),
             evidence: String(r['Bằng chứng'] || ''),
             createdAt: new Date().toISOString(),
@@ -483,6 +497,11 @@ export default function TaskDetailModal({
   const [selectedMissionMemberIds, setSelectedMissionMemberIds] = useState<string[]>([]);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [newMissionDeadline, setNewMissionDeadline] = useState(() => getDefaultMissionDeadline());
+
+  // Phân trang danh sách nhiệm vụ đã khởi tạo: 5 / 10 / 20 / 50 / tất cả dòng
+  // 'all' = hiển thị toàn bộ. Danh sách sắp xếp mới nhất → cũ nhất.
+  const [missionPageSize, setMissionPageSize] = useState<number | 'all'>(5);
+  const [missionPage, setMissionPage] = useState(1);
 
   // Hidden file input for importing Nhiệm vụ chi tiết (missions) from Excel
   const missionExcelInputRef = useRef<HTMLInputElement>(null);
@@ -1864,10 +1883,12 @@ export default function TaskDetailModal({
                       // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                       notifyProjectChat(`📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`);
 
-                      // Reset inputs
+                      // Reset inputs. selectedTask.missions chưa gồm nhiệm vụ vừa tạo
+                      // (cập nhật bất đồng bộ qua parent), nên tính hạn mặc định kế tiếp
+                      // trực tiếp = ngày của nhiệm vụ vừa tạo + 1 ngày, giờ 18:00.
                       setNewMissionName('');
                       setSelectedMissionMemberIds([]);
-                      setNewMissionDeadline(getDefaultMissionDeadline());
+                      setNewMissionDeadline(dateAt18(new Date(finalDeadline), 1));
                     }}
                     disabled={!newMissionName.trim()}
                     className={`w-full py-2.5 px-3 rounded-xl font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition ${
@@ -1888,9 +1909,80 @@ export default function TaskDetailModal({
                   <div className="p-5 rounded-xl border border-dashed border-slate-800 text-center text-[11px] text-slate-500 leading-relaxed bg-slate-950/20">
                     Chưa có nhiệm vụ chi tiết nào được thiết lập cho công việc này.
                   </div>
-                ) : (
+                ) : (() => {
+                  // Sắp xếp mới nhất → cũ nhất theo ngày tạo (fallback timestamp trong id)
+                  const missionSortKey = (m: SubTaskMission): number => {
+                    if (m.createdAt) return new Date(m.createdAt).getTime();
+                    const parsed = parseInt(m.id.replace('mission_', ''));
+                    return isNaN(parsed) ? 0 : parsed;
+                  };
+                  const sortedMissions = [...selectedTask.missions].sort((a, b) => missionSortKey(b) - missionSortKey(a));
+                  const total = sortedMissions.length;
+                  const pageSize = missionPageSize === 'all' ? total : missionPageSize;
+                  const totalPages = missionPageSize === 'all' ? 1 : Math.max(1, Math.ceil(total / pageSize));
+                  const safePage = Math.min(missionPage, totalPages);
+                  const startIdx = missionPageSize === 'all' ? 0 : (safePage - 1) * pageSize;
+                  const pagedMissions = missionPageSize === 'all'
+                    ? sortedMissions
+                    : sortedMissions.slice(startIdx, startIdx + pageSize);
+
+                  return (
+                  <>
+                  {/* Thanh điều khiển phân trang */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9.5px] text-slate-500 font-bold uppercase tracking-wider">Hiển thị:</span>
+                      <select
+                        value={String(missionPageSize)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMissionPageSize(v === 'all' ? 'all' : parseInt(v));
+                          setMissionPage(1);
+                        }}
+                        className="bg-slate-950 text-slate-200 border border-slate-850 focus:border-emerald-500/40 rounded-lg px-2 py-1 text-[10.5px] font-bold outline-none cursor-pointer"
+                      >
+                        <option value="5">5 dòng</option>
+                        <option value="10">10 dòng</option>
+                        <option value="20">20 dòng</option>
+                        <option value="50">50 dòng</option>
+                        <option value="all">Tất cả</option>
+                      </select>
+                      <span className="text-[9.5px] text-slate-500 font-mono">Tổng {total} nhiệm vụ</span>
+                    </div>
+                    {missionPageSize !== 'all' && totalPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={safePage <= 1}
+                          onClick={() => setMissionPage(p => Math.max(1, p - 1))}
+                          className={`px-2 py-1 rounded-lg border text-[10.5px] font-bold transition ${
+                            safePage <= 1
+                              ? 'bg-slate-900 text-slate-600 border-slate-850 cursor-not-allowed'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 cursor-pointer'
+                          }`}
+                        >
+                          ‹ Trước
+                        </button>
+                        <span className="text-[10px] text-slate-400 font-mono px-1">
+                          Trang {safePage}/{totalPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={safePage >= totalPages}
+                          onClick={() => setMissionPage(p => Math.min(totalPages, p + 1))}
+                          className={`px-2 py-1 rounded-lg border text-[10.5px] font-bold transition ${
+                            safePage >= totalPages
+                              ? 'bg-slate-900 text-slate-600 border-slate-850 cursor-not-allowed'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 cursor-pointer'
+                          }`}
+                        >
+                          Sau ›
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 gap-2.5">
-                    {selectedTask.missions.map((mission) => {
+                    {pagedMissions.map((mission) => {
                       const isCompleted = mission.status === 'completed';
                       const creationTime = mission.createdAt 
                         ? formatDateTime(mission.createdAt) 
@@ -1930,7 +2022,7 @@ export default function TaskDetailModal({
                           <div className="space-y-1 flex-1 min-w-0 pr-2">
                             <div className="flex items-center gap-2">
                               <span className={`w-2 h-2 rounded-full shrink-0 ${
-                                isCompleted ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                                isCompleted ? 'bg-emerald-500 animate-pulse' : mission.status === 'doing' ? 'bg-sky-500' : 'bg-amber-500'
                               }`} />
                               <h5 className={`text-[11.5px] font-bold truncate text-left ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
                                 {mission.name}
@@ -2181,11 +2273,13 @@ export default function TaskDetailModal({
                                 </button>
                               )}
                               <span className={`text-[9px] font-bold px-2 py-0.5 rounded border whitespace-nowrap leading-none select-none ${
-                                isCompleted 
-                                  ? 'bg-emerald-950/40 text-emerald-300 border-emerald-900/30' 
-                                  : 'bg-slate-900/40 text-amber-505 border-slate-850'
+                                isCompleted
+                                  ? 'bg-emerald-950/40 text-emerald-300 border-emerald-900/30'
+                                  : mission.status === 'doing'
+                                    ? 'bg-sky-950/40 text-sky-300 border-sky-900/30'
+                                    : 'bg-slate-900/40 text-slate-400 border-slate-850'
                               }`}>
-                                {isCompleted ? 'Hoàn thành' : 'Đang làm'}
+                                {isCompleted ? 'Hoàn thành' : mission.status === 'doing' ? 'Đang làm' : 'Chưa làm'}
                               </span>
                               <ArrowRight className="w-3.5 h-3.5 text-slate-550 group-hover:text-slate-300 group-hover:translate-x-0.5 transition-all" />
                             </div>
@@ -2194,7 +2288,9 @@ export default function TaskDetailModal({
                       );
                     })}
                   </div>
-                )}
+                  </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -3440,7 +3536,8 @@ export default function TaskDetailModal({
                                 </span>
                               </div>
 
-                              {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                              {/* CTP cho phép chỉnh sửa ngay cả khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
+                              {hasMissionPermission && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -3474,11 +3571,14 @@ export default function TaskDetailModal({
                     )}
                   </div>
 
-                  {/* Form Ghi nhận CTP mới (Nếu chưa hoàn thành) */}
-                  {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                  {/* Form Ghi nhận CTP mới — cho phép cập nhật ngay cả khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
+                  {hasMissionPermission && (
                     <div className="mt-3.5 pt-3.5 border-t border-slate-150 space-y-3 bg-white p-1 rounded-xl">
                       <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-slate-600">
                         <Plus className="w-3.5 h-3.5 text-emerald-500" /> Đăng ký công tác phí chuyến đi:
+                        {isMissionCompleted && (
+                          <span className="ml-1 normal-case text-[9px] text-emerald-600 font-semibold">(Nhiệm vụ đã hoàn thành — vẫn có thể bổ sung)</span>
+                        )}
                       </div>
 
                       {mission.memberIds.length === 0 ? (

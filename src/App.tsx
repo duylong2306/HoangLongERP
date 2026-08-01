@@ -17,7 +17,8 @@ import {
   Conversation,
   SalesOrder,
   PurchaseOrder,
-  SubcontractorAdvanceProposal
+  SubcontractorAdvanceProposal,
+  LeaveRequest
 } from './types';
 import {
   INITIAL_EMPLOYEES,
@@ -1008,6 +1009,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   tasksRef.current = tasks;
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  // Đơn nghỉ phép (dùng để cộng vào badge "Việc của tôi" – nhánh Công việc phải duyệt)
+  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
@@ -1320,6 +1323,21 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
     window.addEventListener('hl-payments-updated', handlePaymentsUpdated);
     return () => window.removeEventListener('hl-payments-updated', handlePaymentsUpdated);
+  }, []);
+
+  // Sync đơn nghỉ phép (dùng cho badge "Việc của tôi") khi mount và khi có thay đổi
+  useEffect(() => {
+    const loadLeaves = async () => {
+      try {
+        const data = await dbService.hrmLeaves.list();
+        setLeaves(data || []);
+      } catch (err) {
+        console.error("Lỗi đồng bộ đơn nghỉ phép:", err);
+      }
+    };
+    loadLeaves();
+    window.addEventListener('hl-hrm-leaves-updated', loadLeaves);
+    return () => window.removeEventListener('hl-hrm-leaves-updated', loadLeaves);
   }, []);
 
   // Sync subcontractor advances from Supabase when updated elsewhere
@@ -2510,30 +2528,39 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   }, [currentUser, activeTab, rolePermissions]);
 
-  const myUncompletedCount = tasks.filter(t => {
-    // Guard: only run when currentUser exists
-    if (!currentUser) return false;
-    // 1. Công việc được giao chưa hoàn thành
-    const isAssignee = (t.assigneeId === currentUser?.id || t.assigneeId === currentUser?.name) && t.status !== 'completed';
-    
-    // 2. Công việc phải duyệt chưa hoàn thành (đang chờ duyệt, tôi là người giao việc hoặc có vai trò duyệt)
-    const isToReview = t.status === 'reviewing' && (
-      t.assignerId === currentUser?.id ||
-      t.assignerId === currentUser?.name ||
-      t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name)
-    );
+  // Badge "Việc của tôi" = TỔNG badge của 3 tab trong trang Công việc (đồng bộ với
+  // TaskManagement): (1) Công việc được giao, (2) Nhiệm vụ được giao, (3) Công việc phải duyệt.
+  const myUncompletedCount = (() => {
+    if (!currentUser) return 0;
 
-    // 3. Nhiệm vụ liên quan chưa hoàn thành (user là Phụ trách chính / Nhân sự của nhiệm vụ)
-    let isRelated = false;
-    if (t.status !== 'completed') {
-      isRelated = !!t.missions?.some(m =>
+    // 1. Công việc được giao chưa hoàn thành (bao gồm cả việc có nhiệm vụ user là Phụ trách chính)
+    const assignedUncompletedCount = tasks.filter(t => {
+      const hasMainAssigneeMission = t.missions?.some(m => m.mainAssigneeId === currentUser.id);
+      const isAssignee = t.assigneeId === currentUser.id || t.assigneeId === currentUser.name || hasMainAssigneeMission;
+      return isAssignee && t.status !== 'completed';
+    }).length;
+
+    // 2. Nhiệm vụ được giao chưa hoàn thành (user là Phụ trách chính / Nhân sự tham gia)
+    const relatedUncompletedCount = tasks.reduce((count, task) =>
+      count + (task.missions || []).filter(m =>
         m.status !== 'completed' &&
-        (m.mainAssigneeId === currentUser!.id || (m.memberIds || []).includes(currentUser!.id))
-      );
-    }
+        (m.mainAssigneeId === currentUser.id || (m.memberIds || []).includes(currentUser.id))
+      ).length
+    , 0);
 
-    return isAssignee || isToReview || isRelated;
-  }).length;
+    // 3. Công việc phải duyệt chưa hoàn thành (kèm đơn nghỉ phép & thu chi đang chờ duyệt)
+    const toReviewTasksCount = tasks.filter(t =>
+      t.status === 'reviewing' &&
+      (t.assignerId === currentUser.id ||
+       t.assignerId === currentUser.name ||
+       t.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    ).length;
+    const toReviewUncompletedCount = toReviewTasksCount
+      + leaves.filter(l => l.status === 'pending').length
+      + payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length;
+
+    return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
+  })();
 
   if (!currentUser) {
     if (isInitializing || employees.length === 0) {
