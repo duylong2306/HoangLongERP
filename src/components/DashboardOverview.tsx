@@ -539,25 +539,21 @@ export default function DashboardOverview({
   };
 
 
-  const getEmployeeId = (name: string): string => {
-    const empDataStr = localStorage.getItem('hl_hrm_employees_v3');
-    if (empDataStr) {
-      try {
-        const list = JSON.parse(empDataStr);
-        const match = list.find((e: any) => e.name.toLowerCase() === name.toLowerCase());
-        if (match) return match.id;
-      } catch (e) {}
-    }
-    if (name.includes('Long')) return 'NV001';
-    if (name.includes('Anh') || name.includes('Mai') || name.includes('Ngọc')) return 'NV002';
-    if (name.includes('Sơn')) return 'NV019';
-    if (name.includes('Quân')) return 'NV005';
-    if (name.includes('Hà') || name.includes('Thảo')) return 'NV006';
-    if (name.includes('Tiến')) return 'NV003';
-    return 'NV999';
-  };
-
-  const empId = getEmployeeId(currentUser.name);
+  /**
+   * Mã nhân viên của người đang đăng nhập.
+   *
+   * ⚠️ TRƯỚC ĐÂY: hàm này đoán mã NV từ TÊN (localStorage `hl_hrm_employees_v3` rồi
+   * fallback sang chuỗi if/else `name.includes('Ngọc') → NV002` … `return 'NV999'`).
+   * Trên máy chưa có cache localStorage (đăng nhập lần đầu / xoá cache / máy khác),
+   * mọi người đều bị gán nhầm mã — phần lớn thành 'NV999' (mã KHÔNG tồn tại trong
+   * bảng employees). Bản ghi chấm công ghi lên Supabase với emp_id sai → tab
+   * "Chấm công ngày" (lọc theo nhân viên đang làm việc) loại bỏ hết các bản ghi đó.
+   *
+   * BÂY GIỜ: `currentUser` chính là bản ghi Employee lấy từ bảng `employees`
+   * (xem App.tsx – setCurrentUser(foundUser) từ danh sách employees), nên
+   * `currentUser.id` LUÔN là mã nhân viên chuẩn. Không đoán theo tên nữa.
+   */
+  const empId = currentUser?.id || '';
 
 
   const [hrmEmployees, setHrmEmployees] = useState<any[]>(() => {
@@ -1169,6 +1165,22 @@ export default function DashboardOverview({
   // Confirm Punching slot
   const handleConfirmPunch = async () => {
     if (!activePunchSlot) return;
+
+    // ─── GUARD 0: Bắt buộc có mã nhân viên hợp lệ ───
+    // Không cho ghi bản ghi chấm công "mồ côi" (emp_id rỗng hoặc không có trong bảng
+    // employees). Bản ghi như vậy vẫn nằm trên Supabase nhưng bị mọi màn hình nhân sự
+    // lọc bỏ → nhìn như mất dữ liệu.
+    if (!empId) {
+      stopCameraStream();
+      setShowPunchModal(false);
+      setActivePunchSlot(null);
+      addToast({
+        title: '⛔ Thiếu mã nhân viên',
+        message: 'Tài khoản đang đăng nhập chưa gắn với hồ sơ nhân viên. Vui lòng đăng nhập lại hoặc liên hệ quản trị để cập nhật hồ sơ trước khi chấm công.',
+        type: 'error',
+      });
+      return;
+    }
 
     // Nhãn tiếng Việt cho từng slot điểm danh (hiển thị trong toast)
     const slotLabelMap: Record<string, string> = {

@@ -523,7 +523,18 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
 // Helper: chuẩn hóa giá trị thời gian, xử lý cả trường hợp bị lưu object timestamp
 function normalizeTime(v: any): string {
   if (!v || v === '--:--' || v === '') return '--:--';
-  if (typeof v === 'string') return v;
+  if (typeof v === 'string') {
+    // Một số bản ghi cũ lỡ ghi NGUYÊN object server-time vào cột TEXT, ví dụ:
+    //   '{"date":"2026-07-29","time":"07:32","datetime":"...","epoch_ms":...}'
+    // → phải bóc lấy trường .time, nếu không giao diện sẽ in ra cả cục JSON.
+    if (v.startsWith('{') && v.includes('"time"')) {
+      try {
+        const parsed = JSON.parse(v);
+        if (parsed && typeof parsed.time === 'string') return parsed.time;
+      } catch { /* không phải JSON hợp lệ → trả nguyên chuỗi */ }
+    }
+    return v;
+  }
   if (typeof v === 'object' && v.time) return v.time; // object cũ: {date, time, datetime, epoch_ms}
   return String(v);
 }

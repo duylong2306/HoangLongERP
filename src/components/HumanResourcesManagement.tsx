@@ -1530,12 +1530,18 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // ── Filter attendance once (dùng cho cả table, paginator, summary) ────────
   const attendanceFiltered = useMemo(() => {
-    // Chỉ ghi nhận chấm công của nhân viên ĐANG LÀM; ẩn các nhân viên khác khỏi bảng
+    // Chỉ ghi nhận chấm công của nhân viên ĐANG LÀM; ẩn nhân viên đã nghỉ việc/nghỉ phép.
     const workingEmpIds = new Set(
       employees.filter((e: any) => e.status === 'working').map((e: any) => e.id)
     );
+    // Tập TẤT CẢ mã nhân viên tồn tại (kể cả đã nghỉ) — dùng để phân biệt
+    // "nhân viên đã nghỉ" (cố ý ẩn) với "bản ghi mồ côi" (emp_id sai/không tồn tại).
+    const knownEmpIds = new Set(employees.map((e: any) => e.id));
     return attendance.filter(el => {
-      if (!workingEmpIds.has(el.empId)) return false;
+      // Bản ghi MỒ CÔI (emp_id không có trong bảng nhân sự) vẫn phải hiển thị:
+      // đây là lỗi dữ liệu, nếu ẩn đi thì nhìn như bị mất bản ghi.
+      const isOrphan = !knownEmpIds.has(el.empId);
+      if (!isOrphan && !workingEmpIds.has(el.empId)) return false;
       if (attendanceSearchEmpId !== 'all' && el.empId !== attendanceSearchEmpId) return false;
       if (!el.date) return true;
       const parts = el.date.split('-');
