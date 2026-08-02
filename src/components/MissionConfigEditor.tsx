@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Employee, SubTaskMissionTemplate } from '../types';
 import { CheckSquare, Plus, X, Download, Upload, Briefcase, User } from 'lucide-react';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
@@ -51,13 +51,53 @@ export default function MissionConfigEditor({
 }: MissionConfigEditorProps) {
   const { addToast } = useNotification();
 
+  // ===========================================================================
+  // Quy tắc Hạn hoàn thành mặc định — GIỐNG thẻ ⚡ Tạo nhiệm vụ trong công việc con
+  // (TaskDetailModal):  - Chưa có cấu hình nào: ngày hiện tại, giờ 18:00.
+  //                      - Đã có: hạn của cấu hình mới nhất + 1 ngày, giờ 18:00.
+  // ===========================================================================
+  const toDateTimeLocalInput = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  // Trả về input datetime-local = (ngày của `base`) + `addDays` ngày, giờ mặc định 18:00
+  const dateAt18 = (base: Date, addDays: number = 0): string => {
+    const d = new Date(base);
+    d.setDate(d.getDate() + addDays);
+    d.setHours(18, 0, 0, 0);
+    return toDateTimeLocalInput(d);
+  };
+
+  const getDefaultDeadline = (): string => {
+    const configs = value || [];
+    if (configs.length === 0) return dateAt18(new Date(), 0);
+    // Cấu hình "trước đó" = cấu hình có hạn muộn nhất trong danh sách đã cấu hình
+    const latest = configs.reduce((acc, m) => {
+      const t = m.deadline ? new Date(m.deadline).getTime() : 0;
+      return t > acc ? t : acc;
+    }, 0);
+    const base = latest > 0 ? new Date(latest) : new Date();
+    return dateAt18(base, 1);
+  };
+
   // Form thêm nhiệm vụ mới
   const [newName, setNewName] = useState('');
-  const [newDeadline, setNewDeadline] = useState('');
+  const [newDeadline, setNewDeadline] = useState<string>(() => getDefaultDeadline());
   const [newMainAssigneeId, setNewMainAssigneeId] = useState('');
   const [newMemberIds, setNewMemberIds] = useState<string[]>([]);
 
   const excelInputRef = useRef<HTMLInputElement>(null);
+
+  // Khi danh sách cấu hình thay đổi (thêm/xóa/đổi cửa sổ), cập nhật lại hạn mặc định
+  useEffect(() => {
+    setNewDeadline(getDefaultDeadline());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   const addMission = () => {
     const name = newName.trim();
@@ -70,11 +110,17 @@ export default function MissionConfigEditor({
       name,
       deadline: newDeadline || undefined,
       mainAssigneeId: newMainAssigneeId || undefined,
-      memberIds: [...newMemberIds]
+      // Người Phụ trách chính cũng được tính là Nhân sự tham gia thực hiện,
+      // nên được tự thêm vào memberIds để không phải gán tên 2 lần khi thêm công tác phí.
+      memberIds: newMainAssigneeId
+        ? Array.from(new Set([...newMemberIds, newMainAssigneeId]))
+        : [...newMemberIds]
     };
     onChange([...value, next]);
     setNewName('');
-    setNewDeadline('');
+    // Hạn mặc định kế tiếp = hạn của nhiệm vụ vừa thêm + 1 ngày, giờ 18:00
+    // (giống logic thẻ ⚡ Tạo nhiệm vụ trong công việc con)
+    setNewDeadline(dateAt18(new Date(newDeadline || Date.now()), 1));
     setNewMainAssigneeId('');
     setNewMemberIds([]);
   };
@@ -213,10 +259,11 @@ export default function MissionConfigEditor({
         </div>
       </div>
 
-      {/* Danh sách các mục đã cấu hình */}
+      {/* Danh sách các mục đã cấu hình — sắp xếp mới nhất → cũ nhất
+          (giống logic sắp xếp trong công việc con: mới tạo hiển thị trên cùng) */}
       {value.length > 0 ? (
         <div className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">
-          {value.map((mission, idx) => (
+          {[...value].reverse().map((mission, idx) => (
             <div key={mission.id} className="flex items-center justify-between bg-slate-950 border border-slate-800 px-2.5 py-1.5 rounded-lg text-slate-300 text-[9.5px]">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-[8px] font-bold bg-slate-800 text-slate-450 w-4 h-4 flex items-center justify-center rounded shrink-0">
@@ -279,13 +326,13 @@ export default function MissionConfigEditor({
           </div>
           <div className="space-y-1">
             <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">
-              Hạn hoàn thành {defaultDeadlineHint ? '(mặc định: hạn việc con)' : ''}:
+              Hạn hoàn thành (mặc định: +1 ngày kể từ hạn gần nhất):
             </label>
             <input
-              type="date"
+              type="datetime-local"
               value={newDeadline}
               onChange={(e) => setNewDeadline(e.target.value)}
-              title={defaultDeadlineHint}
+              title={defaultDeadlineHint || 'Mặc định tự động: cấu hình mới nhất + 1 ngày, giờ 18:00'}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-[10.5px] text-slate-200 outline-none focus:border-indigo-500 transition-colors font-mono"
             />
           </div>

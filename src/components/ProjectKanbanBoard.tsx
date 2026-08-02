@@ -1088,7 +1088,7 @@ export default function ProjectKanbanBoard({
                 styleStrike: subtaskAuto.textStyleStyleStrike,
                 styleColor: subtaskAuto.textStyleStyleColor,
                 checklistTexts: subtaskAuto.checklistTexts || [],
-                missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map(templateToMission) : undefined,
+                missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t, i) => templateToMission(t, i)) : undefined,
                 approvals: approvals,
                 isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                 isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -1493,15 +1493,22 @@ export default function ProjectKanbanBoard({
 
   // templateToMission() → Chuyển NHIỆM VỤ CHI TIẾT cấu hình trước thành
   // SubTaskMission thật (status 'todo', chưa có báo cáo/bằng chứng).
-  const templateToMission = (t: SubTaskMissionTemplate): SubTaskMission => ({
+  // `idx` (thứ tự trong danh sách cấu hình) được dùng để làm createdAt tăng dần,
+  // sao cho khi hiển thị trong công việc con (sắp xếp mới nhất → cũ nhất) thì
+  // nhiệm vụ được cấu hình sau cùng nằm trên cùng — giống logic tạo nhiệm vụ thủ công.
+  // Người Phụ trách chính cũng được tính là Nhân sự tham gia thực hiện (memberIds),
+  // để không phải gán tên 2 lần khi thêm công tác phí.
+  const templateToMission = (t: SubTaskMissionTemplate, idx: number = 0): SubTaskMission => ({
     id: `mission_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     name: t.name,
-    memberIds: t.memberIds || [],
+    memberIds: t.mainAssigneeId
+      ? Array.from(new Set([...(t.memberIds || []), t.mainAssigneeId]))
+      : (t.memberIds || []),
     mainAssigneeId: t.mainAssigneeId,
     status: 'todo',
     workReports: '',
     evidence: '',
-    createdAt: new Date().toISOString(),
+    createdAt: new Date(Date.now() + idx).toISOString(),
     deadline: t.deadline || undefined,
   });
 
@@ -1593,12 +1600,17 @@ export default function ProjectKanbanBoard({
       const mergedMissions = editSubMissionConfigs.map(cfg => {
         const existing = existingMissions.find(m => m.id === cfg.id || m.name === cfg.name);
         if (existing) {
+          const mergedMainAssigneeId = cfg.mainAssigneeId ?? existing.mainAssigneeId;
+          const mergedMemberIds = cfg.memberIds ?? existing.memberIds ?? [];
           return {
             ...existing,
             name: cfg.name,
             deadline: cfg.deadline || existing.deadline,
-            mainAssigneeId: cfg.mainAssigneeId ?? existing.mainAssigneeId,
-            memberIds: cfg.memberIds ?? existing.memberIds,
+            mainAssigneeId: mergedMainAssigneeId,
+            // Phụ trách chính cũng tính là Nhân sự tham gia thực hiện (memberIds)
+            memberIds: mergedMainAssigneeId
+              ? Array.from(new Set([...mergedMemberIds, mergedMainAssigneeId]))
+              : mergedMemberIds,
           };
         }
         return templateToMission(cfg);
@@ -1670,7 +1682,7 @@ export default function ProjectKanbanBoard({
       subcontractorApproverId: subTaskSubcontractorApproverId || undefined,
       subcontractorSettlerId: subTaskSubcontractorSettlerId || undefined,
       checklistTexts: subTaskChecklistTexts.length > 0 ? [...subTaskChecklistTexts] : undefined,
-      missions: subTaskMissionConfigs.length > 0 ? subTaskMissionConfigs.map(templateToMission) : undefined,
+      missions: subTaskMissionConfigs.length > 0 ? subTaskMissionConfigs.map((t, i) => templateToMission(t, i)) : undefined,
 
       // 1. DỮ LIỆU ĐỒNG BỘ: QUY TRÌNH DUYỆT NHIỀU CẤP ("VÕ VĂN NAM -> PHẠM ANH TUẤN -> TRƯƠNG HỮU LONG")
       approvals: [
@@ -2047,7 +2059,7 @@ export default function ProjectKanbanBoard({
                       styleStrike: subtaskAuto.textStyleStyleStrike,
                       styleColor: subtaskAuto.textStyleStyleColor,
                       checklistTexts: subtaskAuto.checklistTexts || [],
-                      missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map(templateToMission) : undefined,
+                      missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t, i) => templateToMission(t, i)) : undefined,
                       approvals: approvals,
                       isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                       isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -5251,14 +5263,14 @@ export default function ProjectKanbanBoard({
                                 </button>
                               </div>
                             </div>
-                          </div>
 
-                          {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
-                          <MissionConfigEditor
-                            value={subtaskAuto.subTaskMissions || []}
-                            onChange={(next) => updateSubtaskAutomation(index, { subTaskMissions: next })}
-                            employees={employees}
-                          />
+                            {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+                            <MissionConfigEditor
+                              value={subtaskAuto.subTaskMissions || []}
+                              onChange={(next) => updateSubtaskAutomation(index, { subTaskMissions: next })}
+                              employees={employees}
+                            />
+                          </div>
 
                           {/* Modal Footer */}
                           <div className="bg-slate-950 px-5 py-3 border-t border-slate-800 flex justify-end shrink-0">

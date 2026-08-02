@@ -2018,6 +2018,32 @@ export default function TaskDetailModal({
                               : 'bg-slate-900 border-slate-850 hover:border-slate-750 text-slate-205'
                           }`}
                         >
+                          {/* Thumbnail hình ảnh báo cáo đầu tiên (khung nét đứt khi chưa có).
+                              Click vào ảnh sẽ kích hoạt onClick của cả thẻ → mở chi tiết nhiệm vụ. */}
+                          {(() => {
+                            const thumbSrc = (mission.reportImages && mission.reportImages.length > 0)
+                              ? mission.reportImages[0]
+                              : (mission.evidence && (mission.evidence.startsWith('data:image/') || mission.evidence.startsWith('blob:') || mission.evidence.startsWith('http')))
+                                ? mission.evidence
+                                : '';
+                            return (
+                              <div className="relative shrink-0 w-11 h-11 rounded-lg overflow-hidden group/thumb">
+                                {thumbSrc ? (
+                                  <img
+                                    src={thumbSrc}
+                                    alt="Ảnh báo cáo đầu tiên"
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover rounded-lg border border-slate-800 group-hover/thumb:border-emerald-500/50 transition"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full rounded-lg border-2 border-dashed border-slate-700 flex items-center justify-center text-slate-600">
+                                    <ImageIcon className="w-4 h-4" />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
                           {/* Info area */}
                           <div className="space-y-1 flex-1 min-w-0 pr-2">
                             <div className="flex items-center gap-2">
@@ -2083,7 +2109,12 @@ export default function TaskDetailModal({
                                         if (!(canReceive || canAssignMembers) || selectedTask.status === 'completed' || isCompleted) return;
                                         const updatedMissions = (selectedTask.missions || []).map(m => {
                                           if (m.id === mission.id) {
-                                            return { ...m, mainAssigneeId: undefined };
+                                            // Bỏ Phụ trách chính đồng thời gỡ họ khỏi Nhân sự tham gia thực hiện
+                                            return {
+                                              ...m,
+                                              mainAssigneeId: undefined,
+                                              memberIds: (m.memberIds || []).filter(id => id !== m.mainAssigneeId),
+                                            };
                                           }
                                           return m;
                                         });
@@ -2132,7 +2163,13 @@ export default function TaskDetailModal({
                                           if (!val) return;
                                           const updatedMissions = (selectedTask.missions || []).map(m => {
                                             if (m.id === mission.id) {
-                                              return { ...m, mainAssigneeId: val };
+                                              // Phụ trách chính nhiệm vụ cũng được tính là Nhân sự tham gia thực hiện
+                                              // (tự thêm vào memberIds) để không phải gán tên 2 lần khi thêm công tác phí.
+                                              return {
+                                                ...m,
+                                                mainAssigneeId: val,
+                                                memberIds: Array.from(new Set([...(m.memberIds || []), val]))
+                                              };
                                             }
                                             return m;
                                           });
@@ -2178,6 +2215,12 @@ export default function TaskDetailModal({
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (!(canReceive || canAssignMembers || isMissionMainAssignee) || selectedTask.status === 'completed' || isCompleted) return;
+                                        // Phụ trách chính là trường bắt buộc và luôn là Nhân sự tham gia —
+                                        // không cho gỡ khỏi danh sách nhân sự (chỉ gỡ qua ô Phụ trách chính).
+                                        if (memId === mission.mainAssigneeId) {
+                                          addToast({ title: '⚠️ Không thể gỡ', message: 'Người Phụ trách chính luôn là Nhân sự tham gia thực hiện. Muốn gỡ hãy bỏ chọn Phụ trách chính trước.', type: 'warning' });
+                                          return;
+                                        }
                                         const updatedMissions = (selectedTask.missions || []).map(m => {
                                           if (m.id === mission.id) {
                                             return { ...m, memberIds: (m.memberIds || []).filter(id => id !== memId) };
@@ -3398,9 +3441,47 @@ export default function TaskDetailModal({
 
               {/* Scrollable details */}
               <div className="p-5 space-y-4 overflow-y-auto flex-1">
-                {/* Phụ trách chính */}
+                {/* Phụ trách chính — bắt buộc phải có trước khi hoàn thành nhiệm vụ */}
                 <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
-                  <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider">👑 Phụ trách chính nhiệm vụ:</span>
+                  <div className="flex justify-between items-center">
+                    <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider">👑 Phụ trách chính nhiệm vụ <span className="text-rose-400">*</span>:</span>
+                    {!mission.mainAssigneeId && hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                      <div className="relative shrink-0">
+                        <button className="flex items-center gap-1 text-[8.5px] font-bold text-amber-450 hover:text-amber-300 transition bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/20">
+                          <Plus className="w-2 h-2" /> Gán
+                        </button>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const updatedMissions = (selectedTask.missions || []).map(m => {
+                              if (m.id === mission.id) {
+                                // Phụ trách chính cũng được tính là Nhân sự tham gia thực hiện
+                                return {
+                                  ...m,
+                                  mainAssigneeId: val,
+                                  memberIds: Array.from(new Set([...(m.memberIds || []), val])),
+                                };
+                              }
+                              return m;
+                            });
+                            onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                            const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
+                            notifyProjectChat(`👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`);
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full rounded"
+                        >
+                          <option value="">Chọn phụ trách chính...</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.id} className="bg-slate-950 text-slate-100">
+                              {emp.name} ({emp.department || emp.role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
                   <div className="pt-1">
                     {mission.mainAssigneeId ? (() => {
                       const emp = employees.find(e => e.id === mission.mainAssigneeId);
@@ -3481,6 +3562,12 @@ export default function TaskDetailModal({
                             <button
                               type="button"
                               onClick={() => {
+                                // Phụ trách chính là trường bắt buộc và luôn là Nhân sự tham gia —
+                                // không cho gỡ khỏi danh sách nhân sự (chỉ gỡ qua ô Phụ trách chính).
+                                if (memId === mission.mainAssigneeId) {
+                                  addToast({ title: '⚠️ Không thể gỡ', message: 'Người Phụ trách chính luôn là Nhân sự tham gia thực hiện. Muốn gỡ hãy bỏ chọn Phụ trách chính trước.', type: 'warning' });
+                                  return;
+                                }
                                 const updatedMissions = (selectedTask.missions || []).map(m => {
                                   if (m.id === mission.id) {
                                     return { ...m, memberIds: (m.memberIds || []).filter(id => id !== memId) };
@@ -3877,10 +3964,16 @@ export default function TaskDetailModal({
                       !hasMissionPermission ||
                       !missionReportText.trim() ||
                       missionReportText.trim().length < 10 ||
-                      missionReportImages.length === 0
+                      missionReportImages.length === 0 ||
+                      !mission.mainAssigneeId
                     }
                     onClick={() => {
                       if (!missionReportText.trim() || missionReportImages.length === 0) return;
+                      // Phụ trách chính nhiệm vụ là trường BẮT BUỘC phải có trước khi hoàn thành
+                      if (!mission.mainAssigneeId) {
+                        addToast({ title: '⚠️ Thiếu phụ trách chính', message: 'Vui lòng gán Người Phụ trách chính cho nhiệm vụ trước khi Xác Nhận Hoàn Thành.', type: 'warning' });
+                        return;
+                      }
 
                       const currentMission = (selectedTask.missions || []).find(m => m.id === selectedMissionId);
 
@@ -4006,9 +4099,10 @@ export default function TaskDetailModal({
                       resetMissionReportState();
                     }}
                     className={`px-5 py-2.5 rounded-xl font-bold text-[10.5px] uppercase tracking-wider flex items-center gap-1.5 transition ${
-                      hasMissionPermission && 
-                      missionReportText.trim() && 
-                      missionReportText.trim().length >= 10
+                      hasMissionPermission &&
+                      missionReportText.trim() &&
+                      missionReportText.trim().length >= 10 &&
+                      mission.mainAssigneeId
                         ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 cursor-pointer shadow-lg shadow-emerald-500/15'
                         : 'bg-slate-850 text-slate-550 border border-slate-800 cursor-not-allowed'
                     }`}
