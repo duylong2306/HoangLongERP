@@ -34,3 +34,32 @@ describe('missions travelAllowances round-trip', () => {
     expect(loaded.missions[0].travelAllowances[0].content).toBe('Đi HN');
   });
 });
+
+describe('hrm_role_groups permissions round-trip', () => {
+  it('preserves snake_case module codes after load (rowToCamel would mangle them)', () => {
+    // DB row: cột snake_case, permissions dùng mã module snake_case
+    const row: any = {
+      id: 'role_accounting',
+      name: 'Kế toán',
+      description: 'Phòng kế toán',
+      permissions: { projects_construction: { view: true, create: false, edit: false, delete: false } },
+      member_ids: ['emp_admin', 'NV001'],
+    };
+
+    // Save: keysToSnake (mã module đã snake_case -> giữ nguyên)
+    const saved = keysToSnake(row);
+    expect(saved.permissions.projects_construction).toBeTruthy();
+
+    // Load: querySupabase áp dụng rowToCamel đệ quy -> mã module bị đổi thành camelCase
+    const loaded = rowToCamel(saved);
+    expect(loaded.permissions.projectsConstruction).toBeTruthy();
+    expect(loaded.permissions.projects_construction).toBeUndefined(); // bug gốc
+
+    // Khôi phục như trong hrmRoleGroups.list()
+    const fixedPermissions = keysToSnake(loaded.permissions);
+    expect(fixedPermissions.projects_construction).toBeTruthy();
+    expect(fixedPermissions.projects_construction.view).toBe(true);
+    // memberIds không bị mất (array string không đổi)
+    expect(loaded.memberIds).toEqual(['emp_admin', 'NV001']);
+  });
+});

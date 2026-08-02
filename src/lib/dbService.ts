@@ -594,7 +594,18 @@ export const dbService = {
   // 1.1. HRM ROLE GROUPS (Phân quyền nhóm vai trò)
   hrmRoleGroups: {
     async list(): Promise<HrmRoleGroup[]> {
-      return querySupabase<HrmRoleGroup>('hrm_role_groups', []);
+      const rows = await querySupabase<HrmRoleGroup>('hrm_role_groups', []);
+      // querySupabase áp dụng rowToCamel đệ quy, đổi TẤT CẢ key snake_case → camelCase.
+      // Điều này làm sai lệch các MÃ MODULE trong cột JSONB `permissions`
+      // (projects_construction → projectsConstruction), khiến RolesTab tra cứu
+      // bằng mã snake_case không tìm thấy → ma trận phân quyền hiện trống dù DB có dữ liệu.
+      // Khôi phục lại snake_case cho permissions (keysToSnake không đổi mã đã snake_case
+      // như projects_construction, nhưng sẽ đưa projectsConstruction về đúng dạng).
+      return rows.map((r) => ({
+        ...r,
+        permissions: r.permissions ? keysToSnake(r.permissions) : {},
+        memberIds: r.memberIds || [],
+      }));
     },
     async save(group: HrmRoleGroup): Promise<void> {
       await saveSupabase('hrm_role_groups', group);
