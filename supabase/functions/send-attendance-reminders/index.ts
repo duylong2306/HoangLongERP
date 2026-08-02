@@ -68,28 +68,85 @@ serve(async (req) => {
       );
     }
 
-    // ─── CHECK HOLIDAYS & WEEKENDS ─────────────────────────────────────────
-    const dayOfWeek = now.getUTCDay(); // 0=Sun, 6=Sat
-    if (dayOfWeek === 0) {
+    // ─── CHECK HOLIDAYS & WEEKENDS (theo cấu hình shift_config + hrm_holidays) ──
+    // Tính ngày/giờ Việt Nam (UTC+7) để xét ngày nghỉ theo múi giờ VN
+    const vnNow = new Date(now.getTime() + 7 * 3600 * 1000);
+    const vietnamDow = vnNow.getUTCDay(); // 0=Sun ... 6=Sat (theo giờ VN)
+    const vnDay = String(vnNow.getUTCDate()).padStart(2, "0");
+    const vnMonth = String(vnNow.getUTCMonth() + 1).padStart(2, "0");
+    const vnDdMm = `${vnDay}/${vnMonth}`;
+    const vnDdMmYyyy = `${vnDay}/${vnMonth}/${vnNow.getUTCFullYear()}`;
+
+    const sbHeaders = {
+      apikey: SERVICE_KEY as string,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+    };
+
+    // 1) Ngày nghỉ cuối tuần từ cấu hình ca (tab "Cấu hình ca", shift_config.weekend_days)
+    //    Fail-open: nếu không lấy được config, mặc định chỉ bỏ qua Chủ nhật (như cũ).
+    let weekendDays: number[] = [0];
+    try {
+      const cfgRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/shift_config?select=weekend_days&id=eq.current`,
+        { headers: sbHeaders }
+      );
+      if (cfgRes.ok) {
+        const cfgRows = await cfgRes.json();
+        if (Array.isArray(cfgRows) && cfgRows[0]?.weekend_days) {
+          weekendDays = cfgRows[0].weekend_days;
+        }
+      }
+    } catch (err) {
+      console.warn("Không đọc được shift_config.weekend_days, dùng mặc định [0]:", err);
+    }
+
+    if (Array.isArray(weekendDays) && weekendDays.includes(vietnamDow)) {
       return new Response(
-        JSON.stringify({ success: false, reason: "sunday", message: "Chủ nhật - không thông báo" }),
+        JSON.stringify({
+          success: false,
+          reason: "rest_day",
+          restDayType: "weekend",
+          vietnamDate: vnDdMmYyyy,
+          message: `Ngày nghỉ cuối tuần (${vnDdMmYyyy}) - không thông báo điểm danh`,
+        }),
         { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
-    const month = now.getUTCMonth() + 1;
-    const day = now.getUTCDate();
-    const dateStr = `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}`;
-    const holidays = ["01/01", "30/04", "01/05", "02/09"];
-    if (holidays.includes(dateStr)) {
+    // 2) Ngày lễ từ bảng hrm_holidays (khớp cả DD/MM và DD/MM/YYYY)
+    //    Fail-open: nếu không lấy được, không bỏ qua ngày lễ nào.
+    let holidayDates: string[] = [];
+    try {
+      const holRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/hrm_holidays?select=date`,
+        { headers: sbHeaders }
+      );
+      if (holRes.ok) {
+        const holRows = await holRes.json();
+        if (Array.isArray(holRows)) {
+          holidayDates = holRows.map((h: any) => h.date).filter(Boolean);
+        }
+      }
+    } catch (err) {
+      console.warn("Không đọc được hrm_holidays, bỏ qua kiểm tra ngày lễ:", err);
+    }
+
+    if (holidayDates.includes(vnDdMm) || holidayDates.includes(vnDdMmYyyy)) {
       return new Response(
-        JSON.stringify({ success: false, reason: "holiday", date: dateStr, message: `Ngày lễ ${dateStr} - không thông báo` }),
+        JSON.stringify({
+          success: false,
+          reason: "rest_day",
+          restDayType: "holiday",
+          vietnamDate: vnDdMmYyyy,
+          message: `Ngày lễ ${vnDdMmYyyy} - không thông báo điểm danh`,
+        }),
         { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
     // ─── TODAY STRING ──────────────────────────────────────────────────────
-    const todayStr = `${now.getUTCFullYear()}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const todayStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
 
     // ─── QUERY ACTIVE EMPLOYEES WITH PUSH SUBSCRIPTIONS ────────────────────
     // Lấy tất cả nhân viên active (status = 'working') có push subscription
