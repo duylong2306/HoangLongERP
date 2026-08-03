@@ -271,9 +271,6 @@ export default function ProfilesTab({
           if (targetRole) {
             if (!targetRole.memberIds) targetRole.memberIds = [];
             targetRole.memberIds.push(emp.id);
-            const updated = JSON.stringify(rolesList);
-            localStorage.setItem('hl_cached_hrm_role_groups', updated);
-            localStorage.setItem('hl_hrm_roles_v2', updated);
             setRoleGroupsCache(rolesList);
             // Đồng bộ lên Supabase
             dbService.hrmRoleGroups.save({

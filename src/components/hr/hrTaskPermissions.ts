@@ -10,6 +10,7 @@
 import { Employee, Project, Task } from '../../types';
 import { isUserInRoleGroup } from '../../context';
 import { dbService } from '../../lib/dbService';
+import { loadProjectPermissions } from './hrProjectPermissions';
 
 // ─── Role Scope: vai trò của user đối với MỘT task cụ thể ────────────
 // Dựa trên vị trí dữ liệu THỰC TẾ trong UI
@@ -74,36 +75,24 @@ export const DEFAULT_TASK_PERMISSIONS: TaskPermissionMatrix = {
   },
 };
 
-const STORAGE_KEY = 'hl_task_permissions_v1';
+// ─── In-memory cache (nguồn: Supabase khi mount) ─────────────────────
+let _taskPermissionCache: TaskPermissionMatrix = DEFAULT_TASK_PERMISSIONS;
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-// Đọc ma trận từ localStorage (cache cho Supabase)
-// Supabase là async → load lần đầu từ cloud rồi cache vào localStorage
+// Đọc ma trận từ in-memory cache (đã load từ Supabase khi mount)
 export const loadTaskPermissionMatrix = (): TaskPermissionMatrix => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
-      };
-    }
-  } catch (e) {
-    console.error('Lỗi đọc hl_task_permissions_v1:', e);
-  }
-  return DEFAULT_TASK_PERMISSIONS;
+  return _taskPermissionCache;
 };
 
-/** Đồng bộ từ Supabase về localStorage (gọi khi app mount) */
+/** Đồng bộ từ Supabase về in-memory cache (gọi khi app mount) */
 export const syncTaskPermissionsFromCloud = async (): Promise<void> => {
   try {
     const cloud = await dbService.hrmTaskPermissions.get();
     if (cloud && cloud.actions) {
-      const merged = {
+      _taskPermissionCache = {
         actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...cloud.actions },
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
     }
   } catch (e) {
@@ -111,18 +100,13 @@ export const syncTaskPermissionsFromCloud = async (): Promise<void> => {
   }
 };
 
-// Lưu lên cả localStorage + Supabase (async, fail-safe)
+// Lưu lên in-memory cache + Supabase (async, fail-safe)
 export const saveTaskPermissionMatrix = (matrix: TaskPermissionMatrix): void => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(matrix));
-  } catch (e) {
-    console.error('Lỗi lưu localStorage hl_task_permissions_v1:', e);
-  }
+  _taskPermissionCache = matrix;
   // Đồng bộ lên Supabase (non-blocking)
   dbService.hrmTaskPermissions.save(matrix).catch(e =>
     console.warn('Supabase save task permissions error:', e)
   );
-  window.dispatchEvent(new Event('storage'));
   window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
 };
 
@@ -182,19 +166,13 @@ export const canViewTask = (
   // Check role group permissions via project permissions matrix
   // If user's role group has 'viewTask' action, allow
   try {
-    const saved = localStorage.getItem('hl_project_permissions_v1');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const rgMatrix = parsed.roleGroupMatrix || {};
-      const empGroupIds = currentUser.roleGroupIds || [];
-      console.log('🔍 canViewTask check - User groups:', empGroupIds, 'rgMatrix:', rgMatrix);
-      for (const groupId of empGroupIds) {
-        const actions = rgMatrix.roleGroupActions?.[groupId];
-        console.log(`  Group ${groupId} has actions:`, actions);
-        if (actions?.includes('viewTask')) {
-          console.log(`  ✅ User allowed - group ${groupId} has viewTask`);
-          return true;
-        }
+    const parsed = loadProjectPermissions() as any;
+    const rgMatrix = parsed.roleGroupMatrix || {};
+    const empGroupIds = currentUser.roleGroupIds || [];
+    for (const groupId of empGroupIds) {
+      const actions = rgMatrix.roleGroupActions?.[groupId];
+      if (actions?.includes('viewTask')) {
+        return true;
       }
     }
   } catch (e) {
@@ -230,23 +208,20 @@ export const canDoTaskAction = (
   // Kiểm tra roleGroupMatrix từ Quyền Dự Án (Hệ thống mới — tab "Vai trò nhóm HRM")
   // Cho phép HRM Role Group cấp quyền đặc biệt trong mọi task
   try {
-    const saved = localStorage.getItem('hl_project_permissions_v1');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      const rgMatrix = parsed.roleGroupMatrix;
-      if (rgMatrix?.roleGroupActions) {
-        const empGroupIds = currentUser.roleGroupIds || [];
-        for (const groupId of empGroupIds) {
-          const groupActions = rgMatrix.roleGroupActions[groupId] || [];
-          // Map TaskAction → ProjectAction nếu tên khác nhau
-          const mappedAction = action === 'assignSubWorkers' ? 'assignSubWorker' : action;
-          if (groupActions.includes(mappedAction)) return true;
-          // manageSubTask → kiểm tra nhiều quyền mission
-          if (action === 'manageSubTask') {
-            if (groupActions.includes('createMission') ||
-                groupActions.includes('editMission') ||
-                groupActions.includes('deleteMission')) return true;
-          }
+    const parsed = loadProjectPermissions() as any;
+    const rgMatrix = parsed.roleGroupMatrix;
+    if (rgMatrix?.roleGroupActions) {
+      const empGroupIds = currentUser.roleGroupIds || [];
+      for (const groupId of empGroupIds) {
+        const groupActions = rgMatrix.roleGroupActions[groupId] || [];
+        // Map TaskAction → ProjectAction nếu tên khác nhau
+        const mappedAction = action === 'assignSubWorkers' ? 'assignSubWorker' : action;
+        if (groupActions.includes(mappedAction)) return true;
+        // manageSubTask → kiểm tra nhiều quyền mission
+        if (action === 'manageSubTask') {
+          if (groupActions.includes('createMission') ||
+              groupActions.includes('editMission') ||
+              groupActions.includes('deleteMission')) return true;
         }
       }
     }

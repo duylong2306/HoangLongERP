@@ -339,7 +339,6 @@ export function loadHrmRoleGroups(): HrmRoleGroup[] {
  */
 export async function saveApprovalConfig(config: ApprovalPermission[]): Promise<void> {
   try {
-    localStorage.setItem('hl_hrm_approval_config', JSON.stringify(config));
     // Đồng bộ Supabase — chờ tất cả hoàn tất
     await Promise.all(
       config.map(cfg =>
@@ -350,42 +349,32 @@ export async function saveApprovalConfig(config: ApprovalPermission[]): Promise<
       )
     );
   } catch (e) {
-    console.error('Lỗi ghi hl_hrm_approval_config:', e);
+    console.error('Lỗi lưu cấu hình phê duyệt:', e);
     throw e;
   }
 }
 
 /**
- * Đọc danh sách cấu hình Quyền Phê Duyệt từ localStorage
+ * Đọc danh sách cấu hình Quyền Phê Duyệt (nguồn: Supabase qua syncApprovalConfigFromDb)
  */
 export function loadApprovalConfig(): ApprovalPermission[] {
-  try {
-    const saved = localStorage.getItem('hl_hrm_approval_config');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed as ApprovalPermission[];
-    }
-  } catch (e) {
-    console.error('Lỗi đọc hl_hrm_approval_config:', e);
-  }
   return [];
 }
 
 /**
- * Đồng bộ cấu hình Quyền Phê Duyệt từ Supabase → localStorage.
+ * Đồng bộ cấu hình Quyền Phê Duyệt từ Supabase.
  * Gọi khi component mount để đảm bảo dữ liệu mới nhất từ DB.
  */
 export async function syncApprovalConfigFromDb(): Promise<ApprovalPermission[]> {
   try {
     const dbConfigs = await dbService.hrmApprovalConfig.list();
     if (dbConfigs && dbConfigs.length > 0) {
-      localStorage.setItem('hl_hrm_approval_config', JSON.stringify(dbConfigs));
       return dbConfigs as ApprovalPermission[];
     }
   } catch (e) {
     console.error('Supabase hrmApprovalConfig sync error:', e);
   }
-  return loadApprovalConfig();
+  return [];
 }
 
 // ─── Snapshot lưu làm mặc định cho 3 tab phân quyền ──────────────────────

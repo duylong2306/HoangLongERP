@@ -37,7 +37,9 @@ import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySe
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups } from './context';
+import { Toast } from './context/NotificationContext';
 import { hashPasswordSync } from './lib/passwordUtils';
+import { migrateLegacyData } from './lib/migrateLocalStorage';
 
 // COMPONENTS
 import DashboardOverview from './components/DashboardOverview';
@@ -346,17 +348,18 @@ const stripPassword = (emp: any) => {
 };
 
 export default function App() {
-  const [toasts, setToasts] = useState<any[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => {
     const id = `${Date.now()}_${Math.random()}`;
     const duration = toast.duration === undefined ? 5000 : toast.duration;
+    const type = toast.type === undefined ? 'info' : toast.type;
     // Đẩy cập nhật state vào microtask thay vì chạy ngay. Tránh warning
     // "Cannot update a component while rendering a different component" khi
     // addToast tình cờ bị gọi trong lúc một component khác đang ở pha render
     // (ví dụ bên trong .map() hoặc hàm tính toán chạy lúc render).
     queueMicrotask(() => {
-      setToasts(prev => [...prev, { ...toast, id, duration }]);
+      setToasts(prev => [...prev, { ...toast, id, duration, type }]);
     });
     if (duration > 0) {
       setTimeout(() => {
@@ -382,8 +385,8 @@ export default function App() {
 }
 
 interface AppContentProps {
-  toasts: { id: string; title: string; message: string; type?: string; duration?: number }[];
-  setToasts: React.Dispatch<React.SetStateAction<{ id: string; title: string; message: string; type?: string; duration?: number }[]>>;
+  toasts: Toast[];
+  setToasts: React.Dispatch<React.SetStateAction<Toast[]>>;
   addToast: (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
   removeToast: (id: string) => void;
   employees: Employee[];
@@ -397,81 +400,54 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // 1. Cấu hình Phân quyền từng vai trò
 
   const { displaySettings } = useDisplaySettings();
-  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>(() => {
-    const saved = localStorage.getItem('hl_role_permissions');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const healed: Record<string, string[]> = {};
-        for (const role in parsed) {
-          if (Array.isArray(parsed[role])) {
-            const arr = parsed[role].map((item: string) => item.replace(/_/g, '-'));
-            // Đảm bảo mọi role đều có quyền truy cập Tin Nhắn
-            if (!arr.includes('messages')) arr.push('messages');
-            healed[role] = arr;
-          } else {
-            healed[role] = parsed[role];
-          }
-        }
-        return healed;
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return {
-      director: [
-        'dashboard', 'director-office', 'director-dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees', 'hr-data',
-        'accounting-office', 'finance', 'finance-data',
-        'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
-        'subcontractor-office', 'subcontractor-management',
-        'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor',
-        'system-office', 'settings-accounts', 'settings-roles', 'settings', 'display-settings'
-      ],
-      accountant: [
-        'dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees',
-        'accounting-office', 'finance', 'finance-data',
-        'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
-        'subcontractor-office', 'subcontractor-management',
-        'library-office', 'quotes',
-        'system-office', 'settings'
-      ],
-      pm: [
-        'dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees',
-        'subcontractor-office', 'subcontractor-management',
-        'library-office', 'quotes',
-        'system-office', 'settings'
-      ],
-      engineer: [
-        'dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees',
-        'system-office', 'settings'
-      ],
-      quotation: [
-        'dashboard', 'tasks', 'employees', 'settings', 'messages',
-        'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'
-      ],
-      purchasing: [
-        'dashboard', 'tasks', 'employees', 'settings', 'messages',
-        'warehouse-office', 'material-coordination', 'warehouse-suppliers'
-      ],
-      factory: [
-        'dashboard', 'tasks', 'employees', 'settings', 'messages',
-        'project-office', 'projects-furniture'
-      ]
-    };
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
+    director: [
+      'dashboard', 'director-office', 'director-dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees', 'hr-data',
+      'accounting-office', 'finance', 'finance-data',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
+      'subcontractor-office', 'subcontractor-management',
+      'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor',
+      'system-office', 'settings-accounts', 'settings-roles', 'settings', 'display-settings'
+    ],
+    accountant: [
+      'dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees',
+      'accounting-office', 'finance', 'finance-data',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
+      'subcontractor-office', 'subcontractor-management',
+      'library-office', 'quotes',
+      'system-office', 'settings'
+    ],
+    pm: [
+      'dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees',
+      'subcontractor-office', 'subcontractor-management',
+      'library-office', 'quotes',
+      'system-office', 'settings'
+    ],
+    engineer: [
+      'dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees',
+      'system-office', 'settings'
+    ],
+    quotation: [
+      'dashboard', 'tasks', 'employees', 'settings', 'messages',
+      'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'
+    ],
+    purchasing: [
+      'dashboard', 'tasks', 'employees', 'settings', 'messages',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers'
+    ],
+    factory: [
+      'dashboard', 'tasks', 'employees', 'settings', 'messages',
+      'project-office', 'projects-furniture'
+    ]
   });
-
-  useEffect(() => {
-    localStorage.setItem('hl_role_permissions', JSON.stringify(rolePermissions));
-  }, [rolePermissions]);
-
 
   // Helper cho Màu chủ đạo hiển thị động
   const accentTextClass = 
@@ -502,27 +478,22 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     displaySettings.primaryAccent === 'amber' ? 'bg-slate-800 text-amber-400 border-amber-500/20 font-bold' :
     displaySettings.primaryAccent === 'rose' ? 'bg-slate-800 text-rose-400 border-rose-500/20 font-bold' : 'bg-slate-800 text-violet-400 border-violet-500/20 font-bold';
 
-  // 3. Hồ sơ doanh nghiệp
-  const [businessInfo, setBusinessInfo] = useState(() => {
-    const saved = localStorage.getItem('hl_business_info');
-    if (saved) return JSON.parse(saved);
-    return {
-      companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
-      taxCode: '5801456789',
-      representative: 'Trương Hữu Long',
-      phone: '0988.123.456',
-      email: 'contact@hoanglonglamdong.vn',
-      address: 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
-      foundingYear: '2016',
-      businessSector: 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
-      bankInfo: '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
-      scale: 'Hơn 150 kỹ sư & thợ lành nghề'
-    };
+  // 3. Hồ sơ doanh nghiệp (nguồn: Supabase)
+  const [businessInfo, setBusinessInfo] = useState({
+    companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
+    taxCode: '5801456789',
+    representative: 'Trương Hữu Long',
+    phone: '0988.123.456',
+    email: 'contact@hoanglonglamdong.vn',
+    address: 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
+    foundingYear: '2016',
+    businessSector: 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
+    bankInfo: '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
+    scale: 'Hơn 150 kỹ sư & thợ lành nghề'
   });
 
   const isBusinessInfoInitRef = React.useRef(true);
   useEffect(() => {
-    localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
     // Skip save lần đầu (khi load từ cloud) — chỉ save khi user thay đổi thực sự
     if (isBusinessInfoInitRef.current) {
       isBusinessInfoInitRef.current = false;
@@ -628,6 +599,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         // Employees xong → ẩn splash screen
         setIsInitializing(false);
 
+        // ── MIGRATION MỘT LẦN: đẩy dữ liệu nghiệp vụ cũ từ localStorage lên Supabase ──
+        migrateLegacyData();
+
         // ── BƯỚC 3: Sync cloud ở background → update state + cache ──
         // (non-blocking, app đã render xong từ localStorage)
         (async () => {
@@ -697,9 +671,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             if (cloudData.business_profile?.[0]) {
               const bp = toCamel([cloudData.business_profile[0]])[0];
               setBusinessInfo(bp);
-              localStorage.setItem('hl_business_info', JSON.stringify(bp));
             }
-            if (cloudData.shift_config?.[0]) setHrmConfig(toCamel([cloudData.shift_config[0]])[0]);
+            if (cloudData.shift_config?.[0]) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...toCamel([cloudData.shift_config[0]])[0] }));
 
             // Save vào cache (bỏ qua sensitive tables — KHÔNG lưu sales_orders, purchase_orders vào localStorage)
             for (const t of CACHE_TABLES) {
@@ -954,10 +927,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .catch(err => console.warn('Lỗi khi tải thông báo từ Supabase:', err));
     return () => { mounted = false; };
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('hl_erp_notifications', JSON.stringify(notifications));
-  }, [notifications]);
 
   const addNotification = (notif: Partial<AppNotification>) => {
     const randomNum = Math.floor(100 + Math.random() * 900);
@@ -1563,7 +1532,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         const profile = await dbService.businessProfile.get();
         if (profile) {
           setBusinessInfo(profile);
-          localStorage.setItem('hl_business_info', JSON.stringify(profile));
         }
         const config = await dbService.shiftConfig.get();
         if (config) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...config }));
@@ -1775,7 +1743,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         const profile = await dbService.businessProfile.get();
         if (profile) {
           setBusinessInfo(profile);
-          localStorage.setItem('hl_business_info', JSON.stringify(profile));
         }
       } catch {}
       try {
@@ -1846,8 +1813,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
           setRoleGroupsCache(cloudRoles);
-          localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(cloudRoles));
-          localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(cloudRoles));
         }
       } catch {
         // Fallback về localStorage nếu Supabase lỗi
@@ -4230,7 +4195,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                           scale: editCorpScale.trim() || 'Hơn 150 kỹ sư & thợ lành nghề'
                         };
                         setBusinessInfo(updated);
-                        localStorage.setItem('hl_business_info', JSON.stringify(updated));
                         alert('🏢 Đã lưu hồ sơ cập nhật thông tin doanh nghiệp thành công! Dữ liệu này sẽ làm căn mẫu thông tin cho mọi kết xuất văn bản của hệ thống.');
                       }}
                       className={`px-6 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer shadow-md ${accentBgClass}`}
@@ -4562,6 +4526,24 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                           />
                           <p className="text-[9px] text-slate-500 mt-1">Hệ thống sẽ chỉ tự động chấm công từ ngày này trở đi</p>
                         </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số lần đi muộn cho phép (trong tháng)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={hrmConfig.allowedLateCount}
+                            onChange={(e) => {
+                              const updated = { ...hrmConfig, allowedLateCount: parseInt(e.target.value) || 0 };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Nếu số ngày đi muộn trong tháng vượt quá giá trị này, hệ thống tự ghi vi phạm "Đi muộn" (crit_A_3) vào bảng Hiệu suất.</p>
+                        </div>
                       </div>
                     </div>
 
@@ -4628,6 +4610,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             otPunchOpenBeforeMinutes: 15, otPunchCloseAfterMinutes: 15,
                             otPunchOutOpenBeforeMinutes: 15, otPunchOutCloseAfterMinutes: 15,
                             allowedLateMinutes: 15,
+                            allowedLateCount: 3,
                           };
                           setHrmConfig(updated);
                           dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));

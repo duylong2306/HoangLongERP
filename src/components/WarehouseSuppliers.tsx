@@ -87,8 +87,6 @@ export default function WarehouseSuppliers() {
         debt: typeof s.debt === 'number' ? s.debt : 0
       }));
       setSuppliers(normalized);
-      // Đồng bộ localStorage riêng của NCC (tách khỏi thầu phụ `hl_acc_suppliers`)
-      localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(normalized));
     } catch (e) {
       console.error(e);
     }
@@ -100,11 +98,6 @@ export default function WarehouseSuppliers() {
     window.addEventListener('hl-suppliers-updated', syncSuppliers);
     return () => window.removeEventListener('hl-suppliers-updated', syncSuppliers);
   }, []);
-
-  // Persist mỗi khi data đổi (thêm/sửa/xóa/điều chỉnh công nợ/import)
-  useEffect(() => {
-    localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(suppliers));
-  }, [suppliers]);
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -879,7 +879,6 @@ export default function QuotationSystem({
       dbService.constructionNorms.get(key).then(cloudData => {
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
           setter(cloudData as any);
-          localStorage.setItem(key, JSON.stringify(cloudData));
         }
       }).catch(() => {});
     });
@@ -1153,20 +1152,11 @@ export default function QuotationSystem({
   };
 
   // --- LOCAL STATES FOR BUILDING NORMS & PRICING ---
-  const [houseEstimatePrices, setHouseEstimatePrices] = useState<{ stt: number; type: string; avgPrice: number; minPrice: number; maxPrice: number; features: string }[]>(() => {
-    const local = localStorage.getItem('house_estimate_prices');
-    return local ? JSON.parse(local) : HOUSE_ESTIMATE_PRICES;
-  });
+  const [houseEstimatePrices, setHouseEstimatePrices] = useState<{ stt: number; type: string; avgPrice: number; minPrice: number; maxPrice: number; features: string }[]>(() => HOUSE_ESTIMATE_PRICES);
 
-  const [materialCompositionNorms, setMaterialCompositionNorms] = useState<{ id: string; name: string; unit: string; brick?: number; cement?: number; sand?: number; stone?: number | null; steel?: number | null; water?: number; notes?: string }[]>(() => {
-    const local = localStorage.getItem('material_composition_norms');
-    return local ? JSON.parse(local) : MATERIAL_COMPOSITION_NORMS;
-  });
+  const [materialCompositionNorms, setMaterialCompositionNorms] = useState<{ id: string; name: string; unit: string; brick?: number; cement?: number; sand?: number; stone?: number | null; steel?: number | null; water?: number; notes?: string }[]>(() => MATERIAL_COMPOSITION_NORMS);
 
-  const [materialLaborPrices, setMaterialLaborPrices] = useState<{ group: string; name: string; unit: string; avgPrice: number; minPrice: number; maxPrice: number; notes?: string }[]>(() => {
-    const local = localStorage.getItem('material_labor_prices');
-    return local ? JSON.parse(local) : MATERIAL_LABOR_PRICES;
-  });
+  const [materialLaborPrices, setMaterialLaborPrices] = useState<{ group: string; name: string; unit: string; avgPrice: number; minPrice: number; maxPrice: number; notes?: string }[]>(() => MATERIAL_LABOR_PRICES);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -1179,19 +1169,16 @@ export default function QuotationSystem({
 
   const updateHouseEstimatePrices = (newData: any[]) => {
     setHouseEstimatePrices(newData);
-    localStorage.setItem('house_estimate_prices', JSON.stringify(newData));
     dbService.constructionNorms.save('house_estimate_prices', newData).catch(() => {});
   };
 
   const updateMaterialCompositionNorms = (newData: any[]) => {
     setMaterialCompositionNorms(newData);
-    localStorage.setItem('material_composition_norms', JSON.stringify(newData));
     dbService.constructionNorms.save('material_composition_norms', newData).catch(() => {});
   };
 
   const updateMaterialLaborPrices = (newData: any[]) => {
     setMaterialLaborPrices(newData);
-    localStorage.setItem('material_labor_prices', JSON.stringify(newData));
     dbService.constructionNorms.save('material_labor_prices', newData).catch(() => {});
   };
 

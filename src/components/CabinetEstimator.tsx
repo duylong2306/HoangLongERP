@@ -381,17 +381,17 @@ export default function CabinetEstimator({
     }
   }, [selectedProjectId, projects, customers]);
   const [quoteNotes, setQuoteNotes] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState(() => localStorage.getItem('hl_cabinet_payment_terms') || DEFAULT_FURN_PAYMENT_TERMS);
+  const [paymentTerms, setPaymentTerms] = useState(() => DEFAULT_FURN_PAYMENT_TERMS);
 
-  const [companyLogoImg, setCompanyLogoImg] = useState(() => localStorage.getItem('hl_cabinet_company_logo') || '');
-  const [companyLogoText, setCompanyLogoText] = useState(() => localStorage.getItem('hl_cabinet_company_name') || 'HOANG LONG');
-  const [companySlogan, setCompanySlogan] = useState(() => localStorage.getItem('hl_cabinet_company_slogan') || 'Construction - Furniture - Doors');
-  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => localStorage.getItem('hl_cabinet_company_address') || `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
-  const [companyContactInfo, setCompanyContactInfo] = useState(() => localStorage.getItem('hl_cabinet_company_contact') || `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
+  const [companyLogoImg, setCompanyLogoImg] = useState(() => '');
+  const [companyLogoText, setCompanyLogoText] = useState(() => 'HOANG LONG');
+  const [companySlogan, setCompanySlogan] = useState(() => 'Construction - Furniture - Doors');
+  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
+  const [companyContactInfo, setCompanyContactInfo] = useState(() => `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
 
-  const [contractTemplate, setContractTemplate] = useState(() => localStorage.getItem('hl_cabinet_contract_template') || DEFAULT_FURN_CONTRACT_TEMPLATE);
-  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => localStorage.getItem('hl_cabinet_acceptance_template') || DEFAULT_FURN_ACCEPTANCE_TEMPLATE);
-  const [liquidationTemplate, setLiquidationTemplate] = useState(() => localStorage.getItem('hl_cabinet_liquidation_template') || DEFAULT_FURN_LIQUIDATION_TEMPLATE);
+  const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_FURN_CONTRACT_TEMPLATE);
+  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_FURN_ACCEPTANCE_TEMPLATE);
+  const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_FURN_LIQUIDATION_TEMPLATE);
   const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
@@ -408,24 +408,14 @@ export default function CabinetEstimator({
         defaultData.companyAddressInfo = companyAddressInfo;
         defaultData.companyContactInfo = companyContactInfo;
         defaultData.paymentTerms = paymentTerms;
-        
-        localStorage.setItem('hl_cabinet_default_logo', companyLogoImg);
-        localStorage.setItem('hl_cabinet_default_company_name', companyLogoText);
-        localStorage.setItem('hl_cabinet_default_company_slogan', companySlogan);
-        localStorage.setItem('hl_cabinet_default_company_address', companyAddressInfo);
-        localStorage.setItem('hl_cabinet_default_company_contact', companyContactInfo);
-        localStorage.setItem('hl_cabinet_default_payment_terms', paymentTerms);
       } else if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_cabinet_default_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_cabinet_default_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_cabinet_default_liquidation_template', liquidationTemplate);
       }
-      
+
       await dbService.quotationConfigs.save('furniture_default', defaultData);
       
       setFeedback({
@@ -456,13 +446,13 @@ export default function CabinetEstimator({
       const defaultData = await dbService.quotationConfigs.get('furniture_default');
       
       if (activeTemplateTab === 'quote') {
-        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_cabinet_default_logo') ?? '';
-        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_cabinet_default_company_name') ?? 'HOANG LONG';
-        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_cabinet_default_company_slogan') ?? 'Construction - Furniture - Doors';
-        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_cabinet_default_company_address') ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
-        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_cabinet_default_company_contact') ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
-        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_cabinet_default_payment_terms') ?? DEFAULT_FURN_PAYMENT_TERMS;
-        
+        const logo = defaultData?.companyLogoImg ?? '';
+        const name = defaultData?.companyLogoText ?? 'HOANG LONG';
+        const slogan = defaultData?.companySlogan ?? 'Construction - Furniture - Doors';
+        const address = defaultData?.companyAddressInfo ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
+        const contact = defaultData?.companyContactInfo ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
+        const terms = defaultData?.paymentTerms ?? DEFAULT_FURN_PAYMENT_TERMS;
+
         setCompanyLogoImg(logo);
         setCompanyLogoText(name);
         setCompanySlogan(slogan);
@@ -470,13 +460,13 @@ export default function CabinetEstimator({
         setCompanyContactInfo(contact);
         setPaymentTerms(terms);
       } else if (activeTemplateTab === 'contract') {
-        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_cabinet_default_contract_template') ?? DEFAULT_FURN_CONTRACT_TEMPLATE;
+        const template = defaultData?.contractTemplate ?? DEFAULT_FURN_CONTRACT_TEMPLATE;
         setContractTemplate(template);
       } else if (activeTemplateTab === 'acceptance') {
-        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_cabinet_default_acceptance_template') ?? DEFAULT_FURN_ACCEPTANCE_TEMPLATE;
+        const template = defaultData?.acceptanceTemplate ?? DEFAULT_FURN_ACCEPTANCE_TEMPLATE;
         setAcceptanceTemplate(template);
       } else if (activeTemplateTab === 'liquidation') {
-        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_cabinet_default_liquidation_template') ?? DEFAULT_FURN_LIQUIDATION_TEMPLATE;
+        const template = defaultData?.liquidationTemplate ?? DEFAULT_FURN_LIQUIDATION_TEMPLATE;
         setLiquidationTemplate(template);
       }
       
@@ -518,19 +508,6 @@ export default function CabinetEstimator({
       setDbSaving(false);
     }
   };
-
-  // Auto-persist template changes to localStorage
-  useEffect(() => {
-    localStorage.setItem('hl_cabinet_company_logo', companyLogoImg);
-    localStorage.setItem('hl_cabinet_company_name', companyLogoText);
-    localStorage.setItem('hl_cabinet_company_slogan', companySlogan);
-    localStorage.setItem('hl_cabinet_company_address', companyAddressInfo);
-    localStorage.setItem('hl_cabinet_company_contact', companyContactInfo);
-    localStorage.setItem('hl_cabinet_payment_terms', paymentTerms);
-    localStorage.setItem('hl_cabinet_contract_template', contractTemplate);
-    localStorage.setItem('hl_cabinet_acceptance_template', acceptanceTemplate);
-    localStorage.setItem('hl_cabinet_liquidation_template', liquidationTemplate);
-  }, [companyLogoImg, companyLogoText, companySlogan, companyAddressInfo, companyContactInfo, paymentTerms, contractTemplate, acceptanceTemplate, liquidationTemplate]);
 
   const [dbLoading, setDbLoading] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
@@ -629,6 +606,8 @@ export default function CabinetEstimator({
 
   // --- HỆ THỐNG THÊM SẢN PHẨM TỪ DANH MỤC TIÊU CHUẨN ---
   const [catalogProducts, setCatalogProducts] = useState<ProductCatalogItem[]>([]);
+  const [allProductPrices, setAllProductPrices] = useState<any[]>([]);
+  const [allProductMaterials, setAllProductMaterials] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<ProductCatalogItem | null>(null);
   const [selectedPriceOption, setSelectedPriceOption] = useState<string>('');
@@ -648,39 +627,46 @@ export default function CabinetEstimator({
   const [customProductOtherUnitPrice, setCustomProductOtherUnitPrice] = useState<number | string>('');
   const [customProductOtherMaterial, setCustomProductOtherMaterial] = useState<string>('');
 
-  // Nạp danh mục sản phẩm lĩnh vực Nội thất
+  // Nạp danh mục sản phẩm lĩnh vực Nội thất (từ Supabase)
   useEffect(() => {
-    const saved = localStorage.getItem('hl_acc_products');
-    let loadedProducts = [];
-    if (saved) {
-      try {
-        loadedProducts = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    
-    if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
-      loadedProducts = INITIAL_PRODUCTS;
-      localStorage.setItem('hl_acc_products', JSON.stringify(INITIAL_PRODUCTS));
-    } else {
-      // Merge defaults if missing
-      const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
-      const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
-      if (!hasConst || !hasMech) {
-        const merged = [...loadedProducts];
-        INITIAL_PRODUCTS.forEach(item => {
-          if (!merged.some(m => m.id === item.id)) {
-            merged.push(item);
+    let loadedProducts: any[] = [];
+    dbService.accountingProductCatalog.list()
+      .then(cloudProducts => {
+        if (cloudProducts && cloudProducts.length > 0) {
+          loadedProducts = cloudProducts;
+        }
+      })
+      .catch(err => console.warn('Lỗi tải danh mục sản phẩm từ Supabase:', err))
+      .finally(() => {
+        if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
+          loadedProducts = INITIAL_PRODUCTS;
+        } else {
+          // Merge defaults if missing
+          const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
+          const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
+          if (!hasConst || !hasMech) {
+            const merged = [...loadedProducts];
+            INITIAL_PRODUCTS.forEach(item => {
+              if (!merged.some(m => m.id === item.id)) {
+                merged.push(item);
+              }
+            });
+            loadedProducts = merged;
           }
-        });
-        localStorage.setItem('hl_acc_products', JSON.stringify(merged));
-        loadedProducts = merged;
-      }
-    }
-    
-    const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Nội thất');
-    setCatalogProducts(domainProducts);
+        }
+        const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Nội thất');
+        setCatalogProducts(domainProducts);
+      });
+  }, []);
+
+  // Nạp giá & chất liệu theo sản phẩm từ Supabase
+  useEffect(() => {
+    dbService.productPrices.list()
+      .then(list => { if (Array.isArray(list)) setAllProductPrices(list); })
+      .catch(err => console.warn('Lỗi tải giá sản phẩm từ Supabase:', err));
+    dbService.productMaterials.list()
+      .then(list => { if (Array.isArray(list)) setAllProductMaterials(list); })
+      .catch(err => console.warn('Lỗi tải chất liệu sản phẩm từ Supabase:', err));
   }, []);
 
   const categories = Array.from(new Set(catalogProducts.map(p => p.danhMuc as string).filter(Boolean)));
@@ -694,27 +680,13 @@ export default function CabinetEstimator({
   // Get all active linked prices for selectedProduct
   const getProductLinkedPrices = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (!savedPrices) return [];
-      const allPrices = JSON.parse(savedPrices);
-      return allPrices.filter((pr: any) => pr.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductPrices.filter((pr: any) => pr.productId === selectedProduct.id);
   };
 
   // Get all active linked materials for selectedProduct
   const getProductLinkedMaterials = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (!savedMaterials) return [];
-      const allMaterials = JSON.parse(savedMaterials);
-      return allMaterials.filter((m: any) => m.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductMaterials.filter((m: any) => m.productId === selectedProduct.id);
   };
 
   useEffect(() => {
@@ -729,18 +701,9 @@ export default function CabinetEstimator({
   const handleProductSelect = (prod: any) => {
     setSelectedProduct(prod);
     setIsProdDropdownOpen(false);
-    
-    let subPrices: any[] = [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        subPrices = allPrices.filter((pr: any) => pr.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    
+
+    const subPrices = allProductPrices.filter((pr: any) => pr.productId === prod.id);
+
     if (subPrices.length > 0) {
       setSelectedPriceOption(subPrices[0].tenGia);
       setChosenPrice(subPrices[0].donGia);
@@ -749,16 +712,7 @@ export default function CabinetEstimator({
       setChosenPrice(0);
     }
 
-    let subMats: any[] = [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (savedMaterials) {
-        const allMaterials = JSON.parse(savedMaterials);
-        subMats = allMaterials.filter((m: any) => m.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const subMats = allProductMaterials.filter((m: any) => m.productId === prod.id);
 
     if (subMats.length > 0) {
       setSelectedMaterialOption(subMats[0].tenChatLieu);
@@ -773,18 +727,10 @@ export default function CabinetEstimator({
     setSelectedPriceOption(option);
     if (!selectedProduct) return;
     if (option === 'Tự chọn') return;
-    
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        const match = allPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
-        if (match) {
-          setChosenPrice(match.donGia);
-        }
-      }
-    } catch (e) {
-      console.error(e);
+
+    const match = allProductPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
+    if (match) {
+      setChosenPrice(match.donGia);
     }
   };
 
@@ -1005,7 +951,7 @@ export default function CabinetEstimator({
   const vatAmount = 0;
   const totalWithVat = subtotal;
 
-  const handleSendToProject = () => {
+  const handleSendToProject = async () => {
     if (!selectedProjectId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn hoặc liên kết dự án ở phía trên trước khi gửi báo giá!', type: 'warning' });
       return;
@@ -1027,15 +973,12 @@ export default function CabinetEstimator({
     const itemCode = `BG-HL-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const pdfName = `Bao_gia_Noi_that_${(customerName || 'Khach_hang').trim().replace(/\s+/g, '_')}.pdf`;
 
-    // Sync child tasks in local storage
-    const rawTasks = localStorage.getItem('hl_erp_tasks');
+    // Sync child tasks (nguồn: Supabase)
     let currentTasks: any[] = [];
-    if (rawTasks) {
-      try {
-        currentTasks = JSON.parse(rawTasks);
-      } catch (e) {
-        console.error("Lỗi đọc tasks từ localStorage:", e);
-      }
+    try {
+      currentTasks = await dbService.tasks.list();
+    } catch (e) {
+      console.error("Lỗi đọc tasks từ Supabase:", e);
     }
 
     let taskUpdatedCount = 0;
@@ -1114,11 +1057,9 @@ export default function CabinetEstimator({
       return p;
     });
 
-    localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjects));
     window.dispatchEvent(new CustomEvent('hl-projects-updated'));
 
     if (taskUpdatedCount > 0) {
-      localStorage.setItem('hl_erp_tasks', JSON.stringify(updatedTasks));
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
 
       // Fire and forget matched tasks dbService save

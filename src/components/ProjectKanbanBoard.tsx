@@ -1449,6 +1449,24 @@ export default function ProjectKanbanBoard({
   const [subTaskMaterialCoordinatorId, setSubTaskMaterialCoordinatorId] = useState('');
   const [subTaskSubcontractorApproverId, setSubTaskSubcontractorApproverId] = useState('');
   const [subTaskSubcontractorSettlerId, setSubTaskSubcontractorSettlerId] = useState('');
+  // Subcontractors from Supabase (accounting_subcontractors table)
+  const [subcontractors, setSubcontractors] = useState<Supplier[]>([]);
+
+  useEffect(() => {
+    const loadSubcontractors = async () => {
+      try {
+        const data = await dbService.accountingSubcontractors.list();
+        setSubcontractors(data);
+      } catch (e) {
+        console.error("Lỗi load thầu phụ từ Supabase:", e);
+      }
+    };
+    loadSubcontractors();
+    const handleSync = () => loadSubcontractors();
+    window.addEventListener('hl-suppliers-updated', handleSync);
+    return () => window.removeEventListener('hl-suppliers-updated', handleSync);
+  }, []);
+
   // Đầu mục đo kiểm / Checklist kỹ thuật (công việc con)
   const [subTaskChecklistTexts, setSubTaskChecklistTexts] = useState<string[]>([]);
   // NHIỆM VỤ CHI TIẾT cấu hình trước (công việc con mới)
@@ -3587,7 +3605,7 @@ export default function ProjectKanbanBoard({
                                   </div>
                                   {subTaskSubcontractorEnabled && (
                                     <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                                      {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                                      {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                                       <div>
                                         <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                                         <select
@@ -3595,12 +3613,7 @@ export default function ProjectKanbanBoard({
                                           onChange={(e) => {
                                             const subId = e.target.value;
                                             setSubTaskSubcontractorId(subId);
-                                            const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                            let suppliers = [];
-                                            if (savedSuppliers) {
-                                              try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                            }
-                                            const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                            const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                             if (matched) {
                                               setSubTaskSubcontractorName(matched.name);
                                             } else {
@@ -3618,25 +3631,11 @@ export default function ProjectKanbanBoard({
                                           className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                                         >
                                           <option value="">-- Chọn đối tác thầu phụ --</option>
-                                          {(() => {
-                                            const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                            let suppliers = [];
-                                            if (savedSuppliers) {
-                                              try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                            }
-                                            if (suppliers.length === 0) {
-                                              suppliers = [
-                                                { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                                { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                                { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                              ];
-                                            }
-                                            return suppliers.map((sup: any) => (
-                                              <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                                {sup.name} ({sup.code || sup.id})
-                                              </option>
-                                            ));
-                                          })()}
+                                          {subcontractors.map((sup: any) => (
+                                            <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                              {sup.name} ({sup.code || sup.id})
+                                            </option>
+                                          ))}
                                         </select>
                                       </div>
 
@@ -5099,7 +5098,7 @@ export default function ProjectKanbanBoard({
                               </div>
                               {subtaskAuto.isSubcontractorEnabled === true && (
                                 <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                                  {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                                  {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                                   <div>
                                     <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                                     <select
@@ -5107,12 +5106,7 @@ export default function ProjectKanbanBoard({
                                       onChange={(e) => {
                                         const subId = e.target.value;
                                         updateSubtaskAutomation(index, { subcontractorId: subId || undefined });
-                                        const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                        let suppliers = [];
-                                        if (savedSuppliers) {
-                                          try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                        }
-                                        const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                        const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                         if (matched) {
                                           updateSubtaskAutomation(index, { subcontractorName: matched.name });
                                         } else {
@@ -5130,25 +5124,11 @@ export default function ProjectKanbanBoard({
                                       className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                                     >
                                       <option value="">-- Chọn đối tác thầu phụ --</option>
-                                      {(() => {
-                                        const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                        let suppliers = [];
-                                        if (savedSuppliers) {
-                                          try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                        }
-                                        if (suppliers.length === 0) {
-                                          suppliers = [
-                                            { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                            { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                            { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                          ];
-                                        }
-                                        return suppliers.map((sup: any) => (
-                                          <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                            {sup.name} ({sup.code || sup.id})
-                                          </option>
-                                        ));
-                                      })()}
+                                      {subcontractors.map((sup: any) => (
+                                        <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                          {sup.name} ({sup.code || sup.id})
+                                        </option>
+                                      ))}
                                     </select>
                                   </div>
 
@@ -6121,7 +6101,7 @@ export default function ProjectKanbanBoard({
                       </div>
                       {editSubSubcontractorEnabled && (
                         <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                          {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                          {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                           <div>
                             <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                             <select
@@ -6129,12 +6109,7 @@ export default function ProjectKanbanBoard({
                               onChange={(e) => {
                                 const subId = e.target.value;
                                 setEditSubSubcontractorId(subId);
-                                const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                let suppliers = [];
-                                if (savedSuppliers) {
-                                  try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                }
-                                const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                 if (matched) {
                                   setEditSubSubcontractorName(matched.name);
                                 } else {
@@ -6152,25 +6127,11 @@ export default function ProjectKanbanBoard({
                               className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                             >
                               <option value="">-- Chọn đối tác thầu phụ --</option>
-                              {(() => {
-                                const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                let suppliers = [];
-                                if (savedSuppliers) {
-                                  try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                }
-                                if (suppliers.length === 0) {
-                                  suppliers = [
-                                    { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                    { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                    { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                  ];
-                                }
-                                return suppliers.map((sup: any) => (
-                                  <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                    {sup.name} ({sup.code || sup.id})
-                                  </option>
-                                ));
-                              })()}
+                              {subcontractors.map((sup: any) => (
+                                <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                  {sup.name} ({sup.code || sup.id})
+                                </option>
+                              ))}
                             </select>
                           </div>
 

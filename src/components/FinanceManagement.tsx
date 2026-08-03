@@ -339,10 +339,7 @@ export default function FinanceManagement({
   const [projectFilter, setProjectFilter] = useState('');
 
   // Local persistent states for accounting-specific lists
-  const [subContracts, setSubContracts] = useState<SubContract[]>(() => {
-    const saved = localStorage.getItem('hl_acc_subcontracts');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [subContracts, setSubContracts] = useState<SubContract[]>([]);
 
   // Approved Subcontractor Contracts loaded from Firestore database
   const [approvedSubContracts, setApprovedSubContracts] = useState<ArchivedQuote[]>([]);
@@ -427,15 +424,6 @@ export default function FinanceManagement({
       };
       await dbService.subcontractorAdvances.save(updated);
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
-      
-      // Update localStorage
-      let existing: SubcontractorAdvanceProposal[] = [];
-      const saved = localStorage.getItem('hl_subcontractor_advances');
-      if (saved) {
-        try { existing = JSON.parse(saved); } catch (e) {}
-      }
-      existing = existing.map(p => p.id === updated.id ? updated : p);
-      localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existing));
 
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
       try {
@@ -475,15 +463,6 @@ export default function FinanceManagement({
       };
       await dbService.subcontractorAdvances.save(updated);
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
-      
-      // Update localStorage
-      let existing: SubcontractorAdvanceProposal[] = [];
-      const saved = localStorage.getItem('hl_subcontractor_advances');
-      if (saved) {
-        try { existing = JSON.parse(saved); } catch (e) {}
-      }
-      existing = existing.map(p => p.id === updated.id ? updated : p);
-      localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existing));
 
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
       try {
@@ -505,15 +484,6 @@ export default function FinanceManagement({
       };
       await dbService.subcontractorAdvances.save(updated);
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
-      
-      // Update localStorage
-      let existing: SubcontractorAdvanceProposal[] = [];
-      const saved = localStorage.getItem('hl_subcontractor_advances');
-      if (saved) {
-        try { existing = JSON.parse(saved); } catch (e) {}
-      }
-      existing = existing.map(p => p.id === updated.id ? updated : p);
-      localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existing));
 
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
       try {
@@ -542,15 +512,6 @@ export default function FinanceManagement({
 
       await dbService.subcontractorAdvances.save(updated);
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
-
-      // Update localStorage
-      let existing: SubcontractorAdvanceProposal[] = [];
-      const saved = localStorage.getItem('hl_subcontractor_advances');
-      if (saved) {
-        try { existing = JSON.parse(saved); } catch (e) {}
-      }
-      existing = existing.map(p => p.id === updated.id ? updated : p);
-      localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existing));
 
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
       setEditingAmountProposal(null);
@@ -722,77 +683,12 @@ export default function FinanceManagement({
     return [...subs, ...customs];
   }, [approvedSubContracts, customLiabilities, payments]);
 
-  const [suppliers, setSuppliers] = useState<SupplierPartner[]>(() => {
-    // NCC vật tư — localStorage riêng (tách khỏi thầu phụ `hl_acc_suppliers`)
-    const saved = localStorage.getItem('hl_acc_material_suppliers');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return parsed.map((s: any) => ({
-          id: s.id,
-          name: s.name,
-          representative: s.representative || s.name,
-          gender: s.gender || 'Nam',
-          birthDate: s.birthDate || '',
-          cccd: s.cccd || s.taxCode || '',
-          cccdDate: s.cccdDate || '',
-          cccdPlace: s.cccdPlace || '',
-          address: s.address || s.region || 'Đà Lạt',
-          phone: s.phone || '',
-          email: s.email || '',
-          taxCode: s.taxCode || '',
-          bankAccount: s.bankAccount || s.bankNo || '',
-          bankName: s.bankName || '',
-          field: s.field || 'Thợ thầu thi công',
-          note: s.note || '',
-          region: s.region || s.address || 'Đà Lạt',
-          bankNo: s.bankNo || s.bankAccount || ''
-        }));
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return [];
-  });
+  const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
 
-  const [inventory, setInventory] = useState<MaterialStock[]>(() => {
-    const saved = localStorage.getItem('hl_acc_inventory');
-    if (saved) return JSON.parse(saved);
-    return [];
-  });
+  const [inventory, setInventory] = useState<MaterialStock[]>([]);
 
-  // Dữ liệu kế toán - Định mức công tác phí
-  const [travelNorms, setTravelNorms] = useState<TravelAllowanceNorm[]>(() => {
-    const saved = localStorage.getItem('hl_acc_travel_norms');
-    let normsList: TravelAllowanceNorm[] = [];
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.length > 0 && 'content' in parsed[0]) {
-          // Migration: if any item has old-style content (doesn't start with 'Đi ' and is not 'Nghỉ qua đêm'), trigger fresh defaults
-          const needsMigration = parsed.some((item: any) => item.content !== 'Nghỉ qua đêm' && !item.content.startsWith('Đi '));
-          if (!needsMigration) {
-            normsList = parsed;
-          }
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    if (normsList.length === 0) {
-      normsList = [];
-    }
-    // Auto-repair missing or blank codes dynamically
-    return normsList.map((norm, idx) => {
-      if (!norm.code) {
-        return {
-          ...norm,
-          code: `CTP_${String(idx + 1).padStart(3, '0')}`
-        };
-      }
-      return norm;
-    });
-  });
+  // Dữ liệu kế toán - Định mức công tác phí (nguồn: Supabase)
+  const [travelNorms, setTravelNorms] = useState<TravelAllowanceNorm[]>([]);
 
   const generateNextTravelNormCode = (currentNorms: TravelAllowanceNorm[]): string => {
     let maxNum = 0;
@@ -830,11 +726,7 @@ export default function FinanceManagement({
   const [editingTravelNorm, setEditingTravelNorm] = useState<TravelAllowanceNorm | null>(null);
 
   // ── Danh mục sản phẩm kế toán (Accounting Product Catalog) ──
-  const [accProducts, setAccProducts] = useState<AccountingProductItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_accounting_products');
-    if (saved) { try { return JSON.parse(saved); } catch { /* ignore */ } }
-    return [];
-  });
+  const [accProducts, setAccProducts] = useState<AccountingProductItem[]>([]);
   const [pageAccProd, setPageAccProd] = useState(1);
   const [pageSizeAccProd, setPageSizeAccProd] = useState(10);
   const [showAccProdForm, setShowAccProdForm] = useState(false);
@@ -896,18 +788,10 @@ export default function FinanceManagement({
     dbService.accountingProductCatalog.list().then((cloudData) => {
       if (cloudData && cloudData.length > 0) {
         setAccProducts(cloudData);
-        localStorage.setItem('hl_acc_accounting_products', JSON.stringify(cloudData));
       }
       setAccProdLoaded(true);
     }).catch(() => setAccProdLoaded(true));
   }, []);
-
-  // ── Danh mục sản phẩm kế toán: Persist to localStorage ──
-  useEffect(() => {
-    if (accProducts.length > 0 || accProdLoaded) {
-      localStorage.setItem('hl_acc_accounting_products', JSON.stringify(accProducts));
-    }
-  }, [accProducts, accProdLoaded]);
 
   // ── Danh mục sản phẩm kế toán: Sync to Supabase on change ──
   useEffect(() => {
@@ -1593,9 +1477,8 @@ export default function FinanceManagement({
     }
   }, [activeSubTab]);
 
-  // Form Inputs - Chi: Ưu tiên dùng employees prop từ App (cloud data), fallback localStorage
+  // Form Inputs - Chi: dùng employees prop từ App (cloud data từ Supabase)
   const employees = useMemo(() => {
-    // Dùng prop employees từ App.tsx (đã load từ Supabase)
     if (employeesProp && employeesProp.length > 0) {
       return employeesProp.map(emp => ({
         id: emp.id,
@@ -1603,23 +1486,6 @@ export default function FinanceManagement({
         position: (emp as any).position || '',
         department: emp.department || ''
       }));
-    }
-    // Fallback: đọc từ localStorage nếu prop chưa sẵn sàng
-    const saved = localStorage.getItem('hl_hrm_employees_v3');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((emp: any) => ({
-            id: emp.id || `emp_${Math.random()}`,
-            name: emp.name || '',
-            position: emp.position || '',
-            department: emp.department || ''
-          }));
-        }
-      } catch (e) {
-        console.error("Lỗi khi parse nhân viên từ HRM:", e);
-      }
     }
     return [];
   }, [employeesProp]);
@@ -1648,30 +1514,20 @@ export default function FinanceManagement({
   const [formMatPrice, setFormMatPrice] = useState<number>(350000);
   const [formMatLocation, setFormMatLocation] = useState('Kho lớn xưởng mộc');
 
-  // Trigger local storage updates
+  // Load hợp đồng thầu phụ từ Supabase
   useEffect(() => {
-    localStorage.setItem('hl_acc_subcontracts', JSON.stringify(subContracts));
-  }, [subContracts]);
-
-  useEffect(() => {
-    localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(suppliers));
-    // Không auto-sync Supabase ở đây — chỉ sync khi user chủ động thêm/sửa/xóa (trong handler)
-  }, [suppliers]);
+    dbService.accountingSubContracts.list()
+      .then(list => { if (Array.isArray(list) && list.length > 0) setSubContracts(list); })
+      .catch(err => console.warn('Lỗi tải hợp đồng thầu phụ từ Supabase:', err));
+  }, []);
 
   useEffect(() => {
     const loadSuppliers = async () => {
       try {
         const list = await dbService.suppliers.list();
-        if (list && list.length > 0) {
-          setSuppliers(list);
-          localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(list));
-        }
+        if (list && list.length > 0) setSuppliers(list);
       } catch (e) {
         console.warn('Load suppliers from Supabase failed:', e);
-        const saved = localStorage.getItem('hl_acc_material_suppliers');
-        if (saved) {
-          try { setSuppliers(JSON.parse(saved)); } catch (err) { console.error(err); }
-        }
       }
     };
     loadSuppliers();
@@ -1683,11 +1539,7 @@ export default function FinanceManagement({
         const list = await dbService.suppliers.list();
         if (list && list.length > 0) setSuppliers(list);
       } catch (e) {
-        // Fallback localStorage
-        const saved = localStorage.getItem('hl_acc_material_suppliers');
-        if (saved) {
-          try { setSuppliers(JSON.parse(saved)); } catch (err) { console.error(err); }
-        }
+        console.warn('Load suppliers from Supabase failed:', e);
       }
     };
     window.addEventListener('hl-suppliers-updated', handleSuppliersUpdated);
@@ -1697,21 +1549,12 @@ export default function FinanceManagement({
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('hl_acc_inventory', JSON.stringify(inventory));
-    // Không auto-sync Supabase — chỉ sync khi user chủ động thêm/sửa/xóa
-  }, [inventory]);
-
-  useEffect(() => {
     const handleInventoryUpdated = async () => {
       try {
         const list = await dbService.inventory.list();
         if (list && list.length > 0) setInventory(list);
       } catch (e) {
-        // Fallback localStorage
-        const saved = localStorage.getItem('hl_acc_inventory');
-        if (saved) {
-          try { setInventory(JSON.parse(saved)); } catch (err) { console.error(err); }
-        }
+        console.warn('Load inventory from Supabase failed:', e);
       }
     };
     window.addEventListener('hl-inventory-updated', handleInventoryUpdated);
@@ -1728,7 +1571,6 @@ export default function FinanceManagement({
   }, [duLieuTab, searchTerm]);
 
   useEffect(() => {
-    localStorage.setItem('hl_acc_travel_norms', JSON.stringify(travelNorms));
     // Đồng bộ Supabase
     travelNorms.forEach(n => {
       dbService.travelNorms.save(n).catch(() => {});
@@ -1831,15 +1673,6 @@ export default function FinanceManagement({
         // Update local state list
         setSubcontractorAdvances(prev => prev.map(p => p.id === updatedProposal.id ? updatedProposal : p));
 
-        // Update localStorage
-        let existing: SubcontractorAdvanceProposal[] = [];
-        const saved = localStorage.getItem('hl_subcontractor_advances');
-        if (saved) {
-          try { existing = JSON.parse(saved); } catch (e) {}
-        }
-        existing = existing.map(p => p.id === updatedProposal.id ? updatedProposal : p);
-        localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existing));
-
         // Nếu là đề xuất ứng lương -> cập nhật bảng lương của người đề xuất
         if (payCategory === 'salary_advance' && activeProposalForPayment.subcontractorName) {
           updatePayrollWithAdvance(
@@ -1898,16 +1731,17 @@ export default function FinanceManagement({
   };
 
   // Cập nhật bảng lương khi duyệt đề xuất ứng lương nhân sự
-  const updatePayrollWithAdvance = (empName: string, amount: number, taskName: string) => {
+  const updatePayrollWithAdvance = async (empName: string, amount: number, taskName: string) => {
     try {
       // Trích xuất kỳ lương từ taskName (định dạng: "Ứng lương kỳ MM/YYYY")
       const periodMatch = taskName.match(/Ứng lương kỳ\s*([\d]{2}\/[\d]{4})/);
       const period = periodMatch ? periodMatch[1] : new Date().toLocaleDateString('vi-VN', { month: '2-digit', year: 'numeric' });
 
       let currentPayroll: any[] = [];
-      const savedPayroll = localStorage.getItem('hl_hrm_payroll_v3');
-      if (savedPayroll) {
-        try { currentPayroll = JSON.parse(savedPayroll); } catch (err) {}
+      try {
+        currentPayroll = await dbService.hrmPayrollRecords.list();
+      } catch (err) {
+        console.warn('Lỗi tải bảng lương từ Supabase:', err);
       }
 
       // Tìm bản ghi bảng lương của nhân sự trong kỳ lương tương ứng
@@ -1937,7 +1771,9 @@ export default function FinanceManagement({
         currentPayroll.push(payrollItem);
       }
 
-      localStorage.setItem('hl_hrm_payroll_v3', JSON.stringify(currentPayroll));
+      // Lưu bảng lương lên Supabase
+      dbService.hrmPayrollRecords.save(payrollItem).catch(err =>
+        console.warn('Lỗi lưu bảng lương lên Supabase:', err));
 
       // Trigger event để đồng bộ với DashboardOverview và HumanResourcesManagement
       window.dispatchEvent(new CustomEvent('hl_hrm_payroll_updated', { detail: { empName, amount, period } }));
@@ -1961,6 +1797,8 @@ export default function FinanceManagement({
       status: 'active'
     };
     setSubContracts([newSub, ...subContracts]);
+    dbService.accountingSubContracts.save(newSub).catch(err =>
+      console.warn('Lỗi lưu hợp đồng thầu phụ lên Supabase:', err));
     setShowSubContractForm(false);
     addToast({ title: '✅ Thành công', message: `✍️ Ký số điện tử Hợp đồng thầu phụ mã ${newSub.code} thành công.`, type: 'success' });
   };

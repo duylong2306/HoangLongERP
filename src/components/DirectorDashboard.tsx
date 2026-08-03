@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { dbService } from '../lib/dbService';
 import { 
   Folder, 
   Users, 
@@ -106,12 +107,13 @@ export default function DirectorDashboard({
     return acc;
   }, {} as Record<string, number>);
 
-  // Today attendance (real count from HRM attendance records in localstorage)
-  const getTodayCheckinsCount = () => {
-    try {
-      const savedLogs = localStorage.getItem('hl_hrm_attendance_v3');
-      if (savedLogs) {
-        const parsed = JSON.parse(savedLogs);
+  // Today attendance (đếm thực tế từ bảng attendance trên Supabase)
+  const [todayAttendanceCount, setTodayAttendanceCount] = useState(0);
+  useEffect(() => {
+    let active = true;
+    dbService.attendance.list()
+      .then(logs => {
+        if (!active) return;
         const getLocalYYYYMMDD = (d: Date) => {
           const y = d.getFullYear();
           const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -120,16 +122,15 @@ export default function DirectorDashboard({
         };
         const todayStr = getLocalYYYYMMDD(new Date());
         const uniqueUsers = new Set(
-          parsed
+          (logs || [])
             .filter((log: any) => log.date === todayStr && log.status !== 'missing' && log.status !== 'unexcused')
             .map((log: any) => log.empId)
         );
-        return uniqueUsers.size;
-      }
-    } catch (e) {}
-    return 0;
-  };
-  const todayAttendanceCount = getTodayCheckinsCount();
+        setTodayAttendanceCount(uniqueUsers.size);
+      })
+      .catch(err => console.warn('Lỗi tải chấm công cho Dashboard:', err));
+    return () => { active = false; };
+  }, []);
 
   // ----------------------------------------------------
   // DATA COMPUTATIONS - ACCOUNTING DEPARTMENT
@@ -190,17 +191,23 @@ export default function DirectorDashboard({
   // ----------------------------------------------------
   // DATA COMPUTATIONS - SUBCONTRACTORS (THẦU PHỤ)
   // ----------------------------------------------------
-  const [suppliers] = useState<Supplier[]>(() => {
-    const saved = localStorage.getItem('hl_acc_suppliers');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return [
-      { id: 'XD_1', name: 'Xưởng dán dẹt An Phát', representative: 'Nguyễn An Phát', field: 'Thợ phụ gia công dán cạnh Acrylic', address: 'Bảo Lộc', phone: '0933444555', email: 'anphat@gmail.com' },
-      { id: 'NTN_2', name: 'Nhóm thầu nề Hoàng Long', representative: 'Trần Hoàng Long', field: 'Thợ thầu sắt móng xây thô', address: 'Đà Lạt', phone: '0988777112', email: 'hoanglong@gmail.com' },
-      { id: 'DN_3', name: 'Nhà thầu điện nước Minh Hùng', representative: 'Phạm Minh Hùng', field: 'Thi công M&E công trình', address: 'Đức Trọng', phone: '0912334455', email: 'minhhungme@gmail.com' }
-    ];
-  });
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        // Load from accounting_subcontractors table (separate from material suppliers)
+        const data = await dbService.accountingSubcontractors.list();
+        setSuppliers(data);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    loadSuppliers();
+    const syncSuppliers = () => loadSuppliers();
+    window.addEventListener('hl-suppliers-updated', syncSuppliers);
+    return () => window.removeEventListener('hl-suppliers-updated', syncSuppliers);
+  }, []);
 
   // Filter lists based on search term
   const filteredProjects = projects.filter(p => 

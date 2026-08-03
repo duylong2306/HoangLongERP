@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Shield, DollarSign, Zap, FileText, Briefcase, CheckCircle2, Award, X, Trash2, Calculator, Sliders, AlertCircle, AlertTriangle
 } from 'lucide-react';
@@ -210,31 +210,45 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
   const [newSupplierPhone, setNewSupplierPhone] = React.useState('');
   const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = React.useState(false);
 
-  const [suppliers, setSuppliers] = React.useState<Supplier[]>(() => {
-    const saved = localStorage.getItem('hl_acc_material_suppliers');
-    if (saved) {
-      try { return JSON.parse(saved); } catch(e) {}
-    }
-    return [
-      { id: 'SUP_001', name: 'Công ty Gỗ An Cường Đà Lạt', representative: 'Phạm Minh Trí', phone: '0912345678', email: 'sales@ancuongdalat.vn', address: '12 Đường 3 Tháng 2, Đà Lạt', field: 'Cung cấp gỗ ván mộc mạc', bankAccount: '11200003456', bankName: 'VietinBank', note: 'Đơn vị phân phối vách MDF chính thức', debt: 15400000 },
-      { id: 'SUP_002', name: 'Đại lý Sắt Thép Hoa Sen Đức Trọng', representative: 'Lê Văn Sen', phone: '0905678123', email: 'contact@hoasenductrong.com', address: 'Quốc Lộ 20, Đức Trọng', field: 'Sắt thép dầm cơ khí', bankAccount: '190300400500', bankName: 'Techcombank', note: 'Chuyên thép hộp chịu lực công trình', debt: 34200000 },
-      { id: 'SUP_003', name: 'Kính Mỹ Thuật Đại Việt Lâm Đồng', representative: 'Lê Đại Việt', phone: '0933444555', email: 'daivietglass@gmail.com', address: 'Đức Trọng', field: 'Kính mài, kính thủy lực', bankAccount: '190203040506', bankName: 'Techcombank', note: 'Chuyên kính sấy nhiệt, hoa văn mài cạnh', debt: 0 }
-    ];
-  });
+  // Load suppliers from Supabase
+  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
 
-  const [inventory, setInventory] = React.useState<InventoryItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_inventory');
-    if (saved) {
-      try { return JSON.parse(saved); } catch(e) {}
-    }
-    return [
-      { id: 'mt_1', code: 'MDF-AC-18', name: 'Tấm Gỗ MDF chống ẩm An Cường 18mm', unit: 'Tấm', qty: 450, unitPrice: 380000, minAlert: 50, location: 'Kho lớn xưởng mộc' },
-      { id: 'mt_2', code: 'STH-HS-48', name: 'Sắt hộp mạ kẽm Hoa Sen 40x80', unit: 'Cây', qty: 120, unitPrice: 210000, minAlert: 30, location: 'Xưởng cơ khí sắt' },
-      { id: 'mt_3', code: 'KCL-DV-10', name: 'Kính cường lực mài cạnh bóng 10mm', unit: 'M2', qty: 85, unitPrice: 750000, minAlert: 15, location: 'Kho phụ trung chuyển' },
-      { id: 'mt_4', code: 'SNT-XP-20', name: 'Sơn lót phủ Acrylic sấy nhiệt bóng', unit: 'Thùng 18L', qty: 35, unitPrice: 1200000, minAlert: 10, location: 'Kho sơn xưởng mộc' },
-      { id: 'mt_5', code: 'QA-BL-90', name: 'Bản lề giảm chấn Hafele kịch tủ', unit: 'Cái', qty: 950, unitPrice: 42000, minAlert: 100, location: 'Kệ phụ kiện tổng' }
-    ];
-  });
+  // Load inventory from Supabase
+  const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
+
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        const data = await dbService.suppliers.list();
+        setSuppliers(data);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    const loadInventory = async () => {
+      try {
+        const data = await dbService.inventory.list();
+        setInventory(data);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    loadSuppliers();
+    loadInventory();
+
+    const syncSuppliers = () => loadSuppliers();
+    const syncInventory = () => loadInventory();
+
+    window.addEventListener('hl-suppliers-updated', syncSuppliers);
+    window.addEventListener('hl-inventory-updated', syncInventory);
+
+    return () => {
+      window.removeEventListener('hl-suppliers-updated', syncSuppliers);
+      window.removeEventListener('hl-inventory-updated', syncInventory);
+    };
+  }, []);
 
   const [localCtQuoteSector, setLocalCtQuoteSector] = React.useState<'furniture' | 'construction' | 'mechanical'>('furniture');
   const ctQuoteSector = props.ctQuoteSector !== undefined ? props.ctQuoteSector : localCtQuoteSector;
@@ -1535,7 +1549,6 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                               };
                               const updatedSups = [...suppliers, newSup];
                               setSuppliers(updatedSups);
-                              localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(updatedSups));
                               dbService.suppliers.save(newSup).catch(() => {});
                               window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: updatedSups }));
 
@@ -1792,7 +1805,6 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                                 };
                                 const updatedSups = [...suppliers, autoSup];
                                 setSuppliers(updatedSups);
-                                localStorage.setItem('hl_acc_material_suppliers', JSON.stringify(updatedSups));
                                 dbService.suppliers.save(autoSup).catch(() => {});
                                 window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: updatedSups }));
 

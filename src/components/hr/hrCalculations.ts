@@ -272,16 +272,13 @@ export function computeDailyWorkday(
   if (morningWorked || afternoonWorked) {
     const finalVal = totalBaseShifts * multiplier;
     const detailsText = `${morningWorked ? 'Sáng' : ''}${morningWorked && afternoonWorked ? '+' : ''}${afternoonWorked ? 'Chiều' : ''} (Nhân ${multiplier}x ${multiplierType})`;
-    let latePenalty = 0;
-    let lateNote = '';
-    if (log.status === 'late' && !isHoliday && !isWeekend) {
-      latePenalty = getCoefVal('MDLATE', -0.25);
-      lateNote = ` • Phạt muộn ${latePenalty}`;
-    }
+    // Bỏ phạt -0.25 công khi đi muộn (MDLATE): đi muộn vẫn ghi nhận đủ công.
+    // Vi phạm đi muộn giờ được xử lý qua bảng Hiệu suất (hrm_employee_errors)
+    // khi số lần đi muộn trong tháng vượt quá ngưỡng cho phép (allowedLateCount).
     return {
-      workday: finalVal + latePenalty,
-      label: `+${finalVal + latePenalty}`,
-      details: detailsText + lateNote
+      workday: finalVal,
+      label: `+${finalVal}`,
+      details: detailsText
     };
   } else {
     const hasAnyPunch = hasInS || hasOutS || hasInC || hasOutC ||

@@ -354,7 +354,7 @@ export default function DashboardOverview({
     return String(v);
   };
   const normalizeRecord = (r: any) => {
-    const { _serverTime, ...rest } = r; // Loại bỏ _serverTime object khỏi bản ghi lưu cache/localStorage
+    const { _serverTime, ...rest } = r; // Loại bỏ _serverTime object (dữ liệu thời gian server)
     return {
       ...rest,
       timeInS: normalizeTime(rest.timeInS),
@@ -366,24 +366,7 @@ export default function DashboardOverview({
     };
   };
 
-  const [attendanceList, setAttendanceList] = useState<any[]>(() => {
-    // Load từ localStorage cache trước để tránh flash nút sai khi load trang
-    try {
-      const cached = localStorage.getItem('hl_attendance_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed.map(normalizeRecord);
-      }
-    } catch {}
-    return [];
-  });
-
-  // Cache attendanceList xuống localStorage mỗi khi có thay đổi
-  useEffect(() => {
-    try {
-      localStorage.setItem('hl_attendance_cache', JSON.stringify(attendanceList));
-    } catch {}
-  }, [attendanceList]);
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
 
   // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
   const isSyncingFromCloud = useRef(false);
@@ -452,26 +435,23 @@ export default function DashboardOverview({
       { name: 'Lê Thị Thảo', role: 'Kế Toán' }
     ];
     try {
-      const empDataStr = localStorage.getItem('hl_hrm_employees_v3');
-      if (empDataStr) {
-        const list = JSON.parse(empDataStr);
-        if (Array.isArray(list)) {
-          const filtered = list.filter((e: any) => {
-            const role = (e.position || '').toLowerCase();
-            return (
-              role.includes('giám đốc') ||
-              role.includes('quản') ||
-              role.includes('trưởng') ||
-              role.includes('kế toán') ||
-              ['Trương Hữu Long', 'Lê Thế Tiến', 'Lê Thị Thảo'].includes(e.name)
-            );
-          });
-          if (filtered.length > 0) {
-            return filtered.map((e: any) => ({
-              name: e.name,
-              role: e.position || 'Quản lý'
-            }));
-          }
+      const list = hrmEmployees;
+      if (Array.isArray(list)) {
+        const filtered = list.filter((e: any) => {
+          const role = (e.position || '').toLowerCase();
+          return (
+            role.includes('giám đốc') ||
+            role.includes('quản') ||
+            role.includes('trưởng') ||
+            role.includes('kế toán') ||
+            ['Trương Hữu Long', 'Lê Thế Tiến', 'Lê Thị Thảo'].includes(e.name)
+          );
+        });
+        if (filtered.length > 0) {
+          return filtered.map((e: any) => ({
+            name: e.name,
+            role: e.position || 'Quản lý'
+          }));
         }
       }
     } catch (err) {
@@ -556,30 +536,26 @@ export default function DashboardOverview({
   const empId = currentUser?.id || '';
 
 
-  const [hrmEmployees, setHrmEmployees] = useState<any[]>(() => {
-    const saved = localStorage.getItem('hl_hrm_employees_v3');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [hrmEmployees, setHrmEmployees] = useState<any[]>([]);
+
+  useEffect(() => {
+    dbService.employees.list()
+      .then(list => { if (Array.isArray(list)) setHrmEmployees(list); })
+      .catch(err => console.warn('Lỗi tải nhân viên từ Supabase:', err));
+  }, []);
 
   useEffect(() => {
     const handleSyncEmployees = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
         setHrmEmployees(customEvent.detail);
-      } else {
-        const saved = localStorage.getItem('hl_hrm_employees_v3');
-        if (saved) {
-          setHrmEmployees(JSON.parse(saved));
-        }
       }
     };
     window.addEventListener('hl_employees_changed_from_hrm', handleSyncEmployees);
     window.addEventListener('hl-employees-updated', handleSyncEmployees);
-    window.addEventListener('storage', handleSyncEmployees);
     return () => {
       window.removeEventListener('hl_employees_changed_from_hrm', handleSyncEmployees);
       window.removeEventListener('hl-employees-updated', handleSyncEmployees);
-      window.removeEventListener('storage', handleSyncEmployees);
     };
   }, []);
 
@@ -744,22 +720,32 @@ export default function DashboardOverview({
     'Nghỉ cưới'
   ]);
 
+  // Load coefficients and holidays for unified workday calculation (từ Supabase)
+  const [dashCoefficients, setDashCoefficients] = useState<any[]>([]);
+  const [dashHolidays, setDashHolidays] = useState<any[]>([]);
+
+  useEffect(() => {
+    dbService.hrmLeaveCoefficients.list()
+      .then(list => { if (Array.isArray(list)) setDashCoefficients(list); })
+      .catch(err => console.warn('Lỗi tải hệ số nghỉ phép từ Supabase:', err));
+    dbService.hrmHolidays.list()
+      .then(list => { if (Array.isArray(list)) setDashHolidays(list); })
+      .catch(err => console.warn('Lỗi tải ngày lễ từ Supabase:', err));
+  }, []);
+
   useEffect(() => {
     if (leaveModalOpen) {
       try {
-        const saved = localStorage.getItem('hl_hrm_leave_coefs_v5');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const types = parsed
-              .filter((item: any) => item.isAuto === false)
-              .map((item: any) => item.type)
-              .filter(Boolean);
-            if (types.length > 0) {
-              setLeaveTypes(types);
-              if (!types.includes(leaveRequestType)) {
-                setLeaveRequestType(types[0]);
-              }
+        const parsed = dashCoefficients;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const types = parsed
+            .filter((item: any) => item.isAuto === false)
+            .map((item: any) => item.type)
+            .filter(Boolean);
+          if (types.length > 0) {
+            setLeaveTypes(types);
+            if (!types.includes(leaveRequestType)) {
+              setLeaveRequestType(types[0]);
             }
           }
         }
@@ -781,7 +767,7 @@ export default function DashboardOverview({
         console.error('Error calculating initial dates:', e);
       }
     }
-  }, [leaveModalOpen, todayVal]);
+  }, [leaveModalOpen, todayVal, dashCoefficients]);
 
   const [leaveFrom, setLeaveFrom] = useState('2026-06-08');
   const [leaveTo, setLeaveTo] = useState('2026-06-09');
@@ -817,27 +803,16 @@ export default function DashboardOverview({
   const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | ''>('');
   const [reportShift, setReportShift] = useState<'morning' | 'afternoon' | ''>('');
 
-  // Leaves list state
-  const [dashLeaves, setDashLeaves] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_leaves_v3');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [];
-  });
+  // Leaves list state (nguồn: Supabase)
+  const [dashLeaves, setDashLeaves] = useState<any[]>([]);
 
   const refreshDashLeaves = () => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_leaves_v3');
-      if (saved) {
-        setDashLeaves(JSON.parse(saved));
-      } else {
-        setDashLeaves([]);
-      }
-    } catch (e) {}
+    dbService.hrmLeaves.list()
+      .then(list => { if (Array.isArray(list)) setDashLeaves(list); })
+      .catch(err => console.warn('Lỗi tải đơn nghỉ phép từ Supabase:', err));
   };
 
-  // Listen for real-time leave updates
+  // Listen for real-time leave updates (HRM + Supabase realtime)
   useEffect(() => {
     const handleSyncLeaves = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -846,14 +821,12 @@ export default function DashboardOverview({
       }
     };
     window.addEventListener('hl_leaves_changed_from_hrm', handleSyncLeaves);
-    return () => window.removeEventListener('hl_leaves_changed_from_hrm', handleSyncLeaves);
+    window.addEventListener('hl-hrm-leaves-updated', refreshDashLeaves);
+    return () => {
+      window.removeEventListener('hl_leaves_changed_from_hrm', handleSyncLeaves);
+      window.removeEventListener('hl-hrm-leaves-updated', refreshDashLeaves);
+    };
   }, []);
-
-  useEffect(() => {
-    if (dashLeaves) {
-      window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_dashboard', { detail: dashLeaves }));
-    }
-  }, [dashLeaves]);
 
   // Reset/initialize report states on day selection
   useEffect(() => {
@@ -1331,6 +1304,75 @@ export default function DashboardOverview({
       }
     }
 
+    // ─── Tự ghi vi phạm "Đi muộn" (crit_A_3) khi số ngày đi muộn trong tháng vượt ngưỡng ───
+    // Chỉ xét khi vừa chấm VÀO ca (timeInS / timeInC) và bản ghi bị flag là đi muộn.
+    // Vi phạm ghi 1 bản DUY NHẤT cho mỗi NV-tháng (id deterministic → không nhân đôi dù chấm lại).
+    if ((activePunchSlot === 'timeInS' || activePunchSlot === 'timeInC') && todayLog.status === 'late') {
+      const allowedLateCount = config.allowedLateCount ?? 3;
+      const monthKey = todayVal.substring(0, 7); // "2026-08"
+      const allowedLate = config.allowedLateMinutes ?? 15;
+      const targetInS = timeToMinutes(config.morningIn || '07:30');
+      const targetInC = timeToMinutes(config.afternoonIn || '13:00');
+
+      // Xác định 1 bản ghi có phải "ngày đi muộn" không (bỏ ngày phép/off/không làm)
+      const isLateDay = (log: any): boolean => {
+        if (!log) return false;
+        if (log.empId !== empId && log.empName !== currentUser.name) return false;
+        if (['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS)) return false;
+        if (log.status === 'excused') return false;
+        if (log.notes?.toLowerCase().includes('nghỉ') || log.notes?.toLowerCase().includes('off')) return false;
+        let late = false;
+        const inS = log.timeInS;
+        const inC = log.timeInC;
+        if (inS && inS !== '--:--' && inS !== '') {
+          if (timeToMinutes(inS) > (targetInS + allowedLate)) late = true;
+        }
+        if (inC && inC !== '--:--' && inC !== '') {
+          if (timeToMinutes(inC) > (targetInC + allowedLate)) late = true;
+        }
+        return late;
+      };
+
+      // Đếm số ngày đi muộn RIÊNG BIỆT trong tháng hiện tại (1 ngày dù muộn 2 buổi vẫn tính 1 lần)
+      const lateDates = new Set<string>();
+      [...attendanceList, todayLog].forEach((log: any) => {
+        if (log.date && log.date.startsWith(monthKey) && isLateDay(log)) {
+          lateDates.add(log.date);
+        }
+      });
+      const lateCountInMonth = lateDates.size;
+
+      // Vượt ngưỡng → ghi vi phạm đi muộn vào Bảng Hiệu suất (hrm_employee_errors)
+      if (lateCountInMonth > allowedLateCount) {
+        const violationId = `err_late_${empId}_${monthKey}`;
+        const violation: any = {
+          id: violationId,
+          employeeId: empId,
+          employeeName: currentUser.name,
+          departmentCode: currentUser.department || 'A',
+          departmentName: currentUser.department || '',
+          criterionId: 'crit_A_3',
+          criterionContent: 'Đi muộn không chấp hành giờ giấc làm việc',
+          category: 'readiness',
+          date: todayVal,
+          notes: `Tự động ghi nhận: đi muộn ${lateCountInMonth} lần trong tháng ${monthKey} (ngưỡng cho phép: ${allowedLateCount}). Lần đi muộn gần nhất: ${punchedTime} (${slotLabel}).`,
+          images: [],
+          autoSource: `auto_late_${monthKey}_${empId}`
+        };
+        dbService.hrmEmployeeErrors.save(violation).catch(err =>
+          console.warn('Ghi vi phạm đi muộn lên Supabase thất bại:', err)
+        );
+        // Thông báo cho tab Hiệu suất refresh
+        try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+        addToast({
+          title: '⚠️ Vi phạm đi muộn',
+          message: `Bạn đã đi muộn ${lateCountInMonth} ngày trong tháng ${monthKey} (vượt ngưỡng ${allowedLateCount}). Vi phạm đi muộn đã được ghi vào bảng Hiệu suất.`,
+          type: 'warning',
+          duration: 5000,
+        });
+      }
+    }
+
     // Calc OT hours if both OT slots are set
     if (todayLog.timeInOT !== '--:--' && todayLog.timeInOT !== '' && todayLog.timeOutOT !== '--:--' && todayLog.timeOutOT !== '') {
       try {
@@ -1444,13 +1486,6 @@ export default function DashboardOverview({
       console.error(e);
     }
 
-    // Read stored leaves
-    let currentLeaves: any[] = [];
-    const saved = localStorage.getItem('hl_hrm_leaves_v3');
-    if (saved) {
-      try { currentLeaves = JSON.parse(saved); } catch (e) {}
-    }
-
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const submittedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
@@ -1472,10 +1507,14 @@ export default function DashboardOverview({
       approverPosition: leaveApproverPosition || ''
     };
 
-    const updated = [newRequest, ...currentLeaves];
-    localStorage.setItem('hl_hrm_leaves_v3', JSON.stringify(updated));
-    refreshDashLeaves();
-    
+    // Lưu lên Supabase (nguồn duy nhất) + cập nhật state
+    dbService.hrmLeaves.save(newRequest)
+      .then(() => setDashLeaves(prev => [newRequest, ...(prev || [])]))
+      .catch(err => {
+        console.warn('Push đơn nghỉ phép lên Supabase thất bại:', err);
+        setDashLeaves(prev => [newRequest, ...(prev || [])]);
+      });
+
     setLeaveReasonText('');
     setLeaveModalOpen(false);
     alert(`📬 Đơn xin nghỉ phép đã được nộp sang HỆ THỐNG NHÂN SỰ thành công!\nNgười duyệt: ${(leaveApprover || 'Trương Hữu Long')}${leaveApproverPosition ? ` (${leaveApproverPosition})` : ''}\nTrạng thái: Đang chờ duyệt.`);
@@ -1487,12 +1526,6 @@ export default function DashboardOverview({
     if (!reportReason) {
       alert("Vui lòng nhập lý do giải trình cụ thể!");
       return;
-    }
-
-    let currentLeaves: any[] = [];
-    const saved = localStorage.getItem('hl_hrm_leaves_v3');
-    if (saved) {
-      try { currentLeaves = JSON.parse(saved); } catch (e) {}
     }
 
     const now = new Date();
@@ -1516,9 +1549,13 @@ export default function DashboardOverview({
       isAttendanceCorrection: true
     };
 
-    const updated = [newRequest, ...currentLeaves];
-    localStorage.setItem('hl_hrm_leaves_v3', JSON.stringify(updated));
-    refreshDashLeaves();
+    // Lưu lên Supabase (nguồn duy nhất) + cập nhật state
+    dbService.hrmLeaves.save(newRequest)
+      .then(() => setDashLeaves(prev => [newRequest, ...(prev || [])]))
+      .catch(err => {
+        console.warn('Push báo cáo nghỉ ca lên Supabase thất bại:', err);
+        setDashLeaves(prev => [newRequest, ...(prev || [])]);
+      });
 
     setShowReportForm(false);
     setReportReason('');
@@ -1564,10 +1601,12 @@ export default function DashboardOverview({
 
     // 1. Ghi nhận dữ liệu sang chi tiết lương (Hệ thống nhân sự)
     let currentPayroll: any[] = [];
-    const savedPayroll = localStorage.getItem('hl_hrm_payroll_v3');
-    if (savedPayroll) {
-      try { currentPayroll = JSON.parse(savedPayroll); } catch (err) {}
+    try {
+      currentPayroll = await dbService.hrmPayrollRecords.list();
+    } catch (err) {
+      console.warn('Lỗi tải bảng lương từ Supabase:', err);
     }
+    currentPayroll = currentPayroll || [];
 
     // Tìm xem đã có bản ghi bảng lương tháng của nhân sự này chưa
     let payrollItem = currentPayroll.find((p: any) => p.empName === currentUser.name && p.month === advancePeriod);
@@ -1596,7 +1635,9 @@ export default function DashboardOverview({
       currentPayroll.push(payrollItem);
     }
 
-    localStorage.setItem('hl_hrm_payroll_v3', JSON.stringify(currentPayroll));
+    // Lưu bảng lương lên Supabase
+    dbService.hrmPayrollRecords.save(payrollItem).catch(err =>
+      console.warn('Lỗi lưu bảng lương lên Supabase:', err));
 
     // 2. Tạo Đề Xuất Tạm Ứng Lương (SubcontractorAdvanceProposal) - Gửi sang Đề Xuất Thu Chi
     // Loại: project_expense_proposal (đề xuất chi phí dự án - ứng lương nhân sự)
@@ -1626,17 +1667,8 @@ export default function DashboardOverview({
     };
 
     try {
-      // Lưu vào IndexedDB qua dbService
+      // Lưu lên Supabase (nguồn duy nhất)
       await dbService.subcontractorAdvances.save(newProposal);
-
-      // Cập nhật localStorage để đồng bộ với FinanceManagement
-      let existingProposals: SubcontractorAdvanceProposal[] = [];
-      const savedProposals = localStorage.getItem('hl_subcontractor_advances');
-      if (savedProposals) {
-        try { existingProposals = JSON.parse(savedProposals); } catch (err) {}
-      }
-      existingProposals.unshift(newProposal); // Thêm lên đầu
-      localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existingProposals));
 
       // Trigger custom event để các component khác (FinanceManagement) cập nhật
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: newProposal }));
@@ -1656,23 +1688,6 @@ export default function DashboardOverview({
 
   // Calc aggregated values for current employee
   const currentLogs = attendanceList.filter(a => a.empName === currentUser.name);
-
-  // Load coefficients and holidays for unified workday calculation
-  const dashCoefficients = (() => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_leave_coefs_v6');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [];
-  })();
-
-  const dashHolidays = (() => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_holidays_v3');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [];
-  })();
 
   const dashWeekendDays = config.weekendDays || [0];
 
@@ -2297,8 +2312,7 @@ export default function DashboardOverview({
                     cells.push(<div key={`empty-${i}`} className="h-9 rounded bg-slate-950/20"></div>);
                   }
 
-                  const holidayListRaw = localStorage.getItem('hl_hrm_holidays_v3');
-                  const savedHolidays: { id: string; date: string; name: string }[] = holidayListRaw ? JSON.parse(holidayListRaw) : [];
+                  const savedHolidays: { id: string; date: string; name: string }[] = dashHolidays || [];
                   
                   for (let d = 1; d <= daysInM; d++) {
                     const formattedD = String(d).padStart(2, '0');

@@ -353,11 +353,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     showTemplateOnly = false
   } = props;
 
-  // Read house estimate prices reactively (from prop or localStorage)
+  // Read house estimate prices reactively (from prop, fallback default)
   const houseEstimatePrices = React.useMemo<HouseEstimatePrice[]>(() => {
     if (propsHouseEstimatePrices) return propsHouseEstimatePrices;
-    const local = localStorage.getItem('house_estimate_prices');
-    return local ? (JSON.parse(local) as HouseEstimatePrice[]) : HOUSE_ESTIMATE_PRICES;
+    return HOUSE_ESTIMATE_PRICES;
   }, [propsHouseEstimatePrices]);
   // Config tỉ lệ % đặc thù xây dựng thô
   const [config, setConfig] = useState<QuoteConfig>({
@@ -521,17 +520,17 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   }, [selectedProjectId, projects, customers]);
 
   const [quoteNotes, setQuoteNotes] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState(() => localStorage.getItem('hl_construction_payment_terms') || sessionStorage.getItem('hl_construction_payment_terms') || DEFAULT_CONS_PAYMENT_TERMS);
+  const [paymentTerms, setPaymentTerms] = useState(() => sessionStorage.getItem('hl_construction_payment_terms') || DEFAULT_CONS_PAYMENT_TERMS);
 
-  const [companyLogoImg, setCompanyLogoImg] = useState(() => localStorage.getItem('hl_construction_company_logo') || sessionStorage.getItem('hl_construction_company_logo') || '');
-  const [companyLogoText, setCompanyLogoText] = useState(() => localStorage.getItem('hl_construction_company_name') || sessionStorage.getItem('hl_construction_company_name') || 'HOANG LONG');
-  const [companySlogan, setCompanySlogan] = useState(() => localStorage.getItem('hl_construction_company_slogan') || sessionStorage.getItem('hl_construction_company_slogan') || 'Construction - Furniture - Doors');
-  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => localStorage.getItem('hl_construction_company_address') || sessionStorage.getItem('hl_construction_company_address') || '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>');
-  const [companyContactInfo, setCompanyContactInfo] = useState(() => localStorage.getItem('hl_construction_company_contact') || sessionStorage.getItem('hl_construction_company_contact') || '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>');
+  const [companyLogoImg, setCompanyLogoImg] = useState(() => sessionStorage.getItem('hl_construction_company_logo') || '');
+  const [companyLogoText, setCompanyLogoText] = useState(() => sessionStorage.getItem('hl_construction_company_name') || 'HOANG LONG');
+  const [companySlogan, setCompanySlogan] = useState(() => sessionStorage.getItem('hl_construction_company_slogan') || 'Construction - Furniture - Doors');
+  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => sessionStorage.getItem('hl_construction_company_address') || '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>');
+  const [companyContactInfo, setCompanyContactInfo] = useState(() => sessionStorage.getItem('hl_construction_company_contact') || '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>');
 
-  const [contractTemplate, setContractTemplate] = useState(() => localStorage.getItem('hl_construction_contract_template') || DEFAULT_CONS_CONTRACT_TEMPLATE);
-  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => localStorage.getItem('hl_construction_acceptance_template') || DEFAULT_CONS_ACCEPTANCE_TEMPLATE);
-  const [liquidationTemplate, setLiquidationTemplate] = useState(() => localStorage.getItem('hl_construction_liquidation_template') || DEFAULT_CONS_LIQUIDATION_TEMPLATE);
+  const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_CONS_CONTRACT_TEMPLATE);
+  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_CONS_ACCEPTANCE_TEMPLATE);
+  const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_CONS_LIQUIDATION_TEMPLATE);
   const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
@@ -549,22 +548,12 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         defaultData.companyAddressInfo = companyAddressInfo;
         defaultData.companyContactInfo = companyContactInfo;
         defaultData.paymentTerms = paymentTerms;
-        
-        localStorage.setItem('hl_construction_default_logo', companyLogoImg);
-        localStorage.setItem('hl_construction_default_company_name', companyLogoText);
-        localStorage.setItem('hl_construction_default_company_slogan', companySlogan);
-        localStorage.setItem('hl_construction_default_company_address', companyAddressInfo);
-        localStorage.setItem('hl_construction_default_company_contact', companyContactInfo);
-        localStorage.setItem('hl_construction_default_payment_terms', paymentTerms);
       } else if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_construction_default_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_construction_default_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_construction_default_liquidation_template', liquidationTemplate);
       }
       
       await dbService.quotationConfigs.save('construction_default', defaultData);
@@ -598,13 +587,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       const defaultData = await dbService.quotationConfigs.get('construction_default');
       
       if (activeTemplateTab === 'quote') {
-        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_construction_default_logo') ?? '';
-        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_construction_default_company_name') ?? 'HOANG LONG';
-        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_construction_default_company_slogan') ?? 'Construction - Furniture - Doors';
-        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_construction_default_company_address') ?? '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>';
-        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_construction_default_company_contact') ?? '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>';
-        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_construction_default_payment_terms') ?? DEFAULT_CONS_PAYMENT_TERMS;
-        
+        const logo = defaultData?.companyLogoImg ?? '';
+        const name = defaultData?.companyLogoText ?? 'HOANG LONG';
+        const slogan = defaultData?.companySlogan ?? 'Construction - Furniture - Doors';
+        const address = defaultData?.companyAddressInfo ?? '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>';
+        const contact = defaultData?.companyContactInfo ?? '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>';
+        const terms = defaultData?.paymentTerms ?? DEFAULT_CONS_PAYMENT_TERMS;
+
         setCompanyLogoImg(logo);
         setCompanyLogoText(name);
         setCompanySlogan(slogan);
@@ -612,13 +601,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         setCompanyContactInfo(contact);
         setPaymentTerms(terms);
       } else if (activeTemplateTab === 'contract') {
-        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_construction_default_contract_template') ?? DEFAULT_CONS_CONTRACT_TEMPLATE;
+        const template = defaultData?.contractTemplate ?? DEFAULT_CONS_CONTRACT_TEMPLATE;
         setContractTemplate(template);
       } else if (activeTemplateTab === 'acceptance') {
-        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_construction_default_acceptance_template') ?? DEFAULT_CONS_ACCEPTANCE_TEMPLATE;
+        const template = defaultData?.acceptanceTemplate ?? DEFAULT_CONS_ACCEPTANCE_TEMPLATE;
         setAcceptanceTemplate(template);
       } else if (activeTemplateTab === 'liquidation') {
-        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_construction_default_liquidation_template') ?? DEFAULT_CONS_LIQUIDATION_TEMPLATE;
+        const template = defaultData?.liquidationTemplate ?? DEFAULT_CONS_LIQUIDATION_TEMPLATE;
         setLiquidationTemplate(template);
       }
       
@@ -733,17 +722,6 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     sessionStorage.setItem('hl_construction_company_slogan', companySlogan);
     sessionStorage.setItem('hl_construction_company_address', companyAddressInfo);
     sessionStorage.setItem('hl_construction_company_contact', companyContactInfo);
-
-    localStorage.setItem('hl_construction_company_logo', companyLogoImg);
-    localStorage.setItem('hl_construction_company_name', companyLogoText);
-    localStorage.setItem('hl_construction_company_slogan', companySlogan);
-    localStorage.setItem('hl_construction_company_address', companyAddressInfo);
-    localStorage.setItem('hl_construction_company_contact', companyContactInfo);
-    localStorage.setItem('hl_construction_payment_terms', paymentTerms);
-
-    localStorage.setItem('hl_construction_contract_template', contractTemplate);
-    localStorage.setItem('hl_construction_acceptance_template', acceptanceTemplate);
-    localStorage.setItem('hl_construction_liquidation_template', liquidationTemplate);
   }, [selectedHouseType, chieuDai, chieuRong, soTang, donGiaKhaiToan, nganSachNoiThat, quoteItems, quoteNotes, paymentTerms, config, companyLogoImg, companyLogoText, companySlogan, companyAddressInfo, companyContactInfo, contractTemplate, acceptanceTemplate, liquidationTemplate]);
 
   const [dbLoading, setDbLoading] = useState(false);
@@ -916,6 +894,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
   // --- HỆ THỐNG THÊM SẢN PHẨM TỪ DANH MỤC TIÊU CHUẨN XÂY DỰNG ---
   const [catalogProducts, setCatalogProducts] = useState<ProductCatalogItem[]>([]);
+  const [allProductPrices, setAllProductPrices] = useState<any[]>([]);
+  const [allProductMaterials, setAllProductMaterials] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<ProductCatalogItem | null>(null);
   const [selectedPriceOption, setSelectedPriceOption] = useState<string>('');
@@ -935,39 +915,46 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [customProductOtherQty, setCustomProductOtherQty] = useState<number>(1);
   const [customProductOtherUnitPrice, setCustomProductOtherUnitPrice] = useState<number>(1000000);
 
-  // Nạp danh mục sản phẩm lĩnh vực Xây dựng
+  // Nạp danh mục sản phẩm lĩnh vực Xây dựng (từ Supabase)
   useEffect(() => {
-    const saved = localStorage.getItem('hl_acc_products');
-    let loadedProducts = [];
-    if (saved) {
-      try {
-        loadedProducts = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    
-    if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
-      loadedProducts = INITIAL_PRODUCTS;
-      localStorage.setItem('hl_acc_products', JSON.stringify(INITIAL_PRODUCTS));
-    } else {
-      // Merge defaults if missing
-      const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
-      const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
-      if (!hasConst || !hasMech) {
-        const merged = [...loadedProducts];
-        INITIAL_PRODUCTS.forEach(item => {
-          if (!merged.some(m => m.id === item.id)) {
-            merged.push(item);
+    let loadedProducts: any[] = [];
+    dbService.accountingProductCatalog.list()
+      .then(cloudProducts => {
+        if (cloudProducts && cloudProducts.length > 0) {
+          loadedProducts = cloudProducts;
+        }
+      })
+      .catch(err => console.warn('Lỗi tải danh mục sản phẩm từ Supabase:', err))
+      .finally(() => {
+        if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
+          loadedProducts = INITIAL_PRODUCTS;
+        } else {
+          // Merge defaults if missing
+          const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
+          const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
+          if (!hasConst || !hasMech) {
+            const merged = [...loadedProducts];
+            INITIAL_PRODUCTS.forEach(item => {
+              if (!merged.some(m => m.id === item.id)) {
+                merged.push(item);
+              }
+            });
+            loadedProducts = merged;
           }
-        });
-        localStorage.setItem('hl_acc_products', JSON.stringify(merged));
-        loadedProducts = merged;
-      }
-    }
-    
-    const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Xây dựng');
-    setCatalogProducts(domainProducts);
+        }
+        const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Xây dựng');
+        setCatalogProducts(domainProducts);
+      });
+  }, []);
+
+  // Nạp giá & chất liệu theo sản phẩm từ Supabase
+  useEffect(() => {
+    dbService.productPrices.list()
+      .then(list => { if (Array.isArray(list)) setAllProductPrices(list); })
+      .catch(err => console.warn('Lỗi tải giá sản phẩm từ Supabase:', err));
+    dbService.productMaterials.list()
+      .then(list => { if (Array.isArray(list)) setAllProductMaterials(list); })
+      .catch(err => console.warn('Lỗi tải chất liệu sản phẩm từ Supabase:', err));
   }, []);
 
   const categories = Array.from(new Set(catalogProducts.map(p => p.danhMuc as string).filter(Boolean)));
@@ -983,27 +970,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   // Get all active linked prices for selectedProduct
   const getProductLinkedPrices = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (!savedPrices) return [];
-      const allPrices = JSON.parse(savedPrices);
-      return allPrices.filter((pr: any) => pr.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductPrices.filter((pr: any) => pr.productId === selectedProduct.id);
   };
 
   // Get all active linked materials for selectedProduct
   const getProductLinkedMaterials = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (!savedMaterials) return [];
-      const allMaterials = JSON.parse(savedMaterials);
-      return allMaterials.filter((m: any) => m.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductMaterials.filter((m: any) => m.productId === selectedProduct.id);
   };
 
   useEffect(() => {
@@ -1012,17 +985,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       const defaultProd = probables[0];
       setSelectedProduct(defaultProd);
       
-      let subPrices: any[] = [];
-      try {
-        const savedPrices = localStorage.getItem('hl_acc_product_prices');
-        if (savedPrices) {
-          const allPrices = JSON.parse(savedPrices);
-          subPrices = allPrices.filter((pr: any) => pr.productId === defaultProd.id);
-        }
-      } catch (err) {
-        console.error("Error loading product prices:", err);
-      }
-      
+      const subPrices = allProductPrices.filter((pr: any) => pr.productId === defaultProd.id);
+
       if (subPrices.length > 0) {
         setSelectedPriceOption(subPrices[0].tenGia);
         setChosenPrice(subPrices[0].donGia);
@@ -1031,16 +995,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         setChosenPrice(0);
       }
 
-      let subMats: any[] = [];
-      try {
-        const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-        if (savedMaterials) {
-          const allMaterials = JSON.parse(savedMaterials);
-          subMats = allMaterials.filter((m: any) => m.productId === defaultProd.id);
-        }
-      } catch (err) {
-        console.error("Error loading product materials:", err);
-      }
+      const subMats = allProductMaterials.filter((m: any) => m.productId === defaultProd.id);
 
       if (subMats.length > 0) {
         setSelectedMaterialOption(subMats[0].tenChatLieu);
@@ -1055,23 +1010,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setChosenPrice(0);
       setSelectedMaterialOption('');
     }
-  }, [selectedCategory, catalogProducts]);
+  }, [selectedCategory, catalogProducts, allProductPrices, allProductMaterials]);
 
   const handleProductSelect = (prod: any) => {
     setSelectedProduct(prod);
     setIsProdDropdownOpen(false);
-    
-    let subPrices: any[] = [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        subPrices = allPrices.filter((pr: any) => pr.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    
+
+    const subPrices = allProductPrices.filter((pr: any) => pr.productId === prod.id);
+
     if (subPrices.length > 0) {
       setSelectedPriceOption(subPrices[0].tenGia);
       setChosenPrice(subPrices[0].donGia);
@@ -1080,16 +1026,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setChosenPrice(0);
     }
 
-    let subMats: any[] = [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (savedMaterials) {
-        const allMaterials = JSON.parse(savedMaterials);
-        subMats = allMaterials.filter((m: any) => m.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const subMats = allProductMaterials.filter((m: any) => m.productId === prod.id);
 
     if (subMats.length > 0) {
       setSelectedMaterialOption(subMats[0].tenChatLieu);
@@ -1104,18 +1041,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     setSelectedPriceOption(option);
     if (!selectedProduct) return;
     if (option === 'Tự chọn') return;
-    
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        const match = allPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
-        if (match) {
-          setChosenPrice(match.donGia);
-        }
-      }
-    } catch (e) {
-      console.error(e);
+
+    const match = allProductPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
+    if (match) {
+      setChosenPrice(match.donGia);
     }
   };
 
@@ -1220,7 +1149,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     setCustomProductOtherUnitPrice(1000000);
   };
 
-  const handleSendToProject = () => {
+  const handleSendToProject = async () => {
     if (!selectedProjectId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn hoặc liên kết dự án trước khi gửi báo giá!', type: 'warning' });
       return;
@@ -1242,14 +1171,11 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     const itemCode = `BGXD-HL-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const pdfName = `Bao_gia_Xay_dung_${(customerName || 'Khach_hang').trim().replace(/\s+/g, '_')}.pdf`;
 
-    const rawTasks = localStorage.getItem('hl_erp_tasks');
     let currentTasks: any[] = [];
-    if (rawTasks) {
-      try {
-        currentTasks = JSON.parse(rawTasks);
-      } catch (e) {
-        console.error("Lỗi đọc tasks từ localStorage:", e);
-      }
+    try {
+      currentTasks = await dbService.tasks.list();
+    } catch (e) {
+      console.error("Lỗi đọc tasks từ Supabase:", e);
     }
 
     let taskUpdatedCount = 0;
@@ -1332,11 +1258,9 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       return p;
     });
 
-    localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjects));
     window.dispatchEvent(new CustomEvent('hl-projects-updated'));
 
     if (taskUpdatedCount > 0) {
-      localStorage.setItem('hl_erp_tasks', JSON.stringify(updatedTasks));
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
 
       updatedTasks.forEach(t => {

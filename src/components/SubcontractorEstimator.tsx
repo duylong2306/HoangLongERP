@@ -321,17 +321,12 @@ export default function SubcontractorEstimator({
   const [printLiquidationHtml, setPrintLiquidationHtml] = useState<string | null>(null);
   const printEditorRef = useRef<HTMLDivElement>(null);
 
-  // Load suppliers list from localStorage
+  // Load suppliers list from Supabase
   useEffect(() => {
     const loadSuppliers = () => {
-      const saved = localStorage.getItem('hl_acc_suppliers');
-      if (saved) {
-        try {
-          setSuppliers(JSON.parse(saved));
-        } catch (err) {
-          console.error("Lỗi parse danh sách thầu phụ:", err);
-        }
-      }
+      dbService.suppliers.list()
+        .then(list => { if (Array.isArray(list) && list.length > 0) setSuppliers(list); })
+        .catch(err => console.warn("Lỗi tải danh sách thầu phụ từ Supabase:", err));
     };
     loadSuppliers();
     window.addEventListener('hl-suppliers-updated', loadSuppliers);
@@ -454,27 +449,9 @@ export default function SubcontractorEstimator({
 
   // States cho Template (Mẫu thầu phụ)
   const [activeTemplateTab, setActiveTemplateTab] = useState<'contract' | 'acceptance' | 'liquidation'>('contract');
-  const [contractTemplate, setContractTemplate] = useState(() => {
-    const local = localStorage.getItem('hl_subcontractor_contract_template');
-    if (local && (local.includes('HỢP ĐỒNG KINH TẾ') || local.includes('THI CÔNG CƠ KHÍ') || local.includes('{{CONG_TRINH}}'))) {
-      return DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE;
-    }
-    return local || DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE;
-  });
-  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => {
-    const local = localStorage.getItem('hl_subcontractor_acceptance_template');
-    if (local && (local.includes('BIÊN BẢN NGHIỆM THU VÀ BÀN GIAO CƠ KHÍ') || local.includes('{{SO_BIEN_BAN_NT}}') || local.includes('CƠ KHÍ') || local.includes('{{CONG_TRINH}}'))) {
-      return DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE;
-    }
-    return local || DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE;
-  });
-  const [liquidationTemplate, setLiquidationTemplate] = useState(() => {
-    const local = localStorage.getItem('hl_subcontractor_liquidation_template');
-    if (local && (local.includes('THANH LÝ HỢP ĐỒNG THI CÔNG CƠ KHÍ') || local.includes('CƠ KHÍ') || local.includes('{{CONG_TRINH}}'))) {
-      return DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE;
-    }
-    return local || DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE;
-  });
+  const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
+  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
+  const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
 
@@ -485,15 +462,12 @@ export default function SubcontractorEstimator({
       
       if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_subcontractor_default_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_subcontractor_default_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_subcontractor_default_liquidation_template', liquidationTemplate);
       }
-      
+
       await dbService.quotationConfigs.save('subcontractor_default', defaultData);
       
       setFeedback({
@@ -524,19 +498,16 @@ export default function SubcontractorEstimator({
 
       if (window.confirm(`Bạn có chắc chắn muốn khôi phục ${typeText} về mặc định ban đầu không?`)) {
         if (activeTemplateTab === 'contract') {
-          const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_subcontractor_default_contract_template') ?? DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE;
+          const template = defaultData?.contractTemplate ?? DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE;
           setContractTemplate(template);
-          localStorage.setItem('hl_subcontractor_contract_template', template);
         } else if (activeTemplateTab === 'acceptance') {
-          const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_subcontractor_default_acceptance_template') ?? DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE;
+          const template = defaultData?.acceptanceTemplate ?? DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE;
           setAcceptanceTemplate(template);
-          localStorage.setItem('hl_subcontractor_acceptance_template', template);
         } else if (activeTemplateTab === 'liquidation') {
-          const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_subcontractor_default_liquidation_template') ?? DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE;
+          const template = defaultData?.liquidationTemplate ?? DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE;
           setLiquidationTemplate(template);
-          localStorage.setItem('hl_subcontractor_liquidation_template', template);
         }
-        
+
         setFeedback({
           type: 'success',
           message: `Đã khôi phục ${typeText} về mặc định ban đầu thành công!`
@@ -548,13 +519,10 @@ export default function SubcontractorEstimator({
       // Fallback to static defaults
       if (activeTemplateTab === 'contract') {
         setContractTemplate(DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
-        localStorage.setItem('hl_subcontractor_contract_template', DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
       } else if (activeTemplateTab === 'acceptance') {
         setAcceptanceTemplate(DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
-        localStorage.setItem('hl_subcontractor_acceptance_template', DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
       } else if (activeTemplateTab === 'liquidation') {
         setLiquidationTemplate(DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
-        localStorage.setItem('hl_subcontractor_liquidation_template', DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
       }
       setFeedback({
         type: 'success',
@@ -687,26 +655,20 @@ export default function SubcontractorEstimator({
 
           if (updatedContract) {
             setContractTemplate(updatedContract);
-            localStorage.setItem('hl_subcontractor_contract_template', updatedContract);
           } else {
             setContractTemplate(DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
-            localStorage.setItem('hl_subcontractor_contract_template', DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
           }
 
           if (updatedAcceptance) {
             setAcceptanceTemplate(updatedAcceptance);
-            localStorage.setItem('hl_subcontractor_acceptance_template', updatedAcceptance);
           } else {
             setAcceptanceTemplate(DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
-            localStorage.setItem('hl_subcontractor_acceptance_template', DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
           }
 
           if (updatedLiquidation) {
             setLiquidationTemplate(updatedLiquidation);
-            localStorage.setItem('hl_subcontractor_liquidation_template', updatedLiquidation);
           } else {
             setLiquidationTemplate(DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
-            localStorage.setItem('hl_subcontractor_liquidation_template', DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
           }
 
           if (needUpdateDb) {
@@ -721,11 +683,8 @@ export default function SubcontractorEstimator({
         } else {
           // No dbConfig exists, set defaults
           setContractTemplate(DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
-          localStorage.setItem('hl_subcontractor_contract_template', DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE);
           setAcceptanceTemplate(DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
-          localStorage.setItem('hl_subcontractor_acceptance_template', DEFAULT_SUBCONTRACTOR_ACCEPTANCE_TEMPLATE);
           setLiquidationTemplate(DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
-          localStorage.setItem('hl_subcontractor_liquidation_template', DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
         }
       } catch (err) {
         console.error("Lỗi khi tải mẫu hồ sơ thầu phụ:", err);
@@ -1622,9 +1581,6 @@ export default function SubcontractorEstimator({
                       acceptanceTemplate: acceptanceTemplate,
                       liquidationTemplate: liquidationTemplate,
                     });
-                    localStorage.setItem('hl_subcontractor_contract_template', contractTemplate);
-                    localStorage.setItem('hl_subcontractor_acceptance_template', acceptanceTemplate);
-                    localStorage.setItem('hl_subcontractor_liquidation_template', liquidationTemplate);
                     setIsTemplateEditable(false);
                     setFeedback({
                       message: "Đã thiết lập các mẫu hồ sơ thầu phụ tùy biến làm mặc định thành công và đồng bộ hóa thành công trên toàn ứng dụng!",

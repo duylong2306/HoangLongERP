@@ -64,8 +64,25 @@ export default function TaskDetailModal({
   if (!selectedTask) return null;
 
   const [advProposalApprover, setAdvProposalApprover] = useState('Ban Giám Đốc');
+  const [subcontractors, setSubcontractors] = useState<SupplierPartner[]>([]);
 
   const isCurrentUserAdmin = currentUser.role === 'director' || currentUser.id === 'NV_ADMIN' || currentUser.id === 'emp_admin';
+
+  // Load subcontractors from Supabase (accounting_subcontractors table)
+  useEffect(() => {
+    const loadSubcontractors = async () => {
+      try {
+        const data = await dbService.accountingSubcontractors.list();
+        setSubcontractors(data);
+      } catch (e) {
+        console.error("Lỗi load thầu phụ từ Supabase:", e);
+      }
+    };
+    loadSubcontractors();
+    const handleSync = () => loadSubcontractors();
+    window.addEventListener('hl-suppliers-updated', handleSync);
+    return () => window.removeEventListener('hl-suppliers-updated', handleSync);
+  }, []);
 
   // Load Travel Allowance Norms from localStorage
   const travelNorms = React.useMemo<TravelAllowanceNorm[]>(() => {
@@ -678,6 +695,9 @@ export default function TaskDetailModal({
   const [submittedViolations, setSubmittedViolations] = useState<{ id: string; criterionId: string; employeeIds: string[]; notes: string; images: string[]; createdAt: string }[]>([]);
   // Toàn bộ lỗi vi phạm load trực tiếp từ Supabase (không dùng localStorage)
   const [cloudErrors, setCloudErrors] = useState<any[]>([]);
+  // Cờ cho biết đã load xong dữ liệu vi phạm từ Supabase. Dùng để ngăn effect
+  // tự ghi quá hạn chạy TRƯỚC khi biết các log cũ đã có trong DB (tránh ghi trùng).
+  const [cloudErrorsLoaded, setCloudErrorsLoaded] = useState(false);
 
   const loadSubmittedViolations = (source?: any[]) => {
     const errors = source ?? cloudErrors;
@@ -696,7 +716,13 @@ export default function TaskDetailModal({
         setCloudErrors(d || []);
         loadSubmittedViolations(d || []);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!mounted) return;
+        // Đánh dấu đã load xong (dù thành công hay lỗi) để effect tự ghi quá hạn
+        // được phép chạy — nó sẽ dựa trên dữ liệu đã có, không chạy mù trước DB.
+        setCloudErrorsLoaded(true);
+      });
     return () => { mounted = false; };
   }, []);
 
@@ -732,13 +758,18 @@ export default function TaskDetailModal({
     try {
       const end = new Date(deadlineStr);
       if (isNaN(end.getTime())) return '';
+      // Tính theo NGÀY: so sánh từ 00:00 của ngày hôm nay với cuối ngày deadline,
+      // thống nhất với quy tắc "quá hạn = quá hết ngày" (isDeadlineDayOver).
       const now = new Date();
-      const diffTime = end.getTime() - now.getTime();
-      if (diffTime < 0) {
-        const diffDays = Math.ceil(Math.abs(diffTime) / (1000 * 60 * 60 * 24));
+      now.setHours(0, 0, 0, 0);
+      const deadlineEnd = new Date(end);
+      deadlineEnd.setHours(23, 59, 59, 999);
+      const diffMs = deadlineEnd.getTime() - now.getTime();
+      if (diffMs < 0) {
+        const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
         return `Trễ ${diffDays} ngày`;
       } else {
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
         if (diffDays === 0) {
           return 'Hôm nay';
         }
@@ -747,6 +778,18 @@ export default function TaskDetailModal({
     } catch (e) {
       return '';
     }
+  };
+
+  // Quy tắc QUÁ HẠN thống nhất: một deadline được coi là quá hạn khi đã qua
+  // 23:59:59 của NGÀY deadline — bất kể deadline lưu dạng 'YYYY-MM-DD'
+  // (công việc con) hay 'YYYY-MM-DDTHH:mm' (nhiệm vụ cấu hình trước).
+  // → Cả ngày deadline vẫn được tính là còn hạn, quá nửa đêm mới tính trễ.
+  const isDeadlineDayOver = (deadlineStr?: string): boolean => {
+    if (!deadlineStr) return false;
+    const d = new Date(deadlineStr);
+    if (isNaN(d.getTime())) return false;
+    d.setHours(23, 59, 59, 999);
+    return d.getTime() < Date.now();
   };
 
   useEffect(() => {
@@ -798,35 +841,8 @@ export default function TaskDetailModal({
   }, []);
 
   const allCriteria = React.useMemo(() => {
-    // Ưu tiên dữ liệu vừa fetch từ Supabase
-    if (cloudCriteria.length > 0) return cloudCriteria;
-
-    // Fallback sang localStorage (dữ liệu cũ trước khi có Supabase)
-    const flat: { id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[] = [];
-    try {
-      const saved = localStorage.getItem('hl_hrm_performance_criteria_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((dept: any) => {
-            if (dept.criteria && Array.isArray(dept.criteria)) {
-              dept.criteria.forEach((crit: any) => {
-                flat.push({
-                  id: crit.id,
-                  content: crit.content,
-                  category: (crit.category || 'readiness') as 'readiness' | 'progress' | 'reporting',
-                  deptName: dept.departmentName
-                });
-              });
-            }
-          });
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-
-    return flat;
+    // Dữ liệu từ Supabase (nguồn duy nhất)
+    return cloudCriteria;
   }, [cloudCriteria]);
 
   const relatedEmployees = React.useMemo(() => {
@@ -849,26 +865,72 @@ export default function TaskDetailModal({
 
   useEffect(() => {
     if (selectedTask.status === 'completed') return;
+    // ⚠️ CHỈ tự ghi quá hạn SAU khi đã load xong dữ liệu vi phạm từ Supabase.
+    // Nếu chạy sớm hơn (cloudErrors còn rỗng), sẽ không thấy log tự động cũ đã
+    // lưu ở lần mở modal trước → ghi trùng thêm một bản nữa cho cùng autoSource.
+    if (!cloudErrorsLoaded) return;
     try {
       // Nguồn dữ liệu trực tiếp từ Supabase (đã load khi mở modal)
       let existingErrors: any[] = cloudErrors || [];
       // Sắp xếp để các phần tử mới (unshift vào đầu) không ghi đè lẫn nhau khi chống trùng
       existingErrors = existingErrors.slice();
 
+      // Trả về các log trùng của một autoKey — hỗ trợ cả key camelCase
+      // (autoSource, sau rowToCamel) lẫn snake_case (auto_source, dữ liệu thô).
+      const getAutoLogs = (autoKey: string) =>
+        existingErrors.filter((err: any) =>
+          err.autoSource === autoKey || err.auto_source === autoKey
+        );
+      const isAutoLogged = (autoKey: string) => getAutoLogs(autoKey).length > 0;
+
       let hasChanged = false;
       // Theo dõi các log tự động mới tạo để đồng bộ lên Supabase
       const newlyCreatedLogs: any[] = [];
+      // id của các bản ghi TRÙNG cũ (đã bị nhân đôi do id Date.now() trước đây)
+      // cần xóa khỏi Supabase để dọn dẹp dữ liệu lịch sử.
+      const duplicateIdsToDelete: string[] = [];
+      // Chống trùng trong CHÍNH lần chạy này (cùng autoKey chỉ tạo 1 log)
+      const createdKeys = new Set<string>();
+
+      // ─── DỌN DẸP DỮ LIỆU CŨ ĐÃ NHÂN ĐÔI ─────────────────────────────────
+      // Trước đây id auto-log chứa Date.now() nên mỗi lần chạy lại (hoặc mỗi lần
+      // mở modal) tạo id khác nhau → upsert chèn THÊM dòng mới → nhiều bản ghi
+      // cùng một autoKey. Giờ gộp: với mỗi autoKey quá hạn có NHIỀU dòng, giữ
+      // đúng 1 dòng (ưu tiên bản id deterministic err_auto_...), xóa các bản còn lại.
+      const overdueAutoKeys = new Set<string>();
+      existingErrors.forEach((err: any) => {
+        const k = err.autoSource || err.auto_source;
+        if (k && typeof k === 'string' && k.startsWith('auto_overdue_')) overdueAutoKeys.add(k);
+      });
+      overdueAutoKeys.forEach((k) => {
+        const matches = existingErrors.filter((err: any) => err.autoSource === k || err.auto_source === k);
+        if (matches.length <= 1) return;
+        const keep = matches.find((m: any) => m.id === `err_auto_${k}`) || matches[0];
+        const dupIds = new Set<string>();
+        matches.forEach((m: any) => {
+          if (m !== keep && m.id) {
+            dupIds.add(m.id);
+            duplicateIdsToDelete.push(m.id);
+            hasChanged = true;
+          }
+        });
+        // Giữ bản đại diện; chỉ loại các bản trùng đã đánh dấu khỏi danh sách cục bộ
+        if (dupIds.size > 0) {
+          existingErrors = existingErrors.filter((err: any) => !(err.id && dupIds.has(err.id)));
+        }
+      });
+
       const proj = projects.find(p => p.id === selectedTask.projectId);
       const projName = proj?.name || 'Không rõ';
 
       // 1. Check if the subtask itself is overdue
       if (selectedTask.deadline) {
-        const isTaskOverdue = new Date(selectedTask.deadline).getTime() < Date.now();
+        const isTaskOverdue = isDeadlineDayOver(selectedTask.deadline);
         if (isTaskOverdue && selectedTask.assigneeId) {
           const autoKey = `auto_overdue_task_${selectedTask.id}_${selectedTask.assigneeId}`;
-          const isAlreadyLogged = existingErrors.some((err: any) => err.autoSource === autoKey);
-          
-          if (!isAlreadyLogged) {
+
+          if (!isAutoLogged(autoKey) && !createdKeys.has(autoKey)) {
+            createdKeys.add(autoKey);
             const assignee = employees.find(e => e.id === selectedTask.assigneeId);
             if (assignee) {
               // Resolve employee ID mapped to HRM
@@ -889,8 +951,11 @@ export default function TaskDetailModal({
               }
 
               const criterion = allCriteria.find((c: any) => c.content === 'Làm chậm công việc và ảnh hưởng đến phòng ban khác') || { id: 'crit_B_10', content: 'Làm chậm công việc và ảnh hưởng đến phòng ban khác', category: 'progress' };
-              const logId = `err_log_auto_task_${selectedTask.id}_${Date.now()}`;
-              
+              // id DETERMINISTIC theo autoKey (không dùng Date.now()):
+              // vì id là khóa chính, upsert sẽ GHI ĐÈ cùng một dòng dù effect có chạy
+              // lại bao nhiêu lần → KHÔNG BAO GIỜ nhân đôi vi phạm ở cấp database.
+              const logId = `err_auto_${autoKey}`;
+
               existingErrors.unshift({
                 id: logId,
                 employeeId: resolvedEmployeeId,
@@ -917,16 +982,16 @@ export default function TaskDetailModal({
       if (selectedTask.missions && Array.isArray(selectedTask.missions)) {
         selectedTask.missions.forEach((mission: any) => {
           if (mission.deadline && mission.status !== 'completed') {
-            const isMissionOverdue = new Date(mission.deadline).getTime() < Date.now();
+            const isMissionOverdue = isDeadlineDayOver(mission.deadline);
             if (isMissionOverdue) {
               // Collect all people involved: main assignee + members
               const targetEmpIds = Array.from(new Set([mission.mainAssigneeId, ...(mission.memberIds || [])].filter(Boolean) as string[]));
               
               targetEmpIds.forEach((empId) => {
                 const autoKey = `auto_overdue_mission_${mission.id}_${empId}`;
-                const isAlreadyLogged = existingErrors.some((err: any) => err.autoSource === autoKey);
-                
-                if (!isAlreadyLogged) {
+
+                if (!isAutoLogged(autoKey) && !createdKeys.has(autoKey)) {
+                  createdKeys.add(autoKey);
                   const emp = employees.find(e => e.id === empId);
                   if (emp) {
                     // Resolve employee ID mapped to HRM
@@ -947,8 +1012,11 @@ export default function TaskDetailModal({
                     }
 
                     const criterion = allCriteria.find((c: any) => c.content === 'Làm chậm công việc và ảnh hưởng đến phòng ban khác') || { id: 'crit_B_10', content: 'Làm chậm công việc và ảnh hưởng đến phòng ban khác', category: 'progress' };
-                    const logId = `err_log_auto_m_${mission.id}_${empId}_${Date.now()}`;
-                    
+                    // id DETERMINISTIC theo autoKey (không dùng Date.now()):
+                    // vì id là khóa chính, upsert sẽ GHI ĐÈ cùng một dòng dù effect có chạy
+                    // lại bao nhiêu lần → KHÔNG BAO GIỜ nhân đôi vi phạm ở cấp database.
+                    const logId = `err_auto_${autoKey}`;
+
                     existingErrors.unshift({
                       id: logId,
                       employeeId: resolvedEmployeeId,
@@ -977,6 +1045,14 @@ export default function TaskDetailModal({
       if (hasChanged) {
         // Đồng bộ lên Supabase (nguồn dữ liệu chính — không ghi localStorage)
         syncEmployeeErrorsToSupabase(newlyCreatedLogs);
+        // Xóa các bản ghi quá hạn TRÙNG cũ (dọn dẹp dữ liệu đã nhân đôi trước đây)
+        duplicateIdsToDelete.forEach((dupId) => {
+          dbService.hrmEmployeeErrors.delete(dupId)
+            .catch((e) => console.warn('Xóa vi phạm quá hạn trùng lặp thất bại:', e?.message || e));
+        });
+        if (duplicateIdsToDelete.length > 0) {
+          try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+        }
         // Cập nhật state cục bộ + lịch sử hiển thị
         setCloudErrors(existingErrors);
         loadSubmittedViolations(existingErrors);
@@ -986,7 +1062,8 @@ export default function TaskDetailModal({
     }
     // cloudErrors trong deps để khi load xong từ Supabase, effect chạy lại
     // và check autoSource đúng → không tạo log trùng.
-  }, [selectedTask, employees, projects, allCriteria, cloudErrors]);
+    // cloudErrorsLoaded: chỉ chạy tự ghi sau khi đã load xong DB (chống trùng).
+  }, [selectedTask, employees, projects, allCriteria, cloudErrors, cloudErrorsLoaded]);
 
   const isMissionAssignee = selectedTask.missions?.some(m => m.mainAssigneeId === currentUser.id || m.memberIds?.includes(currentUser.id)) || false;
 
@@ -1512,7 +1589,7 @@ export default function TaskDetailModal({
                   </div>
                   {selectedTask.deadline && selectedTask.status !== 'completed' && (
                     <span className={`px-2 py-0.5 rounded text-[9.5px] font-black border uppercase select-none ${
-                      new Date(selectedTask.deadline).getTime() < Date.now()
+                      isDeadlineDayOver(selectedTask.deadline)
                         ? 'bg-rose-955/35 text-rose-400 border-rose-900/40 animate-pulse'
                         : 'bg-emerald-955/35 text-emerald-400 border-emerald-900/30'
                     }`}>
@@ -1665,18 +1742,7 @@ export default function TaskDetailModal({
                       value={selectedTask.subcontractorId || ''}
                       onChange={(e) => {
                         const val = e.target.value;
-                        const suppliersList = (() => {
-                          const saved = localStorage.getItem('hl_acc_suppliers');
-                          if (saved) {
-                            try {
-                              return JSON.parse(saved);
-                            } catch(e) {
-                              console.error(e);
-                            }
-                          }
-                          return [];
-                        })();
-                        const matchedSup = suppliersList.find((s: any) => s.id === val);
+                        const matchedSup = subcontractors.find((s: any) => s.id === val);
                         const matchedName = matchedSup ? matchedSup.name : '';
 
                         onUpdateTask(selectedTask.id, {
@@ -1687,18 +1753,11 @@ export default function TaskDetailModal({
                       className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 w-full focus:outline-none focus:border-orange-500 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <option value="">-- Click để chọn Thầu Phụ --</option>
-                      {(() => {
-                        const saved = localStorage.getItem('hl_acc_suppliers');
-                        let list = [];
-                        if (saved) {
-                          try { list = JSON.parse(saved); } catch(e) {}
-                        }
-                        return list.map((s: any) => (
-                          <option key={s.id} value={s.id}>
-                            [{s.id}] {s.name}
-                          </option>
-                        ));
-                      })()}
+                      {subcontractors.map((s: any) => (
+                        <option key={s.id} value={s.id}>
+                          [{s.id}] {s.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -1709,12 +1768,7 @@ export default function TaskDetailModal({
                         Chưa có thầu phụ liên kết cho hạng mục công việc này.
                       </div>
                     );
-                    const saved = localStorage.getItem('hl_acc_suppliers');
-                    let list = [];
-                    if (saved) {
-                      try { list = JSON.parse(saved); } catch(e) {}
-                    }
-                    const activeSup = list.find((s: any) => s.id === selectedTask.subcontractorId);
+                    const activeSup = subcontractors.find((s: any) => s.id === selectedTask.subcontractorId);
                     if (!activeSup) return null;
 
                     return (
@@ -1851,11 +1905,12 @@ export default function TaskDetailModal({
 
                       if (selectedTask.deadline) {
                         const mDeadlineDate = new Date(finalDeadline);
-                        const tDeadlineDate = new Date(selectedTask.deadline);
                         // Chỉ so sánh DATE (bỏ qua giờ): task deadline được coi là 23:59:59 của ngày đó
-                        const taskEndOfDay = new Date(tDeadlineDate);
+                        const taskEndOfDay = new Date(selectedTask.deadline);
                         taskEndOfDay.setHours(23, 59, 59, 999);
-                        if (mDeadlineDate.getTime() > taskEndOfDay.getTime() && tDeadlineDate.getTime() > Date.now()) {
+                        // Chỉ chặn khi công việc cha CHƯA quá hạn (theo quy tắc hết ngày),
+                        // để không ngăn người dùng hoàn tất nhiệm vụ trễ sau hạn bàn giao.
+                        if (mDeadlineDate.getTime() > taskEndOfDay.getTime() && !isDeadlineDayOver(selectedTask.deadline)) {
                           addToast({
                             title: '⚠️ Không thể tạo nhiệm vụ',
                             message: `Hạn hoàn thành nhiệm vụ (${formatDateTime(finalDeadline)}) không được lớn hơn Hạn bàn giao của công việc cha (${formatDateTime(selectedTask.deadline)})! Vui lòng chọn ngày sớm hơn hoặc cùng ngày.`,
@@ -1943,6 +1998,7 @@ export default function TaskDetailModal({
                       >
                         <option value="5">5 dòng</option>
                         <option value="10">10 dòng</option>
+                        <option value="15">15 dòng</option>
                         <option value="20">20 dòng</option>
                         <option value="50">50 dòng</option>
                         <option value="all">Tất cả</option>
@@ -2064,7 +2120,7 @@ export default function TaskDetailModal({
                               {(() => {
                                 const mDeadline = mission.deadline || selectedTask.deadline;
                                 if (!mDeadline) return null;
-                                const isOverdue = new Date(mDeadline).getTime() < Date.now();
+                                const isOverdue = isDeadlineDayOver(mDeadline);
                                 return (
                                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-400 font-mono">
                                     <div className="flex items-center gap-1">
@@ -3967,7 +4023,7 @@ export default function TaskDetailModal({
                       missionReportImages.length === 0 ||
                       !mission.mainAssigneeId
                     }
-                    onClick={() => {
+                    onClick={async () => {
                       if (!missionReportText.trim() || missionReportImages.length === 0) return;
                       // Phụ trách chính nhiệm vụ là trường BẮT BUỘC phải có trước khi hoàn thành
                       if (!mission.mainAssigneeId) {
@@ -4023,8 +4079,13 @@ export default function TaskDetailModal({
                         const taskName = selectedTask.name;
                         const missionName = currentMission?.name || '';
 
-                        const savedSummary = localStorage.getItem('hl_travel_expenses_summary_v4');
-                        let summaryList = savedSummary ? JSON.parse(savedSummary) : [];
+                        let summaryList: any[] = [];
+                        try {
+                          summaryList = await dbService.hrmTravelExpenses.list();
+                        } catch (err) {
+                          console.warn('Lỗi tải tổng hợp công tác phí từ Supabase:', err);
+                        }
+                        summaryList = summaryList || [];
 
                         mergedCtp.forEach((ta, taIdx) => {
                           const emp = employees.find(e => e.id === ta.memberId);
@@ -4069,7 +4130,6 @@ export default function TaskDetailModal({
                             .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu Supabase thất bại (vẫn lưu localStorage):', e?.message || e));
                         });
 
-                        localStorage.setItem('hl_travel_expenses_summary_v4', JSON.stringify(summaryList));
                         window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
                       }
 

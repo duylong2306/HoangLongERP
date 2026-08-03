@@ -61,6 +61,14 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
   const [month, setMonth] = useState((new Date().getMonth() + 1).toString().padStart(2, '0'));
   const [year, setYear] = useState(new Date().getFullYear().toString());
 
+  // Định mức vật liệu từ Supabase
+  const [materialNorms, setMaterialNorms] = useState<any[]>([]);
+  useEffect(() => {
+    dbService.constructionNorms.get('material_composition_norms')
+      .then((data: any) => { if (Array.isArray(data)) setMaterialNorms(data); })
+      .catch(err => console.warn('Lỗi tải định mức vật liệu từ Supabase:', err));
+  }, []);
+
   // 1. Calculate takeoff totals if finalItems is not explicitly saved in quoteData
   const takeoffTotals = useMemo(() => {
     if (quoteData.finalItems) return { gach: 0, ximang: 0, cat: 0, da: 0, thep: 0 };
@@ -93,12 +101,8 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
 
       const haoMultiplier = 1 + (parseFloat(row.haoHut as any) || 0) / 100;
 
-      // Fallback or load norms from localStorage
-      let normsList = [];
-      try {
-        const localNorms = localStorage.getItem('material_composition_norms');
-        if (localNorms) normsList = JSON.parse(localNorms);
-      } catch (e) {}
+      // Load norms from Supabase
+      const normsList = materialNorms;
 
       if (row.maDM) {
         const norm = normsList.find((n: any) => n.id.toLowerCase() === row.maDM.toLowerCase());
@@ -113,7 +117,7 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
     });
 
     return { gach, ximang, cat, da, thep };
-  }, [quoteData]);
+  }, [quoteData, materialNorms]);
 
   // 2. Load list of items to render
   const finalItems = useMemo<FinalQuoteItem[]>(() => {

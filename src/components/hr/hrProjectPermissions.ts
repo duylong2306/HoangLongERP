@@ -232,6 +232,9 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
   statusRules: [],
 };
 
+// In-memory cache (nguồn: Supabase khi mount) — thay thế localStorage
+let _projectPermissionCache: ProjectPermissionMatrix = DEFAULT_PROJECT_PERMISSIONS;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 const IS_ADMIN = (uid?: string) => uid === 'NV_ADMIN' || uid === 'emp_admin' || uid === 'admin';
@@ -292,27 +295,11 @@ const expandInheritance = (roles: ProjectRoleScope[]): ProjectRoleScope[] => {
 // ─── Load / Save (localStorage + DB) ─────────────────────────────────────
 
 export const loadProjectPermissions = (): ProjectPermissionMatrix => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        ...DEFAULT_PROJECT_PERMISSIONS,
-        ...parsed,
-        actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, ...(parsed.actions || {}) },
-        visibility: { ...DEFAULT_PROJECT_PERMISSIONS.visibility, ...(parsed.visibility || {}) },
-        // Preserve roleGroupMatrix from saved data
-        roleGroupMatrix: parsed.roleGroupMatrix,
-      };
-    }
-  } catch (e) {
-    console.error('Lỗi đọc', STORAGE_KEY, e);
-  }
-  return DEFAULT_PROJECT_PERMISSIONS;
+  return _projectPermissionCache;
 };
 
 /**
- * Đồng bộ ma trận quyền dự án từ Supabase → localStorage.
+ * Đồng bộ ma trận quyền dự án từ Supabase → in-memory cache.
  * Gọi khi component mount để đảm bảo dữ liệu mới nhất từ DB.
  */
 export const syncProjectPermissionsFromDb = async (): Promise<ProjectPermissionMatrix> => {
@@ -325,27 +312,23 @@ export const syncProjectPermissionsFromDb = async (): Promise<ProjectPermissionM
         actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, ...(cloudMatrix.actions || {}) },
         visibility: { ...DEFAULT_PROJECT_PERMISSIONS.visibility, ...(cloudMatrix.visibility || {}) },
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      _projectPermissionCache = merged;
       return merged;
     }
   } catch (e) {
     console.warn('Supabase projectPermissions sync error:', e);
   }
-  return loadProjectPermissions();
+  return _projectPermissionCache;
 };
 
-/** Lưu ma trận lên localStorage + Firestore + Supabase (qua dbService). Async, fail-safe. */
+/** Lưu ma trận lên in-memory cache + Supabase (qua dbService). Async, fail-safe. */
 export const saveProjectPermissions = async (matrix: ProjectPermissionMatrix): Promise<void> => {
   const finalMatrix: ProjectPermissionMatrix = {
     ...matrix,
     version: 2,
     updatedAt: new Date().toISOString(),
   };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(finalMatrix));
-  } catch (e) {
-    console.error('Lỗi lưu localStorage', STORAGE_KEY, e);
-  }
+  _projectPermissionCache = finalMatrix;
   // Đẩy lên cloud (Firestore + Supabase) nếu có dbService
   try {
     await dbService.projectPermissions.save(finalMatrix);
@@ -353,7 +336,6 @@ export const saveProjectPermissions = async (matrix: ProjectPermissionMatrix): P
     console.warn('Lưu projectPermissions lên cloud thất bại (offline fallback):', e);
   }
   // Notify components
-  window.dispatchEvent(new Event('storage'));
   window.dispatchEvent(new CustomEvent('hl-project-permissions-updated', { detail: finalMatrix }));
 };
 
@@ -370,17 +352,12 @@ export interface RoleGroupProjectMatrix {
 }
 
 export const loadRoleGroupProjectMatrix = (): RoleGroupProjectMatrix => {
-  // Ưu tiên đọc từ matrix chính (đã sync Supabase)
+  // Đọc từ matrix chính (đã sync Supabase)
   try {
     const mainMatrix = loadProjectPermissions();
     if ((mainMatrix as any).roleGroupMatrix) {
       return (mainMatrix as any).roleGroupMatrix;
     }
-  } catch (e) {}
-  // Fallback: localStorage cũ (migration)
-  try {
-    const saved = localStorage.getItem('hl_role_group_project_permissions');
-    if (saved) return JSON.parse(saved);
   } catch (e) {}
   return { roleGroupActions: {} };
 };

@@ -422,88 +422,23 @@ export const INITIAL_MATERIALS: ProductMaterialItem[] = getInitialMaterials(INIT
 
 export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableProps) {
   const { addToast } = useNotification();
-  const [products, setProducts] = useState<ProductCatalogItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_products');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu sản phẩm", e);
-      }
-    }
-    return INITIAL_PRODUCTS;
-  });
+  const [products, setProducts] = useState<ProductCatalogItem[]>(() => INITIAL_PRODUCTS);
 
-  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_product_prices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu đơn giá", e);
-      }
-    }
-    const savedProducts = localStorage.getItem('hl_acc_products');
-    if (savedProducts) {
-      try {
-        const parsedProducts: ProductCatalogItem[] = JSON.parse(savedProducts);
-        return getInitialPrices(parsedProducts);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return INITIAL_PRICES;
-  });
+  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => INITIAL_PRICES);
 
-  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_product_materials');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu chất liệu", e);
-      }
-    }
-    const savedProducts = localStorage.getItem('hl_acc_products');
-    if (savedProducts) {
-      try {
-        const parsedProducts: ProductCatalogItem[] = JSON.parse(savedProducts);
-        return getInitialMaterials(parsedProducts);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return INITIAL_MATERIALS;
-  });
-
-  // Save to localStorage whenever products change
-  useEffect(() => {
-    localStorage.setItem('hl_acc_products', JSON.stringify(products));
-  }, [products]);
-
-  // Save to localStorage whenever prices change
-  useEffect(() => {
-    localStorage.setItem('hl_acc_product_prices', JSON.stringify(pricesList));
-  }, [pricesList]);
-
-  // Save to localStorage whenever materials change
-  useEffect(() => {
-    localStorage.setItem('hl_acc_product_materials', JSON.stringify(materialsList));
-  }, [materialsList]);
+  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => INITIAL_MATERIALS);
 
   // ── Load from Supabase on mount & sync prices to Supabase ──
   useEffect(() => {
     dbService.productPrices.list().then((cloudPrices) => {
       if (cloudPrices && cloudPrices.length > 0) {
         setPricesList(cloudPrices);
-        localStorage.setItem('hl_acc_product_prices', JSON.stringify(cloudPrices));
       }
     }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err));
 
     dbService.productMaterials.list().then((cloudMats) => {
       if (cloudMats && cloudMats.length > 0) {
         setMaterialsList(cloudMats);
-        localStorage.setItem('hl_acc_product_materials', JSON.stringify(cloudMats));
       }
     }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err));
   }, []);
@@ -536,7 +471,6 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     dbService.subcontractorCatalog.list().then((cloudProducts: ProductCatalogItem[]) => {
       if (cloudProducts && cloudProducts.length > 0) {
         setProducts(cloudProducts);
-        localStorage.setItem('hl_acc_products', JSON.stringify(cloudProducts));
       }
     }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err));
   }, []);

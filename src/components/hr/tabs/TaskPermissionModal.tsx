@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { X, RotateCcw, Save, Shield, AlertTriangle, CheckCircle2, DollarSign, FileText, Users, Settings, Eye } from 'lucide-react';
-import { TaskPermissionMatrix, TaskAction, RoleScope, DEFAULT_TASK_PERMISSIONS } from '../hrTaskPermissions';
+import { TaskPermissionMatrix, TaskAction, RoleScope, DEFAULT_TASK_PERMISSIONS, loadTaskPermissionMatrix, saveTaskPermissionMatrix } from '../hrTaskPermissions';
 
 interface TaskPermissionModalProps {
   isOpen: boolean;
@@ -20,21 +20,18 @@ export default function TaskPermissionModal({ isOpen, onClose, roleId, roleName,
 
   const [matrix, setMatrix] = React.useState<TaskPermissionMatrix>(DEFAULT_TASK_PERMISSIONS);
 
-  // Load current matrix for this role from localStorage on open
+  // Load current matrix for this role from in-memory cache on open
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('hl_task_permissions_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Check if there's role-specific override
-        const roleSpecific = parsed.roles?.[roleId];
-        if (roleSpecific) {
-          setMatrix(roleSpecific);
-        } else {
-          setMatrix({
-            actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
-          });
-        }
+      const parsed = loadTaskPermissionMatrix() as any;
+      // Check if there's role-specific override
+      const roleSpecific = parsed.roles?.[roleId];
+      if (roleSpecific) {
+        setMatrix(roleSpecific);
+      } else {
+        setMatrix({
+          actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
+        });
       }
     } catch (e) {
       console.error('Load task permissions error:', e);
@@ -78,15 +75,12 @@ export default function TaskPermissionModal({ isOpen, onClose, roleId, roleName,
   };
 
   const handleSave = () => {
-    // Save role-specific override
+    // Save role-specific override (in-memory + Supabase)
     try {
-      const saved = localStorage.getItem('hl_task_permissions_v1');
-      const base = saved ? JSON.parse(saved) : { actions: DEFAULT_TASK_PERMISSIONS.actions, roles: {} };
+      const base = (loadTaskPermissionMatrix() as any);
       base.roles = base.roles || {};
       base.roles[roleId] = matrix;
-      localStorage.setItem('hl_task_permissions_v1', JSON.stringify(base));
-      window.dispatchEvent(new Event('storage'));
-      window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+      saveTaskPermissionMatrix(base);
     } catch (e) {
       console.error('Save task permissions error:', e);
     }

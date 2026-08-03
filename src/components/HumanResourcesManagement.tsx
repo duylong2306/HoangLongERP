@@ -698,6 +698,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Ref tránh vòng lặp khi refresh từ event 'hl-hrm-employee-errors-updated':
   // trong lúc setEmployeeErrors từ cloud thì effect sync không được save ngược lại
   const isSyncingEmployeeErrorsFromCloud = useRef(false);
+  const isSyncingLeavesFromCloud = useRef(false);
 
   const [errorSearchEmpId, setErrorSearchEmpId] = useState<string>('all');
   const [errorFilterMonth, setErrorFilterMonth] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
@@ -1072,17 +1073,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     dbService.employees.list().then((cloudEmps: any[]) => {
       if (cloudEmps && cloudEmps.length > 0) {
         setEmployees(cloudEmps);
-        // Thêm: sync localStorage với employee profile để tránh mất data
-        const cached = localStorage.getItem('hl_hrm_employees_v3');
-        if (cached) {
-          try { localStorage.setItem('hl_cached_hrm_employees', cached); } catch {}
-        }
       }
     }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); });
     // Holidays
     dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {});
     // Leaves
-    dbService.hrmLeaves.list().then((d: any[]) => { if (d?.length) setLeaves(d); }).catch(() => {});
+    isSyncingLeavesFromCloud.current = true;
+    dbService.hrmLeaves.list().then((d: any[]) => {
+      if (d?.length) setLeaves(d);
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingLeavesFromCloud.current = false; }, 500);
+    });
     // Payroll
     dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {});
     // Employee Errors
@@ -1128,10 +1129,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             id: r.id, name: r.name, description: r.description || '',
             permissions: r.permissions || {}, memberIds: r.memberIds || [],
           })));
-          // Cập nhật localStorage cache
-          const updated = JSON.stringify(cloudRoles);
-          localStorage.setItem('hl_cached_hrm_role_groups', updated);
-          localStorage.setItem('hl_hrm_roles_v2', updated);
         }
       } catch (e) {
         console.error('Realtime roles sync error:', e);
@@ -1184,8 +1181,28 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [attendance]);
 
   useEffect(() => {
+    if (isSyncingLeavesFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (leaves?.length) leaves.forEach(l => dbService.hrmLeaves.save(l).catch(() => {}));
   }, [leaves]);
+
+  // ─── LISTENER: Đơn nghỉ phép thay đổi (từ Tổng Quan hoặc user khác qua realtime) → refresh ───
+  useEffect(() => {
+    const handleLeavesUpdated = async () => {
+      try {
+        isSyncingLeavesFromCloud.current = true;
+        const cloudLeaves = await dbService.hrmLeaves.list();
+        if (cloudLeaves && cloudLeaves.length > 0) {
+          setLeaves(cloudLeaves);
+        }
+      } catch (e) {
+        console.error('Realtime leaves sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingLeavesFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-leaves-updated', handleLeavesUpdated);
+    return () => window.removeEventListener('hl-hrm-leaves-updated', handleLeavesUpdated);
+  }, []);
 
   useEffect(() => {
     if (payroll?.length) payroll.forEach(p => dbService.hrmPayrollRecords.save(p).catch(() => {}));
@@ -1416,7 +1433,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     return Array.from(seen.values());
   };
 
-  // Load Tổng hợp Công Tác Phí: ưu tiên Supabase, fallback localStorage
+  // Load Tổng hợp Công Tác Phí: nguồn Supabase
   const loadTravelExpensesSummary = useCallback(() => {
     if (activeSubTab !== 'trips') return;
     dbService.hrmTravelExpenses.list()
@@ -1424,17 +1441,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         if (data && data.length > 0) {
           const deduped = dedupeTravelExpenses(data);
           setTravelExpensesSummary(deduped);
-          try { localStorage.setItem('hl_travel_expenses_summary_v4', JSON.stringify(deduped)); } catch { /* noop */ }
         } else {
-          const saved = localStorage.getItem('hl_travel_expenses_summary_v4');
-          const local = dedupeTravelExpenses(saved ? JSON.parse(saved) : []);
-          setTravelExpensesSummary(local);
+          setTravelExpensesSummary([]);
         }
       })
       .catch((err) => {
-        console.warn('[TravelExpense][HR] Lỗi tải Supabase, fallback localStorage:', err?.message || err);
-        const saved = localStorage.getItem('hl_travel_expenses_summary_v4');
-        setTravelExpensesSummary(dedupeTravelExpenses(saved ? JSON.parse(saved) : []));
+        console.warn('[TravelExpense][HR] Lỗi tải Supabase:', err?.message || err);
+        setTravelExpensesSummary([]);
       });
   }, [activeSubTab]);
 

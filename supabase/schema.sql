@@ -1432,6 +1432,7 @@ CREATE TABLE IF NOT EXISTS public.shift_config (
   ot_punch_out_open_before_minutes integer DEFAULT 15,
   ot_punch_out_close_after_minutes integer DEFAULT 15,
   allowed_late_minutes integer DEFAULT 15,
+  allowed_late_count integer DEFAULT 3,
   weekend_days integer[] DEFAULT '{0}'::integer[],
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),

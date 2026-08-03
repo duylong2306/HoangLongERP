@@ -21,8 +21,8 @@ import {
  * Danh Mục Nhà Cung Cấp Vật Tư (bảng suppliers).
  * Trước đây là tab con của Quản Lý Thầu Phụ; giờ là sub-tab của Dữ Liệu Kế Toán.
  *
- * Dữ liệu được lưu localStorage `hl_acc_suppliers` để các dropdown
- * "Chọn Thầu Phụ từ Dữ Liệu Kế Toán" (Kanban/TaskDetail/Workflow/Estimator/...) vẫn hoạt động.
+ * Dữ liệu được đồng bộ từ bảng accounting_subcontractors trên Supabase.
+ * Các dropdown "Chọn Thầu Phụ từ Dữ Liệu Kế Toán" (Kanban/TaskDetail/Workflow/Estimator/...) load từ Supabase.
  */
 interface SubcontractorDirectoryProps {
   currentUser: Employee;
@@ -45,8 +45,6 @@ export default function SubcontractorDirectory({
       try {
         const data = await dbService.accountingSubcontractors.list();
         setSuppliers(data);
-        // Đồng bộ localStorage để các dropdown "Chọn Thầu Phụ" đọc được
-        localStorage.setItem('hl_acc_suppliers', JSON.stringify(data));
       } catch (e) {
         console.error("Lỗi load thầu phụ từ Supabase:", e);
       }
@@ -56,11 +54,6 @@ export default function SubcontractorDirectory({
     window.addEventListener('hl-suppliers-updated', handleSync);
     return () => window.removeEventListener('hl-suppliers-updated', handleSync);
   }, []);
-
-  // Persist mỗi khi data đổi (thêm/sửa/xóa/import)
-  useEffect(() => {
-    localStorage.setItem('hl_acc_suppliers', JSON.stringify(suppliers));
-  }, [suppliers]);
 
   // ── Multi-row selection ──
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());

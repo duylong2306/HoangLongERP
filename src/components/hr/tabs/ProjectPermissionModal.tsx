@@ -15,6 +15,8 @@ import {
   RoleGroupProjectMatrix,
   loadRoleGroupProjectMatrix,
   saveRoleGroupProjectMatrix,
+  loadProjectPermissions,
+  saveProjectPermissions,
 } from '../hrProjectPermissions';
 import { loadHrmRoleGroups, useNotification } from '../../../context';
 import SaveActionBar from '../../ui/SaveActionBar';
@@ -206,9 +208,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   };
 
   const handleSaveRoleGroup = async () => {
-    console.log('💾 Saving role group matrix:', rgMatrix);
     await saveRoleGroupProjectMatrix(rgMatrix);
-    console.log('📦 After save, checking localStorage:', localStorage.getItem('hl_project_permissions_v1'));
     setSavedRgMatrix(JSON.parse(JSON.stringify(rgMatrix)));
     addToast({ title: '✅ Thành công', message: 'Quyền nhóm HRM đã được lưu.', type: 'success' });
   };
@@ -263,16 +263,13 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   React.useEffect(() => {
     if (value !== undefined) return;
     try {
-      const saved = localStorage.getItem('hl_project_permissions_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setInternalMatrix({
-          ...DEFAULT_PROJECT_PERMISSIONS,
-          ...parsed,
-          actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, ...(parsed.actions || {}) },
-          visibility: { ...DEFAULT_PROJECT_PERMISSIONS.visibility, ...(parsed.visibility || {}) },
-        });
-      }
+      const parsed = loadProjectPermissions();
+      setInternalMatrix({
+        ...DEFAULT_PROJECT_PERMISSIONS,
+        ...parsed,
+        actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, ...(parsed.actions || {}) },
+        visibility: { ...DEFAULT_PROJECT_PERMISSIONS.visibility, ...(parsed.visibility || {}) },
+      });
     } catch (e) {
       console.error('Load project permissions error:', e);
     }
@@ -308,7 +305,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
       updatedAt: new Date().toISOString(),
     };
     try {
-      localStorage.setItem('hl_project_permissions_v1', JSON.stringify(finalMatrix));
+      saveProjectPermissions(finalMatrix);
     } catch (e) {
       console.error('Save project permissions error:', e);
     }

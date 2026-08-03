@@ -239,6 +239,18 @@ export default function SystemSettings({ currentConfig, onConfigUpdate, isAdmin 
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded px-3 py-2 text-sm focus:border-pink-500 focus:outline-none"
                 />
               </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Số lần đi muộn cho phép (trong tháng)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={config.allowedLateCount}
+                  onChange={(e) => handleChange('allowedLateCount', e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded px-3 py-2 text-sm focus:border-pink-500 focus:outline-none"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">Nếu số ngày đi muộn trong tháng vượt quá giá trị này, hệ thống tự ghi vi phạm "Đi muộn" (crit_A_3) vào bảng Hiệu suất.</p>
+              </div>
             </div>
           </div>
         </div>

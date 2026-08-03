@@ -8,6 +8,7 @@
   autoAttendanceDays: number;
   autoAttendanceStartDate: string | Date;
   allowedLateMinutes: number;
+  allowedLateCount: number;
   otMultiplier: number;
   gpsRadiusAllowed: number;
   weekendDays: number[];

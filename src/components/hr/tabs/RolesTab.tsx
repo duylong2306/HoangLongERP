@@ -118,9 +118,6 @@ export default function RolesTab(props: RolesTabProps) {
 
   const handleSaveGroup = React.useCallback(async () => {
     const updated = [...draftRoles];
-    // Ghi cache localStorage trước (offline-safe)
-    localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
-    localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
     setRoleGroupsCache(updated); // sync in-memory cache
     setRoles(updated);
     syncHrmPermissionsToApp(updated);
@@ -440,8 +437,6 @@ export default function RolesTab(props: RolesTabProps) {
                           const updated = draftRoles.filter(item => item.id !== r.id);
                           setDraftRoles(updated);
                           setRoles(updated);
-                          localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
-                          localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
                           setRoleGroupsCache(updated);
                           dbService.hrmRoleGroups.delete(r.id).catch(err => {
                             console.error('Supabase hrmRoleGroups delete error:', err);

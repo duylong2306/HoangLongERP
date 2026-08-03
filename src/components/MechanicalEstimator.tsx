@@ -204,24 +204,14 @@ export default function MechanicalEstimator({
         defaultData.companyAddressInfo = companyAddressInfo;
         defaultData.companyContactInfo = companyContactInfo;
         defaultData.paymentTerms = paymentTerms;
-        
-        localStorage.setItem('hl_mechanical_company_logo', companyLogoImg);
-        localStorage.setItem('hl_mechanical_company_name', companyLogoText);
-        localStorage.setItem('hl_mechanical_company_slogan', companySlogan);
-        localStorage.setItem('hl_mechanical_company_address', companyAddressInfo);
-        localStorage.setItem('hl_mechanical_company_contact', companyContactInfo);
-        localStorage.setItem('hl_mechanical_payment_terms', paymentTerms);
       } else if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_mechanical_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_mechanical_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_mechanical_liquidation_template', liquidationTemplate);
       }
-      
+
       await dbService.quotationConfigs.save('mechanical', defaultData);
       
       setFeedback({
@@ -253,12 +243,12 @@ export default function MechanicalEstimator({
       const defaultData = await dbService.quotationConfigs.get('mechanical');
       
       if (activeTemplateTab === 'quote') {
-        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_mechanical_company_logo') ?? '';
-        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_mechanical_company_name') ?? 'HOANG LONG';
-        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_mechanical_company_slogan') ?? 'Construction - Furniture - Doors';
-        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_mechanical_company_address') ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
-        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_mechanical_company_contact') ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
-        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_mechanical_payment_terms') ?? DEFAULT_MECH_PAYMENT_TERMS;
+        const logo = defaultData?.companyLogoImg ?? '';
+        const name = defaultData?.companyLogoText ?? 'HOANG LONG';
+        const slogan = defaultData?.companySlogan ?? 'Construction - Furniture - Doors';
+        const address = defaultData?.companyAddressInfo ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
+        const contact = defaultData?.companyContactInfo ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
+        const terms = defaultData?.paymentTerms ?? DEFAULT_MECH_PAYMENT_TERMS;
 
         setCompanyLogoImg(logo);
         setCompanyLogoText(name);
@@ -267,13 +257,13 @@ export default function MechanicalEstimator({
         setCompanyContactInfo(contact);
         setPaymentTerms(terms);
       } else if (activeTemplateTab === 'contract') {
-        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_mechanical_contract_template') ?? DEFAULT_MECH_CONTRACT_TEMPLATE;
+        const template = defaultData?.contractTemplate ?? DEFAULT_MECH_CONTRACT_TEMPLATE;
         setContractTemplate(template);
       } else if (activeTemplateTab === 'acceptance') {
-        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_mechanical_acceptance_template') ?? DEFAULT_MECH_ACCEPTANCE_TEMPLATE;
+        const template = defaultData?.acceptanceTemplate ?? DEFAULT_MECH_ACCEPTANCE_TEMPLATE;
         setAcceptanceTemplate(template);
       } else if (activeTemplateTab === 'liquidation') {
-        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_mechanical_liquidation_template') ?? DEFAULT_MECH_LIQUIDATION_TEMPLATE;
+        const template = defaultData?.liquidationTemplate ?? DEFAULT_MECH_LIQUIDATION_TEMPLATE;
         setLiquidationTemplate(template);
       }
       
@@ -565,30 +555,17 @@ export default function MechanicalEstimator({
   }, [loadedQuote, isMechSavedVal, preselectedProjectId]);
 
   const [quoteNotes, setQuoteNotes] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState(() => localStorage.getItem('hl_mechanical_payment_terms') || DEFAULT_MECH_PAYMENT_TERMS);
+  const [paymentTerms, setPaymentTerms] = useState(() => DEFAULT_MECH_PAYMENT_TERMS);
 
-  const [companyLogoImg, setCompanyLogoImg] = useState(() => localStorage.getItem('hl_mechanical_company_logo') || '');
-  const [companyLogoText, setCompanyLogoText] = useState(() => localStorage.getItem('hl_mechanical_company_name') || 'HOANG LONG');
-  const [companySlogan, setCompanySlogan] = useState(() => localStorage.getItem('hl_mechanical_company_slogan') || 'Construction - Furniture - Doors');
-  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => localStorage.getItem('hl_mechanical_company_address') || `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
-  const [companyContactInfo, setCompanyContactInfo] = useState(() => localStorage.getItem('hl_mechanical_company_contact') || `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
+  const [companyLogoImg, setCompanyLogoImg] = useState(() => '');
+  const [companyLogoText, setCompanyLogoText] = useState(() => 'HOANG LONG');
+  const [companySlogan, setCompanySlogan] = useState(() => 'Construction - Furniture - Doors');
+  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
+  const [companyContactInfo, setCompanyContactInfo] = useState(() => `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
 
-  const [contractTemplate, setContractTemplate] = useState(() => localStorage.getItem('hl_mechanical_contract_template') || DEFAULT_MECH_CONTRACT_TEMPLATE);
-  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => localStorage.getItem('hl_mechanical_acceptance_template') || DEFAULT_MECH_ACCEPTANCE_TEMPLATE);
-  const [liquidationTemplate, setLiquidationTemplate] = useState(() => localStorage.getItem('hl_mechanical_liquidation_template') || DEFAULT_MECH_LIQUIDATION_TEMPLATE);
-
-  // Auto-persist template changes to localStorage
-  useEffect(() => {
-    localStorage.setItem('hl_mechanical_company_logo', companyLogoImg);
-    localStorage.setItem('hl_mechanical_company_name', companyLogoText);
-    localStorage.setItem('hl_mechanical_company_slogan', companySlogan);
-    localStorage.setItem('hl_mechanical_company_address', companyAddressInfo);
-    localStorage.setItem('hl_mechanical_company_contact', companyContactInfo);
-    localStorage.setItem('hl_mechanical_payment_terms', paymentTerms);
-    localStorage.setItem('hl_mechanical_contract_template', contractTemplate);
-    localStorage.setItem('hl_mechanical_acceptance_template', acceptanceTemplate);
-    localStorage.setItem('hl_mechanical_liquidation_template', liquidationTemplate);
-  }, [companyLogoImg, companyLogoText, companySlogan, companyAddressInfo, companyContactInfo, paymentTerms, contractTemplate, acceptanceTemplate, liquidationTemplate]);
+  const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_MECH_CONTRACT_TEMPLATE);
+  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_MECH_ACCEPTANCE_TEMPLATE);
+  const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_MECH_LIQUIDATION_TEMPLATE);
 
   const [dbLoading, setDbLoading] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
@@ -925,7 +902,7 @@ export default function MechanicalEstimator({
     }
   };
 
-  const handleSendToProject = () => {
+  const handleSendToProject = async () => {
     if (!selectedProjectId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng chọn hoặc liên kết dự án ở phía trên trước khi gửi báo giá qua dự án!', type: 'warning' });
       return;
@@ -947,15 +924,12 @@ export default function MechanicalEstimator({
     const itemCode = `BGME-HL-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const pdfName = `Bao_gia_Co_khi_${(customerName || 'Khach_hang').trim().replace(/\s+/g, '_')}.pdf`;
 
-    // Sync child tasks in local storage
-    const rawTasks = localStorage.getItem('hl_erp_tasks');
+    // Sync child tasks (nguồn: Supabase)
     let currentTasks: any[] = [];
-    if (rawTasks) {
-      try {
-        currentTasks = JSON.parse(rawTasks);
-      } catch (e) {
-        console.error("Lỗi đọc tasks từ localStorage:", e);
-      }
+    try {
+      currentTasks = await dbService.tasks.list();
+    } catch (e) {
+      console.error("Lỗi đọc tasks từ Supabase:", e);
     }
 
     let taskUpdatedCount = 0;
@@ -1034,11 +1008,9 @@ export default function MechanicalEstimator({
       return p;
     });
 
-    localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjects));
     window.dispatchEvent(new CustomEvent('hl-projects-updated'));
 
     if (taskUpdatedCount > 0) {
-      localStorage.setItem('hl_erp_tasks', JSON.stringify(updatedTasks));
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
 
       updatedTasks.forEach(t => {

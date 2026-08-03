@@ -198,6 +198,13 @@ export default function ConstructionFinalQuote({
     }
   }, [loadedQuote]);
   const [takeoffUpdateTrigger, setTakeoffUpdateTrigger] = useState(0);
+  // Định mức vật liệu từ Supabase
+  const [materialNorms, setMaterialNorms] = useState<any[]>([]);
+  useEffect(() => {
+    dbService.constructionNorms.get('material_composition_norms')
+      .then((data: any) => { if (Array.isArray(data)) setMaterialNorms(data); })
+      .catch(err => console.warn('Lỗi tải định mức vật liệu từ Supabase:', err));
+  }, []);
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -228,9 +235,7 @@ export default function ConstructionFinalQuote({
       
       // If loadedQuote has takeoffRows, compute from it!
       if (loadedQuote && loadedQuote.takeoffRows && loadedQuote.takeoffRows.length > 0) {
-        const materialCompositionNormsLocal = localStorage.getItem('material_composition_norms');
-        const parsedNorms = materialCompositionNormsLocal ? JSON.parse(materialCompositionNormsLocal) : [];
-        return calculateTakeoffTotalsFromRows(loadedQuote.takeoffRows, parsedNorms);
+        return calculateTakeoffTotalsFromRows(loadedQuote.takeoffRows, materialNorms);
       }
 
       // Check if we have saved totals in sessionStorage
@@ -251,17 +256,14 @@ export default function ConstructionFinalQuote({
 
       // Fallback: calculate from sessionStorage takeoff_rows
       const takeoffRowsLocal = sessionStorage.getItem('takeoff_rows');
-      const materialCompositionNormsLocal = localStorage.getItem('material_composition_norms');
-
       const parsedRows = takeoffRowsLocal ? JSON.parse(takeoffRowsLocal) : [];
-      const parsedNorms = materialCompositionNormsLocal ? JSON.parse(materialCompositionNormsLocal) : [];
 
-      return calculateTakeoffTotalsFromRows(parsedRows, parsedNorms);
+      return calculateTakeoffTotalsFromRows(parsedRows, materialNorms);
     } catch (e) {
       console.error("Error calculating takeoff totals:", e);
       return { gach: 0, ximang: 0, cat: 0, da: 0, thep: 0, cost: 0 };
     }
-  }, [loadedQuote, takeoffUpdateTrigger]);
+  }, [loadedQuote, takeoffUpdateTrigger, materialNorms]);
 
   const takeoffTotals = takeoffTotalsAndCost;
 

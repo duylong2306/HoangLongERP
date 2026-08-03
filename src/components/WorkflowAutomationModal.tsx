@@ -1,13 +1,14 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { 
-  X, Zap, Edit2, ChevronRight, User, ArrowRight, Shield, Plus, Users, Trash2, 
+import {
+  X, Zap, Edit2, ChevronRight, User, ArrowRight, Shield, Plus, Users, Trash2,
   CheckSquare, AlertCircle, Type, Save, Link, ListTodo, Sliders, Play, FileText,
   DollarSign, Mail, Phone, Calendar
 } from 'lucide-react';
-import { Project, Customer, Employee, Task, ProjectDoc } from '../types';
+import { Project, Customer, Employee, Task, ProjectDoc, Supplier } from '../types';
 import { KanbanColumn } from './ProjectKanbanBoard';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import { useNotification } from '../context';
+import { dbService } from '../lib/dbService';
 
 interface WorkflowAutomationModalProps {
   isOpen: boolean;
@@ -34,7 +35,25 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
 }) => {
   const [selectedActionType, setSelectedActionType] = useState<'assignee' | 'status' | 'approval' | 'subtask' | 'textStyle'>('assignee');
   const [activeSubtaskRuleIndex, setActiveSubtaskRuleIndex] = useState<number | null>(null);
+  const [subcontractors, setSubcontractors] = useState<Supplier[]>([]);
   const { addToast } = useNotification();
+
+  // Load subcontractors from Supabase
+  useEffect(() => {
+    if (!isOpen) return;
+    const loadSubcontractors = async () => {
+      try {
+        const data = await dbService.accountingSubcontractors.list();
+        setSubcontractors(data);
+      } catch (e) {
+        console.error("Lỗi load thầu phụ từ Supabase:", e);
+      }
+    };
+    loadSubcontractors();
+    const handleSync = () => loadSubcontractors();
+    window.addEventListener('hl-suppliers-updated', handleSync);
+    return () => window.removeEventListener('hl-suppliers-updated', handleSync);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -681,7 +700,7 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                         </div>
                         {subtaskAuto.isSubcontractorEnabled === true && (
                           <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                            {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                            {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                             <div>
                               <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                               <select
@@ -690,12 +709,7 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                                   const subId = e.target.value;
                                   updateSubtaskAutomation(index, { subcontractorId: subId || undefined });
                                   // Logic to update subcontractorName...
-                                  const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                  let suppliers = [];
-                                  if (savedSuppliers) {
-                                    try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                  }
-                                  const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                  const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                   if (matched) {
                                     updateSubtaskAutomation(index, { subcontractorName: matched.name });
                                   } else {
@@ -713,25 +727,11 @@ export const WorkflowAutomationModal: React.FC<WorkflowAutomationModalProps> = (
                                 className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                               >
                                 <option value="">-- Chọn đối tác thầu phụ --</option>
-                                {(() => {
-                                  const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                  let suppliers = [];
-                                  if (savedSuppliers) {
-                                    try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                  }
-                                  if (suppliers.length === 0) {
-                                    suppliers = [
-                                      { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                      { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                      { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                    ];
-                                  }
-                                  return suppliers.map((sup: any) => (
-                                    <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                      {sup.name} ({sup.code || sup.id})
-                                    </option>
-                                  ));
-                                })()}
+                                {subcontractors.map((sup: any) => (
+                                  <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                    {sup.name} ({sup.code || sup.id})
+                                  </option>
+                                ))}
                               </select>
                             </div>
 
