@@ -371,6 +371,32 @@ export default function DashboardOverview({
   // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
   const isSyncingFromCloud = useRef(false);
 
+  // Loại bỏ bản ghi auto-generated trùng lặp (cùng empId + ngày, bỏ AT-AUTO-* khi có bản ghi thật)
+  const dedupAttendance = (list: any[]): any[] => {
+    const groups = new Map<string, any[]>();
+    for (const log of list) {
+      const key = `${log.empId}|${log.date}`;
+      const arr = groups.get(key);
+      if (arr) arr.push(log);
+      else groups.set(key, [log]);
+    }
+    const deduped: any[] = [];
+    for (const logs of groups.values()) {
+      if (logs.length === 1) { deduped.push(logs[0]); continue; }
+      const real = logs.filter((l: any) => !l.id?.startsWith('AT-AUTO-'));
+      if (real.length > 0) {
+        deduped.push(...real);
+        // Xóa bản ghi auto-generated trùng trên Supabase (fire-and-forget)
+        logs.filter((l: any) => l.id?.startsWith('AT-AUTO-')).forEach((l: any) =>
+          dbService.attendance.delete(l.id).catch(() => {})
+        );
+      } else {
+        deduped.push(logs[logs.length - 1]);
+      }
+    }
+    return deduped;
+  };
+
   // Load attendance from Supabase on mount (dbService.attendance.list hits Supabase first)
   useEffect(() => {
     let mounted = true;
@@ -378,7 +404,7 @@ export default function DashboardOverview({
       .then(list => {
         if (mounted && Array.isArray(list) && list.length > 0) {
           isSyncingFromCloud.current = true;
-          setAttendanceList(list.map(normalizeRecord));
+          setAttendanceList(dedupAttendance(list).map(normalizeRecord));
           requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
         }
       })
@@ -396,7 +422,7 @@ export default function DashboardOverview({
         isSyncingFromCloud.current = true;
         const rawList = customEvent.detail.attendance || customEvent.detail;
         // Normalize time fields (phòng trường hợp data từ HRM chứa object timestamp thay vì string)
-        setAttendanceList(Array.isArray(rawList) ? rawList.map(normalizeRecord) : []);
+        setAttendanceList(Array.isArray(rawList) ? dedupAttendance(rawList).map(normalizeRecord) : []);
         requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
       }
     };

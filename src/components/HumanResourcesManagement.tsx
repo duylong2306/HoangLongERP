@@ -289,7 +289,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         const imported: AttendanceLog[] = rows.map((r, idx) => ({
           id: `AT-IMP-${Date.now()}-${idx}`,
           empId: String(r['Mã NV'] || '').trim(),
@@ -380,7 +380,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         const imported: EmployeeProfile[] = rows.map((r, idx) => ({
           id: String(r['Mã NV'] || `NV_IMP_${Date.now()}_${idx}`).trim(),
           name: String(r['Họ tên'] || '').trim(),
@@ -837,13 +837,52 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // (Hàm getConfiguredApprover được import từ '../context')
 
   const [attendance, setAttendance] = useState<AttendanceLog[]>([]);
+  // Flag đánh dấu đã load xong dữ liệu attendance từ Supabase.
+  // Chỉ khi true mới được tạo mới bản ghi auto-lock (KP/phép/lễ/cuối tuần),
+  // tránh tạo trùng với bản ghi thật từ DashboardOverview.
+  const attendanceLoadedRef = useRef(false);
+
+  // Loại bỏ bản ghi trùng lặp: cùng nhân viên + ngày, giữ bản ghi thật (GPS/FaceID/nhập tay),
+  // bỏ bản ghi auto-generated (AT-AUTO-KP-*, AT-AUTO-LEAVE-*, ...).
+  const dedupAttendance = (list: AttendanceLog[]): AttendanceLog[] => {
+    const groups = new Map<string, AttendanceLog[]>();
+    for (const log of list) {
+      const key = `${log.empId}|${log.date}`;
+      const arr = groups.get(key);
+      if (arr) arr.push(log);
+      else groups.set(key, [log]);
+    }
+    const deduped: AttendanceLog[] = [];
+    for (const logs of groups.values()) {
+      if (logs.length === 1) { deduped.push(logs[0]); continue; }
+      const real = logs.filter(l => !l.id.startsWith('AT-AUTO-'));
+      if (real.length > 0) {
+        deduped.push(...real);
+        // Xóa bản ghi auto-generated trùng trên Supabase (fire-and-forget)
+        logs.filter(l => l.id.startsWith('AT-AUTO-')).forEach(l =>
+          dbService.attendance.delete(l.id).catch(() => {})
+        );
+      } else {
+        deduped.push(logs[logs.length - 1]);
+      }
+    }
+    return deduped;
+  };
 
   // Load attendance từ Supabase trên mount
   useEffect(() => {
     let mounted = true;
     dbService.attendance.list()
-      .then(list => { if (mounted && list.length > 0) setAttendance(list); })
-      .catch(err => console.warn('Lỗi tải chấm công từ Supabase:', err));
+      .then(list => {
+        if (mounted && list.length > 0) {
+          setAttendance(dedupAttendance(list));
+        }
+        if (mounted) attendanceLoadedRef.current = true;
+      })
+      .catch(err => {
+        console.warn('Lỗi tải chấm công từ Supabase:', err);
+        if (mounted) attendanceLoadedRef.current = true;
+      });
     return () => { mounted = false; };
   }, []);
 
@@ -1297,6 +1336,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             changed = true;
           }
         } else {
+          // CHƯA load xong data từ Supabase → KHÔNG tạo bản ghi mới để tránh trùng với bản ghi thật
+          if (!attendanceLoadedRef.current) return;
+
           // Chưa có bản ghi chấm công => thực hiện tự động rà quét và chốt công theo đơn phép hoặc nghỉ không phép
           const dateObj = new Date(checkDate);
           const dayOfWeek = dateObj.getDay();
