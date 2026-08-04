@@ -1233,7 +1233,10 @@ export default function DashboardOverview({
 
     // Look for record for current user on 2026-06-06
     const updated = [...attendanceList];
-    let todayLog = updated.find(a => a.empName === currentUser.name && a.date === todayVal);
+    // QUAN TRỌNG: tìm theo empId + date (KHÔNG dùng empName).
+    // Tìm bằng empName dễ trượt (tên lệch chuẩn hóa / state chưa cập nhật) → tạo bản ghi mới
+    // có id khác → trùng lặp (2 bản ghi cùng empId + ngày). empId là khóa nghiệp vụ duy nhất.
+    let todayLog = updated.find(a => a.empId === empId && a.date === todayVal);
 
     const siteInfo = getSiteGpsInfo(selectedSite);
     const selfPhoto = captureSelfieFromStream();
@@ -1287,9 +1290,10 @@ export default function DashboardOverview({
 
     if (!todayLog) {
       todayLog = {
-        // id duy nhất: gồm mã NV + ngày + 5 số cuối timestamp → tránh 2 NV điểm danh cùng lúc
-        // bị trùng id (id cũ chỉ là 4 số cuối Date.now, rất dễ trùng → upsert ghi đè → mất dữ liệu)
-        id: `AT-${empId}-${todayVal.replace(/-/g, '')}-${Date.now().toString().slice(-5)}`,
+        // id XÁC ĐỊNH từ empId + ngày → mọi lần chấm (sáng/chiều) của cùng 1 NV trong ngày
+        // đều trúng CÙNG dòng (upsert bởi id). Không còn id ngẫu nhiên → không sinh bản ghi trùng.
+        // (dbService.attendance.save cũng chuẩn hóa về đúng id này nên nhất quán đầu cuối.)
+        id: `AT-${empId}-${todayVal.replace(/-/g, '')}`,
         empId: empId,
         empName: currentUser.name,
         date: todayVal,

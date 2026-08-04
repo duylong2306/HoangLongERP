@@ -842,11 +842,16 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // tránh tạo trùng với bản ghi thật từ DashboardOverview.
   const attendanceLoadedRef = useRef(false);
 
-  // Loại bỏ bản ghi trùng lặp: cùng nhân viên + ngày, giữ bản ghi thật (GPS/FaceID/nhập tay),
-  // bỏ bản ghi auto-generated (AT-AUTO-KP-*, AT-AUTO-LEAVE-*, ...).
+  // Loại bỏ / gộp bản ghi trùng lặp: cùng nhân viên + ngày chỉ giữ ĐÚNG 1 bản ghi.
+  // - Nếu có bản ghi thật (GPS/FaceID/nhập tay), gộp TẤT CẢ bản ghi thật thành 1
+  //   (merge các slot giờ/thông tin còn thiếu), xóa các bản trùng trên Supabase.
+  // - Nếu chỉ có bản ghi auto (AT-AUTO-*), giữ bản gần nhất.
+  // Trước đây hàm này chỉ lọc bỏ AT-AUTO-* nên 2 bản ghi thật vẫn bị giữ lại → hiển thị trùng.
   const dedupAttendance = (list: AttendanceLog[]): AttendanceLog[] => {
+    const isRealTime = (t: any) => typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t);
     const groups = new Map<string, AttendanceLog[]>();
     for (const log of list) {
+      if (!log.empId || !log.date) { groups.set(`__orphan_${log.id}`, [log]); continue; }
       const key = `${log.empId}|${log.date}`;
       const arr = groups.get(key);
       if (arr) arr.push(log);
@@ -857,13 +862,33 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       if (logs.length === 1) { deduped.push(logs[0]); continue; }
       const real = logs.filter(l => !l.id.startsWith('AT-AUTO-'));
       if (real.length > 0) {
-        deduped.push(...real);
-        // Xóa bản ghi auto-generated trùng trên Supabase (fire-and-forget)
-        logs.filter(l => l.id.startsWith('AT-AUTO-')).forEach(l =>
+        // Sắp xếp: bản ghi có nhiều giờ thực tế nhất lên đầu làm base
+        const sorted = [...real].sort((a, b) => {
+          const cnt = (x: AttendanceLog) =>
+            (['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT'] as const)
+              .filter(s => isRealTime(x[s])).length;
+          return cnt(b) - cnt(a);
+        });
+        const merged: any = { ...sorted[0] };
+        for (const log of sorted.slice(1)) {
+          (['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT',
+            'photoIn', 'photoOut', 'locationIn', 'locationOut', 'coordsIn', 'coordsOut',
+            'method', 'status', 'otHours', 'notes'] as const).forEach(key => {
+            if (log[key] && log[key] !== '--:--' && log[key] !== '' &&
+                (!merged[key] || merged[key] === '--:--' || merged[key] === '')) {
+              merged[key] = log[key];
+            }
+          });
+          if ((log as any).isLocked) merged.isLocked = true;
+        }
+        deduped.push(merged);
+        // Xóa các bản ghi thật trùng (chỉ giữ merged) và mọi bản auto trên Supabase
+        logs.filter(l => l.id !== merged.id).forEach(l =>
           dbService.attendance.delete(l.id).catch(() => {})
         );
       } else {
         deduped.push(logs[logs.length - 1]);
+        logs.slice(0, -1).forEach(l => dbService.attendance.delete(l.id).catch(() => {}));
       }
     }
     return deduped;
@@ -2496,9 +2521,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return;
     }
     const newLog: AttendanceLog = {
-      // id duy nhất: gồm mã NV + ngày + 5 số cuối timestamp → tránh trùng id (id cũ chỉ 4 số cuối Date.now
-      // rất dễ trùng khi nhiều NV chấm công cùng lúc → upsert ghi đè → mất dữ liệu trên bảng Chấm công ngày)
-      id: `AT-${empId}-${todayStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}`,
+      // id XÁC ĐỊNH từ empId + ngày → mọi lần chấm của cùng 1 NV trong ngày trúng CÙNG dòng.
+      // (dbService.attendance.save cũng chuẩn hóa về đúng id này, nên nhất quán.)
+      id: `AT-${empId}-${todayStr.replace(/-/g, '')}`,
       empId,
       empName: name,
       date: todayStr,

@@ -2155,8 +2155,19 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase chưa được cấu hình — không thể lưu chấm công');
 
+      // Chuẩn hóa id theo empId + date để mọi lượt lưu của bản ghi THẬT (punch, import, sửa tay)
+      // đều ghi vào CÙNG 1 dòng trên Supabase → KHÔNG bao giờ tạo bản ghi trùng (cùng empId + ngày).
+      // Bản ghi auto (AT-AUTO-*) được GIỮ NGUYÊN id riêng biệt: auto-lock và chấm công thật nằm ở
+      // 2 dòng, dedup sẽ ưu tiên giữ bản thật và xóa bản auto. Nếu HR không lắng nghe sự kiện chấm
+      // công (state có thể cũ), auto-lock tạo nhầm AT-AUTO-* trùng empId+date thì ràng buộc UNIQUE
+      // sẽ TỪ CHỐI (reject, không ghi đè) → dữ liệu chấm công thật được bảo vệ, không bị mất.
+      const isAuto = typeof record.id === 'string' && record.id.startsWith('AT-AUTO-');
+      const deterministicId = (!isAuto && record.empId && record.date)
+        ? `AT-${record.empId}-${String(record.date).replace(/-/g, '')}`
+        : record.id;
+
       const row: any = {
-        id: record.id,
+        id: deterministicId,
         emp_id: record.empId,
         emp_name: record.empName,
         date: record.date,

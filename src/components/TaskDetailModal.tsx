@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner } from '../types';
+import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
@@ -156,7 +156,7 @@ export default function TaskDetailModal({
   // Wrapper: await onUpdateTask, nếu save thành công (true) thì mới gửi tin nhắn.
   // Trả về kết quả save (boolean) để caller có thể xử lý tiếp.
   const notifyProjectChatAfterSave = async (
-    savePromise: Promise<boolean>,
+    savePromise: void | Promise<boolean>,
     content: string,
     relatedEntity?: ChatMessage['relatedEntity']
   ): Promise<boolean> => {
@@ -164,7 +164,7 @@ export default function TaskDetailModal({
     if (ok === true && selectedTask.projectId) {
       notifyProjectChat(content, relatedEntity);
     }
-    return ok;
+    return ok === true;
   };
 
   const assignee = employees.find(e => e.id === selectedTask.assigneeId);
