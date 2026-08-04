@@ -292,12 +292,138 @@ export function computeDailyWorkday(
     if (hasAnyPunch) return { workday: 0, label: '0', details: 'Đang làm việc (chờ chốt ca)' };
 
     if (!isHoliday && !isWeekend) {
-      const penaltyVal = getCoefVal('KP', -1.0);
+      // Hệ số vắng không phép = công cơ sở (MSHID + ASHID) nhân với hệ số KP
+      // (mã 'KP' trong tab Hệ Số Chấm Công). Mặc định: 1.0 × (-1.0) = -1.0.
+      const baseDay = getCoefVal('MSHID', 0.5) + getCoefVal('ASHID', 0.5);
+      const kpCoef = getCoefVal('KP', -1.0);
+      const penaltyVal = baseDay * kpCoef;
       return { workday: penaltyVal, label: `${penaltyVal}`, details: 'Vắng không phép (KP)' };
     } else {
       return { workday: 0, label: '0', details: isHoliday ? `Nghỉ Lễ (${holidayName})` : 'Nghỉ cuối tuần' };
     }
   }
+}
+
+// ─── Báo cáo vắng mặt (ngày không có bản ghi chấm công) ───────────────────
+// Hàm thuần: liệt kê các ngày mà nhân viên Đang làm KHÔNG có bản ghi chấm
+// công, để HR duyệt thủ công (gán KP / phép / bù công / bỏ qua).
+//
+// Đã loại trừ:
+//  - Nhân viên không ở trạng thái "working" (đã nghỉ việc…).
+//  - excludedIds / excludedRoles (mặc định: admin / giám đốc — không tự động
+//    phạt KP cho người không chấm công hàng ngày).
+//  - Ngày trước ngày vào làm (emp.startDate).
+//  - Ngày được bao phủ bởi đơn nghỉ ĐÃ DUYỆT (không tính đơn báo cáo/chốt công).
+//  - Ngày tương lai (chưa tới kỳ chấm công).
+
+export interface MissingAttendanceEntry {
+  empId: string;
+  empName: string;
+  date: string;        // YYYY-MM-DD
+  dayOfWeek: number;
+  isHoliday: boolean;
+  isWeekend: boolean;
+  type: 'absent' | 'holiday' | 'weekend';
+}
+
+function matchHolidayDate(dateStr: string, holidays: any[]): boolean {
+  if (!dateStr || !Array.isArray(holidays)) return false;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return false;
+  const ddMmYyyy = `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return holidays.some((h: any) => {
+    if (h.inputMode === 'single') return h.singleDate === dateStr;
+    return dateStr >= h.fromDate && dateStr <= h.toDate;
+  });
+}
+
+function eachDateInRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  if (!from || !to) return out;
+  const cur = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (isNaN(cur.getTime()) || isNaN(end.getTime())) return out;
+  while (cur <= end) {
+    out.push(
+      `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`
+    );
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+export function getMissingAttendanceReport(params: {
+  employees: any[];
+  attendance: any[];
+  leaves: any[];
+  holidays: any[];
+  weekendDays: number[];
+  month: string;   // '1'..'12'
+  year: string;    // '2026'
+  excludedIds?: string[];
+  excludedRoles?: string[];
+}): MissingAttendanceEntry[] {
+  const {
+    employees, attendance, leaves, holidays, weekendDays,
+    month, year, excludedIds = [], excludedRoles = [],
+  } = params;
+
+  const result: MissingAttendanceEntry[] = [];
+  const m = parseInt(month, 10);
+  const y = parseInt(year, 10);
+  if (!Array.isArray(employees) || !m || !y) return result;
+
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const excludedIdSet = new Set(excludedIds);
+  const excludedRoleSet = new Set(excludedRoles);
+
+  const existing = new Set(
+    (attendance || []).map((a: any) => `${a.empId}|${a.date}`)
+  );
+
+  // Ngày được bao phủ bởi đơn nghỉ ĐÃ DUYỆT (không tính đơn báo cáo/chốt công).
+  const leaveCov = new Set<string>();
+  (leaves || []).forEach((l: any) => {
+    if (l.status !== 'approved') return;
+    if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return;
+    eachDateInRange(l.fromDate, l.toDate).forEach((d) => {
+      if (l.empId) leaveCov.add(`${l.empId}|${d}`);
+      if (l.empName) leaveCov.add(`${l.empName}|${d}`);
+    });
+  });
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+
+  (employees || []).forEach((emp: any) => {
+    if (emp.status !== 'working') return;
+    if (excludedIdSet.has(emp.id)) return;
+    if (emp.role && excludedRoleSet.has(emp.role)) return;
+
+    const startDate = (typeof emp.startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(emp.startDate))
+      ? emp.startDate
+      : null;
+    const empName = emp.name || emp.empName || emp.id || '';
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (dateStr > todayStr) continue;               // bỏ ngày tương lai
+      if (startDate && dateStr < startDate) continue;  // bỏ trước ngày vào làm
+      if (existing.has(`${emp.id}|${dateStr}`)) continue;
+      if (leaveCov.has(`${emp.id}|${dateStr}`)) continue;
+
+      const dow = new Date(`${dateStr}T00:00:00`).getDay();
+      const isHoliday = matchHolidayDate(dateStr, holidays);
+      const isWeekend = (weekendDays || []).includes(dow);
+      const type: MissingAttendanceEntry['type'] = isHoliday ? 'holiday' : isWeekend ? 'weekend' : 'absent';
+
+      result.push({ empId: emp.id, empName, date: dateStr, dayOfWeek: dow, isHoliday, isWeekend, type });
+    }
+  });
+
+  result.sort((a, b) => a.empName.localeCompare(b.empName) || (a.date < b.date ? -1 : 1));
+  return result;
 }
 
 /**
