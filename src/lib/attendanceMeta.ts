@@ -185,3 +185,24 @@ export function getLegacyMedia(log: any): LegacyMedia | null {
 export function mapsUrl(coords: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`;
 }
+
+// ============================================================================
+// CÁC LOẠI ĐƠN GIẢI TRÌNH CHẤM CÔNG
+// ----------------------------------------------------------------------------
+// Dùng chung giữa Dashboard (gửi), HRM và TaskManagement (duyệt) để tránh
+// rải rác chuỗi literal. Thêm loại mới ("lỗi hệ thống chấm công") phải thêm
+// vào đây và xử lý ở cả 3 nơi (Dashboard form, HRM + TaskManagement approve).
+// ============================================================================
+
+export const ATTENDANCE_REPORT_TYPES = [
+  'Báo cáo nghỉ ca',
+  'Báo cáo lỗi chấm ra ca',
+  'Báo cáo lỗi hệ thống chấm công',
+] as const;
+
+export type AttendanceReportType = typeof ATTENDANCE_REPORT_TYPES[number];
+
+/** Đơn có phải là một trong các loại giải trình chấm công không. */
+export function isAttendanceReportType(type?: string): boolean {
+  return !!type && (ATTENDANCE_REPORT_TYPES as readonly string[]).includes(type);
+}

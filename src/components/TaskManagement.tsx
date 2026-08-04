@@ -9,6 +9,7 @@ import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
+import { isAttendanceReportType } from '../lib/attendanceMeta';
 
 interface TaskManagementProps {
   tasks: Task[];
@@ -242,12 +243,16 @@ export default function TaskManagement({
         leaveDates.forEach(dStr => {
           const idx = attendance.findIndex((at: any) => at.empId === targetLeave.empId && at.date === dStr);
           if (idx !== -1) {
-            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || targetLeave.type === 'Báo cáo nghỉ ca' || targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
+            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(targetLeave.type)) {
               const currentAt = attendance[idx];
               let timeInS = currentAt.timeInS, timeOutS = currentAt.timeOutS, timeInC = currentAt.timeInC, timeOutC = currentAt.timeOutC;
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
                 if (targetLeave.shift === 'morning') timeOutS = '11:30';
                 else if (targetLeave.shift === 'afternoon') timeOutC = '17:00';
+              } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
+                // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO (giữ ca còn lại nguyên).
+                if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; }
+                else if (targetLeave.shift === 'afternoon') { timeInC = '13:00'; timeOutC = '17:00'; }
               } else if (targetLeave.type !== 'Báo cáo nghỉ ca') {
                 timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : '07:30';
                 timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : '11:30';
@@ -262,7 +267,7 @@ export default function TaskManagement({
             }
           } else {
             let timeInS = symbol, timeOutS = symbol, timeInC = symbol, timeOutC = symbol, method = 'Hành chính phép', st = 'excused';
-            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || targetLeave.type === 'Báo cáo nghỉ ca' || targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
+            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(targetLeave.type)) {
               method = 'Duyệt công'; st = 'valid';
               timeInS = '07:30'; timeOutS = '11:30'; timeInC = '13:00'; timeOutC = '17:00';
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
@@ -271,6 +276,9 @@ export default function TaskManagement({
               } else if (targetLeave.type === 'Báo cáo nghỉ ca') {
                 if (targetLeave.shift === 'morning') { timeInS = ''; timeOutS = ''; }
                 else { timeInC = ''; timeOutC = ''; }
+              } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
+                if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; timeInC = ''; timeOutC = ''; }
+                else { timeInS = ''; timeOutS = ''; timeInC = '13:00'; timeOutC = '17:00'; }
               }
             }
             const newLog = { id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`, empId: targetLeave.empId, empName: targetLeave.empName, date: dStr, timeInS, timeOutS, timeInC, timeOutC, timeInOT: '', timeOutOT: '', method, status: st, statusMsg: st === 'valid' ? 'Hợp lệ' : undefined, otHours: 0, leaveSymbol: st === 'excused' ? symbol : undefined, notes: targetLeave.reason || `Nghỉ phép được duyệt: ${targetLeave.type} (${symbol})` };
@@ -287,7 +295,7 @@ export default function TaskManagement({
       }
     } else if (status === 'rejected') {
       // Cập nhật attendance khi từ chối
-      if (targetLeave.type === 'Báo cáo nghỉ ca' || targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
+      if (isAttendanceReportType(targetLeave.type)) {
         try {
           const attendance = await dbService.attendance.list();
           const leaveDates = getDaysDiffList(targetLeave.fromDate, targetLeave.toDate);

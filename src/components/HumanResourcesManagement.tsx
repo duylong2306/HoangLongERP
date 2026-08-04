@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
-import { mergePunchMeta } from '../lib/attendanceMeta';
+import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
@@ -66,8 +66,8 @@ import RolesTab from './hr/tabs/RolesTab';
  * NGHIỆP VỤ (business rules đã cập nhật 07/2026):
  *   - Bảng chấm công (`attendanceFiltered`): chỉ HIỂN THỊ log của nhân viên ĐANG LÀM
  *     (`status === 'working'`), ẩn hoàn toàn nhân viên nghỉ việc/nghỉ phép.
- *   - Tạo log tự động (`executeAutoWorkdayLocking`): chỉ tạo KP/phép/lễ/cuối tuần
- *     cho nhân viên `working`.
+ *   - Chốt công thủ công (`handleBulkLock`): ngày được chốt (khóa) thì không tự động
+ *     tạo log; công do quản lý kiểm duyệt và chốt bằng tay.
  *   - Tính lương tự động (`handleCalculatePayroll`): chỉ tính lương cho nhân viên
  *     `working`, dựa trên `empAttendance` (workedDays, otSunday, otHoliday, otHours)
  *     từ log chấm công có `status === 'valid'`.
@@ -115,9 +115,9 @@ const WorkdayCell = React.memo(function WorkdayCell({
           <span>Đã chốt</span>
         </span>
       ) : (
-        <span className="text-[8.5px] text-amber-500 font-bold flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-905/20" title="Chờ duyệt">
+        <span className="text-[8.5px] text-amber-500 font-bold flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-905/20" title="Chờ chốt">
           <Unlock className="w-2.5 h-2.5 shrink-0" />
-          <span>Chờ duyệt</span>
+          <span>Chờ chốt</span>
         </span>
       )}
     </div>
@@ -233,6 +233,28 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     return isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_accounting');
   };
 
+  /**
+   * Khi một ngày bị chốt công (khóa), mọi đơn báo cáo chấm công đang CHỜ DUYỆT cho
+   * ngày đó sẽ bị tự động chuyển thành "Bị từ chối" — quản lý quyết định không ghi
+   * nhận công, và không để đơn pending bị ẩn lấp liếm. Chỉ chạy khi thực sự có đơn pending.
+   */
+  const rejectPendingReportsFor = (pairs: { empId: string; date: string }[]) => {
+    if (!pairs.length) return;
+    const pairSet = new Set(pairs.map(p => `${p.empId}|${p.date}`));
+    const pending = (leaves || []).filter(l =>
+      isAttendanceReportType(l.type) && l.status === 'pending' && pairSet.has(`${l.empId}|${l.fromDate}`)
+    );
+    if (!pending.length) return;
+    const updatedLeaves = (leaves || []).map(l =>
+      (isAttendanceReportType(l.type) && l.status === 'pending' && pairSet.has(`${l.empId}|${l.fromDate}`))
+        ? { ...l, status: 'rejected' as const }
+        : l
+    );
+    setLeaves(updatedLeaves);
+    pending.forEach(l => dbService.hrmLeaves.save({ ...l, status: 'rejected' }).catch(() => {}));
+    window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_hrm', { detail: updatedLeaves }));
+  };
+
   const handleBulkLock = () => {
     let toLock = attendanceFiltered;
     if (bulkLockScope === 'page') {
@@ -251,6 +273,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const newlyLocked = updated.filter(a => a.isLocked && !attendance.find(old => old.id === a.id && old.isLocked));
     newlyLocked.forEach(a => dbService.attendance.save(a).catch(() => {}));
     window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
+    // Tự động từ chối các đơn báo cáo chấm công đang chờ duyệt của ngày bị chốt
+    rejectPendingReportsFor(toLock.map((a: any) => ({ empId: a.empId, date: a.date })));
     setShowBulkLockModal(false);
     addToast({ title: '✅ Đã chốt', message: `Đã chốt ${updated.filter(a => a.isLocked && toLock.some(t => t.id === a.id)).length} bản ghi`, type: 'success' });
   };
@@ -841,7 +865,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Flag đánh dấu đã load xong dữ liệu attendance từ Supabase.
   // Chỉ khi true mới được tạo mới bản ghi auto-lock (KP/phép/lễ/cuối tuần),
   // tránh tạo trùng với bản ghi thật từ DashboardOverview.
-  const attendanceLoadedRef = useRef(false);
 
   // Loại bỏ / gộp bản ghi trùng lặp: cùng nhân viên + ngày chỉ giữ ĐÚNG 1 bản ghi.
   // - Nếu có bản ghi thật (GPS/FaceID/nhập tay), gộp TẤT CẢ bản ghi thật thành 1
@@ -906,11 +929,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         if (mounted && list.length > 0) {
           setAttendance(dedupAttendance(list));
         }
-        if (mounted) attendanceLoadedRef.current = true;
       })
       .catch(err => {
         console.warn('Lỗi tải chấm công từ Supabase:', err);
-        if (mounted) attendanceLoadedRef.current = true;
       });
     return () => { mounted = false; };
   }, []);
@@ -1306,191 +1327,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     if (travelNorms?.length) travelNorms.forEach(n => dbService.travelNorms.save(n).catch(() => {}));
   }, [travelNorms]);
 
-  // Chức năng tự động chốt công hàng ngày lúc 22h00 cho tất cả nhân viên
-  const executeAutoWorkdayLocking = () => {
-    if (!employees || employees.length === 0) return;
-
-    const getLocalYYYYMMDD = (d: Date) => {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const r = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${r}`;
-    };
-
-    const now = new Date();
-    const todayStr = getLocalYYYYMMDD(now);
-    const currentHour = now.getHours();
-
-    const daysToAutoCheck = systemConfig?.autoAttendanceDays ?? 7;
-    const autoAttendanceStartDate = new Date(systemConfig?.autoAttendanceStartDate ?? '2020-01-01');
-
-    // Duyệt qua hôm nay và `daysToAutoCheck` ngày trước đó để chốt công tự động nếu chưa chốt
-    const datesToCheck: string[] = [];
-    for (let i = 0; i <= daysToAutoCheck; i++) {
-      const d = new Date(now.getTime());
-      d.setDate(now.getDate() - i);
-      datesToCheck.push(getLocalYYYYMMDD(d));
-    }
-
-    let updated = [...attendance];
-    let changed = false;
-
-    datesToCheck.forEach(checkDate => {
-      // Bỏ qua các ngày trước ngày khởi tạo dữ liệu chấm công
-      // (chỉ chấm từ attendanceInitDate trở đi, không ghi KP cho ngày quá khứ trước đó)
-      if (new Date(checkDate) < autoAttendanceStartDate) {
-        return;
-      }
-
-      const isToday = (checkDate === todayStr);
-      // Nếu là hôm nay, chỉ tự động chốt khi đồng hồ máy tính vượt quá mốc 22h00
-      if (isToday && currentHour < 22) {
-        return;
-      }
-
-      employees.forEach(emp => {
-        // Chỉ chốt công cho nhân viên ĐANG LÀM (ẩn các nhân viên khác khỏi bảng chấm công)
-        if (emp.status !== 'working') return;
-        // Tìm bản ghi chấm công
-        const existingIndex = updated.findIndex(a => a.empId === emp.id && a.date === checkDate);
-
-        if (existingIndex > -1) {
-          const log = updated[existingIndex];
-          if (!log.isLocked) {
-            updated[existingIndex] = {
-              ...log,
-              isLocked: true,
-              notes: log.notes ? `${log.notes} (Đã chốt công tự động lúc 22h00)` : `Đã chốt công tự động lúc 22h00`
-            };
-            changed = true;
-          }
-        } else {
-          // CHƯA load xong data từ Supabase → KHÔNG tạo bản ghi mới để tránh trùng với bản ghi thật
-          if (!attendanceLoadedRef.current) return;
-
-          // Chưa có bản ghi chấm công => thực hiện tự động rà quét và chốt công theo đơn phép hoặc nghỉ không phép
-          const dateObj = new Date(checkDate);
-          const dayOfWeek = dateObj.getDay();
-          const isWeekend = weekendDays.includes(dayOfWeek);
-          
-          const holidayKey = checkDate.split('-').reverse().join('/'); // DD/MM/YYYY
-          const holidayMatch = holidays.find(h => h.date === holidayKey);
-
-          // Kiểm tra xem có đơn xin phép nào được phê duyệt cho nhân viên vào ngày này không
-          const approvedLeave = leaves.find(l => {
-            if (l.status !== 'approved') return false;
-            if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') return false;
-            const sameEmp = (l.empId === emp.id) || (l.empName === emp.name);
-            return sameEmp && checkDate >= l.fromDate && checkDate <= l.toDate;
-          });
-
-          if (approvedLeave) {
-            // Có đơn phép được duyệt => Tự động ghi nhận nghỉ phép và chốt
-            const matchedCoef = leaveCoefficients.find(c => c.type === approvedLeave.type || c.id === approvedLeave.type);
-            const symbol = matchedCoef ? matchedCoef.id : 'PN';
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-LEAVE-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: symbol,
-              timeOutS: symbol,
-              timeInC: symbol,
-              timeOutC: symbol,
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Tự động phép)',
-              status: 'excused',
-              otHours: 0,
-              notes: `Nghỉ phép được phê duyệt (Tự động chốt): ${approvedLeave.type}`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          } else if (holidayMatch) {
-            // Ngày lễ => tự động chốt nghỉ lễ
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-HOLIDAY-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: 'OFF',
-              timeOutS: 'OFF',
-              timeInC: 'OFF',
-              timeOutC: 'OFF',
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Nghỉ Lễ)',
-              status: 'excused',
-              otHours: 0,
-              notes: `Nghỉ Lễ (${holidayMatch.name}) (Tự động chốt)`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          } else if (isWeekend) {
-            // Ngày cuối tuần => tự động chốt nghỉ cuối tuần
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-WEEKEND-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: 'OFF',
-              timeOutS: 'OFF',
-              timeInC: 'OFF',
-              timeOutC: 'OFF',
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Nghỉ Tuần)',
-              status: 'excused',
-              otHours: 0,
-              notes: `Nghỉ cuối tuần (Tự động chốt)`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          } else {
-            // Ngày làm việc bình thường, không chấm công và không phép => Tính Nghỉ không phép (KP)
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-KP-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: 'KP',
-              timeOutS: 'KP',
-              timeInC: 'KP',
-              timeOutC: 'KP',
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Tự động)',
-              status: 'missing',
-              otHours: 0,
-              notes: `Vắng không phép (KP) (Tự động chốt lúc 22h00)`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          }
-        }
-      });
-    });
-
-    if (changed) {
-      setAttendance(updated);
-      // Đồng bộ các log tự động tạo (KP, phép, lễ, cuối tuần) lên Supabase
-      const newLogs = updated.filter(a => a.id.startsWith('AT-AUTO-'));
-      newLogs.forEach(a => dbService.attendance.save(a).catch(() => {}));
-      window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
-    }
-  };
-
-  useEffect(() => {
-    executeAutoWorkdayLocking();
-    const intervalId = setInterval(() => {
-      executeAutoWorkdayLocking();
-    }, 10000);
-    return () => clearInterval(intervalId);
-  }, [attendance, employees, leaves, weekendDays, holidays, leaveCoefficients, systemConfig]);
+  
 
   // Loại bỏ các mục trùng lặp (cùng rowId / cùng id) để tránh React warning
   // "Encountered two children with the same key" và tính tổng bị sai. Giữ lại
@@ -1598,7 +1435,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [attendanceFilter, setAttendanceFilter] = useState('');
   const [attendanceSearchEmpId, setAttendanceSearchEmpId] = useState('all');
   const [attendanceFilterMonth, setAttendanceFilterMonth] = useState(String(new Date().getMonth() + 1)); // '6' for June
-  const [attendanceFilterDay, setAttendanceFilterDay] = useState('all');
+  const [attendanceFilterDay, setAttendanceFilterDay] = useState('today'); // 'today' = lọc ngày hiện tại
   const [attendanceFilterYear, setAttendanceFilterYear] = useState(String(new Date().getFullYear())); // '2026' for this year
   const [showBulkLockModal, setShowBulkLockModal] = useState(false);
   const [bulkLockScope, setBulkLockScope] = useState<'page' | 'month'>('page');
@@ -1644,9 +1481,18 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           return true;
         }
       }
-      if (attendanceFilterMonth !== 'all' && itemMonth !== attendanceFilterMonth) return false;
-      if (attendanceFilterDay !== 'all' && itemDay !== attendanceFilterDay) return false;
-      if (attendanceFilterYear !== 'all' && itemYear !== attendanceFilterYear) return false;
+      const today = new Date();
+      const todayDay = String(today.getDate());
+      const todayMonth = String(today.getMonth() + 1);
+      const todayYear = String(today.getFullYear());
+      if (attendanceFilterDay === 'today') {
+        // Lọc riêng ngày hôm nay (bỏ qua Tháng/Năm chọn ở trên)
+        if (itemDay !== todayDay || itemMonth !== todayMonth || itemYear !== todayYear) return false;
+      } else {
+        if (attendanceFilterMonth !== 'all' && itemMonth !== attendanceFilterMonth) return false;
+        if (attendanceFilterDay !== 'all' && itemDay !== attendanceFilterDay) return false;
+        if (attendanceFilterYear !== 'all' && itemYear !== attendanceFilterYear) return false;
+      }
       return true;
     });
   }, [attendance, employees, attendanceSearchEmpId, attendanceFilterMonth, attendanceFilterDay, attendanceFilterYear]);
@@ -2210,7 +2056,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       const empAttendance = (attendance || []).filter((a: any) => {
         if (!a.date) return false;
         const [aYear, aMonth] = a.date.split('-');
-        return aMonth === payrollMonth && aYear === payrollYear && a.empId === emp.id && a.status === 'valid';
+        // BỎ filter `a.status === 'valid'`: ngày bị đánh dấu invalid (vd. báo cáo
+        // lỗi chấm ra ca bị từ chối) vẫn giữ công thực tế đã làm (ca sáng 0.5),
+        // còn ca bị tranh chấp = 0. computeDailyWorkday tự trả 0 cho ngày nghỉ
+        // không phép (KP) hay OFF, nên không cần loại trừ theo status nữa.
+        return aMonth === payrollMonth && aYear === payrollYear && a.empId === emp.id;
       });
 
       const empErrors = (employeeErrors || []).filter((err: any) => {
@@ -2228,9 +2078,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       });
       inputs.kpiScore = Math.max(0, deducedKpi);
 
-      let sundayCount = 0;
-      let holidayCount = 0;
-      let normalCount = 0;
+      let sundayWork = 0;
+      let holidayWork = 0;
+      let normalWork = 0;
 
       empAttendance.forEach((a: any) => {
         const aDateObj = new Date(a.date);
@@ -2243,16 +2093,24 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           }
         });
 
-        if (isHolidayDate) holidayCount++;
-        else if (isSunday) sundayCount++;
-        else normalCount++;
+        // Dùng công chi tiết (0.5/1.0/-1.0/...) thay vì đếm 1 bản ghi.
+        // Không truyền applyMultiplier:false → giữ hệ số nhân của computeDailyWorkday:
+        //   - Ngày thường: ×1 (công cơ sở)
+        //   - Chủ nhật đi làm: × hệ số TC (cấu hình Hệ số chấm công)
+        //   - Lễ/Tết đi làm: × hệ số TCL (cấu hình Hệ số chấm công)
+        //   - Phép (PN/P/KP/...), OFF, KP: trả đúng hệ số, KHÔNG nhân hệ số.
+        const wd = computeDailyWorkday(a, leaveCoefficients, holidays, weekendDays, leaves).workday;
+
+        if (isHolidayDate) holidayWork += wd;
+        else if (isSunday) sundayWork += wd;
+        else normalWork += wd;
       });
 
       // Determine workedDays (Công nhật), otSunday (TC Chủ Nhật), otHoliday (TC Lễ)
       if (empAttendance.length > 0) {
-        inputs.workedDays = normalCount;
-        inputs.otSunday = sundayCount;
-        inputs.otHoliday = holidayCount;
+        inputs.workedDays = normalWork;
+        inputs.otSunday = sundayWork;
+        inputs.otHoliday = holidayWork;
       } else {
         inputs.workedDays = standardWorkDays;
         inputs.otSunday = 0;
@@ -2683,7 +2541,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return dates;
     };
 
-    setLeaves(leaves.map(l => {
+    const updatedLeaves = leaves.map(l => {
       if (l.id === id) {
         if (status === 'approved') {
           try {
@@ -2694,7 +2552,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             leaveDates.forEach(dStr => {
               const idx = updatedAttendance.findIndex(at => at.empId === l.empId && at.date === dStr);
               if (idx !== -1) {
-                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') {
+                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) {
                   const currentAt = updatedAttendance[idx];
                   let timeInS = currentAt.timeInS;
                   let timeOutS = currentAt.timeOutS;
@@ -2709,6 +2567,16 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     }
                   } else if (l.type === 'Báo cáo nghỉ ca') {
                     // Trạng thái ngày đó sẽ là HỢP LỆ, không cần ghi thêm giờ nếu không có sẵn
+                  } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
+                    // Lỗi hệ thống không thể chấm công: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO
+                    // (chỉ ca đó; ca còn lại giữ nguyên giờ hiện tại để không làm sai lệch).
+                    if (l.shift === 'morning') {
+                      timeInS = '07:30';
+                      timeOutS = '11:30';
+                    } else if (l.shift === 'afternoon') {
+                      timeInC = '13:00';
+                      timeOutC = '17:00';
+                    }
                   } else {
                     timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : '07:30';
                     timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : '11:30';
@@ -2739,7 +2607,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   };
                 }
               } else {
-                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') {
+                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) {
                   let timeInS = '07:30';
                   let timeOutS = '11:30';
                   let timeInC = '13:00';
@@ -2768,6 +2636,19 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       timeOutS = '11:30';
                       timeInC = '';
                       timeOutC = '';
+                    }
+                  } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
+                    // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO, ca còn lại để trống.
+                    if (l.shift === 'morning') {
+                      timeInS = '07:30';
+                      timeOutS = '11:30';
+                      timeInC = '';
+                      timeOutC = '';
+                    } else if (l.shift === 'afternoon') {
+                      timeInS = '';
+                      timeOutS = '';
+                      timeInC = '13:00';
+                      timeOutC = '17:00';
                     }
                   }
 
@@ -2820,7 +2701,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             console.error(e);
           }
         } else if (status === 'rejected') {
-          if (l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') {
+          if (isAttendanceReportType(l.type)) {
             try {
               const leaveDates = getDaysDiffList(l.fromDate, l.toDate);
               let updatedAttendance = [...attendance];
@@ -2869,7 +2750,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         return { ...l, status };
       }
       return l;
-    }));
+    });
+    setLeaves(updatedLeaves);
+    // Đồng bộ ngay trạng thái duyệt sang Dashboard (Tổng quan) để huy hiệu
+    // "✅ Đã duyệt" và việc ẩn cảnh báo "!" cập nhật tức thì, không chờ remount tab.
+    window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_hrm', { detail: updatedLeaves }));
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });
     } else {

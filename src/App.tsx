@@ -36,7 +36,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache } from './context';
 import { Toast } from './context/NotificationContext';
 import { hashPasswordSync } from './lib/passwordUtils';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
@@ -1791,6 +1791,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
           setRoleGroupsCache(cloudRoles);
+        }
+      } catch {}
+      try {
+        const cloudApproval = await dbService.hrmApprovalConfig.list();
+        if (cloudApproval && cloudApproval.length > 0) {
+          setApprovalConfigCache(cloudApproval);
         }
       } catch {}
     };

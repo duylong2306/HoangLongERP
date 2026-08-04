@@ -319,6 +319,15 @@ export type { HrmRoleGroup, HrmApprovalConfig as ApprovalPermission } from '../t
 // In-memory cache: được populate từ Supabase khi app mount, KHÔNG đọc từ localStorage
 let _roleGroupsCache: HrmRoleGroup[] | null = null;
 
+// In-memory cache cho cấu hình Quyền Phê Duyệt — populate từ Supabase khi app mount
+// (cũng như role groups). Đây là nguồn duy nhất cho getConfiguredApprover.
+let _approvalConfigCache: ApprovalPermission[] | null = null;
+
+/** Được gọi từ App.tsx (poll) và RolesTab sau khi lưu, để nạp config vào bộ nhớ. */
+export function setApprovalConfigCache(configs: ApprovalPermission[]): void {
+  _approvalConfigCache = configs;
+}
+
 /**
  * Gọi từ App.tsx sau khi fetch role groups từ Supabase để populate in-memory cache.
  * Đây là nguồn duy nhất cho phân quyền — không dùng localStorage.
@@ -355,10 +364,10 @@ export async function saveApprovalConfig(config: ApprovalPermission[]): Promise<
 }
 
 /**
- * Đọc danh sách cấu hình Quyền Phê Duyệt (nguồn: Supabase qua syncApprovalConfigFromDb)
+ * Đọc danh sách cấu hình Quyền Phê Duyệt (nguồn: in-memory cache đã nạp từ Supabase).
  */
 export function loadApprovalConfig(): ApprovalPermission[] {
-  return [];
+  return _approvalConfigCache ?? [];
 }
 
 /**

@@ -10,7 +10,7 @@ import {
   pendingCount as outboxPendingCount,
   burnTimestampToPhoto,
 } from '../lib/attendanceOutbox';
-import { mergePunchMeta } from '../lib/attendanceMeta';
+import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import PunchMediaList from './hr/PunchMediaList';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
@@ -808,7 +808,7 @@ export default function DashboardOverview({
                 const leavesList = JSON.parse(leavesSaved);
                 const approved = leavesList.find((l: any) => {
                   if (l.status !== 'approved') return false;
-                  if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') return false;
+                  if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return false;
                   const sameEmp = (l.empId && a.empId && l.empId === a.empId) || (l.empName && a.empName && l.empName === a.empName);
                   if (!sameEmp) return false;
                   return todayVal >= l.fromDate && todayVal <= l.toDate;
@@ -973,7 +973,8 @@ export default function DashboardOverview({
   const [reportApprover, setReportApprover] = useState('');
   const [reportStatusText, setReportStatusText] = useState('');
   const [reportReason, setReportReason] = useState('');
-  const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | ''>('');
+  const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | 'Báo cáo lỗi hệ thống chấm công' | ''>('');
+  const [reportCategory, setReportCategory] = useState<'faulty' | 'missing' | ''>('');
   const [reportShift, setReportShift] = useState<'morning' | 'afternoon' | ''>('');
 
   // Leaves list state (nguồn: Supabase)
@@ -1006,6 +1007,9 @@ export default function DashboardOverview({
     if (selectedDayDetail) {
       setShowReportForm(false);
       setReportReason('');
+      setReportType('');
+      setReportCategory('');
+      setReportShift('');
       
       const approvers = getApproversList();
       if (approvers.length > 0) {
@@ -1733,6 +1737,20 @@ export default function DashboardOverview({
     const pad = (n: number) => String(n).padStart(2, '0');
     const submittedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
+    // Người xét duyệt: nếu là "Lỗi hệ thống chấm công" thì dùng người duyệt
+    // Đơn Xin Nghỉ Phép (cấu hình Phân Quyền → Quyền Phê Duyệt), không cho sửa.
+    const configuredLeaveApprover = getConfiguredApprover('leave');
+    const useLockedApprover = isAttendanceReportType(reportType);
+    const finalApproverName = (useLockedApprover && configuredLeaveApprover)
+      ? configuredLeaveApprover.name
+      : (reportApprover || 'Trương Hữu Long');
+    const finalApproverId = (useLockedApprover && configuredLeaveApprover)
+      ? (configuredLeaveApprover.id || '')
+      : '';
+    const finalApproverPosition = (useLockedApprover && configuredLeaveApprover)
+      ? (configuredLeaveApprover.position || '')
+      : '';
+
     const newRequest = {
       id: `LR-${Date.now().toString().slice(-3)}`,
       empId: empId,
@@ -1746,7 +1764,9 @@ export default function DashboardOverview({
       status: 'pending',
       createdAt: todayVal,
       submittedAt: submittedAtStr,
-      approverName: reportApprover || 'Trương Hữu Long',
+      approverName: finalApproverName,
+      approverId: finalApproverId,
+      approverPosition: finalApproverPosition,
       isAttendanceCorrection: true
     };
 
@@ -1762,7 +1782,7 @@ export default function DashboardOverview({
     setReportReason('');
     setReportShift('');
     setReportType('');
-    alert(`Báo cáo đã được gửi tới ${reportApprover || 'Trương Hữu Long'}, trạng thái: Chờ duyệt`);
+    alert(`Báo cáo đã được gửi tới ${finalApproverName}, trạng thái: Chờ duyệt`);
   };
 
   // Submit Salary Advance
@@ -2086,7 +2106,7 @@ export default function DashboardOverview({
   const getSubReport = (date: string, shift: 'morning' | 'afternoon') => {
     return (dashLeaves || []).find((l: any) => {
       if (l.fromDate !== date || l.shift !== shift) return false;
-      if (l.type !== 'Báo cáo nghỉ ca' && l.type !== 'Báo cáo lỗi chấm ra ca') return false;
+      if (!isAttendanceReportType(l.type)) return false;
       return l.empId ? l.empId === empId : l.empName === currentUser.name;
     });
   };
@@ -2168,15 +2188,18 @@ export default function DashboardOverview({
 
   const renderReportButtonAndStatus = (shift: 'morning' | 'afternoon', isFaulty: boolean, isMissing: boolean) => {
     if (!selectedDayDetail) return null;
-    if (selectedDayDetail.log.isLocked) return null;
-    if (selectedDayDetail.log.timeInS === 'OFF') return null;
-
-    const type = isFaulty ? ('Báo cáo lỗi chấm ra ca' as const) : ('Báo cáo nghỉ ca' as const);
-    const statusLabel = isFaulty 
-      ? `Thiếu điểm danh ra ca (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})` 
-      : `Vắng mặt / Không điểm danh (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`;
-    
     const subReport = getSubReport(selectedDayDetail.date, shift);
+    // Ngày đã chốt công: ẩn toàn bộ nếu KHÔNG có báo cáo liên quan. Nếu có báo cáo
+    // (đã duyệt/từ chối), vẫn hiển thị trạng thái để quản lý thấy rõ — không cho
+    // gửi hay "báo cáo lại" khi ngày đã khóa.
+    if (selectedDayDetail.log.isLocked && !subReport) return null;
+    if (selectedDayDetail.log.timeInS === 'OFF' && !subReport) return null;
+
+    const category: 'faulty' | 'missing' = isFaulty ? 'faulty' : 'missing';
+    const statusLabel = isFaulty
+      ? `Thiếu điểm danh ra ca (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`
+      : `Vắng mặt / Không điểm danh (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`;
+
 
     if (subReport) {
       if (subReport.status === 'pending') {
@@ -2197,16 +2220,18 @@ export default function DashboardOverview({
             <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
               ❌ Bị từ chối
             </span>
-            {isShiftEnded30Min(shift) ? (
-              <button
-                type="button"
-                onClick={() => handleTriggerReport(shift, type, statusLabel)}
-                className="bg-slate-800 hover:bg-slate-755 text-rose-405 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black cursor-pointer ml-1"
-              >
-                🔄 Báo cáo lại
-              </button>
-            ) : (
-              <span className="text-[8px] text-slate-500 italic block mt-0.5">🔒 Đợi ca kết thúc 30p</span>
+            {selectedDayDetail.log.isLocked ? null : (
+              isShiftEnded30Min(shift) ? (
+                <button
+                  type="button"
+                  onClick={() => handleTriggerReport(shift, category, statusLabel)}
+                  className="bg-slate-800 hover:bg-slate-755 text-rose-405 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black cursor-pointer ml-1"
+                >
+                  🔄 Báo cáo lại
+                </button>
+              ) : (
+                <span className="text-[8px] text-slate-500 italic block mt-0.5">🔒 Đợi ca kết thúc 30p</span>
+              )
             )}
           </div>
         );
@@ -2218,7 +2243,7 @@ export default function DashboardOverview({
       return (
         <button
           type="button"
-          onClick={() => handleTriggerReport(shift, type, statusLabel)}
+          onClick={() => handleTriggerReport(shift, category, statusLabel)}
           className="bg-amber-600 hover:bg-amber-500 hover:text-white px-2.5 py-1 rounded transition-all active:scale-95 cursor-pointer flex items-center gap-1 text-[10px] font-black text-white"
         >
           📝 Báo cáo lý do
@@ -2233,9 +2258,12 @@ export default function DashboardOverview({
     }
   };
   
-  const handleTriggerReport = (shift: 'morning' | 'afternoon', type: 'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca', currentStatusText: string) => {
+  const handleTriggerReport = (shift: 'morning' | 'afternoon', category: 'faulty' | 'missing', currentStatusText: string) => {
     setReportShift(shift);
-    setReportType(type);
+    setReportCategory(category);
+    // Loại mặc định: lỗi chấm ra ca (faulty) hoặc nghỉ ca (missing).
+    // Với ca missing, người dùng có thể đổi sang "Báo cáo lỗi hệ thống chấm công" trong form.
+    setReportType(category === 'faulty' ? 'Báo cáo lỗi chấm ra ca' : 'Báo cáo nghỉ ca');
     setReportStatusText(currentStatusText);
     if (!reportApprover) {
       const approvers = getApproversList();
@@ -3038,27 +3066,53 @@ export default function DashboardOverview({
                   <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 border-t border-slate-800/60 animate-fadeIn text-left mt-2">
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Loại đơn báo cáo</label>
-                      <input
-                        type="text"
-                        value={reportType}
-                        readOnly
-                        className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
-                      />
+                      {reportCategory === 'missing' ? (
+                        <select
+                          value={reportType}
+                          onChange={(e) => setReportType(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none font-extrabold cursor-pointer"
+                        >
+                          <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
+                          <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={reportType}
+                          readOnly
+                          className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
+                        />
+                      )}
                     </div>
-                    
+
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
-                      <select
-                        value={reportApprover}
-                        onChange={(e) => setReportApprover(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
-                      >
-                        {getApproversList().map((ap, idx) => (
-                          <option key={idx} value={ap.name} className="bg-slate-900">
-                            {ap.name} ({ap.role})
-                          </option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const configuredLeaveApprover = getConfiguredApprover('leave');
+                        const useLockedApprover = isAttendanceReportType(reportType);
+                        if (configuredLeaveApprover && useLockedApprover) {
+                          const approverPos = configuredLeaveApprover.position ? ` (${configuredLeaveApprover.position})` : '';
+                          return (
+                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
+                              <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
+                              <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <select
+                            value={reportApprover}
+                            onChange={(e) => setReportApprover(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
+                          >
+                            {getApproversList().map((ap, idx) => (
+                              <option key={idx} value={ap.name} className="bg-slate-900">
+                                {ap.name} ({ap.role})
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
 
                     <div>
@@ -3184,27 +3238,53 @@ export default function DashboardOverview({
                   <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 border-t border-slate-800/60 animate-fadeIn text-left mt-2">
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Loại đơn báo cáo</label>
-                      <input
-                        type="text"
-                        value={reportType}
-                        readOnly
-                        className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
-                      />
+                      {reportCategory === 'missing' ? (
+                        <select
+                          value={reportType}
+                          onChange={(e) => setReportType(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none font-extrabold cursor-pointer"
+                        >
+                          <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
+                          <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={reportType}
+                          readOnly
+                          className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
+                        />
+                      )}
                     </div>
-                    
+
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
-                      <select
-                        value={reportApprover}
-                        onChange={(e) => setReportApprover(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
-                      >
-                        {getApproversList().map((ap, idx) => (
-                          <option key={idx} value={ap.name} className="bg-slate-900">
-                            {ap.name} ({ap.role})
-                          </option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const configuredLeaveApprover = getConfiguredApprover('leave');
+                        const useLockedApprover = isAttendanceReportType(reportType);
+                        if (configuredLeaveApprover && useLockedApprover) {
+                          const approverPos = configuredLeaveApprover.position ? ` (${configuredLeaveApprover.position})` : '';
+                          return (
+                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
+                              <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
+                              <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <select
+                            value={reportApprover}
+                            onChange={(e) => setReportApprover(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
+                          >
+                            {getApproversList().map((ap, idx) => (
+                              <option key={idx} value={ap.name} className="bg-slate-900">
+                                {ap.name} ({ap.role})
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
 
                     <div>

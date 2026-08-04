@@ -5,7 +5,7 @@ import ProjectPermissionModal from './ProjectPermissionModal';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache } from '../../../context';
+import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { dbService } from '../../../lib/dbService';
 
@@ -249,6 +249,8 @@ export default function RolesTab(props: RolesTabProps) {
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     } else {
       setSavedApprovalConfig(JSON.parse(JSON.stringify(draftApprovalConfig)));
+      // Nạp ngay vào in-memory cache để các form (nghỉ phép, báo cáo chấm công) hiển thị đúng người duyệt
+      setApprovalConfigCache(draftApprovalConfig);
       addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
     }
   }, [draftApprovalConfig, addToast]);

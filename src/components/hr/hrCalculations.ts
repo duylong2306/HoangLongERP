@@ -2,6 +2,7 @@
 // Tách từ HumanResourcesManagement.tsx
 // Các hàm thuần (pure) — không phụ thuộc React hook hay component state.
 import { dbService } from '../../lib/dbService';
+import { isAttendanceReportType } from '../../lib/attendanceMeta';
 
 /** Helper trả về ngày local (UTC+7) theo định dạng YYYY-MM-DD. */
 export function getLocalYYYYMMDD(d: Date): string {
@@ -162,7 +163,8 @@ export function computeDailyWorkday(
   coefs: any[],
   holidays: any[],
   weekendDays: number[] = [0],
-  leaves: any[] = []
+  leaves: any[] = [],
+  opts: { applyMultiplier?: boolean } = {}
 ): {
   workday: number;
   label: string;
@@ -171,6 +173,9 @@ export function computeDailyWorkday(
   const activeCoefs = Array.isArray(coefs) ? coefs : [];
   const activeHolidays = Array.isArray(holidays) ? holidays : [];
   const activeLeaves = Array.isArray(leaves) ? leaves : [];
+  // Mặc định áp dụng hệ số nhân (dùng hiển thị & tính lương). Truyền
+  // { applyMultiplier: false } nếu cần "công cơ sở" (0.5/1.0) không nhân hệ số.
+  const applyMultiplier = opts.applyMultiplier !== false;
 
   const getCoefVal = (id: string, def: number): number => {
     const found = activeCoefs.find((c: any) => c.id === id);
@@ -183,7 +188,7 @@ export function computeDailyWorkday(
 
   const approvedLeave = activeLeaves.find((l: any) => {
     if (l.status !== 'approved') return false;
-    if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') return false;
+    if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return false;
     const sameEmp = (l.empId && log.empId && l.empId === log.empId) || (l.empName && log.empName && l.empName === log.empName);
     if (!sameEmp) return false;
     return log.date >= l.fromDate && log.date <= l.toDate;
@@ -270,7 +275,7 @@ export function computeDailyWorkday(
   }
 
   if (morningWorked || afternoonWorked) {
-    const finalVal = totalBaseShifts * multiplier;
+    const finalVal = totalBaseShifts * (applyMultiplier ? multiplier : 1);
     const detailsText = `${morningWorked ? 'Sáng' : ''}${morningWorked && afternoonWorked ? '+' : ''}${afternoonWorked ? 'Chiều' : ''} (Nhân ${multiplier}x ${multiplierType})`;
     // Bỏ phạt -0.25 công khi đi muộn (MDLATE): đi muộn vẫn ghi nhận đủ công.
     // Vi phạm đi muộn giờ được xử lý qua bảng Hiệu suất (hrm_employee_errors)

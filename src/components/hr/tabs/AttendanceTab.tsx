@@ -350,6 +350,7 @@ export default function AttendanceTab({
               className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
             >
               <option value="all">📅 Tất cả</option>
+              <option value="today">📅 Hôm nay</option>
               {Array.from({ length: 31 }, (_, i) => {
                 const d = String(i + 1);
                 return (
