@@ -9,7 +9,11 @@ import {
   Printer,
   Trash2,
   Eye,
-  Plus
+  Plus,
+  Camera,
+  Upload,
+  X,
+  Pencil
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 
@@ -19,9 +23,11 @@ interface MechanicalArchiveProps {
   canDelete?: boolean;
   preselectedProjectId?: string;
   initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  /** Điều hướng về giao diện Lập Báo Giá và tải lại dữ liệu để sửa chi tiết */
+  onEditQuote?: (quote: ArchivedQuote) => void;
 }
 
-export default function MechanicalArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab }: MechanicalArchiveProps) {
+export default function MechanicalArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab, onEditQuote }: MechanicalArchiveProps) {
   const { addToast } = useNotification();
   const [archivedList, setArchivedList] = useState<ArchivedQuote[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
@@ -29,6 +35,201 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<ArchivedQuote | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>('quote');
+
+  // Image upload states for mechanical quotes
+  const [quoteImagePreview, setQuoteImagePreview] = useState<string | null>(null);
+  const [quoteGalleryImages, setQuoteGalleryImages] = useState<string[]>([]);
+  const [isUploadingQuoteImage, setIsUploadingQuoteImage] = useState(false);
+
+  // Camera states for quote images
+  const [quoteCameraOpen, setQuoteCameraOpen] = useState(false);
+  const quoteCameraStreamRef = useRef<MediaStream | null>(null);
+  const quoteVideoRef = useRef<HTMLVideoElement>(null);
+  const quoteImageInputRef = useRef<HTMLInputElement>(null);
+  const quoteGalleryInputRef = useRef<HTMLInputElement>(null);
+
+  // Camera helper functions
+  const stopQuoteCamera = () => {
+    if (quoteCameraStreamRef.current) {
+      quoteCameraStreamRef.current.getTracks().forEach(t => t.stop());
+      quoteCameraStreamRef.current = null;
+    }
+    setQuoteCameraOpen(false);
+  };
+
+  const openQuoteCamera = async () => {
+    try {
+      stopQuoteCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      quoteCameraStreamRef.current = stream;
+      setQuoteCameraOpen(true);
+      setTimeout(() => {
+        if (quoteVideoRef.current) {
+          quoteVideoRef.current.srcObject = stream;
+          quoteVideoRef.current.play().catch(() => { /* noop */ });
+        }
+      }, 150);
+    } catch (err) {
+      addToast({ title: '⚠️ Không thể mở camera', message: 'Vui lòng cấp quyền camera hoặc tải ảnh lên từ thiết bị.', type: 'warning' });
+    }
+  };
+
+  const captureQuoteImage = () => {
+    const video = quoteVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `quote_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      // Convert to base64 for preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (result) {
+          setQuoteImagePreview(result);
+        }
+      };
+      reader.readAsDataURL(blob);
+      // Upload to Supabase if available
+      try {
+        setIsUploadingQuoteImage(true);
+        const { url, stored } = await dbService.uploadQuoteImage(selectedQuote?.id || '', file);
+        if (stored === 'supabase') {
+          setQuoteImagePreview(url);
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo giá đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          setQuoteImagePreview(url);
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "quote-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      } catch (err) {
+        addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' });
+      } finally {
+        setIsUploadingQuoteImage(false);
+      }
+      stopQuoteCamera();
+    }, 'image/jpeg');
+  };
+
+  const handleQuoteImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!selectedQuote?.id) {
+      addToast({ title: '⚠️ Cảnh báo', message: 'Vui lòng chọn báo giá trước khi tải ảnh lên.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) { // 10MB
+      addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    // Convert to base64 for preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        setQuoteImagePreview(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Upload to Supabase
+    dbService.uploadQuoteImage(selectedQuote.id, file)
+      .then(({ url, stored }) => {
+        setQuoteImagePreview(url);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo giá đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "quote-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      })
+      .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' }));
+    e.target.value = '';
+  };
+
+  const handleQuoteGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (!selectedQuote?.id) {
+      addToast({ title: '⚠️ Cảnh báo', message: 'Vui lòng chọn báo giá trước khi tải ảnh lên.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    const validFiles = Array.from(files).filter(file => {
+      if (!file.type.startsWith('image/')) {
+        addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+        return false;
+      }
+      if (file.size > 10 * 1024 * 1024) { // 10MB
+        addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+        return false;
+      }
+      return true;
+    });
+    if (validFiles.length === 0) {
+      e.target.value = '';
+      return;
+    }
+    // Upload each file to Supabase
+    const uploadPromises = validFiles.map(file => {
+      const reader = new FileReader();
+      return new Promise<{ url: string, stored: 'supabase' | 'local' }>((resolve, reject) => {
+        reader.onload = async (e) => {
+          const result = e.target?.result as string;
+          if (result) {
+            try {
+              const { url, stored } = await dbService.uploadQuoteImage(selectedQuote.id, file);
+              resolve({ url, stored });
+            } catch (err) {
+              reject(err);
+            }
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    Promise.allSettled(uploadPromises).then((results) => {
+      const successUrls: string[] = [];
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successUrls.push(result.value.url);
+        }
+      });
+      if (successUrls.length > 0) {
+        setQuoteGalleryImages(prev => [...prev, ...successUrls]);
+        addToast({ title: '✅ Đã tải lên', message: `Đã tải lên ${successUrls.length} ảnh thành công.`, type: 'success' });
+      }
+      const failedCount = results.length - successUrls.length;
+      if (failedCount > 0) {
+        addToast({ title: '⚠️ Một số ảnh thất bại', message: `Không thể tải lên ${failedCount} ảnh.`, type: 'warning' });
+      }
+    });
+    e.target.value = '';
+  };
+
+  const removeQuoteImage = (type: 'primary' | 'gallery', index?: number) => {
+    if (type === 'primary') {
+      setQuoteImagePreview(null);
+    } else if (type === 'gallery' && typeof index === 'number') {
+      setQuoteGalleryImages(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const resetQuoteImageState = () => {
+    setQuoteImagePreview(null);
+    setQuoteGalleryImages([]);
+    stopQuoteCamera();
+  };
 
   // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
   // Lưu ý: KHÔNG đưa selectedQuote vào dependency để tránh popup bị mở lại ngay sau khi đóng.
@@ -409,6 +610,23 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                                   >
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
+                                  {doc.type === 'quote' && onEditQuote && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!canEdit) {
+                                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                                          return;
+                                        }
+                                        onEditQuote(item);
+                                      }}
+                                      className="p-1.5 bg-amber-950/20 text-amber-400 hover:text-amber-300 rounded border border-amber-950/30 hover:bg-amber-950/40 transition shadow cursor-pointer"
+                                      title="Sửa Báo Giá"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={(e) => handleDeleteClick(item, e)}
@@ -527,6 +745,22 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                 >
                   Đóng
                 </button>
+                {onEditQuote && activeDetailTab === 'quote' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canEdit) {
+                        addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                        return;
+                      }
+                      onEditQuote(selectedQuote);
+                    }}
+                    className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Sửa Báo Giá
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => window.print()}

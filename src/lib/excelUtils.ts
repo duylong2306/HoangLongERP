@@ -45,7 +45,7 @@ export function importFromExcel<T>(
         const binary = ev.target?.result as string;
         const wb = XLSX.read(binary, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, any>[];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false }) as Record<string, any>[];
         if (rows.length === 0) {
           resolve([]);
           return;

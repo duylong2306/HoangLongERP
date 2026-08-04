@@ -1886,7 +1886,7 @@ export default function FinanceManagement({
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         const imported: Customer[] = rows.map((r, idx) => ({
           id: String(r['Mã KH'] || `KH_IMP_${Date.now()}_${idx}`),
           name: String(r['Tên khách hàng'] || '').trim(),
@@ -5342,7 +5342,7 @@ export default function FinanceManagement({
                             try {
                               const wb = XLSX.read(ev.target?.result, { type: 'binary' });
                               const ws = wb.Sheets[wb.SheetNames[0]];
-                              const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                              const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
                               if (rows.length === 0) {
                                 addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dữ liệu.', type: 'warning' });
                                 return;
@@ -5624,7 +5624,7 @@ export default function FinanceManagement({
                           try {
                             const wb = XLSX.read(ev.target?.result, { type: 'binary' });
                             const ws = wb.Sheets[wb.SheetNames[0]];
-                            const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                            const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
                             if (rows.length === 0) {
                               addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dữ liệu.', type: 'warning' });
                               return;

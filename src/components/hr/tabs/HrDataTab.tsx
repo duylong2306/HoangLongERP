@@ -274,7 +274,7 @@ export default function HrDataTab(props: HrDataTabProps) {
           if (!data) { reject(new Error('Không đọc được dữ liệu file')); return; }
           const wb = XLSX.read(data, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
           resolve(rows);
         } catch (err) {
           console.error('[Import Excel] Lỗi parse:', err);

@@ -9,7 +9,8 @@ import {
   Printer,
   Trash2,
   Eye,
-  Plus
+  Plus,
+  Pencil
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 
@@ -19,9 +20,11 @@ interface ConstructionArchiveProps {
   canDelete?: boolean;
   preselectedProjectId?: string;
   initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  /** Điều hướng về giao diện Lập Báo Giá và tải lại dữ liệu để sửa chi tiết */
+  onEditQuote?: (quote: ArchivedQuote) => void;
 }
 
-export default function ConstructionArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab }: ConstructionArchiveProps) {
+export default function ConstructionArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab, onEditQuote }: ConstructionArchiveProps) {
   const [archivedList, setArchivedList] = useState<ArchivedQuote[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -403,6 +406,23 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                                   >
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
+                                  {doc.type === 'quote' && onEditQuote && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!canEdit) {
+                                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                                          return;
+                                        }
+                                        onEditQuote(item);
+                                      }}
+                                      className="p-1.5 bg-amber-950/20 text-amber-400 hover:text-amber-300 rounded border border-amber-950/30 hover:bg-amber-950/40 transition shadow cursor-pointer"
+                                      title="Sửa Báo Giá"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={(e) => handleDeleteClick(item, e)}
@@ -521,6 +541,22 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                 >
                   Đóng
                 </button>
+                {onEditQuote && activeDetailTab === 'quote' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canEdit) {
+                        addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                        return;
+                      }
+                      onEditQuote(selectedQuote);
+                    }}
+                    className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Sửa Báo Giá
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => window.print()}

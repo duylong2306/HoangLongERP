@@ -1,7 +1,7 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { QuoteConfig, QuoteItem, Customer, Project, ProjectDoc, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Printer, Send, AlertTriangle, Edit, Save, Check, XCircle } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Printer, Send, AlertTriangle, Edit, Save, Check, XCircle, Image as ImageIcon, Camera, Upload } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -490,7 +490,8 @@ export default function MechanicalEstimator({
             zincCoatPricePerLiter: it.zincCoatPricePerLiter || 0,
             weldingRodBoxes: it.weldingRodBoxes || 0,
             weldingRodPricePerBox: it.weldingRodPricePerBox || 0,
-            directWelderLabor: it.directWelderLabor || 0
+            directWelderLabor: it.directWelderLabor || 0,
+            imageUrl: it.imageUrl || undefined
           };
         });
         setQuoteItems(loadedItems);
@@ -634,6 +635,10 @@ export default function MechanicalEstimator({
   const [phuKien, setPhuKien] = useState('');
   const [unit, setUnit] = useState('');
   const [unitPrice, setUnitPrice] = useState<string>('');
+  // Image upload for individual item
+  const [itemImageUrl, setItemImageUrl] = useState<string | null>(null);
+  const [isUploadingItemImage, setIsUploadingItemImage] = useState(false);
+  const itemImageInputRef = useRef<HTMLInputElement>(null);
 
   const groupNames: Record<string, string> = {
     iron_frame: '1. Khung kèo kết cấu thép vững chịu lực',
@@ -690,6 +695,45 @@ export default function MechanicalEstimator({
     handleRecalculateAll(updatedConfig);
   };
 
+  // Upload hình ảnh cho hạng mục cơ khí
+  const handleItemImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      if (result) setItemImageUrl(result);
+    };
+    reader.readAsDataURL(file);
+    // Upload to Supabase
+    const tempQuoteId = loadedQuoteVal?.id || `mech_item_${Date.now()}`;
+    dbService.uploadQuoteImage(tempQuoteId, file)
+      .then(({ url, stored }) => {
+        setItemImageUrl(url);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh hạng mục đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "quote-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      })
+      .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' }));
+    e.target.value = '';
+  };
+
+  const removeItemImage = () => {
+    setItemImageUrl(null);
+  };
+
   const handleAddItem = () => {
     if (estimatorMode === 'door') {
       if (!name.trim()) {
@@ -725,11 +769,12 @@ export default function MechanicalEstimator({
         phuKien: phuKien.trim(),
         unit,
         unitPrice: specUnitPrice,
-        totalPrice: calculatedPrice
+        totalPrice: calculatedPrice,
+        imageUrl: itemImageUrl || undefined
       };
 
       setQuoteItems([...quoteItems, newItem]);
-      
+
       // Reset inputs
       setSign('');
       setName('');
@@ -739,6 +784,7 @@ export default function MechanicalEstimator({
       setMauSac('');
       setKinh('');
       setPhuKien('');
+      setItemImageUrl(null);
       setUnitPrice('');
       setNotes('');
       setQty('');
@@ -2005,6 +2051,42 @@ export default function MechanicalEstimator({
                         placeholder="Ví dụ: 2200000"
                       />
                     </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Hình ảnh hạng mục</label>
+                      {itemImageUrl ? (
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={itemImageUrl}
+                            alt="Ảnh hạng mục"
+                            className="w-12 h-12 object-cover rounded-lg border border-slate-700 shadow-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={removeItemImage}
+                            className="text-[10px] text-rose-400 hover:text-rose-300 font-bold flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" /> Gỡ
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => itemImageInputRef.current?.click()}
+                          disabled={isUploadingItemImage}
+                          className="w-full bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-pink-500 rounded-lg p-2 flex items-center justify-center gap-1.5 cursor-pointer text-[10px] font-bold transition-all disabled:opacity-50"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          {isUploadingItemImage ? 'Đang tải...' : 'Chọn ảnh'}
+                        </button>
+                      )}
+                      <input
+                        ref={itemImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleItemImageUpload}
+                        className="hidden"
+                      />
+                    </div>
                     <div className="flex items-end">
                       <button
                         type="button"
@@ -2221,6 +2303,7 @@ export default function MechanicalEstimator({
                   <tr>
                     <th className="px-3 py-2 text-center w-12">Ký hiệu / STT</th>
                     <th className="px-3 py-2">Chi tiết sản phẩm & thông số kỹ thuật</th>
+                    <th className="px-3 py-2 text-center w-16">Hình ảnh</th>
                     <th className="px-3 py-2 text-center">Kích thước (Ngang x Cao)</th>
                     <th className="px-3 py-2 text-center">ĐVT</th>
                     <th className="px-3 py-2 text-center">SL</th>
@@ -2232,7 +2315,7 @@ export default function MechanicalEstimator({
                 <tbody>
                   {quoteItems.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-slate-500 font-medium italic">Không có hạng mục mỏ hàn cơ khí nào trong bảng này.</td>
+                      <td colSpan={9} className="text-center py-8 text-slate-500 font-medium italic">Không có hạng mục mỏ hàn cơ khí nào trong bảng này.</td>
                     </tr>
                   ) : (
                     quoteItems.map((item, idx) => {
@@ -2260,6 +2343,18 @@ export default function MechanicalEstimator({
                               </div>
                             )}
                             {item.notes && <div className="text-[10px] text-pink-400 italic mt-1">Ghi chú: *{item.notes}</div>}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            {item.imageUrl ? (
+                              <img
+                                src={item.imageUrl}
+                                alt={item.name}
+                                className="w-10 h-10 object-cover rounded-lg border border-slate-700 shadow-sm mx-auto"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <span className="text-slate-600 text-[9px]">—</span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-center font-mono text-slate-300">
                             {isDoor && item.ngang && item.cao ? (

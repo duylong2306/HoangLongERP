@@ -16,7 +16,7 @@ interface TaskManagementProps {
   employees: Employee[];
   currentUser: Employee;
   onAddTask: (newTask: Task) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<boolean> | void;
   onUpdateProject?: (id: string, updates: Partial<Project>) => void;
   onDeleteTask?: (id: string) => void;
   onDeleteMultipleTasks?: (ids: string[]) => void;
@@ -1098,6 +1098,16 @@ export default function TaskManagement({
                         <button
                           type="button"
                           onClick={() => {
+                            // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                            const pendingMissions = (t.missions || []).filter(m => m.status !== 'completed');
+                            if (pendingMissions.length > 0) {
+                              addToast({
+                                title: '⚠️ Còn nhiệm vụ chưa hoàn thành',
+                                message: `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi phê duyệt hoàn thành công việc "${t.name}".`,
+                                type: 'warning'
+                              });
+                              return;
+                            }
                             const wl = t.workLogs || [];
                             onUpdateTask(t.id, {
                               status: 'completed',

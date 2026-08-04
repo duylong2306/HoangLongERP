@@ -734,6 +734,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     dbService.checkSuperAdmin(currentUser.id).then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
   }, [currentUser?.id]);
 
+  // ─── Tự động tạo storage bucket cho upload ảnh khi app khởi động ──
+  useEffect(() => {
+    dbService.ensureStorageBuckets().catch(() => {});
+  }, []);
+
   // ─── Load chat conversations từ sớm để sidebar badge hoạt động ──────────────
   const [, forceChatUpdate] = useState(0);
 
@@ -1053,6 +1058,30 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // không phải chạy side-effect bên trong hàm updater của setState.
   const tasksRef = useRef<Task[]>(tasks);
   tasksRef.current = tasks;
+  // HƯỚNG B: ghi nhận thời điểm vừa save 1 task để các nguồn reload (Realtime,
+  // hl-tasks-updated, polling) không ghi đè bản đã lưu mới hơn bằng dữ liệu cũ.
+  const recentTaskSaves = useRef(new Map<string, number>());
+  // Gộp kết quả tải từ server với bản local vừa save (trong cửa sổ 5s) để tránh
+  // mất trạng thái "Hoàn thành nhiệm vụ" do race giữa save và reload.
+  const applyTasksWithLocalOverrides = useCallback((serverTasks: Task[]) => {
+    const now = Date.now();
+    const merged: Task[] = serverTasks.map(t => {
+      const savedAt = recentTaskSaves.current.get(t.id);
+      if (savedAt && now - savedAt < 5000) {
+        const local = tasksRef.current.find(x => x.id === t.id);
+        if (local) return local;
+      }
+      return t;
+    });
+    // Giữ cả task local vừa save nhưng chưa kịp xuất hiện trên server (save chưa commit).
+    recentTaskSaves.current.forEach((savedAt, tid) => {
+      if (now - savedAt < 5000 && !merged.some(t => t.id === tid)) {
+        const local = tasksRef.current.find(x => x.id === tid);
+        if (local) merged.push(local);
+      }
+    });
+    setTasks(merged);
+  }, [setTasks]);
 
   // ── Resolver deep link công việc ────────────────────────────────────────
   // Thông báo đẩy có thể mang `taskId` (chuẩn) hoặc chỉ có `taskCode`
@@ -1364,7 +1393,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const handleTasksUpdated = async () => {
       try {
         const tsks = await dbService.tasks.list();
-        setTasks(tsks);
+        // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu.
+        applyTasksWithLocalOverrides(tsks);
       } catch (err) {
         console.error("Lỗi đồng bộ công việc:", err);
       }
@@ -1465,7 +1495,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       try {
         console.log('[Realtime] 🔔 tasks event:', payload ? { event: payload.eventType } : '(manual)');
         invalidateCache('tasks');
-        setTasks(await dbService.tasks.list());
+        const list = await dbService.tasks.list();
+        // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu (vd mission vừa hoàn thành).
+        applyTasksWithLocalOverrides(list);
       } catch (e) { console.error('Realtime tasks sync error:', e); }
     };
     const fetchPayments = async (payload?: any) => {
@@ -1772,7 +1804,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const handleTasksRefreshRequest = async () => {
       try {
         const taskList = await dbService.tasks.list();
-        setTasks(taskList);
+        // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu.
+        applyTasksWithLocalOverrides(taskList);
       } catch (e) { console.error('Tasks refresh error:', e); }
     };
     window.addEventListener('hl-tasks-refresh', handleTasksRefreshRequest);
@@ -2090,119 +2123,159 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     });
   };
 
-  const handleUpdateTask = (id: string, updates: Partial<Task>) => {
-    setTasks(prev => {
-      const idx = prev.findIndex(t => t.id === id);
-      if (idx !== -1) {
-        const oldTask = prev[idx];
-        const changedTask = { ...oldTask, ...updates };
+  const handleUpdateTask = (id: string, updates: Partial<Task>): Promise<boolean> => {
+    // Tìm task từ state hiện tại (ref) — không chạy side-effect bên trong updater.
+    const oldTask = tasksRef.current.find(t => t.id === id);
+    const baseTask = oldTask;
+    const changedTask: Task = baseTask
+      ? { ...baseTask, ...updates }
+      : { id, ...(updates as Task) };
 
-        // A. THÔNG BÁO TIN NHẮN MỚI TRONG CÔNG VIỆC CON (HỘI THOẠI)
-        if (updates.comments && updates.comments.length > (oldTask.comments?.length || 0)) {
-          const newComment = updates.comments[updates.comments.length - 1];
-          // Thông báo cho người nhận (nếu người nhận không phải là chính người gửi)
-          const recipientIds: string[] = [];
-          if (newComment.senderId !== oldTask.assigneeId) recipientIds.push(oldTask.assigneeId);
-          if (newComment.senderId !== oldTask.assignerId) recipientIds.push(oldTask.assignerId);
+    // ── Side-effect thông báo (tin nhắn, trạng thái, tiến độ, toast) ────────
+    // Được chạy sau khi đã xác định task gốc (nếu có trong state) để tránh bắn
+    // thông báo cho dữ liệu chưa được server xác nhận.
+    const runTaskNotifications = (oldT: Task | undefined, newT: Task) => {
+      if (!oldT) return;
 
-          recipientIds.forEach(recId => {
-            const rec = employees.find(e => e.id === recId);
-            if (rec) {
-              setTimeout(() => {
-                addNotification({
-                  recipientId: recId,
-                  senderId: newComment.senderId,
-                  senderName: newComment.senderName,
-                  senderAvatar: newComment.senderName.substring(0, 2).toUpperCase(),
-                  category: 'chat',
-                  title: `💬 Tin nhắn mới từ ${newComment.senderName}`,
-                  content: `[Công việc con ${oldTask.code}]: "${newComment.content}"`,
-                  detailedContent: `Nội dung cuộc hội thoại trong công việc con "${oldTask.name}" (${oldTask.code}):\n\nNgười gửi: ${newComment.senderName} (${newComment.senderRole})\nThời gian: ${new Date(newComment.createdAt).toLocaleString('vi-VN')}\n\nTin nhắn: "${newComment.content}"`,
-                  subTaskCode: oldTask.code,
-                  taskId: oldTask.id // deep link: bấm thông báo mở đúng chi tiết công việc
-                });
-              }, 10);
-            }
-          });
-        }
+      // A. THÔNG BÁO TIN NHẮN MỚI TRONG CÔNG VIỆC CON (HỘI THOẠI)
+      if (updates.comments && updates.comments.length > (oldT.comments?.length || 0)) {
+        const newComment = updates.comments[updates.comments.length - 1];
+        // Thông báo cho người nhận (nếu người nhận không phải là chính người gửi)
+        const recipientIds: string[] = [];
+        if (newComment.senderId !== oldT.assigneeId) recipientIds.push(oldT.assigneeId);
+        if (newComment.senderId !== oldT.assignerId) recipientIds.push(oldT.assignerId);
 
-        // B. THÔNG BÁO THÔNG TIN TRONG CÔNG VIỆC CON CÓ LIÊN QUAN (TRẠNG THÁI, TIẾN ĐỘ)
-        if (updates.status && updates.status !== oldTask.status) {
-          const statusMap: Record<string, string> = { todo: 'Chưa làm', in_progress: 'Đang làm', review: 'Đợi duyệt', completed: 'Hoàn thành' };
-          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId]))
-            .filter(recId => recId !== currentUser?.id);
-
-          recipientIds.forEach(recId => {
+        recipientIds.forEach(recId => {
+          const rec = employees.find(e => e.id === recId);
+          if (rec) {
             setTimeout(() => {
-              if (!currentUser) return;
               addNotification({
                 recipientId: recId,
-                senderId: currentUser.id,
-                senderName: currentUser.name,
-                senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-                category: 'tasks',
-                title: `📋 Cập nhật công việc con`,
-                content: `Trạng thái công việc "${oldTask.name}" đổi thành: ${statusMap[updates.status || ''] || updates.status}`,
-                detailedContent: `Mã công việc: ${oldTask.code}\nTên công việc: ${oldTask.name}\nPhòng ban: ${oldTask.department}\nHạn hoàn thành: ${oldTask.deadline}\n\nNgười cập nhật: ${currentUser.name}\nTrạng thái mới: ${statusMap[updates.status || ''] || updates.status}\nTiến độ hiện tại: ${changedTask.completionRate}%`,
-                subTaskCode: oldTask.code,
-                taskId: oldTask.id // deep link: bấm thông báo mở đúng chi tiết công việc
+                senderId: newComment.senderId,
+                senderName: newComment.senderName,
+                senderAvatar: newComment.senderName.substring(0, 2).toUpperCase(),
+                category: 'chat',
+                title: `💬 Tin nhắn mới từ ${newComment.senderName}`,
+                content: `[Công việc con ${oldT.code}]: "${newComment.content}"`,
+                detailedContent: `Nội dung cuộc hội thoại trong công việc con "${oldT.name}" (${oldT.code}):\n\nNgười gửi: ${newComment.senderName} (${newComment.senderRole})\nThời gian: ${new Date(newComment.createdAt).toLocaleString('vi-VN')}\n\nTin nhắn: "${newComment.content}"`,
+                subTaskCode: oldT.code,
+                taskId: oldT.id // deep link: bấm thông báo mở đúng chi tiết công việc
               });
             }, 10);
-          });
-        }
-
-        if (updates.completionRate !== undefined && updates.completionRate !== oldTask.completionRate) {
-          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId]))
-            .filter(recId => recId !== currentUser?.id);
-
-          recipientIds.forEach(recId => {
-            setTimeout(() => {
-              if (!currentUser) return;
-              addNotification({
-                recipientId: recId,
-                senderId: currentUser.id,
-                senderName: currentUser.name,
-                senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-                category: 'tasks',
-                title: `📈 Cập nhật tiến độ`,
-                content: `Tiến độ việc "${oldTask.name}" tăng lên ${updates.completionRate}%`,
-                detailedContent: `Mã công việc: ${oldTask.code}\nTên công việc: ${oldTask.name}\nTiến độ cũ: ${oldTask.completionRate}%\nTiến độ mới: ${updates.completionRate}%\n\nNgười cập nhật: ${currentUser.name}`,
-                subTaskCode: oldTask.code,
-                taskId: oldTask.id // deep link: bấm thông báo mở đúng chi tiết công việc
-              });
-            }, 10);
-          });
-        }
-
-        // Phát hiện hoàn thành công việc để bắn Toast nổi
-        const wasCompleted = oldTask.status === 'completed' || oldTask.completionRate === 100;
-        const isNowCompleted = changedTask.status === 'completed' || changedTask.completionRate === 100;
-        if (!wasCompleted && isNowCompleted) {
-          addToast({
-            title: '✅ Hoàn thành công việc',
-            message: `Công việc "${changedTask.name}" đã cán đích và hoàn thành xuất sắc!`,
-            type: 'success'
-          });
-        }
-
-        dbService.tasks.save(changedTask).then(() => {
-          window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
-        }).catch(err => {
-          console.error("Lỗi khi cập nhật công việc:", err);
+          }
         });
-
-        // TỰ ĐỘNG CHUYỂN CỘT KHI HOÀN THÀNH:
-        // Delegate to ProjectKanbanBoard via callback to use centralized updateProjectWithRule logic
-        const projectId = changedTask.projectId;
-        if (projectId) {
-          // The callback will be invoked by the Kanban board component that has the project
-          // We don't need to do anything here - the Kanban board will handle auto-move
-          // when it receives the updated task list via props
-        }
-
-        return prev.map(t => t.id === id ? changedTask : t);
       }
-      return prev;
+
+      // B. THÔNG BÁO THÔNG TIN TRONG CÔNG VIỆC CON CÓ LIÊN QUAN (TRẠNG THÁI, TIẾN ĐỘ)
+      if (updates.status && updates.status !== oldT.status) {
+        const statusMap: Record<string, string> = { todo: 'Chưa làm', in_progress: 'Đang làm', review: 'Đợi duyệt', completed: 'Hoàn thành' };
+        const recipientIds = Array.from(new Set([oldT.assigneeId, oldT.assignerId]))
+          .filter(recId => recId !== currentUser?.id);
+
+        recipientIds.forEach(recId => {
+          setTimeout(() => {
+            if (!currentUser) return;
+            addNotification({
+              recipientId: recId,
+              senderId: currentUser.id,
+              senderName: currentUser.name,
+              senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
+              category: 'tasks',
+              title: `📋 Cập nhật công việc con`,
+              content: `Trạng thái công việc "${oldT.name}" đổi thành: ${statusMap[updates.status || ''] || updates.status}`,
+              detailedContent: `Mã công việc: ${oldT.code}\nTên công việc: ${oldT.name}\nPhòng ban: ${oldT.department}\nHạn hoàn thành: ${oldT.deadline}\n\nNgười cập nhật: ${currentUser.name}\nTrạng thái mới: ${statusMap[updates.status || ''] || updates.status}\nTiến độ hiện tại: ${newT.completionRate}%`,
+              subTaskCode: oldT.code,
+              taskId: oldT.id // deep link: bấm thông báo mở đúng chi tiết công việc
+            });
+          }, 10);
+        });
+      }
+
+      // C. THÔNG BÁO TIẾN ĐỘ
+      if (updates.completionRate !== undefined && updates.completionRate !== oldT.completionRate) {
+        const recipientIds = Array.from(new Set([oldT.assigneeId, oldT.assignerId]))
+          .filter(recId => recId !== currentUser?.id);
+
+        recipientIds.forEach(recId => {
+          setTimeout(() => {
+            if (!currentUser) return;
+            addNotification({
+              recipientId: recId,
+              senderId: currentUser.id,
+              senderName: currentUser.name,
+              senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
+              category: 'tasks',
+              title: `📈 Cập nhật tiến độ`,
+              content: `Tiến độ việc "${oldT.name}" tăng lên ${updates.completionRate}%`,
+              detailedContent: `Mã công việc: ${oldT.code}\nTên công việc: ${oldT.name}\nTiến độ cũ: ${oldT.completionRate}%\nTiến độ mới: ${updates.completionRate}%\n\nNgười cập nhật: ${currentUser.name}`,
+              subTaskCode: oldT.code,
+              taskId: oldT.id // deep link: bấm thông báo mở đúng chi tiết công việc
+            });
+          }, 10);
+        });
+      }
+
+      // D. PHÁT HIỆN HOÀN THÀNH CÔNG VIỆC → BẮN TOAST NỔI
+      const wasCompleted = oldT.status === 'completed' || oldT.completionRate === 100;
+      const isNowCompleted = newT.status === 'completed' || newT.completionRate === 100;
+      if (!wasCompleted && isNowCompleted) {
+        addToast({
+          title: '✅ Hoàn thành công việc',
+          message: `Công việc "${newT.name}" đã cán đích và hoàn thành xuất sắc!`,
+          type: 'success'
+        });
+      }
+    };
+
+    // Optimistic cập nhật state — nhưng nếu task chưa có trong state thì không
+    // tự chèn (tránh giả lập dữ liệu chưa được server xác nhận).
+    if (baseTask) {
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    }
+
+    // Ghi nhận thời điểm save để các nguồn reload không ghi đè bản mới (Hướng B).
+    recentTaskSaves.current.set(id, Date.now());
+
+    // Nếu task đã có trong state → save trực tiếp lên Supabase và trả về kết quả.
+    if (baseTask) {
+      return dbService.tasks.save(changedTask).then(() => {
+        runTaskNotifications(baseTask, changedTask);
+        window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+        return true;
+      }).catch(err => {
+        console.error("Lỗi khi cập nhật công việc:", err);
+        // Save thất bại → bỏ marker chống-ghi-đè và hoàn nguyên UI về bản trước.
+        recentTaskSaves.current.delete(id);
+        setTasks(prev => prev.map(t => t.id === id ? baseTask : t));
+        return false;
+      });
+    }
+
+    // HƯỚNG A: task không còn trong state (bị reload thay thế) → lấy bản mới từ
+    // server, merge updates, save. Không im lặng bỏ qua như trước.
+    return dbService.tasks.list().then(serverTasks => {
+      const serverTask = serverTasks.find(t => t.id === id);
+      const target = serverTask ? { ...serverTask, ...updates } : changedTask;
+      return dbService.tasks.save(target).then(() => {
+        runTaskNotifications(serverTask, target);
+        window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+        // Cập nhật state với bản đã save — giữ bản này làm bản gốc.
+        recentTaskSaves.current.delete(id);
+        setTasks(prev => {
+          const has = prev.some(t => t.id === id);
+          if (has) return prev.map(t => t.id === id ? target : t);
+          return [...prev, target];
+        });
+        return true;
+      }).catch(err => {
+        console.error("Lỗi khi cập nhật công việc (không có trong state):", err);
+        // Save thất bại → bỏ marker chống-ghi-đè để reload không giữ bản local sai.
+        recentTaskSaves.current.delete(id);
+        return false;
+      });
+    }).catch(err => {
+      console.error("Lỗi khi tải công việc để cập nhật:", err);
+      return false;
     });
   };
 

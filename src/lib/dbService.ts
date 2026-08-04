@@ -2342,6 +2342,126 @@ export const dbService = {
     }
   },
 
+  // ===== HÀM UPLOAD HÌNH ẢNH CHO SẢN PHẨM CATALOG =====
+  async uploadProductImage(productId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'product-catalog-images';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeProduct = String(productId || 'product').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `products/${safeProduct}_${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    const localFallback = (): Promise<{ url: string; stored: 'local' }> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string'
+        ? resolve({ url: reader.result, stored: 'local' })
+        : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 10485760,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' };
+        } catch (createErr: any) {
+          console.warn('[uploadProductImage] Không tự tạo được bucket:', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadProductImage] Upload Supabase failed, storing locally:', msg);
+      return await localFallback();
+    }
+  },
+
+  // ===== HÀM UPLOAD HÌNH ẢNH CHO BÁO GIÁ (Quote) =====
+  async uploadQuoteImage(quoteId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'quote-images';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeQuote = String(quoteId || 'quote').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `quotes/${safeQuote}_${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    const localFallback = (): Promise<{ url: string; stored: 'local' }> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string'
+        ? resolve({ url: reader.result, stored: 'local' })
+        : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' as const };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 10485760,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' as const };
+        } catch (createErr: any) {
+          console.warn('[uploadQuoteImage] Không tự tạo được bucket:', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadQuoteImage] Upload Supabase thất bại, lưu cục bộ:', msg);
+      return await localFallback();
+    }
+  },
+
   // Clean initialization helper to bootstrap full local database on the first sync if cloud db is empty
   async bootstrapFirstTime(force = false): Promise<void> {
     const supabase = getSupabase();
@@ -2364,6 +2484,46 @@ export const dbService = {
       }
     } catch (err) {
       console.warn('Error bootstrapping initial tables to Supabase:', err);
+    }
+  },
+
+  // ===== KHỞI TẠO STORAGE BUCKET =====
+  // Tự động tạo các bucket cần thiết cho upload ảnh khi app khởi động
+  async ensureStorageBuckets(): Promise<void> {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const buckets = [
+      {
+        name: 'product-catalog-images',
+        desc: 'Hình ảnh danh mục sản phẩm Nội Thất'
+      },
+      {
+        name: 'quote-images',
+        desc: 'Hình ảnh báo giá Cơ Khí (Cửa Nhôm Kính & Sắt CNC)'
+      }
+    ];
+
+    for (const bucket of buckets) {
+      try {
+        const { error } = await supabase.storage.getBucket(bucket.name);
+        if (error && /not found/i.test(String(error.message || ''))) {
+          const { error: createErr } = await supabase.storage.createBucket(bucket.name, {
+            public: true,
+            fileSizeLimit: 10485760, // 10MB
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          if (createErr) {
+            console.warn(`[Storage] Không tạo được bucket "${bucket.name}":`, createErr.message);
+          } else {
+            console.log(`[Storage] ✅ Đã tạo bucket "${bucket.name}" (${bucket.desc})`);
+          }
+        } else {
+          console.log(`[Storage] ✅ Bucket "${bucket.name}" đã tồn tại`);
+        }
+      } catch (err) {
+        console.warn(`[Storage] Lỗi kiểm tra bucket "${bucket.name}":`, err);
+      }
     }
   }
 };

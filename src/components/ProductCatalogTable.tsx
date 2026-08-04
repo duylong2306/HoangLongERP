@@ -15,7 +15,9 @@ import {
   Check,
   Info,
   Upload,
-  Download
+  Download,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface ProductCatalogTableProps {
@@ -521,6 +523,203 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
   const [fDonGiaAnCuong, setFDonGiaAnCuong] = useState<string>('');
   const [fDonGiaPlywood, setFDonGiaPlywood] = useState<string>('');
 
+  // Image Upload States
+  const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
+  const [productGalleryImages, setProductGalleryImages] = useState<string[]>([]);
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productGalleryFiles, setProductGalleryFiles] = useState<File[]>([]);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  // Camera states for product images
+  const [productCameraOpen, setProductCameraOpen] = useState(false);
+  const productCameraStreamRef = useRef<MediaStream | null>(null);
+  const productVideoRef = useRef<HTMLVideoElement>(null);
+  const productImageInputRef = useRef<HTMLInputElement>(null);
+  const productGalleryInputRef = useRef<HTMLInputElement>(null);
+
+  // Camera helper functions
+  const stopProductCamera = () => {
+    if (productCameraStreamRef.current) {
+      productCameraStreamRef.current.getTracks().forEach(t => t.stop());
+      productCameraStreamRef.current = null;
+    }
+    setProductCameraOpen(false);
+  };
+
+  const openProductCamera = async () => {
+    try {
+      stopProductCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      productCameraStreamRef.current = stream;
+      setProductCameraOpen(true);
+      setTimeout(() => {
+        if (productVideoRef.current) {
+          productVideoRef.current.srcObject = stream;
+          productVideoRef.current.play().catch(() => { /* noop */ });
+        }
+      }, 150);
+    } catch (err) {
+      addToast({ title: '⚠️ Không thể mở camera', message: 'Vui lòng cấp quyền camera hoặc tải ảnh lên từ thiết bị.', type: 'warning' });
+    }
+  };
+
+  const captureProductImage = () => {
+    const video = productVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `product_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      // Convert to base64 for preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (result) {
+          setProductImagePreview(result);
+        }
+      };
+      reader.readAsDataURL(blob);
+      // Upload to Supabase if available
+      try {
+        setIsUploadingImage(true);
+        const { url, stored } = await dbService.uploadProductImage(currentEditingId || '', file);
+        if (stored === 'supabase') {
+          setProductImagePreview(url);
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh sản phẩm đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          setProductImagePreview(url);
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "product-catalog-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      } catch (err) {
+        addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' });
+      } finally {
+        setIsUploadingImage(false);
+      }
+      stopProductCamera();
+    }, 'image/jpeg');
+  };
+
+  const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!currentEditingId) {
+      addToast({ title: '⚠️ Cảnh báo', message: 'Vui lòng lưu sản phẩm trước khi tải ảnh lên.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) { // 10MB
+      addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    // Convert to base64 for preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        setProductImagePreview(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Upload to Supabase
+    dbService.uploadProductImage(currentEditingId, file)
+      .then(({ url, stored }) => {
+        setProductImagePreview(url);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh sản phẩm đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "product-catalog-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      })
+      .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' }));
+    e.target.value = '';
+  };
+
+  const handleProductGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (!currentEditingId) {
+      addToast({ title: '⚠️ Cảnh báo', message: 'Vui lòng lưu sản phẩm trước khi tải ảnh lên.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    const validFiles = Array.from(files).filter(file => {
+      if (!file.type.startsWith('image/')) {
+        addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+        return false;
+      }
+      if (file.size > 10 * 1024 * 1024) { // 10MB
+        addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+        return false;
+      }
+      return true;
+    });
+    if (validFiles.length === 0) {
+      e.target.value = '';
+      return;
+    }
+    // Upload each file to Supabase
+    const uploadPromises = validFiles.map(file => {
+      const reader = new FileReader();
+      return new Promise<{ url: string, stored: 'supabase' | 'local' }>((resolve, reject) => {
+        reader.onload = async (e) => {
+          const result = e.target?.result as string;
+          if (result) {
+            try {
+              const { url, stored } = await dbService.uploadProductImage(currentEditingId, file);
+              resolve({ url, stored });
+            } catch (err) {
+              reject(err);
+            }
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    Promise.allSettled(uploadPromises).then((results) => {
+      const successUrls: string[] = [];
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successUrls.push(result.value.url);
+        }
+      });
+      if (successUrls.length > 0) {
+        setProductGalleryImages(prev => [...prev, ...successUrls]);
+        addToast({ title: '✅ Đã tải lên', message: `Đã tải lên ${successUrls.length} ảnh thành công.`, type: 'success' });
+      }
+      const failedCount = results.length - successUrls.length;
+      if (failedCount > 0) {
+        addToast({ title: '⚠️ Một số ảnh thất bại', message: `Không thể tải lên ${failedCount} ảnh.`, type: 'warning' });
+      }
+    });
+    e.target.value = '';
+  };
+
+  const removeProductImage = (type: 'primary' | 'gallery', index?: number) => {
+    if (type === 'primary') {
+      setProductImagePreview(null);
+    } else if (type === 'gallery' && typeof index === 'number') {
+      setProductGalleryImages(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const resetProductImageState = () => {
+    setProductImagePreview(null);
+    setProductGalleryImages([]);
+    stopProductCamera();
+  };
+
   // Delete confirm state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -535,6 +734,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     setFDonGiaAnCuong('');
     setFDonGiaPlywood('');
     setCurrentEditingId(null);
+    setProductImagePreview(null);
+    setProductGalleryImages([]);
   };
 
   // Open modal for Adding
@@ -556,6 +757,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     setFDonGiaThaiLan(item.donGiaThaiLan !== null ? String(item.donGiaThaiLan) : '');
     setFDonGiaAnCuong(item.donGiaAnCuong !== null ? String(item.donGiaAnCuong) : '');
     setFDonGiaPlywood(item.donGiaPlywood !== null ? String(item.donGiaPlywood) : '');
+    setProductImagePreview(item.imageUrl || null);
+    setProductGalleryImages(item.galleryImages || []);
     setShowFormModal(true);
   };
 
@@ -599,6 +802,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
         donGiaThaiLan: priceThaiLan,
         donGiaAnCuong: priceAnCuong,
         donGiaPlywood: pricePlywood,
+        imageUrl: productImagePreview || undefined,
+        galleryImages: productGalleryImages.length > 0 ? productGalleryImages : undefined,
       };
 
       if (fChatLieu.trim()) {
@@ -626,6 +831,8 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
             donGiaThaiLan: priceThaiLan,
             donGiaAnCuong: priceAnCuong,
             donGiaPlywood: pricePlywood,
+            imageUrl: productImagePreview || undefined,
+            galleryImages: productGalleryImages.length > 0 ? productGalleryImages : undefined,
           };
         }
         return p;
@@ -992,6 +1199,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
             <thead>
               <tr className="bg-slate-50 text-slate-700 uppercase tracking-wider font-extrabold text-[9.5px] border-b border-slate-200">
                 <th className="px-3 py-3 text-left w-[80px]">Mã SP</th>
+                <th className="px-3 py-3 text-left w-[100px]">Hình ảnh</th>
                 <th className="px-3 py-3 text-left w-[90px]">Lĩnh vực</th>
                 <th className="px-3 py-3 text-left w-[110px]">Danh mục</th>
                 <th className="px-4 py-3 text-left w-[180px]">Tên sản phẩm</th>
@@ -1015,7 +1223,31 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
                     >
                       {/* ID - Mã SP */}
                       <td className="px-3 py-3 font-mono font-bold text-orange-600 text-[11px] border-r border-slate-100">{p.id}</td>
-                      
+
+                      {/* Hình ảnh */}
+                      <td className="px-3 py-2 border-r border-slate-100">
+                        {p.imageUrl ? (
+                          <div className="relative group">
+                            <img
+                              src={p.imageUrl}
+                              alt={p.tenSanPham}
+                              className="w-14 h-14 object-cover rounded-lg border border-slate-200 shadow-sm"
+                              loading="lazy"
+                            />
+                            {(p.galleryImages && p.galleryImages.length > 0) && (
+                              <span className="absolute -bottom-1 -right-1 bg-orange-600 text-white text-[8px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border border-white shadow-sm">
+                                {p.galleryImages.length}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="w-14 h-14 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-slate-400">
+                            <ImageIcon className="w-4 h-4" />
+                            <span className="text-[8px] font-bold mt-0.5">Chưa có</span>
+                          </div>
+                        )}
+                      </td>
+
                       {/* Lĩnh vực */}
                       <td className="px-3 py-3 font-semibold text-slate-700">{p.linhVuc}</td>
                       
@@ -1149,7 +1381,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
                 })
               ) : (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500 italic">
+                  <td colSpan={11} className="px-4 py-8 text-center text-slate-500 italic">
                     Không tìm thấy sản phẩm nào phù hợp với bộ lọc hoặc từ khóa tìm kiếm.
                   </td>
                 </tr>
@@ -1340,7 +1572,174 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
               <div className="bg-orange-50 border border-orange-200/80 p-3.5 rounded-xl text-xs text-orange-850 leading-relaxed font-medium">
                 ⚡ <strong>Cấu hình đơn giá riêng:</strong> Sau khi sản phẩm được lưu, bạn có thể tự do thêm, sửa, xóa vô hạn các mức đơn giá liên kết phù hợp với từng chất liệu (như Thái Lan, An Cường, Plywood, Vân gỗ...) bằng cách click nút <strong>"+ Thêm"</strong> hoặc click trực tiếp vào nhãn đơn giá trên dòng sản phẩm ngoài bảng chính.
               </div>
- 
+
+              {/* Hình ảnh sản phẩm */}
+              <div className="border border-slate-200 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-orange-500" />
+                    <label className="text-slate-600 font-extrabold uppercase tracking-wider text-[9px]">Hình ảnh sản phẩm</label>
+                  </div>
+                  {modalMode === 'edit' && (
+                    <span className="text-[9px] text-slate-400 font-semibold">Ảnh sẽ hiển thị trong bảng danh mục & khi thêm vào báo giá</span>
+                  )}
+                </div>
+
+                {modalMode === 'add' ? (
+                  <div className="bg-slate-50 border border-dashed border-slate-300 rounded-lg p-3 text-center text-[10px] text-slate-500 font-medium">
+                    💡 Sau khi sản phẩm được <strong className="text-orange-600">lưu thành công</strong>, mở lại sản phẩm (bút ✏️ Chỉnh sửa) để tải hình ảnh lên.
+                  </div>
+                ) : (
+                  <>
+                    {/* Ảnh chính */}
+                    <div>
+                      <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1.5">Ảnh đại diện</div>
+                      {productImagePreview ? (
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={productImagePreview}
+                            alt="Ảnh sản phẩm"
+                            className="w-20 h-20 object-cover rounded-lg border border-slate-200 shadow-sm"
+                          />
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => removeProductImage('primary')}
+                              className="text-[10px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" /> Gỡ ảnh chính
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => productImageInputRef.current?.click()}
+                              className="text-[10px] text-slate-600 hover:text-slate-800 font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Upload className="w-3.5 h-3.5" /> Thay ảnh khác
+                            </button>
+                            <input
+                              ref={productImageInputRef}
+                              type="file"
+                              accept="image/*"
+                              onChange={handleProductImageUpload}
+                              className="hidden"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => productImageInputRef.current?.click()}
+                            disabled={isUploadingImage}
+                            className="px-3 py-2 bg-orange-600 hover:bg-orange-550 text-white font-bold text-[10px] rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            {isUploadingImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={openProductCamera}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-lg flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            Chụp ảnh
+                          </button>
+                          <input
+                            ref={productImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleProductImageUpload}
+                            className="hidden"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Thư viện ảnh */}
+                    <div>
+                      <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1.5">Thư viện ảnh (tối đa nhiều ảnh)</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {productGalleryImages.map((img, i) => (
+                          <div key={i} className="relative group">
+                            <img
+                              src={img}
+                              alt={`Ảnh ${i + 1}`}
+                              className="w-16 h-16 object-cover rounded-lg border border-slate-200"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeProductImage('gallery', i)}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                              title="Gỡ ảnh"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => productGalleryInputRef.current?.click()}
+                          className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-400 cursor-pointer"
+                          title="Thêm ảnh"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span className="text-[8px] font-bold">Thêm</span>
+                        </button>
+                        <input
+                          ref={productGalleryInputRef}
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={handleProductGalleryUpload}
+                          className="hidden"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Camera modal overlay */}
+              {productCameraOpen && (
+                <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+                  <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-md space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-white text-xs font-bold uppercase tracking-wider">Chụp ảnh sản phẩm</span>
+                      <button
+                        type="button"
+                        onClick={stopProductCamera}
+                        className="text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <video
+                      ref={productVideoRef}
+                      className="w-full rounded-xl bg-black aspect-video object-cover"
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <div className="flex justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={captureProductImage}
+                        className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-lg cursor-pointer"
+                      >
+                        Chụp & Lưu
+                      </button>
+                      <button
+                        type="button"
+                        onClick={stopProductCamera}
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-lg cursor-pointer"
+                      >
+                        Đóng
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Form Buttons */}
               <div className="flex justify-end gap-3 pt-3.5 border-t border-slate-200">
                 <button

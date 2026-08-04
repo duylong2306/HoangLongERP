@@ -31,7 +31,9 @@ import {
   X,
   FolderOpen,
   Upload,
-  Download
+  Download,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 import CabinetEstimator from './CabinetEstimator';
 import ConstructionEstimator from './ConstructionEstimator';
@@ -990,6 +992,31 @@ export default function QuotationSystem({
     sessionStorage.removeItem('takeoff_saved_totals');
   };
 
+  // ---- ĐIỀU HƯỚNG SỬA BÁO GIÁ TỪ LƯU TRỮ HỒ SƠ ----
+  // Khi bấm "Sửa Báo Giá" tại Lưu Trữ Hồ Sơ, chuyển về tab Lập Báo Giá tương ứng
+  // và nạp lại toàn bộ dữ liệu hồ sơ đã lưu để người dùng tiếp tục chỉnh sửa chi tiết.
+  const handleEditCabinetQuote = (quote: ArchivedQuote) => {
+    setActiveTab('furniture');
+    setFurnitureSubTab('estimator');
+    setLoadedCabinetQuote(quote);
+    setIsCabinetSaved(true);
+  };
+
+  const handleEditConstructionQuote = (quote: ArchivedQuote) => {
+    setActiveTab('construction');
+    setConstructionSubTab('quotes_folder');
+    setQuotesFolderTab('estimator');
+    setLoadedQuote(quote);
+    setIsConstructionSaved(true);
+  };
+
+  const handleEditMechanicalQuote = (quote: ArchivedQuote) => {
+    setActiveTab('mechanical');
+    setMechanicalSubTab('estimator');
+    setLoadedMechanicalQuote(quote);
+    setIsMechanicalSaved(true);
+  };
+
   // Dropdowns
   const [isProjDropdownOpen, setIsProjDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1664,7 +1691,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <CabinetArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} />
+              <CabinetArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} onEditQuote={handleEditCabinetQuote} />
             )}
           </div>
         )}
@@ -2834,7 +2861,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <ConstructionArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} />
+              <ConstructionArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} onEditQuote={handleEditConstructionQuote} />
             )}
           </div>
         )}
@@ -3011,7 +3038,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <MechanicalArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} />
+              <MechanicalArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} onEditQuote={handleEditMechanicalQuote} />
             )}
           </div>
         )}

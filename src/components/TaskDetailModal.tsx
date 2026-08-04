@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote } from '../types';
+import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
@@ -37,7 +37,7 @@ interface TaskDetailModalProps {
   projects: Project[];
   employees: Employee[];
   currentUser: Employee;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<boolean> | void;
   onUpdateProject?: (projectId: string, updates: Partial<Project>) => void;
   isReadOnly?: boolean;
   onOpenConnectedTool?: (tool: 'approval' | 'cost' | 'material' | 'quotation' | 'contract' | 'acceptance' | 'liquidation') => void;
@@ -64,7 +64,7 @@ export default function TaskDetailModal({
   if (!selectedTask) return null;
 
   const [advProposalApprover, setAdvProposalApprover] = useState('Ban Giám Đốc');
-  const [subcontractors, setSubcontractors] = useState<SupplierPartner[]>([]);
+  const [subcontractors, setSubcontractors] = useState<any[]>([]);
 
   const isCurrentUserAdmin = currentUser.role === 'director' || currentUser.id === 'NV_ADMIN' || currentUser.id === 'emp_admin';
 
@@ -441,57 +441,97 @@ export default function TaskDetailModal({
   const handleImportMissionsExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Hiển thị thông báo bắt đầu import
+    addToast({ title: '⏳ Đang xử lý', message: 'Đang đọc file Excel...', type: 'info' });
+
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        // Use blankrows: false to skip completely empty rows, and raw: false to get formatted values
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         if (rows.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dòng nào.', type: 'warning' });
           return;
         }
-        const imported: SubTaskMission[] = rows.map((r, idx) => {
-          const name = String(r['Tên nhiệm vụ'] || '').trim();
-          const statusRaw = String(r['Trạng thái'] || '').trim().toLowerCase();
-          const deadlineRaw = String(r['Hạn hoàn thành'] || '').trim();
-          let deadline: string | undefined;
-          if (deadlineRaw) {
-            // Hỗ trợ cả định dạng dd/mm/yyyy HH:MM và ISO
-            const isoMatch = deadlineRaw.match(/^\d{4}-\d{2}-\d{2}/);
-            if (isoMatch) {
-              deadline = new Date(deadlineRaw).toISOString();
-            } else {
-              const parts = deadlineRaw.split(/[\/\s:]/).map(Number);
-              if (parts.length >= 3) {
-                const [day, month, year, hh = 12, mm = 0] = parts;
-                const d = new Date(year, month - 1, day, hh, mm, 0, 0);
-                if (!isNaN(d.getTime())) deadline = d.toISOString();
-              }
-            }
-          }
-          const memberNames = String(r['Thành viên'] || '').split(',').map(s => s.trim()).filter(Boolean);
-          const memberIds = memberNames.map(n => empIdByName(n)).filter((v): v is string => Boolean(v));
-          const mainAssigneeName = String(r['Người phụ trách chính'] || '').trim();
-          const mainAssigneeId = empIdByName(mainAssigneeName);
-          return {
-            id: `mission_${Date.now()}_${idx}`,
-            name: name || `Nhiệm vụ ${idx + 1}`,
-            memberIds,
-            mainAssigneeId,
-            status: statusRaw === 'hoàn thành' || statusRaw === 'completed' || statusRaw === 'xong'
-              ? 'completed'
-              : statusRaw === 'đang làm' || statusRaw === 'doing' || statusRaw === 'đang thực hiện'
-                ? 'doing'
-                : 'todo',
-            workReports: String(r['Báo cáo'] || ''),
-            evidence: String(r['Bằng chứng'] || ''),
-            createdAt: new Date().toISOString(),
-            deadline,
-          } as SubTaskMission;
-        }).filter(m => m.name && m.name.trim());
 
-        if (imported.length === 0) {
+        // Process rows in smaller batches to prevent UI freezing
+        const batchSize = 100; // Process 100 rows at a time
+        let processedRows: SubTaskMission[] = [];
+        let batchCount = 0;
+
+        // Add a loading toast that will be updated with progress
+        const loadingToast = addToast({ title: '⏳ Đang xử lý', message: `Đang xử lý hàng ${batchCount + 1}-${Math.min(batchCount + batchSize, rows.length)} trong tổng số ${rows.length} dòng...`, type: 'info' });
+
+        for (let i = 0; i < rows.length; i += batchSize) {
+          const batch = rows.slice(i, i + batchSize);
+          batchCount = i / batchSize + 1;
+
+          // Update loading message
+          addToast({
+            title: '⏳ Đang xử lý',
+            message: `Đang xử lý hàng ${i + 1}-${Math.min(i + batchSize, rows.length)} trong tổng số ${rows.length} dòng...`,
+            type: 'info'
+          });
+
+          const batchImported: SubTaskMission[] = batch
+            .map((r, idx) => {
+              // Check if the row has actual data in "Tên nhiệm vụ" column
+              const rawName = r['Tên nhiệm vụ'];
+              // Skip rows where "Tên nhiệm vụ" is undefined, null, or empty string
+              if (rawName === undefined || rawName === null || String(rawName).trim() === '') {
+                return null;
+              }
+              const name = String(rawName).trim();
+              const statusRaw = String(r['Trạng thái'] || '').trim().toLowerCase();
+              const deadlineRaw = String(r['Hạn hoàn thành'] || '').trim();
+              let deadline: string | undefined;
+              if (deadlineRaw) {
+                // Hỗ trợ cả định dạng dd/mm/yyyy HH:MM và ISO
+                const isoMatch = deadlineRaw.match(/^\d{4}-\d{2}-\d{2}/);
+                if (isoMatch) {
+                  deadline = new Date(deadlineRaw).toISOString();
+                } else {
+                  const parts = deadlineRaw.split(/[\/\s:]/).map(Number);
+                  if (parts.length >= 3) {
+                    const [day, month, year, hh = 12, mm = 0] = parts;
+                    const d = new Date(year, month - 1, day, hh, mm, 0, 0);
+                    if (!isNaN(d.getTime())) deadline = d.toISOString();
+                  }
+                }
+              }
+              const memberNames = String(r['Thành viên'] || '').split(',').map(s => s.trim()).filter(Boolean);
+              const memberIds = memberNames.map(n => empIdByName(n)).filter((v): v is string => Boolean(v));
+              const mainAssigneeName = String(r['Người phụ trách chính'] || '').trim();
+              const mainAssigneeId = empIdByName(mainAssigneeName);
+              return {
+                id: `mission_${Date.now()}_${i + idx}`, // Sử dụng index để tránh trùng lặp
+                name,
+                memberIds,
+                mainAssigneeId,
+                status: statusRaw === 'hoàn thành' || statusRaw === 'completed' || statusRaw === 'xong'
+                  ? 'completed'
+                  : statusRaw === 'đang làm' || statusRaw === 'doing' || statusRaw === 'đang thực hiện'
+                    ? 'doing'
+                    : 'todo',
+                workReports: String(r['Báo cáo'] || ''),
+                evidence: String(r['Bằng chứng'] || ''),
+                createdAt: new Date().toISOString(),
+                deadline,
+              } as SubTaskMission;
+            })
+            .filter((m): m is SubTaskMission => m !== null && !!m.name?.trim());
+
+          // Add batch to processed rows
+          processedRows = [...processedRows, ...batchImported];
+
+          // Allow UI to update between batches
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        if (processedRows.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu hợp lệ', message: 'Cần cột "Tên nhiệm vụ" trong file Excel.', type: 'warning' });
           return;
         }
@@ -499,9 +539,9 @@ export default function TaskDetailModal({
         // Gộp với missions hiện tại (giữ nguyên các nhiệm vụ cũ, thêm mới từ Excel)
         const currentMissions = selectedTask.missions || [];
         onUpdateTask(selectedTask.id, {
-          missions: [...currentMissions, ...imported]
+          missions: [...currentMissions, ...processedRows]
         });
-        addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} nhiệm vụ chi tiết từ Excel.`, type: 'success' });
+        addToast({ title: '✅ Nhập thành công', message: `Đã import ${processedRows.length} nhiệm vụ chi tiết từ Excel.`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel. Vui lòng kiểm tra định dạng.', type: 'error' });
       }
@@ -1164,7 +1204,19 @@ export default function TaskDetailModal({
     ]);
   };
 
-  const handleConfirmApprovalRequest = () => {
+  const handleConfirmApprovalRequest = async () => {
+    // ⛔ Bảo vệ: chỉ cho gửi yêu cầu phê duyệt khi TẤT CẢ nhiệm vụ đã hoàn thành.
+    const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
+    if (pendingMissions.length > 0) {
+      addToast({
+        title: '⚠️ Còn nhiệm vụ chưa hoàn thành',
+        message: `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi gửi yêu cầu phê duyệt công việc "${selectedTask.name}".`,
+        type: 'warning'
+      });
+      setShowApprovalWarning(false);
+      return;
+    }
+
     // Build approval chain (chọn tự do)
     let updatedApprovals: any[];
     let approverName: string;
@@ -1192,12 +1244,21 @@ export default function TaskDetailModal({
       createdAt: timestamp
     };
 
-    onUpdateTask(selectedTask.id, {
+    const saveResult = await onUpdateTask(selectedTask.id, {
       status: 'reviewing',
       completionRate: 90,
       approvals: updatedApprovals,
       comments: [newComment, ...(selectedTask.comments || [])]
     });
+    if (saveResult === false) {
+      // ⛔ Save thất bại → báo lỗi, không đóng modal, không gửi tin nhóm.
+      addToast({
+        title: '❌ Lưu thất bại',
+        message: 'Không thể gửi yêu cầu phê duyệt công việc lên hệ thống. Vui lòng kiểm tra kết nối và thử lại.',
+        type: 'error'
+      });
+      return;
+    }
     // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
     notifyProjectChat(`🔔 ${currentUser.name} đã gửi Yêu cầu phê duyệt công việc "${selectedTask.name}" (Người duyệt: ${approverName}).`);
 
@@ -3248,6 +3309,11 @@ export default function TaskDetailModal({
             const isAssignee = currentUser.id === selectedTask.assigneeId;
             const isAssigner = currentUser.id === selectedTask.assignerId || isUserInRoleGroup(currentUser.id, 'role_admin') || currentUser.id === project?.pmId;
 
+            // Chặn Hoàn thành công việc / Gửi phê duyệt khi còn nhiệm vụ (missions) chưa hoàn thành.
+            const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
+            const allMissionsCompleted = pendingMissions.length === 0;
+            const missionBlockMsg = `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi ${selectedTask.isApprovalRequired === true ? 'gửi yêu cầu phê duyệt' : 'hoàn thành công việc'} này.`;
+
             if (selectedTask.status === 'todo') {
               if (isAssignee) {
                 return (
@@ -3282,15 +3348,26 @@ export default function TaskDetailModal({
                   return (
                     <button
                       type="button"
-                      onClick={() => {
-                        onUpdateTask(selectedTask.id, {
+                      disabled={!allMissionsCompleted}
+                      title={!allMissionsCompleted ? missionBlockMsg : 'Hoàn thành công việc'}
+                      onClick={async () => {
+                        // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                        if (!allMissionsCompleted) {
+                          addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
+                          return;
+                        }
+                        const ok = await onUpdateTask(selectedTask.id, {
                           status: 'completed',
                           completionRate: 100
                         });
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái hoàn thành công việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                          return;
+                        }
                         // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                         notifyProjectChat(`🎉 ${currentUser.name} (Phụ Trách Chính) đã HOÀN THÀNH công việc "${selectedTask.name}".`);
                       }}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
+                      className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-emerald-600' : ''}`}
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       Hoàn thành công việc
@@ -3300,10 +3377,17 @@ export default function TaskDetailModal({
                   return (
                     <button
                       type="button"
+                      disabled={!allMissionsCompleted}
+                      title={!allMissionsCompleted ? missionBlockMsg : 'Gửi yêu cầu phê duyệt'}
                       onClick={() => {
+                        // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                        if (!allMissionsCompleted) {
+                          addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
+                          return;
+                        }
                         setShowApprovalWarning(true);
                       }}
-                      className="bg-rose-600 hover:bg-rose-500 text-white font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md animate-pulse"
+                      className={`bg-rose-600 hover:bg-rose-500 text-white font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md animate-pulse ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-rose-600' : ''}`}
                     >
                       <Shield className="w-4 h-4" />
                       Yêu cầu phê duyệt
@@ -3340,15 +3424,26 @@ export default function TaskDetailModal({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        onUpdateTask(selectedTask.id, {
+                      disabled={!allMissionsCompleted}
+                      title={!allMissionsCompleted ? missionBlockMsg : 'Xét duyệt hoàn thành công việc'}
+                      onClick={async () => {
+                        // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                        if (!allMissionsCompleted) {
+                          addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
+                          return;
+                        }
+                        const ok = await onUpdateTask(selectedTask.id, {
                           status: 'completed',
                           completionRate: 100
                         });
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái hoàn thành công việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                          return;
+                        }
                         // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                         notifyProjectChat(`✅ ${currentUser.name} đã XÉT DUYỆT hoàn thành công việc "${selectedTask.name}".`);
                       }}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
+                      className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-emerald-600' : ''}`}
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       Xét Duyệt
@@ -4068,6 +4163,26 @@ export default function TaskDetailModal({
                         return m;
                       });
 
+                      // Push task update — chờ kết quả lưu lên Supabase.
+                      let saveOk: boolean | void;
+                      try {
+                        saveOk = await onUpdateTask(selectedTask.id, {
+                          missions: updatedMissions
+                        });
+                      } catch (err) {
+                        console.error('Lỗi khi lưu hoàn thành nhiệm vụ:', err);
+                        saveOk = false;
+                      }
+                      // ⛔ Nếu lưu thất bại → báo lỗi, KHÔNG gửi CTP / tin nhóm / đóng modal.
+                      if (saveOk === false) {
+                        addToast({
+                          title: '❌ Lưu thất bại',
+                          message: `Không thể lưu trạng thái hoàn thành nhiệm vụ "${mission?.name || selectedMissionId}" lên hệ thống. Vui lòng kiểm tra kết nối và thử lại.`,
+                          type: 'error'
+                        });
+                        return;
+                      }
+
                       // Gửi toàn bộ thông tin Công Tác Phí qua Menu Công tác phí (HR System)
                       if (mergedCtp.length > 0) {
                         const project = projects.find(p => p.id === selectedTask.projectId);
@@ -4133,10 +4248,6 @@ export default function TaskDetailModal({
                         window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
                       }
 
-                      // Push task update
-                      onUpdateTask(selectedTask.id, {
-                        missions: updatedMissions
-                      });
                       // 🎉 Thông báo Toast khi Xác Nhận Hoàn Thành nhiệm vụ thành công
                       addToast({
                         title: '✅ Hoàn thành nhiệm vụ',

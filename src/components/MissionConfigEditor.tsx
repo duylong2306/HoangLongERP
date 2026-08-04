@@ -171,38 +171,47 @@ export default function MissionConfigEditor({
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        // Use blankrows: false to skip completely empty rows
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         if (rows.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dòng nào.', type: 'warning' });
           return;
         }
-        const imported: SubTaskMissionTemplate[] = rows.map((r, idx) => {
-          const name = String(r['Tên nhiệm vụ'] || '').trim();
-          const deadlineRaw = String(r['Hạn hoàn thành'] || '').trim();
-          let deadline: string | undefined;
-          if (deadlineRaw) {
-            const isoMatch = deadlineRaw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-            if (isoMatch) {
-              deadline = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-            } else {
-              const parts = deadlineRaw.split(/[\/\s:]/).map(Number);
-              if (parts.length >= 3 && parts[0] && parts[1] && parts[2]) {
-                const [day, month, year] = parts;
-                deadline = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const imported: SubTaskMissionTemplate[] = rows
+          .map((r, idx): SubTaskMissionTemplate | null => {
+            // Check if the row has actual data in "Tên nhiệm vụ" column
+            const rawName = r['Tên nhiệm vụ'];
+            // Skip rows where "Tên nhiệm vụ" is undefined, null, or empty string
+            if (rawName === undefined || rawName === null || String(rawName).trim() === '') {
+              return null;
+            }
+            const name = String(rawName).trim();
+            const deadlineRaw = String(r['Hạn hoàn thành'] || '').trim();
+            let deadline: string | undefined;
+            if (deadlineRaw) {
+              const isoMatch = deadlineRaw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+              if (isoMatch) {
+                deadline = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+              } else {
+                const parts = deadlineRaw.split(/[\/\s:]/).map(Number);
+                if (parts.length >= 3 && parts[0] && parts[1] && parts[2]) {
+                  const [day, month, year] = parts;
+                  deadline = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                }
               }
             }
-          }
-          const memberNames = String(r['Thành viên'] || '').split(',').map(s => s.trim()).filter(Boolean);
-          const memberIds = memberNames.map(n => empIdByName(employees, n)).filter((v): v is string => Boolean(v));
-          const mainAssigneeId = empIdByName(employees, String(r['Người phụ trách chính'] || '').trim());
-          return {
-            id: `ms_cfg_${Date.now()}_${idx}`,
-            name: name || `Nhiệm vụ ${idx + 1}`,
-            deadline,
-            mainAssigneeId,
-            memberIds
-          };
-        }).filter(m => m.name && m.name.trim());
+            const memberNames = String(r['Thành viên'] || '').split(',').map(s => s.trim()).filter(Boolean);
+            const memberIds = memberNames.map(n => empIdByName(employees, n)).filter((v): v is string => Boolean(v));
+            const mainAssigneeId = empIdByName(employees, String(r['Người phụ trách chính'] || '').trim());
+            return {
+              id: `ms_cfg_${Date.now()}_${idx}`,
+              name,
+              deadline,
+              mainAssigneeId,
+              memberIds
+            };
+          })
+          .filter((m): m is SubTaskMissionTemplate => m !== null && !!m.name?.trim());
 
         if (imported.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu hợp lệ', message: 'Cần cột "Tên nhiệm vụ" trong file Excel.', type: 'warning' });

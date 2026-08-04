@@ -8,7 +8,8 @@ vi.mock('../ConnectedToolsModal', () => ({ default: () => null }));
 vi.mock('../MissionConfigEditor', () => ({ default: () => null }));
 vi.mock('../SearchableEmployeeSelect', () => ({ default: () => null }));
 
-vi.mock('../../lib/chatStore', () => ({ sendGroupChatMessage: vi.fn() }));
+const chatMock = vi.hoisted(() => ({ sendGroupChatMessage: vi.fn().mockResolvedValue(null) }));
+vi.mock('../../lib/chatStore', () => chatMock);
 vi.mock('./hr/hrTaskPermissions', () => ({
   canDoTaskAction: () => true,
   loadTaskPermissionMatrix: vi.fn(),
@@ -86,6 +87,9 @@ function Wrapper({ initialTask, onTasksChange }: { initialTask: any; onTasksChan
       onTasksChange?.(next);
       return next;
     });
+    // Nếu cấu hình trả false (save fail), trả Promise<false> để modal chặn hoàn thành.
+    if ((Wrapper as any).__failSave) return Promise.resolve(false);
+    return undefined;
   };
   return (
     <TaskDetailModal
@@ -107,7 +111,8 @@ function makeTask() {
     code: 'CV1',
     name: 'Công việc con test',
     projectId: 'proj1',
-    status: 'in_progress',
+    status: 'doing',
+    assigneeId: 'emp_admin',
     missions: [
       {
         id: 'mission_1',
@@ -177,6 +182,55 @@ describe('Travel Expense persistence', () => {
     const callArg = hrmTravelExpensesSave.mock.calls[0][0];
     expect(callArg.employeeName).toBeTruthy();
     expect(callArg.amount).toBe(200000);
+
+    cleanup();
+  });
+
+  it('blocks "Hoàn thành công việc" when a mission is still incomplete', async () => {
+    const onTasksChange = vi.fn();
+    const task = makeTask(); // mission_1 status = 'todo'
+    render(<Wrapper initialTask={task} onTasksChange={onTasksChange} />);
+
+    // Status doing → the footer shows "Hoàn thành công việc" button
+    fireEvent.click(screen.getByText('Hoàn thành công việc'));
+
+    // Should NOT mark task as completed (no status update to completed)
+    await waitFor(() => {
+      const last = onTasksChange.mock.calls.at(-1)?.[0];
+      expect(last?.[0]?.status).not.toBe('completed');
+    });
+    // And no group chat message should be sent for completing the work
+    expect(chatMock.sendGroupChatMessage).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it('does not complete mission nor send group chat when task save fails', async () => {
+    (Wrapper as any).__failSave = true;
+    try {
+      const task = makeTask(); // mission_1 status = 'todo'
+      render(<Wrapper initialTask={task} />);
+
+      // Open mission detail popup
+      fireEvent.click(screen.getByText('Nhiệm vụ thi công A'));
+
+      // Fill report + image (required to enable the button)
+      const report = screen.getByPlaceholderText(/Mô tả chi tiết/i) as HTMLTextAreaElement;
+      fireEvent.change(report, { target: { value: 'Đã hoàn thành nhiệm vụ thi công đạt chất lượng.' } });
+
+      const fileInputs = Array.from(document.querySelectorAll('input[type=file]')) as HTMLInputElement[];
+      const fileInput = fileInputs.find(f => (f.getAttribute('accept') || '').includes('image')) || fileInputs[0];
+      fireEvent.change(fileInput, { target: { files: [new File([new Uint8Array([1])], 'r.jpg', { type: 'image/jpeg' })] } });
+      await waitFor(() => expect(screen.getByText(/Đã có 1 ảnh/)).toBeTruthy(), { timeout: 3000 });
+
+      // Click complete — save fails → mission NOT completed, no group chat
+      fireEvent.click(screen.getByText('Xác Nhận Hoàn Thành'));
+
+      await waitFor(() => expect(chatMock.sendGroupChatMessage).not.toHaveBeenCalled());
+      expect(hrmTravelExpensesSave).not.toHaveBeenCalled();
+    } finally {
+      (Wrapper as any).__failSave = false;
+    }
 
     cleanup();
   });

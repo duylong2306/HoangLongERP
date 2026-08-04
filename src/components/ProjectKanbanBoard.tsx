@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate } from '../types';
+import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier } from '../types';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
 import {
@@ -65,7 +65,7 @@ interface ProjectKanbanBoardProps {
   onUpdateProject: (id: string, updates: Partial<Project>) => void;
   onDeleteProject?: (id: string) => void;
   onAddTask: (newTask: Task) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<boolean> | void;
   onDeleteTask?: (id: string) => void;
   onDeleteMultipleTasks?: (ids: string[]) => void;
   onAddCustomer?: (newCust: Customer) => void;
@@ -1281,7 +1281,8 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   const localUpdateTask = (taskId: string, taskUpdates: Partial<Task>) => {
     // Call original prop - automation is now handled centrally in App.tsx
-    onUpdateTask(taskId, taskUpdates);
+    // Trả về promise (nếu có) để TaskDetailModal biết kết quả lưu thành công hay không.
+    return onUpdateTask(taskId, taskUpdates);
   };
 
   // Drag operations

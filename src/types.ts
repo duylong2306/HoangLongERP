@@ -446,6 +446,8 @@ export interface QuoteItem {
   wastageCost?: number;
 
   totalPrice: number;
+  // Hình ảnh minh họa sản phẩm - thêm vào theo yêu cầu
+  images?: string[];   // Mảng URL hình ảnh minh họa cho sản phẩm này
 }
 
 export interface Quote {
@@ -487,6 +489,9 @@ export interface Quote {
   contractTemplate?: string;
   acceptanceTemplate?: string;
   liquidationTemplate?: string;
+  // Hình ảnh minh họa cho báo giá - thêm vào theo yêu cầu
+  images?: string[];   // Mảng URL hình ảnh minh họa cho báo giá (kích thước chung)
+  thumbnail?: string;  // URL ảnh thu nhỏ
   // Optional subcontractor-contract fields (used by SubcontractorEstimator)
   subcontractorId?: string;
   subcontractorName?: string;
@@ -578,6 +583,9 @@ export interface ProductCatalogItem {
   donGiaThaiLan?: number | null; // Đơn giá Thái Lan (đ)
   donGiaAnCuong?: number | null; // Đơn giá An Cường (đ)
   donGiaPlywood?: number | null; // Đơn giá gỗ Plywood (đ)
+  // Hình ảnh sản phẩm - thêm vào theo yêu cầu
+  imageUrl?: string; // URL ảnh chính của sản phẩm
+  galleryImages?: string[]; // Mảng URL ảnh thư viện của sản phẩm
 }
 
 export interface ProductPriceItem {
@@ -701,6 +709,9 @@ export interface ArchivedQuote {
   companySlogan?: string;
   companyAddressInfo?: string;
   companyContactInfo?: string;
+  // Hình ảnh minh họa cho báo giá - thêm vào theo yêu cầu
+  images?: string[];   // Mảng URL hình ảnh minh họa cho báo giá (kích thước chung)
+  thumbnail?: string;  // URL ảnh thu nhỏ
   // Optional metadata used by Kanban/archive views
   totalPrice?: number;
   _sectorType?: string;

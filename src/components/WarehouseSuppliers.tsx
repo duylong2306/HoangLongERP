@@ -256,7 +256,7 @@ export default function WarehouseSuppliers() {
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         const imported: SupplierPartner[] = rows.map((r, idx) => ({
           id: String(r['Mã NCC'] || `NCC_IMP_${Date.now()}_${idx}`),
           name: String(r['Tên nhà cung cấp'] || '').trim(),
