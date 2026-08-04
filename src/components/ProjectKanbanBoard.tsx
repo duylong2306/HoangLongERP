@@ -103,7 +103,7 @@ export default function ProjectKanbanBoard({
   // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
   // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
   // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
-  const notifyProjectChat = (content: string) => {
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity']) => {
     const pid = selectedProject?.id;
     if (!pid || !currentUser) return;
     sendGroupChatMessage({
@@ -112,7 +112,26 @@ export default function ProjectKanbanBoard({
       senderName: currentUser.name,
       senderRole: currentUser.role,
       content,
+      relatedEntity,
     });
+  };
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
+  // Wrapper: await onUpdateProject, nếu save thành công thì mới gửi tin nhắn.
+  const notifyProjectChatAfterSave = async (
+    savePromise: Promise<void>,
+    content: string,
+    relatedEntity?: ChatMessage['relatedEntity']
+  ): Promise<void> => {
+    try {
+      await savePromise;
+      if (selectedProject?.id) {
+        notifyProjectChat(content, relatedEntity);
+      }
+    } catch (err) {
+      console.error('Save failed, not sending chat message:', err);
+      throw err;
+    }
   };
 
   // ─── ĐỒNG BỘ NHÂN SỰ DỰ ÁN VÀO NHÓM CHAT ─────────────────────────────────
@@ -169,7 +188,7 @@ export default function ProjectKanbanBoard({
         message: `Đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`,
         type: 'success',
       });
-      notifyProjectChat(`👥 ${currentUser?.name || 'Hệ thống'} đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`);
+      notifyProjectChat(`👥 ${currentUser?.name || 'Hệ thống'} đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`, { type: 'project', id: selectedProject.id });
 
       // Điều hướng về chi tiết tin nhắn của nhóm chat dự án vừa đồng bộ
       window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
@@ -739,9 +758,9 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   // handleSaveProjectDetails() → Lưu chi tiết dự án đã chỉnh sửa (callback onUpdateProject)
   // ===========================================================================
-  const handleSaveProjectDetails = () => {
+  const handleSaveProjectDetails = async () => {
     if (!selectedProject) return;
-    
+
     let calculatedEndStr = '';
     if (editStartDate && editDuration) {
       const dt = new Date(editStartDate);
@@ -753,22 +772,26 @@ export default function ProjectKanbanBoard({
       calculatedEndStr = selectedProject.endDate;
     }
 
-    updateProjectWithRule(selectedProject.id, {
-      image: editImage,
-      address: editAddress,
-      startDate: editStartDate,
-      endDate: calculatedEndStr,
-      contractDuration: editDuration || undefined,
-      contractValue: editContractValue,
-      customerId: editCustomerId,
-      cardColor: editCardColor || '',
-    } as any);
+    try {
+      await notifyProjectChatAfterSave(
+        onUpdateProject(selectedProject.id, {
+          image: editImage,
+          address: editAddress,
+          startDate: editStartDate,
+          endDate: calculatedEndStr,
+          contractDuration: editDuration || undefined,
+          contractValue: editContractValue,
+          customerId: editCustomerId,
+          cardColor: editCardColor || '',
+        } as any),
+        `💾 ${currentUser?.name || 'Người dùng'} đã cập nhật & lưu thông tin dự án "${selectedProject?.name || ''}".`
+      );
 
-    setIsEditingDetails(false);
-    addToast({ title: '✅ Thành công', message: '💾 Đã cập nhật và lưu trữ thông tin công trình thành công!', type: 'success' });
-
-    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-    notifyProjectChat(`💾 ${currentUser?.name || 'Người dùng'} đã cập nhật & lưu thông tin dự án "${selectedProject?.name || ''}".`);
+      setIsEditingDetails(false);
+      addToast({ title: '✅ Thành công', message: '💾 Đã cập nhật và lưu trữ thông tin công trình thành công!', type: 'success' });
+    } catch (err) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thông tin dự án. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+    }
   };
 
   // 3.5. States for project creation modal in Kanban
@@ -931,14 +954,19 @@ export default function ProjectKanbanBoard({
   // Tự động: chuyển cột, tạo subtask, gán PM, phê duyệt, log comment vào Documents
   // Đây là hàm lõi điều phối các rule của KanbanColumn.automation
   // ===========================================================================
-  const updateProjectWithRule = (projectId: string, updates: Partial<Project>, updatedTasksList?: Task[]) => {
+  const updateProjectWithRule = async (projectId: string, updates: Partial<Project>, updatedTasksList?: Task[]) => {
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
 
     // 📣 Thông báo THAY ĐỔI TRƯỞNG DỰ ÁN vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
     if (updates.pmId && updates.pmId !== proj.pmId) {
       const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mớí';
-      notifyProjectChat(`👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`);
+      await notifyProjectChatAfterSave(
+        onUpdateProject(projectId, { ...updates, pmId: updates.pmId }),
+        `👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`
+      );
+      // Return early since we've already called onUpdateProject with the PM change
+      return;
     }
 
     const finalStatus = updates.status !== undefined ? updates.status : proj.status;
@@ -1184,7 +1212,7 @@ export default function ProjectKanbanBoard({
         }
       }
     }
-    onUpdateProject(projectId, updates);
+    await onUpdateProject(projectId, updates);
   };
 
   // ===========================================================================
@@ -1202,7 +1230,7 @@ export default function ProjectKanbanBoard({
   // người dùng KÉO THẺ thủ công (moveProjectToColumn).
   const autoMovedDoneRef = useRef<Set<string>>(new Set());
 
-  const checkAutoMoveProject = useCallback((projectId: string) => {
+  const checkAutoMoveProject = useCallback(async (projectId: string) => {
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
 
@@ -1239,7 +1267,7 @@ export default function ProjectKanbanBoard({
 
     if (targetColId) {
       autoMovedDoneRef.current.add(projectId);
-      updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
+      await updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
     }
   }, [projects, tasks, columns, getProjectColumnId, updateProjectWithRule]);
 
@@ -1318,11 +1346,11 @@ export default function ProjectKanbanBoard({
 
   // Moving logic that delegates to the centralized update function
   // moveProjectToColumn() → Di chuyển project sang column (gọi updateProjectWithRule với kanbanColumnId)
-  const moveProjectToColumn = (projectId: string, columnId: string) => {
+  const moveProjectToColumn = async (projectId: string, columnId: string) => {
     // Thao tác thủ công → xoá marker auto-move để lần hoàn thành sau (nếu có)
     // vẫn có thể tự động chuyển tiếp theo cấu hình.
     autoMovedDoneRef.current.delete(projectId);
-    updateProjectWithRule(projectId, { kanbanColumnId: columnId });
+    await updateProjectWithRule(projectId, { kanbanColumnId: columnId });
   };
 
   // Open Column Editing dialogue
@@ -1642,7 +1670,7 @@ export default function ProjectKanbanBoard({
   };
 
   // handleAddSubTask() → Thêm subtask mới vào dự án (callback onAddTask)
-  const handleAddSubTask = () => {
+  const handleAddSubTask = async () => {
     if (!selectedProject || !subTaskName.trim()) return;
 
     // Validate required fields
@@ -1734,10 +1762,14 @@ export default function ProjectKanbanBoard({
       timeLogs: []
     };
 
-    onAddTask(childTask);
-
-    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-    notifyProjectChat(`📝 ${currentUser?.name || 'Người dùng'} đã khởi tạo Công Việc Con "${childTask.name}" cho dự án "${selectedProject?.name || ''}".`);
+    try {
+      await onAddTask(childTask);
+      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage) - CHỈ SAU KHI SAVE THÀNH CÔNG
+      notifyProjectChat(`📝 ${currentUser?.name || 'Người dùng'} đã khởi tạo Công Việc Con "${childTask.name}" cho dự án "${selectedProject?.name || ''}".`, { type: 'task', id: childTask.id });
+    } catch (err) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể tạo công việc con. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+      return;
+    }
 
     // Mở ngay lập tức giao diện chi tiết công việc của công việc con vừa được tạo
     setOverlayTaskId(childTask.id);
@@ -3245,7 +3277,9 @@ export default function ProjectKanbanBoard({
                                   {/* Transparent select over avatar for easy click trigger */}
                                   <select
                                     value={selectedProject.pmId || ''}
-                                    onChange={(e) => updateProjectWithRule(selectedProject.id, { pmId: e.target.value })}
+                                    onChange={(e) => {
+                                      updateProjectWithRule(selectedProject.id, { pmId: e.target.value });
+                                    }}
                                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
                                     title="Nhấp vào avatar để thay đổi Trưởng Dự Án chuyên trách"
                                   >
@@ -3263,7 +3297,9 @@ export default function ProjectKanbanBoard({
                                   <div className="relative">
                                     <select
                                       value={selectedProject.pmId || ''}
-                                      onChange={(e) => updateProjectWithRule(selectedProject.id, { pmId: e.target.value })}
+                                      onChange={(e) => {
+                                        updateProjectWithRule(selectedProject.id, { pmId: e.target.value });
+                                      }}
                                       className="bg-transparent text-slate-200 font-bold text-xs border-none outline-none focus:ring-0 p-0 hover:text-emerald-400 transition-colors cursor-pointer w-full"
                                     >
                                       <option value="" disabled className="bg-slate-950 text-slate-400">-- Chưa gán --</option>

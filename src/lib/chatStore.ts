@@ -76,6 +76,7 @@ function msgFromRow(r: any): ChatMessage {
     pinned: r.pinned ?? false,
     replyTo: r.reply_to ?? undefined,
     mentions: r.mentions ?? undefined,
+    relatedEntity: r.related_entity ? JSON.parse(r.related_entity) : undefined,
   };
 }
 
@@ -98,6 +99,7 @@ function msgToRow(m: ChatMessage): any {
     pinned: m.pinned ?? false,
     reply_to: m.replyTo ?? null,
     mentions: m.mentions ?? null,
+    related_entity: m.relatedEntity ? JSON.stringify(m.relatedEntity) : null,
   };
 }
 
@@ -255,6 +257,7 @@ export async function ensureProjectChatGroup(
  * @param senderName     - Tên người gửi (hiển thị trong tin nhắn)
  * @param senderRole     - Vai trò người gửi (tuỳ chọn)
  * @param content        - Nội dung tin nhắn (tùy biến tự do)
+ * @param relatedEntity  - Thực thể liên quan để điều hướng (task, project, mission)
  * @returns Tin nhắn vừa tạo, hoặc null nếu nhóm chat không tồn tại
  */
 export async function sendGroupChatMessage(params: {
@@ -263,6 +266,7 @@ export async function sendGroupChatMessage(params: {
   senderName: string;
   senderRole?: string;
   content: string;
+  relatedEntity?: ChatMessage['relatedEntity'];
 }): Promise<ChatMessage | null> {
   // Chỉ gửi khi nhóm chat thực sự tồn tại
   const exists = getConversations().some(c => c.id === params.conversationId);
@@ -275,6 +279,7 @@ export async function sendGroupChatMessage(params: {
     senderRole: (params.senderRole || 'member') as any,
     content: params.content,
     system: false,
+    relatedEntity: params.relatedEntity,
   });
 }
 

@@ -371,7 +371,11 @@ export default function DashboardOverview({
   // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
   const isSyncingFromCloud = useRef(false);
 
+  // Debounce guard để ngăn chặn double-submit khi user click nhanh nút chấm công
+  const punchDebounceRef = useRef<Set<string>>(new Set());
+
   // Loại bỏ bản ghi auto-generated trùng lặp (cùng empId + ngày, bỏ AT-AUTO-* khi có bản ghi thật)
+  // VÀ gộp nhiều bản ghi thật thành 1 bản ghi duy nhất (merge tất cả fields)
   const dedupAttendance = (list: any[]): any[] => {
     const groups = new Map<string, any[]>();
     for (const log of list) {
@@ -385,9 +389,34 @@ export default function DashboardOverview({
       if (logs.length === 1) { deduped.push(logs[0]); continue; }
       const real = logs.filter((l: any) => !l.id?.startsWith('AT-AUTO-'));
       if (real.length > 0) {
-        deduped.push(...real);
+        // Gộp nhiều bản ghi thật thành 1: lấy bản ghi mới nhất (theo id timestamp) làm base,
+        // sau đó merge tất cả fields có dữ liệu từ các bản ghi khác
+        const sorted = [...real].sort((a, b) => {
+          // Ưu tiên bản ghi có id chứa timestamp lớn hơn (mới hơn)
+          const aTs = a.id?.split('-').pop() || '';
+          const bTs = b.id?.split('-').pop() || '';
+          return bTs.localeCompare(aTs);
+        });
+        const merged = { ...sorted[0] };
+        for (const log of sorted.slice(1)) {
+          // Merge các field time, photo, location, coords, notes
+          ['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT',
+           'photoIn', 'photoOut', 'locationIn', 'locationOut', 'coordsIn', 'coordsOut',
+           'method', 'status', 'otHours', 'notes'].forEach(key => {
+            if (log[key] && log[key] !== '--:--' && log[key] !== '' && (!merged[key] || merged[key] === '--:--' || merged[key] === '')) {
+              merged[key] = log[key];
+            }
+          });
+          // Giữ isLocked = true nếu có bản ghi nào locked
+          if (log.isLocked) merged.isLocked = true;
+        }
+        deduped.push(merged);
         // Xóa bản ghi auto-generated trùng trên Supabase (fire-and-forget)
         logs.filter((l: any) => l.id?.startsWith('AT-AUTO-')).forEach((l: any) =>
+          dbService.attendance.delete(l.id).catch(() => {})
+        );
+        // Xóa các bản ghi thật trùng lặp cũ trên Supabase (chỉ giữ merged)
+        sorted.slice(1).forEach((l: any) =>
           dbService.attendance.delete(l.id).catch(() => {})
         );
       } else {

@@ -1135,6 +1135,30 @@ export default function MessagesView({
                                     >
                                       ↩ Trả lời
                                     </button>
+                                    {msg.relatedEntity && (
+                                      <button
+                                        onClick={() => {
+                                          if (msg.relatedEntity?.type === 'task') {
+                                            window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: msg.relatedEntity.id } }));
+                                          } else if (msg.relatedEntity?.type === 'project') {
+                                            window.dispatchEvent(new CustomEvent('hl-open-project', { detail: { projectId: msg.relatedEntity.id } }));
+                                          } else if (msg.relatedEntity?.type === 'mission') {
+                                            // For mission, we need to open the task first, then the mission detail
+                                            // We can't directly open mission from here without knowing the parent task
+                                            // So we'll open the task and let the user navigate
+                                            const tasks = (window as any).__APP_TASKS__ || [];
+                                            const task = tasks.find((t: any) => t.missions?.some((m: any) => m.id === msg.relatedEntity?.id));
+                                            if (task) {
+                                              window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: task.id } }));
+                                            }
+                                          }
+                                        }}
+                                        className="text-indigo-400 hover:text-indigo-300 text-[10px] cursor-pointer font-medium"
+                                        title="Xem chi tiết"
+                                      >
+                                        👁 Xem chi tiết
+                                      </button>
+                                    )}
                                     {isSelf && (
                                       <button
                                         onClick={() => handleDeleteMessage(msg.id)}

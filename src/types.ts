@@ -914,6 +914,10 @@ export interface ChatMessage {
     content: string;
   };
   mentions?: string[];    // Danh sách tên người được @tag
+  relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission)
+    type: 'task' | 'project' | 'mission';
+    id: string;
+  };
 }
 
 export interface Toast {

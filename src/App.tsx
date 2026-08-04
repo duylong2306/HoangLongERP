@@ -2003,39 +2003,43 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   };
 
-  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
-    setProjects(prevProjects => {
-      const updated = prevProjects.map(p => {
-        if (p.id === id) {
-          const finalStatus = updates.status !== undefined ? updates.status : p.status;
-          const finalProgress = updates.progress !== undefined ? updates.progress : p.progress;
-          const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
-          // Chỉ ép về col_done khi dự án VỪA hoàn thành MÀ chưa nằm ở cột nào
-          // (cả trong update lẫn trong dữ liệu hiện tại). Nếu dự án đã có cột
-          // (ví dụ cột đã cấu hình "chuyển cột khi hoàn thành"), TUYỆT ĐỐI không
-          // ghi đè — nếu không mỗi lần cập nhật/save sẽ kéo thẻ về col_done gây
-          // hiện tượng "chạy lung tung", không theo đúng cấu hình.
-          const nextp = {
-            ...p,
-            ...updates,
-            ...(isCompleted && !updates.kanbanColumnId && !p.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
-          };
-          
-          // Trigger the Firestore save as a side-effect outside state rendering if possible,
-          // but to be safe and compatible, we run it immediately on the constructed nextp
-          setTimeout(() => {
-            dbService.projects.save(nextp).then(() => {
-              window.dispatchEvent(new CustomEvent('hl-projects-updated'));
-            }).catch(err => {
-              console.error("Lỗi khi lưu cập nhật dự án:", err);
-            });
-          }, 0);
-          
-          return nextp;
-        }
-        return p;
+  const handleUpdateProject = (id: string, updates: Partial<Project>): Promise<void> => {
+    return new Promise<void>((resolve, reject) => {
+      setProjects(prevProjects => {
+        const updated = prevProjects.map(p => {
+          if (p.id === id) {
+            const finalStatus = updates.status !== undefined ? updates.status : p.status;
+            const finalProgress = updates.progress !== undefined ? updates.progress : p.progress;
+            const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
+            // Chỉ ép về col_done khi dự án VỪA hoàn thành MÀ chưa nằm ở cột nào
+            // (cả trong update lẫn trong dữ liệu hiện tại). Nếu dự án đã có cột
+            // (ví dụ cột đã cấu hình "chuyển cột khi hoàn thành"), TUYỆT ĐỐI không
+            // ghi đè — nếu không mỗi lần cập nhật/save sẽ kéo thẻ về col_done gây
+            // hiện tượng "chạy lung tung", không theo đúng cấu hình.
+            const nextp = {
+              ...p,
+              ...updates,
+              ...(isCompleted && !updates.kanbanColumnId && !p.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
+            };
+
+            // Trigger the Firestore save as a side-effect outside state rendering if possible,
+            // but to be safe and compatible, we run it immediately on the constructed nextp
+            setTimeout(() => {
+              dbService.projects.save(nextp).then(() => {
+                window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+                resolve();
+              }).catch(err => {
+                console.error("Lỗi khi lưu cập nhật dự án:", err);
+                reject(err);
+              });
+            }, 0);
+
+            return nextp;
+          }
+          return p;
+        });
+        return updated;
       });
-      return updated;
     });
   };
 
@@ -2114,13 +2118,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   // HANDLERS CÔNG VIỆC
-  const handleAddTask = (newTask: Task) => {
+  const handleAddTask = async (newTask: Task): Promise<void> => {
     setTasks(prev => [newTask, ...prev]);
-    dbService.tasks.save(newTask).then(() => {
-      window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
-    }).catch(err => {
-      console.error("Lỗi khi thêm công việc mới:", err);
-    });
+    await dbService.tasks.save(newTask);
+    window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
   };
 
   const handleUpdateTask = (id: string, updates: Partial<Task>): Promise<boolean> => {

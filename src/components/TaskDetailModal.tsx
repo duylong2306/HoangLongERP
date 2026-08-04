@@ -140,7 +140,7 @@ export default function TaskDetailModal({
   // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
   // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
   // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
-  const notifyProjectChat = (content: string) => {
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity']) => {
     if (!selectedTask.projectId) return;
     sendGroupChatMessage({
       conversationId: `conv_project_${selectedTask.projectId}`,
@@ -148,7 +148,23 @@ export default function TaskDetailModal({
       senderName: currentUser.name,
       senderRole: currentUser.role,
       content,
+      relatedEntity,
     });
+  };
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
+  // Wrapper: await onUpdateTask, nếu save thành công (true) thì mới gửi tin nhắn.
+  // Trả về kết quả save (boolean) để caller có thể xử lý tiếp.
+  const notifyProjectChatAfterSave = async (
+    savePromise: Promise<boolean>,
+    content: string,
+    relatedEntity?: ChatMessage['relatedEntity']
+  ): Promise<boolean> => {
+    const ok = await savePromise;
+    if (ok === true && selectedTask.projectId) {
+      notifyProjectChat(content, relatedEntity);
+    }
+    return ok;
   };
 
   const assignee = employees.find(e => e.id === selectedTask.assigneeId);
@@ -768,13 +784,17 @@ export default function TaskDetailModal({
 
   // Đồng bộ lỗi vi phạm lên Supabase để xuất hiện trong Nhật ký lỗi vi phạm (HR).
   // Lưu nguyên taskId/autoSource (cột task_id / auto_source đã có từ migration 017).
-  const syncEmployeeErrorsToSupabase = (errors: any[]) => {
-    errors.forEach((err) => {
-      dbService.hrmEmployeeErrors.save(err)
-        .catch((e) => console.warn('Sync lỗi vi phạm lên Supabase thất bại:', e?.message || e));
-    });
+  const syncEmployeeErrorsToSupabase = async (errors: any[]) => {
+    const results = await Promise.allSettled(
+      errors.map((err) => dbService.hrmEmployeeErrors.save(err))
+    );
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) {
+      console.warn(`Sync ${failed}/${errors.length} lỗi vi phạm lên Supabase thất bại`);
+    }
     // Báo cho màn hình HR refresh danh sách (nếu đang mở cùng trình duyệt)
     try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+    return failed === 0;
   };
 
   const convertToDatetimeLocal = (isoString?: string): string => {
@@ -1107,7 +1127,7 @@ export default function TaskDetailModal({
 
   const isMissionAssignee = selectedTask.missions?.some(m => m.mainAssigneeId === currentUser.id || m.memberIds?.includes(currentUser.id)) || false;
 
-  const handleSendViolations = () => {
+  const handleSendViolations = async () => {
     for (let i = 0; i < violationRows.length; i++) {
       const row = violationRows[i];
       if (!row.selectedCriterionId) {
@@ -1174,7 +1194,11 @@ export default function TaskDetailModal({
 
     const updatedErrors = [...newLogsToInsert, ...existingErrors];
     // Đồng bộ lên Supabase (nguồn dữ liệu chính — không ghi localStorage)
-    syncEmployeeErrorsToSupabase(newLogsToInsert);
+    const syncOk = await syncEmployeeErrorsToSupabase(newLogsToInsert);
+    if (!syncOk) {
+      addToast({ title: '❌ Đồng bộ thất bại', message: 'Một số vi phạm không thể đồng bộ lên Supabase. Vui lòng kiểm tra kết nối.', type: 'error' });
+      return;
+    }
     // Cập nhật state cục bộ + lịch sử hiển thị
     setCloudErrors(updatedErrors);
     loadSubmittedViolations(updatedErrors);
@@ -1267,7 +1291,7 @@ export default function TaskDetailModal({
   };
 
   // Xử lý duyệt từng cấp (sequential) — chỉ bước đang chờ mới được duyệt
-  const handleApproveStep = (stepId: string, decision: 'approved' | 'rejected') => {
+  const handleApproveStep = async (stepId: string, decision: 'approved' | 'rejected') => {
     if (!selectedTask.approvals) return;
     const next = selectedTask.approvals.map((s: any) =>
       s.id === stepId
@@ -1281,18 +1305,24 @@ export default function TaskDetailModal({
       status: allApproved ? 'completed' as const : selectedTask.status,
       completionRate: allApproved ? 100 : selectedTask.completionRate,
     };
-    onUpdateTask?.(selectedTask.id, updatedTask as any);
-    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-    if (decision === 'approved') {
-      notifyProjectChat(`✅ ${currentUser.name} đã DUYỆT bước phê duyệt công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`);
-    } else {
-      notifyProjectChat(`❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`);
+    const ok = await onUpdateTask?.(selectedTask.id, updatedTask as any);
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage) - CHỈ SAU KHI SAVE THÀNH CÔNG
+    if (ok === true) {
+      if (decision === 'approved') {
+        notifyProjectChat(`✅ ${currentUser.name} đã DUYỆT bước phê duyệt công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`);
+      } else {
+        notifyProjectChat(`❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`);
+      }
+    } else if (ok === false) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu kết quả duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
     }
-    addToast({
-      title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
-      message: decision === 'approved' ? 'Bước duyệt đã được phê duyệt.' : 'Bước duyệt đã bị từ chối.',
-      type: decision === 'approved' ? 'success' : 'warning',
-    });
+    if (ok !== false) {
+      addToast({
+        title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
+        message: decision === 'approved' ? 'Bước duyệt đã được phê duyệt.' : 'Bước duyệt đã bị từ chối.',
+        type: decision === 'approved' ? 'success' : 'warning',
+      });
+    }
   };
 
   const taskStatusLabels: Record<TaskStatus, string> = {
@@ -1633,6 +1663,24 @@ export default function TaskDetailModal({
                         </span>
                       </div>
                     )}
+
+                    {/* Nút Vào nhóm chat dự án */}
+                    {project && (
+                      <div className="sm:col-span-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const convId = `conv_project_${project.id}`;
+                            window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
+                          }}
+                          className="w-full bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-bold text-[11px] py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                          title="Mở nhóm chat dự án"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                          Vào nhóm chat Dự Án
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1754,14 +1802,19 @@ export default function TaskDetailModal({
                         <select
                           disabled={selectedTask.status === 'completed' || !canEditTask}
                           value={selectedTask.assigneeId || ''}
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const val = e.target.value;
                             const empName = employees.find(emp => emp.id === val)?.name || 'Chưa gán';
-                            onUpdateTask(selectedTask.id, {
-                              assigneeId: val
-                            });
-                            // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                            notifyProjectChat(`👤 ${currentUser.name} đã chuyển Phụ Trách Chính công việc "${selectedTask.name}" sang ${empName}.`);
+                            const ok = await notifyProjectChatAfterSave(
+                              onUpdateTask(selectedTask.id, {
+                                assigneeId: val
+                              }),
+                              `👤 ${currentUser.name} đã chuyển Phụ Trách Chính công việc "${selectedTask.name}" sang ${empName}.`,
+                              { type: 'task', id: selectedTask.id }
+                            );
+                            if (ok === false) {
+                              addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi Phụ Trách Chính. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                            }
                           }}
                           className={`bg-transparent text-slate-205 text-[11px] outline-none font-bold flex-1 max-w-[110px] ${
                             (selectedTask.status === 'completed' || !canEditTask) ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer'
@@ -1957,7 +2010,7 @@ export default function TaskDetailModal({
 
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (!newMissionName.trim()) return;
 
                       const finalDeadline = newMissionDeadline
@@ -1993,11 +2046,17 @@ export default function TaskDetailModal({
                       };
                       const currentMissions = selectedTask.missions || [];
 
-                      onUpdateTask(selectedTask.id, {
-                        missions: [...currentMissions, newMission]
-                      });
-                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                      notifyProjectChat(`📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`);
+                      const ok = await notifyProjectChatAfterSave(
+                        onUpdateTask(selectedTask.id, {
+                          missions: [...currentMissions, newMission]
+                        }),
+                        `📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`,
+                        { type: 'task', id: selectedTask.id }
+                      );
+                      if (ok === false) {
+                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể tạo nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                        return;
+                      }
 
                       // Reset inputs. selectedTask.missions chưa gồm nhiệm vụ vừa tạo
                       // (cập nhật bất đồng bộ qua parent), nên tính hạn mặc định kế tiếp
@@ -2221,7 +2280,7 @@ export default function TaskDetailModal({
                                   <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                                     <div 
                                       className="group/avatar relative shrink-0"
-                                      onClick={(e) => {
+                                      onClick={async (e) => {
                                         e.stopPropagation();
                                         if (!(canReceive || canAssignMembers) || selectedTask.status === 'completed' || isCompleted) return;
                                         const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -2235,9 +2294,14 @@ export default function TaskDetailModal({
                                           }
                                           return m;
                                         });
-                                        onUpdateTask(selectedTask.id, { missions: updatedMissions });
-                                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                                        notifyProjectChat(`🔓 ${currentUser.name} đã bỏ Phụ Trách Chính Nhiệm Vụ "${mission.name}".`);
+                                        const ok = await notifyProjectChatAfterSave(
+                                          onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                          `🔓 ${currentUser.name} đã bỏ Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                                          { type: 'mission', id: mission.id }
+                                        );
+                                        if (ok === false) {
+                                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                        }
                                       }}
                                     >
                                       <div
@@ -2275,7 +2339,7 @@ export default function TaskDetailModal({
                                       </button>
                                       <select
                                         value=""
-                                        onChange={(e) => {
+                                        onChange={async (e) => {
                                           const val = e.target.value;
                                           if (!val) return;
                                           const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -2290,10 +2354,15 @@ export default function TaskDetailModal({
                                             }
                                             return m;
                                           });
-                                          onUpdateTask(selectedTask.id, { missions: updatedMissions });
-                                          // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                                           const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
-                                          notifyProjectChat(`👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`);
+                                          const ok = await notifyProjectChatAfterSave(
+                                            onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                            `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                                            { type: 'mission', id: mission.id }
+                                          );
+                                          if (ok === false) {
+                                            addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                          }
                                         }}
                                         className="absolute inset-0 opacity-0 cursor-pointer w-5.5 h-5.5 rounded-full"
                                       >
@@ -2326,10 +2395,10 @@ export default function TaskDetailModal({
                                     : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                                   
                                   return (
-                                    <div 
-                                      key={memId} 
+                                    <div
+                                      key={memId}
                                       className="group/mem relative shrink-0"
-                                      onClick={(e) => {
+                                      onClick={async (e) => {
                                         e.stopPropagation();
                                         if (!(canReceive || canAssignMembers || isMissionMainAssignee) || selectedTask.status === 'completed' || isCompleted) return;
                                         // Phụ trách chính là trường bắt buộc và luôn là Nhân sự tham gia —
@@ -2344,10 +2413,15 @@ export default function TaskDetailModal({
                                           }
                                           return m;
                                         });
-                                        onUpdateTask(selectedTask.id, { missions: updatedMissions });
-                                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                                         const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
-                                        notifyProjectChat(`➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`);
+                                        const ok = await notifyProjectChatAfterSave(
+                                          onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                          `➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`,
+                                          { type: 'mission', id: mission.id }
+                                        );
+                                        if (ok === false) {
+                                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                        }
                                       }}
                                     >
                                       <div
@@ -2381,7 +2455,7 @@ export default function TaskDetailModal({
                                   </button>
                                   <select
                                     value=""
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                       const val = e.target.value;
                                       if (!val) return;
                                       const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -2390,10 +2464,15 @@ export default function TaskDetailModal({
                                         }
                                         return m;
                                       });
-                                      onUpdateTask(selectedTask.id, { missions: updatedMissions });
-                                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                                       const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
-                                      notifyProjectChat(`➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`);
+                                      const ok = await notifyProjectChatAfterSave(
+                                        onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                        `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
+                                        { type: 'mission', id: mission.id }
+                                      );
+                                      if (ok === false) {
+                                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                      }
                                     }}
                                     className="absolute inset-0 opacity-0 cursor-pointer w-5.5 h-5.5 rounded-full"
                                   >
@@ -2415,15 +2494,20 @@ export default function TaskDetailModal({
                               {!isCompleted && hasMissionPermission && selectedTask.status !== 'completed' && (
                                 <button
                                   type="button"
-                                  onClick={(e) => {
+                                  onClick={async (e) => {
                                     e.stopPropagation();
                                     if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
                                       const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
-                                      onUpdateTask(selectedTask.id, {
-                                        missions: updatedMissions
-                                      });
-                                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                                      notifyProjectChat(`🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`);
+                                      const ok = await notifyProjectChatAfterSave(
+                                        onUpdateTask(selectedTask.id, {
+                                          missions: updatedMissions
+                                        }),
+                                        `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
+                                        { type: 'mission', id: mission.id }
+                                      );
+                                      if (ok === false) {
+                                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể xóa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                      }
                                     }
                                   }}
                                   className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
@@ -3319,13 +3403,18 @@ export default function TaskDetailModal({
                 return (
                   <button
                     type="button"
-                    onClick={() => {
-                      onUpdateTask(selectedTask.id, {
-                        status: 'doing',
-                        completionRate: 20
-                      });
-                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                      notifyProjectChat(`🙋 ${currentUser.name} đã Nhận Việc "${selectedTask.name}".`);
+                    onClick={async () => {
+                      const ok = await notifyProjectChatAfterSave(
+                        onUpdateTask(selectedTask.id, {
+                          status: 'doing',
+                          completionRate: 20
+                        }),
+                        `🙋 ${currentUser.name} đã Nhận Việc "${selectedTask.name}".`,
+                        { type: 'task', id: selectedTask.id }
+                      );
+                      if (ok === false) {
+                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái Nhận Việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                      }
                     }}
                     className="bg-sky-600 hover:bg-sky-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
                   >
@@ -3409,13 +3498,18 @@ export default function TaskDetailModal({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        onUpdateTask(selectedTask.id, {
-                          status: 'doing',
-                          completionRate: 50
-                        });
-                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                        notifyProjectChat(`❌ ${currentUser.name} đã TỪ CHỐI duyệt công việc "${selectedTask.name}".`);
+                      onClick={async () => {
+                        const ok = await notifyProjectChatAfterSave(
+                          onUpdateTask(selectedTask.id, {
+                            status: 'doing',
+                            completionRate: 50
+                          }),
+                          `❌ ${currentUser.name} đã TỪ CHỐI duyệt công việc "${selectedTask.name}".`,
+                          { type: 'task', id: selectedTask.id }
+                        );
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái Từ Chối duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                        }
                       }}
                       className="bg-rose-600 hover:bg-rose-500 text-white font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-sm"
                     >
@@ -3432,16 +3526,18 @@ export default function TaskDetailModal({
                           addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
                           return;
                         }
-                        const ok = await onUpdateTask(selectedTask.id, {
-                          status: 'completed',
-                          completionRate: 100
-                        });
+                        const ok = await notifyProjectChatAfterSave(
+                          onUpdateTask(selectedTask.id, {
+                            status: 'completed',
+                            completionRate: 100
+                          }),
+                          `✅ ${currentUser.name} đã XÉT DUYỆT hoàn thành công việc "${selectedTask.name}".`,
+                          { type: 'task', id: selectedTask.id }
+                        );
                         if (ok === false) {
                           addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái hoàn thành công việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
                           return;
                         }
-                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                        notifyProjectChat(`✅ ${currentUser.name} đã XÉT DUYỆT hoàn thành công việc "${selectedTask.name}".`);
                       }}
                       className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-emerald-600' : ''}`}
                     >
@@ -3603,7 +3699,7 @@ export default function TaskDetailModal({
                         </button>
                         <select
                           value=""
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const val = e.target.value;
                             if (!val) return;
                             const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -3617,9 +3713,15 @@ export default function TaskDetailModal({
                               }
                               return m;
                             });
-                            onUpdateTask(selectedTask.id, { missions: updatedMissions });
                             const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
-                            notifyProjectChat(`👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`);
+                            const ok = await notifyProjectChatAfterSave(
+                              onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                              `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                              { type: 'mission', id: mission.id }
+                            );
+                            if (ok === false) {
+                              addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                            }
                           }}
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full rounded"
                         >
@@ -3667,7 +3769,7 @@ export default function TaskDetailModal({
                         </button>
                         <select
                           value=""
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const val = e.target.value;
                             if (!val) return;
                             const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -3676,10 +3778,15 @@ export default function TaskDetailModal({
                               }
                               return m;
                             });
-                            onUpdateTask(selectedTask.id, { missions: updatedMissions });
-                            // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                             const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
-                            notifyProjectChat(`➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`);
+                            const ok = await notifyProjectChatAfterSave(
+                              onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                              `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
+                              { type: 'mission', id: mission.id }
+                            );
+                            if (ok === false) {
+                              addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                            }
                           }}
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full rounded"
                         >
@@ -4287,14 +4394,19 @@ export default function TaskDetailModal({
                 {!isMissionCompleted && hasMissionPermission && (
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
                         const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== selectedMissionId);
-                        onUpdateTask(selectedTask.id, {
-                          missions: updatedMissions
-                        });
-                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                        notifyProjectChat(`🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`);
+                        const ok = await notifyProjectChatAfterSave(
+                          onUpdateTask(selectedTask.id, {
+                            missions: updatedMissions
+                          }),
+                          `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
+                          { type: 'mission', id: mission.id }
+                        );
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể xóa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                        }
 
                         setSelectedMissionId(null);
                         setMissionAttachedFile(null);
