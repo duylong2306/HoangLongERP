@@ -1,6 +1,8 @@
 // ─── Core HRM types & interfaces ───────────────────────────────────────
 // Tách từ HumanResourcesManagement.tsx để dễ bảo trì.
 
+import type { PunchMeta } from '../../lib/attendanceMeta';
+
 export interface Role {
   id: string;
   name: string;
@@ -110,12 +112,16 @@ export interface AttendanceLog {
   otHours: number;
   notes: string;
   approvedBy?: string;
+  // Ảnh + tọa độ CŨ: chỉ 1 cặp vào/ra cho cả ngày (lượt chấm sau ghi đè lượt trước).
+  // Giữ lại cho dữ liệu lịch sử & các màn hình chưa nâng cấp.
   photoIn?: string;
   photoOut?: string;
   locationIn?: string;
   coordsIn?: string;
   locationOut?: string;
   coordsOut?: string;
+  /** Ảnh + tọa độ RIÊNG cho từng lượt chấm: Vào/Ra sáng, chiều, tăng ca (cột jsonb punch_meta). */
+  punchMeta?: PunchMeta;
   isLocked?: boolean;
   statusMsg?: string;
   leaveSymbol?: string;

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
+import { mergePunchMeta } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
@@ -879,6 +880,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               merged[key] = log[key];
             }
           });
+          // Ảnh/tọa độ theo từng lượt chấm: gộp theo slot để không mất ảnh của
+          // các lượt chỉ tồn tại ở bản ghi trùng (base thắng ở slot nó đã có).
+          merged.punchMeta = mergePunchMeta((log as any).punchMeta, merged.punchMeta);
           if ((log as any).isLocked) merged.isLocked = true;
         }
         deduped.push(merged);

@@ -10,6 +10,8 @@ import {
   pendingCount as outboxPendingCount,
   burnTimestampToPhoto,
 } from '../lib/attendanceOutbox';
+import { mergePunchMeta } from '../lib/attendanceMeta';
+import PunchMediaList from './hr/PunchMediaList';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
   CheckSquare, 
@@ -414,6 +416,8 @@ export default function DashboardOverview({
               merged[key] = log[key];
             }
           });
+          // Ảnh/tọa độ theo từng lượt: gộp theo slot (bản base thắng ở slot nó đã có)
+          merged.punchMeta = mergePunchMeta(log.punchMeta, merged.punchMeta);
           // Giữ isLocked = true nếu có bản ghi nào locked
           if (log.isLocked) merged.isLocked = true;
         }
@@ -563,6 +567,67 @@ export default function DashboardOverview({
     return defaultList;
   };
 
+  const LEAVE_SYMBOLS = ['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'];
+
+  /** Giờ hợp lệ dạng "HH:MM" (loại bỏ '--:--', rỗng, ký hiệu nghỉ, object server-time). */
+  const parsePunchMinutes = (raw: any): number | null => {
+    const v = normalizeTime(raw);
+    if (!v || v === '--:--' || LEAVE_SYMBOLS.includes(v)) return null;
+    if (!/^\d{1,2}:\d{2}$/.test(v)) return null;
+    const min = timeToMinutes(v);
+    return Number.isFinite(min) ? min : null;
+  };
+
+  /** Ngày nghỉ theo lịch (cuối tuần hoặc nghỉ lễ) — không áp định mức giờ ca chuẩn. */
+  const isCalendarRestDay = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    if ((config.weekendDays || [0]).includes(d.getDay())) return true;
+    // dashHolidays lưu ngày dạng "DD/MM/YYYY"
+    const [y, m, day] = dateStr.split('-');
+    const holidayKey = `${day}/${m}/${y}`;
+    return (dashHolidays || []).some((h: any) => h?.date === holidayKey);
+  };
+
+  /**
+   * Ca nào trong ngày được MIỄN tính đi muộn / về sớm:
+   *  - Đơn nghỉ phép đã duyệt (không có `shift` = nghỉ cả ngày)
+   *  - Đơn giải trình chấm công đã duyệt cho đúng ca đó
+   */
+  const getExcusedShifts = (log: any): { morning: boolean; afternoon: boolean } => {
+    const res = { morning: false, afternoon: false };
+    const dateStr = log?.date;
+    if (!dateStr) return res;
+    for (const l of dashLeaves || []) {
+      if (l?.status !== 'approved') continue;
+      const sameEmp = (l.empId && log.empId && l.empId === log.empId)
+        || (l.empName && log.empName && l.empName === log.empName);
+      if (!sameEmp) continue;
+      const inRange = l.fromDate && l.toDate
+        ? (dateStr >= l.fromDate && dateStr <= l.toDate)
+        : l.fromDate === dateStr;
+      if (!inRange) continue;
+      if (l.shift === 'morning') res.morning = true;
+      else if (l.shift === 'afternoon') res.afternoon = true;
+      else { res.morning = true; res.afternoon = true; }
+    }
+    return res;
+  };
+
+  /**
+   * Đếm số lần ĐI MUỘN / VỀ SỚM của một bản ghi chấm công.
+   *
+   * Các điểm đã sửa so với bản cũ:
+   *  1. VỀ SỚM có dung sai `punchOutOpenBeforeMinutes` (mặc định 15p) — trùng với
+   *     cửa sổ mà hệ thống CHO PHÉP chấm ra ca. Trước đây ra ca lúc 11:20 (hệ thống
+   *     mở cửa sổ chấm từ 11:15) vẫn bị tính là "về sớm" → con số luôn bị thổi phồng.
+   *  2. Bỏ qua ngày nghỉ tuần / nghỉ lễ: những ngày này không có định mức giờ ca,
+   *     ai đi làm bù/OT đều bị tính muộn oan.
+   *  3. Bỏ qua ca đã có đơn nghỉ phép hoặc đơn giải trình ĐƯỢC DUYỆT.
+   *  4. Chuẩn hóa giờ trước khi tính (bản ghi cũ có thể lưu object/JSON server-time),
+   *     tránh NaN âm thầm làm sai kết quả.
+   */
   const getLogAttendanceStats = (log: any) => {
     let lates = 0;
     let earlies = 0;
@@ -571,48 +636,52 @@ export default function DashboardOverview({
     let isLateAfternoon = false;
     let isEarlyAfternoon = false;
 
-    if (!log) return { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
+    const empty = { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
+    if (!log) return empty;
 
-    // Ignore leave days and off symbols
-    const isLeave = ['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS) || 
-                    log.status === 'excused' || 
-                    log.notes?.toLowerCase().includes('nghỉ') || 
+    // Ngày nghỉ phép / ký hiệu off → không tính vi phạm giờ giấc
+    const isLeave = LEAVE_SYMBOLS.includes(normalizeTime(log.timeInS)) ||
+                    log.status === 'excused' ||
+                    log.notes?.toLowerCase().includes('nghỉ') ||
                     log.notes?.toLowerCase().includes('off');
-    if (isLeave) return { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
+    if (isLeave) return empty;
+
+    // Cuối tuần / nghỉ lễ: không có định mức giờ ca chuẩn để so sánh
+    if (isCalendarRestDay(log.date)) return empty;
+
+    const excused = getExcusedShifts(log);
 
     const targetInS = timeToMinutes(config?.morningIn || '07:30');
     const targetOutS = timeToMinutes(config?.morningOut || '11:30');
     const targetInC = timeToMinutes(config?.afternoonIn || '13:00');
     const targetOutC = timeToMinutes(config?.afternoonOut || '17:00');
     const allowedLates = config?.allowedLateMinutes ?? 15;
+    // Dung sai về sớm = đúng bằng khoảng thời gian hệ thống mở cửa sổ chấm ra ca sớm
+    const allowedEarlies = config?.punchOutOpenBeforeMinutes ?? 15;
 
     // 1. Ca Sáng
-    if (log.timeInS && log.timeInS !== '--:--' && log.timeInS !== '' && !['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS)) {
-      const min = timeToMinutes(log.timeInS);
-      if (min > (targetInS + allowedLates)) {
+    if (!excused.morning) {
+      const inMin = parsePunchMinutes(log.timeInS);
+      if (inMin !== null && inMin > targetInS + allowedLates) {
         lates++;
         isLateMorning = true;
       }
-    }
-    if (log.timeOutS && log.timeOutS !== '--:--' && log.timeOutS !== '') {
-      const min = timeToMinutes(log.timeOutS);
-      if (min < targetOutS) {
+      const outMin = parsePunchMinutes(log.timeOutS);
+      if (outMin !== null && outMin < targetOutS - allowedEarlies) {
         earlies++;
         isEarlyMorning = true;
       }
     }
 
     // 2. Ca Chiều
-    if (log.timeInC && log.timeInC !== '--:--' && log.timeInC !== '') {
-      const min = timeToMinutes(log.timeInC);
-      if (min > (targetInC + allowedLates)) {
+    if (!excused.afternoon) {
+      const inMin = parsePunchMinutes(log.timeInC);
+      if (inMin !== null && inMin > targetInC + allowedLates) {
         lates++;
         isLateAfternoon = true;
       }
-    }
-    if (log.timeOutC && log.timeOutC !== '--:--' && log.timeOutC !== '') {
-      const min = timeToMinutes(log.timeOutC);
-      if (min < targetOutC) {
+      const outMin = parsePunchMinutes(log.timeOutC);
+      if (outMin !== null && outMin < targetOutC - allowedEarlies) {
         earlies++;
         isEarlyAfternoon = true;
       }
@@ -1362,6 +1431,7 @@ export default function DashboardOverview({
         coordsIn: '',
         locationOut: '',
         coordsOut: '',
+        punchMeta: {},
         isLocked: false
       };
       updated.unshift(todayLog);
@@ -1383,16 +1453,32 @@ export default function DashboardOverview({
         })
       : '';
 
-    // Check if slot name is an In slot or Out slot
+    const punchLocation = liveGpsAddr || selectedSite;
+    const punchCoords = liveGpsCoords || siteInfo.coords;
+
+    // ─── Ghi ảnh + tọa độ RIÊNG cho lượt chấm này (không ghi đè lượt trước) ───
+    // Mỗi ngày có tới 6 lượt: Vào/Ra sáng, Vào/Ra chiều, Vào/Ra tăng ca. Trước đây
+    // tất cả lượt "Vào" dùng chung photoIn nên chấm Vào chiều xóa mất ảnh Vào sáng.
+    todayLog.punchMeta = mergePunchMeta(todayLog.punchMeta, {
+      [activePunchSlot]: {
+        photo: burnedPhoto,
+        location: punchLocation,
+        coords: punchCoords,
+        at: punchedTime,
+      },
+    });
+
+    // Vẫn ghi cặp trường CŨ (lượt vào/ra gần nhất) để các màn hình chưa nâng cấp
+    // (tab Chấm công bên Nhân sự) tiếp tục hiển thị bình thường.
     const isInSlot = activePunchSlot.toLowerCase().includes('in');
     if (isInSlot) {
       todayLog.photoIn = burnedPhoto;
-      todayLog.locationIn = liveGpsAddr || selectedSite;
-      todayLog.coordsIn = liveGpsCoords || siteInfo.coords;
+      todayLog.locationIn = punchLocation;
+      todayLog.coordsIn = punchCoords;
     } else {
       todayLog.photoOut = burnedPhoto;
-      todayLog.locationOut = liveGpsAddr || selectedSite;
-      todayLog.coordsOut = liveGpsCoords || siteInfo.coords;
+      todayLog.locationOut = punchLocation;
+      todayLog.coordsOut = punchCoords;
     }
 
     // Check-in status setup
@@ -1430,27 +1516,14 @@ export default function DashboardOverview({
     if ((activePunchSlot === 'timeInS' || activePunchSlot === 'timeInC') && todayLog.status === 'late') {
       const allowedLateCount = config.allowedLateCount ?? 3;
       const monthKey = todayVal.substring(0, 7); // "2026-08"
-      const allowedLate = config.allowedLateMinutes ?? 15;
-      const targetInS = timeToMinutes(config.morningIn || '07:30');
-      const targetInC = timeToMinutes(config.afternoonIn || '13:00');
 
-      // Xác định 1 bản ghi có phải "ngày đi muộn" không (bỏ ngày phép/off/không làm)
+      // Xác định 1 bản ghi có phải "ngày đi muộn" không.
+      // Dùng CHUNG getLogAttendanceStats với bộ đếm hiển thị trên dashboard để 2 nơi
+      // không lệch nhau (cùng bỏ qua ngày nghỉ tuần/lễ, ngày phép, ca đã duyệt đơn).
       const isLateDay = (log: any): boolean => {
         if (!log) return false;
         if (log.empId !== empId && log.empName !== currentUser.name) return false;
-        if (['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS)) return false;
-        if (log.status === 'excused') return false;
-        if (log.notes?.toLowerCase().includes('nghỉ') || log.notes?.toLowerCase().includes('off')) return false;
-        let late = false;
-        const inS = log.timeInS;
-        const inC = log.timeInC;
-        if (inS && inS !== '--:--' && inS !== '') {
-          if (timeToMinutes(inS) > (targetInS + allowedLate)) late = true;
-        }
-        if (inC && inC !== '--:--' && inC !== '') {
-          if (timeToMinutes(inC) > (targetInC + allowedLate)) late = true;
-        }
-        return late;
+        return getLogAttendanceStats(log).lates > 0;
       };
 
       // Đếm số ngày đi muộn RIÊNG BIỆT trong tháng hiện tại (1 ngày dù muộn 2 buổi vẫn tính 1 lần)
@@ -1815,7 +1888,12 @@ export default function DashboardOverview({
   };
 
   // Calc aggregated values for current employee
-  const currentLogs = attendanceList.filter(a => a.empName === currentUser.name);
+  // Lọc theo empId (khóa nghiệp vụ duy nhất), chỉ fallback sang empName cho bản ghi
+  // cũ chưa có empId. Lọc thuần theo tên dễ trượt khi tên lệch chuẩn hóa (dấu cách
+  // thừa, viết hoa/thường khác) → bảng thống kê hiện 0 dù vẫn có dữ liệu chấm công.
+  const currentLogs = attendanceList.filter(a =>
+    a.empId ? a.empId === empId : a.empName === currentUser.name
+  );
 
   const dashWeekendDays = config.weekendDays || [0];
 
@@ -1831,10 +1909,20 @@ export default function DashboardOverview({
 
   const countOvertimeHours = logsInMonth.reduce((sum, curr) => sum + (curr.otHours || 0), 0);
   const countOvertimeTimes = logsInMonth.filter(log => (log.otHours || 0) > 0).length;
-  const countLateArrive = logsInMonth.reduce((sum, log) => {
-    const stats = getLogAttendanceStats(log);
-    return sum + stats.lates + stats.earlies;
-  }, 0);
+  // Đi muộn / về sớm trong tháng: đếm theo LƯỢT (mỗi ca vi phạm là 1 lượt),
+  // tách riêng 2 loại để hiển thị chi tiết thay vì gộp thành 1 con số khó hiểu.
+  const monthLateEarly = logsInMonth.reduce(
+    (acc, log) => {
+      const stats = getLogAttendanceStats(log);
+      acc.lates += stats.lates;
+      acc.earlies += stats.earlies;
+      if (stats.lates > 0) acc.lateDays.add(log.date);
+      if (stats.earlies > 0) acc.earlyDays.add(log.date);
+      return acc;
+    },
+    { lates: 0, earlies: 0, lateDays: new Set<string>(), earlyDays: new Set<string>() }
+  );
+  const countLateArrive = monthLateEarly.lates + monthLateEarly.earlies;
 
   // Real salary multiplier
   const userBaseSalary = isAdmin
@@ -1988,12 +2076,94 @@ export default function DashboardOverview({
     }
   };
 
+  /**
+   * Tìm đơn giải trình chấm công của CHÍNH người đang đăng nhập cho 1 ngày + 1 ca.
+   *
+   * ⚠️ Trước đây hàm này KHÔNG lọc theo nhân viên → đơn của đồng nghiệp khác trùng
+   * ngày/ca cũng bị coi là đơn của mình, khiến nút "Báo cáo lý do" biến mất và hiện
+   * nhầm trạng thái "Đã duyệt". Nay lọc theo empId (fallback empName cho bản ghi cũ).
+   */
   const getSubReport = (date: string, shift: 'morning' | 'afternoon') => {
-    return (dashLeaves || []).find((l: any) => 
-      l.fromDate === date && 
-      l.shift === shift && 
-      (l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca')
-    );
+    return (dashLeaves || []).find((l: any) => {
+      if (l.fromDate !== date || l.shift !== shift) return false;
+      if (l.type !== 'Báo cáo nghỉ ca' && l.type !== 'Báo cáo lỗi chấm ra ca') return false;
+      return l.empId ? l.empId === empId : l.empName === currentUser.name;
+    });
+  };
+
+  /**
+   * Phát hiện LỖI CHẤM CÔNG của 1 ngày để hiện cảnh báo trên lịch tháng.
+   *
+   * Coi là lỗi khi:
+   *   - "missing": cả ca không có lịch sử check-in nào (vắng mặt không rõ lý do)
+   *   - "faulty" : có chấm vào ca nhưng THIẾU chấm ra ca
+   *
+   * KHÔNG coi là lỗi (nên không cảnh báo):
+   *   - Ngày nghỉ tuần / nghỉ lễ, ngày trong tương lai
+   *   - Ca chưa kết thúc (hôm nay, ca chiều lúc 9h sáng thì chưa thể gọi là lỗi)
+   *   - Ngày nghỉ phép đã duyệt / bản ghi mang ký hiệu nghỉ / đã chốt công
+   *   - Ca ĐÃ GỬI báo cáo giải trình thành công (chờ duyệt hoặc đã duyệt)
+   *     → đúng yêu cầu "báo cáo thành công thì không hiển thị cảnh báo nữa".
+   *     Đơn bị TỪ CHỐI thì cảnh báo hiện lại để nhân viên báo cáo lần nữa.
+   */
+  const getDayAttendanceIssues = (dateStr: string, log: any) => {
+    const issues: { shift: 'morning' | 'afternoon'; kind: 'missing' | 'faulty'; label: string }[] = [];
+    if (!dateStr || dateStr > todayVal) return issues;
+    if (isCalendarRestDay(dateStr)) return issues;
+    if (log?.isLocked) return issues;
+
+    // Ngày TRƯỚC khi nhân viên vào làm thì không thể có chấm công → không cảnh báo.
+    // (Chỉ áp dụng khi hồ sơ lưu ngày vào làm đúng chuẩn YYYY-MM-DD.)
+    const startDate = getCurrentEmployeeProfile()?.startDate;
+    if (typeof startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && dateStr < startDate) {
+      return issues;
+    }
+
+    // Bản ghi mang ký hiệu nghỉ / được miễn → không phải lỗi chấm công
+    if (log) {
+      const symbol = normalizeTime(log.timeInS);
+      if (LEAVE_SYMBOLS.includes(symbol)) return issues;
+      if (log.status === 'excused') return issues;
+      if (log.notes?.toLowerCase().includes('nghỉ') || log.notes?.toLowerCase().includes('off')) return issues;
+    }
+
+    // Ca đã kết thúc chưa? (ngày quá khứ thì luôn rồi)
+    const shiftEnded = (shift: 'morning' | 'afternoon'): boolean => {
+      if (dateStr < todayVal) return true;
+      const endMin = timeToMinutes(
+        shift === 'morning' ? (config.morningOut || '11:30') : (config.afternoonOut || '17:00')
+      );
+      // Cộng thêm cửa sổ cho phép chấm ra muộn để không báo lỗi khi ca vừa kết thúc
+      return getCurrentMinute() >= endMin + (config.punchOutCloseAfterMinutes ?? 15);
+    };
+
+    const excused = getExcusedShifts({ ...(log || {}), date: dateStr, empId, empName: currentUser.name });
+
+    const shifts: { shift: 'morning' | 'afternoon'; inKey: string; outKey: string; name: string }[] = [
+      { shift: 'morning',   inKey: 'timeInS', outKey: 'timeOutS', name: 'Ca Sáng' },
+      { shift: 'afternoon', inKey: 'timeInC', outKey: 'timeOutC', name: 'Ca Chiều' },
+    ];
+
+    for (const s of shifts) {
+      if (!shiftEnded(s.shift)) continue;
+      if (excused[s.shift]) continue;
+
+      const hasIn = parsePunchMinutes(log?.[s.inKey]) !== null;
+      const hasOut = parsePunchMinutes(log?.[s.outKey]) !== null;
+      if (hasIn && hasOut) continue;
+
+      // Đã gửi báo cáo thành công (chờ duyệt / đã duyệt) → coi như đã xử lý
+      const report = getSubReport(dateStr, s.shift);
+      if (report && (report.status === 'pending' || report.status === 'approved')) continue;
+
+      if (hasIn && !hasOut) {
+        issues.push({ shift: s.shift, kind: 'faulty', label: `${s.name}: thiếu chấm RA ca` });
+      } else {
+        issues.push({ shift: s.shift, kind: 'missing', label: `${s.name}: không có lịch sử check-in` });
+      }
+    }
+
+    return issues;
   };
 
   const renderReportButtonAndStatus = (shift: 'morning' | 'afternoon', isFaulty: boolean, isMissing: boolean) => {
@@ -2326,9 +2496,24 @@ export default function DashboardOverview({
                 <span className="text-sm font-black text-amber-400 font-mono">{countOvertimeHours}h ({countOvertimeTimes} lần)</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div
+                className="flex items-center justify-between"
+                title={
+                  countLateArrive === 0
+                    ? `Tháng ${currentMonthYear}: không có lượt vào muộn / về sớm nào.`
+                    : `Tháng ${currentMonthYear}: vào muộn ${monthLateEarly.lates} lượt (${monthLateEarly.lateDays.size} ngày), về sớm ${monthLateEarly.earlies} lượt (${monthLateEarly.earlyDays.size} ngày).\n` +
+                      `Dung sai: muộn ${config.allowedLateMinutes ?? 15} phút, sớm ${config.punchOutOpenBeforeMinutes ?? 15} phút. Không tính ngày nghỉ tuần/lễ và ca đã được duyệt đơn.`
+                }
+              >
                 <span className="text-xs text-slate-400 font-bold">VÀO MUỘN / VỀ SỚM</span>
-                <span className="text-sm font-black text-rose-400 font-mono">{countLateArrive} lần</span>
+                <span className={`text-sm font-black font-mono ${countLateArrive > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {countLateArrive} lần
+                  {countLateArrive > 0 && (
+                    <span className="text-[9px] text-slate-500 font-bold ml-1.5">
+                      ({monthLateEarly.lates} muộn / {monthLateEarly.earlies} sớm)
+                    </span>
+                  )}
+                </span>
               </div>
 
               <div className="flex items-center justify-between">
@@ -2521,10 +2706,20 @@ export default function DashboardOverview({
                     }
                     
                     const dayDots = getDayDots(dateStr, log);
-                    
-                    const isClickable = !!log;
+
+                    // ─── Cảnh báo lỗi chấm công (thiếu check-in / thiếu chấm ra ca) ───
+                    // Ẩn ngay khi ca đó đã gửi báo cáo giải trình thành công.
+                    const dayIssues = getDayAttendanceIssues(dateStr, log);
+                    const hasIssue = dayIssues.length > 0;
+                    if (hasIssue) {
+                      titleText += `\n⚠️ Lỗi chấm công:\n• ${dayIssues.map(i => i.label).join('\n• ')}\n→ Nhấp vào ngày để gửi báo cáo giải trình.`;
+                    }
+
+                    // Ngày có lỗi nhưng KHÔNG có bản ghi (vắng mặt hoàn toàn) vẫn phải mở
+                    // được modal, nếu không người dùng thấy cảnh báo mà không có cách xử lý.
+                    const isClickable = !!log || hasIssue;
                     const isToday = dateStr === todayVal;
-                    
+
                     cells.push(
                       <div
                         key={`day-${d}`}
@@ -2533,19 +2728,50 @@ export default function DashboardOverview({
                             // Normalize time fields before passing to detail view
                             const normalizedLog = normalizeRecord(log);
                             setSelectedDayDetail({ date: dateStr, log: normalizedLog, holidayName: holidayMatch?.name });
+                          } else if (hasIssue) {
+                            // Bản ghi rỗng để modal hiển thị "Không có lịch sử check-in"
+                            // kèm nút báo cáo lý do cho cả 2 ca.
+                            setSelectedDayDetail({
+                              date: dateStr,
+                              log: {
+                                id: `AT-${empId}-${dateStr.replace(/-/g, '')}`,
+                                empId,
+                                empName: currentUser.name,
+                                date: dateStr,
+                                timeInS: '--:--', timeOutS: '--:--',
+                                timeInC: '--:--', timeOutC: '--:--',
+                                timeInOT: '--:--', timeOutOT: '--:--',
+                                status: 'invalid',
+                                otHours: 0,
+                                notes: 'Không có dữ liệu chấm công cho ngày này.',
+                                isLocked: false,
+                              },
+                              holidayName: holidayMatch?.name,
+                            });
                           }
                         }}
                         className={`h-12 flex flex-col items-center justify-between py-1 rounded text-[10px] font-mono transition-all relative ${cellClass} ${
-                          isClickable 
-                            ? 'cursor-pointer hover:bg-emerald-900/35 hover:scale-105 active:scale-95 duration-100 border-2 border-emerald-500/10' 
+                          isClickable
+                            ? 'cursor-pointer hover:bg-emerald-900/35 hover:scale-105 active:scale-95 duration-100 border-2 border-emerald-500/10'
                             : 'cursor-help'
+                        } ${
+                          hasIssue ? 'ring-1 ring-amber-500/60' : ''
                         } ${
                           isToday
                             ? 'ring-2 ring-emerald-500 ring-offset-1 ring-offset-slate-900 shadow-[0_0_15px_rgba(16,185,129,0.75)] border-emerald-400/80 z-20 scale-102 font-black'
                             : ''
                         }`}
-                        title={isClickable ? `${titleText} - Nhấp để xem chi tiết ca 1, ca 2, đi muộn, tăng ca` : titleText}
+                        title={isClickable ? `${titleText}\n— Nhấp để xem chi tiết ca 1, ca 2, đi muộn, tăng ca` : titleText}
                       >
+                        {hasIssue && (
+                          <span
+                            className="absolute -top-1 -left-1 z-30 flex items-center justify-center w-[13px] h-[13px] rounded-full bg-amber-500 text-slate-950 text-[8px] font-black shadow-md shadow-amber-500/40 animate-pulse"
+                            title={`Lỗi chấm công:\n• ${dayIssues.map(i => i.label).join('\n• ')}`}
+                            aria-label={`Ngày ${d} có lỗi chấm công chưa báo cáo`}
+                          >
+                            !
+                          </span>
+                        )}
                         {holidayMatch ? (
                           <span className="absolute top-0 right-0 text-[8px] text-amber-305 font-semibold bg-amber-950 px-0.5 rounded-bl border-b border-l border-amber-800/60 leading-none h-[11px] flex items-center uppercase tracking-tight z-10" title={`Nghỉ Lễ: ${holidayMatch.name}`}>
                             L
@@ -2592,12 +2818,48 @@ export default function DashboardOverview({
                 })()}
               </div>
 
-              <div className="mt-2 text-[9px] font-mono border-t border-slate-800/40 pt-2 shrink-0 flex items-center justify-center gap-1.5 text-emerald-400">
-                <span className="h-2 w-2 relative flex shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span className="font-bold">🟢 Click vào ô xanh lá (số công) để xem chi tiết ca 1, ca 2, đi muộn, tăng ca.</span>
+              <div className="mt-2 text-[9px] font-mono border-t border-slate-800/40 pt-2 shrink-0 space-y-1.5">
+                <div className="flex items-center justify-center gap-1.5 text-emerald-400">
+                  <span className="h-2 w-2 relative flex shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="font-bold">🟢 Click vào ô xanh lá (số công) để xem chi tiết ca 1, ca 2, đi muộn, tăng ca.</span>
+                </div>
+
+                {/* Chú thích + tổng hợp cảnh báo lỗi chấm công chưa báo cáo trong tháng */}
+                {(() => {
+                  const daysInMonth = new Date(
+                    parseInt(todayVal.split('-')[0], 10),
+                    parseInt(todayVal.split('-')[1], 10),
+                    0
+                  ).getDate();
+                  const [yy, mm] = todayVal.split('-');
+                  let errorDays = 0;
+                  for (let dd = 1; dd <= daysInMonth; dd++) {
+                    const ds = `${yy}-${mm}-${String(dd).padStart(2, '0')}`;
+                    if (ds > todayVal) break;
+                    const lg = currentLogs.find(a => a.date === ds);
+                    if (getDayAttendanceIssues(ds, lg).length > 0) errorDays++;
+                  }
+                  if (errorDays === 0) {
+                    return (
+                      <div className="flex items-center justify-center gap-1.5 text-emerald-500/80">
+                        <span className="font-bold">✅ Không có ngày nào bị lỗi chấm công trong tháng này.</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center justify-center gap-1.5 text-amber-400 text-center leading-relaxed">
+                      <span className="flex items-center justify-center w-[13px] h-[13px] rounded-full bg-amber-500 text-slate-950 text-[8px] font-black shrink-0">
+                        !
+                      </span>
+                      <span className="font-bold">
+                        {errorDays} ngày bị lỗi chấm công chưa báo cáo — nhấp vào ngày có dấu ! để gửi giải trình.
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -2999,58 +3261,12 @@ export default function DashboardOverview({
                 </div>
               ) : null}
 
-              {/* Ảnh chấm công & GPS thiết bị nếu có */}
-              {(selectedDayDetail.log.photoIn || selectedDayDetail.log.photoOut || selectedDayDetail.log.coordsIn || selectedDayDetail.log.coordsOut) && (
-                <div className="bg-slate-950/45 p-3.5 rounded-xl border border-slate-850/60 space-y-2 mt-2">
-                  <span className="text-[10px] font-bold text-slate-500 block uppercase">HÌNH ẢNH & ĐỊA ĐIỂM XÁC THỰC:</span>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {selectedDayDetail.log.photoIn && (
-                      <button 
-                        type="button"
-                        className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 cursor-zoom-in hover:border-sky-500/50 transition-all text-left"
-                        onClick={() => setZoomedImage(selectedDayDetail.log.photoIn)}
-                      >
-                        <img src={selectedDayDetail.log.photoIn} className="w-8 h-8 rounded-md object-cover border border-slate-700" alt="Selfie Vào" referrerPolicy="no-referrer" />
-                        <span className="text-slate-300 font-medium text-[10px]">Ảnh Vào</span>
-                      </button>
-                    )}
-                    {selectedDayDetail.log.photoOut && (
-                      <button 
-                        type="button"
-                        className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 cursor-zoom-in hover:border-sky-500/50 transition-all text-left"
-                        onClick={() => setZoomedImage(selectedDayDetail.log.photoOut)}
-                      >
-                        <img src={selectedDayDetail.log.photoOut} className="w-8 h-8 rounded-md object-cover border border-slate-700" alt="Selfie Ra" referrerPolicy="no-referrer" />
-                        <span className="text-slate-300 font-medium text-[10px]">Ảnh Ra</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-1.5 mt-1 text-[10px] text-slate-400">
-                    {selectedDayDetail.log.coordsIn && (
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedDayDetail.log.coordsIn)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:underline flex items-center gap-1 text-sky-400"
-                        title="Xem trên Google Maps"
-                      >
-                        🗺️ Vào: {selectedDayDetail.log.locationIn || 'Công trình'} ({selectedDayDetail.log.coordsIn})
-                      </a>
-                    )}
-                    {selectedDayDetail.log.coordsOut && (
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedDayDetail.log.coordsOut)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:underline flex items-center gap-1 text-sky-455"
-                        title="Xem trên Google Maps"
-                      >
-                        🗺️ Ra: {selectedDayDetail.log.locationOut || 'Công trình'} ({selectedDayDetail.log.coordsOut})
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* Ảnh FaceID & tọa độ GPS của TỪNG lượt chấm: Vào/Ra sáng, chiều, tăng ca */}
+              <PunchMediaList
+                log={selectedDayDetail.log}
+                onZoomImage={setZoomedImage}
+                variant="full"
+              />
 
               {/* Ghi chú & Trạng thái hệ thống */}
               <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-850/40 text-slate-400">
@@ -3135,51 +3351,13 @@ export default function DashboardOverview({
                           <span>{userTodayLog.notes || `Chưa thực hiện chấm công ca hôm nay.`}</span>
                         </div>
                         
-                        {/* Live Session Photo & GPS links */}
-                        <div className="flex flex-wrap items-center gap-2 mt-1">
-                          {userTodayLog.photoIn && (
-                            <button 
-                              type="button" 
-                              onClick={() => setZoomedImage(userTodayLog.photoIn)}
-                              className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                            >
-                              <img src={userTodayLog.photoIn} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Vào" referrerPolicy="no-referrer" />
-                              <span className="text-slate-400">Ảnh Vào</span>
-                            </button>
-                          )}
-                          {userTodayLog.photoOut && (
-                            <button 
-                              type="button" 
-                              onClick={() => setZoomedImage(userTodayLog.photoOut)}
-                              className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                            >
-                              <img src={userTodayLog.photoOut} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Ra" referrerPolicy="no-referrer" />
-                              <span className="text-slate-400">Ảnh Ra</span>
-                            </button>
-                          )}
-                          {userTodayLog.coordsIn && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(userTodayLog.coordsIn)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                              title="Click để xem trên Google Maps"
-                            >
-                              🗺️ Vào: {userTodayLog.locationIn || selectedSite} ({userTodayLog.coordsIn})
-                            </a>
-                          )}
-                          {userTodayLog.coordsOut && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(userTodayLog.coordsOut)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                              title="Click để xem trên Google Maps"
-                            >
-                              🗺️ Ra: {userTodayLog.locationOut || selectedSite} ({userTodayLog.coordsOut})
-                            </a>
-                          )}
-                        </div>
+                        {/* Ảnh + tọa độ của TỪNG lượt chấm hôm nay (tối đa 6 lượt) */}
+                        <PunchMediaList
+                          log={userTodayLog}
+                          onZoomImage={setZoomedImage}
+                          variant="compact"
+                          fallbackLocation={selectedSite}
+                        />
                       </td>
                     </tr>
                     {currentLogs.filter(a => a.date !== todayVal).map((log, index) => (
@@ -3204,51 +3382,12 @@ export default function DashboardOverview({
                             <span>{log.notes || `Chấm công FaceID & định vị tọa độ`} • OT {log.otHours || 0}H</span>
                           </div>
 
-                          {/* Historical Log Photo & GPS Links */}
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
-                            {log.photoIn && (
-                              <button 
-                                type="button" 
-                                onClick={() => setZoomedImage(log.photoIn)}
-                                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                              >
-                                <img src={log.photoIn} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Vào" referrerPolicy="no-referrer" />
-                                <span className="text-slate-400">Ảnh Vào</span>
-                              </button>
-                            )}
-                            {log.photoOut && (
-                              <button 
-                                type="button" 
-                                onClick={() => setZoomedImage(log.photoOut)}
-                                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                              >
-                                <img src={log.photoOut} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Ra" referrerPolicy="no-referrer" />
-                                <span className="text-slate-400">Ảnh Ra</span>
-                              </button>
-                            )}
-                            {log.coordsIn && (
-                              <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(log.coordsIn)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                                title="Click để xem trên Google Maps"
-                              >
-                                🗺️ Vào: {log.locationIn || 'Công trình'} ({log.coordsIn})
-                              </a>
-                            )}
-                            {log.coordsOut && (
-                              <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(log.coordsOut)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-sky-450 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                                title="Click để xem trên Google Maps"
-                              >
-                                🗺️ Ra: {log.locationOut || 'Công trình'} ({log.coordsOut})
-                              </a>
-                            )}
-                          </div>
+                          {/* Ảnh + tọa độ của TỪNG lượt chấm trong ngày (tối đa 6 lượt) */}
+                          <PunchMediaList
+                            log={log}
+                            onZoomImage={setZoomedImage}
+                            variant="compact"
+                          />
                         </td>
                       </tr>
                     ))}

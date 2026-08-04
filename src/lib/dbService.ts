@@ -1,5 +1,6 @@
 import { getSupabase } from './supabase';
 import { ensureProjectChatGroup } from './chatStore';
+import { parsePunchMeta, mergePunchMeta, hasAnyPunchMeta } from './attendanceMeta';
 import {
   Employee,
   Customer,
@@ -2139,6 +2140,9 @@ export const dbService = {
           photoOut: r.photo_out,
           locationOut: r.location_out,
           coordsOut: r.coords_out,
+          // Ảnh + tọa độ RIÊNG cho từng lượt chấm (Vào/Ra sáng, chiều, tăng ca).
+          // Cột jsonb punch_meta — xem migration 024_attendance_punch_meta.sql.
+          punchMeta: parsePunchMeta(r.punch_meta),
           isLocked: r.is_locked,
         }));
       } catch (err) {
@@ -2238,6 +2242,26 @@ export const dbService = {
         row.time_out_c = record.timeOutC;
         row.time_in_ot = record.timeInOT;
         row.time_out_ot = record.timeOutOT;
+      }
+
+      // ─── Ảnh + tọa độ theo TỪNG LƯỢT chấm (punch_meta) ───
+      // upsert ghi đè NGUYÊN cột, nên nếu client gửi state cũ/thiếu (ví dụ mở app ở máy
+      // khác, chỉ có metadata lượt vừa chấm) thì ảnh các lượt trước sẽ bị xóa sạch.
+      // → Đọc punch_meta hiện có trên DB rồi GỘP theo từng slot (client thắng ở slot nó có).
+      if (hasAnyPunchMeta(record)) {
+        let existingMeta: any = null;
+        try {
+          const { data: prev } = await supabase
+            .from('attendance_records')
+            .select('punch_meta')
+            .eq('id', deterministicId)
+            .maybeSingle();
+          existingMeta = prev?.punch_meta ?? null;
+        } catch {
+          // Không đọc được bản cũ (mạng/quyền) → vẫn ghi phần client có, không chặn chấm công
+          existingMeta = null;
+        }
+        row.punch_meta = mergePunchMeta(existingMeta, record.punchMeta);
       }
 
       try {
