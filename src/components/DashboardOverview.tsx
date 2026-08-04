@@ -3,6 +3,13 @@ import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, S
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
 import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, useNotification } from '../context';
 import { dbService } from '../lib/dbService';
+import {
+  enqueuePunch,
+  removePunch,
+  syncAttendanceOutbox,
+  pendingCount as outboxPendingCount,
+  burnTimestampToPhoto,
+} from '../lib/attendanceOutbox';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
   CheckSquare, 
@@ -441,6 +448,47 @@ export default function DashboardOverview({
     return () => { mounted = false; };
   }, []);
 
+  // ─── Outbox: đồng bộ lại các lượt chấm chưa đẩy được lên Supabase ───
+  // Kích hoạt khi: mount, có mạng trở lại ('online'), hoặc tab được focus lại.
+  useEffect(() => {
+    let cancelled = false;
+    const refreshPending = () => setPendingSync(outboxPendingCount());
+    const trySync = async () => {
+      const summary = await syncAttendanceOutbox((rec, slot) =>
+        dbService.attendance.save(rec, slot)
+      );
+      if (cancelled) return;
+      refreshPending();
+      // Xóa cờ chờ trên UI sau khi đã đồng bộ xong ít nhất 1 bản ghi
+      if (summary.synced > 0) {
+        setAttendanceList(list => list.map(l => (l.syncPending ? { ...l, syncPending: false } : l)));
+        addToast({
+          title: '✅ Đã đồng bộ',
+          message: `Đồng bộ thành công ${summary.synced} bản ghi chấm công đang chờ.`,
+          type: 'success',
+        });
+      }
+      if (summary.dropped > 0) {
+        addToast({
+          title: '⚠️ Cần liên hệ Admin',
+          message: `${summary.dropped} bản ghi không thể đồng bộ sau nhiều lần thử (có thể do quyền). Vui lòng báo Admin.`,
+          type: 'error',
+          duration: 8000,
+        });
+      }
+    };
+    refreshPending();
+    trySync();
+    window.addEventListener('online', trySync);
+    const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', trySync);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
   const [selectedDayDetail, setSelectedDayDetail] = useState<{ date: string; log: any; holidayName?: string } | null>(null);
 
   // Listen for real-time changes to the attendance logs (chỉ update UI, KHÔNG save lại Supabase — tránh vòng lặp Realtime)
@@ -760,6 +808,7 @@ export default function DashboardOverview({
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [gpsErrorMsg, setGpsErrorMsg] = useState<string>('');
   const [showPunchModal, setShowPunchModal] = useState(false);
+  const [pendingSync, setPendingSync] = useState<number>(() => outboxPendingCount());
   const [webcamActive, setWebcamActive] = useState(false);
   const [webcamError, setWebcamError] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1322,14 +1371,26 @@ export default function DashboardOverview({
     todayLog[activePunchSlot] = punchedTime;
     todayLog.method = `GPS/FaceID (${selectedSite})`;
 
+    // Đốt giờ chấm + công trình + GPS + tên NV vào ảnh selfie để tạo dấu vết audit
+    // (chống sửa giờ trong localStorage: ảnh vẫn giữ giờ gốc). Dùng giờ máy chủ nếu có.
+    const stampTime = serverTs ? serverTs.time : punchedTime;
+    const burnedPhoto = selfPhoto
+      ? await burnTimestampToPhoto(selfPhoto, {
+          time: stampTime,
+          site: selectedSite,
+          gps: liveGpsCoords || siteInfo.coords,
+          empName: currentUser.name,
+        })
+      : '';
+
     // Check if slot name is an In slot or Out slot
     const isInSlot = activePunchSlot.toLowerCase().includes('in');
     if (isInSlot) {
-      todayLog.photoIn = selfPhoto;
+      todayLog.photoIn = burnedPhoto;
       todayLog.locationIn = liveGpsAddr || selectedSite;
       todayLog.coordsIn = liveGpsCoords || siteInfo.coords;
     } else {
-      todayLog.photoOut = selfPhoto;
+      todayLog.photoOut = burnedPhoto;
       todayLog.locationOut = liveGpsAddr || selectedSite;
       todayLog.coordsOut = liveGpsCoords || siteInfo.coords;
     }
@@ -1448,30 +1509,38 @@ export default function DashboardOverview({
     }
 
     // Update local state for immediate UI feedback (loại bỏ _serverTime trước khi set state để tránh cache object)
-    const { _serverTime, ...logForState } = todayLog;
-    setAttendanceList(updated.map(l => l.id === todayLog.id ? logForState : l));
+    const { _serverTime, syncPending, ...logForState } = todayLog;
+    setAttendanceList(updated.map(l => l.id === todayLog.id ? { ...logForState, syncPending: true } : l));
 
     // Stop camera and close
     stopCameraStream();
     setShowPunchModal(false);
     setActivePunchSlot(null);
 
-    // ─── Lưu lên Supabase và báo kết quả cho người dùng ───
-    // (kèm _serverTime + punchSlot để chống gian lận giờ client)
+    // ─── Lưu lên Supabase, có Outbox dự phòng khi mất mạng/RLS ───
+    // Luôn đưa vào Outbox TRƯỚC khi thử đẩy, để không bao giờ mất dữ liệu chấm công
+    // nếu đẩy thất bại. Khi đẩy thành công sẽ xóa khỏi Outbox.
+    const opId = `${todayLog.id}:${activePunchSlot}:${Date.now()}`;
+    const recordToSave = { ...todayLog, _serverTime: serverTs };
+    enqueuePunch({ id: opId, record: recordToSave, punchSlot: activePunchSlot as any, serverTs, queuedAt: Date.now() });
+    setPendingSync(outboxPendingCount());
+
     try {
-      await dbService.attendance.save({ ...todayLog, _serverTime: serverTs }, activePunchSlot as any);
+      await dbService.attendance.save(recordToSave, activePunchSlot as any);
+      removePunch(opId);
+      setPendingSync(outboxPendingCount());
       addToast({
         title: '✅ Điểm danh thành công',
         message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime} tại ${selectedSite}.`,
         type: 'success',
       });
     } catch (err) {
-      console.error('Lỗi khi lưu chấm công lên Supabase:', err);
       const errMsg = err instanceof Error ? err.message : 'Lỗi không xác định';
+      console.error('Lỗi khi lưu chấm công lên Supabase (đã lưu tạm vào Outbox):', err);
       addToast({
-        title: '❌ Lưu điểm danh thất bại',
-        message: `Chấm [${slotLabel}] lúc ${punchedTime} KHÔNG được lưu lên hệ thống. Vui lòng chụp màn hình và liên hệ Admin. Chi tiết: ${errMsg}`,
-        type: 'error',
+        title: '⏳ Đã lưu tạm',
+        message: `Chấm [${slotLabel}] lúc ${punchedTime} chưa đẩy được lên hệ thống (${errMsg}). Đã lưu tạm và sẽ tự động đồng bộ khi có kết nối.`,
+        type: 'warning',
         duration: 8000,
       });
     }
@@ -3204,6 +3273,12 @@ export default function DashboardOverview({
       )}
 
       {/* MODAL 1: CHỤP ẢNH XÁC THỰC FACEID & GPS MOBILE APP */}
+      {pendingSync > 0 && (
+        <div className="fixed bottom-4 left-4 z-[60] bg-amber-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 pointer-events-none">
+          <span className="animate-pulse">⏳</span> {pendingSync} bản ghi chờ đồng bộ
+        </div>
+      )}
+
       {showPunchModal && activePunchSlot && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="biometric_webcam_modal">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
