@@ -617,8 +617,8 @@ export default function CabinetEstimator({
   const [searchProductQuery, setSearchProductQuery] = useState<string>('');
   const [customMaterial, setCustomMaterial] = useState<string>('');
 
-  // Hình ảnh minh họa cho dòng sản phẩm đang soạn (BƯỚC 1)
-  const [draftProductImages, setDraftProductImages] = useState<string[]>([]);
+  // Hình ảnh minh họa cho dòng sản phẩm đang soạn (BƯỚC 1) — chỉ 1 ảnh/dòng
+  const [draftProductImage, setDraftProductImage] = useState<string | null>(null);
   const [isUploadingDraftImage, setIsUploadingDraftImage] = useState(false);
   const draftImageInputRef = useRef<HTMLInputElement>(null);
   // Trạng thái sửa từng dòng sản phẩm đã thêm
@@ -731,7 +731,7 @@ export default function CabinetEstimator({
     setChosenPrice('');
     setSelectedMaterialOption('');
     setSelectedPriceOption('');
-    setDraftProductImages([]);
+    setDraftProductImage(null);
   }, [selectedCategory, catalogProducts]);
 
   const handleProductSelect = (prod: any) => {
@@ -793,7 +793,7 @@ export default function CabinetEstimator({
 
     const specQty = normalizeQty(productQty) || 1;
     const specPrice = typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0;
-    const specImages = draftProductImages.length > 0 ? draftProductImages : undefined;
+    const specImages = draftProductImage ? [draftProductImage] : undefined;
 
     if (editingItemId) {
       // ── CẬP NHẬT DÒNG ĐANG SỬA ──
@@ -836,7 +836,7 @@ export default function CabinetEstimator({
     // Reset form
     skipCategoryResetRef.current = false;
     setProductQty('');
-    setDraftProductImages([]);
+    setDraftProductImage(null);
     setEditingItemId(null);
     setEditingSource(null);
   };
@@ -984,49 +984,35 @@ export default function CabinetEstimator({
     setQuoteItems(quoteItems.filter(item => item.id !== id));
   };
 
-  // ── Tải ảnh minh họa cho từng dòng sản phẩm đang soạn ──
+  // ── Tải ảnh minh họa cho dòng sản phẩm đang soạn (tối đa 1 ảnh) ──
   const handleDraftImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+    const file = e.target.files && e.target.files[0];
     e.target.value = '';
-    if (!files || files.length === 0) return;
-    const validFiles = Array.from(files).filter(file => {
-      if (!file.type.startsWith('image/')) {
-        addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
-        return false;
-      }
-      if (file.size > 10 * 1024 * 1024) { // 10MB
-        addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
-        return false;
-      }
-      return true;
-    });
-    if (validFiles.length === 0) return;
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) { // 10MB
+      addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+      return;
+    }
 
     setIsUploadingDraftImage(true);
-    const tasks = validFiles.map(async (file) => {
-      try {
-        const { url, stored } = await dbService.uploadQuoteImage(`quote_item_${Date.now()}`, file);
-        return { url, stored };
-      } catch (err) {
-        console.warn('Upload ảnh dòng sản phẩm thất bại:', err);
-        return null;
-      }
-    });
-    Promise.allSettled(tasks).then((results) => {
-      const urls: string[] = [];
-      let anyLocal = false;
-      results.forEach(r => { if (r.status === 'fulfilled' && r.value) { urls.push(r.value.url); if (r.value.stored === 'local') anyLocal = true; } });
-      if (urls.length > 0) {
-        setDraftProductImages(prev => [...prev, ...urls].slice(0, 5));
-        if (anyLocal) {
-          addToast({ title: '⚠️ Lưu cục bộ', message: `Đã thêm ${urls.length} hình ảnh nhưng Supabase chưa có bucket "quote-images". Chạy migration 025 trong SQL Editor để tạo bucket và lưu ảnh lên cloud.`, type: 'warning', duration: 7000 });
+    dbService.uploadQuoteImage(`quote_item_${Date.now()}`, file)
+      .then(({ url, stored }) => {
+        setDraftProductImage(url); // luôn set ảnh (lên cloud hoặc base64 cục bộ)
+        if (stored === 'local') {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Đã thêm hình ảnh nhưng Supabase chưa có bucket "quote-images". Chạy migration 025 trong SQL Editor để lưu ảnh lên cloud.', type: 'warning', duration: 7000 });
         } else {
-          addToast({ title: '✅ Đã tải ảnh', message: `Đã thêm ${urls.length} hình ảnh cho dòng sản phẩm.`, type: 'success' });
+          addToast({ title: '✅ Đã tải ảnh', message: 'Đã thêm hình ảnh cho dòng sản phẩm.', type: 'success' });
         }
-      } else {
+      })
+      .catch((err) => {
+        console.warn('Upload ảnh dòng sản phẩm thất bại:', err);
         addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên, vui lòng thử lại.', type: 'error' });
-      }
-    }).finally(() => setIsUploadingDraftImage(false));
+      })
+      .finally(() => setIsUploadingDraftImage(false));
   };
 
   // ── SỬA TỪNG DÒNG SẢN PHẨM ĐÃ THÊM ──
@@ -1040,7 +1026,7 @@ export default function CabinetEstimator({
       setCustomProductOtherQty(item.qty);
       setCustomProductOtherUnitPrice(item.unitPrice ?? Math.round((item.totalPrice || 0) / (item.qty || 1)));
       setCustomProductOtherMaterial((item.material && item.material !== 'Tự chọn theo ý khách') ? item.material : '');
-      setDraftProductImages(item.images || []);
+      setDraftProductImage(item.images?.[0] || null);
     } else {
       // Tìm sản phẩm trong danh mục theo tên
       const prod = catalogProducts.find(p => p.tenSanPham === item.productName) || null;
@@ -1062,7 +1048,7 @@ export default function CabinetEstimator({
         setSelectedMaterialOption(item.material || 'Tự nhập');
       }
       setProductQty(item.qty);
-      setDraftProductImages(item.images || []);
+      setDraftProductImage(item.images?.[0] || null);
     }
     // Cuộn lên form để thấy dữ liệu đang sửa
     const formEl = document.getElementById('cabinet-product-add-form');
@@ -1073,7 +1059,7 @@ export default function CabinetEstimator({
     skipCategoryResetRef.current = false;
     setEditingItemId(null);
     setEditingSource(null);
-    setDraftProductImages([]);
+    setDraftProductImage(null);
     setSelectedProduct(null);
     setSelectedCategory('');
     setProductQty('');
@@ -1093,7 +1079,7 @@ export default function CabinetEstimator({
     const specPrice = typeof customProductOtherUnitPrice === 'number'
       ? customProductOtherUnitPrice
       : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0;
-    const specImages = draftProductImages.length > 0 ? draftProductImages : undefined;
+    const specImages = draftProductImage ? [draftProductImage] : undefined;
 
     if (editingItemId && editingSource === 'other') {
       // ── CẬP NHẬT DÒNG SẢN PHẨM KHÁC ĐANG SỬA ──
@@ -1140,7 +1126,7 @@ export default function CabinetEstimator({
     setCustomProductOtherQty(1);
     setCustomProductOtherUnitPrice(1000000);
     setCustomProductOtherMaterial('Tự chọn theo ý khách');
-    setDraftProductImages([]);
+    setDraftProductImage(null);
     setEditingItemId(null);
     setEditingSource(null);
   };
@@ -2405,68 +2391,65 @@ export default function CabinetEstimator({
                       />
                     </div>
 
-                    {/* Hình ảnh minh họa cho dòng sản phẩm */}
+                    {/* Hình ảnh minh họa cho dòng sản phẩm (1 ảnh) */}
                     <div className="md:col-span-8">
                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-1.5">
                             <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
                             <label className="text-slate-600 font-bold uppercase tracking-wider text-[9px]">
-                              Hình ảnh minh họa dòng sản phẩm (tối đa 5 ảnh)
+                              Hình ảnh minh họa dòng sản phẩm (1 ảnh)
                             </label>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => draftImageInputRef.current?.click()}
-                            disabled={isUploadingDraftImage || draftProductImages.length >= 5}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
-                          >
-                            <Upload className="w-3 h-3" />
-                            {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
-                          </button>
+                          {!draftProductImage && (
+                            <button
+                              type="button"
+                              onClick={() => draftImageInputRef.current?.click()}
+                              disabled={isUploadingDraftImage}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Upload className="w-3 h-3" />
+                              {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                            </button>
+                          )}
                           <input
                             ref={draftImageInputRef}
                             type="file"
                             accept="image/*"
-                            multiple
                             onChange={handleDraftImageUpload}
                             className="hidden"
                           />
                         </div>
-                        {draftProductImages.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {draftProductImages.map((img, i) => (
-                              <div key={i} className="relative group">
-                                <img
-                                  src={img}
-                                  alt={`Ảnh dòng sản phẩm ${i + 1}`}
-                                  className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setDraftProductImages(prev => prev.filter((_, idx) => idx !== i))}
-                                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
-                                  title="Gỡ ảnh"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ))}
-                            {draftProductImages.length < 5 && (
+                        {draftProductImage ? (
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              <img
+                                src={draftProductImage}
+                                alt="Ảnh dòng sản phẩm"
+                                className="w-20 h-20 object-cover rounded-lg border border-slate-200 shadow-sm"
+                              />
                               <button
                                 type="button"
-                                onClick={() => draftImageInputRef.current?.click()}
-                                className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-400 cursor-pointer"
-                                title="Thêm ảnh"
+                                onClick={() => setDraftProductImage(null)}
+                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                                title="Gỡ ảnh"
                               >
-                                <Plus className="w-4 h-4" />
-                                <span className="text-[8px] font-bold">Thêm</span>
+                                <X className="w-3 h-3" />
                               </button>
-                            )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => draftImageInputRef.current?.click()}
+                              disabled={isUploadingDraftImage}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Upload className="w-3 h-3" />
+                              {isUploadingDraftImage ? 'Đang tải...' : 'Thay ảnh khác'}
+                            </button>
                           </div>
                         ) : (
                           <div className="text-[10px] text-slate-400 italic">
-                            💡 Hình ảnh này sẽ hiển thị trên từng dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
+                            💡 Hình ảnh này sẽ hiển thị trên dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
                           </div>
                         )}
                       </div>
@@ -2752,63 +2735,60 @@ export default function CabinetEstimator({
                     </div>
                   </div>
 
-                  {/* Hình ảnh minh họa dòng sản phẩm */}
+                  {/* Hình ảnh minh họa dòng sản phẩm (1 ảnh) */}
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-1.5">
                         <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
                         <label className="text-slate-600 font-bold uppercase tracking-wider text-[9px]">
-                          Hình ảnh minh họa dòng sản phẩm (tối đa 5 ảnh)
+                          Hình ảnh minh họa dòng sản phẩm (1 ảnh)
                         </label>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => draftImageInputRef.current?.click()}
-                        disabled={isUploadingDraftImage || draftProductImages.length >= 5}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
-                      >
-                        <Upload className="w-3 h-3" />
-                        {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
-                      </button>
+                      {!draftProductImage && (
+                        <button
+                          type="button"
+                          onClick={() => draftImageInputRef.current?.click()}
+                          disabled={isUploadingDraftImage}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                        </button>
+                      )}
                       <input
                         ref={draftImageInputRef}
                         type="file"
                         accept="image/*"
-                        multiple
                         onChange={handleDraftImageUpload}
                         className="hidden"
                       />
                     </div>
-                    {draftProductImages.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {draftProductImages.map((img, i) => (
-                          <div key={i} className="relative group">
-                            <img src={img} alt={`Ảnh dòng sản phẩm ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm" />
-                            <button
-                              type="button"
-                              onClick={() => setDraftProductImages(prev => prev.filter((_, idx) => idx !== i))}
-                              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
-                              title="Gỡ ảnh"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                        {draftProductImages.length < 5 && (
+                    {draftProductImage ? (
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <img src={draftProductImage} alt="Ảnh dòng sản phẩm" className="w-20 h-20 object-cover rounded-lg border border-slate-200 shadow-sm" />
                           <button
                             type="button"
-                            onClick={() => draftImageInputRef.current?.click()}
-                            className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-400 cursor-pointer"
-                            title="Thêm ảnh"
+                            onClick={() => setDraftProductImage(null)}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                            title="Gỡ ảnh"
                           >
-                            <Plus className="w-4 h-4" />
-                            <span className="text-[8px] font-bold">Thêm</span>
+                            <X className="w-3 h-3" />
                           </button>
-                        )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => draftImageInputRef.current?.click()}
+                          disabled={isUploadingDraftImage}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          {isUploadingDraftImage ? 'Đang tải...' : 'Thay ảnh khác'}
+                        </button>
                       </div>
                     ) : (
                       <div className="text-[10px] text-slate-400 italic">
-                        💡 Hình ảnh này sẽ hiển thị trên từng dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
+                        💡 Hình ảnh này sẽ hiển thị trên dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
                       </div>
                     )}
                   </div>
@@ -2892,18 +2872,11 @@ export default function CabinetEstimator({
                           </td>
                           <td className="px-3 py-2 text-center">
                             {itemImages.length > 0 ? (
-                              <div className="flex items-center justify-center gap-1">
-                                <img
-                                  src={itemImages[0]}
-                                  alt={item.productName}
-                                  className="w-11 h-11 object-cover rounded-lg border border-slate-200 shadow-sm"
-                                />
-                                {itemImages.length > 1 && (
-                                  <span className="bg-orange-600 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-white">
-                                    {itemImages.length}
-                                  </span>
-                                )}
-                              </div>
+                              <img
+                                src={itemImages[0]}
+                                alt={item.productName}
+                                className="w-11 h-11 object-cover rounded-lg border border-slate-200 shadow-sm mx-auto"
+                              />
                             ) : (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 rounded text-slate-400 font-bold border border-slate-200 text-[9px]">
                                 Chưa có
