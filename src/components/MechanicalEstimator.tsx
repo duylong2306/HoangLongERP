@@ -465,6 +465,8 @@ export default function MechanicalEstimator({
     if (loadedQuote && loadedQuote.sector === 'mechanical') {
       if (loadedQuote.items) {
         const loadedItems = loadedQuote.items.map((it: any) => {
+          // Hỗ trợ dữ liệu cũ: nếu chưa có quyCach thì gộp từ he/mauSac/kinh/phuKien
+          const legacyQuyCach = [it.he, it.mauSac, it.kinh, it.phuKien].filter(Boolean).join(' | ');
           return {
             id: it.id,
             name: it.productName || it.name,
@@ -475,6 +477,7 @@ export default function MechanicalEstimator({
             drawingType: it.drawingType || 'steel_frame',
             ngang: it.ngang || 0,
             cao: it.cao || 0,
+            quyCach: it.quyCach || legacyQuyCach || '',
             he: it.he || '',
             mauSac: it.mauSac || '',
             kinh: it.kinh || '',
@@ -629,16 +632,17 @@ export default function MechanicalEstimator({
   const [drawingType, setDrawingType] = useState('');
   const [ngang, setNgang] = useState<string>('');
   const [cao, setCao] = useState<string>('');
-  const [he, setHe] = useState('');
-  const [mauSac, setMauSac] = useState('');
-  const [kinh, setKinh] = useState('');
-  const [phuKien, setPhuKien] = useState('');
+  // Quy cách sản phẩm: gộp Hệ nhôm/Loại sắt + Màu sắc + Loại kính + Phụ kiện thành 1 trường
+  const [quyCach, setQuyCach] = useState('');
   const [unit, setUnit] = useState('');
   const [unitPrice, setUnitPrice] = useState<string>('');
   // Image upload for individual item
   const [itemImageUrl, setItemImageUrl] = useState<string | null>(null);
   const [isUploadingItemImage, setIsUploadingItemImage] = useState(false);
   const itemImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Trạng thái sửa từng dòng sản phẩm đã thêm
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
 
   const groupNames: Record<string, string> = {
     iron_frame: '1. Khung kèo kết cấu thép vững chịu lực',
@@ -649,35 +653,53 @@ export default function MechanicalEstimator({
     custom: '6. Kết cấu máy cơ khí khung máy phụ trợ mộc'
   };
 
+  // Làm tròn 3 chữ số thập phân (hỗ trợ số lượng/đơn giá/thành tiền thập phân)
+  const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+  // Chuẩn hóa số nhập vào: cho phép thập phân, làm tròn 3 chữ số
+  const parseNum = (raw: number | string | undefined, fallback = 0): number => {
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    const num = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/,/g, '.'));
+    if (isNaN(num)) return fallback;
+    return round3(num);
+  };
+
+  // Trả về chuỗi rỗng nếu input không hợp lệ (dùng cho state string)
+  const round3Str = (raw: string): string => {
+    const num = parseFloat(String(raw).replace(/,/g, '.'));
+    if (isNaN(num)) return '';
+    return String(round3(num));
+  };
+
   // Dự toán logic kết quả cơ khí thép
   const calculateItemPrice = (item: any, currentConfig: QuoteConfig): number => {
     if (item.pricingMethod === 'quick') {
       const basicCost = (item.weightKg || 0) * (item.unitPricePerKg || 0);
-      return Math.round(basicCost * (item.qty || 1));
+      return round3(basicCost * (item.qty || 1));
     } else {
       // Phân bổ bóc gối vật tư cơ khí thô xưởng hàn
-      const materialCost = 
+      const materialCost =
         ((item.steelTons || 0) * (item.steelPricePerTon || 0)) +
         ((item.zincCoatLiters || 0) * (item.zincCoatPricePerLiter || 0)) +
         ((item.weldingRodBoxes || 0) * (item.weldingRodPricePerBox || 0));
-      
+
       const basicLabor = item.directWelderLabor || 0;
-      
+
       // Áp hao hụt phôi
       const materialWithWastage = materialCost * (1 + currentConfig.wastagePercent / 100);
-      
+
       // Cơ tính tổ hợp giá gốc thô
       const primeCost = materialWithWastage + basicLabor;
-      
+
       // Phụ gia bù đắp sơn phủ mạ điện kẽm nhúng
       const electroZincSurplus = primeCost * (currentConfig.accessoryPercent / 100);
-      
+
       // Khác phân bổ quản trị máy móc CNC khấu hao
       const cncDepreciation = primeCost * (currentConfig.generalPercent / 100);
       const profitCost = primeCost * (currentConfig.profitPercent / 100);
       const laborMargin = primeCost * (currentConfig.laborPercent / 100);
-      
-      return Math.round((primeCost + electroZincSurplus + cncDepreciation + profitCost + laborMargin) * (item.qty || 1));
+
+      return round3((primeCost + electroZincSurplus + cncDepreciation + profitCost + laborMargin) * (item.qty || 1));
     }
   };
 
@@ -723,7 +745,7 @@ export default function MechanicalEstimator({
         if (stored === 'supabase') {
           addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh hạng mục đã được gửi lên Supabase.', type: 'success' });
         } else {
-          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "quote-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Chưa có bucket "quote-images" trên Supabase. Ảnh lưu tạm dưới dạng base64 — chạy migration 025 trong SQL Editor để tạo bucket và lưu lên cloud.', type: 'warning', duration: 7000 });
         }
       })
       .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' }));
@@ -740,94 +762,154 @@ export default function MechanicalEstimator({
         addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập Tên sản phẩm!', type: 'warning' });
         return;
       }
-      
-      const specNgang = typeof ngang === 'number' ? ngang : parseFloat(ngang as any) || 0;
-      const specCao = typeof cao === 'number' ? cao : parseFloat(cao as any) || 0;
-      const specQty = typeof qty === 'number' ? qty : parseInt(qty as any) || 1;
-      const specUnitPrice = typeof unitPrice === 'number' ? unitPrice : parseInt(unitPrice as any) || 0;
-      
+
+      const specNgang = parseNum(ngang);
+      const specCao = parseNum(cao);
+      const specQty = parseNum(qty) || 1;
+      const specUnitPrice = parseNum(unitPrice);
+
       // Tính diện tích
       let area = 1;
       if (specNgang && specCao) {
-        area = Math.round(specNgang * specCao * 100) / 100;
+        area = round3(specNgang * specCao);
       }
-      const calculatedPrice = Math.round(area * specUnitPrice * specQty);
+      const calculatedPrice = round3(area * specUnitPrice * specQty);
 
-      const newItem = {
-        id: `q_mech_${Date.now()}`,
-        name: name.trim(),
-        qty: specQty,
-        notes: notes || undefined,
-        pricingMethod: 'quick',
-        sign: sign.trim() || undefined,
-        drawingType,
-        ngang: specNgang,
-        cao: specCao,
-        he: he.trim(),
-        mauSac: mauSac.trim(),
-        kinh: kinh.trim(),
-        phuKien: phuKien.trim(),
-        unit,
-        unitPrice: specUnitPrice,
-        totalPrice: calculatedPrice,
-        imageUrl: itemImageUrl || undefined
-      };
+      const specQuyCach = quyCach.trim();
 
-      setQuoteItems([...quoteItems, newItem]);
+      if (editingItemId) {
+        // ── CẬP NHẬT DÒNG ĐANG SỬA ──
+        setQuoteItems(prev => prev.map(item => item.id === editingItemId ? {
+          ...item,
+          name: name.trim(),
+          qty: specQty,
+          notes: notes || undefined,
+          sign: sign.trim() || undefined,
+          drawingType,
+          ngang: specNgang,
+          cao: specCao,
+          quyCach: specQuyCach,
+          unit,
+          unitPrice: specUnitPrice,
+          totalPrice: calculatedPrice,
+          imageUrl: itemImageUrl || undefined
+        } : item));
+        setFeedback({ message: `Đã cập nhật dòng "${name.trim()}" trong báo giá thành công!`, type: 'success' });
+      } else {
+        // ── THÊM MỚI ──
+        const newItem = {
+          id: `q_mech_${Date.now()}`,
+          name: name.trim(),
+          qty: specQty,
+          notes: notes || undefined,
+          pricingMethod: 'quick',
+          sign: sign.trim() || undefined,
+          drawingType,
+          ngang: specNgang,
+          cao: specCao,
+          quyCach: specQuyCach,
+          unit,
+          unitPrice: specUnitPrice,
+          totalPrice: calculatedPrice,
+          imageUrl: itemImageUrl || undefined
+        };
+
+        setQuoteItems([...quoteItems, newItem]);
+        setFeedback({ message: `Đã thêm hạng mục "${name.trim()}" vào báo giá thành công!`, type: 'success' });
+      }
+      setTimeout(() => setFeedback(null), 3000);
 
       // Reset inputs
       setSign('');
       setName('');
       setNgang('');
       setCao('');
-      setHe('');
-      setMauSac('');
-      setKinh('');
-      setPhuKien('');
+      setQuyCach('');
       setItemImageUrl(null);
       setUnitPrice('');
       setNotes('');
       setQty('');
+      setEditingItemId(null);
     } else {
       if (!name.trim()) {
         addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập Tên sản phẩm!', type: 'warning' });
         return;
       }
 
-      const specQty = typeof qty === 'number' ? qty : parseInt(qty as any) || 1;
-      const specWeightKg = typeof weightKg === 'number' ? weightKg : parseInt(weightKg as any) || 0;
-      const specUnitPricePerKg = typeof unitPricePerKg === 'number' ? unitPricePerKg : parseInt(unitPricePerKg as any) || 0;
-      const specSteelTons = typeof steelTons === 'number' ? steelTons : parseFloat(steelTons as any) || 0;
-      const specSteelPricePerTon = typeof steelPricePerTon === 'number' ? steelPricePerTon : parseInt(steelPricePerTon as any) || 0;
-      const specZincCoatLiters = typeof zincCoatLiters === 'number' ? zincCoatLiters : parseInt(zincCoatLiters as any) || 0;
-      const specZincCoatPricePerLiter = typeof zincCoatPricePerLiter === 'number' ? zincCoatPricePerLiter : parseInt(zincCoatPricePerLiter as any) || 0;
-      const specWeldingRodBoxes = typeof weldingRodBoxes === 'number' ? weldingRodBoxes : parseInt(weldingRodBoxes as any) || 0;
-      const specWeldingRodPricePerBox = typeof weldingRodPricePerBox === 'number' ? weldingRodPricePerBox : parseInt(weldingRodPricePerBox as any) || 0;
-      const specDirectWelderLabor = typeof directWelderLabor === 'number' ? directWelderLabor : parseInt(directWelderLabor as any) || 0;
+      const specQty = parseNum(qty) || 1;
+      const specWeightKg = parseNum(weightKg);
+      const specUnitPricePerKg = parseNum(unitPricePerKg);
+      const specSteelTons = parseNum(steelTons);
+      const specSteelPricePerTon = parseNum(steelPricePerTon);
+      const specZincCoatLiters = parseNum(zincCoatLiters);
+      const specZincCoatPricePerLiter = parseNum(zincCoatPricePerLiter);
+      const specWeldingRodBoxes = parseNum(weldingRodBoxes);
+      const specWeldingRodPricePerBox = parseNum(weldingRodPricePerBox);
+      const specDirectWelderLabor = parseNum(directWelderLabor);
 
-      const newItem = {
-        id: `q_mech_${Date.now()}`,
-        group,
-        name: name.trim(),
-        qty: specQty,
-        notes: notes || undefined,
-        pricingMethod,
-        weightKg: specWeightKg,
-        unitPricePerKg: specUnitPricePerKg,
-        materials,
-        steelTons: specSteelTons,
-        steelPricePerTon: specSteelPricePerTon,
-        zincCoatLiters: specZincCoatLiters,
-        zincCoatPricePerLiter: specZincCoatPricePerLiter,
-        weldingRodBoxes: specWeldingRodBoxes,
-        weldingRodPricePerBox: specWeldingRodPricePerBox,
-        directWelderLabor: specDirectWelderLabor,
-        totalPrice: 0
-      };
+      if (editingItemId) {
+        // ── CẬP NHẬT DÒNG KẾT CẤU THÉP ĐANG SỬA ──
+        setQuoteItems(prev => prev.map(item => item.id === editingItemId ? {
+          ...item,
+          group,
+          name: name.trim(),
+          qty: specQty,
+          notes: notes || undefined,
+          pricingMethod,
+          weightKg: specWeightKg,
+          unitPricePerKg: specUnitPricePerKg,
+          materials,
+          steelTons: specSteelTons,
+          steelPricePerTon: specSteelPricePerTon,
+          zincCoatLiters: specZincCoatLiters,
+          zincCoatPricePerLiter: specZincCoatPricePerLiter,
+          weldingRodBoxes: specWeldingRodBoxes,
+          weldingRodPricePerBox: specWeldingRodPricePerBox,
+          directWelderLabor: specDirectWelderLabor,
+          totalPrice: calculateItemPrice({
+            ...item,
+            qty: specQty,
+            pricingMethod,
+            weightKg: specWeightKg,
+            unitPricePerKg: specUnitPricePerKg,
+            steelTons: specSteelTons,
+            steelPricePerTon: specSteelPricePerTon,
+            zincCoatLiters: specZincCoatLiters,
+            zincCoatPricePerLiter: specZincCoatPricePerLiter,
+            weldingRodBoxes: specWeldingRodBoxes,
+            weldingRodPricePerBox: specWeldingRodPricePerBox,
+            directWelderLabor: specDirectWelderLabor,
+          }, config)
+        } : item));
+        setFeedback({ message: `Đã cập nhật dòng "${name.trim()}" trong báo giá thành công!`, type: 'success' });
+      } else {
+        // ── THÊM MỚI KẾT CẤU THÉP ──
+        const newItem = {
+          id: `q_mech_${Date.now()}`,
+          group,
+          name: name.trim(),
+          qty: specQty,
+          notes: notes || undefined,
+          pricingMethod,
+          weightKg: specWeightKg,
+          unitPricePerKg: specUnitPricePerKg,
+          materials,
+          steelTons: specSteelTons,
+          steelPricePerTon: specSteelPricePerTon,
+          zincCoatLiters: specZincCoatLiters,
+          zincCoatPricePerLiter: specZincCoatPricePerLiter,
+          weldingRodBoxes: specWeldingRodBoxes,
+          weldingRodPricePerBox: specWeldingRodPricePerBox,
+          directWelderLabor: specDirectWelderLabor,
+          totalPrice: 0
+        };
 
-      newItem.totalPrice = calculateItemPrice(newItem, config);
-      setQuoteItems([...quoteItems, newItem]);
-      
+        newItem.totalPrice = calculateItemPrice(newItem, config);
+        setQuoteItems([...quoteItems, newItem]);
+        setFeedback({ message: `Đã thêm hạng mục "${name.trim()}" vào báo giá thành công!`, type: 'success' });
+      }
+      setTimeout(() => setFeedback(null), 3000);
+
       // Reset inputs
       setName('');
       setQty('');
@@ -842,11 +924,74 @@ export default function MechanicalEstimator({
       setWeldingRodBoxes('');
       setWeldingRodPricePerBox('');
       setDirectWelderLabor('');
+      setEditingItemId(null);
     }
   };
 
   const handleRemoveItem = (id: string) => {
     setQuoteItems(quoteItems.filter(item => item.id !== id));
+  };
+
+  // ── SỬA TỪNG DÒNG HẠNG MỤC ĐÃ THÊM ──
+  const handleEditItem = (item: any) => {
+    if (isLockedVal) return;
+    setEditingItemId(item.id);
+    setName(item.name || '');
+    setSign(item.sign || '');
+    setDrawingType(item.drawingType || '');
+    setNgang(item.ngang ? String(item.ngang) : '');
+    setCao(item.cao ? String(item.cao) : '');
+    setQuyCach(item.quyCach || '');
+    setUnit(item.unit || '');
+    setUnitPrice(item.unitPrice ? String(item.unitPrice) : '');
+    setQty(item.qty ? String(item.qty) : '');
+    setNotes(item.notes || '');
+    setItemImageUrl(item.imageUrl || null);
+    setGroup(item.group || 'iron_frame');
+    setPricingMethod(item.pricingMethod || 'quick');
+    setWeightKg(item.weightKg ? String(item.weightKg) : '');
+    setUnitPricePerKg(item.unitPricePerKg ? String(item.unitPricePerKg) : '');
+    setMaterials(item.materials || '');
+    setSteelTons(item.steelTons ? String(item.steelTons) : '');
+    setSteelPricePerTon(item.steelPricePerTon ? String(item.steelPricePerTon) : '');
+    setZincCoatLiters(item.zincCoatLiters ? String(item.zincCoatLiters) : '');
+    setZincCoatPricePerLiter(item.zincCoatPricePerLiter ? String(item.zincCoatPricePerLiter) : '');
+    setWeldingRodBoxes(item.weldingRodBoxes ? String(item.weldingRodBoxes) : '');
+    setWeldingRodPricePerBox(item.weldingRodPricePerBox ? String(item.weldingRodPricePerBox) : '');
+    setDirectWelderLabor(item.directWelderLabor ? String(item.directWelderLabor) : '');
+    // Xác định chế độ nhập phù hợp cho dòng đang sửa
+    const isDoorItem = item.estimatorMode === 'door' || (!item.estimatorMode && (item.ngang || item.cao));
+    setEstimatorMode(isDoorItem ? 'door' : 'steel');
+    // Cuộn lên form để thấy dữ liệu đang sửa
+    const formEl = document.getElementById('mech_add_item_form');
+    if (formEl) formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleCancelEditItem = () => {
+    setEditingItemId(null);
+    setName('');
+    setSign('');
+    setDrawingType('');
+    setNgang('');
+    setCao('');
+    setQuyCach('');
+    setUnit('');
+    setUnitPrice('');
+    setQty('');
+    setNotes('');
+    setItemImageUrl(null);
+    setGroup('iron_frame');
+    setPricingMethod('quick');
+    setWeightKg('');
+    setUnitPricePerKg('');
+    setMaterials('');
+    setSteelTons('');
+    setSteelPricePerTon('');
+    setZincCoatLiters('');
+    setZincCoatPricePerLiter('');
+    setWeldingRodBoxes('');
+    setWeldingRodPricePerBox('');
+    setDirectWelderLabor('');
   };
 
   // Tài chính cộng hóa đơn
@@ -1908,15 +2053,31 @@ export default function MechanicalEstimator({
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-800 pb-3 gap-2">
                   <div className="flex items-center gap-2">
                     <Calculator className="w-4 h-4 text-pink-500" />
-                    <span className="font-extrabold text-slate-100 text-xs uppercase tracking-wider">Thêm hạng mục báo giá cơ khí (Cửa Nhôm Kính & Sắt CNC)</span>
+                    <span className="font-extrabold text-slate-100 text-xs uppercase tracking-wider">
+                      {editingItemId ? (
+                        <>✏️ Cập nhật hạng mục báo giá <span className="text-pink-400 normal-case tracking-normal">(đang sửa dòng #{quoteItems.findIndex(i => i.id === editingItemId) + 1})</span></>
+                      ) : (
+                        <>Thêm hạng mục báo giá cơ khí (Cửa Nhôm Kính & Sắt CNC)</>
+                      )}
+                    </span>
                   </div>
+                  {editingItemId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditItem}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-white bg-slate-800 border border-slate-700 hover:border-slate-600 rounded-lg px-2.5 py-1.5 transition-colors cursor-pointer"
+                    >
+                      <XCircle className="w-3 h-3" /> Hủy sửa
+                    </button>
+                  )}
                 </div>
 
                 {estimatorMode === 'door' ? (
                   /* GIAO DIỆN NHẬP CỬA NHÔM KÍNH / SẮT CNC (MẪU ĐÍNH KÈM) */
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs text-left">
-                    <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Ký hiệu (ví dụ: D1, W2)</label>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 text-xs text-left">
+                    {/* Ký hiệu */}
+                    <div className="md:col-span-2">
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Ký hiệu (D1, W2)</label>
                       <input
                         type="text"
                         value={sign}
@@ -1925,7 +2086,8 @@ export default function MechanicalEstimator({
                         placeholder="Nhập ký hiệu..."
                       />
                     </div>
-                    <div className="md:col-span-2">
+                    {/* Tên sản phẩm */}
+                    <div className="md:col-span-7">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Tên sản phẩm / Mô tả <span className="text-rose-500 font-bold">*</span></label>
                       <input
                         type="text"
@@ -1935,40 +2097,46 @@ export default function MechanicalEstimator({
                         placeholder="Ví dụ: Cửa đi 4 cánh Xingfa nhập khẩu..."
                       />
                     </div>
-                    <div>
+                    {/* Bản vẽ / Phân loại */}
+                    <div className="md:col-span-3">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Bản vẽ / Phân loại</label>
                       <input
                         type="text"
                         value={drawingType}
                         onChange={(e) => setDrawingType(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-semibold"
-                        placeholder="Ví dụ: Cửa đi 1 cánh mở quay..."
+                        placeholder="Cửa đi 1 cánh mở quay..."
                       />
                     </div>
 
-                    <div>
+                    {/* Chiều ngang */}
+                    <div className="md:col-span-2">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Chiều ngang (m) <span className="text-rose-500 font-bold">*</span></label>
                       <input
                         type="number"
                         step="0.001"
+                        inputMode="decimal"
                         value={ngang}
-                        onChange={(e) => setNgang(e.target.value)}
+                        onChange={(e) => setNgang(round3Str(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                         placeholder="Ví dụ: 0.915"
                       />
                     </div>
-                    <div>
+                    {/* Chiều cao */}
+                    <div className="md:col-span-2">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Chiều cao (m) <span className="text-rose-500 font-bold">*</span></label>
                       <input
                         type="number"
                         step="0.001"
+                        inputMode="decimal"
                         value={cao}
-                        onChange={(e) => setCao(e.target.value)}
+                        onChange={(e) => setCao(round3Str(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                         placeholder="Ví dụ: 2.765"
                       />
                     </div>
-                    <div>
+                    {/* Đơn vị tính */}
+                    <div className="md:col-span-2">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn vị tính</label>
                       <input
                         type="text"
@@ -1978,80 +2146,70 @@ export default function MechanicalEstimator({
                         placeholder="Bộ hoặc M2..."
                       />
                     </div>
-                    <div>
+                    {/* Số lượng */}
+                    <div className="md:col-span-2">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Số lượng <span className="text-rose-500 font-bold">*</span></label>
                       <input
                         type="number"
+                        step="0.001"
+                        inputMode="decimal"
                         value={qty}
-                        onChange={(e) => setQty(e.target.value)}
-                        min="1"
+                        onChange={(e) => setQty(round3Str(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                         placeholder="Ví dụ: 1"
                       />
                     </div>
-
-                    <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Hệ nhôm / Loại sắt</label>
-                      <input
-                        type="text"
-                        value={he}
-                        onChange={(e) => setHe(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                        placeholder="XINGFA HỆ 55, Sắt hộp 40x80..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Màu sắc</label>
-                      <input
-                        type="text"
-                        value={mauSac}
-                        onChange={(e) => setMauSac(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                        placeholder="Xám ghi, đen, vân gỗ..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Loại kính</label>
-                      <input
-                        type="text"
-                        value={kinh}
-                        onChange={(e) => setKinh(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                        placeholder="Kính cường lực 8mm, 10mm..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Phụ kiện đi kèm</label>
-                      <input
-                        type="text"
-                        value={phuKien}
-                        onChange={(e) => setPhuKien(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                        placeholder="Kinlong, Draho, Huy Hoàng..."
-                      />
-                    </div>
-
+                    {/* Đơn giá định mức */}
                     <div className="md:col-span-2">
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Ghi chú kỹ thuật lắp ráp</label>
-                      <input
-                        type="text"
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                        placeholder="Ví dụ: Khoan lỗ thoát nước đáy cửa chính..."
-                      />
-                    </div>
-                    <div className="md:col-span-1">
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá định mức (đ/m2) <span className="text-rose-500 font-bold">*</span></label>
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá (đ/m2) <span className="text-rose-500 font-bold">*</span></label>
                       <input
                         type="number"
+                        step="0.001"
+                        inputMode="decimal"
                         value={unitPrice}
-                        onChange={(e) => setUnitPrice(e.target.value)}
+                        onChange={(e) => setUnitPrice(round3Str(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 text-emerald-400 rounded-lg p-2.5 outline-none focus:border-pink-500 font-extrabold text-xs"
                         placeholder="Ví dụ: 2200000"
                       />
                     </div>
-                    <div className="md:col-span-1">
+                    {/* Diện tích tự tính */}
+                    <div className="md:col-span-2">
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Diện tích (m2)</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={ngang && cao ? `${round3(parseFloat(String(ngang).replace(/,/g, '.')) * parseFloat(String(cao).replace(/,/g, '.')))} m2` : '—'}
+                        className="w-full bg-slate-950/50 border border-slate-800 text-slate-300 rounded-lg p-2.5 outline-none font-mono font-bold text-center select-none"
+                      />
+                    </div>
+
+                    {/* Quy cách sản phẩm (gộp 4 trường) */}
+                    <div className="md:col-span-6">
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">
+                        Quy cách sản phẩm <span className="text-slate-500 font-normal normal-case">(Hệ nhôm/Loại sắt • Màu sắc • Loại kính • Phụ kiện)</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={quyCach}
+                        onChange={(e) => setQuyCach(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium resize-none leading-relaxed"
+                        placeholder="Ví dụ: XINGFA hệ 55 • màu ghi xám • kính cường lực 8mm • phụ kiện Kinlong..."
+                      />
+                    </div>
+
+                    {/* Ghi chú kỹ thuật */}
+                    <div className="md:col-span-4">
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Ghi chú kỹ thuật lắp ráp</label>
+                      <textarea
+                        rows={2}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium resize-none leading-relaxed"
+                        placeholder="Ví dụ: Khoan lỗ thoát nước đáy cửa chính..."
+                      />
+                    </div>
+                    {/* Hình ảnh hạng mục */}
+                    <div className="md:col-span-2">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Hình ảnh hạng mục</label>
                       {itemImageUrl ? (
                         <div className="flex items-center gap-2">
@@ -2087,21 +2245,12 @@ export default function MechanicalEstimator({
                         className="hidden"
                       />
                     </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={handleAddItem}
-                        className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold p-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-[0.98]"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Thêm vào bảng
-                      </button>
-                    </div>
                   </div>
                 ) : (
                   /* GIAO DIỆN NHẬP KẾT CẤU THÉP & MÁI CHE */
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs text-left">
-                    <div>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 text-xs text-left">
+                    {/* Nhóm kết cấu */}
+                    <div className="md:col-span-3">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Nhóm kết cấu cơ khí</label>
                       <select
                         value={group}
@@ -2116,7 +2265,8 @@ export default function MechanicalEstimator({
                         <option value="custom">6. Kết cấu máy cơ khí khung mộc</option>
                       </select>
                     </div>
-                    <div className="md:col-span-2">
+                    {/* Tên kết cấu */}
+                    <div className="md:col-span-6">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Tên kết cấu / Hạng mục gia công <span className="text-rose-500 font-bold">*</span></label>
                       <input
                         type="text"
@@ -2126,7 +2276,8 @@ export default function MechanicalEstimator({
                         placeholder="Ví dụ: Giàn hoa sắt hộp mạ kẽm..."
                       />
                     </div>
-                    <div>
+                    {/* Phương pháp tính */}
+                    <div className="md:col-span-3">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Phương pháp tính dự toán</label>
                       <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-800 h-10 items-center">
                         <button
@@ -2148,28 +2299,48 @@ export default function MechanicalEstimator({
 
                     {pricingMethod === 'quick' ? (
                       <>
-                        <div>
-                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Khối lượng ước tính (kg) <span className="text-rose-500 font-bold">*</span></label>
+                        {/* Khối lượng ước tính */}
+                        <div className="md:col-span-3">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Khối lượng (kg) <span className="text-rose-500 font-bold">*</span></label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={weightKg}
-                            onChange={(e) => setWeightKg(e.target.value)}
+                            onChange={(e) => setWeightKg(round3Str(e.target.value))}
                             className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 1200"
                           />
                         </div>
-                        <div>
-                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá gia công thô (đ/kg) <span className="text-rose-500 font-bold">*</span></label>
+                        {/* Đơn giá gia công */}
+                        <div className="md:col-span-3">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá gia công (đ/kg) <span className="text-rose-500 font-bold">*</span></label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={unitPricePerKg}
-                            onChange={(e) => setUnitPricePerKg(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
+                            onChange={(e) => setUnitPricePerKg(round3Str(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-800 text-emerald-400 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 38000"
                           />
                         </div>
+                        {/* Số lượng */}
                         <div className="md:col-span-2">
-                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Mác thép / Vật tư chính sử dụng</label>
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Số lượng <span className="text-rose-500 font-bold">*</span></label>
+                          <input
+                            type="number"
+                            step="0.001"
+                            inputMode="decimal"
+                            value={qty}
+                            onChange={(e) => setQty(round3Str(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
+                            placeholder="Ví dụ: 1"
+                          />
+                        </div>
+                        {/* Mác thép / Vật tư */}
+                        <div className="md:col-span-4">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Mác thép / Vật tư chính</label>
                           <input
                             type="text"
                             value={materials}
@@ -2181,93 +2352,108 @@ export default function MechanicalEstimator({
                       </>
                     ) : (
                       <>
-                        <div>
-                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Khối lượng thép thép hình (tấn) <span className="text-rose-500 font-bold">*</span></label>
+                        {/* Bốc tách thép: 2 cột chính + 2 cột phụ */}
+                        <div className="md:col-span-3">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Thép hình (tấn) <span className="text-rose-500 font-bold">*</span></label>
                           <input
                             type="number"
                             step="0.001"
+                            inputMode="decimal"
                             value={steelTons}
-                            onChange={(e) => setSteelTons(e.target.value)}
+                            onChange={(e) => setSteelTons(round3Str(e.target.value))}
                             className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 1.8"
                           />
                         </div>
-                        <div>
-                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá thép đen thô (đ/tấn) <span className="text-rose-500 font-bold">*</span></label>
+                        <div className="md:col-span-3">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá thép (đ/tấn) <span className="text-rose-500 font-bold">*</span></label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={steelPricePerTon}
-                            onChange={(e) => setSteelPricePerTon(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
+                            onChange={(e) => setSteelPricePerTon(round3Str(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-800 text-emerald-400 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 18500000"
                           />
                         </div>
-                        <div>
+                        <div className="md:col-span-2">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Số lượng <span className="text-rose-500 font-bold">*</span></label>
+                          <input
+                            type="number"
+                            step="0.001"
+                            inputMode="decimal"
+                            value={qty}
+                            onChange={(e) => setQty(round3Str(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
+                            placeholder="Ví dụ: 1"
+                          />
+                        </div>
+                        <div className="md:col-span-4">
+                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Chi phí nhân công thợ (đ)</label>
+                          <input
+                            type="number"
+                            step="0.001"
+                            inputMode="decimal"
+                            value={directWelderLabor}
+                            onChange={(e) => setDirectWelderLabor(round3Str(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
+                            placeholder="Ví dụ: 14000000"
+                          />
+                        </div>
+                        <div className="md:col-span-3">
                           <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Sơn chống rỉ kẽm (Lít)</label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={zincCoatLiters}
-                            onChange={(e) => setZincCoatLiters(e.target.value)}
+                            onChange={(e) => setZincCoatLiters(round3Str(e.target.value))}
                             className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 35"
                           />
                         </div>
-                        <div>
+                        <div className="md:col-span-3">
                           <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá sơn (đ/lít)</label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={zincCoatPricePerLiter}
-                            onChange={(e) => setZincCoatPricePerLiter(e.target.value)}
+                            onChange={(e) => setZincCoatPricePerLiter(round3Str(e.target.value))}
                             className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 165000"
                           />
                         </div>
-
-                        <div>
+                        <div className="md:col-span-3">
                           <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Que hàn (Hộp 5kg)</label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={weldingRodBoxes}
-                            onChange={(e) => setWeldingRodBoxes(e.target.value)}
+                            onChange={(e) => setWeldingRodBoxes(round3Str(e.target.value))}
                             className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 12"
                           />
                         </div>
-                        <div>
+                        <div className="md:col-span-3">
                           <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Đơn giá que hàn (đ/hộp)</label>
                           <input
                             type="number"
+                            step="0.001"
+                            inputMode="decimal"
                             value={weldingRodPricePerBox}
-                            onChange={(e) => setWeldingRodPricePerBox(e.target.value)}
+                            onChange={(e) => setWeldingRodPricePerBox(round3Str(e.target.value))}
                             className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
                             placeholder="Ví dụ: 240000"
-                          />
-                        </div>
-                        <div className="md:col-span-2">
-                          <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Chi phí nhân công thợ (đ)</label>
-                          <input
-                            type="number"
-                            value={directWelderLabor}
-                            onChange={(e) => setDirectWelderLabor(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                            placeholder="Ví dụ: 14000000"
                           />
                         </div>
                       </>
                     )}
 
-                    <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Số lượng <span className="text-rose-500 font-bold">*</span></label>
-                      <input
-                        type="number"
-                        value={qty}
-                        onChange={(e) => setQty(e.target.value)}
-                        min="1"
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-2.5 outline-none focus:border-pink-500 font-medium"
-                        placeholder="Ví dụ: 1"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
+                    {/* Ghi chú thiết kế */}
+                    <div className="md:col-span-12">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Ghi chú thiết kế gia cường</label>
                       <input
                         type="text"
@@ -2277,18 +2463,91 @@ export default function MechanicalEstimator({
                         placeholder="Ví dụ: Bản mã dày 8ly khoan neo 4 lỗ..."
                       />
                     </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={handleAddItem}
-                        className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold p-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-[0.98]"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Thêm vào bảng
-                      </button>
-                    </div>
                   </div>
                 )}
+
+                {/* BÁO CÁO TỔNG HỢP KIỂM SOÁT NHANH */}
+                {(() => {
+                  const hasPreview = name.trim() !== '' || editingItemId !== null;
+                  const qtyNum = parseNum(qty) || 1;
+                  const previewTotal = (() => {
+                    if (estimatorMode === 'door') {
+                      const area = round3(parseNum(ngang) * parseNum(cao));
+                      return round3(area * parseNum(unitPrice) * qtyNum);
+                    }
+                    if (pricingMethod === 'quick') {
+                      return round3(parseNum(weightKg) * parseNum(unitPricePerKg) * qtyNum);
+                    }
+                    // Bốc tách thép — dùng đúng logic dự toán chi tiết
+                    return calculateItemPrice({
+                      pricingMethod: 'detail',
+                      qty: qtyNum,
+                      steelTons: parseNum(steelTons),
+                      steelPricePerTon: parseNum(steelPricePerTon),
+                      zincCoatLiters: parseNum(zincCoatLiters),
+                      zincCoatPricePerLiter: parseNum(zincCoatPricePerLiter),
+                      weldingRodBoxes: parseNum(weldingRodBoxes),
+                      weldingRodPricePerBox: parseNum(weldingRodPricePerBox),
+                      directWelderLabor: parseNum(directWelderLabor),
+                    }, config);
+                  })();
+                  const fmt = (n: number) => Number(n) % 1 === 0 ? n.toLocaleString('vi-VN') : n.toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+                  const areaVal = estimatorMode === 'door' ? round3(parseNum(ngang) * parseNum(cao)) : 0;
+
+                  return (
+                    <div className="bg-white border border-pink-500/30 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 animate-scale-up text-left shadow-lg">
+                      <div className="space-y-1 text-center md:text-left min-w-0">
+                        <div className="text-[10px] uppercase font-black tracking-widest text-slate-400">
+                          BÁO CÁO TỔNG HỢP KIỂM SOÁT NHANH
+                        </div>
+                        {hasPreview ? (
+                          <>
+                            <div className="text-xs text-slate-200 leading-relaxed truncate">
+                              Đang soạn: <span className="font-extrabold text-pink-400">{name.trim()}</span>
+                              {sign.trim() && <span className="text-slate-400"> (Ký hiệu: <span className="font-bold text-slate-300">{sign.trim()}</span>)</span>}
+                            </div>
+                            {estimatorMode === 'door' ? (
+                              <div className="text-[11px] text-slate-400 font-medium space-y-0.5">
+                                {quyCach.trim() && <div className="truncate">📐 Quy cách: <span className="text-slate-300">{quyCach.trim()}</span></div>}
+                                <div>
+                                  Kích thước: <span className="font-bold font-mono text-slate-200">{ngang || 0}m x {cao || 0}m</span> = <span className="font-bold font-mono text-slate-200">{areaVal} m2</span> — Đơn giá: <span className="font-bold font-mono text-emerald-400">{fmt(parseNum(unitPrice))} đ/m2</span> x <span className="font-bold font-mono text-slate-200">{qtyNum}</span>
+                                </div>
+                              </div>
+                            ) : pricingMethod === 'quick' ? (
+                              <div className="text-[11px] text-slate-400 font-medium">
+                                {groupNames[group] || group} — Định mức: <span className="font-bold font-mono text-slate-200">{fmt(parseNum(weightKg))} kg</span> x <span className="font-bold font-mono text-emerald-400">{fmt(parseNum(unitPricePerKg))} đ/kg</span> x <span className="font-bold font-mono text-slate-200">{qtyNum}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-slate-400 font-medium">
+                                {groupNames[group] || group} — Thép <span className="font-bold font-mono text-slate-200">{fmt(parseNum(steelTons))} tấn</span> + phụ trợ, số lượng <span className="font-bold font-mono text-slate-200">{qtyNum}</span>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-xs text-slate-500 italic">Nhập thông tin hạng mục để xem trước nội dung sản phẩm và tổng khối lượng sơ bộ...</div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto shrink-0">
+                        <div className="text-center sm:text-right">
+                          <div className="text-[9px] uppercase font-bold tracking-widest text-slate-400">TỔNG KHỐI LƯỢNG SƠ BỘ</div>
+                          <div className="text-lg font-black font-mono text-emerald-400 tracking-tight">
+                            {fmt(previewTotal)} <span className="text-xs font-normal text-slate-500">đ</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleAddItem}
+                          className={`w-full sm:w-auto ${editingItemId ? 'bg-amber-600 hover:bg-amber-500' : 'bg-pink-600 hover:bg-pink-500'} text-white font-bold px-6 py-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-[0.98]`}
+                        >
+                          <Plus className="w-4 h-4" />
+                          {editingItemId ? 'Cập nhật dòng hạng mục' : 'Thêm vào bảng'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <div className="p-4 mb-4 bg-slate-950/45 border border-dashed border-slate-800 text-slate-400 rounded-xl text-center text-xs font-semibold">
@@ -2320,21 +2579,33 @@ export default function MechanicalEstimator({
                   ) : (
                     quoteItems.map((item, idx) => {
                       const isDoor = item.estimatorMode === 'door' || (!item.estimatorMode && item.ngang && item.cao);
+                      const qtyStr = Number(item.qty) % 1 === 0 ? item.qty : Number(item.qty).toFixed(3);
+                      const uPriceStr = Number(item.unitPrice || 0) % 1 === 0 ? (item.unitPrice || 0).toLocaleString('vi-VN') : Number(item.unitPrice || 0).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+                      const totalStr = Number(item.totalPrice || 0) % 1 === 0 ? (item.totalPrice || 0).toLocaleString('vi-VN') : Number(item.totalPrice || 0).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
                       return (
-                        <tr key={item.id} className="border-b border-slate-850 hover:bg-slate-950/40 transition-colors">
+                        <tr
+                          key={item.id}
+                          className={`border-b border-slate-850 transition-colors ${editingItemId === item.id ? 'bg-pink-950/30 hover:bg-pink-950/40' : 'hover:bg-slate-950/40'}`}
+                        >
                           <td className="px-3 py-2.5 text-center font-mono text-slate-400">
-                            {isDoor ? (item.sign || `C${idx + 1}`) : `STT ${idx + 1}`}
+                            {editingItemId === item.id && <span className="text-amber-400">✏️</span>} {isDoor ? (item.sign || `C${idx + 1}`) : `STT ${idx + 1}`}
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="font-semibold text-slate-100">{item.name}</div>
                             {isDoor ? (
-                              <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
-                                <div>• Hệ nhôm: <strong className="text-slate-300">{item.he || 'Tiêu chuẩn'}</strong> | Màu sắc: <strong className="text-slate-300">{item.mauSac || 'Tự chọn'}</strong></div>
-                                <div>• Loại kính: <strong className="text-slate-300">{item.kinh || 'Kính Temper 8mm'}</strong> | Phụ kiện: <strong className="text-slate-300">{item.phuKien || 'Đồng bộ'}</strong></div>
+                              <div className="text-[10px] text-slate-400 mt-1">
+                                {item.quyCach ? (
+                                  <div className="whitespace-pre-line leading-relaxed">📐 Quy cách: <span className="text-slate-300">{item.quyCach}</span></div>
+                                ) : (
+                                  <div className="space-y-0.5">
+                                    <div>• Hệ nhôm: <strong className="text-slate-300">{item.he || 'Tiêu chuẩn'}</strong> | Màu sắc: <strong className="text-slate-300">{item.mauSac || 'Tự chọn'}</strong></div>
+                                    <div>• Loại kính: <strong className="text-slate-300">{item.kinh || 'Kính Temper 8mm'}</strong> | Phụ kiện: <strong className="text-slate-300">{item.phuKien || 'Đồng bộ'}</strong></div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div className="text-[10px] text-slate-400 mt-1">
-                                {groupNames[item.group]} | 
+                                {groupNames[item.group]} |
                                 {item.pricingMethod === 'quick' ? (
                                   <span>Định mức: {item.weightKg} kg x {item.unitPricePerKg?.toLocaleString('vi-VN')} đ/kg</span>
                                 ) : (
@@ -2358,7 +2629,7 @@ export default function MechanicalEstimator({
                           </td>
                           <td className="px-3 py-2.5 text-center font-mono text-slate-300">
                             {isDoor && item.ngang && item.cao ? (
-                              <span>{item.ngang.toFixed(3)}m x {item.cao.toFixed(3)}m<br/><span className="text-[10px] text-slate-500">({(item.ngang * item.cao).toFixed(3)} m2)</span></span>
+                              <span>{Number(item.ngang).toFixed(3)}m x {Number(item.cao).toFixed(3)}m<br/><span className="text-[10px] text-slate-500">({(Number(item.ngang) * Number(item.cao)).toFixed(3)} m2)</span></span>
                             ) : (
                               <span className="text-slate-500 italic">-</span>
                             )}
@@ -2366,28 +2637,38 @@ export default function MechanicalEstimator({
                           <td className="px-3 py-2.5 text-center text-slate-300 font-bold">
                             {item.unit || (isDoor ? 'Bộ' : 'Hạng mục')}
                           </td>
-                          <td className="px-3 py-2.5 text-center font-bold text-slate-100">
-                            {item.qty}
+                          <td className="px-3 py-2.5 text-center font-bold text-slate-100 font-mono">
+                            {qtyStr}
                           </td>
                           <td className="px-3 py-2.5 text-right font-mono text-slate-200">
                             {isDoor ? (
-                              <span>{(item.unitPrice || 0).toLocaleString('vi-VN')} đ/m2</span>
+                              <span>{uPriceStr} đ/m2</span>
                             ) : (
                               <span>{(item.pricingMethod === 'quick' ? (item.weightKg * item.unitPricePerKg) : (item.totalPrice / (item.qty || 1))).toLocaleString('vi-VN')} đ</span>
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-right font-extrabold text-emerald-400 font-mono">
-                            {(item.totalPrice).toLocaleString('vi-VN')} đ
+                            {totalStr} đ
                           </td>
                           <td className="px-3 py-2.5 text-center">
-                            <button
-                              disabled={isLockedVal}
-                              onClick={() => !isLockedVal && handleRemoveItem(item.id)}
-                              className="text-rose-500 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer p-1 transition-colors"
-                              title={isLockedVal ? "Hồ sơ đã khóa" : "Xóa dòng này"}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                disabled={isLockedVal}
+                                onClick={() => !isLockedVal && handleEditItem(item)}
+                                className="text-sky-400 hover:text-sky-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer p-1 rounded hover:bg-slate-800 transition-colors"
+                                title={isLockedVal ? "Hồ sơ đã khóa" : "Sửa dòng này"}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                disabled={isLockedVal}
+                                onClick={() => !isLockedVal && handleRemoveItem(item.id)}
+                                className="text-rose-500 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer p-1 rounded hover:bg-slate-800 transition-colors"
+                                title={isLockedVal ? "Hồ sơ đã khóa" : "Xóa dòng này"}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

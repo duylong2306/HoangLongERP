@@ -3,7 +3,8 @@ import { Quote, Customer, Project, QuoteItem, QuoteConfig, ArchivedQuote } from 
 import { dbService } from '../lib/dbService';
 import {
   useNotification,
-  loadHrmRoleGroups
+  loadHrmRoleGroups,
+  isUserInRoleGroup
 } from '../context';
 import {
   Calculator,
@@ -1581,8 +1582,11 @@ export default function QuotationSystem({
 
                           <div className="space-y-1">
                             {(() => {
-                              const userFilteredList = archivedCabinetQuotesList.filter(q => q.creatorId === currentUser?.id);
-                              const matches = userFilteredList.filter(q => 
+                              // Người có quyền quotes (admin/office/technical) xem được toàn bộ hồ sơ,
+                              // người khác chỉ xem hồ sơ do mình tạo
+                              const canViewAllArchives = canView || isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical');
+                              const userFilteredList = canViewAllArchives ? archivedCabinetQuotesList : archivedCabinetQuotesList.filter(q => q.creatorId === currentUser?.id);
+                              const matches = userFilteredList.filter(q =>
                                 (q.customerName || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
                                 (q.customerPhone || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
                                 (q.code || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
@@ -2952,8 +2956,11 @@ export default function QuotationSystem({
 
                           <div className="space-y-1">
                             {(() => {
-                              const userFilteredList = archivedMechanicalQuotesList.filter(q => q.creatorId === currentUser?.id);
-                              const matches = userFilteredList.filter(q => 
+                              // Người có quyền quotes (admin/office/technical) xem được toàn bộ hồ sơ,
+                              // người khác chỉ xem hồ sơ do mình tạo
+                              const canViewAllArchives = canView || isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical');
+                              const userFilteredList = canViewAllArchives ? archivedMechanicalQuotesList : archivedMechanicalQuotesList.filter(q => q.creatorId === currentUser?.id);
+                              const matches = userFilteredList.filter(q =>
                                 (q.customerName || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||
                                 (q.customerPhone || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||
                                 (q.code || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||

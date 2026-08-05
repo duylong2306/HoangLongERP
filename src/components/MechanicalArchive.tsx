@@ -104,7 +104,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
           addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo giá đã được gửi lên Supabase.', type: 'success' });
         } else {
           setQuoteImagePreview(url);
-          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "quote-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Chưa có bucket "quote-images" trên Supabase. Chạy migration 025 trong SQL Editor để tạo bucket và lưu ảnh lên cloud.', type: 'warning', duration: 7000 });
         }
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' });
@@ -150,7 +150,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
         if (stored === 'supabase') {
           addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo giá đã được gửi lên Supabase.', type: 'success' });
         } else {
-          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "quote-images". Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Chưa có bucket "quote-images" trên Supabase. Chạy migration 025 trong SQL Editor để tạo bucket và lưu ảnh lên cloud.', type: 'warning', duration: 7000 });
         }
       })
       .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' }));

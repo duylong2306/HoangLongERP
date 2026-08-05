@@ -993,6 +993,11 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                             <span className="font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px] uppercase">Dự toán phôi</span>
                             <p className="m-0 text-slate-600 font-medium">Bản mã gia cường dày: {(item.weightKg || 0).toLocaleString('vi-VN')} kg phôi sắt</p>
                           </div>
+                        ) : item.quyCach ? (
+                          <div className="space-y-0.5 font-medium text-slate-800">
+                            <div className="whitespace-pre-line">📐 Quy cách: {item.quyCach}</div>
+                            {item.notes && <div className="text-rose-600 italic font-semibold mt-1">📍 Ghi chú: {item.notes}</div>}
+                          </div>
                         ) : (
                           <div className="space-y-0.5 font-medium text-slate-800">
                             {item.he && <div><span className="text-slate-400 font-bold">Hệ:</span> {item.he}</div>}
@@ -1003,25 +1008,25 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                           </div>
                         )}
                       </td>
-                      
+
                       {/* Đvt */}
                       <td className="p-3 border border-slate-200 text-center text-slate-650">
                         {item.unit || 'm²'}
                       </td>
-                      
+
                       {/* SL */}
                       <td className="p-3 border border-slate-200 text-center font-black text-slate-900">
-                        {item.qty}
+                        {Number(item.qty) % 1 === 0 ? item.qty : Number(item.qty).toFixed(3)}
                       </td>
-                      
+
                       {/* Đơn giá */}
                       <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
-                        {unitPriceVal.toLocaleString('vi-VN')}
+                        {Number(unitPriceVal) % 1 === 0 ? unitPriceVal.toLocaleString('vi-VN') : Number(unitPriceVal).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                       </td>
-                      
+
                       {/* Thành tiền */}
                       <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
-                        {totalPriceVal.toLocaleString('vi-VN')}
+                        {Number(totalPriceVal) % 1 === 0 ? totalPriceVal.toLocaleString('vi-VN') : Number(totalPriceVal).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                       </td>
                     </>
                   ) : (
@@ -1038,9 +1043,17 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                       
                       {/* Hình ảnh */}
                       <td className="p-2 border border-slate-200 text-center text-[10px] text-slate-400 italic">
-                        <span className="inline-block px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-bold border border-slate-200">
-                          Mẫu thiết kế
-                        </span>
+                        {item.images && item.images.length > 0 ? (
+                          <img
+                            src={item.images[0]}
+                            alt={item.productName}
+                            className="w-14 h-14 object-cover rounded-lg border border-slate-200 shadow-sm mx-auto"
+                          />
+                        ) : (
+                          <span className="inline-block px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-bold border border-slate-200">
+                            Mẫu thiết kế
+                          </span>
+                        )}
                       </td>
                       
                       {/* Thông số kỹ thuật */}

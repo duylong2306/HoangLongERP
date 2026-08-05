@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { useNotification } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
 import { INITIAL_PRODUCTS } from './ProductCatalogTable';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Edit, Save, Check } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Edit, Save, Check, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -616,7 +616,16 @@ export default function CabinetEstimator({
   const [searchCategoryQuery, setSearchCategoryQuery] = useState<string>('');
   const [searchProductQuery, setSearchProductQuery] = useState<string>('');
   const [customMaterial, setCustomMaterial] = useState<string>('');
-  
+
+  // Hình ảnh minh họa cho dòng sản phẩm đang soạn (BƯỚC 1)
+  const [draftProductImages, setDraftProductImages] = useState<string[]>([]);
+  const [isUploadingDraftImage, setIsUploadingDraftImage] = useState(false);
+  const draftImageInputRef = useRef<HTMLInputElement>(null);
+  // Trạng thái sửa từng dòng sản phẩm đã thêm
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<'catalog' | 'other' | null>(null);
+  const skipCategoryResetRef = useRef(false);
+
   const [isCatDropdownOpen, setIsCatDropdownOpen] = useState(false);
   const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
 
@@ -677,11 +686,32 @@ export default function CabinetEstimator({
     // Để trống toàn bộ giá trị đầu vào mặc định, không tự động chọn danh mục đầu tiên
   }, [catalogProducts]);
 
-  // Get all active linked prices for selectedProduct
-  const getProductLinkedPrices = () => {
-    if (!selectedProduct) return [];
-    return allProductPrices.filter((pr: any) => pr.productId === selectedProduct.id);
+  // Lấy các mức giá liên kết cho 1 sản phẩm (từ bảng đơn giá hoặc từ chính bản ghi sản phẩm).
+  // Fallback từ chính bản ghi sản phẩm giúp mọi người được phân quyền trong Nhóm Vai Trò
+  // đều nhìn thấy giá trị trong "Phương án giá liên kết phát hiện" dù bảng đơn giá chưa kịp đồng bộ.
+  const getPricesForProduct = (prod: any): any[] => {
+    if (!prod) return [];
+    const linked = allProductPrices.filter((pr: any) => pr.productId === prod.id);
+    if (linked.length > 0) return linked;
+    const derived: any[] = [];
+    if (prod.donGiaThaiLan != null && prod.donGiaThaiLan !== '') {
+      derived.push({ id: `PR_${prod.id}_TL`, productId: prod.id, tenGia: 'Thái Lan', donGia: Number(prod.donGiaThaiLan), ghiChu: 'Giá vật liệu gỗ Thái Lan' });
+    }
+    if (prod.donGiaAnCuong != null && prod.donGiaAnCuong !== '') {
+      derived.push({ id: `PR_${prod.id}_AC`, productId: prod.id, tenGia: 'An Cường', donGia: Number(prod.donGiaAnCuong), ghiChu: 'Giá vật liệu gỗ An Cường' });
+    }
+    if (prod.donGiaPlywood != null && prod.donGiaPlywood !== '') {
+      derived.push({ id: `PR_${prod.id}_PW`, productId: prod.id, tenGia: 'Plywood', donGia: Number(prod.donGiaPlywood), ghiChu: 'Giá vật liệu gỗ Plywood' });
+    }
+    // Sản phẩm từ bảng accounting_product_catalog chỉ có một mức giá "don_gia"
+    if (prod.donGia != null && prod.donGia !== '' && derived.length === 0) {
+      derived.push({ id: `PR_${prod.id}_NYT`, productId: prod.id, tenGia: 'Giá niêm yết', donGia: Number(prod.donGia), ghiChu: 'Đơn giá niêm yết trong danh mục' });
+    }
+    return derived;
   };
+
+  // Get all active linked prices for selectedProduct
+  const getProductLinkedPrices = () => getPricesForProduct(selectedProduct);
 
   // Get all active linked materials for selectedProduct
   const getProductLinkedMaterials = () => {
@@ -690,19 +720,25 @@ export default function CabinetEstimator({
   };
 
   useEffect(() => {
+    // Khi đang sửa một dòng, không xóa toàn bộ giá trị khi đổi danh mục
+    if (skipCategoryResetRef.current) {
+      skipCategoryResetRef.current = false;
+      return;
+    }
     // Không tự chọn sản phẩm đầu tiên khi đổi danh mục để trống các ô nhập liệu theo yêu cầu
     setSelectedProduct(null);
     setCustomMaterial('');
     setChosenPrice('');
     setSelectedMaterialOption('');
     setSelectedPriceOption('');
+    setDraftProductImages([]);
   }, [selectedCategory, catalogProducts]);
 
   const handleProductSelect = (prod: any) => {
     setSelectedProduct(prod);
     setIsProdDropdownOpen(false);
 
-    const subPrices = allProductPrices.filter((pr: any) => pr.productId === prod.id);
+    const subPrices = getPricesForProduct(prod);
 
     if (subPrices.length > 0) {
       setSelectedPriceOption(subPrices[0].tenGia);
@@ -728,7 +764,8 @@ export default function CabinetEstimator({
     if (!selectedProduct) return;
     if (option === 'Tự chọn') return;
 
-    const match = allProductPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
+    // Dùng cùng nguồn hiển thị với danh sách phương án để mọi người được phân quyền đều thấy giá
+    const match = getPricesForProduct(selectedProduct).find((pr: any) => pr.tenGia === option);
     if (match) {
       setChosenPrice(match.donGia);
     }
@@ -740,35 +777,68 @@ export default function CabinetEstimator({
     setCustomMaterial(option);
   };
 
+  // Chuẩn hóa số lượng nhập vào: cho phép số thập phân, làm tròn 3 chữ số
+  const normalizeQty = (raw: number | string | undefined): number => {
+    if (raw === undefined || raw === null || raw === '') return 0;
+    const num = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/,/g, '.'));
+    if (isNaN(num)) return 0;
+    return Math.round(num * 1000) / 1000;
+  };
+
   const handleAddProductToQuote = () => {
     if (!selectedProduct) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn sản phẩm trước!', type: 'warning' });
       return;
     }
-    
-    const specQty = typeof productQty === 'number' ? productQty : parseInt(productQty as any) || 1;
-    const specPrice = typeof chosenPrice === 'number' ? chosenPrice : parseInt(chosenPrice as any) || 0;
 
-    const newItem: QuoteItem = {
-      id: `qi_prod_${Date.now()}`,
-      productGroup: 'custom',
-      productName: selectedProduct.tenSanPham,
-      qty: specQty,
-      material: customMaterial,
-      unit: selectedProduct.donVi || 'Chiếc',
-      unitPrice: specPrice,
-      pricingMethod: 'quick',
-      totalPrice: specQty * specPrice
-    };
-    
-    setQuoteItems(prev => [...prev, newItem]);
-    setProductQty('');
-    
-    setFeedback({
-      message: `Đã thêm sản phẩm "${selectedProduct.tenSanPham}" vào báo giá thành công!`,
-      type: 'success'
-    });
+    const specQty = normalizeQty(productQty) || 1;
+    const specPrice = typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0;
+    const specImages = draftProductImages.length > 0 ? draftProductImages : undefined;
+
+    if (editingItemId) {
+      // ── CẬP NHẬT DÒNG ĐANG SỬA ──
+      setQuoteItems(prev => prev.map(item => item.id === editingItemId ? {
+        ...item,
+        productName: selectedProduct.tenSanPham,
+        qty: specQty,
+        material: customMaterial,
+        unit: selectedProduct.donVi || item.unit || 'Chiếc',
+        unitPrice: specPrice,
+        totalPrice: specQty * specPrice,
+        images: specImages,
+      } : item));
+      setFeedback({
+        message: `Đã cập nhật dòng "${selectedProduct.tenSanPham}" trong báo giá thành công!`,
+        type: 'success'
+      });
+    } else {
+      // ── THÊM MỚI ──
+      const newItem: QuoteItem = {
+        id: `qi_prod_${Date.now()}`,
+        productGroup: 'custom',
+        productName: selectedProduct.tenSanPham,
+        qty: specQty,
+        material: customMaterial,
+        unit: selectedProduct.donVi || 'Chiếc',
+        unitPrice: specPrice,
+        pricingMethod: 'quick',
+        totalPrice: specQty * specPrice,
+        images: specImages
+      };
+      setQuoteItems(prev => [...prev, newItem]);
+      setFeedback({
+        message: `Đã thêm sản phẩm "${selectedProduct.tenSanPham}" vào báo giá thành công!`,
+        type: 'success'
+      });
+    }
     setTimeout(() => setFeedback(null), 3000);
+
+    // Reset form
+    skipCategoryResetRef.current = false;
+    setProductQty('');
+    setDraftProductImages([]);
+    setEditingItemId(null);
+    setEditingSource(null);
   };
   // -----------------------------------------------------
 
@@ -914,32 +984,165 @@ export default function CabinetEstimator({
     setQuoteItems(quoteItems.filter(item => item.id !== id));
   };
 
+  // ── Tải ảnh minh họa cho từng dòng sản phẩm đang soạn ──
+  const handleDraftImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    e.target.value = '';
+    if (!files || files.length === 0) return;
+    const validFiles = Array.from(files).filter(file => {
+      if (!file.type.startsWith('image/')) {
+        addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+        return false;
+      }
+      if (file.size > 10 * 1024 * 1024) { // 10MB
+        addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+        return false;
+      }
+      return true;
+    });
+    if (validFiles.length === 0) return;
+
+    setIsUploadingDraftImage(true);
+    const tasks = validFiles.map(async (file) => {
+      try {
+        const { url, stored } = await dbService.uploadQuoteImage(`quote_item_${Date.now()}`, file);
+        return { url, stored };
+      } catch (err) {
+        console.warn('Upload ảnh dòng sản phẩm thất bại:', err);
+        return null;
+      }
+    });
+    Promise.allSettled(tasks).then((results) => {
+      const urls: string[] = [];
+      let anyLocal = false;
+      results.forEach(r => { if (r.status === 'fulfilled' && r.value) { urls.push(r.value.url); if (r.value.stored === 'local') anyLocal = true; } });
+      if (urls.length > 0) {
+        setDraftProductImages(prev => [...prev, ...urls].slice(0, 5));
+        if (anyLocal) {
+          addToast({ title: '⚠️ Lưu cục bộ', message: `Đã thêm ${urls.length} hình ảnh nhưng Supabase chưa có bucket "quote-images". Chạy migration 025 trong SQL Editor để tạo bucket và lưu ảnh lên cloud.`, type: 'warning', duration: 7000 });
+        } else {
+          addToast({ title: '✅ Đã tải ảnh', message: `Đã thêm ${urls.length} hình ảnh cho dòng sản phẩm.`, type: 'success' });
+        }
+      } else {
+        addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên, vui lòng thử lại.', type: 'error' });
+      }
+    }).finally(() => setIsUploadingDraftImage(false));
+  };
+
+  // ── SỬA TỪNG DÒNG SẢN PHẨM ĐÃ THÊM ──
+  const handleEditItem = (item: QuoteItem, source: 'catalog' | 'other') => {
+    if (isLocked) return;
+    setEditingItemId(item.id);
+    setEditingSource(source);
+    if (source === 'other') {
+      setAddMethod('other');
+      setCustomProductOtherName(item.productName);
+      setCustomProductOtherQty(item.qty);
+      setCustomProductOtherUnitPrice(item.unitPrice ?? Math.round((item.totalPrice || 0) / (item.qty || 1)));
+      setCustomProductOtherMaterial((item.material && item.material !== 'Tự chọn theo ý khách') ? item.material : '');
+      setDraftProductImages(item.images || []);
+    } else {
+      // Tìm sản phẩm trong danh mục theo tên
+      const prod = catalogProducts.find(p => p.tenSanPham === item.productName) || null;
+      setAddMethod('catalog');
+      skipCategoryResetRef.current = true;
+      setSelectedCategory(prod ? prod.danhMuc : (selectedCategory || ''));
+      setSelectedProduct(prod);
+      if (prod) {
+        const subPrices = getPricesForProduct(prod);
+        const priceMatch = subPrices.find(p => p.donGia === item.unitPrice);
+        if (priceMatch) {
+          setSelectedPriceOption(priceMatch.tenGia);
+          setChosenPrice(priceMatch.donGia);
+        } else {
+          setSelectedPriceOption('Tự chọn');
+          setChosenPrice(item.unitPrice ?? 0);
+        }
+        setCustomMaterial(item.material || prod.chatLieu || '');
+        setSelectedMaterialOption(item.material || 'Tự nhập');
+      }
+      setProductQty(item.qty);
+      setDraftProductImages(item.images || []);
+    }
+    // Cuộn lên form để thấy dữ liệu đang sửa
+    const formEl = document.getElementById('cabinet-product-add-form');
+    if (formEl) formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleCancelEditItem = () => {
+    skipCategoryResetRef.current = false;
+    setEditingItemId(null);
+    setEditingSource(null);
+    setDraftProductImages([]);
+    setSelectedProduct(null);
+    setSelectedCategory('');
+    setProductQty('');
+    setCustomMaterial('');
+    setSelectedMaterialOption('');
+    setSelectedPriceOption('');
+    setChosenPrice('');
+  };
+
   const handleAddCustomOtherProduct = () => {
     if (!customProductOtherName.trim()) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập tên sản phẩm!', type: 'warning' });
       return;
     }
 
-    const newItem: any = {
-      id: `item_custom_${Date.now()}`,
-      productName: customProductOtherName.trim(),
-      productType: 'Sản phẩm khác',
-      calcMethod: 'Đơn chiếc / Khác',
-      qty: customProductOtherQty,
-      unit: 'bộ',
-      unitPrice: customProductOtherUnitPrice,
-      totalPrice: Number(customProductOtherQty) * Number(customProductOtherUnitPrice),
-      material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
-      notes: ''
-    };
+    const specQty = normalizeQty(customProductOtherQty) || 1;
+    const specPrice = typeof customProductOtherUnitPrice === 'number'
+      ? customProductOtherUnitPrice
+      : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0;
+    const specImages = draftProductImages.length > 0 ? draftProductImages : undefined;
 
-    setQuoteItems([...quoteItems, newItem]);
-    
+    if (editingItemId && editingSource === 'other') {
+      // ── CẬP NHẬT DÒNG SẢN PHẨM KHÁC ĐANG SỬA ──
+      setQuoteItems(prev => prev.map(item => item.id === editingItemId ? {
+        ...item,
+        productName: customProductOtherName.trim(),
+        qty: specQty,
+        unit: 'bộ',
+        unitPrice: specPrice,
+        totalPrice: specQty * specPrice,
+        material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
+        images: specImages,
+      } : item));
+      setFeedback({
+        message: `Đã cập nhật dòng "${customProductOtherName.trim()}" trong báo giá thành công!`,
+        type: 'success'
+      });
+    } else {
+      // ── THÊM MỚI SẢN PHẨM KHÁC ──
+      const newItem: any = {
+        id: `item_custom_${Date.now()}`,
+        productName: customProductOtherName.trim(),
+        productType: 'Sản phẩm khác',
+        calcMethod: 'Đơn chiếc / Khác',
+        qty: specQty,
+        unit: 'bộ',
+        unitPrice: specPrice,
+        totalPrice: specQty * specPrice,
+        material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
+        notes: '',
+        images: specImages
+      };
+      setQuoteItems(prev => [...prev, newItem]);
+      setFeedback({
+        message: `Đã thêm sản phẩm "${customProductOtherName.trim()}" vào báo giá thành công!`,
+        type: 'success'
+      });
+    }
+    setTimeout(() => setFeedback(null), 3000);
+
     // reset inputs
+    skipCategoryResetRef.current = false;
     setCustomProductOtherName('');
     setCustomProductOtherQty(1);
     setCustomProductOtherUnitPrice(1000000);
     setCustomProductOtherMaterial('Tự chọn theo ý khách');
+    setDraftProductImages([]);
+    setEditingItemId(null);
+    setEditingSource(null);
   };
 
   // Tổng cộng hóa đơn
@@ -1978,8 +2181,8 @@ export default function CabinetEstimator({
 
             {/* THÊM SẢN PHẨM FORM */}
             {!isLocked && (
-              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40">
-              
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40" id="cabinet-product-add-form">
+
               {/* Header của form */}
               <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-205 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -1987,18 +2190,34 @@ export default function CabinetEstimator({
                     <Calculator className="w-3.5 h-3.5 text-orange-600 animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-xs text-slate-900 uppercase tracking-wider">
+                    <h3 className="font-extrabold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-2">
                       Thêm sản phẩm báo giá
+                      {editingItemId && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-black text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5 normal-case tracking-normal">
+                          <Edit className="w-3 h-3" /> ĐANG SỬA DÒNG #{quoteItems.findIndex(i => i.id === editingItemId) + 1}
+                        </span>
+                      )}
                     </h3>
-                    <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Bổ sung danh mục sản phẩm tiêu chuẩn hoặc nhập sản phẩm khác bên ngoài</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5 font-medium">
+                      {editingItemId ? 'Điều chỉnh nội dung dòng sản phẩm rồi bấm "Cập nhật" để áp dụng.' : 'Bổ sung danh mục sản phẩm tiêu chuẩn hoặc nhập sản phẩm khác bên ngoài'}
+                    </p>
                   </div>
+                  {editingItemId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditItem}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-white border border-slate-300 hover:border-slate-400 rounded-lg px-2.5 py-1.5 transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" /> Hủy sửa
+                    </button>
+                  )}
                 </div>
 
                 {/* Tab switchers in header */}
                 <div className="flex bg-slate-200/80 rounded-lg p-0.5 border border-slate-300">
                   <button
                     type="button"
-                    onClick={() => setAddMethod('catalog')}
+                    onClick={() => { if (editingItemId && editingSource !== 'catalog') handleCancelEditItem(); setAddMethod('catalog'); }}
                     className={`px-3 py-1.5 text-[10.5px] font-bold transition-all rounded cursor-pointer flex items-center gap-1.5 ${
                       addMethod === 'catalog'
                         ? 'bg-orange-600 text-white shadow-md font-extrabold'
@@ -2009,7 +2228,7 @@ export default function CabinetEstimator({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAddMethod('other')}
+                    onClick={() => { if (editingItemId && editingSource !== 'other') handleCancelEditItem(); setAddMethod('other'); }}
                     className={`px-3 py-1.5 text-[10.5px] font-bold transition-all rounded cursor-pointer flex items-center gap-1.5 ${
                       addMethod === 'other'
                         ? 'bg-orange-600 text-white shadow-md font-extrabold'
@@ -2092,7 +2311,7 @@ export default function CabinetEstimator({
                     </div>
 
                     {/* Sản phẩm */}
-                    <div className="relative md:col-span-12 lg:col-span-5 text-left font-sans">
+                    <div className="relative md:col-span-7 text-left font-sans">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
                         Sản phẩm {isProdDropdownOpen ? "(Đang tìm)" : ""}
@@ -2152,30 +2371,104 @@ export default function CabinetEstimator({
                       )}
                     </div>
 
-                    {/* Đơn vị vị tính & Định lượng */}
-                    <div className="md:col-span-2 grid grid-cols-2 gap-2 text-left">
-                      <div>
-                        <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate">
-                          Đơn Vị
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={selectedProduct ? selectedProduct.donVi : "---"}
-                          className="w-full bg-slate-50 text-slate-500 border border-slate-200 rounded-xl p-3 text-xs font-bold text-center outline-none select-none cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate">
-                          Số lượng
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={productQty}
-                          onChange={(e) => setProductQty(e.target.value)}
-                          className="w-full bg-white text-slate-905 border border-slate-200 rounded-xl p-3 text-xs font-bold font-mono outline-none focus:border-orange-500 text-center"
-                        />
+                    {/* Đơn vị tính */}
+                    <div className="md:col-span-2 text-left">
+                      <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate">
+                        Đơn Vị
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={selectedProduct ? selectedProduct.donVi : "---"}
+                        className="w-full bg-slate-50 text-slate-500 border border-slate-200 rounded-xl p-3 text-xs font-bold text-center outline-none select-none cursor-not-allowed"
+                      />
+                    </div>
+
+                    {/* Số lượng */}
+                    <div className="md:col-span-2 text-left">
+                      <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate" title="Cho phép nhập số thập phân, làm tròn 3 chữ số">
+                        Số lượng
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.001"
+                        inputMode="decimal"
+                        value={productQty}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '.');
+                          const num = parseFloat(raw);
+                          setProductQty(isNaN(num) ? raw : Math.round(num * 1000) / 1000);
+                        }}
+                        className="w-full bg-white text-slate-905 border border-slate-200 rounded-xl p-3 text-xs font-bold font-mono outline-none focus:border-orange-500 text-center"
+                        placeholder="VD: 3,555"
+                      />
+                    </div>
+
+                    {/* Hình ảnh minh họa cho dòng sản phẩm */}
+                    <div className="md:col-span-8">
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+                            <label className="text-slate-600 font-bold uppercase tracking-wider text-[9px]">
+                              Hình ảnh minh họa dòng sản phẩm (tối đa 5 ảnh)
+                            </label>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => draftImageInputRef.current?.click()}
+                            disabled={isUploadingDraftImage || draftProductImages.length >= 5}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                          >
+                            <Upload className="w-3 h-3" />
+                            {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                          </button>
+                          <input
+                            ref={draftImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handleDraftImageUpload}
+                            className="hidden"
+                          />
+                        </div>
+                        {draftProductImages.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {draftProductImages.map((img, i) => (
+                              <div key={i} className="relative group">
+                                <img
+                                  src={img}
+                                  alt={`Ảnh dòng sản phẩm ${i + 1}`}
+                                  className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setDraftProductImages(prev => prev.filter((_, idx) => idx !== i))}
+                                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                                  title="Gỡ ảnh"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                            {draftProductImages.length < 5 && (
+                              <button
+                                type="button"
+                                onClick={() => draftImageInputRef.current?.click()}
+                                className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-400 cursor-pointer"
+                                title="Thêm ảnh"
+                              >
+                                <Plus className="w-4 h-4" />
+                                <span className="text-[8px] font-bold">Thêm</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-400 italic">
+                            💡 Hình ảnh này sẽ hiển thị trên từng dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2361,25 +2654,25 @@ export default function CabinetEstimator({
                         Đang soạn: <span className="font-extrabold text-orange-600">{selectedProduct.tenSanPham}</span> ({selectedProduct.id})
                       </div>
                       <div className="text-[11px] text-slate-600 font-medium font-sans">
-                        Phương án: <span className="font-bold text-slate-800">{selectedPriceOption}</span> — Đơn giá: <span className="font-extrabold font-mono text-slate-900">{(typeof chosenPrice === 'number' ? chosenPrice : parseInt(chosenPrice) || 0).toLocaleString('vi-VN')} đ/{selectedProduct.donVi}</span> x <span className="font-extrabold font-mono text-slate-900">{productQty || 0}</span>
+                        Phương án: <span className="font-bold text-slate-800">{selectedPriceOption}</span> — Đơn giá: <span className="font-extrabold font-mono text-slate-900">{(typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0).toLocaleString('vi-VN')} đ/{selectedProduct.donVi}</span> x <span className="font-extrabold font-mono text-slate-900">{productQty || 0}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
                       <div className="text-center sm:text-right">
                         <div className="text-[9px] uppercase font-bold tracking-widest text-slate-500">TỔNG KHỐI LƯỢNG SƠ BỘ</div>
                         <div className="text-lg font-black font-mono text-orange-600 tracking-tight">
-                          {((typeof chosenPrice === 'number' ? chosenPrice : parseInt(chosenPrice) || 0) * (typeof productQty === 'number' ? productQty : parseInt(productQty) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
+                          {(normalizeQty(productQty) * (typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
                         </div>
                       </div>
-                      
+
                       <button
                         type="button"
                         onClick={handleAddProductToQuote}
                         className="w-full sm:w-auto bg-orange-600 hover:bg-orange-550 active:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg hover:shadow-orange-700/20"
                       >
                         <Plus className="w-4 h-4 shrink-0" />
-                        Thêm sản phẩm
+                        {editingItemId ? 'Cập nhật dòng' : 'Thêm sản phẩm'}
                       </button>
                     </div>
                   </div>
@@ -2429,10 +2722,17 @@ export default function CabinetEstimator({
                       </label>
                       <input
                         type="number"
-                        min="1"
+                        min="0"
+                        step="0.001"
+                        inputMode="decimal"
                         value={customProductOtherQty}
-                        onChange={(e) => setCustomProductOtherQty(e.target.value)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '.');
+                          const num = parseFloat(raw);
+                          setCustomProductOtherQty(isNaN(num) ? raw : Math.round(num * 1000) / 1000);
+                        }}
                         className="w-full bg-white text-slate-950 border border-slate-200 rounded-xl p-3 text-xs focus:border-orange-500 outline-none font-bold font-mono transition-all text-center"
+                        placeholder="VD: 2,342"
                       />
                     </div>
 
@@ -2452,6 +2752,67 @@ export default function CabinetEstimator({
                     </div>
                   </div>
 
+                  {/* Hình ảnh minh họa dòng sản phẩm */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+                        <label className="text-slate-600 font-bold uppercase tracking-wider text-[9px]">
+                          Hình ảnh minh họa dòng sản phẩm (tối đa 5 ảnh)
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => draftImageInputRef.current?.click()}
+                        disabled={isUploadingDraftImage || draftProductImages.length >= 5}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                      >
+                        <Upload className="w-3 h-3" />
+                        {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                      </button>
+                      <input
+                        ref={draftImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleDraftImageUpload}
+                        className="hidden"
+                      />
+                    </div>
+                    {draftProductImages.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {draftProductImages.map((img, i) => (
+                          <div key={i} className="relative group">
+                            <img src={img} alt={`Ảnh dòng sản phẩm ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm" />
+                            <button
+                              type="button"
+                              onClick={() => setDraftProductImages(prev => prev.filter((_, idx) => idx !== i))}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                              title="Gỡ ảnh"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                        {draftProductImages.length < 5 && (
+                          <button
+                            type="button"
+                            onClick={() => draftImageInputRef.current?.click()}
+                            className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-400 cursor-pointer"
+                            title="Thêm ảnh"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span className="text-[8px] font-bold">Thêm</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        💡 Hình ảnh này sẽ hiển thị trên từng dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
+                      </div>
+                    )}
+                  </div>
+
                   {/* Summary row */}
                   <div className="bg-orange-50 border border-orange-200/60 rounded-2xl p-4.5 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="space-y-1 text-center md:text-left">
@@ -2462,25 +2823,25 @@ export default function CabinetEstimator({
                         Chất liệu: <span className="font-extrabold text-slate-600">{customProductOtherMaterial || 'Tự chọn theo ý khách'}</span>
                       </div>
                       <div className="text-[11px] text-slate-600 font-medium">
-                        Tổng tạm tính: <span className="font-extrabold font-mono text-slate-900">{(typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseInt(customProductOtherUnitPrice) || 0).toLocaleString('vi-VN')} đ</span> x <span className="font-extrabold font-mono text-slate-900">{customProductOtherQty || 0}</span>
+                        Tổng tạm tính: <span className="font-extrabold font-mono text-slate-900">{(typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0).toLocaleString('vi-VN')} đ</span> x <span className="font-extrabold font-mono text-slate-900">{customProductOtherQty || 0}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
                       <div className="text-center sm:text-right">
                         <div className="text-[9px] uppercase font-bold tracking-widest text-slate-500">TỔNG KHỐI LƯỢNG SƠ BỘ</div>
                         <div className="text-lg font-black font-mono text-orange-600 tracking-tight">
-                          {((typeof customProductOtherQty === 'number' ? customProductOtherQty : parseInt(customProductOtherQty) || 0) * (typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseInt(customProductOtherUnitPrice) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
+                          {(normalizeQty(customProductOtherQty) * (typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
                         </div>
                       </div>
-                      
+
                       <button
                         type="button"
                         onClick={handleAddCustomOtherProduct}
                         className="w-full sm:w-auto bg-orange-600 hover:bg-orange-550 active:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg hover:shadow-orange-700/20"
                       >
                         <Plus className="w-4 h-4 shrink-0" />
-                        Thêm sản phẩm
+                        {editingItemId && editingSource === 'other' ? 'Cập nhật dòng' : 'Thêm sản phẩm'}
                       </button>
                     </div>
                   </div>
@@ -2496,18 +2857,19 @@ export default function CabinetEstimator({
                   <tr>
                     <th className="px-3 py-2.5 text-center w-12 text-slate-700">STT</th>
                     <th className="px-3 py-2 text-slate-700">Tên sản phẩm</th>
+                    <th className="px-3 py-2 text-center w-20 text-slate-700">Hình ảnh</th>
                     <th className="px-3 py-2 text-slate-700">Chất liệu</th>
                     <th className="px-3 py-2 text-center text-slate-700">Số lượng</th>
                     <th className="px-3 py-2 text-center text-slate-700">Đơn vị</th>
                     <th className="px-3 py-2 text-right text-slate-700">Đơn giá</th>
                     <th className="px-3 py-2 text-right text-slate-700">Thành tiền</th>
-                    <th className="px-3 py-2 text-center w-10"></th>
+                    <th className="px-3 py-2 text-center w-20"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {quoteItems.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-slate-400 font-medium italic">
+                      <td colSpan={9} className="text-center py-8 text-slate-400 font-medium italic">
                         Chưa có sản phẩm nào trong báo giá này. Hãy chọn và thêm từ khung phía trên.
                       </td>
                     </tr>
@@ -2516,30 +2878,68 @@ export default function CabinetEstimator({
                       const unitVal = item.unit || 'm';
                       const defaultMat = item.material || 'Gỗ MDF An Cường chống ẩm';
                       const uPrice = item.unitPrice || 0;
+                      const itemImages = item.images || [];
                       return (
-                        <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                          <td className="px-3 py-2.5 text-center text-slate-500 font-semibold">{idx + 1}</td>
+                        <tr
+                          key={item.id}
+                          className={`border-b border-slate-100 transition-colors ${editingItemId === item.id ? 'bg-amber-50/70 hover:bg-amber-50' : 'hover:bg-slate-50'}`}
+                        >
+                          <td className="px-3 py-2.5 text-center text-slate-500 font-semibold">
+                            {editingItemId === item.id && <span className="text-amber-600">✏️</span>} {idx + 1}
+                          </td>
                           <td className="px-3 py-2.5">
                             <div className="font-semibold text-slate-900">{item.productName}</div>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {itemImages.length > 0 ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <img
+                                  src={itemImages[0]}
+                                  alt={item.productName}
+                                  className="w-11 h-11 object-cover rounded-lg border border-slate-200 shadow-sm"
+                                />
+                                {itemImages.length > 1 && (
+                                  <span className="bg-orange-600 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-white">
+                                    {itemImages.length}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 rounded text-slate-400 font-bold border border-slate-200 text-[9px]">
+                                Chưa có
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-slate-600 max-w-[200px] truncate" title={defaultMat}>
                             {defaultMat}
                           </td>
-                          <td className="px-3 py-2.5 text-center font-bold text-slate-900">{item.qty}</td>
+                          <td className="px-3 py-2.5 text-center font-bold text-slate-900 font-mono">{item.qty}</td>
                           <td className="px-3 py-2.5 text-center text-slate-500">{unitVal}</td>
                           <td className="px-3 py-2.5 text-right text-slate-600 font-mono">{(uPrice).toLocaleString('vi-VN')} đ</td>
                           <td className="px-3 py-2.5 text-right font-extrabold text-emerald-600 font-mono">{(item.totalPrice).toLocaleString('vi-VN')} đ</td>
                           <td className="px-3 py-2.5 text-center">
-                            <button
-                              onClick={() => !isLocked && handleRemoveItem(item.id)}
-                              disabled={isLocked}
-                              className={`text-rose-500 hover:text-rose-600 p-1 transition-colors ${
-                                isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
-                              }`}
-                              title={isLocked ? 'Không thể xóa khi hồ sơ đang bị khóa' : 'Xóa dòng này'}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => !isLocked && handleEditItem(item, (item as any).productType === 'Sản phẩm khác' ? 'other' : 'catalog')}
+                                disabled={isLocked}
+                                className={`text-sky-600 hover:text-sky-700 hover:bg-sky-50 p-1 rounded transition-colors ${
+                                  isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
+                                }`}
+                                title={isLocked ? 'Không thể sửa khi hồ sơ đang bị khóa' : 'Sửa dòng này'}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => !isLocked && handleRemoveItem(item.id)}
+                                disabled={isLocked}
+                                className={`text-rose-500 hover:text-rose-600 hover:bg-rose-50 p-1 rounded transition-colors ${
+                                  isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
+                                }`}
+                                title={isLocked ? 'Không thể xóa khi hồ sơ đang bị khóa' : 'Xóa dòng này'}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
