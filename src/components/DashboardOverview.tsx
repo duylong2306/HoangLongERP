@@ -1282,7 +1282,10 @@ export default function DashboardOverview({
   }, [showPunchModal]);
 
   const captureSelfieFromStream = (): string => {
-    if (videoRef.current && cameraStream) {
+    // Chỉ chụp khi camera thật đang chạy VÀ đã có frame (readyState >= 2 = HAVE_CURRENT_DATA).
+    // KHÔNG bao giờ trả về ảnh mẫu/ảnh giả — mọi ảnh lưu lên Supabase phải là ảnh
+    // người dùng chụp trực tiếp lúc điểm danh.
+    if (videoRef.current && cameraStream && videoRef.current.readyState >= 2) {
       try {
         const canvas = document.createElement('canvas');
         canvas.width = 300;
@@ -1293,23 +1296,10 @@ export default function DashboardOverview({
           return canvas.toDataURL('image/jpeg', 0.85);
         }
       } catch (e) {
-        console.error("Webcam capture error fallback to profile", e);
+        console.error("Webcam capture error", e);
       }
     }
-    
-    // Customized placeholder based on current user
-    if (currentUser.name?.toLowerCase().includes('long')) {
-      return 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?w=150&auto=format&fit=crop&q=80';
-    } else if (currentUser.name?.toLowerCase().includes('ngọc')) {
-      return currentUser.gender === 'Nữ' 
-        ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80'
-        : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80';
-    } else if (currentUser.name?.toLowerCase().includes('tiến')) {
-      return 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80';
-    } else if (currentUser.name?.toLowerCase().includes('ny')) {
-      return 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80';
-    }
-    return 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+    return '';
   };
 
   // Confirm Punching slot
@@ -1408,6 +1398,22 @@ export default function DashboardOverview({
         addToast({ title: '⚠️ Chưa chấm vào ca', message: `Bạn chưa chấm [${slotLabelMap[inSlot] || inSlot.toUpperCase()}] (vào ca). Vui lòng chấm vào ca trước khi chấm ra ca.`, type: 'warning' });
         return;
       }
+    }
+
+    // ─── GUARD 5: BẮT BUỘC có ảnh FaceID THẬT (chụp trực tiếp lúc điểm danh) ───
+    // Camera lỗi / chưa có frame → KHÔNG ghi nhận lượt chấm. Không bao giờ thay
+    // thế bằng ảnh mẫu/ảnh giả (nguồn gốc ảnh "AI sinh ra" trước đây).
+    if (!selfPhoto) {
+      stopCameraStream();
+      setShowPunchModal(false);
+      setActivePunchSlot(null);
+      addToast({
+        title: '📷 Chưa có ảnh FaceID',
+        message: 'Camera chưa chụp được ảnh khuôn mặt. Vui lòng cấp quyền truy cập camera, mở lại màn hình chấm công rồi bấm CHỤP ẢNH & CHẤM CÔNG. Mọi lượt chấm công bắt buộc có ảnh chụp trực tiếp lúc điểm danh.',
+        type: 'error',
+        duration: 8000,
+      });
+      return;
     }
 
     if (!todayLog) {
@@ -3516,7 +3522,7 @@ export default function DashboardOverview({
 
             <div className="p-5 space-y-4">
               
-              {/* CAMERA FEED OR SIMULATOR */}
+              {/* CAMERA FEED (hoặc cảnh báo khi camera không hoạt động) */}
               <div className="relative rounded-xl border border-slate-750 bg-black overflow-hidden h-48 flex flex-col items-center justify-center">
                 {webcamActive && !webcamError ? (
                   <>
@@ -3534,16 +3540,25 @@ export default function DashboardOverview({
                     </span>
                   </>
                 ) : (
-                  // Animated fall-back simulator
+                  // Camera lỗi/không có → cảnh báo rõ ràng (KHÔNG giả lập ảnh AI)
                   <div className="text-center p-5 space-y-3 w-full h-full flex flex-col justify-center items-center bg-gradient-to-b from-slate-950 to-slate-900 border border-slate-850">
                     <div className="relative">
-                      <Fingerprint className="w-16 h-16 text-sky-400 animate-pulse mx-auto" />
-                      <div className="absolute inset-0 border-2 border-sky-400/20 rounded-full animate-ping scale-125"></div>
+                      <AlertCircle className="w-14 h-14 text-rose-400 mx-auto" />
                     </div>
                     <div>
-                      <p className="text-xs text-slate-300 font-black">QUÉT SINH TRẮC HỌC HOÀNG LONG ERP</p>
-                      <p className="text-[10px] text-slate-500 mt-1">Đang giả lập nhận dạng khuôn mặt bằng AI 3D Mesh...</p>
+                      <p className="text-xs text-rose-300 font-black">KHÔNG TRUY CẬP ĐƯỢC CAMERA</p>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        Chấm công bắt buộc có ảnh khuôn mặt chụp trực tiếp lúc điểm danh.
+                        Vui lòng cấp quyền truy cập camera, mở qua HTTPS và thử lại.
+                      </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={startCameraStream}
+                      className="mt-1 bg-sky-500 hover:bg-sky-400 text-white text-[10px] py-1.5 px-3 rounded-lg font-bold cursor-pointer"
+                    >
+                      🔄 Thử lại camera
+                    </button>
                   </div>
                 )}
               </div>
@@ -3593,9 +3608,14 @@ export default function DashboardOverview({
                 <button
                   type="button"
                   onClick={handleConfirmPunch}
-                  className="flex-1 bg-sky-500 hover:bg-sky-400 text-white text-xs py-2 rounded-xl font-black text-center flex items-center justify-center gap-1.5 cursor-pointer"
+                  disabled={webcamError}
+                  className={`flex-1 text-xs py-2 rounded-xl font-black text-center flex items-center justify-center gap-1.5 ${
+                    webcamError
+                      ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                      : 'bg-sky-500 hover:bg-sky-400 text-white cursor-pointer'
+                  }`}
                 >
-                  <Camera className="w-4 h-4 text-white" />
+                  <Camera className={`w-4 h-4 ${webcamError ? 'text-slate-600' : 'text-white'}`} />
                   CHỤP ẢNH & CHẤM CÔNG
                 </button>
               </div>
