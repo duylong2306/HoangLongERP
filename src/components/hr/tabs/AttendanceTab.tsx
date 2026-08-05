@@ -3,6 +3,7 @@ import { Lock, FileSpreadsheet, FileUp, Download, Trash2, AlertTriangle, Clock, 
 import { readHrmConfigFromStorage, getAttendanceStatusText, getMissingAttendanceReport } from '../hrCalculations';
 import MissingAttendanceReport from './MissingAttendanceReport';
 import { EmployeeProfile, LeaveCoefficient, Holiday, AttendanceLog, LeaveRequest } from '../hrTypes';
+import PunchMediaList from '../PunchMediaList';
 
 type ToastInput = { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number };
 
@@ -622,61 +623,12 @@ export default function AttendanceTab({
                       <div className="text-[10px] text-slate-404 font-medium">
                         {log.method ? log.method.replace('Công trình ', '') : 'Chưa ghi nhận'}
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Photos: luôn render 2 khung VÀO/RA để cột giữ rộng đều */}
-                        <div className="flex items-center gap-1 border-r border-slate-800 pr-2 shrink-0">
-                          {log.photoIn ? (
-                            <button
-                              type="button"
-                              onClick={() => setZoomedImage(log.photoIn ?? null)}
-                              className="group relative cursor-zoom-in border border-slate-700 hover:border-amber-500 rounded p-[1px] bg-slate-950 block transition-colors"
-                              title="Ảnh check-in vào (Click phóng to)"
-                            >
-                              <img src={log.photoIn} className="w-5.5 h-5.5 rounded object-cover" alt="Vào" referrerPolicy="no-referrer" />
-                            </button>
-                          ) : (
-                            <div className="w-5.5 h-5.5 rounded bg-slate-800 border border-slate-700 flex items-center justify-center text-[7px] text-slate-500 font-bold" title="Chưa có ảnh check-in">VÀO</div>
-                          )}
-                          {log.photoOut ? (
-                            <button
-                              type="button"
-                              onClick={() => setZoomedImage(log.photoOut ?? null)}
-                              className="group relative cursor-zoom-in border border-slate-700 hover:border-amber-500 rounded p-[1px] bg-slate-950 block transition-colors"
-                              title="Ảnh check-out ra (Click phóng to)"
-                            >
-                              <img src={log.photoOut} className="w-5.5 h-5.5 rounded object-cover" alt="Ra" referrerPolicy="no-referrer" />
-                            </button>
-                          ) : (
-                            <div className="w-5.5 h-5.5 rounded bg-slate-800 border border-slate-700 flex items-center justify-center text-[7px] text-slate-500 font-bold" title="Chưa có ảnh check-out">RA</div>
-                          )}
-                        </div>
-
-                        {/* Maps Coordinates */}
-                        <div className="flex flex-col gap-0.5 justify-center">
-                          {log.coordsIn && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(log.coordsIn)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[9px] text-amber-550 hover:text-amber-400 hover:underline font-mono px-1 py-0.5 bg-amber-950/20 border border-amber-900/10 rounded inline-flex items-center gap-0.5"
-                              title={`Mở vị trí check-in Vào: ${log.locationIn || 'Không rõ'}`}
-                            >
-                              📍 Vào: {log.coordsIn?.split(',')[0]}...
-                            </a>
-                          )}
-                          {log.coordsOut && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(log.coordsOut)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[9px] text-slate-400 hover:text-white hover:underline font-mono px-1 py-0.5 bg-slate-900 border border-slate-800 rounded inline-flex items-center gap-0.5"
-                              title={`Mở vị trí check-out Ra: ${log.locationOut || 'Không rõ'}`}
-                            >
-                              📍 Ra: {log.coordsOut?.split(',')[0]}...
-                            </a>
-                          )}
-                        </div>
-                      </div>
+                      {/* Ảnh FaceID + GPS đầy đủ 6 lượt: Vào/Ra sáng, chiều, tăng ca */}
+                      <PunchMediaList
+                        log={log}
+                        onZoomImage={setZoomedImage}
+                        variant="compact"
+                      />
                     </div>
                   </td>
                   <td className="py-2.5 text-center whitespace-nowrap">
