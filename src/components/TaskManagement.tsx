@@ -8,7 +8,7 @@ import {
 import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, isUserInRoleGroup } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 
 interface TaskManagementProps {
@@ -571,9 +571,40 @@ export default function TaskManagement({
   }).length;
 
   // 2. Công việc phải duyệt chưa hoàn thành (mặc định đã là trạng thái 'reviewing' nên tương đương toReviewTasksCount)
-  const toReviewUncompletedCount = toReviewTasksCount 
-    + leaves.filter(l => l.status === 'pending').length 
-    + payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length;
+  // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt (lọc theo ID lẫn tên,
+  // tương tự logic công việc phải duyệt ở trên — vì một số đơn fallback chỉ lưu tên người duyệt)
+  const myPendingLeaves = leaves.filter(l =>
+    l.status === 'pending' &&
+    (l.approverId === currentUser?.id ||
+     l.approverName === currentUser?.name ||
+     l.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+  );
+
+  // Đề xuất TÀI CHÍNH chờ duyệt mà user hiện tại có quyền xét duyệt:
+  // (a) được CHỈ ĐỊNH làm người duyệt (approver theo ID/tên, kể cả chuỗi duyệt approvals), HOẶC
+  // (b) thuộc nhóm Kế toán (role_accounting) / Giám đốc (role_admin) → xem & duyệt toàn bộ.
+  // Đồng nhất với canApproveProposal trong FinanceManagement.
+  const isFinanceApprover = isUserInRoleGroup(currentUser?.id, 'role_accounting') || isUserInRoleGroup(currentUser?.id, 'role_admin');
+  const myPendingPayments = payments.filter(p =>
+    p.status === 'pending' &&
+    (isFinanceApprover ||
+     p.proposer === currentUser?.name ||
+     p.recipient === currentUser?.name ||
+     p.approver === currentUser?.name ||
+     (p.approver && currentUser?.name && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
+     p.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+  );
+  const myPendingAdvances = subcontractorAdvances.filter(a =>
+    a.status === 'pending_approval' &&
+    (isFinanceApprover ||
+     a.approver === currentUser?.id ||
+     (a.approverName && currentUser?.name && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
+     a.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+  );
+  const toReviewUncompletedCount = toReviewTasksCount
+    + myPendingLeaves.length
+    + myPendingPayments.length
+    + myPendingAdvances.length;
 
   // 3. Nhiệm vụ liên quan chưa hoàn thành (mission.status !== 'completed')
   const relatedUncompletedCount = tasks.reduce((count, task) =>
@@ -1175,18 +1206,18 @@ export default function TaskManagement({
                   </button>
                 )}
                 <span className="bg-pink-955 border border-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                  {leaves.filter(l => l.status === 'pending').length} chờ duyệt
+                  {myPendingLeaves.length} chờ duyệt
                 </span>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {leaves.filter(l => l.status === 'pending').length === 0 ? (
+              {myPendingLeaves.length === 0 ? (
                 <div className="text-center py-16 text-slate-500 italic text-xs">
-                  Không có đơn nghỉ phép nào chờ duyệt.
+                  Không có đơn nghỉ phép nào chờ bạn duyệt.
                 </div>
               ) : (
-                leaves.filter(l => l.status === 'pending').map(l => (
+                myPendingLeaves.map(l => (
                   <div 
                     key={l.id} 
                     className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
@@ -1257,12 +1288,12 @@ export default function TaskManagement({
                     <Trash2 className="w-3 h-3" /> Xóa bộ nhớ tạm
                   </button>
                 )}
-                {/* Count: payments + subcontractor advances pending_approval where currentUser is approver */}
+                {/* Count: payments + subcontractor advances pending_approval mà user có quyền duyệt (chỉ định hoặc thuộc Kế toán/Giám đốc) */}
                 <span className="bg-emerald-955 border border-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                   {
-                    payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length
+                    myPendingPayments.length
                     +
-                    subcontractorAdvances.filter(a => a.status === 'pending_approval').length
+                    myPendingAdvances.length
                   } chờ duyệt
                 </span>
               </div>
@@ -1271,8 +1302,8 @@ export default function TaskManagement({
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
               {/* Combine payments and subcontractor advances */}
               {(() => {
-                const pendingPayments = payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name));
-                const pendingAdvances = subcontractorAdvances.filter(a => a.status === 'pending_approval');
+                const pendingPayments = myPendingPayments;
+                const pendingAdvances = myPendingAdvances;
                 const allPending = [
                   ...pendingPayments.map(p => ({ type: 'payment' as const, data: p })),
                   ...pendingAdvances.map(a => ({ type: 'advance' as const, data: a }))

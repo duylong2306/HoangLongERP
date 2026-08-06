@@ -797,6 +797,8 @@ export interface LeaveRequest {
   createdAt: string;
   submittedAt?: string;
   approverName?: string;
+  approverId?: string;
+  approverPosition?: string;
   isAttendanceCorrection?: boolean;
   shift?: 'morning' | 'afternoon';
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config

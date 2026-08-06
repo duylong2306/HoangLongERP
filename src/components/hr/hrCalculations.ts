@@ -490,6 +490,7 @@ export function calculateSingleEmployeePayroll(
 
   return {
     bluCode,
+    workedDays: inputs.workedDays,
     baseSalary,
     performanceSalary,
     kpiScore,

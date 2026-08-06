@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Calculator, FileSpreadsheet, Download } from 'lucide-react';
 import { PayrollItem } from '../hrTypes';
 
 interface PayrollTabProps {
   payroll: PayrollItem[];
+  employees?: any[];
   payrollMonth: string;
   setPayrollMonth: (v: string) => void;
   payrollYear: string;
@@ -25,6 +26,7 @@ interface PayrollTabProps {
 
 export default function PayrollTab({
   payroll,
+  employees,
   payrollMonth,
   setPayrollMonth,
   payrollYear,
@@ -43,6 +45,43 @@ export default function PayrollTab({
   triggerDownloadPayslip,
   addToast,
 }: PayrollTabProps) {
+  const [payrollNameSearch, setPayrollNameSearch] = useState('');
+  const [showNameSuggest, setShowNameSuggest] = useState(false);
+
+  // Chuẩn hóa về chữ thường, bỏ dấu để tìm kiếm gần đúng (không phân biệt dấu/hoa thường).
+  const normStr = (s: string) =>
+    String(s || '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase();
+
+  // Lọc kết quả theo Kỳ lương (tháng/năm) VÀ theo tên nhân viên (tìm gần đúng),
+  // sau đó sắp xếp theo mã nhân viên (empId) theo thứ tự số tự nhiên.
+  const empIdNum = (id: string) => {
+    const m = String(id || '').match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+  };
+  const filteredPayroll = (payroll || [])
+    .filter((p: any) => {
+      const monthOk = p.month === `${payrollMonth}/${payrollYear}`;
+      const q = payrollNameSearch.trim();
+      const nameOk = !q || normStr(p.empName).includes(normStr(q));
+      return monthOk && nameOk;
+    })
+    .sort((a: any, b: any) => {
+      const na = empIdNum(a.empId);
+      const nb = empIdNum(b.empId);
+      if (na !== nb) return na - nb;
+      return String(a.empId).localeCompare(String(b.empId));
+    });
+
+  // Gợi ý nhân viên (từ danh sách employees) khớp gần đúng với từ khoá đang nhập.
+  const nameSuggestions = !payrollNameSearch.trim()
+    ? []
+    : (employees || [])
+        .filter((e: any) => e && normStr(e.name).includes(normStr(payrollNameSearch.trim())))
+        .slice(0, 10);
+
   return (
     <div className="space-y-4 animate-fadeIn">
       {/* TOOLBAR CONTROLS */}
@@ -78,7 +117,7 @@ export default function PayrollTab({
             <label className="block text-[9.5px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">Kỳ Tính Lương (Tháng)</label>
             <select
               value={payrollMonth}
-              onChange={(e) => setPayrollMonth(e.target.value)}
+              onChange={(e) => { setPayrollMonth(e.target.value); setPayrollPage(1); }}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
             >
               {Array.from({ length: 12 }, (_, i) => {
@@ -91,7 +130,7 @@ export default function PayrollTab({
             <label className="block text-[9.5px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">Kỳ Tính Lương (Năm)</label>
             <select
               value={payrollYear}
-              onChange={(e) => setPayrollYear(e.target.value)}
+              onChange={(e) => { setPayrollYear(e.target.value); setPayrollPage(1); }}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
             >
               <option value="2024">Năm 2024</option>
@@ -138,6 +177,34 @@ export default function PayrollTab({
               </button>
             </div>
           </div>
+
+          {/* BỘ LỌC TÊN NHÂN VIÊN */}
+          <div className="relative">
+            <label className="block text-[9.5px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">Tìm kiếm nhân viên</label>
+            <input
+              type="text"
+              value={payrollNameSearch}
+              onChange={(e) => { setPayrollNameSearch(e.target.value); setPayrollPage(1); setShowNameSuggest(true); }}
+              onFocus={() => setShowNameSuggest(true)}
+              onBlur={() => setTimeout(() => setShowNameSuggest(false), 150)}
+              placeholder="Nhập tên nhân viên (gần đúng)..."
+              className="w-full sm:w-72 px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+            />
+            {showNameSuggest && nameSuggestions.length > 0 && (
+              <ul className="absolute z-20 mt-1 w-full sm:w-72 max-h-60 overflow-auto rounded-lg border border-slate-700 bg-slate-800 shadow-lg">
+                {nameSuggestions.map((emp: any) => (
+                  <li
+                    key={emp.id || emp.name}
+                    onMouseDown={() => { setPayrollNameSearch(emp.name); setShowNameSuggest(false); setPayrollPage(1); }}
+                    className="px-3 py-2 text-sm text-slate-200 hover:bg-amber-600 hover:text-white cursor-pointer"
+                  >
+                    {emp.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
         </div>
       </div>
 
@@ -156,6 +223,7 @@ export default function PayrollTab({
             <table className="w-full text-left whitespace-nowrap border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 text-[10.5px]">
+                  <th className="pb-2 text-center w-10">STT</th>
                   <th className="pb-2">Nhân viên</th>
                   <th className="pb-2">Lương gốc</th>
                   <th className="pb-2">Công đạt</th>
@@ -172,18 +240,19 @@ export default function PayrollTab({
               </thead>
               <tbody>
                 {(() => {
-                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? payroll.length : (globalPageSize as number));
-                  const endIndex = globalPageSize === 'all' ? payroll.length : startIndex + (globalPageSize as number);
-                  const paginated = payroll.slice(startIndex, endIndex);
+                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? filteredPayroll.length : (globalPageSize as number));
+                  const endIndex = globalPageSize === 'all' ? filteredPayroll.length : startIndex + (globalPageSize as number);
+                  const paginated = filteredPayroll.slice(startIndex, endIndex);
                   if (paginated.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={12} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương hiện tại. Vui lòng click "Tính lương tự động" phía trên.</td>
+                        <td colSpan={13} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kỳ lương {payrollMonth}/{payrollYear}. Vui lòng chọn đúng kỳ lương hoặc click "Tính lương tự động" phía trên.</td>
                       </tr>
                     );
                   }
-                  return paginated.map(pay => (
+                  return paginated.map((pay, idx) => (
                     <tr key={pay.id} className="border-b border-slate-850/60 hover:bg-slate-950/30 transition-all">
+                      <td className="py-2.5 text-center text-slate-400 font-mono">{startIndex + idx + 1}</td>
                       <td className="py-2.5 font-bold text-white">
                         {pay.empName}
                         <span className="block text-[8.5px] text-slate-400 font-mono mt-0.5">{pay.empId}</span>
@@ -232,6 +301,7 @@ export default function PayrollTab({
             <table className="w-full text-left whitespace-nowrap border-collapse min-w-[2200px]">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+                  <th className="pb-2 text-center w-10">STT</th>
                   <th className="pb-2">Mã BLU</th>
                   <th className="pb-2">Nhân viên</th>
                   <th className="pb-2">Công nhật</th>
@@ -261,18 +331,19 @@ export default function PayrollTab({
               </thead>
               <tbody className="divide-y divide-slate-850/65">
                 {(() => {
-                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? payroll.length : (globalPageSize as number));
-                  const endIndex = globalPageSize === 'all' ? payroll.length : startIndex + (globalPageSize as number);
-                  const paginated = payroll.slice(startIndex, endIndex);
+                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? filteredPayroll.length : (globalPageSize as number));
+                  const endIndex = globalPageSize === 'all' ? filteredPayroll.length : startIndex + (globalPageSize as number);
+                  const paginated = filteredPayroll.slice(startIndex, endIndex);
                   if (paginated.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={25} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương mộc.</td>
+                        <td colSpan={26} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương mộc.</td>
                       </tr>
                     );
                   }
-                  return paginated.map(pay => (
+                  return paginated.map((pay, idx) => (
                     <tr key={pay.id} className="hover:bg-slate-950/40 text-[10.5px] font-mono transition-all">
+                      <td className="py-2.5 text-center text-slate-400 font-mono">{startIndex + idx + 1}</td>
                       <td className="py-2.5 text-slate-400 font-mono text-[9.5px]">{pay.bluCode}</td>
                       <td className="py-2.5 font-sans">
                         <b className="text-white block">{pay.empName}</b>
@@ -328,7 +399,7 @@ export default function PayrollTab({
 
         {/* Payroll Pagination helper */}
         {(() => {
-          const totalFiltered = payroll.length;
+          const totalFiltered = filteredPayroll.length;
           if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
           const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
           return (
@@ -358,7 +429,7 @@ export default function PayrollTab({
 
         {/* Global Row Selector inside Payroll footer */}
         <div className="flex justify-between items-center mt-3 pt-2 text-[10px] text-slate-500 border-t border-slate-850/50">
-          <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, payroll.length)} / ${payroll.length} dòng`} mỗi trang.</div>
+          <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, filteredPayroll.length)} / ${filteredPayroll.length} dòng`} mỗi trang.</div>
           <div className="flex items-center gap-1.5">
             <span>Hiển thị:</span>
             <select
