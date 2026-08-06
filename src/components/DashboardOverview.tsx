@@ -1439,7 +1439,6 @@ export default function DashboardOverview({
       const inSlot = activePunchSlot.replace('Out', 'In'); // timeOutS→timeInS, timeOutC→timeInC, timeOutOT→timeInOT
       const inFilled = todayLog && todayLog[inSlot] !== undefined &&
         todayLog[inSlot] !== '--:--' && todayLog[inSlot] !== '';
-      console.log('DEBUG: Ra ca check', { activePunchSlot, inSlot, todayLog, inFilled });
       if (!inFilled) {
         stopCameraStream();
         setShowPunchModal(false);
@@ -2094,18 +2093,6 @@ export default function DashboardOverview({
     // For checkout slots: time window must be open AND check-in must be completed
     const checkInVal = userTodayLog[s.checkInSlot];
     const checkInCompleted = checkInVal !== '--:--' && checkInVal !== '' && checkInVal !== undefined;
-
-    // DEBUG: Check visibility logic for "Ra ca" buttons
-    if (slot.toLowerCase().includes('out')) {
-      console.log('DEBUG: isSlotActive (Ra ca)', {
-        slot: slot,
-        isBetween: isBetween,
-        checkInSlot: s.checkInSlot,
-        checkInVal: checkInVal,
-        checkInCompleted: checkInCompleted,
-        userTodayLog: userTodayLog
-      });
-    }
 
     return checkInCompleted;
   };
