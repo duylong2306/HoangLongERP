@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange } from './lib/dbService';
+import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
 import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
 import {
@@ -1761,6 +1762,51 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
   }, []);
 
+  // ─── Outbox chấm công: đồng bộ TOÀN CỤC (cấp App) ─────────────────────────
+  // Quan trọng: logic outbox trước đây nằm trong DashboardOverview → CHỈ chạy khi
+  // user đang ở tab Tổng Quan. Nếu user chấm xong rồi tắt app, mở lại ở tab KHÁC
+  // (activeTab lưu trong sessionStorage), DashboardOverview không mount → outbox
+  // nằm im trong localStorage, lượt chấm chưa lên DB.
+  // Đưa sync lên cấp App (luôn mount) → đảm bảo lượt chấm trong outbox được đẩy
+  // lên DB mỗi khi app mở, bất kể user đang ở tab nào. Sau khi sync, dispatch
+  // 'hl-outbox-synced' để Dashboard (nếu đang mở) cập nhật badge/pending.
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: any = null;
+    const trySync = async () => {
+      if (cancelled) return;
+      const pendingBefore = outboxPendingCount();
+      if (pendingBefore === 0) return; // không có gì → không tốn request
+      const summary = await syncAttendanceOutbox((rec, slot) =>
+        dbService.attendance.save(rec, slot)
+      );
+      if (cancelled) return;
+      if (summary.dropped > 0) {
+        addToast({
+          title: '⚠️ Cần liên hệ Admin',
+          message: `${summary.dropped} bản ghi chấm công không thể đồng bộ sau nhiều lần thử. Vui lòng báo Admin.`,
+          type: 'error',
+          duration: 8000,
+        });
+      }
+      // Báo Dashboard cập nhật badge "chờ đồng bộ" / xóa cờ pending trên dòng.
+      window.dispatchEvent(new CustomEvent('hl-outbox-synced', { detail: summary }));
+    };
+    trySync();
+    window.addEventListener('online', trySync);
+    const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
+    document.addEventListener('visibilitychange', onVis);
+    // Thử lại định kỳ (20s) để lượt chấm nằm trong outbox (do lỗi mạng lúc 25 user
+    // cùng chấm, hoặc user tắt app rồi mở lại) vẫn được đẩy lên DB.
+    retryTimer = setInterval(() => { if (!cancelled) trySync(); }, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(retryTimer);
+      window.removeEventListener('online', trySync);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
   // ─── Polling Tier 1 (300s): dữ liệu thay đổi vừa phải, fallback cho Realtime ──
   useEffect(() => {
     const poll = async () => {
@@ -2740,9 +2786,37 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
        t.assignerId === currentUser.name ||
        t.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
     ).length;
+    // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt
+    // (đồng bộ với TaskManagement myPendingLeaves: lọc theo ID lẫn tên, kể cả chuỗi duyệt approvals)
+    const myPendingLeaves = leaves.filter(l =>
+      l.status === 'pending' &&
+      (l.approverId === currentUser.id ||
+       l.approverName === currentUser.name ||
+       l.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    );
+    // Đề xuất tài chính chờ duyệt (đồng bộ TaskManagement myPendingPayments/myPendingAdvances):
+    // chỉ định làm người duyệt, hoặc thuộc nhóm Kế toán / Giám đốc → xem toàn bộ.
+    const isFinanceApprover = isUserInRoleGroup(currentUser.id, 'role_accounting') || isUserInRoleGroup(currentUser.id, 'role_admin');
+    const myPendingPayments = payments.filter(p =>
+      p.status === 'pending' &&
+      (isFinanceApprover ||
+       p.proposer === currentUser.name ||
+       p.recipient === currentUser.name ||
+       p.approver === currentUser.name ||
+       (p.approver && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
+       p.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    );
+    const myPendingAdvances = subcontractorAdvances.filter(a =>
+      a.status === 'pending_approval' &&
+      (isFinanceApprover ||
+       a.approver === currentUser.id ||
+       (a.approverName && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
+       a.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    );
     const toReviewUncompletedCount = toReviewTasksCount
-      + leaves.filter(l => l.status === 'pending').length
-      + payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length;
+      + myPendingLeaves.length
+      + myPendingPayments.length
+      + myPendingAdvances.length;
 
     return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
   })();

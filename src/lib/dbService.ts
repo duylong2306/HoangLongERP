@@ -233,6 +233,36 @@ function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
   });
 }
 
+// ─── Upload Queue (Storage) ───────────────────────────────────────────────
+// Tương tự write queue nhưng dành riêng cho upload ảnh lên Supabase Storage
+// (bucket attendance-photos). 25 user cùng chấm → 25 upload ảnh nhỏ đồng thời
+// có thể tạo spike băng thông / kết nối. Hàng đợi này giới hạn số upload chạy
+// song song, dàn đều tải trọng. Tách biệt khỏi write queue để upload ảnh không
+// làm trễ các lệnh ghi DB (chấm công, duyệt...).
+const UPLOAD_CONCURRENCY = 4;
+let _uploadQueue: Array<() => void> = [];
+let _activeUploads = 0;
+
+function pumpUploadQueue() {
+  while (_activeUploads < UPLOAD_CONCURRENCY && _uploadQueue.length > 0) {
+    const run = _uploadQueue.shift()!;
+    _activeUploads++;
+    run();
+  }
+}
+
+function enqueueUpload<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    _uploadQueue.push(() => {
+      task().then(resolve, reject).finally(() => {
+        _activeUploads--;
+        pumpUploadQueue();
+      });
+    });
+    pumpUploadQueue();
+  });
+}
+
 // Query helper for Supabase (cached per table)
 async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T[]> {
   // Trả cache nếu có
@@ -2245,25 +2275,34 @@ export const dbService = {
      * Dùng cho luồng điểm danh / realtime để TRÁNH tải toàn bộ lịch sử — nguyên nhân
      * gây lag khi nhiều user chấm công cùng lúc (bầy đàn tái tải). Mặc định nên dùng
      * khoảng = tháng hiện tại (xem currentMonthRange()).
+     *
+     * THAM SỐ `empId` (tùy chọn): khi truyền vào, query thêm `.eq('emp_id', empId)`
+     * để CHỈ tải dòng của đúng nhân viên đó. Mỗi tab Dashboard từ giờ chỉ download
+     * ~30 dòng của mình thay vì toàn bộ dòng của 25 user → băng thông giảm ~25 lần,
+     * và tab không bao giờ phải xử lý dữ liệu người khác. Dùng index
+     * (emp_id, date) nên vẫn nhanh. HRM (cần xem toàn bộ) gọi KHÔNG truyền empId.
      */
-    async listForRange(startDate: string, endDate: string): Promise<any[]> {
+    async listForRange(startDate: string, endDate: string, empId?: string): Promise<any[]> {
       const supabase = getSupabase();
       if (!supabase) return [];
+      const cacheKey = empId ? `${startDate}~${endDate}~${empId}` : `${startDate}~${endDate}`;
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('attendance_records')
           .select('*')
           .gte('date', startDate)
           .lte('date', endDate)
           .order('date', { ascending: false })
-          .limit(5000); // bound kết quả: tránh quét toàn bảng nếu thiếu index date
+          .limit(empId ? 500 : 5000); // 1 nhân viên / tháng tối đa vài chục dòng → bound nhỏ
+        if (empId) query = query.eq('emp_id', empId);
+        const { data, error } = await query;
         if (error) {
           console.error('Supabase attendance range load error:', error.message);
           throw new Error(`Không thể tải chấm công: ${error.message}`);
         }
         const rows = (data || []).map((r: any) => mapAttendanceRow(r));
-        // Ghi vào cache theo khóa tháng → lần sau mở tab render ngay từ cache.
-        _attendanceRangeCache.set(`${startDate}~${endDate}`, { rows, ts: Date.now() });
+        // Ghi vào cache theo khóa tháng (+ empId nếu có) → lần sau mở tab render ngay từ cache.
+        _attendanceRangeCache.set(cacheKey, { rows, ts: Date.now() });
         return rows;
       } catch (err) {
         console.error('Supabase attendance range fetch exception:', err);
@@ -2649,7 +2688,9 @@ export const dbService = {
     if (!supabase) return null;
 
     const BUCKET = 'attendance-photos';
-    try {
+    // Đưa upload vào hàng đợi giới hạn concurrency (UPLOAD_CONCURRENCY) để 25 user
+    // cùng chấm không bắn 25 upload song song → dàn đều tải trọng mạng/storage.
+    const doUpload = async (): Promise<string | null> => {
       const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(dataUrl);
       if (!m) return null;
       const mime = m[1];
@@ -2670,6 +2711,9 @@ export const dbService = {
       if (error) throw error;
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;
+    };
+    try {
+      return await enqueueUpload(doUpload);
     } catch (err) {
       console.warn('[uploadAttendancePhoto] Upload thất bại — giữ base64 để outbox fallback:', (err as any)?.message || err);
       return null;

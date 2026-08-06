@@ -6,8 +6,8 @@ import { dbService, mapAttendanceRow, todayString } from '../lib/dbService';
 import {
   enqueuePunch,
   removePunch,
-  syncAttendanceOutbox,
   pendingCount as outboxPendingCount,
+  getPendingPunches,
   burnTimestampToPhoto,
 } from '../lib/attendanceOutbox';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
@@ -443,7 +443,9 @@ export default function DashboardOverview({
   useEffect(() => {
     let mounted = true;
     const ym = todayVal.slice(0, 7); // 'YYYY-MM'
-    dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`)
+    // Chỉ tải dòng của đúng user đang đăng nhập (empId) → mỗi tab không download
+    // toàn bộ chấm công của 25 user. Giảm ~25x băng thông khi nhiều người mở app.
+    dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`, empId)
       .then(list => {
         if (mounted && Array.isArray(list) && list.length > 0) {
           isSyncingFromCloud.current = true;
@@ -455,19 +457,18 @@ export default function DashboardOverview({
     return () => { mounted = false; };
   }, []);
 
-  // ─── Outbox: đồng bộ lại các lượt chấm chưa đẩy được lên Supabase ───
-  // Kích hoạt khi: mount, có mạng trở lại ('online'), hoặc tab được focus lại.
+  // ─── Outbox: cập nhật UI từ sync TOÀN CỤC (thực hiện ở cấp App) ───────────
+  // Việc ĐẨY dữ liệu lên DB giờ do App đảm nhiệm (chạy mọi khi app mở, bất kể tab)
+  // để lượt chấm không bị kẹt trong localStorage khi user tắt app rồi mở lại ở
+  // tab khác. Dashboard chỉ lắng nghe 'hl-outbox-synced' (do App dispatch) để cập
+  // nhật badge "chờ đồng bộ" + xóa cờ pending trên dòng, cùng toast "Đã đồng bộ".
   useEffect(() => {
-    let cancelled = false;
     const refreshPending = () => setPendingSync(outboxPendingCount());
-    const trySync = async () => {
-      const summary = await syncAttendanceOutbox((rec, slot) =>
-        dbService.attendance.save(rec, slot)
-      );
-      if (cancelled) return;
+    const onSynced = (e: Event) => {
+      const summary = (e as CustomEvent).detail;
       refreshPending();
       // Xóa cờ chờ trên UI sau khi đã đồng bộ xong ít nhất 1 bản ghi
-      if (summary.synced > 0) {
+      if (summary?.synced > 0) {
         setAttendanceList(list => list.map(l => (l.syncPending ? { ...l, syncPending: false } : l)));
         addToast({
           title: '✅ Đã đồng bộ',
@@ -475,24 +476,11 @@ export default function DashboardOverview({
           type: 'success',
         });
       }
-      if (summary.dropped > 0) {
-        addToast({
-          title: '⚠️ Cần liên hệ Admin',
-          message: `${summary.dropped} bản ghi không thể đồng bộ sau nhiều lần thử (có thể do quyền). Vui lòng báo Admin.`,
-          type: 'error',
-          duration: 8000,
-        });
-      }
     };
     refreshPending();
-    trySync();
-    window.addEventListener('online', trySync);
-    const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
-    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('hl-outbox-synced', onSynced);
     return () => {
-      cancelled = true;
-      window.removeEventListener('online', trySync);
-      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('hl-outbox-synced', onSynced);
     };
   }, []);
 
@@ -525,6 +513,14 @@ export default function DashboardOverview({
     const handleRealtime = (e: Event) => {
       const p = (e as CustomEvent).detail;
       if (!p || !p.eventType) return;
+      // Dashboard CHỈ hiển thị chấm công của user đang đăng nhập → chỉ xử lý các
+      // dòng thuộc empId hiện tại. Bỏ qua dòng của user khác để state không phình to
+      // khi 25 user cùng chấm (mỗi realtime event của họ không đẩy vào list của ta).
+      // empId rỗng (chưa gắn hồ sơ) → chấp nhận mọi dòng để không mất realtime.
+      if (empId) {
+        const rowEmpId = p.new?.emp_id || p.old?.emp_id || p.new?.empId || p.old?.empId;
+        if (rowEmpId && rowEmpId !== empId) return;
+      }
       isSyncingFromCloud.current = true;
       setAttendanceList(prev => {
         if (p.eventType === 'DELETE') {
@@ -553,15 +549,34 @@ export default function DashboardOverview({
   // với luồng điểm danh — đồng thời tái dùng event hl-attendance-updated để ghi đè list.
   useEffect(() => {
     const reloadMonth = async () => {
+      // CHỈ đồng bộ khi tab đang hiển thị: 25 user mở app nhưng để background thì
+      // không cần tải → tránh 25 tab gọi Supabase vô ích khi user không nhìn.
+      if (document.visibilityState !== 'visible') return;
+      // Đang có lượt chấm chờ đồng bộ (outbox) → state local ĐANG TRƯỚC DB.
+      // Bỏ qua reconcile để không ghi đè mất lượt chấm vừa bấm (nút sẽ hiện lại
+      // "VÀO/RA" gây hiểu nhầm). Khi outbox rỗng, reconcile tự chạy lại bình thường.
+      if (outboxPendingCount() > 0) return;
       const ym = todayString().slice(0, 7); // 'YYYY-MM'
       try {
-        const list = await dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`);
+        // Chỉ tải lại dòng của mình (empId) để đồng bộ nền không kéo theo dữ liệu
+        // của 25 user khác mỗi 2 phút.
+        const list = await dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`, empId);
         window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: list }));
       } catch { /* thất bại êm — lần sau thử lại */ }
     };
-    reloadMonth();
+    // Jitter ngẫu nhiên 0–20s: 25 tab không đồng loạt gọi Supabase tại cùng 1 phút
+    // → dàn đều tải trọng, tránh spike khi nhiều user mở app cùng lúc.
+    const jitter = Math.floor(Math.random() * 20000);
+    const initialTimer = setTimeout(reloadMonth, jitter);
     const id = setInterval(reloadMonth, 120000);
-    return () => clearInterval(id);
+    // Khi tab chuyển từ background → foreground, đồng bộ ngay (bù cho lúc bị bỏ qua).
+    const onVisible = () => { if (document.visibilityState === 'visible') reloadMonth(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   // Dispatch changes made dynamically within the Dashboard module to the HRM module
@@ -2018,8 +2033,40 @@ export default function DashboardOverview({
   const calcEstimatedSalary = Math.round(((standardDailyRate ?? 0) * countAccumulatedDays) + (countOvertimeHours * ((userBaseSalary ?? 0) / 26 / 8) * (config.otMultiplier ?? 1.5)));
 
   // Get current today slots
-  const userTodayLog = attendanceList.find(a => a.empName === currentUser.name && a.date === todayVal) || {
+  // QUAN TRỌNG: tìm theo empId (không dùng empName) để đồng bộ với logic chấm công
+  // (handleConfirmPunch) và currentLogs ở trên. Tìm theo tên dễ trượt nếu tên lệch
+  // chuẩn hóa → dòng "Hôm nay" hiển thị rỗng dù bản ghi thực sự tồn tại.
+  const userTodayLog = attendanceList.find(a =>
+    (a.empId ? a.empId === empId : a.empName === currentUser.name) && a.date === todayVal
+  ) || {
     timeInS: '--:--', timeOutS: '--:--', timeInC: '--:--', timeOutC: '--:--', timeInOT: '--:--', timeOutOT: '--:--'
+  };
+
+  /**
+   * Xác định 1 ca ĐÃ được chấm (local) chưa — kể cả khi CSDL chưa cập nhật kịp
+   * (lượt chấm đang nằm trong outbox chờ đồng bộ). Dùng để nút điểm danh KHÔNG
+   * hiện lại "VÀO/RA" gây hiểu nhầm "mình chưa điểm danh" trong lúc 25 user ồ ạt
+   * chấm và reload định kỳ (mỗi 2 phút) chưa kịp lấy dữ liệu mới từ server.
+   *
+   * Nguồn tra cứu (theo thứ tự ưu tiên):
+   *   1. State local (đã cập nhật ngay khi bấm) — có giờ chính xác.
+   *   2. Outbox (lượt đã bấm nhưng đang chờ đẩy lên DB) — có giờ đã chấm.
+   * → Tái dùng chính outbox làm "cờ đã điểm danh ca đó" lưu local, không cần
+   *   cấu trúc riêng. Trả về giờ chấm nếu đã chấm, ngược lại null.
+   */
+  const getLocalPunch = (slot: string): string | null => {
+    const localVal = userTodayLog[slot];
+    if (localVal && localVal !== '--:--' && localVal !== '') return localVal;
+    try {
+      const pending = getPendingPunches();
+      const op = pending.find(
+        o => o.record && o.record.empId === empId && o.record.date === todayVal && o.punchSlot === slot
+      );
+      if (op?.record?.[slot] && op.record[slot] !== '--:--' && op.record[slot] !== '') {
+        return op.record[slot];
+      }
+    } catch { /* ignore */ }
+    return null;
   };
 
   const isTimeBetween = (curr: number, start: number, end: number) => {
@@ -2410,8 +2457,11 @@ export default function DashboardOverview({
               const { key, slotIn, slotOut, configIn, configOut, icon: Icon, label, color } = item;
               const inVal = userTodayLog[slotIn];
               const outVal = userTodayLog[slotOut];
-              const inCompleted = inVal !== '--:--' && inVal !== '' && inVal != null;
-              const outCompleted = outVal !== '--:--' && outVal !== '' && outVal != null;
+              // ĐÃ CHẤM ca này chưa? Ưu tiên state local, FALLBACK xuống outbox
+              // (lượt chấm đã bấm nhưng CSDL chưa cập nhật kịp) → vẫn coi là đã chấm
+              // để nút không hiện lại "VÀO/RA" gây hiểu nhầm. Xem getLocalPunch.
+              const inCompleted = !!getLocalPunch(slotIn);
+              const outCompleted = !!getLocalPunch(slotOut);
               const shiftActive = isShiftActive(key as any);
 
               // ─── Tính toán trạng thái nút theo khung giờ cấu hình ───
@@ -2474,8 +2524,10 @@ export default function DashboardOverview({
                 }
               } else {
                 // Cả vào + ra đều đã chấm - chuẩn hóa thời gian hiển thị
-                const displayIn = normalizeTime(inVal);
-                const displayOut = normalizeTime(outVal);
+                // Ưu tiên giờ từ getLocalPunch (local hoặc outbox) để hiện đúng giờ
+                // kể cả khi attendanceList vừa bị reload ghi đè bằng dữ liệu cũ.
+                const displayIn = normalizeTime(getLocalPunch(slotIn) ?? inVal);
+                const displayOut = normalizeTime(getLocalPunch(slotOut) ?? outVal);
                 btnLabel = key === 'overtime'
                   ? `✅ Tăng ca: ${displayIn} → ${displayOut}`
                   : `✅ ${key === 'morning' ? 'Sáng' : 'Chiều'}: ${displayIn} → ${displayOut}`;
