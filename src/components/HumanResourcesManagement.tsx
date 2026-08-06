@@ -1461,12 +1461,21 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       isSyncingAttendanceFromCloud.current = true;
       try {
         const isAll = attendanceFilterMonth === 'all' || attendanceFilterYear === 'all';
+        const from = `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-01`;
+        const to = `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-31`;
+
+        // 1) Render NGAY bằng cache tháng (nếu có) để bảng hiện lên tức thì,
+        //    không phải chờ mạng — đây là mục tiêu chính của việc cải tiến tốc độ.
+        if (!isAll) {
+          const cached = dbService.attendance.getCachedRange(from, to);
+          if (mounted && cached && cached.length > 0) setAttendance(dedupAttendance(cached));
+        }
+
+        // 2) Fetch dữ liệu mới từ Supabase, rồi cập nhật lại ở nền.
+        //    listForRange tự ghi vào cache → lần sau mở tab lại load ngay lập tức.
         const list = isAll
           ? await dbService.attendance.list()
-          : await dbService.attendance.listForRange(
-              `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-01`,
-              `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-31`
-            );
+          : await dbService.attendance.listForRange(from, to);
         if (mounted && list.length > 0) setAttendance(dedupAttendance(list));
       } catch (err) {
         console.warn('Lỗi tải chấm công từ Supabase:', err);

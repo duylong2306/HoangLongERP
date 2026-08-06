@@ -175,12 +175,19 @@ export async function seedTableToSupabase(tableName: string, data: any[]): Promi
 // Save/delete tự động invalidate cache để lần query sau lấy data mới.
 const _queryCache = new Map<string, any[]>();
 const _inflight = new Map<string, Promise<any[]>>();
+// Cache theo tháng cho attendance_records (tab Chấm công ngày): `listForRange`
+// tải nguyên 1 tháng mỗi lần bật tab. Cache để render bảng NGAY rồi mới refresh
+// nền — hết cảm giác "mở tab chờ 1 lúc". Bị xóa khi attendance save/delete hoặc
+// khi invalidateCache('attendance_records') (xem bên dưới).
+const _attendanceRangeCache = new Map<string, { rows: any[]; ts: number }>();
 
 export function invalidateCache(tableName?: string) {
   if (tableName) {
     _queryCache.delete(tableName);
+    if (tableName === 'attendance_records') _attendanceRangeCache.clear();
   } else {
     _queryCache.clear();
+    _attendanceRangeCache.clear();
   }
 }
 
@@ -2254,11 +2261,23 @@ export const dbService = {
           console.error('Supabase attendance range load error:', error.message);
           throw new Error(`Không thể tải chấm công: ${error.message}`);
         }
-        return (data || []).map((r: any) => mapAttendanceRow(r));
+        const rows = (data || []).map((r: any) => mapAttendanceRow(r));
+        // Ghi vào cache theo khóa tháng → lần sau mở tab render ngay từ cache.
+        _attendanceRangeCache.set(`${startDate}~${endDate}`, { rows, ts: Date.now() });
+        return rows;
       } catch (err) {
         console.error('Supabase attendance range fetch exception:', err);
         throw err;
       }
+    },
+    /**
+     * Đọc NHANH dữ liệu tháng đã tải trước đó trong phiên (KHÔNG gọi mạng).
+     * Trả null nếu chưa có cache cho khoảng này. Dùng để render bảng tức thì
+     * rồi mới refresh nền bằng listForRange().
+     */
+    getCachedRange(startDate: string, endDate: string): any[] | null {
+      const hit = _attendanceRangeCache.get(`${startDate}~${endDate}`);
+      return hit ? hit.rows : null;
     },
     /**
      * Lưu chấm công với thời gian máy chủ (Server-side time).
@@ -2381,6 +2400,7 @@ export const dbService = {
           const { error } = await supabase.from('attendance_records').upsert(row);
           if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);
         });
+        _attendanceRangeCache.clear(); // dữ liệu thay đổi → cache cũ không còn đúng
       } catch (err) {
         console.error('Supabase attendance save exception:', err);
         throw err;
@@ -2395,6 +2415,7 @@ export const dbService = {
           const { error } = await supabase.from('attendance_records').delete().eq('id', id);
           if (error) throw new Error(`Xóa chấm công thất bại: ${error.message}`);
         });
+        _attendanceRangeCache.clear(); // dữ liệu thay đổi → cache cũ không còn đúng
       } catch (err) {
         console.error('Supabase attendance delete exception:', err);
         throw err;
