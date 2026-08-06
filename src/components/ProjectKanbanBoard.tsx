@@ -343,6 +343,7 @@ export default function ProjectKanbanBoard({
   const [editColRuleParam, setEditColRuleParam] = useState<string>('');
   const [showAutoWorkflowModal, setShowAutoWorkflowModal] = useState(false);
   const [activeWorkflowColId, setActiveWorkflowColId] = useState<string>('col_design');
+  const [openColMenuId, setOpenColMenuId] = useState<string | null>(null);
   const [selectedActionType, setSelectedActionType] = useState<
     'assignee' | 'status' | 'approval' | 'subtask' | 'textStyle'
   >('assignee');
@@ -2609,48 +2610,66 @@ export default function ProjectKanbanBoard({
                     </h4>
                   </div>
 
-                  {/* Column actions group */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  {/* Column actions: gom 3 thao tác vào nút menu "..." */}
+                  <div className="relative shrink-0">
                     <button
-                      onClick={() => {
-                        if (!canEditColumn) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA cấu hình cột ở phân hệ này.', type: 'error' });
-                          return;
-                        }
-                        openEditColumn(col);
-                      }}
-                      className={`p-1 rounded transition-colors ${canEditColumn ? 'hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
-                      title="Đổi tên & cấu hình cột phân đoạn này"
+                      onClick={() => setOpenColMenuId(openColMenuId === col.id ? null : col.id)}
+                      className={`p-1 rounded transition-colors ${openColMenuId === col.id ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer'}`}
+                      title="Thao tác cột phân đoạn"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <MoreVertical className="w-4 h-4" />
                     </button>
-                    <button
-                      onClick={() => {
-                        if (!canConfigureColumnAutomation) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền CẤU HÌNH quy trình tự động ở phân hệ này.', type: 'error' });
-                          return;
-                        }
-                        setActiveWorkflowColId(col.id);
-                        setShowAutoWorkflowModal(true);
-                      }}
-                      className={`p-1 rounded transition-colors ${canConfigureColumnAutomation ? 'hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
-                      title="Cấu hình quy trình tự động cho phân đoạn này"
-                    >
-                      <Settings className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!canDeleteColumn) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA cột phân đoạn ở phân hệ này.', type: 'error' });
-                          return;
-                        }
-                        deleteColumn(col.id);
-                      }}
-                      className={`p-1 rounded transition-colors ${canDeleteColumn ? 'hover:bg-red-500/15 text-slate-400 hover:text-red-400 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
-                      title="Xóa cột phân đoạn này"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    {openColMenuId === col.id && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setOpenColMenuId(null)} />
+                        <div className="absolute right-0 top-full mt-1 z-40 w-56 rounded-lg border border-slate-700 bg-slate-800 shadow-xl py-1 text-left">
+                          <button
+                            onClick={() => {
+                              setOpenColMenuId(null);
+                              if (!canEditColumn) {
+                                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA cấu hình cột ở phân hệ này.', type: 'error' });
+                                return;
+                              }
+                              openEditColumn(col);
+                            }}
+                            className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors ${canEditColumn ? 'text-slate-200 hover:bg-slate-700 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            Đổi tên & cấu hình
+                          </button>
+                          <button
+                            onClick={() => {
+                              setOpenColMenuId(null);
+                              if (!canConfigureColumnAutomation) {
+                                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền CẤU HÌNH quy trình tự động ở phân hệ này.', type: 'error' });
+                                return;
+                              }
+                              setActiveWorkflowColId(col.id);
+                              setShowAutoWorkflowModal(true);
+                            }}
+                            className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors ${canConfigureColumnAutomation ? 'text-slate-200 hover:bg-slate-700 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
+                          >
+                            <Settings className="w-3.5 h-3.5" />
+                            Cấu hình tự động
+                          </button>
+                          <div className="my-1 border-t border-slate-700/70" />
+                          <button
+                            onClick={() => {
+                              setOpenColMenuId(null);
+                              if (!canDeleteColumn) {
+                                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA cột phân đoạn ở phân hệ này.', type: 'error' });
+                                return;
+                              }
+                              deleteColumn(col.id);
+                            }}
+                            className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors ${canDeleteColumn ? 'text-red-400 hover:bg-red-500/15 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            Xóa cột phân đoạn
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
