@@ -2635,6 +2635,47 @@ export const dbService = {
     }
   },
 
+  // ===== UPLOAD ẢNH SELFIE CHẤM CÔNG =====
+  // Ảnh lúc điểm danh được upload lên bucket 'attendance-photos' (migration 029)
+  // thay vì lưu base64 vào cột photo_in/photo_out/punch_meta.photo — nguồn gốc
+  // payload nặng 5–15 MB/tháng khiến tab Chấm công / Dashboard tải chậm.
+  // Tên object là UUID ngẫu nhiên → không lộ mã NV/ngày, khó đoán URL.
+  // Trả public URL; null nếu upload thất bại (caller giữ base64 để outbox fallback).
+  async uploadAttendancePhoto(dataUrl: string): Promise<string | null> {
+    if (!dataUrl) return null;
+    // Đã là public URL (hoặc ảnh không phải data URL) → không cần upload
+    if (!dataUrl.startsWith('data:image')) return dataUrl;
+    const supabase = getSupabase();
+    if (!supabase) return null;
+
+    const BUCKET = 'attendance-photos';
+    try {
+      const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(dataUrl);
+      if (!m) return null;
+      const mime = m[1];
+      const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'jpg';
+      const bin = atob(m[2]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mime });
+      const uuid = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `a${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+      const path = `attendance/${uuid}.${ext}`;
+
+      const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
+        contentType: mime,
+        upsert: false,
+      });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    } catch (err) {
+      console.warn('[uploadAttendancePhoto] Upload thất bại — giữ base64 để outbox fallback:', (err as any)?.message || err);
+      return null;
+    }
+  },
+
   // Clean initialization helper to bootstrap full local database on the first sync if cloud db is empty
   async bootstrapFirstTime(force = false): Promise<void> {
     const supabase = getSupabase();

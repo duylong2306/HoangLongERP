@@ -1511,6 +1511,14 @@ export default function DashboardOverview({
         })
       : '';
 
+    // Upload ảnh đã đốt giờ lên Storage (bucket attendance-photos, migration 029)
+    // rồi lưu public URL vào DB thay vì base64 — giữ bảng attendance_records nhẹ
+    // (payload 1 tháng giảm từ MB xuống KB, đỡ nghẽn khi nhiều user mở app).
+    // Nếu upload thất bại (offline/mất mạng) → giữ nguyên base64 để outbox đẩy lên sau.
+    const storedPhoto = burnedPhoto
+      ? ((await dbService.uploadAttendancePhoto(burnedPhoto)) ?? burnedPhoto)
+      : '';
+
     const punchLocation = liveGpsAddr || selectedSite;
     const punchCoords = liveGpsCoords || siteInfo.coords;
 
@@ -1519,7 +1527,7 @@ export default function DashboardOverview({
     // tất cả lượt "Vào" dùng chung photoIn nên chấm Vào chiều xóa mất ảnh Vào sáng.
     todayLog.punchMeta = mergePunchMeta(todayLog.punchMeta, {
       [activePunchSlot]: {
-        photo: burnedPhoto,
+        photo: storedPhoto,
         location: punchLocation,
         coords: punchCoords,
         at: punchedTime,
@@ -1530,11 +1538,11 @@ export default function DashboardOverview({
     // (tab Chấm công bên Nhân sự) tiếp tục hiển thị bình thường.
     const isInSlot = activePunchSlot.toLowerCase().includes('in');
     if (isInSlot) {
-      todayLog.photoIn = burnedPhoto;
+      todayLog.photoIn = storedPhoto;
       todayLog.locationIn = punchLocation;
       todayLog.coordsIn = punchCoords;
     } else {
-      todayLog.photoOut = burnedPhoto;
+      todayLog.photoOut = storedPhoto;
       todayLog.locationOut = punchLocation;
       todayLog.coordsOut = punchCoords;
     }
