@@ -106,7 +106,8 @@ import {
   Menu,
   RefreshCw,
   Calendar,
-  User
+  User,
+  ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase } from './lib/supabase';
@@ -3295,6 +3296,24 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
               return (
                 <div className="flex items-center gap-2">
+                  {/* Nút quay lại (back) — thay thế cử chỉ vuốt về tab trước trên mobile */}
+                  <button
+                    onClick={() => {
+                      setTabHistory(prev => {
+                        if (prev.length === 0) return prev;
+                        const last = prev[prev.length - 1];
+                        setActiveTabState(last);
+                        return prev.slice(0, -1);
+                      });
+                    }}
+                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors flex items-center justify-center h-8.5 w-8.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Quay lại trang trước"
+                    id="back_nav_btn"
+                    disabled={tabHistory.length === 0}
+                  >
+                    <ArrowLeft className="w-4 h-4 text-emerald-400" />
+                  </button>
+
                   {/* Nút reload trang */}
                   <button
                     onClick={() => window.location.reload()}
@@ -3668,29 +3687,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         <main
           className="flex-1 p-3 sm:p-6 lg:overflow-y-auto"
           id="main_content_scroller"
-          onTouchStart={(e) => {
-            const el = e.currentTarget;
-            el.dataset.touchStartX = String(e.touches[0].clientX);
-            el.dataset.touchStartY = String(e.touches[0].clientY);
-          }}
-          onTouchEnd={(e) => {
-            const el = e.currentTarget;
-            const startX = parseFloat(el.dataset.touchStartX || '0');
-            const startY = parseFloat(el.dataset.touchStartY || '0');
-            const endX = e.changedTouches[0].clientX;
-            const endY = e.changedTouches[0].clientY;
-            const dx = endX - startX;
-            const dy = endY - startY;
-            // Swipe right > 80px, ít di chuyển dọc (< 50px), chỉ trên mobile
-            if (dx > 80 && Math.abs(dy) < 50 && window.innerWidth < 768) {
-              setTabHistory(prev => {
-                if (prev.length === 0) return prev;
-                const last = prev[prev.length - 1];
-                setActiveTabState(last);
-                return prev.slice(0, -1);
-              });
-            }
-          }}
         >
           {!isAccessible(activeTab) ? (
             <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center space-y-4 animate-fadeIn" id="access_denied_pane">
