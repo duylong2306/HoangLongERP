@@ -89,6 +89,55 @@ export function normalizeOrderItems(order: any): any {
   return { ...order, items: Array.isArray(items) ? items : [] };
 }
 
+// ─── Date helpers (múi giờ local VN, khớp cột date trên Supabase) ───────────
+/** 'YYYY-MM-DD' theo giờ local — khớp với cách cột date được lưu trên Supabase (Asia/Ho_Chi_Minh). */
+export function todayString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const r = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${r}`;
+}
+
+/**
+ * Khoảng [ngày đầu, ngày cuối] của tháng chứa refDate (mặc định hôm nay).
+ * Dùng 'YYYY-MM-31' làm bound trên — an toàn cho mọi tháng vì ngày được lưu
+ * dạng chuỗi cố định 'YYYY-MM-DD' (so sánh từ điển đúng).
+ */
+export function currentMonthRange(refDate?: string): { start: string; end: string } {
+  const ds = refDate || todayString();
+  const ym = ds.slice(0, 7); // 'YYYY-MM'
+  return { start: `${ym}-01`, end: `${ym}-31` };
+}
+
+/** Map 1 dòng thô từ Supabase attendance_records → object dùng trong app. */
+export function mapAttendanceRow(r: any) {
+  return {
+    id: r.id,
+    empId: r.emp_id,
+    empName: r.emp_name,
+    date: r.date,
+    timeInS: normalizeTime(r.time_in_s),
+    timeOutS: normalizeTime(r.time_out_s),
+    timeInC: normalizeTime(r.time_in_c),
+    timeOutC: normalizeTime(r.time_out_c),
+    timeInOT: normalizeTime(r.time_in_ot),
+    timeOutOT: normalizeTime(r.time_out_ot),
+    method: r.method,
+    status: r.status,
+    otHours: r.ot_hours,
+    notes: r.notes,
+    photoIn: r.photo_in,
+    locationIn: r.location_in,
+    coordsIn: r.coords_in,
+    photoOut: r.photo_out,
+    locationOut: r.location_out,
+    coordsOut: r.coords_out,
+    punchMeta: parsePunchMeta(r.punch_meta),
+    isLocked: r.is_locked,
+  };
+}
+
 // NOTE: The helper that returned static initial data has been removed because the app now relies on Supabase for all defaults.
 // function getInitialDataForTable(tableName: string): any[] {
 //   switch (tableName) {
@@ -2119,34 +2168,35 @@ export const dbService = {
           console.error('Supabase attendance load error:', error.message);
           throw new Error(`Không thể tải chấm công: ${error.message}`);
         }
-        return (data || []).map((r: any) => ({
-          id: r.id,
-          empId: r.emp_id,
-          empName: r.emp_name,
-          date: r.date,
-          timeInS: normalizeTime(r.time_in_s),
-          timeOutS: normalizeTime(r.time_out_s),
-          timeInC: normalizeTime(r.time_in_c),
-          timeOutC: normalizeTime(r.time_out_c),
-          timeInOT: normalizeTime(r.time_in_ot),
-          timeOutOT: normalizeTime(r.time_out_ot),
-          method: r.method,
-          status: r.status,
-          otHours: r.ot_hours,
-          notes: r.notes,
-          photoIn: r.photo_in,
-          locationIn: r.location_in,
-          coordsIn: r.coords_in,
-          photoOut: r.photo_out,
-          locationOut: r.location_out,
-          coordsOut: r.coords_out,
-          // Ảnh + tọa độ RIÊNG cho từng lượt chấm (Vào/Ra sáng, chiều, tăng ca).
-          // Cột jsonb punch_meta — xem migration 024_attendance_punch_meta.sql.
-          punchMeta: parsePunchMeta(r.punch_meta),
-          isLocked: r.is_locked,
-        }));
+        return (data || []).map((r: any) => mapAttendanceRow(r));
       } catch (err) {
         console.error('Supabase attendance fetch exception:', err);
+        throw err;
+      }
+    },
+    /**
+     * Tải chấm công trong khoảng [startDate, endDate] (định dạng 'YYYY-MM-DD').
+     * Dùng cho luồng điểm danh / realtime để TRÁNH tải toàn bộ lịch sử — nguyên nhân
+     * gây lag khi nhiều user chấm công cùng lúc (bầy đàn tái tải). Mặc định nên dùng
+     * khoảng = tháng hiện tại (xem currentMonthRange()).
+     */
+    async listForRange(startDate: string, endDate: string): Promise<any[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase
+          .from('attendance_records')
+          .select('*')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: false });
+        if (error) {
+          console.error('Supabase attendance range load error:', error.message);
+          throw new Error(`Không thể tải chấm công: ${error.message}`);
+        }
+        return (data || []).map((r: any) => mapAttendanceRow(r));
+      } catch (err) {
+        console.error('Supabase attendance range fetch exception:', err);
         throw err;
       }
     },

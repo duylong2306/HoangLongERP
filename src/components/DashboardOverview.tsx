@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
 import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, useNotification } from '../context';
-import { dbService } from '../lib/dbService';
+import { dbService, mapAttendanceRow, todayString } from '../lib/dbService';
 import {
   enqueuePunch,
   removePunch,
@@ -437,10 +437,13 @@ export default function DashboardOverview({
     return deduped;
   };
 
-  // Load attendance from Supabase on mount (dbService.attendance.list hits Supabase first)
+  // Load attendance from Supabase on mount.
+  // Chỉ tải THÁNG HIỆN TẠI (thay vì toàn bộ lịch sử) để tránh lag khi nhiều user mở app — lịch
+  // điểm danh chỉ cần dữ liệu trong tháng, báo cáo lịch sử nằm ở module Nhân sự.
   useEffect(() => {
     let mounted = true;
-    dbService.attendance.list()
+    const ym = todayVal.slice(0, 7); // 'YYYY-MM'
+    dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`)
       .then(list => {
         if (mounted && Array.isArray(list) && list.length > 0) {
           isSyncingFromCloud.current = true;
@@ -513,6 +516,52 @@ export default function DashboardOverview({
       window.removeEventListener('hl-attendance-updated', handleSync);
       window.removeEventListener('hl_attendance_changed_from_hrm', handleSync);
     };
+  }, []);
+
+  // Realtime tăng dần (P1): cập nhật TẠI CHỖ 1 dòng từ payload realtime thay vì tải lại toàn bộ.
+  // Đây là chìa khóa giải quyết lag giờ điểm danh — mỗi lượt chấm chỉ sửa 1 dòng trên state cục bộ,
+  // không phát sinh truy vấn Supabase nào.
+  useEffect(() => {
+    const handleRealtime = (e: Event) => {
+      const p = (e as CustomEvent).detail;
+      if (!p || !p.eventType) return;
+      isSyncingFromCloud.current = true;
+      setAttendanceList(prev => {
+        if (p.eventType === 'DELETE') {
+          const id = p.old?.id;
+          return id ? prev.filter(r => r.id !== id) : prev;
+        }
+        // INSERT / UPDATE / ERROR: ghi đè (upsert) theo id để tương thích với dòng mapped.
+        const mapped = mapAttendanceRow(p.new);
+        const idx = prev.findIndex(r => r.id === mapped.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = mapped;
+          return copy;
+        }
+        return [mapped, ...prev];
+      });
+      requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
+    };
+    window.addEventListener('hl-attendance-realtime', handleRealtime);
+    return () => window.removeEventListener('hl-attendance-realtime', handleRealtime);
+  }, []);
+
+  // Mạng lưới an toàn (P1): định kỳ tải lại THÁNG HIỆN TẠI để tự sửa (reconcile)
+  // các dòng bị lỡ realtime do mất kết nối/restart kênh. Chỉ tải 1 tháng (không
+  // phải toàn bộ lịch sử) và tần suất thấp (2 phút) nên tải trọng không đáng kể so
+  // với luồng điểm danh — đồng thời tái dùng event hl-attendance-updated để ghi đè list.
+  useEffect(() => {
+    const reloadMonth = async () => {
+      const ym = todayString().slice(0, 7); // 'YYYY-MM'
+      try {
+        const list = await dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`);
+        window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: list }));
+      } catch { /* thất bại êm — lần sau thử lại */ }
+    };
+    reloadMonth();
+    const id = setInterval(reloadMonth, 120000);
+    return () => clearInterval(id);
   }, []);
 
   // Dispatch changes made dynamically within the Dashboard module to the HRM module

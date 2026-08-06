@@ -236,8 +236,11 @@ export default function TaskManagement({
       // B. Cập nhật attendance trên Supabase
       try {
         const symbol = getLeaveSymbol(targetLeave.type);
-        const attendance = await dbService.attendance.list();
         const leaveDates = getDaysDiffList(targetLeave.fromDate, targetLeave.toDate);
+        // Chỉ tải KHOẢNG NGÀY NGHỈ (thay vì toàn bộ lịch sử) để tìm/sửa bản ghi tương ứng.
+        const attendance = leaveDates.length > 0
+          ? await dbService.attendance.listForRange(leaveDates[0], leaveDates[leaveDates.length - 1])
+          : [];
         const toSave: any[] = [];
 
         leaveDates.forEach(dStr => {
@@ -297,8 +300,11 @@ export default function TaskManagement({
       // Cập nhật attendance khi từ chối
       if (isAttendanceReportType(targetLeave.type)) {
         try {
-          const attendance = await dbService.attendance.list();
           const leaveDates = getDaysDiffList(targetLeave.fromDate, targetLeave.toDate);
+          // Chỉ tải KHOẢNG NGÀY NGHỈ (thay vì toàn bộ lịch sử) để tìm/sửa bản ghi tương ứng.
+          const attendance = leaveDates.length > 0
+            ? await dbService.attendance.listForRange(leaveDates[0], leaveDates[leaveDates.length - 1])
+            : [];
           const toSave: any[] = [];
 
           leaveDates.forEach(dStr => {

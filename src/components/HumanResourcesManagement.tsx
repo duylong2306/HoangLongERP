@@ -931,20 +931,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     return deduped;
   };
 
-  // Load attendance từ Supabase trên mount
-  useEffect(() => {
-    let mounted = true;
-    dbService.attendance.list()
-      .then(list => {
-        if (mounted && list.length > 0) {
-          setAttendance(dedupAttendance(list));
-        }
-      })
-      .catch(err => {
-        console.warn('Lỗi tải chấm công từ Supabase:', err);
-      });
-    return () => { mounted = false; };
-  }, []);
+  // NOTE: việc load chấm công đã chuyển xuống effect phụ thuộc
+  // [attendanceFilterMonth, attendanceFilterYear] (xem đoạn "Load attendance theo tháng"
+  // ngay sau khai báo filter) để chỉ tải KHOẢNG THÁNG đang chọn thay vì toàn bộ lịch sử.
 
   // Ngày khởi tạo dữ liệu chấm công - chỉ chấm từ ngày này trở đi
   const [attendanceInitDate, setAttendanceInitDate] = useState<Date>(() => {
@@ -1447,6 +1436,32 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [attendanceFilterMonth, setAttendanceFilterMonth] = useState(String(new Date().getMonth() + 1)); // '6' for June
   const [attendanceFilterDay, setAttendanceFilterDay] = useState('today'); // 'today' = lọc ngày hiện tại
   const [attendanceFilterYear, setAttendanceFilterYear] = useState(String(new Date().getFullYear())); // '2026' for this year
+
+  // ── Load attendance theo THÁNG đang chọn (thay vì toàn bộ lịch sử) ──────────
+  // Tab "Chấm công ngày" / báo cáo chỉ cần dữ liệu trong tháng được lọc → tải
+  // KHOẢNG [YYYY-MM-01, YYYY-MM-31] thay vì SELECT * toàn bộ bảng attendance_records
+  // (đây là nguyên nhân cũ gây load chậm khi lịch sử phình to). Khi đổi Tháng/Năm,
+  // effect chạy lại tải đúng tháng. Chọn 'all' thì fallback tải toàn bộ (hiếm dùng).
+  useEffect(() => {
+    let mounted = true;
+    const loadRange = async () => {
+      try {
+        const isAll = attendanceFilterMonth === 'all' || attendanceFilterYear === 'all';
+        const list = isAll
+          ? await dbService.attendance.list()
+          : await dbService.attendance.listForRange(
+              `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-01`,
+              `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-31`
+            );
+        if (mounted && list.length > 0) setAttendance(dedupAttendance(list));
+      } catch (err) {
+        console.warn('Lỗi tải chấm công từ Supabase:', err);
+      }
+    };
+    loadRange();
+    return () => { mounted = false; };
+  }, [attendanceFilterMonth, attendanceFilterYear]);
+
   const [showBulkLockModal, setShowBulkLockModal] = useState(false);
   const [bulkLockScope, setBulkLockScope] = useState<'page' | 'month'>('page');
   const [employeeSearch, setEmployeeSearch] = useState('');

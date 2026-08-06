@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { dbService, invalidateCache, normalizeOrderItems } from './lib/dbService';
+import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange } from './lib/dbService';
 import { useWebPush } from './hooks/useWebPush';
 import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
 import {
@@ -1521,8 +1521,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireAttendanceEvent = async (payload?: any) => {
       console.log('[Realtime] 🔔 attendance_records event:', payload ? { event: payload.eventType } : '(manual)');
       try {
+        // Ưu tiên: cập nhật TẠI CHỖ bằng dòng thay đổi từ realtime (payload.new / payload.old).
+        // KHÔNG tải lại bảng → loại bỏ hoàn toàn bầy đàn tái tải khi 25 user chấm công cùng lúc.
+        if (payload && payload.eventType) {
+          window.dispatchEvent(new CustomEvent('hl-attendance-realtime', { detail: payload }));
+          return;
+        }
+        // Fallback (chỉ khi gọi manual, không có payload realtime): tải THÁNG HIỆN TẠI.
         invalidateCache('attendance_records');
-        const attendanceList = await dbService.attendance.list();
+        const { start, end } = currentMonthRange();
+        const attendanceList = await dbService.attendance.listForRange(start, end);
         window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: attendanceList }));
       } catch (e) { console.error('Realtime attendance sync error:', e); }
     };

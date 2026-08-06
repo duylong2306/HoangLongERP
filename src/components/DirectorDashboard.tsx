@@ -111,16 +111,17 @@ export default function DirectorDashboard({
   const [todayAttendanceCount, setTodayAttendanceCount] = useState(0);
   useEffect(() => {
     let active = true;
-    dbService.attendance.list()
+    const getLocalYYYYMMDD = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const r = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${r}`;
+    };
+    const todayStr = getLocalYYYYMMDD(new Date());
+    // Chỉ tải NGÀY HÔM NAY (thay vì toàn bộ lịch sử) để đếm số người điểm danh.
+    dbService.attendance.listForRange(todayStr, todayStr)
       .then(logs => {
         if (!active) return;
-        const getLocalYYYYMMDD = (d: Date) => {
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const r = String(d.getDate()).padStart(2, '0');
-          return `${y}-${m}-${r}`;
-        };
-        const todayStr = getLocalYYYYMMDD(new Date());
         const uniqueUsers = new Set(
           (logs || [])
             .filter((log: any) => log.date === todayStr && log.status !== 'missing' && log.status !== 'unexcused')
