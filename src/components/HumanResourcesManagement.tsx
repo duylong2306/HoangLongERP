@@ -724,6 +724,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // trong lúc setEmployeeErrors từ cloud thì effect sync không được save ngược lại
   const isSyncingEmployeeErrorsFromCloud = useRef(false);
   const isSyncingLeavesFromCloud = useRef(false);
+  // Ref tránh vòng lặp echo-save: trong lúc tải attendance / travelNorms từ cloud
+  // thì effect bulk-save không được ghi NGƯỢC toàn bộ dữ liệu vừa tải lên Supabase
+  // (nguồn gốc bão POST làm nghẽn kết nối → chấm công tải chậm/không tải được).
+  const isSyncingAttendanceFromCloud = useRef(false);
+  const isSyncingTravelNormsFromCloud = useRef(false);
 
   const [errorSearchEmpId, setErrorSearchEmpId] = useState<string>('all');
   const [errorFilterMonth, setErrorFilterMonth] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
@@ -1203,7 +1208,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       setTimeout(() => { isSyncingCriteriaFromCloud.current = false; }, 500);
     });
     // Travel Norms
-    dbService.travelNorms.list().then((d: any[]) => { if (d?.length) setTravelNorms(d); }).catch(() => {});
+    isSyncingTravelNormsFromCloud.current = true;
+    dbService.travelNorms.list().then((d: any[]) => {
+      if (d?.length) setTravelNorms(d);
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingTravelNormsFromCloud.current = false; }, 500);
+    });
   }, []);
 
   // ─── REALTIME LISTENER: Re-fetch roles từ Supabase khi có thay đổi từ user khác ───
@@ -1263,6 +1273,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [roles]);
 
   useEffect(() => {
+    if (isSyncingAttendanceFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud (tránh mount-save rỗng ghi đè)
     if (attendance?.length) {
       attendance.forEach(rec => dbService.attendance.save(rec).catch(() => {}));
     }
@@ -1323,6 +1334,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [departmentCriteria]);
 
   useEffect(() => {
+    if (isSyncingTravelNormsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud (tránh mount-save rỗng ghi đè)
     if (travelNorms?.length) travelNorms.forEach(n => dbService.travelNorms.save(n).catch(() => {}));
   }, [travelNorms]);
 
@@ -1445,6 +1457,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   useEffect(() => {
     let mounted = true;
     const loadRange = async () => {
+      // Cờ chống echo-save: dữ liệu đang tải từ cloud thì không ghi ngược lên Supabase
+      isSyncingAttendanceFromCloud.current = true;
       try {
         const isAll = attendanceFilterMonth === 'all' || attendanceFilterYear === 'all';
         const list = isAll
@@ -1456,6 +1470,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         if (mounted && list.length > 0) setAttendance(dedupAttendance(list));
       } catch (err) {
         console.warn('Lỗi tải chấm công từ Supabase:', err);
+      } finally {
+        setTimeout(() => { isSyncingAttendanceFromCloud.current = false; }, 500);
       }
     };
     loadRange();

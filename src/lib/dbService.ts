@@ -189,6 +189,43 @@ export function populateCache(tableName: string, data: any[]) {
   _queryCache.set(tableName, data);
 }
 
+// ─── Write Queue ─────────────────────────────────────────────────────────
+// Giới hạn số request GHI (upsert/insert/delete) tới Supabase chạy đồng thời.
+//
+// Trước đây các effect "bulk-save" (mỗi dòng data 1 request POST song song)
+// bắn N request cùng lúc. Khi nhiều người dùng mở app, tổng request vượt giới
+// hạn connection pool của PostgREST → server đóng kết nối với
+// ERR_CONNECTION_CLOSED, kéo theo CẢ request GET đọc dữ liệu (chấm công ngày,
+// dashboard) bị nghẽn → tải chậm hoặc không tải được.
+//
+// Queue này tuần tự hoá các lần ghi: mỗi lúc chỉ có WRITE_CONCURRENCY request
+// chạy, phần còn lại xếp hàng. Request ĐỌC không qua queue nên luồng xem dữ
+// liệu không bị chặn bởi hàng đợi ghi.
+const WRITE_CONCURRENCY = 5;
+let _writeQueue: Array<() => void> = [];
+let _activeWrites = 0;
+
+function pumpWriteQueue() {
+  while (_activeWrites < WRITE_CONCURRENCY && _writeQueue.length > 0) {
+    const run = _writeQueue.shift()!;
+    _activeWrites++;
+    run();
+  }
+}
+
+/** Đưa 1 request ghi vào queue. Trả về Promise resolve/reject theo kết quả của task. */
+function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    _writeQueue.push(() => {
+      task().then(resolve, reject).finally(() => {
+        _activeWrites--;
+        pumpWriteQueue();
+      });
+    });
+    pumpWriteQueue();
+  });
+}
+
 // Query helper for Supabase (cached per table)
 async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T[]> {
   // Trả cache nếu có
@@ -240,13 +277,17 @@ async function saveSupabase(tableName: string, item: any): Promise<void> {
   try {
     const snakeItem = keysToSnake(item);
     console.log(`[DB] Saving to ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
-    const { data, error } = await supabase.from(tableName).upsert(snakeItem).select();
-    if (error) {
-      console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
-      throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
-    }
-    console.log(`[DB] ✅ Saved to ${tableName}:`, data?.length, 'row(s)');
-    invalidateCache(tableName);
+    // Đưa request ghi vào queue giới hạn concurrency — tránh bắn N POST song
+    // song làm vượt connection pool của PostgREST (nguồn gốc ERR_CONNECTION_CLOSED).
+    await enqueueWrite(async () => {
+      const { data, error } = await supabase.from(tableName).upsert(snakeItem).select();
+      if (error) {
+        console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
+        throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
+      }
+      console.log(`[DB] ✅ Saved to ${tableName}:`, data?.length, 'row(s)');
+      invalidateCache(tableName);
+    });
   } catch (err) {
     console.error(`[DB] ❌ Supabase save exception for ${tableName}:`, err);
     throw err;
@@ -269,18 +310,21 @@ async function insertSupabase(tableName: string, item: any): Promise<boolean> {
   }
   const snakeItem = keysToSnake(item);
   console.log(`[DB] Inserting into ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
-  const { data, error } = await supabase.from(tableName).insert(snakeItem).select();
-  if (error) {
-    if (error.code === '23505') {
-      console.warn(`[DB] ⚠️ ${tableName}: id "${item.id}" đã tồn tại — không ghi đè.`);
-      return false;
+  // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+  return await enqueueWrite(async () => {
+    const { data, error } = await supabase.from(tableName).insert(snakeItem).select();
+    if (error) {
+      if (error.code === '23505') {
+        console.warn(`[DB] ⚠️ ${tableName}: id "${item.id}" đã tồn tại — không ghi đè.`);
+        return false;
+      }
+      console.error(`[DB] ❌ Supabase insert error for ${tableName}:`, error.message, error.details, error.hint);
+      throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
     }
-    console.error(`[DB] ❌ Supabase insert error for ${tableName}:`, error.message, error.details, error.hint);
-    throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
-  }
-  console.log(`[DB] ✅ Inserted into ${tableName}:`, data?.length, 'row(s)');
-  invalidateCache(tableName);
-  return true;
+    console.log(`[DB] ✅ Inserted into ${tableName}:`, data?.length, 'row(s)');
+    invalidateCache(tableName);
+    return true;
+  });
 }
 
 /**
@@ -558,12 +602,15 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
     throw new Error(`Supabase chưa được cấu hình — không thể xóa ${tableName}`);
   }
   try {
-    const { error } = await supabase.from(tableName).delete().eq('id', id);
-    if (error) {
-      console.error(`Supabase delete error for ${tableName}:`, error.message);
-      throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
-    }
-    invalidateCache(tableName);
+    // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+    await enqueueWrite(async () => {
+      const { error } = await supabase.from(tableName).delete().eq('id', id);
+      if (error) {
+        console.error(`Supabase delete error for ${tableName}:`, error.message);
+        throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
+      }
+      invalidateCache(tableName);
+    });
   } catch (err) {
     console.error(`Supabase delete exception for ${tableName}:`, err);
     throw err;
@@ -2327,9 +2374,13 @@ export const dbService = {
         row.punch_meta = mergePunchMeta(existingMeta, record.punchMeta);
       }
 
+      // Request ghi qua queue giới hạn concurrency — auto-lock / import / nhiều
+      // user chấm cùng lúc nếu bắn song song sẽ làm nghẽn connection pool PostgREST.
       try {
-        const { error } = await supabase.from('attendance_records').upsert(row);
-        if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);
+        await enqueueWrite(async () => {
+          const { error } = await supabase.from('attendance_records').upsert(row);
+          if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);
+        });
       } catch (err) {
         console.error('Supabase attendance save exception:', err);
         throw err;
@@ -2339,8 +2390,11 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase chưa được cấu hình — không thể xóa chấm công');
       try {
-        const { error } = await supabase.from('attendance_records').delete().eq('id', id);
-        if (error) throw new Error(`Xóa chấm công thất bại: ${error.message}`);
+        // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+        await enqueueWrite(async () => {
+          const { error } = await supabase.from('attendance_records').delete().eq('id', id);
+          if (error) throw new Error(`Xóa chấm công thất bại: ${error.message}`);
+        });
       } catch (err) {
         console.error('Supabase attendance delete exception:', err);
         throw err;

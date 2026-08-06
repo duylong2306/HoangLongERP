@@ -4,9 +4,11 @@
 // Cache name with version for easy updates
 // ⚠️ Tăng số phiên bản mỗi khi sửa chiến lược cache, để `activate` dọn cache cũ.
 // v2: thêm SPA navigation fallback (sửa lỗi 404 khi bấm thông báo đẩy).
-const CACHE_NAME = 'hl-erp-v2';
-const CACHE_STATIC = 'hl-erp-static-v2';
-const CACHE_DYNAMIC = 'hl-erp-dynamic-v2';
+// v3: bỏ SW can thiệp request Supabase/API — để supabase-js tự retry (trước đây
+//     networkFirst làm tải chậm + trả 503 Offline giả che mất lỗi thật).
+const CACHE_NAME = 'hl-erp-v3';
+const CACHE_STATIC = 'hl-erp-static-v3';
+const CACHE_DYNAMIC = 'hl-erp-dynamic-v3';
 
 // Assets to cache immediately on install (App Shell)
 // Chỉ include các file chắc chắn tồn tại, tránh lỗi addAll
@@ -75,7 +77,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // API requests (Supabase, Firebase) - Network first, fallback to cache
+  // API requests (Supabase, Firebase) - KHÔNG can thiệp.
+  // Cho request đi thẳng mạng để supabase-js tự retry (executeWithRetry) và trình
+  // duyệt dùng cache HTTP thường. Trước đây SW chặn bằng networkFirst gây ra:
+  //   1) load chậm — phải chờ fetch fail mới rơi về cache;
+  //   2) cache.put() crash ("Cache.put() encountered a network error") khi mạng giật;
+  //   3) trả 503 Offline GIẢ, che mất lỗi thật và vô hiệu hoá retry của supabase-js
+  //      → triệu chứng "thi thoảng tải chấm công rất chậm / không tải được".
   if (
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('firebaseio.com') ||
@@ -83,7 +91,6 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('fcm.googleapis.com') ||
     url.pathname.startsWith('/api/')
   ) {
-    event.respondWith(networkFirst(request, CACHE_DYNAMIC));
     return;
   }
 
@@ -135,7 +142,7 @@ async function navigationHandler(request) {
   try {
     const rootResponse = await fetch('/');
     if (rootResponse.ok) {
-      cache.put('/', rootResponse.clone());
+      safeCachePut(cache, '/', rootResponse);
       return rootResponse;
     }
   } catch (err) {
@@ -148,6 +155,16 @@ async function navigationHandler(request) {
   });
 }
 
+// Cache.put() với body bị hỏng do mạng giật sẽ ném "Cache.put() encountered a
+// network error" → bọc try/catch để không làm crash toàn bộ handler fetch.
+async function safeCachePut(cache, request, response) {
+  try {
+    await cache.put(request, response.clone());
+  } catch (err) {
+    console.warn('[SW] Bỏ qua cache.put lỗi:', request.url, err && err.message);
+  }
+}
+
 // Cache-first strategy (for static assets)
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
@@ -157,7 +174,7 @@ async function cacheFirst(request, cacheName) {
     // Serve from cache, update in background (stale-while-revalidate)
     const fetchPromise = fetch(request)
       .then((response) => {
-        if (response.ok) cache.put(request, response.clone());
+        if (response.ok) safeCachePut(cache, request, response);
         return response;
       })
       .catch(() => cached);
@@ -167,7 +184,7 @@ async function cacheFirst(request, cacheName) {
   // Not in cache - fetch and store
   try {
     const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+    if (response.ok) safeCachePut(cache, request, response);
     return response;
   } catch (err) {
     console.log('[SW] Cache first fetch failed:', request.url, err);
@@ -185,7 +202,7 @@ async function networkFirst(request, cacheName) {
 
   try {
     const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+    if (response.ok) safeCachePut(cache, request, response);
     return response;
   } catch (err) {
     console.log('[SW] Network first fetch failed:', request.url, err);
