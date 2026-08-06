@@ -977,6 +977,12 @@ export const dbService = {
       } catch (e) {
         console.warn('Supabase business_profile save exception:', e);
       }
+    },
+    // Trả về mảng [profile] (hoặc []) để tương thích với RPC load_all_core_data
+    // (vốn jsonb_agg → mảng). Dùng chung get() đã map sang camelCase.
+    async list(): Promise<any[]> {
+      const p = await this.get();
+      return p ? [p] : [];
     }
   },
 
@@ -1068,6 +1074,12 @@ export const dbService = {
       } catch (e) {
         console.warn('Supabase shift_config save exception:', e);
       }
+    },
+    // Trả về mảng [config] (hoặc []) để tương thích với RPC load_all_core_data
+    // (vốn jsonb_agg → mảng). Dùng chung get() đã map sang camelCase.
+    async list(): Promise<any[]> {
+      const c = await this.get();
+      return c ? [c] : [];
     }
   },
 
@@ -2189,7 +2201,8 @@ export const dbService = {
           .select('*')
           .gte('date', startDate)
           .lte('date', endDate)
-          .order('date', { ascending: false });
+          .order('date', { ascending: false })
+          .limit(5000); // bound kết quả: tránh quét toàn bảng nếu thiếu index date
         if (error) {
           console.error('Supabase attendance range load error:', error.message);
           throw new Error(`Không thể tải chấm công: ${error.message}`);
@@ -2573,42 +2586,10 @@ export const dbService = {
   },
 
   // ===== KHỞI TẠO STORAGE BUCKET =====
-  // Tự động tạo các bucket cần thiết cho upload ảnh khi app khởi động
-  async ensureStorageBuckets(): Promise<void> {
-    const supabase = getSupabase();
-    if (!supabase) return;
-
-    const buckets = [
-      {
-        name: 'product-catalog-images',
-        desc: 'Hình ảnh danh mục sản phẩm Nội Thất'
-      },
-      {
-        name: 'quote-images',
-        desc: 'Hình ảnh báo giá Cơ Khí (Cửa Nhôm Kính & Sắt CNC)'
-      }
-    ];
-
-    for (const bucket of buckets) {
-      try {
-        const { error } = await supabase.storage.getBucket(bucket.name);
-        if (error && /not found/i.test(String(error.message || ''))) {
-          const { error: createErr } = await supabase.storage.createBucket(bucket.name, {
-            public: true,
-            fileSizeLimit: 10485760, // 10MB
-            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
-          });
-          if (createErr) {
-            console.warn(`[Storage] Không tạo được bucket "${bucket.name}":`, createErr.message);
-          } else {
-            console.log(`[Storage] ✅ Đã tạo bucket "${bucket.name}" (${bucket.desc})`);
-          }
-        } else {
-          console.log(`[Storage] ✅ Bucket "${bucket.name}" đã tồn tại`);
-        }
-      } catch (err) {
-        console.warn(`[Storage] Lỗi kiểm tra bucket "${bucket.name}":`, err);
-      }
-    }
-  }
+  // (Đã bỏ ensureStorageBuckets chạy từ client.) App chạy với anon key nên KHÔNG
+  // có quyền createBucket() (chỉ service_role) — gọi getBucket/createBucket từ
+  // trình duyệt trả 400 + "row violates row-level security policy" và in rác vào
+  // console. Việc tạo bucket "quote-images" / "product-catalog-images" là trách
+  // nhiệm của migration 025 (chạy trên Supabase SQL editor / supabase db push),
+  // không phải runtime. Upload ảnh vẫn hoạt động bình thường một khi bucket tồn tại.
 };

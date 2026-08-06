@@ -611,13 +611,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               cloudData = await dbService.loadAllCore();
             } catch {
               // Fallback: query từng bảng
-              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders, sups, advances] = await Promise.all([
+              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders, sups, advances, bps, scs] = await Promise.all([
                 dbService.customers.list(), dbService.projects.list(),
                 dbService.tasks.list(), dbService.receipts.list(),
                 dbService.payments.list(), dbService.quotes.list(),
                 dbService.salesOrders.list(), dbService.purchaseOrders.list(),
                 dbService.suppliers.list().catch(() => []),
                 dbService.subcontractorAdvances.list(),
+                dbService.businessProfile.list().catch(() => []),
+                dbService.shiftConfig.list().catch(() => []),
               ]);
               cloudData = {
                 customers: custs, projects: projs, tasks: tsks,
@@ -625,7 +627,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                 sales_orders: sOrders, purchase_orders: pOrders,
                 suppliers: sups,
                 subcontractor_advances: advances,
-                business_profile: [], shift_config: [],
+                business_profile: bps, shift_config: scs,
               };
             }
 
@@ -653,6 +655,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             }
             const sOrderRows = toCamel(sOrderRaw || []).map(normalizeOrderItems);
             const pOrderRows = toCamel(pOrderRaw || []).map(normalizeOrderItems);
+
+            // business_profile / shift_config chỉ có trong RPC load_all_core_data.
+            // Nếu RPC trả [] cho 1 trong 2 (do lỗi phụ trợ), query bù trực tiếp
+            // để không làm mất thông tin công ty / cấu hình ca làm việc.
+            if (!Array.isArray(cloudData.business_profile) || cloudData.business_profile.length === 0) {
+              cloudData.business_profile = await dbService.businessProfile.list().catch(() => []);
+            }
+            if (!Array.isArray(cloudData.shift_config) || cloudData.shift_config.length === 0) {
+              cloudData.shift_config = await dbService.shiftConfig.list().catch(() => []);
+            }
 
             const supRows = toCamel(cloudData.suppliers || []);
             const advRows = toCamel(cloudData.subcontractor_advances || []);
@@ -733,11 +745,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (!currentUser?.id) { setIsSuperAdmin(false); return; }
     dbService.checkSuperAdmin(currentUser.id).then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
   }, [currentUser?.id]);
-
-  // ─── Tự động tạo storage bucket cho upload ảnh khi app khởi động ──
-  useEffect(() => {
-    dbService.ensureStorageBuckets().catch(() => {});
-  }, []);
 
   // ─── Load chat conversations từ sớm để sidebar badge hoạt động ──────────────
   const [, forceChatUpdate] = useState(0);
