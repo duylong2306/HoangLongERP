@@ -5,6 +5,7 @@ import {
 import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProposal, ApprovalStep, Supplier, InventoryItem } from '../types';
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
+import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
 
@@ -376,6 +377,20 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
       workLogs: [...currentWorkLogs, newWorkLog],
       comments: [newComment, ...(activeTask.comments || [])]
     });
+
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người khởi tạo và người duyệt
+    const approverEmp = employees.find(e => e.id === approverId);
+    if (currentUser?.id && approverId && currentUser.id !== approverId) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name || 'Người dùng',
+        senderRole: currentUser.role,
+        recipientId: approverId,
+        recipientName: approverEmp?.name || approverName,
+        content: `🔔 ${currentUser.name || 'Người dùng'} đã gửi Yêu cầu phê duyệt công việc "${activeTask.name}". Vui lòng xem xét.`,
+        relatedEntity: { type: 'task', id: activeTask.id },
+      });
+    }
 
     setActiveConnectedTool(null);
     setConnectedTaskId(null);
@@ -1329,6 +1344,20 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                               // Save to database
                               setLastCostProposalId(ctCostProposalId);
                               await dbService.subcontractorAdvances.save(proposal);
+
+                              // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người lập → người duyệt)
+                              const creatorEmp: any = proposal.creator ? employees.find(e => e.id === proposal.creator) : findEmployeeByName(employees, proposal.creatorName);
+                              if (creatorEmp?.id && approverEmp?.id && creatorEmp.id !== approverEmp.id) {
+                                sendApprovalDirectMessage({
+                                  senderId: creatorEmp.id,
+                                  senderName: creatorEmp.name || proposal.creatorName || 'Người lập đề xuất',
+                                  senderRole: creatorEmp.role,
+                                  recipientId: approverEmp.id,
+                                  recipientName: approverEmp.name || proposal.approverName || 'Người xét duyệt',
+                                  content: `🔔 Đề xuất tạm ứng ${proposal.id} (${proposal.taskName}) ${totalVal.toLocaleString('vi-VN')}đ. Lý do: ${ctCostDescription || ''}. Vui lòng xem xét.`,
+                                  relatedEntity: { type: 'advance', id: proposal.id },
+                                });
+                              }
 
                               // Add a document log to Project
                               const newCostDoc: ProjectDoc = {

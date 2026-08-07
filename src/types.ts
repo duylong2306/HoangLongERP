@@ -529,27 +529,6 @@ export interface Quote {
   mucPhatToiDa?: number;
 }
 
-export interface AppNotification {
-  id: string;          // Mã tin nhắn
-  recipientId: string; // ID Người nhận
-  recipientName: string; // Người nhận (User)
-  department: string;  // Phòng Ban
-  content: string;     // Nội dung thông báo
-  subTaskCode: string; // Mã Công Việc con
-  createdAt: string;   // Ngày tạo
-  read: boolean;       // Đã đọc hay chưa
-  senderId?: string;   // ID Người gửi
-  senderName?: string; // Tên người gửi
-  senderAvatar?: string; // Ký tự đại diện hoặc mã màu avatar
-  category?: 'tasks' | 'projects' | 'employees' | 'finance' | 'warehouse' | 'subcontractor' | 'attendance' | 'approval' | 'chat' | 'hr'; // Phân loại
-  title?: string;       // Tiêu đề thông báo
-  detailedContent?: string; // Nội dung đầy đủ chi tiết
-  attachments?: ChatAttachment[]; // File đính kèm tin nhắn
-  conversationId?: string; // ID hội thoại (dùng cho category chat để điều hướng)
-  taskId?: string; // ID công việc liên quan
-  notificationType?: string; // Loại thông báo chi tiết (morning/afternoon cho attendance)
-}
-
 export interface ChatAttachment {
   id: string;
   type: 'image' | 'file' | 'camera';
@@ -916,8 +895,12 @@ export interface ChatMessage {
     content: string;
   };
   mentions?: string[];    // Danh sách tên người được @tag
-  relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission)
-    type: 'task' | 'project' | 'mission';
+  reactions?: {           // Phản ứng cảm xúc: mỗi emoji nhóm các user đã thả
+    emoji: string;
+    users: string[];      // Danh sách userId đã thả emoji này
+  }[];
+  relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission, leave, payment, advance)
+    type: 'task' | 'project' | 'mission' | 'leave' | 'payment' | 'advance';
     id: string;
   };
 }

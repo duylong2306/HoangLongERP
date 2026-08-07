@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
+import { sendApprovalDirectMessage } from '../lib/chatStore';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
@@ -2840,6 +2841,20 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     // Đồng bộ ngay trạng thái duyệt sang Dashboard (Tổng quan) để huy hiệu
     // "✅ Đã duyệt" và việc ẩn cảnh báo "!" cập nhật tức thì, không chờ remount tab.
     window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_hrm', { detail: updatedLeaves }));
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → nhân viên nộp đơn)
+    if (currentUser?.id && targetLeave?.empId && currentUser.id !== targetLeave.empId) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: targetLeave.empId,
+        recipientName: targetLeave.empName,
+        content: status === 'approved'
+          ? `✅ Đã duyệt đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`
+          : `❌ Đã từ chối đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`,
+        relatedEntity: { type: 'leave', id: targetLeave.id },
+      });
+    }
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });
     } else {

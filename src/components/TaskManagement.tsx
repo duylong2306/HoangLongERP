@@ -8,6 +8,7 @@ import {
 import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
+import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { useNotification, isUserInRoleGroup } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 
@@ -31,6 +32,10 @@ interface TaskManagementProps {
   initialTaskId?: string;
   /** Gọi lại sau khi đã mở `initialTaskId`, để App reset state deep link. */
   onInitialTaskOpened?: () => void;
+  /** Phạm vi khởi tạo (deep link từ tin nhắn xét duyệt → mở thẳng bảng "Công việc phải duyệt"). */
+  initialTaskScope?: 'assigned' | 'all' | 'toreview';
+  /** Gọi lại sau khi đã áp dụng `initialTaskScope`, để App reset state deep link. */
+  onInitialTaskScopeOpened?: () => void;
 }
 
 export default function TaskManagement({
@@ -50,7 +55,9 @@ export default function TaskManagement({
   onRedirectToHrLeaves,
   subcontractorAdvances = [],
   initialTaskId,
-  onInitialTaskOpened
+  onInitialTaskOpened,
+  initialTaskScope,
+  onInitialTaskScopeOpened
 }: TaskManagementProps) {
   const { addToast } = useNotification();
   // Bộ lọc
@@ -59,7 +66,7 @@ export default function TaskManagement({
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
   // Phạm vi SCOPE: "assigned" (Công việc được giao), "all" (Nhiệm vụ liên quan) hoặc "toreview" (Công việc phải duyệt)
-  const [taskScope, setTaskScope] = useState<'assigned' | 'all' | 'toreview'>('assigned');
+  const [taskScope, setTaskScope] = useState<'assigned' | 'all' | 'toreview'>(initialTaskScope || 'assigned');
 
   // Trạng thái cho Chi tiết công việc chọn Xem
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -81,6 +88,13 @@ export default function TaskManagement({
     setFilterStatus('all');
     onInitialTaskOpened?.();
   }, [initialTaskId, tasks, currentUser?.id, onInitialTaskOpened]);
+
+  // Deep link xét duyệt → mở thẳng bảng "Công việc phải duyệt"
+  useEffect(() => {
+    if (!initialTaskScope) return;
+    setTaskScope(initialTaskScope);
+    onInitialTaskScopeOpened?.();
+  }, [initialTaskScope, onInitialTaskScopeOpened]);
 
   // States to view leave request or payment details under "Việc của tôi"
   const [viewingLeave, setViewingLeave] = useState<LeaveRequest | null>(null);
@@ -334,6 +348,20 @@ export default function TaskManagement({
     // Lưu đơn đã duyệt/từ chối lên Supabase
     const changed = updated.find(l => l.id === id);
     if (changed) dbService.hrmLeaves.save(changed).catch(() => {});
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và nhân viên nộp đơn
+    if (currentUser.id && targetLeave.empId && currentUser.id !== targetLeave.empId) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: targetLeave.empId,
+        recipientName: targetLeave.empName,
+        content: status === 'approved'
+          ? `✅ Đã duyệt đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`
+          : `❌ Đã từ chối đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`,
+        relatedEntity: { type: 'leave', id: targetLeave.id },
+      });
+    }
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });
     } else {
@@ -348,6 +376,21 @@ export default function TaskManagement({
     if (updatedPayment) {
       dbService.payments.save({ ...updatedPayment, status }).catch(err =>
         console.warn('Lỗi khi lưu trạng thái duyệt thanh toán lên Supabase:', err));
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
+      const proposerEmp = findEmployeeByName(employees, updatedPayment.proposer);
+      if (currentUser.id && proposerEmp?.id && currentUser.id !== proposerEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: proposerEmp.id,
+          recipientName: proposerEmp.name || updatedPayment.proposer,
+          content: status === 'approved'
+            ? `✅ Đã duyệt phiếu chi ${updatedPayment.code} (${updatedPayment.recipient}) ${updatedPayment.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối phiếu chi ${updatedPayment.code} (${updatedPayment.recipient}) ${updatedPayment.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'payment', id: updatedPayment.id },
+        });
+      }
     }
     addToast({ title: '✅ Đã cập nhật', message: `Đã cập nhật đề xuất thanh toán [${id}] sang trạng thái: ${status === 'approved' ? 'Phê duyệt ✅' : 'Từ chối ❌'}`, type: 'success' });
   };
@@ -362,6 +405,21 @@ export default function TaskManagement({
     try {
       await dbService.subcontractorAdvances.save(updated);
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người lập đề xuất
+      const creatorEmp = adv.creator ? employees.find(e => e.id === adv.creator) : findEmployeeByName(employees, adv.creatorName);
+      if (currentUser.id && creatorEmp?.id && currentUser.id !== creatorEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: creatorEmp.id,
+          recipientName: creatorEmp.name || adv.creatorName || 'Người lập đề xuất',
+          content: decision === 'approved'
+            ? `✅ Đã duyệt đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'advance', id: adv.id },
+        });
+      }
       addToast({
         title: decision === 'approved' ? '✅ Đã phê duyệt' : '❌ Đã từ chối',
         message: `Đề xuất ${id} → ${decision === 'approved' ? 'Chờ Lập Phiếu (KT)' : 'Từ Chối'}`,
@@ -1134,7 +1192,19 @@ export default function TaskManagement({
                                 notes: `${currentUser.name} đã Từ Chối duyệt kết quả thông qua cổng duyệt nhanh.`
                               }]
                             });
-                            // 🤖 (Đã loại bỏ: thông báo công việc gửi về nhóm chat)
+                            // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → người giao)
+                            const assignerEmp = employees.find(e => e.id === t.assignerId);
+                            if (currentUser.id && t.assignerId && currentUser.id !== t.assignerId) {
+                              sendApprovalDirectMessage({
+                                senderId: currentUser.id,
+                                senderName: currentUser.name,
+                                senderRole: currentUser.role,
+                                recipientId: t.assignerId,
+                                recipientName: assignerEmp?.name || 'Người giao việc',
+                                content: `❌ ${currentUser.name} đã TỪ CHỐI duyệt kết quả công việc "${t.name}".`,
+                                relatedEntity: { type: 'task', id: t.id },
+                              });
+                            }
                           }}
                           className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                         >
@@ -1166,7 +1236,19 @@ export default function TaskManagement({
                                 notes: `${currentUser.name} đã Phê Duyệt kết quả hoàn thành sản phẩm mốc nghiệm thu.`
                               }]
                             });
-                            // 🤖 (Đã loại bỏ: thông báo công việc gửi về nhóm chat)
+                            // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → người giao)
+                            const assignerEmp = employees.find(e => e.id === t.assignerId);
+                            if (currentUser.id && t.assignerId && currentUser.id !== t.assignerId) {
+                              sendApprovalDirectMessage({
+                                senderId: currentUser.id,
+                                senderName: currentUser.name,
+                                senderRole: currentUser.role,
+                                recipientId: t.assignerId,
+                                recipientName: assignerEmp?.name || 'Người giao việc',
+                                content: `✅ ${currentUser.name} đã DUYỆT hoàn thành công việc "${t.name}".`,
+                                relatedEntity: { type: 'task', id: t.id },
+                              });
+                            }
                           }}
                           className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-2.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer"
                         >

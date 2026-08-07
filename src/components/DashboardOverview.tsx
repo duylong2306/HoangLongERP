@@ -11,6 +11,7 @@ import {
   burnTimestampToPhoto,
 } from '../lib/attendanceOutbox';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
+import { sendApprovalDirectMessage, findEmployeeByName, maybeSendAttendanceChatMessage } from '../lib/chatStore';
 import PunchMediaList from './hr/PunchMediaList';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
@@ -1688,6 +1689,14 @@ export default function DashboardOverview({
         message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime} tại ${selectedSite}.`,
         type: 'success',
       });
+      // 📣 Nhóm chat "Điểm danh": người chấm ĐẦU TIÊN trong ca kích hoạt Hệ
+      // Thống gửi tin nhắc vào nhóm (server-side atomic, chống race + ngày nghỉ).
+      maybeSendAttendanceChatMessage({
+        date: todayVal,
+        slot: activePunchSlot,
+        empId,
+        empName: currentUser.name,
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Lỗi không xác định';
       console.error('Lỗi khi lưu chấm công lên Supabase (đã lưu tạm vào Outbox):', err);
@@ -1797,6 +1806,20 @@ export default function DashboardOverview({
         setDashLeaves(prev => [newRequest, ...(prev || [])]);
       });
 
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (nhân viên → người duyệt)
+    const approverEmp = hrmEmployees.find((e: any) => e.id === newRequest.approverId) || findEmployeeByName(hrmEmployees, newRequest.approverName);
+    if (empId && approverEmp?.id && empId !== approverEmp.id) {
+      sendApprovalDirectMessage({
+        senderId: empId,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: approverEmp.id,
+        recipientName: approverEmp.name || newRequest.approverName,
+        content: `🔔 ${currentUser.name} đã gửi ĐƠN NGHỈ PHÉP "${newRequest.type}" từ ${newRequest.fromDate} đến ${newRequest.toDate} (${newRequest.daysCount} ngày). Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        relatedEntity: { type: 'leave', id: newRequest.id },
+      });
+    }
+
     setLeaveReasonText('');
     setLeaveModalOpen(false);
     alert(`📬 Đơn xin nghỉ phép đã được nộp sang HỆ THỐNG NHÂN SỰ thành công!\nNgười duyệt: ${(leaveApprover || 'Trương Hữu Long')}${leaveApproverPosition ? ` (${leaveApproverPosition})` : ''}\nTrạng thái: Đang chờ duyệt.`);
@@ -1854,6 +1877,20 @@ export default function DashboardOverview({
         console.warn('Push báo cáo nghỉ ca lên Supabase thất bại:', err);
         setDashLeaves(prev => [newRequest, ...(prev || [])]);
       });
+
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (nhân viên → người duyệt)
+    const approverEmp = hrmEmployees.find((e: any) => e.id === finalApproverId) || findEmployeeByName(hrmEmployees, finalApproverName);
+    if (empId && approverEmp?.id && empId !== approverEmp.id) {
+      sendApprovalDirectMessage({
+        senderId: empId,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: approverEmp.id,
+        recipientName: approverEmp.name || finalApproverName,
+        content: `🔔 ${currentUser.name} đã gửi BÁO CÁO CHẤM CÔNG "${newRequest.type}" (${newRequest.shift || ''}) ngày ${newRequest.fromDate}. Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        relatedEntity: { type: 'leave', id: newRequest.id },
+      });
+    }
 
     setShowReportForm(false);
     setReportReason('');
@@ -1970,6 +2007,20 @@ export default function DashboardOverview({
 
       // Trigger custom event để các component khác (FinanceManagement) cập nhật
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: newProposal }));
+
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người lập → người duyệt)
+      const approverEmp = hrmEmployees.find((e: any) => e.id === finalApproverId) || findEmployeeByName(hrmEmployees, finalApproverName);
+      if (empId && approverEmp?.id && empId !== approverEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: empId,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: approverEmp.id,
+          recipientName: approverEmp.name || finalApproverName,
+          content: `🔔 ${currentUser.name} đã gửi ĐỀ XUẤT TẠM ỨNG LƯƠNG ${proposalId} (${newProposal.taskName}) ${amount.toLocaleString('vi-VN')}đ. Lý do: ${newProposal.reason}. Vui lòng xem xét.`,
+          relatedEntity: { type: 'advance', id: proposalId },
+        });
+      }
     } catch (err) {
       console.error('Lỗi khi lưu đề xuất tạm ứng lương:', err);
       alert('❌ Có lỗi xảy ra khi gửi đề xuất. Vui lòng thử lại!');

@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService } from '../lib/dbService';
+import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem } from '../types';
 import { useNotification, isUserInRoleGroup, loadHrmRoleGroups } from '../context';
 import * as XLSX from 'xlsx';
@@ -426,6 +427,19 @@ export default function FinanceManagement({
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
 
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → người lập đề xuất)
+      const creatorEmp = proposal.creator ? (employeesProp || []).find(e => e.id === proposal.creator) : findEmployeeByName(employeesProp || [], proposal.creatorName);
+      if (currentUser?.id && creatorEmp?.id && currentUser.id !== creatorEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: creatorEmp.id,
+          recipientName: creatorEmp.name || proposal.creatorName || 'Người lập đề xuất',
+          content: `✅ Đã duyệt đề xuất tạm ứng ${proposal.id} (${proposal.taskName || proposal.subcontractorName}) ${proposal.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'advance', id: proposal.id },
+        });
+      }
       try {
         addToast({ title: '✅ Đã phê duyệt', message: `✅ Đã phê duyệt Đề xuất ${proposal.id}! Trạng thái chuyển thành: Chờ Lập Phiếu.`, type: 'success' });
       } catch (e) {}
@@ -465,6 +479,19 @@ export default function FinanceManagement({
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
 
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → người lập đề xuất)
+      const creatorEmp = proposal.creator ? (employeesProp || []).find(e => e.id === proposal.creator) : findEmployeeByName(employeesProp || [], proposal.creatorName);
+      if (currentUser?.id && creatorEmp?.id && currentUser.id !== creatorEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: creatorEmp.id,
+          recipientName: creatorEmp.name || proposal.creatorName || 'Người lập đề xuất',
+          content: `❌ Đã từ chối đề xuất tạm ứng ${proposal.id} (${proposal.taskName || proposal.subcontractorName}) ${proposal.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'advance', id: proposal.id },
+        });
+      }
       try {
         addToast({ title: 'ℹ️ Thông báo', message: `❌ Đã từ chối Đề xuất ${proposal.id}. Trạng thái chuyển thành: Từ Chối.`, type: 'info' });
       } catch (e) {}

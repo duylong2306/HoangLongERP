@@ -76,6 +76,7 @@ function msgFromRow(r: any): ChatMessage {
     pinned: r.pinned ?? false,
     replyTo: r.reply_to ?? undefined,
     mentions: r.mentions ?? undefined,
+    reactions: r.reactions ?? undefined,
     relatedEntity: r.related_entity ? JSON.parse(r.related_entity) : undefined,
   };
 }
@@ -99,6 +100,7 @@ function msgToRow(m: ChatMessage): any {
     pinned: m.pinned ?? false,
     reply_to: m.replyTo ?? null,
     mentions: m.mentions ?? null,
+    reactions: m.reactions ?? [],
     related_entity: m.relatedEntity ? JSON.stringify(m.relatedEntity) : null,
   };
 }
@@ -169,6 +171,62 @@ export async function getOrCreatePersonalConversation(
   conversationsCache.set(newConv.id, newConv);
   await pushConversation(newConv);
   return newConv;
+}
+
+// Tìm hoặc tạo hội thoại cá nhân (1-1) — bản gói gọn, an toàn với dữ liệu rỗng.
+// Dùng chung cho mọi luồng "xét duyệt → hội thoại cá nhân" trong app.
+export async function getOrCreateDirectConv(
+  userId1: string, userId2: string,
+  user1Name: string, user2Name: string,
+): Promise<Conversation | null> {
+  if (!userId1 || !userId2 || userId1 === userId2) return null;
+  return getOrCreatePersonalConversation(userId1, userId2, user1Name, user2Name);
+}
+
+// Tra cứu nhân viên theo TÊN — nhiều đơn (nghỉ phép, phiếu chi) chỉ lưu tên
+// người duyệt/đề xuất ("Trương Hữu Long (Giám đốc)"), cần ánh xạ sang ID để
+// dựng hội thoại cá nhân. Ưu tiên khớp chính xác, rồi bỏ phần chức danh.
+export function findEmployeeByName(
+  employees: { id: string; name?: string }[],
+  name?: string | null,
+): { id: string; name?: string } | undefined {
+  if (!name) return undefined;
+  const trimmed = String(name).trim();
+  if (!trimmed) return undefined;
+  const exact = employees.find(e => e.name === trimmed);
+  if (exact) return exact;
+  const base = trimmed.split('(')[0].trim();
+  return (
+    employees.find(e => e.name === base) ||
+    employees.find(e => e.name?.includes(base)) ||
+    employees.find(e => e.name && base.includes(e.name))
+  );
+}
+
+// ─── Xét duyệt → hội thoại cá nhân ─────────────────────────────────────────
+// Gửi một tin nhắn xét duyệt giữa 2 người (người khởi tạo ↔ người duyệt).
+// Tự tìm/tạo hội thoại cá nhân 2 chiều rồi gửi tin kèm deep-link thực thể.
+export async function sendApprovalDirectMessage(params: {
+  senderId: string;
+  senderName: string;
+  senderRole?: string;
+  recipientId: string;
+  recipientName: string;
+  content: string;
+  relatedEntity?: ChatMessage['relatedEntity'];
+}): Promise<ChatMessage | null> {
+  if (!params.senderId || !params.recipientId || params.senderId === params.recipientId) return null;
+  const conv = await getOrCreateDirectConv(params.senderId, params.recipientId, params.senderName, params.recipientName);
+  if (!conv) return null;
+  return addMessage({
+    conversationId: conv.id,
+    senderId: params.senderId,
+    senderName: params.senderName,
+    senderRole: (params.senderRole || 'member') as any,
+    content: params.content,
+    system: false,
+    relatedEntity: params.relatedEntity,
+  });
 }
 
 // Tạo hội thoại nhóm
@@ -309,6 +367,105 @@ export async function addMemberToConversation(convId: string, memberId: string):
   conversationsCache.set(convId, updatedConv);
   await pushConversation(updatedConv);
   return updatedConv;
+}
+
+// ─── Nhóm chat "Điểm danh" ─────────────────────────────────────────────────
+// Nhóm chat ĐIỂM DANH (id cố định `conv_attendance`): người chấm công ĐẦU TIÊN
+// trong mỗi ca (Vào/Ra sáng, Vào/Ra chiều) khiến Hệ Thống gửi 1 tin nhắc vào
+// nhóm. Việc chọn "người đầu tiên" dùng RPC server-side atomic
+// (INSERT ON CONFLICT DO NOTHING) → chống race khi nhiều người cùng bấm.
+export const ATTENDANCE_CONV_ID = 'conv_attendance';
+
+// Nội dung tin theo 4 slot (BỎ QUA tăng ca timeInOT/timeOutOT).
+export const ATTENDANCE_CHAT_CONTENT: Record<string, string> = {
+  timeInS: '⏰ Đến giờ check-in rồi mọi người!',
+  timeOutS: '⏰ Đến giờ check-out rồi mọi người!',
+  timeInC: '⏰ Đến giờ check-in (chiều) rồi mọi người!',
+  timeOutC: '⏰ Đến giờ check-out (chiều) rồi mọi người!',
+};
+
+/**
+ * Tự động tạo (idempotent) nhóm chat "Điểm danh". Thành viên = toàn bộ nhân
+ * viên có tài khoản hệ thống (hasSystemAccount). Nếu nhóm đã tồn tại, đồng bộ
+ * thêm thành viên mới (không xóa ai).
+ */
+export async function ensureAttendanceChatGroup(
+  employees: { id: string }[]
+): Promise<Conversation | null> {
+  const memberIds = Array.from(new Set(
+    (employees || []).map(e => e.id).filter(Boolean) as string[]
+  ));
+  if (memberIds.length === 0) return null;
+
+  const existing = conversationsCache.get(ATTENDANCE_CONV_ID);
+  if (existing) {
+    const missing = memberIds.filter(id => !existing.participantIds.includes(id));
+    if (missing.length === 0) return existing;
+    const updated = { ...existing, participantIds: [...existing.participantIds, ...missing] };
+    conversationsCache.set(ATTENDANCE_CONV_ID, updated);
+    await pushConversation(updated);
+    return updated;
+  }
+
+  const newConv: Conversation = {
+    id: ATTENDANCE_CONV_ID,
+    type: 'group',
+    name: 'Điểm danh',
+    avatar: 'ĐD',
+    color: '#27AE60',
+    participantIds: memberIds,
+    createdBy: 'system',
+    createdAt: new Date().toISOString(),
+    unreadCount: 0,
+    pinned: true,
+  };
+  conversationsCache.set(ATTENDANCE_CONV_ID, newConv);
+  await pushConversation(newConv);
+  return newConv;
+}
+
+/**
+ * Gọi SAU KHI lưu chấm công thành công cho 1 trong 4 slot chính. Claim "người
+ * chấm đầu tiên" qua RPC `claim_attendance_chat` (server-side atomic); chỉ khi
+ * trả về row (đúng người đầu tiên, không phải ngày nghỉ) mới gửi tin vào nhóm.
+ * Mọi lỗi đều nuốt im lặng — không làm hỏng luồng chấm công.
+ */
+export async function maybeSendAttendanceChatMessage(params: {
+  date: string;   // YYYY-MM-DD
+  slot: string;   // timeInS/timeOutS/timeInC/timeOutC
+  empId: string;
+  empName: string;
+}): Promise<void> {
+  const content = ATTENDANCE_CHAT_CONTENT[params.slot];
+  if (!content) return; // bỏ qua tăng ca & slot không thuộc 4 ca chính
+
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase.rpc('claim_attendance_chat', {
+      p_date: params.date,
+      p_slot: params.slot,
+      p_emp_id: params.empId,
+    });
+    if (error) {
+      console.warn('claim_attendance_chat error:', error.message);
+      return;
+    }
+    // Chỉ người chấm ĐẦU TIÊN (RPC trả về 1 row) mới gửi tin nhắc
+    if (!Array.isArray(data) || data.length === 0) return;
+
+    await ensureAttendanceChatGroup([{ id: params.empId }]);
+    await addMessage({
+      conversationId: ATTENDANCE_CONV_ID,
+      senderId: 'system',
+      senderName: 'Hệ Thống',
+      senderRole: 'system' as any,
+      content,
+      system: true,
+    });
+  } catch (err) {
+    console.warn('maybeSendAttendanceChatMessage error (ignored):', err);
+  }
 }
 
 // ─── Messages CRUD (async + cache) ────────────────────────────────────────
@@ -537,6 +694,59 @@ export async function togglePinMessage(conversationId: string, messageId: string
   if (sb) {
     const { error } = await sb.from('chat_messages').update({ pinned: updated.pinned }).eq('id', messageId);
     if (error) console.error('togglePinMessage error:', error.message);
+  }
+  return updated;
+}
+
+// Thả/bỏ thả tim (hoặc emoji) vào tin nhắn — toggle theo userId
+export async function toggleMessageReaction(
+  conversationId: string,
+  messageId: string,
+  userId: string,
+  emoji: string
+): Promise<ChatMessage | null> {
+  const msgs = messagesCache.get(conversationId) || [];
+  const idx = msgs.findIndex(m => m.id === messageId);
+  if (idx === -1) return null;
+
+  const reactions = [...(msgs[idx].reactions ?? [])];
+  const groupIdx = reactions.findIndex(g => g.emoji === emoji);
+  let hasEmoji = false;
+
+  if (groupIdx === -1) {
+    // Emoji chưa có → tạo nhóm mới với user hiện tại
+    reactions.push({ emoji, users: [userId] });
+    hasEmoji = true;
+  } else {
+    const users = reactions[groupIdx].users;
+    if (users.includes(userId)) {
+      // Đã thả rồi → gỡ user; nếu hết user thì xóa nhóm emoji
+      const nextUsers = users.filter(u => u !== userId);
+      if (nextUsers.length === 0) reactions.splice(groupIdx, 1);
+      else reactions[groupIdx] = { emoji, users: nextUsers };
+    } else {
+      reactions[groupIdx] = { emoji, users: [...users, userId] };
+      hasEmoji = true;
+    }
+  }
+
+  const updated: ChatMessage = {
+    ...msgs[idx],
+    reactions,
+  };
+
+  // Update cache
+  const newMsgs = [...msgs];
+  newMsgs[idx] = updated;
+  messagesCache.set(conversationId, newMsgs);
+
+  // Push to Supabase
+  const sb = getSupabase();
+  if (sb) {
+    const { error } = await sb.from('chat_messages')
+      .update({ reactions })
+      .eq('id', messageId);
+    if (error) console.error('toggleMessageReaction error:', error.message);
   }
   return updated;
 }

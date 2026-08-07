@@ -1,19 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Employee, AppNotification, ChatAttachment, Task, TaskComment, Conversation, ChatMessage } from '../types';
+import { Employee, ChatAttachment, Task, TaskComment, Conversation, ChatMessage } from '../types';
 import { useNotification } from '../context';
-import { dbService } from '../lib/dbService';
-import NotificationList from './NotificationList';
 import {
   getConversations, saveConversations, getMessages, addMessage,
   getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
   markConversationRead, getUserConversations, deleteMessageFromConversation,
   updateMessage, searchMessagesInConversation, getConversationUnreadCount,
-  addMemberToConversation,
+  addMemberToConversation, toggleMessageReaction,
   loadConversationsFromCloud, loadMessagesFromCloud,
   subscribeConversations, subscribeMessages,
 } from '../lib/chatStore';
 import {
-  Search, MessageSquare, Bell, User, Users, Send, Image, Smile,
+  Search, MessageSquare, User, Users, Send, Image, Smile,
   ThumbsUp, Phone, Info, MoreVertical, CheckCheck, ChevronLeft,
   Pin, Plus, X, Trash, Camera, Paperclip, File, Download, Check,
 } from 'lucide-react';
@@ -21,34 +19,24 @@ import {
 interface MessagesViewProps {
   currentUser: Employee;
   employees: Employee[];
-  notifications: AppNotification[];
-  onUpdateNotifications: (updated: AppNotification[]) => void;
   onNavigateTab?: (tab: string) => void;
   tasks?: Task[];
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void;
-  initialPaneTab?: ActivePaneTab;
   initialConversationId?: string; // Mở trực tiếp hội thoại này
   showBadgeCounts?: boolean; // Hiển thị badge số chưa đọc trên tab
   onToggleBadgeCounts?: (next: boolean) => void; // Bật/tắt badge
 }
 
-type ActivePaneTab = 'all' | 'personal' | 'group' | 'notifications' | 'contacts';
+type ActivePaneTab = 'all' | 'personal' | 'group' | 'contacts';
 
 export default function MessagesView({
-  currentUser, employees, notifications, onUpdateNotifications, onNavigateTab, tasks = [], onUpdateTask,
-  initialPaneTab = 'all',
+  currentUser, employees, onNavigateTab, tasks = [], onUpdateTask,
   initialConversationId,
   showBadgeCounts = true,
   onToggleBadgeCounts,
 }: MessagesViewProps) {
   const { addToast } = useNotification();
-  const [activePaneTab, setActivePaneTab] = useState<ActivePaneTab>(initialPaneTab);
-
-  // Đồng bộ với tab được chọn từ lối tắt chuông thông báo (App.tsx)
-  useEffect(() => {
-    setActivePaneTab(initialPaneTab);
-    setSearchQuery('');
-  }, [initialPaneTab]);
+  const [activePaneTab, setActivePaneTab] = useState<ActivePaneTab>('all');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
@@ -92,6 +80,11 @@ export default function MessagesView({
   const [replyToMsg, setReplyToMsg] = useState<{ id: string; senderName: string; content: string } | null>(null);
   const [showAddMember, setShowAddMember] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // ─── Reaction & Gesture (double-tap / right-click / swipe-to-reply) ────
+  const [contextMenu, setContextMenu] = useState<{ msgId: string; x: number; y: number } | null>(null);
+  const touchTrackRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const lastTapRef = useRef<{ msgId: string; t: number } | null>(null);
 
   // ─── @Mention State ────────────────────────────────────────────────────
   const [showMentionPicker, setShowMentionPicker] = useState(false);
@@ -279,6 +272,65 @@ export default function MessagesView({
     }
   };
 
+  // ─── Reaction & Gesture handlers ────────────────────────────────────────
+  // Thả/bỏ thả phản ứng (tim ❤️ mặc định) vào tin nhắn
+  const handleToggleReaction = async (msgId: string, emoji: string) => {
+    if (!selectedConv) return;
+    await toggleMessageReaction(selectedConv.id, msgId, currentUser.id, emoji);
+    setConvMessages(getMessages(selectedConv.id));
+  };
+
+  // Click chuột phải (desktop) → mở context menu ngay vị trí chuột
+  const handleContextMenu = (e: React.MouseEvent, msgId: string) => {
+    e.preventDefault();
+    const x = Math.min(e.clientX, window.innerWidth - 170);
+    const y = Math.min(e.clientY, window.innerHeight - 100);
+    setContextMenu({ msgId, x, y });
+  };
+
+  const closeContextMenu = () => setContextMenu(null);
+
+  // Double-tap (mobile) → thả tim; Vuốt sang phải (mobile) → trả lời
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchTrackRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent, msgId: string) => {
+    const track = touchTrackRef.current;
+    touchTrackRef.current = null;
+    if (!track) return;
+
+    // Bỏ qua nếu chạm vào phần tử tương tác (nút, link, input...) — tránh gây
+    // thả tim ngoài ý muốn khi user bấm nút reply/pill/ảnh.
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, textarea, [data-no-gesture]')) return;
+
+    const t = e.changedTouches[0];
+    const dx = t.clientX - track.x;
+    const dy = t.clientY - track.y;
+    const dt = Date.now() - track.t;
+
+    // Vuốt sang phải (ưu tiên nếu chuyển động ngang rõ ràng) → kích hoạt trả lời
+    if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      const msg = convMessages.find(m => m.id === msgId);
+      if (msg) setReplyToMsg({ id: msg.id, senderName: msg.senderName, content: msg.content });
+      return;
+    }
+
+    // Tap không di chuyển → kiểm tra double-tap để thả tim
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && dt < 300) {
+      const now = Date.now();
+      const last = lastTapRef.current;
+      if (last && last.msgId === msgId && now - last.t < 300) {
+        lastTapRef.current = null;
+        handleToggleReaction(msgId, '❤️');
+      } else {
+        lastTapRef.current = { msgId, t: now };
+      }
+    }
+  };
+
   // ─── Multi-select: Chọn/Bỏ chọn 1 hội thoại ──────────────────────────
   const toggleConvSelect = (convId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -400,34 +452,9 @@ export default function MessagesView({
 
       // Gửi notification cho những người được tag trong group chat
       if (mentionedNames.length > 0 && conv && (conv.type === 'group' || conv.type === 'task')) {
-        const convName = conv.name;
-        for (const name of mentionedNames) {
-          const mentionedEmp = employees.find(e =>
-            e.id !== currentUser.id && e.name.toLowerCase() === name.toLowerCase()
-          );
-          if (mentionedEmp) {
-            const notifId = `MENTION-${Date.now()}-${Math.floor(Math.random() * 900) + 100}`;
-            const notif = {
-              id: notifId,
-              recipientId: mentionedEmp.id,
-              recipientName: mentionedEmp.name,
-              department: mentionedEmp.department || '',
-              title: `💬 ${currentUser.name} đã tag bạn`,
-              content: `trong "${convName}": ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`,
-              detailedContent: text,
-              category: 'chat' as const,
-              senderName: currentUser.name,
-              senderAvatar: currentUser.name.charAt(0).toUpperCase(),
-              senderId: currentUser.id,
-              read: false,
-              createdAt: new Date().toISOString(),
-            };
-            try {
-              dbService.notifications.save(notif).catch(() => {});
-              window.dispatchEvent(new CustomEvent('hl-dispatch-notification', { detail: notif }));
-            } catch {}
-          }
-        }
+        // Lõi Thông báo hệ thống đã bị xóa (phần D) — nhắc @mention giờ do tin
+        // nhắn chat + Web Push (chatStore.addMessage) đảm nhận, không tạo bản ghi
+        // notifications riêng nữa.
       }
 
       return;
@@ -543,13 +570,6 @@ export default function MessagesView({
     return filtered.filter(e => e.name.toLowerCase().includes(q) || (e.department && e.department.toLowerCase().includes(q)));
   }, [employees, currentUser.id, searchQuery]);
 
-  const systemNotifications = notifications.filter(n => n.recipientId === currentUser.id && n.category !== 'chat');
-  const filteredSystemNotifs = systemNotifications.filter(n =>
-    n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (n.title && n.title.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
-
-  const systemUnreadCount = systemNotifications.filter(n => !n.read).length;
   // personalUnreadCount đã được tính toán bằng useMemo ở trên (chỉ tính hội thoại người dùng tham gia)
 
   // Danh sách tab menu bên trái (dạng cột hẹp, kiểu Telegram PC)
@@ -557,7 +577,6 @@ export default function MessagesView({
     { id: 'all' as const, label: 'Tất cả', icon: MessageSquare, count: newMessageCount },
     { id: 'personal' as const, label: 'Cá nhân', icon: User, count: personalUnreadCount },
     { id: 'group' as const, label: 'Nhóm', icon: Users, count: groupUnreadCount },
-    { id: 'notifications' as const, label: 'Thông báo', icon: Bell, count: systemUnreadCount },
   ];
 
   // ─── Helper: get member info ────────────────────────────────────────────
@@ -644,7 +663,7 @@ export default function MessagesView({
               <span>Tin nhắn</span>
             </h1>
             <div className="flex items-center gap-2">
-              {activePaneTab !== 'notifications' && activePaneTab !== 'contacts' && (
+              {activePaneTab !== 'contacts' && (
                 <button
                   onClick={() => { setConvSelectMode(v => !v); setSelectedConvIds(new Set()); }}
                   className={`px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
@@ -698,7 +717,7 @@ export default function MessagesView({
         <div className="flex-1 overflow-y-auto scrollbar-thin bg-slate-950 border-r border-slate-800">
 
           {/* ALL TAB - Groups + Personal */}
-          {activePaneTab !== 'notifications' && activePaneTab !== 'contacts' && (<>
+          {activePaneTab !== 'contacts' && (<>
             {/* Conversations list */}
             {filteredConversations.length === 0 ? (
               <div className="py-16 text-center">
@@ -799,7 +818,7 @@ export default function MessagesView({
           </>)}
 
           {/* BULK ACTION BAR */}
-          {convSelectMode && activePaneTab !== 'notifications' && activePaneTab !== 'contacts' && (
+          {convSelectMode && activePaneTab !== 'contacts' && (
             <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 px-3 py-2.5 flex items-center justify-between z-20">
               <div className="flex items-center gap-2">
                 <button
@@ -822,18 +841,6 @@ export default function MessagesView({
                 </button>
               )}
             </div>
-          )}
-
-          {/* NOTIFICATIONS TAB */}
-          {activePaneTab === 'notifications' && (
-            <NotificationList
-              notifications={notifications}
-              employees={employees}
-              currentUser={currentUser}
-              onUpdateNotifications={onUpdateNotifications}
-              onNavigateTab={onNavigateTab}
-              onClose={() => setActivePaneTab('all')}
-            />
           )}
 
           {/* CONTACTS TAB */}
@@ -1062,7 +1069,13 @@ export default function MessagesView({
                               </div>
                             )}
 
-                            <div className={`group flex gap-2 max-w-[88%] items-end ${isSelf ? 'ml-auto flex-row-reverse' : ''}`}>
+                            <div
+                              className={`group flex gap-2 max-w-[88%] items-end ${isSelf ? 'ml-auto flex-row-reverse' : ''}`}
+                              style={{ touchAction: 'pan-y' }}
+                              onContextMenu={e => { if (!msg.deleted) handleContextMenu(e, msg.id); }}
+                              onTouchStart={handleTouchStart}
+                              onTouchEnd={e => { if (!msg.deleted) handleTouchEnd(e, msg.id); }}
+                            >
                               {/* Avatar */}
                               {!isSelf && isGroup && (
                                 <div className={`shrink-0 ${sameSender ? 'invisible' : ''}`}>
@@ -1084,6 +1097,7 @@ export default function MessagesView({
                                 {/* Reply preview (clickable to scroll) */}
                                 {msg.replyTo && (
                                   <div
+                                    data-no-gesture
                                     onClick={() => {
                                       const el = document.getElementById(`msg_${msg.replyTo!.id}`);
                                       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1100,7 +1114,7 @@ export default function MessagesView({
                                   <p className="whitespace-pre-wrap">{renderContentWithMentions(msg.content)}</p>
                                   {/* Attachments */}
                                   {msg.attachments && msg.attachments.length > 0 && !msg.deleted && (
-                                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                    <div className="flex flex-wrap gap-1.5 mt-1.5" data-no-gesture>
                                       {msg.attachments.map((att: any) => (
                                         <div key={att.id} className="relative group">
                                           {att.type === 'image' || att.type === 'camera' ? (
@@ -1125,6 +1139,30 @@ export default function MessagesView({
                                   </div>
                                 </div>
 
+                                {/* Reaction pills */}
+                                {msg.reactions && msg.reactions.length > 0 && !msg.deleted && (
+                                  <div className={`flex flex-wrap gap-1 mt-1 ${isSelf ? 'justify-end' : ''}`}>
+                                    {msg.reactions.map(grp => {
+                                      const mine = grp.users.includes(currentUser.id);
+                                      return (
+                                        <button
+                                          key={grp.emoji}
+                                          onClick={() => handleToggleReaction(msg.id, grp.emoji)}
+                                          title={grp.users.length > 0 ? `${grp.users.length} người đã thả` : undefined}
+                                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border transition-colors cursor-pointer ${
+                                            mine
+                                              ? 'bg-indigo-500/30 border-indigo-400 text-white'
+                                              : 'bg-slate-800 border-slate-700 text-slate-200 hover:border-indigo-400'
+                                          }`}
+                                        >
+                                          <span>{grp.emoji}</span>
+                                          <span className="text-[10px]">{grp.users.length}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
                                 {/* Action menu (reply / delete) */}
                                 {!msg.deleted && (
                                   <div className={`flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity ${isSelf ? 'justify-end' : ''}`}>
@@ -1142,6 +1180,9 @@ export default function MessagesView({
                                             window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: msg.relatedEntity.id } }));
                                           } else if (msg.relatedEntity?.type === 'project') {
                                             window.dispatchEvent(new CustomEvent('hl-open-project', { detail: { projectId: msg.relatedEntity.id } }));
+                                          } else if (msg.relatedEntity?.type === 'leave' || msg.relatedEntity?.type === 'payment' || msg.relatedEntity?.type === 'advance') {
+                                            // Xét duyệt → mở bảng "Công việc phải duyệt" trong tab Công việc
+                                            window.dispatchEvent(new CustomEvent('hl-open-approval', { detail: { kind: msg.relatedEntity.type, id: msg.relatedEntity.id } }));
                                           } else if (msg.relatedEntity?.type === 'mission') {
                                             // For mission, we need to open the task first, then the mission detail
                                             // We can't directly open mission from here without knowing the parent task
@@ -1525,6 +1566,49 @@ export default function MessagesView({
           </div>
         </div>
       )}
+
+      {/* CONTEXT MENU (click chuột phải trên desktop → thả tim) */}
+      {contextMenu && (() => {
+        const ctxMsg = convMessages.find(m => m.id === contextMenu.msgId);
+        return (
+          <>
+            <div className="fixed inset-0 z-40" onClick={closeContextMenu} onContextMenu={e => { e.preventDefault(); closeContextMenu(); }} />
+            <div
+              className="fixed z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 min-w-[160px]"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              <button
+                onClick={() => {
+                  handleToggleReaction(contextMenu.msgId, '❤️');
+                  closeContextMenu();
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-[12px] transition-colors cursor-pointer ${
+                  ctxMsg?.reactions?.some(g => g.emoji === '❤️' && g.users.includes(currentUser.id))
+                    ? 'text-indigo-300 bg-indigo-500/20'
+                    : 'text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <span className="text-[15px]">❤️</span>
+                {ctxMsg?.reactions?.some(g => g.emoji === '❤️' && g.users.includes(currentUser.id))
+                  ? 'Bỏ thả tim'
+                  : 'Thả tim'}
+              </button>
+              {!ctxMsg?.deleted && (
+                <button
+                  onClick={() => {
+                    if (ctxMsg) setReplyToMsg({ id: ctxMsg.id, senderName: ctxMsg.senderName, content: ctxMsg.content });
+                    closeContextMenu();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <span className="text-[15px]">↩️</span>
+                  Trả lời
+                </button>
+              )}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

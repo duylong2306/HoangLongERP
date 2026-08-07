@@ -444,7 +444,6 @@ const VERIFIED_LINK_COLUMNS: LinkColumnMap = {
   byTask: new Set([
     'quotes',
     'subcontractor_advances',
-    'notifications',
     'hrm_employee_errors',          // Ghi nhận vi phạm kỷ luật & hiệu suất
     'conversations',
   ]),
@@ -1922,29 +1921,6 @@ export const dbService = {
       }
     } catch (e) {
       console.warn('Supabase updateQuoteDocHtml exception:', e);
-    }
-  },
-
-  // 10.5. NOTIFICATIONS (Thông báo hệ thống - Đồng bộ Supabase)
-  notifications: {
-    async list(): Promise<any[]> {
-      return querySupabase<any>('notifications', []);
-    },
-    async save(notif: any): Promise<void> {
-      await saveSupabase('notifications', notif);
-    },
-    async delete(id: string): Promise<void> {
-      await deleteSupabase('notifications', id);
-    },
-    async markRead(id: string): Promise<void> {
-      const supabase = getSupabase();
-      if (!supabase) return;
-      try {
-        const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
-        if (error) console.warn('Supabase markRead error:', error.message);
-      } catch (e) {
-        console.warn('Supabase markRead exception:', e);
-      }
     }
   },
 

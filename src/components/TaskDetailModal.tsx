@@ -22,7 +22,7 @@ interface TravelAllowanceNorm {
 }
 import { useNotification, isUserInRoleGroup } from '../context';
 import { dbService } from '../lib/dbService';
-import { sendGroupChatMessage } from '../lib/chatStore';
+import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 
 // Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
 const sectorArchiveTab = (type?: string): string =>
@@ -1283,8 +1283,17 @@ export default function TaskDetailModal({
       });
       return;
     }
-    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-    notifyProjectChat(`🔔 ${currentUser.name} đã gửi Yêu cầu phê duyệt công việc "${selectedTask.name}" (Người duyệt: ${approverName}).`);
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người khởi tạo và người duyệt
+    const approverEmp = employees.find(e => e.id === approverId);
+    sendApprovalDirectMessage({
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderRole: currentUser.role,
+      recipientId: approverId,
+      recipientName: approverEmp?.name || approverName,
+      content: `🔔 ${currentUser.name} đã gửi Yêu cầu phê duyệt công việc "${selectedTask.name}". Vui lòng xem xét.`,
+      relatedEntity: { type: 'task', id: selectedTask.id },
+    });
 
     setShowApprovalWarning(false);
     addToast({ title: '✅ Thành công', message: 'Đã gửi yêu cầu phê duyệt liên thông tự động thành công!', type: 'success' });
@@ -1306,12 +1315,30 @@ export default function TaskDetailModal({
       completionRate: allApproved ? 100 : selectedTask.completionRate,
     };
     const ok = await onUpdateTask?.(selectedTask.id, updatedTask as any);
-    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage) - CHỈ SAU KHI SAVE THÀNH CÔNG
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người giao việc
+    // - CHỈ SAU KHI SAVE THÀNH CÔNG
     if (ok === true) {
+      const assignerEmp = employees.find(e => e.id === selectedTask.assignerId);
       if (decision === 'approved') {
-        notifyProjectChat(`✅ ${currentUser.name} đã DUYỆT bước phê duyệt công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`);
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: selectedTask.assignerId,
+          recipientName: assignerEmp?.name || 'Người giao việc',
+          content: `✅ ${currentUser.name} đã DUYỆT công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`,
+          relatedEntity: { type: 'task', id: selectedTask.id },
+        });
       } else {
-        notifyProjectChat(`❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`);
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: selectedTask.assignerId,
+          recipientName: assignerEmp?.name || 'Người giao việc',
+          content: `❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`,
+          relatedEntity: { type: 'task', id: selectedTask.id },
+        });
       }
     } else if (ok === false) {
       addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu kết quả duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
@@ -1441,6 +1468,21 @@ export default function TaskDetailModal({
 
     try {
       await dbService.subcontractorAdvances.save(proposal);
+
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người lập → người duyệt)
+      const approverEmp = employees.find(e => e.id === approver) || findEmployeeByName(employees, approver);
+      const creatorEmp = employees.find(e => e.id === creator);
+      if (creatorEmp?.id && approverEmp?.id && creatorEmp.id !== approverEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: creatorEmp.id,
+          senderName: creatorEmp.name || 'Người lập đề xuất',
+          senderRole: creatorEmp.role,
+          recipientId: approverEmp.id,
+          recipientName: approverEmp.name || approver,
+          content: `🔔 Đề xuất tạm ứng ${code} (${taskName}) ${amount.toLocaleString('vi-VN')}đ cho thầu phụ ${subcontractorName}. Lý do: ${reason}. Vui lòng xem xét.`,
+          relatedEntity: { type: 'advance', id: code },
+        });
+      }
 
       // Show high-end custom success notification
       setCustomDialog({

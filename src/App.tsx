@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange } from './lib/dbService';
 import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
-import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations } from './lib/chatStore';
+import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations, sendApprovalDirectMessage, findEmployeeByName, ensureAttendanceChatGroup } from './lib/chatStore';
 import {
   Employee,
   Customer,
@@ -14,7 +14,6 @@ import {
   Quote,
   ProjectStatus,
   QuoteConfig,
-  AppNotification,
   Conversation,
   SalesOrder,
   PurchaseOrder,
@@ -107,13 +106,11 @@ import {
   Menu,
   RefreshCw,
   Calendar,
-  User,
   ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase } from './lib/supabase';
 import {
-  buildPushUrl,
   parsePushData,
   readDeepLinkFromLocation,
   clearDeepLinkFromLocation,
@@ -575,6 +572,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         const finalEmps = ensureAdminAndPasswords(cloudEmps);
         setEmployees(finalEmps);
 
+        // ── Nhóm chat "Điểm danh" (idempotent, không chặn init) ──
+        ensureAttendanceChatGroup(finalEmps).catch(err =>
+          console.warn('ensureAttendanceChatGroup error:', err));
+
         // Ensure admin
         const hasAdminInDb = finalEmps.some(e => e.username === 'admin' || e.id === 'emp_admin');
         if (!hasAdminInDb) {
@@ -811,20 +812,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     localStorage.setItem('hl_erp_sidebar_collapsed', sidebarCollapsed ? 'true' : 'false');
   }, [sidebarCollapsed]);
 
-  const [showNotificationsPanel, setShowNotificationsPanel] = useState<boolean>(false);
-  // Đóng popup Thông báo & Tin nhắn khi click ra ngoài cửa sổ
-  useEffect(() => {
-    if (!showNotificationsPanel) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('#notification_bell_root')) return;
-      setShowNotificationsPanel(false);
-    };
-    // Dùng capture để bắt event trước khi các handler khác chạy
-    document.addEventListener('mousedown', handleClickOutside, true);
-    return () => document.removeEventListener('mousedown', handleClickOutside, true);
-  }, [showNotificationsPanel]);
-
   // Đóng dropdown tài khoản khi click ra ngoài
   useEffect(() => {
     if (!showUserMenu) return;
@@ -836,11 +823,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     document.addEventListener('mousedown', handleClickOutside, true);
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [showUserMenu]);
-  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread' | 'tasks' | 'finance' | 'employees_attendance' | 'chat'>('all');
-  // Tab phân hệ Messenger được mở từ lối tắt chuông thông báo
-  const [messengerInitialTab, setMessengerInitialTab] = useState<'all' | 'personal' | 'group' | 'notifications'>('all');
-  // Bộ lọc trong popover Thông báo & Tin nhắn (4 tab)
-  const [popoverFilter, setPopoverFilter] = useState<'all' | 'personal' | 'group' | 'notifications'>('all');
   // Hội thoại cần mở khi điều hướng vào Messenger
   const [initialConvId, setInitialConvId] = useState<string | null>(null);
   // Sau khi MessagesView đã nhận initialConvId, reset để lần click sau vẫn kích hoạt lại
@@ -865,6 +847,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [deepLinkTaskId, setDeepLinkTaskId] = useState<string | null>(null);
   // Deep link công việc đang chờ `tasks` tải xong để tra ID/mã
   const [pendingTaskLink, setPendingTaskLink] = useState<PushDeepLink | null>(null);
+  // Deep link xét duyệt (leave/payment/advance) → mở thẳng "Công việc phải duyệt" trong tab Công việc
+  const [approvalDeepLink, setApprovalDeepLink] = useState<{ kind: string; id: string } | null>(null);
 
   const handlePushDeepLink = useCallback((link: PushDeepLink) => {
     // Ưu tiên 1: hội thoại chat
@@ -922,126 +906,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     clearDeepLinkFromLocation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    // Trả về mảng rỗng - dữ liệu thông báo sẽ được nạp từ Supabase trong useEffect
-    return [];
-  });
-
-  // Load notifications from Supabase on mount
-  useEffect(() => {
-    let mounted = true;
-    dbService.notifications.list()
-      .then(list => {
-        if (mounted && Array.isArray(list) && list.length > 0) {
-          const sorted = [...list].sort((a, b) =>
-            (b.createdAt || '').localeCompare(a.createdAt || ''));
-          setNotifications(sorted as AppNotification[]);
-        }
-      })
-      .catch(err => console.warn('Lỗi khi tải thông báo từ Supabase:', err));
-    return () => { mounted = false; };
-  }, []);
-
-  const addNotification = (notif: Partial<AppNotification>) => {
-    const randomNum = Math.floor(100 + Math.random() * 900);
-    const id = notif.id || `MSG-${Date.now()}-${randomNum}`;
-    const recipientId = notif.recipientId || 'emp_1';
-    const recipient = employees.find(e => e.id === recipientId) || currentUser;
-
-    if (!recipient) return;
-
-    const newNotif: AppNotification = {
-      id,
-      recipientId: recipient.id,
-      recipientName: recipient.name,
-      department: recipient.department || 'Phòng Ban',
-      content: notif.content || 'Thông báo mới từ hệ thống.',
-      subTaskCode: notif.subTaskCode || 'CV-GEN',
-      createdAt: notif.createdAt || new Date().toISOString(),
-      read: false,
-      senderId: notif.senderId || 'system',
-      senderName: notif.senderName || 'Hệ Thống',
-      senderAvatar: notif.senderAvatar || 'HT',
-      category: notif.category || 'tasks',
-      title: notif.title || 'Thông báo hệ thống',
-      detailedContent: notif.detailedContent || notif.content || 'Nội dung chi tiết thông báo hệ thống.',
-      conversationId: notif.conversationId,
-      taskId: notif.taskId,
-      notificationType: notif.notificationType
-    };
-
-    setNotifications(prev => {
-      // Chống trùng lặp: bỏ qua nếu đã có thông báo giống hệt (cùng người nhận, tiêu đề, nội dung)
-      // được tạo trong vòng 5 giây gần đây
-      const isDuplicate = prev.some(n =>
-        n.recipientId === newNotif.recipientId &&
-        n.title === newNotif.title &&
-        n.content === newNotif.content &&
-        Math.abs(new Date(n.createdAt).getTime() - new Date(newNotif.createdAt).getTime()) < 5000
-      );
-      if (isDuplicate) return prev;
-      return [newNotif, ...prev];
-    });
-
-    addToast({
-      title: `🔔 ${newNotif.title}`,
-      message: newNotif.content,
-      type: 'info'
-    });
-
-    // Persist to Supabase (non-blocking)
-    dbService.notifications.save(newNotif).catch(err =>
-      console.warn('Lỗi khi lưu thông báo lên Supabase:', err));
-
-    // 🔔 Gửi Web Push notification đến thiết bị người nhận (non-blocking)
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      if (supabaseUrl && supabaseAnonKey && recipient.id) {
-        fetch(`${supabaseUrl}/functions/v1/send-push`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            userIds: [recipient.id],
-            title: newNotif.title || 'Thông báo mới',
-            body: newNotif.content || '',
-            // Deep link: bấm vào thông báo phải mở ĐÚNG chi tiết công việc/hội thoại.
-            // (Trước đây url luôn là '/' và taskId bị bỏ rơi → chỉ mở được trang chủ.)
-            data: {
-              url: buildPushUrl({
-                taskId: newNotif.taskId,
-                taskCode: newNotif.taskId ? undefined : newNotif.subTaskCode,
-                conversationId: newNotif.conversationId,
-                category: newNotif.category,
-              }),
-              type: newNotif.category,
-              taskId: newNotif.taskId,
-              taskCode: newNotif.subTaskCode,
-              conversationId: newNotif.conversationId,
-              sourceId: newNotif.subTaskCode,
-              tag: `system-${newNotif.category}`,
-            },
-          }),
-        }).catch(err => console.warn('Web Push error:', err));
-      }
-    } catch (err) {
-      console.warn('Web Push error (ignored):', err);
-    }
-  };
-
-  useEffect(() => {
-    const handleDispatchNotification = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail) {
-        addNotification(customEvent.detail);
-      }
-    };
-    window.addEventListener('hl-dispatch-notification', handleDispatchNotification);
-    return () => window.removeEventListener('hl-dispatch-notification', handleDispatchNotification);
-  }, [employees, currentUser]);
 
   // ⚠️ Client-side attendance timer ĐÃ BỎ (gây trùng lặp).
   // Thông báo điểm danh giờ chỉ chạy qua server-side:
@@ -1462,12 +1326,26 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       const convId = (e as CustomEvent).detail?.conversationId;
       if (!convId) return;
       setInitialConvId(convId);
-      setMessengerInitialTab('group');
       setActiveTab('messages');
     };
     window.addEventListener('hl-open-conversation', handleOpenConversation);
     return () => window.removeEventListener('hl-open-conversation', handleOpenConversation);
   }, []);
+
+  // Deep link từ tin nhắn xét duyệt (leave/payment/advance) → mở tab Công việc
+  // ở bảng "Công việc phải duyệt" để người dùng thao tác duyệt/từ chối ngay.
+  useEffect(() => {
+    const handleOpenApproval = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      const kind = d?.kind as string;
+      const id = d?.id as string;
+      if (!kind || !id) return;
+      setApprovalDeepLink({ kind, id });
+      setActiveTab('tasks');
+    };
+    window.addEventListener('hl-open-approval', handleOpenApproval);
+    return () => window.removeEventListener('hl-open-approval', handleOpenApproval);
+  }, [setActiveTab]);
 
   // Sync subcontractor advances from Supabase when updated elsewhere
   useEffect(() => {
@@ -1745,7 +1623,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, fireChatMessagesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, fireConversationsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fcm_tokens' }, fireFcmTokensEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => window.dispatchEvent(new CustomEvent('hl-notifications-updated')))
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Realtime] ✅ Channel ready. Listening for 45+ tables');
@@ -2206,85 +2083,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const runTaskNotifications = (oldT: Task | undefined, newT: Task) => {
       if (!oldT) return;
 
-      // A. THÔNG BÁO TIN NHẮN MỚI TRONG CÔNG VIỆC CON (HỘI THOẠI)
-      if (updates.comments && updates.comments.length > (oldT.comments?.length || 0)) {
-        const newComment = updates.comments[updates.comments.length - 1];
-        // Thông báo cho người nhận (nếu người nhận không phải là chính người gửi)
-        const recipientIds: string[] = [];
-        if (newComment.senderId !== oldT.assigneeId) recipientIds.push(oldT.assigneeId);
-        if (newComment.senderId !== oldT.assignerId) recipientIds.push(oldT.assignerId);
+      // ── Lõi Thông báo hệ thống ĐÃ BỊ XÓA ──
+      // Các nhắc comment/trạng thái/tiến độ cũ tạo bản ghi `notifications` đã
+      // được loại bỏ (xem plan phần D). Hội thoại công việc & luồng duyệt giờ
+      // đi qua chat (chatStore.addMessage). Giữ lại duy nhất toast hoàn thành.
 
-        recipientIds.forEach(recId => {
-          const rec = employees.find(e => e.id === recId);
-          if (rec) {
-            setTimeout(() => {
-              addNotification({
-                recipientId: recId,
-                senderId: newComment.senderId,
-                senderName: newComment.senderName,
-                senderAvatar: newComment.senderName.substring(0, 2).toUpperCase(),
-                category: 'chat',
-                title: `💬 Tin nhắn mới từ ${newComment.senderName}`,
-                content: `[Công việc con ${oldT.code}]: "${newComment.content}"`,
-                detailedContent: `Nội dung cuộc hội thoại trong công việc con "${oldT.name}" (${oldT.code}):\n\nNgười gửi: ${newComment.senderName} (${newComment.senderRole})\nThời gian: ${new Date(newComment.createdAt).toLocaleString('vi-VN')}\n\nTin nhắn: "${newComment.content}"`,
-                subTaskCode: oldT.code,
-                taskId: oldT.id // deep link: bấm thông báo mở đúng chi tiết công việc
-              });
-            }, 10);
-          }
-        });
-      }
-
-      // B. THÔNG BÁO THÔNG TIN TRONG CÔNG VIỆC CON CÓ LIÊN QUAN (TRẠNG THÁI, TIẾN ĐỘ)
-      if (updates.status && updates.status !== oldT.status) {
-        const statusMap: Record<string, string> = { todo: 'Chưa làm', in_progress: 'Đang làm', review: 'Đợi duyệt', completed: 'Hoàn thành' };
-        const recipientIds = Array.from(new Set([oldT.assigneeId, oldT.assignerId]))
-          .filter(recId => recId !== currentUser?.id);
-
-        recipientIds.forEach(recId => {
-          setTimeout(() => {
-            if (!currentUser) return;
-            addNotification({
-              recipientId: recId,
-              senderId: currentUser.id,
-              senderName: currentUser.name,
-              senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-              category: 'tasks',
-              title: `📋 Cập nhật công việc con`,
-              content: `Trạng thái công việc "${oldT.name}" đổi thành: ${statusMap[updates.status || ''] || updates.status}`,
-              detailedContent: `Mã công việc: ${oldT.code}\nTên công việc: ${oldT.name}\nPhòng ban: ${oldT.department}\nHạn hoàn thành: ${oldT.deadline}\n\nNgười cập nhật: ${currentUser.name}\nTrạng thái mới: ${statusMap[updates.status || ''] || updates.status}\nTiến độ hiện tại: ${newT.completionRate}%`,
-              subTaskCode: oldT.code,
-              taskId: oldT.id // deep link: bấm thông báo mở đúng chi tiết công việc
-            });
-          }, 10);
-        });
-      }
-
-      // C. THÔNG BÁO TIẾN ĐỘ
-      if (updates.completionRate !== undefined && updates.completionRate !== oldT.completionRate) {
-        const recipientIds = Array.from(new Set([oldT.assigneeId, oldT.assignerId]))
-          .filter(recId => recId !== currentUser?.id);
-
-        recipientIds.forEach(recId => {
-          setTimeout(() => {
-            if (!currentUser) return;
-            addNotification({
-              recipientId: recId,
-              senderId: currentUser.id,
-              senderName: currentUser.name,
-              senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-              category: 'tasks',
-              title: `📈 Cập nhật tiến độ`,
-              content: `Tiến độ việc "${oldT.name}" tăng lên ${updates.completionRate}%`,
-              detailedContent: `Mã công việc: ${oldT.code}\nTên công việc: ${oldT.name}\nTiến độ cũ: ${oldT.completionRate}%\nTiến độ mới: ${updates.completionRate}%\n\nNgười cập nhật: ${currentUser.name}`,
-              subTaskCode: oldT.code,
-              taskId: oldT.id // deep link: bấm thông báo mở đúng chi tiết công việc
-            });
-          }, 10);
-        });
-      }
-
-      // D. PHÁT HIỆN HOÀN THÀNH CÔNG VIỆC → BẮN TOAST NỔI
+      // PHÁT HIỆN HOÀN THÀNH CÔNG VIỆC → BẮN TOAST NỔI
       const wasCompleted = oldT.status === 'completed' || oldT.completionRate === 100;
       const isNowCompleted = newT.status === 'completed' || newT.completionRate === 100;
       if (!wasCompleted && isNowCompleted) {
@@ -2503,23 +2307,21 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (targetPayment) {
       dbService.payments.save({ ...targetPayment, status });
 
-      // Phát thông báo trạng thái phê duyệt cho người đề xuất
-      const proposerEmployee = employees.find(e => e.name === targetPayment.proposer);
-      const recipientId = proposerEmployee ? proposerEmployee.id : 'emp_1';
-      if (!currentUser) return;
-      setTimeout(() => {
-        addNotification({
-          recipientId,
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
+      const proposerEmployee = findEmployeeByName(employees, targetPayment.proposer);
+      if (currentUser && proposerEmployee && currentUser.id !== proposerEmployee.id) {
+        sendApprovalDirectMessage({
           senderId: currentUser.id,
           senderName: currentUser.name,
-          senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-          category: 'finance',
-          title: status === 'approved' ? '✅ Phê duyệt thanh toán thành công' : '❌ Từ chối phê duyệt thanh toán',
-          content: `Yêu cầu thanh toán ${targetPayment.code} (${targetPayment.recipient}) đã được ${status === 'approved' ? 'duyệt chi' : 'từ chối'}.`,
-          detailedContent: `Mã phiếu: ${targetPayment.code}\nNội dung chi chiết đề xuất thanh toán:\n\nHạng mục: ${targetPayment.recipient}\nSố tiền: ${targetPayment.amount.toLocaleString('vi-VN')} đ\nNgười đề xuất: ${targetPayment.proposer}\nNgười xét duyệt: ${currentUser.name}\n\nTrạng thái mới: ${status === 'approved' ? 'ĐÃ PHÊ DUYỆT & ĐÃ CHI' : 'BỊ TỪ CHỐI DUYỆT'}`,
-          subTaskCode: 'CV-GEN'
+          senderRole: currentUser.role,
+          recipientId: proposerEmployee.id,
+          recipientName: proposerEmployee.name || targetPayment.proposer,
+          content: status === 'approved'
+            ? `✅ Đã duyệt phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'payment', id: targetPayment.id },
         });
-      }, 10);
+      }
     }
   };
 
@@ -2655,28 +2457,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       return q;
     });
     setQuotes(updated);
-
-    // Notification logic
-    const statusTexts: Record<string, string> = { draft: 'Nháp', sent: 'Đã gửi', approved: 'Đã phê duyệt', rejected: 'Bị từ chối' };
-    const quote = quotes.find(q => q.id === quoteId);
-    if (quote) {
-      const associatedProject = projects.find(p => p.id === quote.projectId);
-      const recipientId = associatedProject ? associatedProject.pmId : 'emp_1';
-      if (!currentUser) return;
-      setTimeout(() => {
-        addNotification({
-          recipientId,
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-          category: 'projects',
-          title: status === 'approved' ? '🎯 Báo giá được phê duyệt' : '⚠️ Báo giá bị cập nhật trạng thái',
-          content: `Báo giá ${quote.code} (${quote.customerName || 'Khách hàng'}) đã được ${statusTexts[status] || status}.`,
-          detailedContent: `Báo giá: ${quote.code}\nKhách hàng: ${quote.customerName || 'N/A'}\nTrạng thái mới: ${statusTexts[status] || status}\nDự án liên đới: ${quote.projectName || 'N/A'}\n\nNgười phê duyệt: ${currentUser.name}\nHạn mức đầu tư: ${quote.nganSachNoiThat?.toLocaleString('vi-VN') || 0} đ`,
-          subTaskCode: 'CV-GEN'
-        });
-      }, 10);
-    }
+    // Lõi Thông báo hệ thống đã bị xóa (phần D) — không còn gửi notification
+    // khi cập nhật trạng thái báo giá nữa.
   };
 
   // Ánh xạ parent-child cho sidebar: nếu có quyền cha → tự động có quyền con
@@ -2860,7 +2642,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   return (
     <AuthProvider employees={employees} addToast={addToast}>
-      <NotificationProvider employees={employees} currentUser={currentUser} toasts={toasts} addToast={addToast} removeToast={removeToast}>
+      <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
         <div
           className="flex min-h-screen w-full lg:h-screen lg:w-screen bg-slate-950 lg:overflow-hidden text-slate-200 font-sans transition-all duration-200"
           style={{ fontFamily: currentFont }}
@@ -3321,52 +3103,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               </div>
             )}
 
-            {/* THÔNG BÁO TIN NHẮN MỚI (CHUÔNG THÔNG BÁO) */}
+            {/* CHUÔNG 🔔 → LỐI TẮT VÀO TIN NHẮN (badge = tổng tin chat chưa đọc) */}
             {(() => {
-              const userNotifications = notifications.filter(n => n.recipientId === currentUser?.id);
-              const systemUnreadCount = userNotifications.filter(n => !n.read).length;
-              // Thêm tin nhắn chat chưa đọc từ conversations
               const chatConvs = getUserConversations(getConversations(), currentUser?.id ?? '');
               const chatUnreadCount = chatConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
-              const unreadCount = systemUnreadCount + chatUnreadCount;
-
-              // Helper sinh màu avatar và fallback tên (giống MessagesView)
-              const avatarColors = ['#6366F1','#EF4444','#10B981','#F59E0B','#A855F7','#3B82F6','#14B8A6','#F97316','#334155'];
-              const getAvatarColor = (name: string) => {
-                let hash = 0;
-                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-                return avatarColors[Math.abs(hash) % avatarColors.length];
-              };
-              const getAvatarFallback = (name: string) => {
-                if (!name) return '??';
-                const words = name.trim().split(/\s+/);
-                if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
-                return (words[0].charAt(0) + words[words.length - 1].charAt(0)).toUpperCase();
-              };
-              const formatTime = (iso: string) => {
-                try {
-                  const d = new Date(iso); const now = new Date();
-                  const diffMs = now.getTime() - d.getTime();
-                  if (diffMs < 60000) return 'Vừa xong';
-                  const diffMins = Math.floor(diffMs / 60000);
-                  if (diffMins < 60) return `${diffMins} phút`;
-                  const diffHours = Math.floor(diffMins / 60);
-                  if (diffHours < 24) return `${diffHours} giờ`;
-                  return d.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit' });
-                } catch { return ''; }
-              };
-
-              // Badge counts cho 4 tab bộ lọc
-              const notifAllCount = systemUnreadCount + chatUnreadCount;
-              const notifPersonalCount = chatConvs.filter(c => c.type === 'personal').reduce((s, c) => s + (c.unreadCount || 0), 0);
-              const notifGroupCount = chatConvs.filter(c => c.type === 'group' || c.type === 'task').reduce((s, c) => s + (c.unreadCount || 0), 0);
-
-              const popoverTabs: Array<{id: typeof popoverFilter, label: string, icon: any, count: number}> = [
-                { id: 'all', label: 'Tất cả', icon: MessageSquare, count: notifAllCount },
-                { id: 'personal', label: 'Cá nhân', icon: User, count: notifPersonalCount },
-                { id: 'group', label: 'Nhóm', icon: Users, count: notifGroupCount },
-                { id: 'notifications', label: 'Thông báo', icon: Bell, count: systemUnreadCount },
-              ];
 
               return (
                 <div className="flex items-center gap-2">
@@ -3399,306 +3139,21 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                   </button>
 
                   <div className="relative" id="notification_bell_root">
-                  <button
-                    onClick={() => setShowNotificationsPanel(!showNotificationsPanel)}
-                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors relative flex items-center justify-center h-8.5 w-8.5"
-                    title="Thông báo tin nhắn phòng ban & công việc"
-                    id="notification_bell_btn"
-                  >
-                    <Bell className="w-4 h-4 text-emerald-400" />
-                    {showBadgeCounts && unreadCount > 0 ? (
-                      <span className="absolute -top-1 -right-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-rose-600 text-[9px] font-black text-white ring-1 ring-rose-500 animate-pulse">
-                        {unreadCount}
-                      </span>
-                    ) : null}
-                  </button>
-
-                  {showNotificationsPanel && (
-                    <div
-                      className="absolute right-0 mt-2 sm:mt-3 w-[86vw] max-w-[330px] sm:w-[460px] sm:max-w-none bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl shadow-2xl p-2.5 sm:p-4.5 z-50 text-slate-200 font-sans top-full flex flex-col gap-2 sm:gap-3.5 ring-1 ring-slate-800"
-                      id="notification_popover"
-                      onClick={(e) => e.stopPropagation()}
+                    <button
+                      onClick={() => { setActiveTab('messages'); if (mobileMenuOpen) setMobileMenuOpen(false); }}
+                      className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors relative flex items-center justify-center h-8.5 w-8.5"
+                      title="Tin nhắn"
+                      id="notification_bell_btn"
                     >
-                      {/* Header */}
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2 sm:pb-3 gap-2">
-                        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                          <div className="p-1 sm:p-1.5 bg-emerald-500/10 rounded-lg shrink-0">
-                            <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
-                          </div>
-                          <div className="min-w-0">
-                            <span className="font-extrabold text-[11.5px] sm:text-sm text-white block truncate">Thông báo & Tin nhắn</span>
-                            <span className="hidden sm:block text-[10px] text-slate-500 font-medium">Được đồng bộ theo thời gian thực</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-                          {/* Nút ẩn/hiện badge */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const next = !showBadgeCounts;
-                              setShowBadgeCounts(next);
-                              localStorage.setItem('hl_show_badge_counts', next ? 'true' : 'false');
-                            }}
-                            className={`p-1 sm:p-1.5 text-[11px] sm:text-sm rounded-lg cursor-pointer transition-all ${
-                              showBadgeCounts ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-600 bg-slate-850'
-                            }`}
-                            title={showBadgeCounts ? 'Ẩn số chưa đọc' : 'Hiện số chưa đọc'}
-                          >
-                            {showBadgeCounts ? '🔔' : '🔕'}
-                          </button>
-                          {userNotifications.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = notifications.map(n => n.recipientId === currentUser.id ? { ...n, read: true } : n);
-                                setNotifications(updated);
-                              }}
-                              title="Đánh dấu đã đọc tất cả"
-                              className="text-[9px] sm:text-[10px] bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap"
-                            >
-                              <span className="sm:hidden">✓</span>
-                              <span className="hidden sm:inline">Đọc tất cả</span>
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const remainder = notifications.filter(n => n.recipientId !== currentUser.id);
-                              setNotifications(remainder);
-                            }}
-                            title="Xóa tất cả thông báo"
-                            className="text-[9px] sm:text-[10px] bg-rose-950/40 hover:bg-rose-900/45 text-rose-400 border border-rose-900/30 font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap"
-                          >
-                            <span className="sm:hidden">🗑</span>
-                            <span className="hidden sm:inline">Xóa tất cả</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* MOBILE: 4 bộ lọc gom thành dropdown cho gọn */}
-                      <div className="sm:hidden">
-                        <select
-                          value={popoverFilter}
-                          onChange={(e) => setPopoverFilter(e.target.value as typeof popoverFilter)}
-                          className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-[11px] font-bold rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-emerald-500/60"
-                        >
-                          {popoverTabs.map(tab => (
-                            <option key={tab.id} value={tab.id} className="bg-slate-950 text-slate-200">
-                              {tab.label}{showBadgeCounts && tab.count > 0 ? ` (${tab.count > 99 ? '99+' : tab.count})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* DESKTOP: 4 tab bộ lọc — kiểu tab gạch chân ngang (Flowbite) */}
-                      <ul className="hidden sm:flex flex-nowrap -mb-px text-sm font-medium text-center">
-                        {popoverTabs.map(tab => {
-                          const isActive = popoverFilter === tab.id;
-                          return (
-                            <li key={tab.id} className="flex-1 min-w-0">
-                              <button
-                                type="button"
-                                onClick={() => setPopoverFilter(tab.id)}
-                                className={`w-full inline-flex items-center justify-center px-2 py-3 border-b-2 rounded-t-lg cursor-pointer transition-colors group relative ${
-                                  isActive
-                                    ? 'text-emerald-400 border-emerald-400'
-                                    : 'text-slate-400 border-transparent hover:text-emerald-400 hover:border-emerald-400/50'
-                                }`}
-                                aria-current={isActive ? 'page' : undefined}
-                              >
-                                {showBadgeCounts && tab.count > 0 && (
-                                  <span className="me-1.5 bg-rose-500 text-white text-[8px] font-bold min-w-[14px] h-3.5 px-1 flex items-center justify-center rounded-full">
-                                    {tab.count > 99 ? '99+' : tab.count}
-                                  </span>
-                                )}
-                                <span className="truncate">{tab.label}</span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-
-                      {/* Danh sách hội thoại + thông báo đã lọc */}
-                      <div className="max-h-[52vh] sm:max-h-[360px] overflow-y-auto pr-1 scrollbar-thin">
-                        {(() => {
-                          // Lấy conversations của user
-                          const allConvs = getUserConversations(getConversations(), currentUser?.id || '');
-
-                          // Lọc theo popoverFilter
-                          let displayItems: Array<{type: 'conv'; conv: Conversation} | {type: 'notif'; notif: AppNotification}> = [];
-
-                          if (popoverFilter === 'personal' || popoverFilter === 'all') {
-                            const personalConvs = allConvs.filter(c => c.type === 'personal');
-                            personalConvs.forEach(conv => displayItems.push({ type: 'conv', conv }));
-                          }
-                          if (popoverFilter === 'group' || popoverFilter === 'all') {
-                            const groupConvs = allConvs.filter(c => c.type === 'group' || c.type === 'task');
-                            groupConvs.forEach(conv => displayItems.push({ type: 'conv', conv }));
-                          }
-                          if (popoverFilter === 'notifications' || popoverFilter === 'all') {
-                            // Dedup thông báo theo nội dung + người gửi để tránh trùng lặp
-                            const seen = new Set<string>();
-                            userNotifications.forEach(n => {
-                              const dedupKey = `${n.senderId}_${n.title}_${n.content}`;
-                              if (!seen.has(dedupKey)) {
-                                seen.add(dedupKey);
-                                displayItems.push({ type: 'notif', notif: n });
-                              }
-                            });
-                          }
-
-                          // Sắp xếp: chưa đọc trước, sau đó mới nhất
-                          displayItems.sort((a, b) => {
-                            const aUnread = a.type === 'conv' ? (a.conv.unreadCount || 0) : (!a.notif.read ? 1 : 0);
-                            const bUnread = b.type === 'conv' ? (b.conv.unreadCount || 0) : (!b.notif.read ? 1 : 0);
-                            if (aUnread > 0 && bUnread === 0) return -1;
-                            if (aUnread === 0 && bUnread > 0) return 1;
-                            const aTime = a.type === 'conv' ? (a.conv.lastMessageAt || a.conv.createdAt) : a.notif.createdAt;
-                            const bTime = b.type === 'conv' ? (b.conv.lastMessageAt || b.conv.createdAt) : b.notif.createdAt;
-                            return bTime.localeCompare(aTime);
-                          });
-
-                          if (displayItems.length === 0) {
-                            return (
-                              <div className="py-10 text-center text-slate-500 space-y-2">
-                                <MessageSquare className="w-8 h-8 mx-auto text-slate-700 opacity-60" />
-                                <p className="text-xs font-semibold">Không có mục nào phù hợp.</p>
-                              </div>
-                            );
-                          }
-
-                          return displayItems.map(item => {
-                            if (item.type === 'conv') {
-                              const conv = item.conv;
-                              const isGroup = conv.type === 'group' || conv.type === 'task';
-                              const unread = conv.unreadCount || 0;
-                              const otherId = conv.participantIds.find(id => id !== currentUser?.id);
-                              const otherEmp = otherId ? employees.find(e => e.id === otherId) : null;
-                              const displayName = isGroup ? conv.name : (otherEmp?.name || 'Người dùng');
-                              const avatarText = isGroup ? (conv.avatar || getAvatarFallback(conv.name)) : (otherEmp ? getAvatarFallback(otherEmp.name) : '??');
-                              const avatarColor = conv.color || (otherEmp ? getAvatarColor(otherEmp.name) : '#6366F1');
-
-                              return (
-                                <div
-                                  key={`conv_${conv.id}`}
-                                  onClick={() => {
-                                    // Mở thẳng vào hội thoại này trong Messenger
-                                    setInitialConvId(conv.id);
-                                    setMessengerInitialTab('all');
-                                    setShowNotificationsPanel(false);
-                                    setActiveTab('messages');
-                                    if (mobileMenuOpen) setMobileMenuOpen(false);
-                                  }}
-                                  className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-2.5 py-2 sm:py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
-                                    unread > 0
-                                      ? 'bg-emerald-500/5 border-l-emerald-500 hover:bg-slate-800/60'
-                                      : 'border-l-transparent hover:bg-slate-800/60'
-                                  }`}
-                                >
-                                  <div className="relative shrink-0">
-                                    <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs shadow-md text-white"
-                                      style={{ backgroundColor: avatarColor }}>
-                                      {avatarText}
-                                    </div>
-                                    {!isGroup && <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-slate-900"></span>}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-semibold text-[12px] sm:text-[13px] truncate ${unread > 0 ? 'text-white' : 'text-slate-300'}`}>
-                                        {displayName}
-                                      </span>
-                                      {conv.lastMessageAt && (
-                                        <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono shrink-0 ml-2">{formatTime(conv.lastMessageAt)}</span>
-                                      )}
-                                    </div>
-                                    <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5 truncate">
-                                      {isGroup ? 'Nhóm' : (otherEmp?.department || 'Nhân viên')}
-                                    </p>
-                                  </div>
-                                  {unread > 0 && (
-                                    <span className="bg-indigo-500 text-white text-[9px] font-bold min-w-[18px] h-4 flex items-center justify-center rounded-full px-1 shrink-0">
-                                      {unread}
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            } else {
-                              const notif = item.notif;
-                              const isUnread = !notif.read;
-                              const senderName = notif.senderName || 'Hệ Thống';
-                              const avatarText = notif.senderAvatar || getAvatarFallback(senderName);
-
-                              return (
-                                <div
-                                  key={notif.id}
-                                  onClick={() => {
-                                    // Đánh dấu đã đọc + lưu lên Supabase
-                                    const updated = notifications.map(n => n.id === notif.id ? { ...n, read: true } : n);
-                                    setNotifications(updated);
-                                    dbService.notifications.markRead(notif.id).catch(() => {});
-                                    setShowNotificationsPanel(false);
-                                    if (mobileMenuOpen) setMobileMenuOpen(false);
-
-                                    // Dùng CHUNG bộ điều hướng với thông báo đẩy để
-                                    // bấm chuông và bấm push cho ra cùng một kết quả:
-                                    // thông báo công việc → mở thẳng modal chi tiết.
-                                    const cat = notif.category;
-                                    handlePushDeepLink({
-                                      taskId: notif.taskId,
-                                      taskCode:
-                                        (cat === 'tasks' || cat === 'approval') && !notif.taskId
-                                          ? notif.subTaskCode
-                                          : undefined,
-                                      conversationId: notif.conversationId,
-                                      category: cat === 'attendance' ? 'dashboard' : cat,
-                                    });
-                                  }}
-                                  className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-2.5 py-2 sm:py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
-                                    isUnread
-                                      ? 'bg-emerald-500/5 border-l-emerald-500 hover:bg-slate-800/60'
-                                      : 'border-l-transparent hover:bg-slate-800/60'
-                                  }`}
-                                >
-                                  <div className="relative shrink-0">
-                                    <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs shadow-md text-white"
-                                      style={{ backgroundColor: getAvatarColor(senderName) }}>
-                                      {avatarText}
-                                    </div>
-                                    {notif.category && (
-                                      <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[6px] sm:text-[7px] border-2 border-slate-900"
-                                        style={{
-                                          backgroundColor: notif.category === 'chat' ? '#6366F1' : notif.category === 'attendance' ? '#F59E0B' : notif.category === 'finance' ? '#10B981' : '#3B82F6'
-                                        }}>
-                                        {notif.category === 'chat' ? '💬' : notif.category === 'attendance' ? '⏰' : notif.category === 'finance' ? '💰' : '📋'}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-semibold text-[12px] sm:text-[13px] truncate ${isUnread ? 'text-white' : 'text-slate-300'}`}>
-                                        {senderName}
-                                      </span>
-                                      <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono shrink-0 ml-2">
-                                        {formatTime(notif.createdAt)}
-                                      </span>
-                                    </div>
-                                    <p className={`text-[11px] sm:text-[12px] mt-0.5 truncate leading-tight ${isUnread ? 'text-white font-semibold' : 'text-slate-400'}`}>
-                                      {notif.title || notif.content}
-                                    </p>
-                                  </div>
-                                  {isUnread && (
-                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                                  )}
-                                </div>
-                              );
-                            }
-                          });
-                        })()}
-                      </div>
-                    </div>
-                  )}
+                      <Bell className="w-4 h-4 text-emerald-400" />
+                      {showBadgeCounts && chatUnreadCount > 0 ? (
+                        <span className="absolute -top-1 -right-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-rose-600 text-[9px] font-black text-white ring-1 ring-rose-500 animate-pulse">
+                          {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  </div>
                 </div>
-              </div>
               );
             })()}
 
@@ -3912,6 +3367,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               subcontractorAdvances={subcontractorAdvances}
               initialTaskId={deepLinkTaskId ?? undefined}
               onInitialTaskOpened={() => setDeepLinkTaskId(null)}
+              initialTaskScope={approvalDeepLink ? 'toreview' : undefined}
+              onInitialTaskScopeOpened={() => setApprovalDeepLink(null)}
             />
           )}
 
@@ -5056,15 +4513,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             <MessagesView
               currentUser={currentUser!}
               employees={employees}
-              notifications={notifications}
-              onUpdateNotifications={(updated) => {
-                setNotifications(updated);
-                // Lưu trạng thái đã đọc lên Supabase (non-blocking)
-                const readNotifs = updated.filter(n => n.read);
-                readNotifs.forEach(n => dbService.notifications.markRead(n.id).catch(() => {}));
-              }}
               onNavigateTab={(tab) => setActiveTab(tab)}
-              initialPaneTab={messengerInitialTab}
               initialConversationId={initialConvId ?? undefined}
               showBadgeCounts={showBadgeCounts}
               onToggleBadgeCounts={(next) => {
