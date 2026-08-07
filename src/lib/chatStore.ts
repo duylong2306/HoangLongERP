@@ -128,18 +128,26 @@ export function saveMessages(conversationId: string, msgs: ChatMessage[]): void 
 
 // ─── Supabase push (internal) ─────────────────────────────────────────────
 
-async function pushConversation(conv: Conversation) {
+async function pushConversation(conv: Conversation): Promise<any | null> {
   const sb = getSupabase();
-  if (!sb) return;
+  if (!sb) return null;
   const { error } = await sb.from('conversations').upsert(convToRow(conv));
-  if (error) console.error('pushConversation error:', error.message);
+  if (error) {
+    console.error('pushConversation error:', error.message);
+    return error;
+  }
+  return null;
 }
 
-async function pushMessage(msg: ChatMessage) {
+async function pushMessage(msg: ChatMessage): Promise<any | null> {
   const sb = getSupabase();
-  if (!sb) return;
+  if (!sb) return null;
   const { error } = await sb.from('chat_messages').insert(msgToRow(msg));
-  if (error) console.error('pushMessage error:', error.message);
+  if (error) {
+    console.error('pushMessage error:', error.message);
+    return error;
+  }
+  return null;
 }
 
 // ─── Conversation CRUD (async + cache) ────────────────────────────────────
@@ -493,8 +501,27 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
     });
   }
 
-  // Push message lên Supabase
-  await pushMessage(newMsg);
+  // Đảm bảo conversation tồn tại trên cloud TRƯỚC KHI insert message.
+  // chat_messages.conversation_id có FK tới conversations(id) (ON DELETE CASCADE),
+  // nên nếu conversation chưa có trên cloud, insert message sẽ lỗi 23503 (foreign
+  // key) và — nếu bị swallow — tin nhắn bị MẤT SILENT (hiện tạm rồi biến mất khi
+  // reload). Upsert conversation trước để chắc chắn FK target tồn tại.
+  if (conv) {
+    await pushConversation({ ...conv, lastMessageAt: newMsg.createdAt });
+  }
+
+  // Push message lên Supabase. Nếu lỗi FK (conversation chưa kịp có trên cloud do
+  // race / push trước thất bại) → upsert lại conversation rồi thử lại 1 lần.
+  let pushErr = await pushMessage(newMsg);
+  if (
+    pushErr &&
+    (pushErr.code === '23503' ||
+      (pushErr.message || '').toLowerCase().includes('foreign key'))
+  ) {
+    if (conv) await pushConversation({ ...conv, lastMessageAt: newMsg.createdAt });
+    pushErr = await pushMessage(newMsg);
+  }
+  if (pushErr) console.error('pushMessage failed (tin nhắn có thể không được lưu):', pushErr.message);
 
   // Push conversation LÊN SUPABASE với unreadCount +1 (dành cho người nhận)
   let convForPush = conv;
@@ -504,6 +531,7 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
       lastMessageAt: newMsg.createdAt,
       unreadCount: (conv.unreadCount || 0) + 1,
     };
+    conversationsCache.set(msg.conversationId, convForPush);
     await pushConversation(convForPush);
   }
 
@@ -838,25 +866,55 @@ export async function loadConversationsFromCloud(userId?: string): Promise<Conve
 }
 
 /** Kéo tin nhắn của 1 hội thoại từ Supabase về cache. */
-export async function loadMessagesFromCloud(conversationId: string): Promise<ChatMessage[]> {
+// Biên giới cũ nhất (ISO) đã được load cho mỗi hội thoại. Dùng để realtime
+// reload chỉ trong cửa sổ đang mở (không load lại toàn bộ tin nhắn).
+const _loadedFromIso = new Map<string, string>();
+
+/**
+ * Tải tin nhắn từ cloud. Mặc định (không có opts) tải TẤT CẢ (giữ tương thích
+ * ngược). Khi truyền opts.fromIso, chỉ tải tin nhắn có created_at >= fromIso
+ * (cửa sổ theo ngày) → làm nhẹ app, không load 1 lần toàn bộ lịch sử.
+ *
+ * Kết quả được MERGE (union theo id) vào cache thay vì ghi đè, để các lần load
+ * cũ hơn (vuốt lên) cộng dồn chứ không đè mất tin cũ đã có.
+ */
+export async function loadMessagesFromCloud(
+  conversationId: string,
+  opts?: { fromIso?: string },
+): Promise<ChatMessage[]> {
   const sb = getSupabase();
-  if (!sb) return [];
+  if (!sb) return getMessages(conversationId);
   try {
-    const { data, error } = await sb
+    let query = sb
       .from('chat_messages')
       .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+      .eq('conversation_id', conversationId);
+    if (opts?.fromIso) query = query.gte('created_at', opts.fromIso);
+    query = query.order('created_at', { ascending: true });
+    const { data, error } = await query;
     if (error) {
       console.error('loadMessagesFromCloud error:', error.message);
-      return [];
+      return getMessages(conversationId);
     }
     const msgs = (data || []).map(msgFromRow);
-    saveMessages(conversationId, msgs);
-    return msgs;
+
+    // Merge union theo id vào cache
+    const existing = getMessages(conversationId);
+    const byId = new Map<string, ChatMessage>();
+    for (const m of existing) byId.set(m.id, m);
+    for (const m of msgs) byId.set(m.id, m);
+    const merged = Array.from(byId.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    saveMessages(conversationId, merged);
+
+    // Ghi nhớ biên cũ nhất để realtime reload đúng cửa sổ
+    if (opts?.fromIso) {
+      const prev = _loadedFromIso.get(conversationId);
+      if (!prev || opts.fromIso < prev) _loadedFromIso.set(conversationId, opts.fromIso);
+    }
+    return merged;
   } catch (e) {
     console.error('loadMessagesFromCloud exception:', e);
-    return [];
+    return getMessages(conversationId);
   }
 }
 
@@ -925,7 +983,9 @@ export function subscribeMessages(
     .on('postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
       async () => {
-        const msgs = await loadMessagesFromCloud(conversationId);
+        // Chỉ reload cửa sổ đã load (từ _loadedFromIso) thay vì toàn bộ lịch sử
+        const from = _loadedFromIso.get(conversationId);
+        const msgs = await loadMessagesFromCloud(conversationId, from ? { fromIso: from } : undefined);
         onChange(msgs);
       })
     .subscribe();

@@ -2696,6 +2696,64 @@ export const dbService = {
     }
   },
 
+  // ===== UPLOAD AVATAR (xem migration 034_create_avatars_bucket.sql) =====
+  async uploadAvatar(empId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'avatars';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeEmp = String(empId || 'emp').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `${safeEmp}/${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 5242880,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' };
+        } catch (createErr: any) {
+          console.warn('[uploadAvatar] Không tự tạo được bucket avatars:', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadAvatar] Upload Supabase thất bại, lưu cục bộ:', msg);
+      const reader = new FileReader();
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+  },
+
   // Clean initialization helper to bootstrap full local database on the first sync if cloud db is empty
   async bootstrapFirstTime(force = false): Promise<void> {
     const supabase = getSupabase();

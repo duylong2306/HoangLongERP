@@ -1,6 +1,7 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useRef } from 'react';
 import { Employee } from '../types';
 import { hashPasswordSync } from '../lib/passwordUtils';
+import { dbService } from '../lib/dbService';
 import {
   X,
   User,
@@ -13,7 +14,9 @@ import {
   EyeOff,
   Save,
   KeyRound,
-  Sparkles
+  Sparkles,
+  Upload,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNotification } from '../context';
@@ -66,6 +69,10 @@ export default function UserProfileModal({
 
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  // Upload avatar lên Supabase Storage (bucket 'avatars' — migration 034)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarFileRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -142,6 +149,40 @@ export default function UserProfileModal({
     setAvatar(urlOrEmoji);
   };
 
+  // Chọn file ảnh từ máy → upload lên Supabase Storage → lưu public URL làm avatar
+  const handleAvatarFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset để có thể chọn lại cùng file
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Sai định dạng', message: 'Vui lòng chọn file ảnh (PNG, JPG, WEBP, GIF).', type: 'warning' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      addToast({ title: '⚠️ Ảnh quá lớn', message: 'Kích thước tối đa 5MB.', type: 'warning' });
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const res = await dbService.uploadAvatar(currentUser.id, file);
+      setAvatar(res.url);
+      addToast({
+        title: res.stored === 'supabase' ? '✅ Đã tải lên' : 'ℹ️ Đã lưu cục bộ',
+        message: res.stored === 'supabase'
+          ? 'Ảnh đại diện đã được upload lên Supabase.'
+          : 'Không thể kết nối Supabase, ảnh được lưu tạm trên máy.',
+        type: res.stored === 'supabase' ? 'success' : 'info',
+      });
+    } catch (err) {
+      console.error(err);
+      addToast({ title: '❌ Lỗi', message: 'Tải ảnh lên thất bại, vui lòng thử lại.', type: 'error' });
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm font-sans select-none text-slate-200">
@@ -203,9 +244,26 @@ export default function UserProfileModal({
                       </span>
                     )}
                   </div>
-                  <div className="absolute -bottom-1 -right-1 p-1 bg-slate-900 rounded-full border border-slate-700 text-slate-400">
-                    <Camera className="w-3.5 h-3.5" />
-                  </div>
+                  <input
+                    ref={avatarFileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarFileSelected}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => avatarFileRef.current?.click()}
+                    disabled={uploadingAvatar}
+                    title="Tải ảnh đại diện từ máy"
+                    className="absolute -bottom-1 -right-1 p-1 bg-slate-900 rounded-full border border-slate-700 text-slate-400 hover:text-white hover:border-emerald-500 transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    {uploadingAvatar ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
+                  </button>
                 </div>
 
                 {/* Avatar Selection Options */}
@@ -236,7 +294,16 @@ export default function UserProfileModal({
                     ))}
                   </div>
 
-                  <div className="pt-1.5 flex justify-center sm:justify-start">
+                  <div className="pt-1.5 flex flex-wrap gap-2 justify-center sm:justify-start">
+                    <button
+                      type="button"
+                      onClick={() => avatarFileRef.current?.click()}
+                      disabled={uploadingAvatar}
+                      className="text-[10px] font-bold text-slate-400 hover:text-white flex items-center gap-1 uppercase tracking-wide bg-slate-900/60 p-1 px-2 rounded hover:bg-slate-800 transition-colors disabled:opacity-60 cursor-pointer"
+                    >
+                      {uploadingAvatar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3 text-emerald-400" />}
+                      {uploadingAvatar ? 'Đang tải...' : 'Tải ảnh từ máy'}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShowCustomUrlInput(!showCustomUrlInput)}

@@ -13,7 +13,7 @@ import {
 import {
   Search, MessageSquare, User, Users, Send, Image, Smile,
   ThumbsUp, Phone, Info, MoreVertical, CheckCheck, ChevronLeft,
-  Pin, Plus, X, Trash, Camera, Paperclip, File, Download, Check,
+  Pin, Plus, X, Trash, Camera, Paperclip, File, Download, Check, Loader2,
 } from 'lucide-react';
 import UserAvatar from './UserAvatar';
 
@@ -77,6 +77,17 @@ export default function MessagesView({
   const messageInputRef = useRef<HTMLInputElement>(null);
   const quickEmojis = ['😊', '👍', '❤️', '😂', '🎉', '🔥'];
 
+  // ─── Lazy-load tin nhắn theo cửa sổ ngày (2 ngày/lần) ──────────────────────
+  // Chỉ load sẵn 2 ngày gần nhất; vuốt lên đầu danh sách → load tiếp 2 ngày cũ hơn.
+  const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+  const [msgWindowStart, setMsgWindowStartState] = useState<string | null>(null);
+  const msgWindowStartRef = useRef<string | null>(null);
+  const setMsgWindowStart = (v: string | null) => { msgWindowStartRef.current = v; setMsgWindowStartState(v); };
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const messageListRef = useRef<HTMLDivElement>(null);
+
   // ─── Reply & Edit State ────────────────────────────────────────────────
   const [replyToMsg, setReplyToMsg] = useState<{ id: string; senderName: string; content: string } | null>(null);
   const [showAddMember, setShowAddMember] = useState(false);
@@ -124,29 +135,40 @@ export default function MessagesView({
         setConvMessages([]);
         return;
       }
-      // Hiển thị ngay từ cache
-      setConvMessages(getMessages(selectedConv.id).filter(m => !m.deleted || m.senderId === currentUser.id));
+
+      // Chỉ load sẵn 2 ngày gần nhất. Neo cửa sổ vào tin mới nhất của hội thoại
+      // (không chỉ "now - 2 ngày") để hội thoại có tin nhắn cũ vẫn hiện được tin gần nhất.
+      const latestTs = selectedConv.lastMessageAt ? new Date(selectedConv.lastMessageAt).getTime() : Date.now();
+      const initialStart = new Date(Math.min(Date.now() - TWO_DAYS, latestTs - TWO_DAYS)).toISOString();
+      setMsgWindowStart(initialStart);
+      setHasMoreOlder(true);
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+
+      // Hiển thị ngay từ cache (chỉ trong cửa sổ 2 ngày)
+      setConvMessages(applyWindow(getMessages(selectedConv.id)));
       markConversationRead(selectedConv.id);
       // Ghi "đã xem" (read_by) cho tin của người khác → hiển thị người đã xem
       markMessagesReadByUser(selectedConv.id, currentUser.id);
       setConversations(getConversations());
 
-      // Kéo bản mới nhất từ cloud + subscribe realtime cho hội thoại này
+      // Kéo bản mới nhất từ cloud (chỉ cửa sổ 2 ngày) + subscribe realtime
       const convId = selectedConv.id;
       let mounted = true;
-      loadMessagesFromCloud(convId).then(msgs => {
+      loadMessagesFromCloud(convId, { fromIso: initialStart }).then(msgs => {
         if (mounted) {
-          setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
+          setConvMessages(applyWindow(msgs));
           markConversationRead(convId);
           markMessagesReadByUser(convId, currentUser.id);
           setConversations(getConversations());
+          setHasMoreOlder(msgs.length > 0);
         }
       });
       // Chỉ cập nhật UI khi có tin nhắn MỚI (insert), KHÔNG gọi markConversationRead
       // để tránh loop: realtime fire → markRead → update → realtime fire lại
       const unsub = subscribeMessages(convId, (msgs) => {
         if (mounted) {
-          setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
+          setConvMessages(applyWindow(msgs));
           // Hội thoại đang mở → đánh dấu tin mới đã xem ngay (idempotent, không loop)
           markMessagesReadByUser(convId, currentUser.id);
         }
@@ -158,6 +180,8 @@ export default function MessagesView({
   }, [selectedConv?.id]);
 
   useEffect(() => {
+    // Không cuộn xuống khi đang prepred tin cũ (loadOlder đã tự giữ vị trí)
+    if (loadingOlderRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [convMessages.length, selectedConv?.id]);
 
@@ -274,7 +298,7 @@ export default function MessagesView({
     const msg = convMessages.find(m => m.id === msgId);
     if (msg && msg.senderId === currentUser.id) {
       deleteMessageFromConversation(selectedConv.id, msgId);
-      setConvMessages(getMessages(selectedConv.id));
+      setConvMessages(applyWindow(getMessages(selectedConv.id)));
       setConversations(getConversations());
       addToast({ title: '🗑️ Đã xóa', message: 'Tin nhắn đã được xóa', type: 'info' });
     }
@@ -285,7 +309,7 @@ export default function MessagesView({
   const handleToggleReaction = async (msgId: string, emoji: string) => {
     if (!selectedConv) return;
     await toggleMessageReaction(selectedConv.id, msgId, currentUser.id, emoji);
-    setConvMessages(getMessages(selectedConv.id));
+    setConvMessages(applyWindow(getMessages(selectedConv.id)));
   };
 
   // Click chuột phải (desktop) → mở context menu ngay vị trí chuột
@@ -297,6 +321,50 @@ export default function MessagesView({
   };
 
   const closeContextMenu = () => setContextMenu(null);
+
+  // Lọc tin nhắn theo cửa sổ ngày hiện tại (chỉ hiển thị những tin >= msgWindowStart)
+  const applyWindow = (msgs: ChatMessage[]): ChatMessage[] => {
+    const ws = msgWindowStartRef.current;
+    const cutoff = ws ? new Date(ws).getTime() : -Infinity;
+    return msgs.filter(
+      m => (!m.deleted || m.senderId === currentUser.id) && new Date(m.createdAt).getTime() >= cutoff,
+    );
+  };
+
+  // Vuốt lên đầu → mở rộng cửa sổ ngược lên 2 ngày cũ hơn, load tiếp từ cloud
+  const loadOlderMessages = async () => {
+    if (!selectedConv || !msgWindowStartRef.current || loadingOlderRef.current || !hasMoreOlder) return;
+    const olderStartIso = new Date(new Date(msgWindowStartRef.current).getTime() - TWO_DAYS).toISOString();
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    // Giữ nguyên vị trí cuộn sau khi prepred tin cũ (tránh nhảy lên đầu)
+    const el = messageListRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    const prevTop = el?.scrollTop ?? 0;
+
+    const fetched = await loadMessagesFromCloud(selectedConv.id, { fromIso: olderStartIso });
+    setMsgWindowStart(olderStartIso);
+    setConvMessages(applyWindow(getMessages(selectedConv.id)));
+    setHasMoreOlder(fetched.length > 0);
+
+    loadingOlderRef.current = false;
+    setLoadingOlder(false);
+
+    // Khôi phục vị trí cuộn (scrollHeight tăng do prepred)
+    requestAnimationFrame(() => {
+      if (el) el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+    });
+  };
+
+  // Phát hiện vuốt lên gần đầu danh sách → load tiếp tin cũ hơn
+  const handleMessageScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (el.scrollTop < 80 && !loadingOlderRef.current && hasMoreOlder && selectedConv) {
+      loadOlderMessages();
+    }
+  };
 
   // Double-tap (mobile) → thả tim; Vuốt sang phải (mobile) → trả lời
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -451,7 +519,7 @@ export default function MessagesView({
         replyTo: replyToMsg ?? undefined,
         mentions: mentionedNames.length > 0 ? mentionedNames : undefined,
       });
-      setConvMessages(getMessages(conv.id));
+      setConvMessages(applyWindow(getMessages(conv.id)));
       setConversations(getConversations());
       setInputText('');
       clearAttachments();
@@ -1028,7 +1096,11 @@ export default function MessagesView({
               <div className="flex-1 flex flex-col bg-slate-950 relative min-w-0 h-full">
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1 scrollbar-thin bg-slate-950">
+                <div
+                  ref={messageListRef}
+                  onScroll={handleMessageScroll}
+                  className="flex-1 overflow-y-auto px-4 py-3 space-y-1 scrollbar-thin bg-slate-950"
+                >
                   {/* Welcome */}
                   {selectedConv && (
                     <div className="py-6 text-center shrink-0">
@@ -1046,6 +1118,14 @@ export default function MessagesView({
                         {(selectedConv.type === 'group' || selectedConv.type === 'task') ? `${getConvMemberCount(selectedConv)} thành viên` : 'Cuộc trò chuyện riêng tư'}
                       </p>
                       <p className="text-[10px] text-slate-500 mt-1">Tin nhắn được mã hóa cục bộ trong trình duyệt</p>
+                    </div>
+                  )}
+
+                  {/* Spinner load tin cũ hơn khi vuốt lên đầu */}
+                  {loadingOlder && (
+                    <div className="py-3 flex items-center justify-center gap-2 text-slate-400 text-[11px]">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Đang tải tin nhắn cũ hơn...
                     </div>
                   )}
 
@@ -1116,7 +1196,8 @@ export default function MessagesView({
                                   </div>
                                 )}
 
-                                {/* Message bubble */}
+                                {/* Message bubble + footer: thời gian dưới phải, ❤️+avatar dưới trái */}
+                                <div className="flex flex-col">
                                 <div id={`msg_${msg.id}`} className={`p-2.5 text-[14px] leading-relaxed ${isSelf ? 'bg-indigo-700 text-white rounded-2xl rounded-br-md' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md'} ${msg.deleted ? 'opacity-60 italic' : ''}`}>
                                   <p className="whitespace-pre-wrap">{renderContentWithMentions(msg.content)}</p>
                                   {/* Attachments */}
@@ -1139,13 +1220,15 @@ export default function MessagesView({
                                       ))}
                                     </div>
                                   )}
-                                  <div className="flex items-center gap-1 mt-0.5">
-                                    {/* Góc trái: ❤️ + avatar người đã thả tim (cùng dòng với thời gian) */}
+                                  </div>
+                                  {/* Footer nằm DƯỚI bubble: ❤️+avatar (trái) | thời gian+đã xem (phải) */}
+                                  <div className="flex items-center gap-2 mt-0.5 px-0.5">
+                                    {/* Trái: ❤️ + avatar người đã thả tim */}
                                     {(() => {
                                       const heartGrp = msg.reactions?.find(g => g.emoji === '❤️');
                                       if (!heartGrp || heartGrp.users.length === 0) return null;
                                       return (
-                                        <div className={`flex items-center gap-0.5 ${isSelf ? 'mr-auto' : 'mr-1.5'}`}
+                                        <div className="flex items-center gap-0.5 flex-shrink-0"
                                           title={heartGrp.users.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}>
                                           <span className="text-[11px] leading-none">❤️</span>
                                           <div className="flex -space-x-1.5">
@@ -1163,50 +1246,26 @@ export default function MessagesView({
                                       );
                                     })()}
 
-                                    <span className={`text-[10px] ${isSelf ? 'text-indigo-300' : 'text-slate-500'}`}>{formatTime(msg.createdAt)}</span>
-                                    {msg.edited && <span className="text-[9px] text-slate-500">(đã sửa)</span>}
-
-                                    {/* Người đã xem (chỉ tin tự gửi, chưa bị xóa) */}
-                                    {isSelf && !msg.deleted && msg.readBy && msg.readBy.length > 0 && (
-                                      <div className="flex items-center gap-0.5"
-                                        title={`Đã xem: ${msg.readBy.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}`}>
-                                        <div className="flex -space-x-1">
-                                          {msg.readBy.slice(0, 3).map(uid => {
-                                            const emp = employees.find(e => e.id === uid);
-                                            return <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-white/20" />;
-                                          })}
+                                    {/* Phải: time + readBy + check — luôn sát phải (ml-auto) */}
+                                    <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                                      <span className={`text-[10px] ${isSelf ? 'text-indigo-300' : 'text-slate-500'}`}>{formatTime(msg.createdAt)}</span>
+                                      {msg.edited && <span className="text-[9px] text-slate-500">(đã sửa)</span>}
+                                      {isSelf && !msg.deleted && msg.readBy && msg.readBy.length > 0 && (
+                                        <div className="flex items-center gap-0.5"
+                                          title={`Đã xem: ${msg.readBy.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}`}>
+                                          <div className="flex -space-x-1">
+                                            {msg.readBy.slice(0, 3).map(uid => {
+                                              const emp = employees.find(e => e.id === uid);
+                                              return <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-white/20" />;
+                                            })}
+                                          </div>
+                                          {msg.readBy.length > 3 && <span className="text-[8px] text-slate-400">+{msg.readBy.length - 3}</span>}
                                         </div>
-                                        {msg.readBy.length > 3 && <span className="text-[8px] text-slate-400">+{msg.readBy.length - 3}</span>}
-                                      </div>
-                                    )}
-
-                                    {isSelf && !msg.deleted && <CheckCheck className="w-3 h-3 text-indigo-300" />}
+                                      )}
+                                      {isSelf && !msg.deleted && <CheckCheck className="w-3 h-3 text-indigo-300" />}
+                                    </div>
                                   </div>
                                 </div>
-
-                                {/* Reaction pills */}
-                                {msg.reactions && msg.reactions.length > 0 && !msg.deleted && (
-                                  <div className={`flex flex-wrap gap-1 mt-1 ${isSelf ? 'justify-end' : ''}`}>
-                                    {msg.reactions.map(grp => {
-                                      const mine = grp.users.includes(currentUser.id);
-                                      return (
-                                        <button
-                                          key={grp.emoji}
-                                          onClick={() => handleToggleReaction(msg.id, grp.emoji)}
-                                          title={grp.users.length > 0 ? `${grp.users.length} người đã thả` : undefined}
-                                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border transition-colors cursor-pointer ${
-                                            mine
-                                              ? 'bg-indigo-500/30 border-indigo-400 text-white'
-                                              : 'bg-slate-800 border-slate-700 text-slate-200 hover:border-indigo-400'
-                                          }`}
-                                        >
-                                          <span>{grp.emoji}</span>
-                                          <span className="text-[10px]">{grp.users.length}</span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
 
                                 {/* Action menu (reply / delete) */}
                                 {!msg.deleted && (
