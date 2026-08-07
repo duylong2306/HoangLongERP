@@ -83,7 +83,7 @@ function msgFromRow(r: any): ChatMessage {
 }
 
 function msgToRow(m: ChatMessage): any {
-  return {
+  const row: any = {
     id: m.id,
     conversation_id: m.conversationId,
     sender_id: m.senderId,
@@ -103,8 +103,17 @@ function msgToRow(m: ChatMessage): any {
     mentions: m.mentions ?? null,
     reactions: m.reactions ?? [],
     read_by: m.readBy ?? [],
-    related_entity: m.relatedEntity ? JSON.stringify(m.relatedEntity) : null,
   };
+  // CHỈ gửi related_entity khi có giá trị. Cột này có thể CHƯA tồn tại trên một
+  // số project Supabase (chưa chạy migration 035). Gửi `related_entity: null`
+  // vào cột không tồn tại → PostgREST trả 400 "Could not find the
+  // 'related_entity' column" và TOÀN BỘ insert tin nhắn thất bại (tin nhắn
+  // không được lưu, dù conversation vẫn cập nhật last_message_at). Omit key này
+  // khi rỗng để tin nhắn thường gửi được ngay cả khi chưa có cột.
+  if (m.relatedEntity) {
+    row.related_entity = JSON.stringify(m.relatedEntity);
+  }
+  return row;
 }
 
 // ─── Sync cache accessors (đọc/ghi in-memory, interface giữ nguyên) ────────
