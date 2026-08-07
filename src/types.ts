@@ -889,6 +889,7 @@ export interface ChatMessage {
   deleted?: boolean;      // Đã xóa (soft delete)
   deletedAt?: string;     // Thời gian xóa
   pinned?: boolean;       // Đã ghim
+  readBy?: string[];      // Danh sách userId đã xem tin nhắn (chỉ ghi cho tin người khác gửi)
   replyTo?: {             // Trả lời tin nhắn nào
     id: string;
     senderName: string;

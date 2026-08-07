@@ -28,6 +28,7 @@ import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
+import UserAvatar from './UserAvatar';
 import { sendGroupChatMessage, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
@@ -3278,18 +3279,11 @@ export default function ProjectKanbanBoard({
                         <div className="bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-800 transition-colors">
                           {(() => {
                             const pm = employees.find(e => e.id === selectedProject.pmId);
-                            const name = pm ? pm.name : 'Chưa gán';
-                            const parts = name.split(' ');
-                            const initials = parts.length >= 2
-                              ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                              : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                             return (
                               <>
                                 {/* Interactive Avatar (Clicking triggers employee select via select overlay) */}
                                 <div className="relative shrink-0 w-11 h-11">
-                                  <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-650 flex items-center justify-center font-bold text-slate-950 text-sm shadow-md border border-emerald-400/20 group-hover:scale-105 transition-all">
-                                    {initials}
-                                  </div>
+                                  <UserAvatar employee={pm || null} size="lg" className="shadow-md" />
                                   <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-emerald-400 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
                                     ⚙️
                                   </span>
@@ -4915,18 +4909,11 @@ export default function ProjectKanbanBoard({
                               <div className="bg-slate-900 border border-slate-805/60 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-700 transition-colors">
                                 {(() => {
                                   const assignedEmp = employees.find(e => e.id === subtaskAuto.assignId);
-                                  const name = assignedEmp ? assignedEmp.name : 'Chưa gán (Bấm để gán)';
-                                  const parts = name.split(' ');
-                                  const initials = parts.length >= 2
-                                    ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                    : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                                   return (
                                     <>
                                       {/* Avatar tròn tương tác */}
                                       <div className="relative shrink-0 w-11 h-11">
-                                        <div className={`w-11 h-11 rounded-full bg-gradient-to-br ${assignedEmp ? 'from-indigo-500 to-purple-600' : 'from-slate-700 to-slate-800'} flex items-center justify-center font-bold text-white text-sm shadow-md border border-white/5 group-hover:scale-105 transition-all`}>
-                                          {initials}
-                                        </div>
+                                        <UserAvatar employee={assignedEmp || null} size="lg" className={`shadow-md ${assignedEmp ? '' : 'opacity-50'}`} />
                                         <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-indigo-450 border border-slate-805 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
                                           ⚙️
                                         </span>

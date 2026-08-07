@@ -694,7 +694,8 @@ create table if not exists public.chat_messages (
   pinned           boolean default false,
   reply_to         jsonb,
   mentions         jsonb,
-  reactions        jsonb
+  reactions        jsonb,
+  read_by          jsonb
 );
 
 -- -----------------------------------------------------------------------------
@@ -1389,6 +1390,7 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
   reply_to jsonb,
   mentions jsonb,
   reactions jsonb,
+  read_by jsonb,
   CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
   CONSTRAINT chat_messages_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.conversations(id)
 );

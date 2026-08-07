@@ -77,6 +77,7 @@ function msgFromRow(r: any): ChatMessage {
     replyTo: r.reply_to ?? undefined,
     mentions: r.mentions ?? undefined,
     reactions: r.reactions ?? undefined,
+    readBy: r.read_by ?? undefined,
     relatedEntity: r.related_entity ? JSON.parse(r.related_entity) : undefined,
   };
 }
@@ -101,6 +102,7 @@ function msgToRow(m: ChatMessage): any {
     reply_to: m.replyTo ?? null,
     mentions: m.mentions ?? null,
     reactions: m.reactions ?? [],
+    read_by: m.readBy ?? [],
     related_entity: m.relatedEntity ? JSON.stringify(m.relatedEntity) : null,
   };
 }
@@ -586,6 +588,38 @@ export async function markConversationRead(convId: string): Promise<void> {
   if (convErr) console.error('markConversationRead error:', convErr.message);
   const { error: msgErr } = await sb.from('chat_messages').update({ read: true }).eq('conversation_id', convId);
   if (msgErr) console.error('mark messages read error:', msgErr.message);
+}
+
+// Đánh dấu "đã xem" (read_by) cho các tin do NGƯỜI KHÁC gửi trong hội thoại.
+// Chỉ ghi 1 lần/user/tin; tin tự gửi không ghi. Dùng cho cơ chế hiển thị "người đã xem".
+export async function markMessagesReadByUser(convId: string, userId: string): Promise<void> {
+  const sb = getSupabase();
+  const msgs = messagesCache.get(convId) || [];
+  const toMark = msgs.filter(m =>
+    m.senderId !== userId &&
+    !(m.readBy || []).includes(userId) &&
+    !m.deleted
+  );
+  if (toMark.length === 0) return;
+
+  // Update cache trước
+  const byId = new Map(toMark.map(m => [m.id, m]));
+  messagesCache.set(convId, msgs.map(m => {
+    if (!byId.has(m.id)) return m;
+    const readBy = [...(m.readBy || []), userId];
+    return { ...m, readBy };
+  }));
+
+  // Update Supabase (mỗi tin 1 update với read_by mới)
+  if (sb) {
+    for (const m of toMark) {
+      const next = [...(m.readBy || []), userId];
+      const { error } = await sb.from('chat_messages')
+        .update({ read_by: next })
+        .eq('id', m.id);
+      if (error) { console.error('markMessagesReadByUser error:', error.message); break; }
+    }
+  }
 }
 
 // Lấy hội thoại của user (filter theo participantIds)

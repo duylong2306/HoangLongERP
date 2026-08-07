@@ -23,6 +23,7 @@ interface TravelAllowanceNorm {
 import { useNotification, isUserInRoleGroup } from '../context';
 import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import UserAvatar from './UserAvatar';
 
 // Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
 const sectorArchiveTab = (type?: string): string =>
@@ -1521,39 +1522,31 @@ export default function TaskDetailModal({
                       : rate >= 30 ? 'bg-amber-500' 
                       : 'bg-rose-500';
 
-  // Format initials for Avatars exactly like project member displays
-  const renderInitialsAvatar = (emp: Employee, options?: { showNameLabel?: boolean, statusText?: string, onDelete?: () => void }) => {
-    const parts = emp.name.split(' ');
-    const initials = parts.length >= 2
-      ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-      : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-    
-    return (
-      <div className="flex items-center gap-2 group/avatar relative shrink-0" key={emp.id}>
-        <div 
-          className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center font-black text-white text-[11px] shadow-lg border border-white/10 transition-all duration-200 hover:scale-[1.07] relative cursor-pointer"
-          title={`${emp.name} (${emp.role?.toUpperCase() || '—'} - ${emp.department})`}
-        >
-          {initials}
-          {options?.onDelete && (
-            <div 
-              onClick={(e) => { e.stopPropagation(); options.onDelete?.(); }}
-              className="absolute inset-0 bg-red-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[10px] opacity-0 group-hover/avatar:opacity-100 transition-opacity"
-            >
-              ✕
-            </div>
-          )}
+  // Format avatar cho hiển thị nhân viên (đọc emp.avatar thực, fallback chữ cái/emoji)
+  const renderUserAvatar = (emp: Employee, options?: { showNameLabel?: boolean, statusText?: string, onDelete?: () => void }) => (
+    <div className="flex items-center gap-2 group/avatar relative shrink-0" key={emp.id}>
+      <UserAvatar
+        employee={emp}
+        size="md"
+        title={`${emp.name} (${emp.role?.toUpperCase() || '—'} - ${emp.department})`}
+      />
+      {(options?.showNameLabel !== false) && (
+        <div>
+          <span className="font-bold text-slate-100 block text-[11px] leading-tight">{emp.name}</span>
+          <span className="text-[9px] text-slate-400 block leading-none mt-0.5">{emp.department}</span>
+          {options?.statusText && <span className="text-[8px] text-emerald-400 font-semibold block mt-0.5">{options.statusText}</span>}
         </div>
-        {(options?.showNameLabel !== false) && (
-          <div>
-            <span className="font-bold text-slate-100 block text-[11px] leading-tight">{emp.name}</span>
-            <span className="text-[9px] text-slate-400 block leading-none mt-0.5">{emp.department}</span>
-            {options?.statusText && <span className="text-[8px] text-emerald-400 font-semibold block mt-0.5">{options.statusText}</span>}
-          </div>
-        )}
-      </div>
-    );
-  };
+      )}
+      {options?.onDelete && (
+        <div
+          onClick={(e) => { e.stopPropagation(); options.onDelete?.(); }}
+          className="absolute inset-0 bg-red-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[10px] opacity-0 group-hover/avatar:opacity-100 transition-opacity"
+        >
+          ✕
+        </div>
+      )}
+    </div>
+  );
 
   // ─── ĐỒNG BỘ CÔNG TÁC PHÍ LÊN SUPABASE (hrm_travel_expenses) ───────────────
   // GỌI NGAY KHI "Thêm công tác phí" để dữ liệu được lưu TỨC THÌ, KHÔNG phụ
@@ -1817,7 +1810,7 @@ export default function TaskDetailModal({
                   {/* 1. NGƯỜI GIAO VIỆC */}
                   <div className="space-y-1.5">
                     <span className="block text-slate-500 text-[9.5px] font-bold uppercase tracking-wider">Người Giao Việc</span>
-                    {assigner ? renderInitialsAvatar(assigner, { statusText: 'Chủ trì việc gốc' }) : (
+                    {assigner ? renderUserAvatar(assigner, { statusText: 'Chủ trì việc gốc' }) : (
                       <span className="text-slate-500 italic block text-[11px] pt-1">Chưa xác định</span>
                     )}
                   </div>
@@ -1833,14 +1826,14 @@ export default function TaskDetailModal({
                       )}
                     </span>
                     {isReadOnly ? (
-                      assignee ? renderInitialsAvatar(assignee, { statusText: 'Chịu trách nhiệm' }) : (
+                      assignee ? renderUserAvatar(assignee, { statusText: 'Chịu trách nhiệm' }) : (
                         <span className="text-slate-500 italic block text-[11px] pt-1">Chưa có Phụ Trách Chính</span>
                       )
                     ) : (
                       <div className={`flex items-center gap-2 max-w-full overflow-hidden ${
                         (selectedTask.status === 'completed' || !canEditTask) ? 'opacity-65' : ''
                       }`}>
-                        {assignee && renderInitialsAvatar(assignee, { showNameLabel: false })}
+                        {assignee && renderUserAvatar(assignee, { showNameLabel: false })}
                         <select
                           disabled={selectedTask.status === 'completed' || !canEditTask}
                           value={selectedTask.assigneeId || ''}

@@ -6,7 +6,7 @@ import {
   getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
   markConversationRead, getUserConversations, deleteMessageFromConversation,
   updateMessage, searchMessagesInConversation, getConversationUnreadCount,
-  addMemberToConversation, toggleMessageReaction,
+  addMemberToConversation, toggleMessageReaction, markMessagesReadByUser,
   loadConversationsFromCloud, loadMessagesFromCloud,
   subscribeConversations, subscribeMessages,
 } from '../lib/chatStore';
@@ -15,6 +15,7 @@ import {
   ThumbsUp, Phone, Info, MoreVertical, CheckCheck, ChevronLeft,
   Pin, Plus, X, Trash, Camera, Paperclip, File, Download, Check,
 } from 'lucide-react';
+import UserAvatar from './UserAvatar';
 
 interface MessagesViewProps {
   currentUser: Employee;
@@ -126,6 +127,8 @@ export default function MessagesView({
       // Hiển thị ngay từ cache
       setConvMessages(getMessages(selectedConv.id).filter(m => !m.deleted || m.senderId === currentUser.id));
       markConversationRead(selectedConv.id);
+      // Ghi "đã xem" (read_by) cho tin của người khác → hiển thị người đã xem
+      markMessagesReadByUser(selectedConv.id, currentUser.id);
       setConversations(getConversations());
 
       // Kéo bản mới nhất từ cloud + subscribe realtime cho hội thoại này
@@ -135,13 +138,18 @@ export default function MessagesView({
         if (mounted) {
           setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
           markConversationRead(convId);
+          markMessagesReadByUser(convId, currentUser.id);
           setConversations(getConversations());
         }
       });
       // Chỉ cập nhật UI khi có tin nhắn MỚI (insert), KHÔNG gọi markConversationRead
       // để tránh loop: realtime fire → markRead → update → realtime fire lại
       const unsub = subscribeMessages(convId, (msgs) => {
-        if (mounted) setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
+        if (mounted) {
+          setConvMessages(msgs.filter(m => !m.deleted || m.senderId === currentUser.id));
+          // Hội thoại đang mở → đánh dấu tin mới đã xem ngay (idempotent, không loop)
+          markMessagesReadByUser(convId, currentUser.id);
+        }
       });
       return () => { mounted = false; unsub(); };
     } else {
@@ -762,13 +770,14 @@ export default function MessagesView({
 
                     {/* Avatar */}
                     <div className="relative shrink-0">
-                      <div
-                        className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm shadow-md"
-                        style={{ backgroundColor: conv.color || '#6366F1', color: '#FFFFFF' }}
-                      >
-                        {isGroup ? (conv.avatar || getAvatarFallback(conv.name)) : (otherEmp ? getAvatarFallback(otherEmp.name) : '??')}
-                      </div>
-                      {!isGroup && <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-[2px] border-slate-950"></span>}
+                      {isGroup ? (
+                        <UserAvatar name={conv.name} avatar={conv.avatar} size="lg" className="shadow-md" />
+                      ) : (
+                        <>
+                          <UserAvatar employee={otherEmp || null} size="lg" className="shadow-md" />
+                          <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-[2px] border-slate-950"></span>
+                        </>
+                      )}
                     </div>
 
                     {/* Info */}
@@ -1023,13 +1032,13 @@ export default function MessagesView({
                   {/* Welcome */}
                   {selectedConv && (
                     <div className="py-6 text-center shrink-0">
-                      <div className="w-12 h-12 rounded-full mx-auto flex items-center justify-center font-bold text-sm shadow-md mb-2 text-white"
-                        style={{ backgroundColor: selectedConv.color || '#6366F1' }}>
-                        {(selectedConv.type === 'group' || selectedConv.type === 'task') ? (selectedConv.avatar || getAvatarFallback(selectedConv.name)) : (() => {
-                          const e = getConvOtherMember(selectedConv);
-                          return e ? getAvatarFallback(e.name) : '??';
-                        })()}
-                      </div>
+                      {(() => {
+                        if (selectedConv.type === 'group' || selectedConv.type === 'task') {
+                          return <UserAvatar name={selectedConv.name} avatar={selectedConv.avatar} size="xl" className="mx-auto shadow-md mb-2" />;
+                        }
+                        const e = getConvOtherMember(selectedConv);
+                        return <UserAvatar employee={e || null} size="xl" className="mx-auto shadow-md mb-2" />;
+                      })()}
                       <h3 className="font-semibold text-white text-[14px]">
                         {(selectedConv.type === 'group' || selectedConv.type === 'task') ? selectedConv.name : (getConvOtherMember(selectedConv)?.name || 'Cuộc trò chuyện')}
                       </h3>
@@ -1079,9 +1088,7 @@ export default function MessagesView({
                               {/* Avatar */}
                               {!isSelf && isGroup && (
                                 <div className={`shrink-0 ${sameSender ? 'invisible' : ''}`}>
-                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[8px] ${getAvatarBgColor(msg.senderName ?? '')}`}>
-                                    {getAvatarFallback(msg.senderName ?? '')}
-                                  </div>
+                                  <UserAvatar employee={senderEmp || null} size="sm" noRing />
                                 </div>
                               )}
 
@@ -1132,9 +1139,47 @@ export default function MessagesView({
                                       ))}
                                     </div>
                                   )}
-                                  <div className={`flex items-center gap-1 mt-0.5 ${isSelf ? 'justify-end' : ''}`}>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    {/* Góc trái: ❤️ + avatar người đã thả tim (cùng dòng với thời gian) */}
+                                    {(() => {
+                                      const heartGrp = msg.reactions?.find(g => g.emoji === '❤️');
+                                      if (!heartGrp || heartGrp.users.length === 0) return null;
+                                      return (
+                                        <div className={`flex items-center gap-0.5 ${isSelf ? 'mr-auto' : 'mr-1.5'}`}
+                                          title={heartGrp.users.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}>
+                                          <span className="text-[11px] leading-none">❤️</span>
+                                          <div className="flex -space-x-1.5">
+                                            {heartGrp.users.slice(0, 4).map(uid => {
+                                              const emp = employees.find(e => e.id === uid);
+                                              return (
+                                                <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-slate-900/70" />
+                                              );
+                                            })}
+                                          </div>
+                                          {heartGrp.users.length > 4 && (
+                                            <span className="text-[8px] text-slate-400">+{heartGrp.users.length - 4}</span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+
                                     <span className={`text-[10px] ${isSelf ? 'text-indigo-300' : 'text-slate-500'}`}>{formatTime(msg.createdAt)}</span>
                                     {msg.edited && <span className="text-[9px] text-slate-500">(đã sửa)</span>}
+
+                                    {/* Người đã xem (chỉ tin tự gửi, chưa bị xóa) */}
+                                    {isSelf && !msg.deleted && msg.readBy && msg.readBy.length > 0 && (
+                                      <div className="flex items-center gap-0.5"
+                                        title={`Đã xem: ${msg.readBy.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}`}>
+                                        <div className="flex -space-x-1">
+                                          {msg.readBy.slice(0, 3).map(uid => {
+                                            const emp = employees.find(e => e.id === uid);
+                                            return <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-white/20" />;
+                                          })}
+                                        </div>
+                                        {msg.readBy.length > 3 && <span className="text-[8px] text-slate-400">+{msg.readBy.length - 3}</span>}
+                                      </div>
+                                    )}
+
                                     {isSelf && !msg.deleted && <CheckCheck className="w-3 h-3 text-indigo-300" />}
                                   </div>
                                 </div>
