@@ -23,6 +23,8 @@ const HRM_CONFIG_DEFAULTS = {
   morningIn: '07:30', morningOut: '11:30',
   afternoonIn: '13:00', afternoonOut: '17:00',
   allowedLateMinutes: 15,
+  allowedLateMorning: 15,
+  allowedLateAfternoon: 15,
   punchOutOpenBeforeMinutes: 15,
   punchOutCloseAfterMinutes: 15,
 };
@@ -44,6 +46,8 @@ export async function refreshHrmConfigCache(): Promise<void> {
         afternoonIn:      cloud.afternoonIn      ?? HRM_CONFIG_DEFAULTS.afternoonIn,
         afternoonOut:     cloud.afternoonOut     ?? HRM_CONFIG_DEFAULTS.afternoonOut,
         allowedLateMinutes:          cloud.allowedLateMinutes          ?? HRM_CONFIG_DEFAULTS.allowedLateMinutes,
+        allowedLateMorning:          cloud.allowedLateMorning          ?? HRM_CONFIG_DEFAULTS.allowedLateMorning,
+        allowedLateAfternoon:        cloud.allowedLateAfternoon        ?? HRM_CONFIG_DEFAULTS.allowedLateAfternoon,
         punchOutOpenBeforeMinutes:   cloud.punchOutOpenBeforeMinutes   ?? HRM_CONFIG_DEFAULTS.punchOutOpenBeforeMinutes,
         punchOutCloseAfterMinutes:   cloud.punchOutCloseAfterMinutes   ?? HRM_CONFIG_DEFAULTS.punchOutCloseAfterMinutes,
       };
@@ -66,6 +70,8 @@ export function getAttendanceStatusText(
     morningIn?: string; morningOut?: string;
     afternoonIn?: string; afternoonOut?: string;
     allowedLateMinutes?: number;
+    allowedLateMorning?: number;
+    allowedLateAfternoon?: number;
     punchOutOpenBeforeMinutes?: number;
     punchOutCloseAfterMinutes?: number;
   }
@@ -96,15 +102,24 @@ export function getAttendanceStatusText(
   const afternoonFaulty = hasInC && !hasOutC;
 
   const cfg = hrmConfig ?? readHrmConfigFromStorage();
-  const allowedLate     = cfg.allowedLateMinutes           ?? 15;
   const punchOutOpenMin = cfg.punchOutOpenBeforeMinutes    ?? 15;
 
-  const lateMinutesS = (hasInS && cfg.morningIn)
-    ? Math.max(0, minutesDiff(log.timeInS, cfg.morningIn) - allowedLate) : 0;
+  // Dung sai "Cho phép đi muộn" tách RIÊNG theo từng ca (migration 036):
+  //   - Ca Sáng  → allowedLateMorning  (lấy từ ô "⏱️ Cho phép đi muộn" của CA SÁNG)
+  //   - Ca Chiều → allowedLateAfternoon (lấy từ ô "⏱️ Cho phép đi muộn" của CA CHIỀU)
+  // `allowedLateMinutes` (global) chỉ còn là fallback khi chưa có giá trị per-shift.
+  const allowedLateMorning   = cfg.allowedLateMorning   ?? cfg.allowedLateMinutes ?? 5;
+  const allowedLateAfternoon = cfg.allowedLateAfternoon ?? cfg.allowedLateMinutes ?? 5;
+
+  // Dung sai làm NGƯỠNG: điểm danh trong khoảng dung sai → KHÔNG tính đi muộn (0).
+  // Vượt ngưỡng → hiển thị phút lệch THỰC TẾ, KHÔNG trừ dung sai (vd 76').
+  // Về sớm dùng dung sai `punchOutOpenBeforeMinutes` (chung cả 2 ca).
+  const rawLateS = (hasInS && cfg.morningIn) ? minutesDiff(log.timeInS, cfg.morningIn) : 0;
+  const rawLateC = (hasInC && cfg.afternoonIn) ? minutesDiff(log.timeInC, cfg.afternoonIn) : 0;
+  const lateMinutesS = rawLateS > allowedLateMorning ? Math.max(0, rawLateS) : 0;
   const earlyMinutesS = (hasOutS && cfg.morningOut)
     ? Math.max(0, minutesDiff(cfg.morningOut, log.timeOutS) - punchOutOpenMin) : 0;
-  const lateMinutesC = (hasInC && cfg.afternoonIn)
-    ? Math.max(0, minutesDiff(log.timeInC, cfg.afternoonIn) - allowedLate) : 0;
+  const lateMinutesC = rawLateC > allowedLateAfternoon ? Math.max(0, rawLateC) : 0;
   const earlyMinutesC = (hasOutC && cfg.afternoonOut)
     ? Math.max(0, minutesDiff(cfg.afternoonOut, log.timeOutC) - punchOutOpenMin) : 0;
 

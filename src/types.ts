@@ -9,6 +9,8 @@
   autoAttendanceStartDate: string | Date;
   allowedLateMinutes: number;
   allowedLateCount: number;
+  allowedLateMorning?: number;    // Dung sai đi muộn ca Sáng (phút)
+  allowedLateAfternoon?: number;  // Dung sai đi muộn ca Chiều (phút)
   otMultiplier: number;
   gpsRadiusAllowed: number;
   weekendDays: number[];

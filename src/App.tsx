@@ -1347,6 +1347,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return () => window.removeEventListener('hl-open-approval', handleOpenApproval);
   }, [setActiveTab]);
 
+  // Deep link từ tin nhắn thông báo công việc (task/mission) → mở tab Công việc
+  // và bung modal chi tiết của công việc được giao (hl-open-task do MessagesView dispatch).
+  useEffect(() => {
+    const handleOpenTask = (e: Event) => {
+      const taskId = (e as CustomEvent).detail?.taskId;
+      if (!taskId) return;
+      setDeepLinkTaskId(taskId);
+      setActiveTab('tasks');
+    };
+    window.addEventListener('hl-open-task', handleOpenTask);
+    return () => window.removeEventListener('hl-open-task', handleOpenTask);
+  }, [setActiveTab]);
+
   // Sync subcontractor advances from Supabase when updated elsewhere
   useEffect(() => {
     const handleAdvancesUpdated = async () => {
@@ -3952,7 +3965,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                         closeAfter: hrmConfig.punchCloseAfterMinutes,
                         outOpenBefore: hrmConfig.punchOutOpenBeforeMinutes,
                         outCloseAfter: hrmConfig.punchOutCloseAfterMinutes,
-                        allowLate: hrmConfig.allowedLateMinutes,
+                        allowLate: hrmConfig.allowedLateMorning,
                         showLate: true,
                       },
                       {
@@ -3965,7 +3978,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                         closeAfter: hrmConfig.punchCloseAfterMinutes,
                         outOpenBefore: hrmConfig.punchOutOpenBeforeMinutes,
                         outCloseAfter: hrmConfig.punchOutCloseAfterMinutes,
-                        allowLate: hrmConfig.allowedLateMinutes,
+                        allowLate: hrmConfig.allowedLateAfternoon,
                         showLate: true,
                       },
                       {
@@ -3984,6 +3997,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                     ].map((shift) => {
                       const inWin = getSlotWindow(shift.inTime || '00:00', Number(shift.openBefore ?? 0), Number(shift.closeAfter ?? 0));
                       const outWin = getSlotWindow(shift.outTime || '00:00', Number(shift.outOpenBefore ?? 0), Number(shift.outCloseAfter ?? 0));
+                      // Trường dung sai "Cho phép đi muộn" tách riêng theo ca (migration 036)
+                      const lateField: 'allowedLateMorning' | 'allowedLateAfternoon' =
+                        shift.key === 'morning' ? 'allowedLateMorning' : 'allowedLateAfternoon';
 
                       return (
                         <div key={shift.key} className={`bg-slate-900/40 p-4 rounded-xl border ${shift.accent} space-y-4`}>
@@ -4038,15 +4054,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                   onChange={(e) => {
                                     const rawVal = e.target.value;
                                     const val = rawVal === '' ? 15 : Math.max(0, parseInt(rawVal, 10));
-                                    const updated = { ...hrmConfig, allowedLateMinutes: val };
+                                    const updated = { ...hrmConfig, [lateField]: val };
                                     setHrmConfig(updated);
                                     dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                     window.dispatchEvent(new Event('storage'));
                                     window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                                   }}
                                   onBlur={() => {
-                                    if (hrmConfig.allowedLateMinutes === undefined || hrmConfig.allowedLateMinutes === null) {
-                                      const updated = { ...hrmConfig, allowedLateMinutes: 15 };
+                                    if ((hrmConfig as any)[lateField] === undefined || (hrmConfig as any)[lateField] === null) {
+                                      const updated = { ...hrmConfig, [lateField]: 15 };
                                       setHrmConfig(updated);
                                       dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                       window.dispatchEvent(new Event('storage'));
@@ -4233,6 +4249,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             otPunchOutOpenBeforeMinutes: 15, otPunchOutCloseAfterMinutes: 15,
                             allowedLateMinutes: 15,
                             allowedLateCount: 3,
+                            allowedLateMorning: 15,
+                            allowedLateAfternoon: 15,
                           };
                           setHrmConfig(updated);
                           dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
@@ -4513,6 +4531,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             <MessagesView
               currentUser={currentUser!}
               employees={employees}
+              tasks={tasks}
               onNavigateTab={(tab) => setActiveTab(tab)}
               initialConversationId={initialConvId ?? undefined}
               showBadgeCounts={showBadgeCounts}

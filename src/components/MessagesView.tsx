@@ -7,6 +7,7 @@ import {
   markConversationRead, getUserConversations, deleteMessageFromConversation,
   updateMessage, searchMessagesInConversation, getConversationUnreadCount,
   addMemberToConversation, toggleMessageReaction, markMessagesReadByUser,
+  isUserInConversation,
   loadConversationsFromCloud, loadMessagesFromCloud,
   subscribeConversations, subscribeMessages,
 } from '../lib/chatStore';
@@ -301,6 +302,64 @@ export default function MessagesView({
       setConvMessages(applyWindow(getMessages(selectedConv.id)));
       setConversations(getConversations());
       addToast({ title: '🗑️ Đã xóa', message: 'Tin nhắn đã được xóa', type: 'info' });
+    }
+  };
+
+  // ─── Deep-link từ tin nhắn thông báo công việc ─────────────────────────
+  // Mở nhóm chat dự án (conv_project_<projectId>) liên kết với công việc/nhiệm vụ
+  // trong tin nhắn. CHẶN THEO PHÂN QUYỀN: chỉ mở nếu user hiện tại LÀ THÀNH VIÊN
+  // của nhóm (membership là ACL của hệ chat — getUserConversations lọc theo đó).
+  // Nếu không phải thành viên → toast chặn, không mở.
+  const openProjectChat = async (projectId?: string) => {
+    if (!projectId) return;
+    // Refresh conversations từ cloud để chắc chắn membership mới nhất
+    // (người được giao vừa được thêm vào nhóm ở luồng giao việc) — tránh lag realtime.
+    try {
+      await loadConversationsFromCloud(currentUser.id);
+      setConversations(getConversations());
+    } catch { /* offline — fall về cache */ }
+    const convId = `conv_project_${projectId}`;
+    if (!isUserInConversation(getConversations(), currentUser.id, convId)) {
+      addToast({ title: '🔒 Không có quyền', message: 'Bạn chưa được thêm vào nhóm chat dự án này.', type: 'warning' });
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
+  };
+
+  // Giải projectId từ thực thể liên quan (task / mission / project) rồi mở nhóm dự án
+  const openProjectChatForEntity = (re: ChatMessage['relatedEntity']) => {
+    if (!re) return;
+    let projectId: string | undefined;
+    if (re.type === 'project') {
+      projectId = re.id;
+    } else if (re.type === 'task') {
+      projectId = tasks.find(t => t.id === re.id)?.projectId;
+    } else if (re.type === 'mission') {
+      const task = tasks.find(t => t.missions?.some(m => m.id === re.id));
+      projectId = task?.projectId;
+    }
+    if (!projectId) {
+      addToast({ title: 'ℹ️ Không có nhóm dự án', message: 'Thực thể này không thuộc dự án nào nên không có nhóm chat dự án.', type: 'info' });
+      return;
+    }
+    openProjectChat(projectId);
+  };
+
+  // Mở chi tiết thực thể liên quan theo loại (deep-link cũ, bổ sung nhóm dự án)
+  const openRelatedEntity = (msg: ChatMessage) => {
+    const re = msg.relatedEntity;
+    if (!re) return;
+    if (re.type === 'task') {
+      window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: re.id } }));
+    } else if (re.type === 'project') {
+      openProjectChat(re.id);
+    } else if (re.type === 'leave' || re.type === 'payment' || re.type === 'advance') {
+      // Xét duyệt → mở bảng "Công việc phải duyệt" trong tab Công việc
+      window.dispatchEvent(new CustomEvent('hl-open-approval', { detail: { kind: re.type, id: re.id } }));
+    } else if (re.type === 'mission') {
+      // Mở task chứa nhiệm vụ (tra qua props tasks)
+      const task = tasks.find(t => t.missions?.some(m => m.id === re.id));
+      if (task) window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: task.id } }));
     }
   };
 
@@ -1278,31 +1337,24 @@ export default function MessagesView({
                                       ↩ Trả lời
                                     </button>
                                     {msg.relatedEntity && (
-                                      <button
-                                        onClick={() => {
-                                          if (msg.relatedEntity?.type === 'task') {
-                                            window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: msg.relatedEntity.id } }));
-                                          } else if (msg.relatedEntity?.type === 'project') {
-                                            window.dispatchEvent(new CustomEvent('hl-open-project', { detail: { projectId: msg.relatedEntity.id } }));
-                                          } else if (msg.relatedEntity?.type === 'leave' || msg.relatedEntity?.type === 'payment' || msg.relatedEntity?.type === 'advance') {
-                                            // Xét duyệt → mở bảng "Công việc phải duyệt" trong tab Công việc
-                                            window.dispatchEvent(new CustomEvent('hl-open-approval', { detail: { kind: msg.relatedEntity.type, id: msg.relatedEntity.id } }));
-                                          } else if (msg.relatedEntity?.type === 'mission') {
-                                            // For mission, we need to open the task first, then the mission detail
-                                            // We can't directly open mission from here without knowing the parent task
-                                            // So we'll open the task and let the user navigate
-                                            const tasks = (window as any).__APP_TASKS__ || [];
-                                            const task = tasks.find((t: any) => t.missions?.some((m: any) => m.id === msg.relatedEntity?.id));
-                                            if (task) {
-                                              window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: task.id } }));
-                                            }
-                                          }
-                                        }}
-                                        className="text-indigo-400 hover:text-indigo-300 text-[10px] cursor-pointer font-medium"
-                                        title="Xem chi tiết"
-                                      >
-                                        👁 Xem chi tiết
-                                      </button>
+                                      <>
+                                        <button
+                                          onClick={() => openRelatedEntity(msg)}
+                                          className="text-indigo-400 hover:text-indigo-300 text-[10px] cursor-pointer font-medium"
+                                          title="Xem chi tiết"
+                                        >
+                                          👁 Xem chi tiết
+                                        </button>
+                                        {(msg.relatedEntity?.type === 'task' || msg.relatedEntity?.type === 'mission' || msg.relatedEntity?.type === 'project') && (
+                                          <button
+                                            onClick={() => openProjectChatForEntity(msg.relatedEntity)}
+                                            className="text-emerald-400 hover:text-emerald-300 text-[10px] cursor-pointer font-medium"
+                                            title="Mở nhóm chat dự án của công việc này"
+                                          >
+                                            💬 Nhóm dự án
+                                          </button>
+                                        )}
+                                      </>
                                     )}
                                     {isSelf && (
                                       <button

@@ -29,7 +29,7 @@ import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import UserAvatar from './UserAvatar';
-import { sendGroupChatMessage, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
+import { sendGroupChatMessage, sendApprovalDirectMessage, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
 import MissionConfigEditor from './MissionConfigEditor';
@@ -133,6 +133,58 @@ export default function ProjectKanbanBoard({
       console.error('Save failed, not sending chat message:', err);
       throw err;
     }
+  };
+
+  // ─── THÔNG BÁO CÔNG VIỆC TỰ ĐỘNG (automation Kanban) ────────────────────
+  // Automation không có "người giao chủ động" — người giao là PM dự án (assignerId).
+  // Khi rule sinh công việc con, gửi tin cá nhân cho người được giao (assigneeId)
+  // + thêm assigner & assignee vào nhóm chat dự án (membership = phân quyền mở nhóm).
+  const notifyAutoAssignedTask = (autoTask: Task, proj: { id: string; name: string; pmId?: string }) => {
+    const assigneeEmp = employees.find(e => e.id === autoTask.assigneeId);
+    // Người giao hệ thống = PM dự án (hoặc fallback). Tin gửi từ PM để người nhận biết ai giao.
+    const assignerId = autoTask.assignerId || proj.pmId || 'emp_3';
+    const assignerEmp = employees.find(e => e.id === assignerId);
+    if (assignerEmp && assigneeEmp && assignerEmp.id !== assigneeEmp.id) {
+      sendApprovalDirectMessage({
+        senderId: assignerEmp.id,
+        senderName: assignerEmp.name,
+        senderRole: assignerEmp.role,
+        recipientId: assigneeEmp.id,
+        recipientName: assigneeEmp.name,
+        content: `📌 Hệ thống (quy trình Kanban) đã GIAO cho bạn công việc "${autoTask.name}"${autoTask.deadline ? ` (Hạn: ${autoTask.deadline})` : ''}.`,
+        relatedEntity: { type: 'task', id: autoTask.id },
+      });
+    }
+    // 🧩 Nhắn thêm cho NGƯỜI PHỤ TRÁCH CHÍNH của từng nhiệm vụ con trong công việc.
+    // Bỏ qua nếu trùng với task assignee (người đó đã nhận tin giao công việc chứa mission)
+    // hoặc trùng với PM (người giao) — tránh spam trùng tin.
+    (autoTask.missions || []).forEach(mission => {
+      const mAssigneeId = mission.mainAssigneeId;
+      if (!mAssigneeId || mAssigneeId === assignerId || mAssigneeId === autoTask.assigneeId) return;
+      const mAssigneeEmp = employees.find(e => e.id === mAssigneeId);
+      if (!mAssigneeEmp) return;
+      sendApprovalDirectMessage({
+        senderId: assignerId,
+        senderName: assignerEmp?.name || 'Hệ thống',
+        senderRole: assignerEmp?.role,
+        recipientId: mAssigneeId,
+        recipientName: mAssigneeEmp.name,
+        content: `🧩 Hệ thống (quy trình Kanban) đã giao cho bạn Nhiệm Vụ "${mission.name}" trong công việc "${autoTask.name}"${mission.deadline ? ` (Hạn: ${mission.deadline})` : ''}.`,
+        relatedEntity: { type: 'task', id: autoTask.id },
+      });
+    });
+    // Thêm assigner, task assignee & mọi người phụ trách mission vào nhóm chat dự án
+    ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: proj.pmId })
+      .then(conv => {
+        if (!conv) return;
+        const members = Array.from(new Set([
+          assignerId,
+          autoTask.assigneeId,
+          ...(autoTask.missions || []).map(m => m.mainAssigneeId),
+        ].filter(Boolean) as string[]));
+        members.forEach(mid => addMemberToConversation(conv.id, mid));
+      })
+      .catch(() => {});
   };
 
   // ─── ĐỒNG BỘ NHÂN SỰ DỰ ÁN VÀO NHÓM CHAT ─────────────────────────────────
@@ -1135,6 +1187,8 @@ export default function ProjectKanbanBoard({
                 subcontractorSettlerId: subtaskAuto.subcontractorSettlerId
               };
               onAddTask(autoTask);
+              // 📩 Thông báo công việc được giao tự động (quy trình Kanban) → tin cá nhân người được giao
+              notifyAutoAssignedTask(autoTask, proj);
 
               // Thiết kế Hồ sơ
               if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
@@ -1768,6 +1822,34 @@ export default function ProjectKanbanBoard({
       await onAddTask(childTask);
       // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage) - CHỈ SAU KHI SAVE THÀNH CÔNG
       notifyProjectChat(`📝 ${currentUser?.name || 'Người dùng'} đã khởi tạo Công Việc Con "${childTask.name}" cho dự án "${selectedProject?.name || ''}".`, { type: 'task', id: childTask.id });
+
+      // 📩 Thông báo GIAO VIỆC CON → HỘI THOẠI CÁ NHÂN người được giao (người thi hành chính).
+      // Người nhận việc có thể CHƯA có trong nhóm chat dự án → nhắn riêng 1-1 để họ
+      // thấy tin + badge đỏ ngay, không phụ thuộc đã được đồng bộ vào nhóm hay chưa.
+      const assigneeEmp = employees.find(e => e.id === subTaskAssigneeId);
+      if (currentUser?.id && subTaskAssigneeId && currentUser.id !== subTaskAssigneeId && assigneeEmp) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: subTaskAssigneeId,
+          recipientName: assigneeEmp.name,
+          content: `📌 ${currentUser.name} đã GIAO cho bạn công việc con "${subTaskName}" thuộc dự án "${selectedProject?.name || ''}"${subTaskDeadline ? ` (Hạn: ${subTaskDeadline})` : ''}.`,
+          relatedEntity: { type: 'task', id: childTask.id },
+        });
+      }
+      // 👥 Thêm người giao (assigner), người được giao (assignee) và người đang tạo vào
+      // nhóm chat dự án để họ mở được nhóm qua deep-link "💬 Nhóm dự án" trên tin nhắn
+      // giao việc (membership = phân quyền của hệ chat).
+      if (selectedProject) {
+        ensureProjectChatGroup({ id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId })
+          .then(conv => {
+            if (!conv) return;
+            const members = Array.from(new Set([subTaskAssignerId, subTaskAssigneeId, currentUser?.id].filter(Boolean) as string[]));
+            members.forEach(mid => addMemberToConversation(conv.id, mid));
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       addToast({ title: '❌ Lưu thất bại', message: 'Không thể tạo công việc con. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
       return;
@@ -2122,6 +2204,8 @@ export default function ProjectKanbanBoard({
                       isSubcontractorEnabled: subtaskAuto.isSubcontractorEnabled === true
                     };
                     onAddTask(autoTask);
+                    // 📩 Thông báo công việc được giao tự động (quy trình Kanban) → tin cá nhân người được giao
+                    notifyAutoAssignedTask(autoTask, customProject);
 
                     // Thiết kế Hồ sơ
                     if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {

@@ -8,7 +8,7 @@ import {
 import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
-import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { useNotification, isUserInRoleGroup } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 
@@ -561,6 +561,37 @@ export default function TaskManagement({
     };
 
     onAddTask(newlyCreatedTask);
+
+    // 📩 Thông báo GIAO VIỆC → HỘI THOẠI CÁ NHÂN người được giao.
+    // Người nhận việc có thể CHƯA có trong nhóm chat dự án, nên phải nhắn riêng
+    // 1-1 (sendApprovalDirectMessage) để họ thấy tin + badge đỏ ngay trong hộp thư.
+    const assigneeEmp = employees.find(e => e.id === newTaskAssignee);
+    if (currentUser.id && newTaskAssignee && currentUser.id !== newTaskAssignee && assigneeEmp) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: newTaskAssignee,
+        recipientName: assigneeEmp.name,
+        content: `📌 ${currentUser.name} đã GIAO cho bạn công việc "${newTaskName}"${newTaskDeadline ? ` (Hạn: ${newTaskDeadline})` : ''}.`,
+        relatedEntity: { type: 'task', id: newlyCreatedTask.id },
+      });
+    }
+    // 👥 Đồng thời thêm người giao (assigner) VÀ người được giao (assignee) vào nhóm
+    // chat dự án (nếu có dự án liên kết) để cả hai mở được nhóm qua deep-link "💬 Nhóm
+    // dự án" trên tin nhắn giao việc — không phụ thuộc bấm "Đồng bộ nhân sự".
+    if (newTaskProj) {
+      const proj = projects.find(p => p.id === newTaskProj);
+      if (proj) {
+        ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: proj.pmId })
+          .then(conv => {
+            if (!conv) return;
+            const members = Array.from(new Set([currentUser.id, newTaskAssignee].filter(Boolean) as string[]));
+            members.forEach(mid => addMemberToConversation(conv.id, mid));
+          })
+          .catch(() => {});
+      }
+    }
 
     // Reset form states
     setNewTaskName('');

@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage } from '../types';
+import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage, ChatAttachment } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
@@ -22,7 +22,7 @@ interface TravelAllowanceNorm {
 }
 import { useNotification, isUserInRoleGroup } from '../context';
 import { dbService } from '../lib/dbService';
-import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import UserAvatar from './UserAvatar';
 
 // Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
@@ -141,7 +141,7 @@ export default function TaskDetailModal({
   // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
   // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
   // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
-  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity']) => {
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[]) => {
     if (!selectedTask.projectId) return;
     sendGroupChatMessage({
       conversationId: `conv_project_${selectedTask.projectId}`,
@@ -150,6 +150,7 @@ export default function TaskDetailModal({
       senderRole: currentUser.role,
       content,
       relatedEntity,
+      attachments,
     });
   };
 
@@ -572,6 +573,12 @@ export default function TaskDetailModal({
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [newMissionDeadline, setNewMissionDeadline] = useState(() => getDefaultMissionDeadline());
 
+  // Trạng thái chỉnh sửa Nhiệm vụ (tên + hạn hoàn thành) — chỉ áp dụng cho nhiệm vụ CHƯA hoàn thành.
+  const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+  const [editMissionName, setEditMissionName] = useState('');
+  const [editMissionDeadline, setEditMissionDeadline] = useState('');
+  const [editingMissionError, setEditingMissionError] = useState('');
+
   // Phân trang danh sách nhiệm vụ đã khởi tạo: 5 / 10 / 20 / 50 / tất cả dòng
   // 'all' = hiển thị toàn bộ. Danh sách sắp xếp mới nhất → cũ nhất.
   const [missionPageSize, setMissionPageSize] = useState<number | 'all'>(5);
@@ -646,18 +653,29 @@ export default function TaskDetailModal({
   };
 
   const handleMissionReportImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file)
-      .then(({ url, stored }) => {
-        setMissionReportImages(prev => [...prev, url]);
-        if (stored === 'supabase') {
-          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo cáo đã được gửi lên Supabase.', type: 'success' });
-        } else {
-          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
-        }
-      })
-      .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể xử lý ảnh báo cáo.', type: 'error' }));
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    let done = 0;
+    let successCount = 0;
+    let warningShown = false;
+    // Tải nhiều ảnh song song; dồn kết quả vào missionReportImages theo thứ tự chọn.
+    files.forEach((file, idx) => {
+      dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file)
+        .then(({ url, stored }) => {
+          setMissionReportImages(prev => [...prev, url]);
+          if (stored === 'supabase') successCount++;
+          else if (!warningShown) { warningShown = true; addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Ảnh lưu tạm dưới dạng base64.', type: 'warning' }); }
+        })
+        .catch(() => addToast({ title: '⛔ Lỗi', message: `Không thể xử lý ảnh "${file.name}".`, type: 'error' }))
+        .finally(() => {
+          done++;
+          if (done === files.length) {
+            if (successCount === files.length) {
+              addToast({ title: '✅ Đã tải ảnh lên', message: `${files.length} hình ảnh báo cáo đã được gửi lên Supabase.`, type: 'success' });
+            }
+          }
+        });
+    });
     e.target.value = '';
   };
 
@@ -668,6 +686,77 @@ export default function TaskDetailModal({
   const resetMissionReportState = () => {
     setMissionReportImages([]);
     stopMissionReportCamera();
+  };
+
+  // ─── SỬA NHIỆM VỤ (tên + hạn hoàn thành) — nhiệm vụ chưa Hoàn thành ───────
+  // Khởi động chế độ sửa: nạp giá trị hiện tại vào form, báo lỗi nếu Công việc cha
+  // đã Hoàn thành (khi đó toàn bộ thao tác sửa nhiệm vụ bị khóa).
+  const startEditMission = (mission: SubTaskMission) => {
+    if (selectedTask.status === 'completed') {
+      addToast({ title: '⛔ Công việc đã hoàn thành', message: 'Không thể chỉnh sửa nhiệm vụ của công việc đã Hoàn thành.', type: 'error' });
+      return;
+    }
+    setEditingMissionId(mission.id);
+    setEditMissionName(mission.name);
+    setEditMissionDeadline(mission.deadline ? toDateTimeLocalInput(new Date(mission.deadline)) : '');
+    setEditingMissionError('');
+  };
+
+  const cancelEditMission = () => {
+    setEditingMissionId(null);
+    setEditMissionName('');
+    setEditMissionDeadline('');
+    setEditingMissionError('');
+  };
+
+  // Lưu chỉnh sửa: kiểm tra TÊN không rỗng + HẠN không vượt quá Hạn bàn giao công
+  // việc cha (giống quy tắc khi khởi tạo), rồi cập nhật missions.
+  const saveEditMission = async (mission: SubTaskMission) => {
+    const name = editMissionName.trim();
+    if (!name) {
+      setEditingMissionError('⚠️ Tên nhiệm vụ không được để trống.');
+      return;
+    }
+
+    // Hạn mới: rỗng = thừa hưởng hạn của công việc cha (giống quy tắc khởi tạo).
+    let finalDeadline = mission.deadline;
+    if (editMissionDeadline) {
+      finalDeadline = new Date(editMissionDeadline).toISOString();
+    } else if (selectedTask.deadline) {
+      finalDeadline = selectedTask.deadline;
+    }
+
+    if (selectedTask.deadline && finalDeadline) {
+      const newDeadlineDate = new Date(finalDeadline);
+      // Chỉ so sánh DATE (bỏ qua giờ): task deadline được coi là 23:59:59 của ngày đó.
+      const taskEndOfDay = new Date(selectedTask.deadline);
+      taskEndOfDay.setHours(23, 59, 59, 999);
+      // Chỉ chặn khi công việc cha CHƯA quá hạn — không ngăn người dùng hoàn tất
+      // nhiệm vụ trễ sau hạn bàn giao.
+      if (newDeadlineDate.getTime() > taskEndOfDay.getTime() && !isDeadlineDayOver(selectedTask.deadline)) {
+        setEditingMissionError(`⚠️ Hạn hoàn thành mới (${formatDateTime(finalDeadline)}) không được lớn hơn Hạn bàn giao của công việc cha (${formatDateTime(selectedTask.deadline)})!`);
+        return;
+      }
+    }
+
+    const updatedMissions = (selectedTask.missions || []).map(m => {
+      if (m.id === mission.id) {
+        return { ...m, name, deadline: finalDeadline };
+      }
+      return m;
+    });
+
+    const ok = await notifyProjectChatAfterSave(
+      onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+      `✏️ ${currentUser.name} đã cập nhật Nhiệm Vụ "${mission.name}" → "${name}"${mission.deadline !== finalDeadline ? ` (Hạn mới: ${formatDateTime(finalDeadline)})` : ''}.`,
+      { type: 'mission', id: mission.id }
+    );
+
+    if (ok === false) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu chỉnh sửa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+      return;
+    }
+    cancelEditMission();
   };
 
   // States inside detail modal of a mission for Travel Allowance recording
@@ -2093,6 +2182,32 @@ export default function TaskDetailModal({
                         return;
                       }
 
+                      // 📩 Thông báo Nhiệm Vụ MỚI → HỘI THOẠI CÁ NHÂN người phụ trách công việc cha.
+                      // Người phụ trách có thể CHƯA có trong nhóm chat dự án → nhắn riêng 1-1
+                      // (sendApprovalDirectMessage) để họ thấy tin + badge đỏ ngay trong hộp thư.
+                      const parentAssigneeEmp = employees.find(e => e.id === selectedTask.assigneeId);
+                      if (currentUser.id && selectedTask.assigneeId && currentUser.id !== selectedTask.assigneeId && parentAssigneeEmp) {
+                        // 👥 Thêm người phụ trách công việc cha vào nhóm chat dự án (nếu có) để
+                        // họ mở được deep-link "💬 Nhóm dự án" trên tin nhắn nhiệm vụ vừa gửi.
+                        if (selectedTask.projectId) {
+                          const proj = projects.find(p => p.id === selectedTask.projectId);
+                          if (proj) {
+                            ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: proj.pmId })
+                              .then(conv => { if (conv) addMemberToConversation(conv.id, selectedTask.assigneeId); })
+                              .catch(() => {});
+                          }
+                        }
+                        sendApprovalDirectMessage({
+                          senderId: currentUser.id,
+                          senderName: currentUser.name,
+                          senderRole: currentUser.role,
+                          recipientId: selectedTask.assigneeId,
+                          recipientName: parentAssigneeEmp.name,
+                          content: `🧩 ${currentUser.name} đã thêm Nhiệm Vụ "${newMission.name}" vào công việc "${selectedTask.name}" của bạn.`,
+                          relatedEntity: { type: 'task', id: selectedTask.id },
+                        });
+                      }
+
                       // Reset inputs. selectedTask.missions chưa gồm nhiệm vụ vừa tạo
                       // (cập nhật bất đồng bộ qua parent), nên tính hạn mặc định kế tiếp
                       // trực tiếp = ngày của nhiệm vụ vừa tạo + 1 ngày, giờ 18:00.
@@ -2206,6 +2321,7 @@ export default function TaskDetailModal({
                         <div 
                           key={mission.id}
                           onClick={() => {
+                            cancelEditMission();
                             setSelectedMissionId(mission.id);
                             setMissionReportText(mission.workReports || '');
                             setMissionEvidenceText(mission.evidence || '');
@@ -2257,44 +2373,108 @@ export default function TaskDetailModal({
 
                           {/* Info area */}
                           <div className="space-y-1 flex-1 min-w-0 pr-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${
-                                isCompleted ? 'bg-emerald-500 animate-pulse' : mission.status === 'doing' ? 'bg-sky-500' : 'bg-amber-500'
-                              }`} />
-                              <h5 className={`text-[11.5px] font-bold truncate text-left ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
-                                {mission.name}
-                              </h5>
-                            </div>
-                            
-                            <div className="flex flex-col gap-y-1">
-                              <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 font-mono">
-                                <Clock className="w-3 h-3 text-slate-550 shrink-0" />
-                                <span>Ngày tạo: <b className="text-slate-300 font-semibold">{creationTime}</b></span>
-                              </div>
-                              
-                              {(() => {
-                                const mDeadline = mission.deadline || selectedTask.deadline;
-                                if (!mDeadline) return null;
-                                const isOverdue = isDeadlineDayOver(mDeadline);
-                                return (
-                                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-400 font-mono">
-                                    <div className="flex items-center gap-1">
-                                      <Calendar className="w-3 h-3 text-rose-500 shrink-0" />
-                                      <span>Hạn hoàn thành: <b className="text-rose-400 font-semibold">{formatDateTime(mDeadline)}</b></span>
-                                    </div>
-                                    {!isCompleted && (
-                                      <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black border uppercase select-none ${
-                                        isOverdue
-                                          ? 'bg-rose-950/40 text-rose-400 border-rose-900/40 animate-pulse'
-                                          : 'bg-emerald-955/35 text-emerald-400 border-emerald-900/30'
-                                      }`}>
-                                        {getRemainingDaysText(mDeadline)}
-                                      </span>
+                            {editingMissionId === mission.id ? (
+                              // ─── FORM CHỈNH SỬA NHIỆM VỤ (tên + hạn hoàn thành) ───
+                              <div className="space-y-2 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] text-slate-400 font-bold uppercase block tracking-wider">Tên nhiệm vụ:</label>
+                                  <input
+                                    type="text"
+                                    value={editMissionName}
+                                    onChange={(e) => setEditMissionName(e.target.value)}
+                                    placeholder="Tên nhiệm vụ"
+                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none placeholder:text-slate-650"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] text-slate-400 font-bold uppercase block tracking-wider flex justify-between">
+                                    <span>Hạn hoàn thành:</span>
+                                    {selectedTask.deadline && (
+                                      <span className="text-zinc-500 font-sans normal-case">(Hạn bàn giao: {formatDateTime(selectedTask.deadline)})</span>
                                     )}
+                                  </label>
+                                  <input
+                                    type="datetime-local"
+                                    value={editMissionDeadline}
+                                    onChange={(e) => setEditMissionDeadline(e.target.value)}
+                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none cursor-pointer"
+                                  />
+                                </div>
+                                {editingMissionError && (
+                                  <div className="text-[9.5px] text-rose-400 font-bold bg-rose-950/30 border border-rose-900/40 rounded-lg px-2.5 py-1.5 leading-relaxed animate-fade-in">
+                                    {editingMissionError}
                                   </div>
-                                );
-                              })()}
-                            </div>
+                                )}
+                                <div className="flex items-center gap-1.5 pt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveEditMission(mission)}
+                                    className="flex-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9.5px] font-extrabold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1"
+                                  >
+                                    <Check className="w-3 h-3 stroke-[3]" /> Lưu
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={cancelEditMission}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 text-slate-300 text-[9.5px] font-bold transition cursor-pointer"
+                                  >
+                                    Hủy
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                    isCompleted ? 'bg-emerald-500 animate-pulse' : mission.status === 'doing' ? 'bg-sky-500' : 'bg-amber-500'
+                                  }`} />
+                                  <h5 className={`text-[11.5px] font-bold truncate text-left flex-1 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
+                                    {mission.name}
+                                  </h5>
+                                  {/* ✏️ Nút Sửa — chỉ hiện cho nhiệm vụ CHƯA hoàn thành của công việc chưa hoàn thành */}
+                                  {!isCompleted && selectedTask.status !== 'completed' && hasMissionPermission && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); startEditMission(mission); }}
+                                      className="p-1 rounded-md text-slate-450 hover:text-amber-400 hover:bg-amber-500/10 transition cursor-pointer shrink-0"
+                                      title="Sửa tên / hạn hoàn thành"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-col gap-y-1">
+                                  <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 font-mono">
+                                    <Clock className="w-3 h-3 text-slate-550 shrink-0" />
+                                    <span>Ngày tạo: <b className="text-slate-300 font-semibold">{creationTime}</b></span>
+                                  </div>
+
+                                  {(() => {
+                                    const mDeadline = mission.deadline || selectedTask.deadline;
+                                    if (!mDeadline) return null;
+                                    const isOverdue = isDeadlineDayOver(mDeadline);
+                                    return (
+                                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-400 font-mono">
+                                        <div className="flex items-center gap-1">
+                                          <Calendar className="w-3 h-3 text-rose-500 shrink-0" />
+                                          <span>Hạn hoàn thành: <b className="text-rose-400 font-semibold">{formatDateTime(mDeadline)}</b></span>
+                                        </div>
+                                        {!isCompleted && (
+                                          <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black border uppercase select-none ${
+                                            isOverdue
+                                              ? 'bg-rose-950/40 text-rose-400 border-rose-900/40 animate-pulse'
+                                              : 'bg-emerald-955/35 text-emerald-400 border-emerald-900/30'
+                                          }`}>
+                                            {getRemainingDaysText(mDeadline)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </>
+                            )}
                           </div>
 
                           {/* Quick Tagging and Members at the end */}
@@ -4201,7 +4381,7 @@ export default function TaskDetailModal({
                             ref={missionReportImageInputRef}
                             type="file"
                             accept="image/*"
-                            capture="environment"
+                            multiple
                             onChange={handleMissionReportImageUpload}
                             className="hidden"
                           />
@@ -4403,8 +4583,26 @@ export default function TaskDetailModal({
                         delete nxt[selectedMissionId || ''];
                         return nxt;
                       });
-                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                      notifyProjectChat(`✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`);
+                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage).
+                      // Kèm BÁO CÁO CÔNG VIỆC + HÌNH ẢNH báo cáo để cả nhóm xem được tiến độ.
+                      const _reportText = missionReportText.trim();
+                      const _reportImgs = [...missionReportImages];
+                      const _missionReportMsg = `✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`
+                        + (_reportText ? `\n\n📋 Báo cáo: ${_reportText}` : '')
+                        + (_reportImgs.length > 0 ? `\n📷 ${_reportImgs.length} hình ảnh báo cáo.` : '');
+                      notifyProjectChat(
+                        _missionReportMsg,
+                        { type: 'mission', id: mission?.id || selectedMissionId || '' },
+                        _reportImgs.length > 0
+                          ? _reportImgs.map((url, i) => ({
+                              id: `att_${Date.now()}_${i}`,
+                              type: 'image' as const,
+                              name: `Bao-cao-${(mission?.name || 'nhiem-vu').slice(0, 20)}-${i + 1}.jpg`,
+                              url,
+                              mimeType: 'image/jpeg',
+                            }))
+                          : undefined
+                      );
 
                       // Clear states
                       setSelectedMissionId(null);

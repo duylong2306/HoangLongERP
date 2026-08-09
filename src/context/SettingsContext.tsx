@@ -46,6 +46,8 @@ export interface HrmConfig {
   otPunchOutOpenBeforeMinutes: number;
   otPunchOutCloseAfterMinutes: number;
   allowedLateMinutes: number;
+  allowedLateMorning?: number;    // Dung sai đi muộn ca Sáng (phút)
+  allowedLateAfternoon?: number;  // Dung sai đi muộn ca Chiều (phút)
   weekendDays: number[];
 }
 
@@ -92,6 +94,8 @@ const DEFAULT_HRM_CONFIG: HrmConfig = {
   otPunchOutOpenBeforeMinutes: 15,
   otPunchOutCloseAfterMinutes: 15,
   allowedLateMinutes: 15,
+  allowedLateMorning: 15,
+  allowedLateAfternoon: 15,
   weekendDays: [0],
 };
 
@@ -251,6 +255,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             ...cloud,
             weekendDays: cloud.weekendDays ?? [0],
             allowedLateMinutes: cloud.allowedLateMinutes ?? 15,
+            allowedLateMorning: cloud.allowedLateMorning ?? 15,
+            allowedLateAfternoon: cloud.allowedLateAfternoon ?? 15,
           }));
         }
         // Nạp cache cho hrCalculations (readHrmConfigFromStorage)

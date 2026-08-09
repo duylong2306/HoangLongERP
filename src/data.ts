@@ -156,6 +156,8 @@ export const DEFAULT_SYSTEM_CONFIG = {
   autoAttendanceStartDate: '2020-01-01',
   allowedLateMinutes: 15,
   allowedLateCount: 3,
+  allowedLateMorning: 15,
+  allowedLateAfternoon: 15,
   otMultiplier: 1.5,
   gpsRadiusAllowed: 50,
   weekendDays: [0, 6], // CN và T7

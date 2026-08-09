@@ -1,4 +1,4 @@
-import { Conversation, ChatMessage } from '../types';
+import { Conversation, ChatMessage, ChatAttachment } from '../types';
 import { getSupabase } from './supabase';
 import { buildPushUrl } from './pushDeepLink';
 
@@ -344,6 +344,7 @@ export async function sendGroupChatMessage(params: {
   senderRole?: string;
   content: string;
   relatedEntity?: ChatMessage['relatedEntity'];
+  attachments?: ChatAttachment[];
 }): Promise<ChatMessage | null> {
   // Chỉ gửi khi nhóm chat thực sự tồn tại
   const exists = getConversations().some(c => c.id === params.conversationId);
@@ -357,6 +358,7 @@ export async function sendGroupChatMessage(params: {
     content: params.content,
     system: false,
     relatedEntity: params.relatedEntity,
+    attachments: params.attachments,
   });
 }
 

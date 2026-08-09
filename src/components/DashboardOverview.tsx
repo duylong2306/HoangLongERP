@@ -720,14 +720,19 @@ export default function DashboardOverview({
     const targetOutS = timeToMinutes(config?.morningOut || '11:30');
     const targetInC = timeToMinutes(config?.afternoonIn || '13:00');
     const targetOutC = timeToMinutes(config?.afternoonOut || '17:00');
-    const allowedLates = config?.allowedLateMinutes ?? 15;
+    // Dung sai "Cho phép đi muộn" tách riêng theo từng ca (migration 036):
+    //   - Ca Sáng  → allowedLateMorning
+    //   - Ca Chiều → allowedLateAfternoon
+    // `allowedLateMinutes` (global) chỉ còn là fallback.
+    const allowedLateMorning   = config?.allowedLateMorning   ?? config?.allowedLateMinutes ?? 15;
+    const allowedLateAfternoon = config?.allowedLateAfternoon ?? config?.allowedLateMinutes ?? 15;
     // Dung sai về sớm = đúng bằng khoảng thời gian hệ thống mở cửa sổ chấm ra ca sớm
     const allowedEarlies = config?.punchOutOpenBeforeMinutes ?? 15;
 
     // 1. Ca Sáng
     if (!excused.morning) {
       const inMin = parsePunchMinutes(log.timeInS);
-      if (inMin !== null && inMin > targetInS + allowedLates) {
+      if (inMin !== null && inMin > targetInS + allowedLateMorning) {
         lates++;
         isLateMorning = true;
       }
@@ -741,7 +746,7 @@ export default function DashboardOverview({
     // 2. Ca Chiều
     if (!excused.afternoon) {
       const inMin = parsePunchMinutes(log.timeInC);
-      if (inMin !== null && inMin > targetInC + allowedLates) {
+      if (inMin !== null && inMin > targetInC + allowedLateAfternoon) {
         lates++;
         isLateAfternoon = true;
       }
@@ -1569,9 +1574,10 @@ export default function DashboardOverview({
       const mm = now.getMinutes();
       const checkInMin = hh * 60 + mm;
       const limitMin = timeToMinutes(config.morningIn || '07:30');
-      const allowedLates = config.allowedLateMinutes ?? 15;
-      if (checkInMin > (limitMin + allowedLates)) {
+      const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+      if (checkInMin > (limitMin + allowedLateMorning)) {
         todayLog.status = 'late';
+        // Ghi phút muộn THỰC TẾ (không trừ dung sai) → khớp với badge "Muộn X'" trong chấm công ngày.
         todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút sáng. Địa điểm: ${selectedSite}`;
       } else {
         todayLog.status = 'valid';
@@ -1582,9 +1588,10 @@ export default function DashboardOverview({
       const mm = now.getMinutes();
       const checkInMin = hh * 60 + mm;
       const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-      const allowedLates = config.allowedLateMinutes ?? 15;
-      if (checkInMin > (limitMin + allowedLates)) {
+      const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+      if (checkInMin > (limitMin + allowedLateAfternoon)) {
         todayLog.status = 'late';
+        // Ghi phút muộn THỰC TẾ (không trừ dung sai) → khớp với badge "Muộn X'" trong chấm công ngày.
         todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút chiều. Địa điểm: ${selectedSite}`;
       } else {
         todayLog.status = 'valid';
@@ -2683,7 +2690,7 @@ export default function DashboardOverview({
                   countLateArrive === 0
                     ? `Tháng ${currentMonthYear}: không có lượt vào muộn / về sớm nào.`
                     : `Tháng ${currentMonthYear}: vào muộn ${monthLateEarly.lates} lượt (${monthLateEarly.lateDays.size} ngày), về sớm ${monthLateEarly.earlies} lượt (${monthLateEarly.earlyDays.size} ngày).\n` +
-                      `Dung sai: muộn ${config.allowedLateMinutes ?? 15} phút, sớm ${config.punchOutOpenBeforeMinutes ?? 15} phút. Không tính ngày nghỉ tuần/lễ và ca đã được duyệt đơn.`
+                      `Dung sai: muộn Sáng ${config.allowedLateMorning ?? config.allowedLateMinutes ?? 15} phút, Chiều ${config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15} phút, sớm ${config.punchOutOpenBeforeMinutes ?? 15} phút. Không tính ngày nghỉ tuần/lễ và ca đã được duyệt đơn.`
                 }
               >
                 <span className="text-xs text-slate-400 font-bold">VÀO MUỘN / VỀ SỚM</span>
@@ -2754,8 +2761,8 @@ export default function DashboardOverview({
                       } else if (log.timeInS && log.timeInS !== '--:--' && log.timeInS !== '') {
                         const checkInMin = timeToMinutes(log.timeInS);
                         const limitMin = timeToMinutes(config.morningIn || '07:30');
-                        const allowedLates = config.allowedLateMinutes ?? 15;
-                        if (checkInMin > (limitMin + allowedLates)) {
+                        const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+                        if (checkInMin > (limitMin + allowedLateMorning)) {
                           dots.push({ color: 'bg-amber-500', label: 'Sáng: Muộn' });
                         } else {
                           dots.push({ color: 'bg-emerald-500', label: 'Sáng: Đúng giờ' });
@@ -2772,8 +2779,8 @@ export default function DashboardOverview({
                       } else if (log.timeInC && log.timeInC !== '--:--' && log.timeInC !== '') {
                         const checkInMin = timeToMinutes(log.timeInC);
                         const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                        const allowedLates = config.allowedLateMinutes ?? 15;
-                        if (checkInMin > (limitMin + allowedLates)) {
+                        const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+                        if (checkInMin > (limitMin + allowedLateAfternoon)) {
                           dots.push({ color: 'bg-amber-500', label: 'Chiều: Muộn' });
                         } else {
                           dots.push({ color: 'bg-emerald-500', label: 'Chiều: Đúng giờ' });
@@ -3170,8 +3177,8 @@ export default function DashboardOverview({
                           {(() => {
                             const inMin = timeToMinutes(timeInS);
                             const limitMin = timeToMinutes(config.morningIn || '07:30');
-                            const allowedLates = config.allowedLateMinutes ?? 15;
-                            return inMin > (limitMin + allowedLates) ? (
+                            const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+                            return inMin > (limitMin + allowedLateMorning) ? (
                               <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                             ) : (
                               <span className="text-emerald-450 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -3199,8 +3206,8 @@ export default function DashboardOverview({
                         {(() => {
                           const inMin = timeToMinutes(timeInS);
                           const limitMin = timeToMinutes(config.morningIn || '07:30');
-                          const allowedLates = config.allowedLateMinutes ?? 15;
-                          return inMin > (limitMin + allowedLates) ? (
+                          const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+                          return inMin > (limitMin + allowedLateMorning) ? (
                             <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                           ) : (
                             <span className="text-emerald-450 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -3342,8 +3349,8 @@ export default function DashboardOverview({
                           {(() => {
                             const inMin = timeToMinutes(timeInC);
                             const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                            const allowedLates = config.allowedLateMinutes ?? 15;
-                            return inMin > (limitMin + allowedLates) ? (
+                            const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+                            return inMin > (limitMin + allowedLateAfternoon) ? (
                               <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                             ) : (
                               <span className="text-emerald-455 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -3371,8 +3378,8 @@ export default function DashboardOverview({
                         {(() => {
                           const inMin = timeToMinutes(timeInC);
                           const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                          const allowedLates = config.allowedLateMinutes ?? 15;
-                          return inMin > (limitMin + allowedLates) ? (
+                          const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+                          return inMin > (limitMin + allowedLateAfternoon) ? (
                             <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                           ) : (
                             <span className="text-emerald-455 font-bold text-[9px] block">✅ Đúng giờ</span>
