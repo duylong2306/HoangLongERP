@@ -2431,17 +2431,6 @@ export default function TaskDetailModal({
                                   <h5 className={`text-[11.5px] font-bold truncate text-left flex-1 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
                                     {mission.name}
                                   </h5>
-                                  {/* ✏️ Nút Sửa — chỉ hiện cho nhiệm vụ CHƯA hoàn thành của công việc chưa hoàn thành */}
-                                  {!isCompleted && selectedTask.status !== 'completed' && hasMissionPermission && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); startEditMission(mission); }}
-                                      className="p-1 rounded-md text-slate-450 hover:text-amber-400 hover:bg-amber-500/10 transition cursor-pointer shrink-0"
-                                      title="Sửa tên / hạn hoàn thành"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
                                 </div>
 
                                 <div className="flex flex-col gap-y-1">
@@ -2707,29 +2696,40 @@ export default function TaskDetailModal({
                             {/* Status and Arrow */}
                             <div className="flex items-center gap-2">
                               {!isCompleted && hasMissionPermission && selectedTask.status !== 'completed' && (
-                                <button
-                                  type="button"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
-                                      const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
-                                      const ok = await notifyProjectChatAfterSave(
-                                        onUpdateTask(selectedTask.id, {
-                                          missions: updatedMissions
-                                        }),
-                                        `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
-                                        { type: 'mission', id: mission.id }
-                                      );
-                                      if (ok === false) {
-                                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể xóa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                <>
+                                  {/* ✏️ Nút Sửa — đặt cạnh nút Xóa */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); startEditMission(mission); }}
+                                    className="p-1 px-1.5 bg-slate-950 hover:bg-amber-950/40 border border-slate-850 hover:border-amber-900 text-slate-500 hover:text-amber-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
+                                    title="Sửa tên / hạn hoàn thành"
+                                  >
+                                    <Edit2 className="w-3 h-3 text-amber-400" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
+                                        const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
+                                        const ok = await notifyProjectChatAfterSave(
+                                          onUpdateTask(selectedTask.id, {
+                                            missions: updatedMissions
+                                          }),
+                                          `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
+                                          { type: 'mission', id: mission.id }
+                                        );
+                                        if (ok === false) {
+                                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể xóa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                        }
                                       }
-                                    }
-                                  }}
-                                  className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
-                                  title="Xóa nhiệm vụ này"
-                                >
-                                  <Trash2 className="w-3 h-3 text-rose-400" />
-                                </button>
+                                    }}
+                                    className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
+                                    title="Xóa nhiệm vụ này"
+                                  >
+                                    <Trash2 className="w-3 h-3 text-rose-400" />
+                                  </button>
+                                </>
                               )}
                               <span className={`text-[9px] font-bold px-2 py-0.5 rounded border whitespace-nowrap leading-none select-none ${
                                 isCompleted
