@@ -342,7 +342,11 @@ export function useSettings(): SettingsContextValue {
 // Các interface HrmRoleGroup, ApprovalPermission đã được chuyển sang ../types
 export type { HrmRoleGroup, HrmApprovalConfig as ApprovalPermission } from '../types';
 
-// In-memory cache: được populate từ Supabase khi app mount, KHÔNG đọc từ localStorage
+// In-memory cache: được populate từ Supabase khi app mount.
+// Ngoài ra còn phản hồi qua localStorage (bản snapshot lần đồng bộ thành công gần
+// nhất) để khi mạng chậm — điển hình trên mobile — phân quyền vẫn đọc được NGAY,
+// tránh lỗi "Giám đốc không thấy toàn bộ công việc" do cache rỗng lúc khởi tạo.
+const ROLE_GROUPS_STORAGE_KEY = 'hl_role_groups_cache_v1';
 let _roleGroupsCache: HrmRoleGroup[] | null = null;
 
 // In-memory cache cho cấu hình Quyền Phê Duyệt — populate từ Supabase khi app mount
@@ -356,16 +360,39 @@ export function setApprovalConfigCache(configs: ApprovalPermission[]): void {
 
 /**
  * Gọi từ App.tsx sau khi fetch role groups từ Supabase để populate in-memory cache.
- * Đây là nguồn duy nhất cho phân quyền — không dùng localStorage.
+ * Đồng thời snapshot xuống localStorage — nguồn fallback đồng bộ cho lần mở sau.
  */
 export function setRoleGroupsCache(groups: HrmRoleGroup[]): void {
   _roleGroupsCache = groups;
+  try {
+    localStorage.setItem(ROLE_GROUPS_STORAGE_KEY, JSON.stringify(groups));
+  } catch (e) {
+    console.warn('Không thể snapshot role groups xuống localStorage:', e);
+  }
 }
 
-/** Đọc danh sách Role Groups từ in-memory cache (đã load từ Supabase) */
+/**
+ * Đọc danh sách Role Groups.
+ * Ưu tiên in-memory cache (đã load từ Supabase). Nếu chưa có (mạng chậm, khởi
+ * động lại), đọc snapshot đồng bộ từ localStorage của lần đồng bộ thành công
+ * trước đó — đảm bảo phân quyền (vd. Giám Đốc / role_admin) sẵn sàng NGAY trên
+ * render đầu tiên mà không cần chờ Supabase.
+ */
 export function loadHrmRoleGroups(): HrmRoleGroup[] {
   if (_roleGroupsCache) return _roleGroupsCache;
-  // Chưa load xong từ Supabase → fail-secure: trả về []
+  try {
+    const saved = localStorage.getItem(ROLE_GROUPS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        _roleGroupsCache = parsed as HrmRoleGroup[];
+        return _roleGroupsCache;
+      }
+    }
+  } catch (e) {
+    console.warn('Lỗi đọc role groups snapshot từ localStorage:', e);
+  }
+  // Chưa có dữ liệu nào → fail-secure: trả về []
   return [];
 }
 

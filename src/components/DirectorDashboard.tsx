@@ -460,7 +460,7 @@ export default function DirectorDashboard({
                               </div>
                             </div>
                             <span className={`text-[9px] font-extrabold uppercase ${
-                              proj.status === 'completed' ? 'text-emerald-400' : proj.status === 'processing' ? 'text-indigo-400' : 'text-amber-400'
+                              proj.status === 'completed' ? 'text-emerald-400' : proj.status === 'processing' ? 'text-indigo-400' : proj.status === 'maintenance' ? 'text-orange-400' : 'text-amber-400'
                             }`}>{proj.status}</span>
                           </td>
                           <td className="py-3 px-2 text-right">

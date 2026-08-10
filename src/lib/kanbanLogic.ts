@@ -1,4 +1,4 @@
-import { Project } from '../types';
+import { Project, ProjectStatus } from '../types';
 
 /**
  * Pure, framework-free logic for the Project Kanban board.
@@ -10,6 +10,9 @@ export interface KanbanColumnAutomation {
   type: 'auto_pm' | 'auto_progress' | 'auto_comment' | 'auto_approval' | 'auto_complete' | 'none';
   param?: string | number;
   assignId?: string;
+  /** Quy trình tự động "Cập nhật trạng thái": giá trị ProjectStatus sẽ được áp
+      lên project.status khi thẻ dự án được kéo vào cột này. */
+  statusSet?: ProjectStatus;
   statusUpdate?: string;
   approvalRole?: string;
   tagToAdd?: string;
@@ -56,14 +59,36 @@ export { AVAILABLE_CARD_COLORS };
 /** Initial column configuration for a fresh sector (no saved custom columns). */
 export const getDefaultColumns = (): KanbanColumn[] => {
   return [
-    { id: 'col_design', name: 'YÊU CẦU THIẾT KẾ', color: 'bg-indigo-650', iconColor: 'text-indigo-400', automation: { type: 'auto_progress', param: 10 } },
-    { id: 'col_bid', name: 'ĐẤU THẦU', color: 'bg-sky-600', iconColor: 'text-sky-450', automation: { type: 'auto_pm', param: 'emp_3' } },
-    { id: 'col_waiting', name: 'CHỜ KẾT QUẢ', color: 'bg-blue-700', iconColor: 'text-blue-450', automation: { type: 'none' } },
-    { id: 'col_active', name: 'GIỚI ĐOẠN THI CÔNG', color: 'bg-amber-500', iconColor: 'text-amber-400', automation: { type: 'auto_progress', param: 40 } },
-    { id: 'col_accept', name: 'NGHIỆM THU', color: 'bg-emerald-600', iconColor: 'text-emerald-450', automation: { type: 'auto_approval', param: 'director' } },
-    { id: 'col_fix', name: 'XỬ LÝ - KHẮC PHỤC', color: 'bg-purple-600', iconColor: 'text-purple-400', automation: { type: 'auto_progress', param: 90 } },
-    { id: 'col_done', name: 'HOÀN THÀNH', color: 'bg-pink-600', iconColor: 'text-pink-400', automation: { type: 'auto_complete' } },
+    { id: 'col_design', name: 'YÊU CẦU THIẾT KẾ', color: 'bg-indigo-650', iconColor: 'text-indigo-400', automation: { type: 'auto_progress', param: 10, statusSet: 'processing' } },
+    { id: 'col_bid', name: 'ĐẤU THẦU', color: 'bg-sky-600', iconColor: 'text-sky-450', automation: { type: 'auto_pm', param: 'emp_3', statusSet: 'processing' } },
+    { id: 'col_waiting', name: 'CHỜ KẾT QUẢ', color: 'bg-blue-700', iconColor: 'text-blue-450', automation: { type: 'none', statusSet: 'paused' } },
+    { id: 'col_active', name: 'GIỚI ĐOẠN THI CÔNG', color: 'bg-amber-500', iconColor: 'text-amber-400', automation: { type: 'auto_progress', param: 40, statusSet: 'processing' } },
+    { id: 'col_accept', name: 'NGHIỆM THU', color: 'bg-emerald-600', iconColor: 'text-emerald-450', automation: { type: 'auto_approval', param: 'director', statusSet: 'processing' } },
+    { id: 'col_fix', name: 'XỬ LÝ - KHẮC PHỤC', color: 'bg-purple-600', iconColor: 'text-purple-400', automation: { type: 'auto_progress', param: 90, statusSet: 'processing' } },
+    { id: 'col_done', name: 'HOÀN THÀNH', color: 'bg-pink-600', iconColor: 'text-pink-400', automation: { type: 'auto_complete', statusSet: 'completed' } },
   ];
+};
+
+/**
+ * Bảo đảm mọi cột đều kích hoạt 2 quy trình mặc định LUÔN bật:
+ *  - "Cập nhật trạng thái" (statusSet) → mặc định "Đang triển khai" (processing)
+ *  - "Kiểu văn bản" (textStyle) → mặc định In đậm (bold), không đổi màu chữ
+ * Các cột được lưu từ trước khi các tính năng này ra mắt sẽ thiếu các trường
+ * trên — hàm này gán giá trị mặc định để quy trình hoạt động ngay lập tức.
+ */
+export const ensureColumnsHaveAutomationDefaults = (
+  columns: KanbanColumn[],
+  defaultStatus: ProjectStatus = 'processing'
+): KanbanColumn[] => {
+  return columns.map(c => {
+    const auto: KanbanColumnAutomation = {
+      ...(c.automation || { type: 'none' }),
+      statusSet: c.automation?.statusSet || defaultStatus,
+    };
+    if (auto.textStyleStyleBold === undefined) auto.textStyleStyleBold = true;
+    if (auto.textStyleStyleColor === undefined) auto.textStyleStyleColor = '';
+    return { ...c, automation: auto };
+  });
 };
 
 /** Build short uppercase initials from a Vietnamese name. */
@@ -185,6 +210,11 @@ export const getProjectColumnId = (project: Project, columns: KanbanColumn[]): s
   }
   if (project.status === 'completed') return 'col_done';
   if (project.status === 'new') return 'col_design';
+  // Trạng thái đặc biệt: Đang Bảo Trì / Tạm dừng / Đã Hủy → cột cố định riêng
+  // (đúng như cấu hình "Cập nhật trạng thái" trong quy trình tự động cột).
+  if (project.status === 'maintenance') return columns.some(c => c.id === 'col_maintenance') ? 'col_maintenance' : 'col_fix';
+  if (project.status === 'paused') return 'col_waiting';
+  if (project.status === 'cancelled') return columns.some(c => c.id === 'col_cancelled') ? 'col_cancelled' : 'col_design';
   if (project.progress >= 90) return 'col_fix';
   if (project.progress >= 70) return 'col_accept';
   if (project.progress > 0) return 'col_active';
@@ -203,7 +233,8 @@ export const addColumnReducer = (
     name: 'BƯỚC CẢI TIẾN MỚI',
     color: 'bg-slate-700',
     iconColor: 'text-slate-400',
-    automation: { type: 'none' }
+    // 2 quy trình mặc định luôn bật: cập nhật trạng thái + kiểu văn bản (in đậm, không đổi màu)
+    automation: { type: 'none', statusSet: 'processing', textStyleStyleBold: true, textStyleStyleColor: '' }
   };
   return { column: newCol, columns: [...columns, newCol] };
 };

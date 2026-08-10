@@ -84,7 +84,7 @@ export interface Customer {
 }
 
 export type ProjectType = 'construction' | 'furniture' | 'mechanical' | 'general';
-export type ProjectStatus = 'new' | 'processing' | 'paused' | 'completed' | 'cancelled';
+export type ProjectStatus = 'new' | 'processing' | 'paused' | 'maintenance' | 'completed' | 'cancelled';
 
 export interface ProjectDocCustomField {
   label: string; // Nhãn tùy chỉnh (vd: "Chất liệu chính", "Điều khoản tạm ứng")

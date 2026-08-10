@@ -121,6 +121,7 @@ export default function ProjectManagement({
     new: 'Mới',
     processing: 'Đang triển khai',
     paused: 'Tạm dừng',
+    maintenance: 'Đang Bảo Trì',
     completed: 'Hoàn thành',
     cancelled: 'Hủy'
   };
@@ -696,6 +697,7 @@ export default function ProjectManagement({
               <option value="new">Mới ký</option>
               <option value="processing">Đang chạy</option>
               <option value="paused">Tạm ngưng</option>
+              <option value="maintenance">Đang Bảo Trì</option>
               <option value="completed">Đã bàn giao</option>
             </select>
           </div>
@@ -726,6 +728,7 @@ export default function ProjectManagement({
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
                       p.status === 'processing' ? 'bg-sky-100 text-sky-800' :
+                      p.status === 'maintenance' ? 'bg-orange-100 text-orange-800' :
                       p.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {statusLabels[p.status]}
@@ -798,6 +801,7 @@ export default function ProjectManagement({
                       <option value="new">Mới</option>
                       <option value="processing">Đang triển khai</option>
                       <option value="paused">Tạm dừng</option>
+                      <option value="maintenance">Đang Bảo Trì</option>
                       <option value="completed">Hoàn thành</option>
                     </select>
                     <input
@@ -812,7 +816,7 @@ export default function ProjectManagement({
                 </div>
               ) : (
                 <div className="p-2 bg-slate-50 rounded border border-slate-200 text-xs text-slate-400 text-center italic">
-                  Trạng thái: <strong className="text-slate-700">{selectedProject.status === 'new' ? 'Mới' : selectedProject.status === 'processing' ? 'Đang triển khai' : selectedProject.status === 'paused' ? 'Tạm dừng' : selectedProject.status === 'completed' ? 'Hoàn thành' : 'Hủy'}</strong> | Tiến độ: <strong className="text-slate-700">{selectedProject.progress}%</strong> (chỉ PM/Giám đốc mới cập nhật)
+                  Trạng thái: <strong className="text-slate-700">{selectedProject.status === 'new' ? 'Mới' : selectedProject.status === 'processing' ? 'Đang triển khai' : selectedProject.status === 'paused' ? 'Tạm dừng' : selectedProject.status === 'maintenance' ? 'Đang Bảo Trì' : selectedProject.status === 'completed' ? 'Hoàn thành' : 'Hủy'}</strong> | Tiến độ: <strong className="text-slate-700">{selectedProject.progress}%</strong> (chỉ PM/Giám đốc mới cập nhật)
                 </div>
               )}
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
-import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
+import { Project, ProjectStatus, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
+import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, ensureColumnsHaveAutomationDefaults, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
 import {
   Plus, Search, Edit2, Check, Settings, Play, ArrowRight, CheckSquare,
@@ -8,7 +8,7 @@ import {
   Paperclip, Tag, Trash2, X, Send, AlertCircle, FileUp, Shield,
   HelpCircle, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
   Users, Mail, Percent, ListTodo, RotateCcw, Calculator, Sliders, Type, MoreVertical,
-  ZoomIn, ZoomOut
+  ZoomIn, ZoomOut, Lock
 } from 'lucide-react';
 // MODULE NHẬP (Imports)
 // -----------------------
@@ -41,6 +41,17 @@ const sectorArchiveTab = (type?: string): string =>
   type === 'construction' ? 'quotes-construction'
   : type === 'mechanical' ? 'quotes-mechanical'
   : 'quotes'; // furniture / general / mặc định → Hồ Sơ Nội Thất
+
+// Quy trình tự động "Cập nhật trạng thái" — các trạng thái dự án mà quản trị
+// có thể chọn áp cho thẻ khi dự án được kéo vào một cột Kanban.
+const STATUS_SET_OPTIONS: { value: ProjectStatus; label: string }[] = [
+  { value: 'processing', label: 'Đang triển khai' },
+  { value: 'paused', label: 'Tạm ngưng' },
+  { value: 'completed', label: 'Hoàn thành' },
+  { value: 'maintenance', label: 'Đang Bảo Trì' },
+  { value: 'cancelled', label: 'Đã Hủy' },
+];
+const STATUS_SET_DEFAULT: ProjectStatus = 'processing';
 
 // PROPS (Interface) - Định nghĩa các props component nhận từ parent (App.tsx / SectorKanbanWrapper)
 // =================================================================================================
@@ -367,7 +378,10 @@ export default function ProjectKanbanBoard({
       dbService.kanbanColumns.get(sector).then(data => {
         if (!active) return;
         if (data && data.columns && data.columns.length > 0) {
-          setColumns(data.columns);
+          // Luôn đảm bảo 2 quy trình mặc định được kích hoạt trên mọi cột:
+          // "Cập nhật trạng thái" (mặc định "Đang triển khai") và "Kiểu văn bản"
+          // (mặc định In đậm, không đổi màu chữ) — kể cả cột lưu trước khi tính năng này có.
+          setColumns(ensureColumnsHaveAutomationDefaults(data.columns));
           setColumnWidth(data.columnWidth);
         } else {
           setColumns(getDefaultColumns());
@@ -426,7 +440,7 @@ export default function ProjectKanbanBoard({
   const [activeWorkflowColId, setActiveWorkflowColId] = useState<string>('col_design');
   const [openColMenuId, setOpenColMenuId] = useState<string | null>(null);
   const [selectedActionType, setSelectedActionType] = useState<
-    'assignee' | 'status' | 'approval' | 'subtask' | 'textStyle'
+    'assignee' | 'statusSet' | 'status' | 'approval' | 'subtask' | 'textStyle'
   >('assignee');
   const [activeSubtaskRuleIndex, setActiveSubtaskRuleIndex] = useState<number | null>(null);
 
@@ -1128,14 +1142,26 @@ export default function ProjectKanbanBoard({
             ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
           }
 
-          // 2.2 Kiểu văn bản (In đậm, in nghiêng, gạch giữa, màu chữ)
-          if (rule.textStyleStyleItalic !== undefined || rule.textStyleStyleBold !== undefined || rule.textStyleStyleStrike !== undefined || rule.textStyleStyleColor !== undefined) {
-            updates.styleItalic = rule.textStyleStyleItalic;
-            updates.styleBold = rule.textStyleStyleBold;
-            updates.styleStrike = rule.textStyleStyleStrike;
-            updates.styleColor = rule.textStyleStyleColor;
-            ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
+          // 1.1 Quy trình tự động "Cập nhật trạng thái" — LUÔN kích hoạt trên mọi cột.
+          // Cập nhật project.status theo giá trị được cấu hình; nếu cột chưa cấu hình
+          // thì dùng mặc định "Đang triển khai" (processing).
+          const statusToSet = rule.statusSet || STATUS_SET_DEFAULT;
+          updates.status = statusToSet;
+          const stLabel = STATUS_SET_OPTIONS.find(o => o.value === statusToSet)?.label || String(statusToSet);
+          ruleLogs.push(`Cập nhật trạng thái dự án: ${stLabel}`);
+          // Đồng bộ: trạng thái Hoàn thành cũng đồng nghĩa với 100% tiến độ — để thẻ và
+          // chỉ số tiến độ nhất quán.
+          if (statusToSet === 'completed') {
+            updates.progress = 100;
           }
+
+          // 2.2 Quy trình tự động "Kiểu văn bản" — LUÔN kích hoạt trên mọi cột.
+          // Mặc định: In đậm (Bold), không đổi màu chữ.
+          updates.styleItalic = rule.textStyleStyleItalic;
+          updates.styleBold = rule.textStyleStyleBold !== undefined ? rule.textStyleStyleBold : true;
+          updates.styleStrike = rule.textStyleStyleStrike;
+          updates.styleColor = rule.textStyleStyleColor || '';
+          ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
 
           // 3. Gửi yêu cầu phê duyệt
           if (rule.approvalRole && rule.approvalRole !== 'none') {
@@ -2152,14 +2178,12 @@ export default function ProjectKanbanBoard({
                   ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
                 }
 
-                // rule 2.2: Kiểu văn bản (In đậm, in nghiêng, gạch giữa, màu chữ)
-                if (rule.textStyleStyleItalic !== undefined || rule.textStyleStyleBold !== undefined || rule.textStyleStyleStrike !== undefined || rule.textStyleStyleColor !== undefined) {
-                  customProject.styleItalic = rule.textStyleStyleItalic;
-                  customProject.styleBold = rule.textStyleStyleBold;
-                  customProject.styleStrike = rule.textStyleStyleStrike;
-                  customProject.styleColor = rule.textStyleStyleColor;
-                  ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
-                }
+                // rule 2.2: Quy trình "Kiểu văn bản" — LUÔN kích hoạt (mặc định In đậm, không đổi màu chữ)
+                customProject.styleItalic = rule.textStyleStyleItalic;
+                customProject.styleBold = rule.textStyleStyleBold !== undefined ? rule.textStyleStyleBold : true;
+                customProject.styleStrike = rule.textStyleStyleStrike;
+                customProject.styleColor = rule.textStyleStyleColor || '';
+                ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
 
                 // rule 3: Approval request
                 if (rule.approvalRole && rule.approvalRole !== 'none') {
@@ -2693,6 +2717,7 @@ export default function ProjectKanbanBoard({
             // Check if column has any active automation rule
             const hasActiveAutomation = [
               col.automation?.assignId,
+              col.automation?.statusSet,
               col.automation?.statusUpdate,
               (col.automation?.textStyleStyleItalic || col.automation?.textStyleStyleBold || col.automation?.textStyleStyleStrike || col.automation?.textStyleStyleColor),
               col.automation?.approvalRole && col.automation.approvalRole !== 'none',
@@ -2735,7 +2760,8 @@ export default function ProjectKanbanBoard({
                     {openColMenuId === col.id && (
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setOpenColMenuId(null)} />
-                        <div className="absolute right-0 top-full mt-1 z-40 w-56 rounded-lg border border-slate-700 bg-slate-800 shadow-xl py-1 text-left">
+                        {/* Menu xổ SANG PHẢI (left-0), nền trắng, bóng đổ, bo góc 12px */}
+                        <div className="absolute left-0 top-full mt-1.5 z-40 w-52 rounded-xl bg-white shadow-xl ring-1 ring-black/5 border border-slate-200 py-1.5 text-left">
                           <button
                             onClick={() => {
                               setOpenColMenuId(null);
@@ -2745,10 +2771,10 @@ export default function ProjectKanbanBoard({
                               }
                               openEditColumn(col);
                             }}
-                            className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors ${canEditColumn ? 'text-slate-200 hover:bg-slate-700 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
+                            className={`flex items-center gap-2.5 w-full px-3.5 py-2 text-xs transition-colors ${canEditColumn ? 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            Đổi tên & cấu hình
+                            <Edit2 className="w-3.5 h-3.5 text-indigo-500" />
+                            <span className="font-semibold">Đổi tên & cấu hình</span>
                           </button>
                           <button
                             onClick={() => {
@@ -2760,12 +2786,12 @@ export default function ProjectKanbanBoard({
                               setActiveWorkflowColId(col.id);
                               setShowAutoWorkflowModal(true);
                             }}
-                            className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors ${canConfigureColumnAutomation ? 'text-slate-200 hover:bg-slate-700 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
+                            className={`flex items-center gap-2.5 w-full px-3.5 py-2 text-xs transition-colors ${canConfigureColumnAutomation ? 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
                           >
-                            <Settings className="w-3.5 h-3.5" />
-                            Cấu hình tự động
+                            <Settings className="w-3.5 h-3.5 text-indigo-500" />
+                            <span className="font-semibold">Cấu hình tự động</span>
                           </button>
-                          <div className="my-1 border-t border-slate-700/70" />
+                          <div className="my-1 border-t border-slate-200" />
                           <button
                             onClick={() => {
                               setOpenColMenuId(null);
@@ -2775,10 +2801,10 @@ export default function ProjectKanbanBoard({
                               }
                               deleteColumn(col.id);
                             }}
-                            className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors ${canDeleteColumn ? 'text-red-400 hover:bg-red-500/15 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
+                            className={`flex items-center gap-2.5 w-full px-3.5 py-2 text-xs transition-colors ${canDeleteColumn ? 'text-red-600 hover:bg-red-50 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
                           >
-                            <X className="w-3.5 h-3.5" />
-                            Xóa cột phân đoạn
+                            <X className="w-3.5 h-3.5 text-red-500" />
+                            <span className="font-semibold">Xóa cột phân đoạn</span>
                           </button>
                         </div>
                       </>
@@ -2814,6 +2840,7 @@ export default function ProjectKanbanBoard({
                           <div className={`absolute left-0 top-0 bottom-0 w-1 ${
                             p.cardColor ? p.cardColor : (
                               p.status === 'completed' ? 'bg-emerald-500' :
+                              p.status === 'maintenance' ? 'bg-orange-500' :
                               p.status === 'paused' ? 'bg-amber-500' : 'bg-sky-500'
                             )
                           }`}></div>
@@ -4609,12 +4636,16 @@ export default function ProjectKanbanBoard({
       {/* 2.5 WORKFLOW AUTOMATION MODAL */}
       {showAutoWorkflowModal && (() => {
         const activeCol = columns.find(c => c.id === activeWorkflowColId);
-        const isActionActive = activeCol?.automation 
-          ? (selectedActionType === 'assignee' ? !!activeCol.automation.assignId
+        // Quy trình "Cập nhật trạng thái" (statusSet) và "Kiểu văn bản" (textStyle)
+        // LUÔN kích hoạt trên mọi cột — không cho phép tắt (luôn trả true) để đúng
+        // yêu cầu "mặc định luôn bật".
+        const alwaysOnAutomation = selectedActionType === 'statusSet' || selectedActionType === 'textStyle';
+        const isActionActive = activeCol?.automation
+          ? (alwaysOnAutomation ? true
+            : selectedActionType === 'assignee' ? !!activeCol.automation.assignId
             : selectedActionType === 'status' ? !!activeCol.automation.statusUpdate
             : selectedActionType === 'approval' ? (!!activeCol.automation.approvalRole && activeCol.automation.approvalRole !== 'none')
             : selectedActionType === 'subtask' ? (!!activeCol.automation.subtaskTitle || (activeCol.automation.subtaskTitles && activeCol.automation.subtaskTitles.some(t => !!t)))
-            : selectedActionType === 'textStyle' ? (activeCol.automation.textStyleStyleItalic !== undefined || activeCol.automation.textStyleStyleBold !== undefined || activeCol.automation.textStyleStyleStrike !== undefined || activeCol.automation.textStyleStyleColor !== undefined)
             : false)
           : false;
 
@@ -4628,6 +4659,15 @@ export default function ProjectKanbanBoard({
             iconColor: 'text-sky-450 text-sky-450',
             isActive: (auto: any) => !!auto?.assignId,
           },
+          statusSet: {
+            title: 'Cập nhật trạng thái',
+            description: 'Tự động đổi trạng thái dự án khi kéo thẻ vào cột.',
+            helpText: 'Dự án sẽ tự động cập nhật trạng thái (Đang triển khai / Tạm ngưng / Hoàn thành / Đang Bảo Trì / Đã Hủy) khi thẻ công trình được kéo vào phân đoạn này. Quy trình này LUÔN được kích hoạt trên mọi cột với giá trị mặc định "Đang triển khai" — bạn chỉ việc chọn giá trị phù hợp cho từng cột.',
+            icon: ListTodo,
+            iconBg: 'bg-orange-500/10 border border-orange-500/30',
+            iconColor: 'text-orange-400',
+            isActive: (auto: any) => !!auto?.statusSet,
+          },
           status: {
             title: 'Chuyển cột khi hoàn thành',
             description: 'Tự động chuyển dự án sang phân đoạn khác khi hoàn thành.',
@@ -4640,7 +4680,7 @@ export default function ProjectKanbanBoard({
           textStyle: {
             title: 'Kiểu văn bản',
             description: 'Tự động cập nhật định dạng chữ của thẻ Dự Án.',
-            helpText: 'Dự án sẽ tự động thay đổi kiểu chữ (in nghiêng, in đậm, gạch giữa) và màu sắc của thẻ khi di chuyển vào phân đoạn này.',
+            helpText: 'Dự án sẽ tự động thay đổi kiểu chữ (in đậm, in nghiêng, gạch giữa) và màu sắc của thẻ khi di chuyển vào phân đoạn này. Quy trình này LUÔN kích hoạt trên mọi cột — mặc định In đậm và không thay đổi màu chữ; bạn chỉ việc điều chỉnh thêm định dạng cho từng cột.',
             icon: Type,
             iconBg: 'bg-violet-500/10 border border-violet-500/30',
             iconColor: 'text-violet-450 text-violet-400',
@@ -4673,6 +4713,23 @@ export default function ProjectKanbanBoard({
 
           const updates: Partial<NonNullable<KanbanColumn['automation']>> = {};
 
+          // 2 quy trình mặc định ("Cập nhật trạng thái" & "Kiểu văn bản") không bao giờ
+          // tắt — chỉ cập nhật giá trị theo cấu hình hiện tại.
+          if (alwaysOnAutomation) {
+            const currentAuto = activeCol?.automation || { type: 'none' as const };
+            if (selectedActionType === 'statusSet') {
+              updateColAutomation(activeWorkflowColId, { statusSet: currentAuto.statusSet || STATUS_SET_DEFAULT });
+            } else {
+              updateColAutomation(activeWorkflowColId, {
+                textStyleStyleBold: currentAuto.textStyleStyleBold !== undefined ? currentAuto.textStyleStyleBold : true,
+                textStyleStyleItalic: currentAuto.textStyleStyleItalic,
+                textStyleStyleStrike: currentAuto.textStyleStyleStrike,
+                textStyleStyleColor: currentAuto.textStyleStyleColor || '',
+              });
+            }
+            return;
+          }
+
           if (isActionActive) {
             // Deactivate
             if (selectedActionType === 'assignee') updates.assignId = undefined;
@@ -4682,12 +4739,6 @@ export default function ProjectKanbanBoard({
               updates.subtaskTitle = undefined;
               updates.subtaskTitles = undefined;
             }
-            else if (selectedActionType === 'textStyle') {
-              updates.textStyleStyleItalic = undefined;
-              updates.textStyleStyleBold = undefined;
-              updates.textStyleStyleStrike = undefined;
-              updates.textStyleStyleColor = undefined;
-            }
           } else {
             // Activate with default value
             if (selectedActionType === 'assignee') updates.assignId = employees[0]?.id || 'emp_3';
@@ -4696,10 +4747,6 @@ export default function ProjectKanbanBoard({
             else if (selectedActionType === 'subtask') {
               updates.subtaskTitle = 'Khảo sát hiện trạng công xưởng thực tế';
               updates.subtaskTitles = ['Khảo sát hiện trạng công xưởng thực tế'];
-            }
-            else if (selectedActionType === 'textStyle') {
-              updates.textStyleStyleBold = true;
-              updates.textStyleStyleColor = 'text-red-500';
             }
           }
 
@@ -4751,6 +4798,25 @@ export default function ProjectKanbanBoard({
                   </select>
                   <p className="text-[10px] text-slate-500">
                     PM chịu quyền điều động xe, thợ cơ động gỗ gia công thực hiện bàn giao chi phối.
+                  </p>
+                </div>
+              );
+
+            case 'statusSet':
+              return (
+                <div className="space-y-2 text-left">
+                  <label className="block text-slate-350 font-bold mb-1">Trạng thái dự án được cập nhật khi kéo thẻ vào cột</label>
+                  <select
+                    value={auto.statusSet || STATUS_SET_DEFAULT}
+                    onChange={(e) => updateColAutomation(activeWorkflowColId, { statusSet: e.target.value as ProjectStatus })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none cursor-pointer text-[11px]"
+                  >
+                    {STATUS_SET_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    Khi thẻ dự án được kéo vào cột này, hệ thống sẽ tự động cập nhật trạng thái dự án thành <strong className="text-slate-300">{STATUS_SET_OPTIONS.find(o => o.value === (auto.statusSet || STATUS_SET_DEFAULT))?.label}</strong>.
                   </p>
                 </div>
               );
@@ -5447,14 +5513,17 @@ export default function ProjectKanbanBoard({
                     <div className="space-y-2.5">
                       <label className="block text-xs uppercase tracking-wider font-extrabold text-slate-400">Định dạng kiểu chữ (Đa tùy chọn)</label>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <label className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 p-3 rounded-lg cursor-pointer hover:border-slate-700 select-none transition-colors">
+                        {/* In Đậm là mặc định LUÔN bật — không cho phép tắt */}
+                        <label className="flex items-center gap-2.5 bg-slate-950 border border-slate-700/80 p-3 rounded-lg select-none transition-colors cursor-not-allowed opacity-90">
                           <input
                             type="checkbox"
-                            checked={!!auto.textStyleStyleBold}
-                            onChange={(e) => updateColAutomation(activeWorkflowColId, { textStyleStyleBold: e.target.checked })}
-                            className="w-4 h-4 text-indigo-600 border-slate-700 bg-slate-900 rounded focus:ring-indigo-500 cursor-pointer"
+                            checked
+                            readOnly
+                            disabled
+                            className="w-4 h-4 text-indigo-600 border-slate-700 bg-slate-900 rounded focus:ring-indigo-500 cursor-not-allowed"
                           />
                           <span className="font-bold text-[11px] text-white">In Đậm (Bold)</span>
+                          <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.5 rounded">Mặc định</span>
                         </label>
 
                         <label className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 p-3 rounded-lg cursor-pointer hover:border-slate-700 select-none transition-colors">
@@ -5652,7 +5721,7 @@ export default function ProjectKanbanBoard({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {activeState ? (
+                          {(activeState || key === 'statusSet' || key === 'textStyle') ? (
                             <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                               Bật
@@ -5698,24 +5767,38 @@ export default function ProjectKanbanBoard({
                       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-4 shadow-sm">
                         <div className="flex items-center justify-between border-b border-slate-801 pb-3 border-slate-800">
                           <div>
-                            <span className="font-extrabold text-slate-200 block text-[11px]">Trạng thái tự động hóa</span>
-                            <span className="text-[9px] text-slate-500 block mt-0.5">Bật hoặc tắt hành động quy trình này</span>
+                            <span className="font-extrabold text-slate-200 block text-[11px]">
+                              {alwaysOnAutomation ? 'Quy trình luôn kích hoạt' : 'Trạng thái tự động hóa'}
+                            </span>
+                            <span className="text-[9px] text-slate-500 block mt-0.5">
+                              {alwaysOnAutomation
+                                ? `${actionsConfig[selectedActionType].title} luôn bật trên mọi cột — không thể tắt.`
+                                : 'Bật hoặc tắt hành động quy trình này'}
+                            </span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className={`text-[10px] font-black tracking-wide ${isActionActive ? 'text-emerald-400' : 'text-slate-500'}`}>
-                              {isActionActive ? 'ĐANG KÍCH HOẠT' : 'CHƯA ÁP DỤNG'}
+                              {alwaysOnAutomation
+                                ? 'LUÔN KÍCH HOẠT'
+                                : (isActionActive ? 'ĐANG KÍCH HOẠT' : 'CHƯA ÁP DỤNG')}
                             </span>
-                            <button
-                              type="button"
-                              onClick={handleToggleAction}
-                              className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer relative duration-150 ${
-                                isActionActive ? 'bg-emerald-500' : 'bg-slate-800 border border-slate-755 border-slate-850'
-                              }`}
-                            >
-                              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-150 ${
-                                isActionActive ? 'translate-x-4' : 'translate-x-0'
-                              }`} />
-                            </button>
+                            {alwaysOnAutomation ? (
+                              <div className="w-9 h-5 rounded-full p-0.5 relative bg-emerald-500 opacity-80 cursor-not-allowed">
+                                <div className="bg-white w-4 h-4 rounded-full shadow-md translate-x-4" />
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={handleToggleAction}
+                                className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer relative duration-150 ${
+                                  isActionActive ? 'bg-emerald-500' : 'bg-slate-800 border border-slate-755 border-slate-850'
+                                }`}
+                              >
+                                <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-150 ${
+                                  isActionActive ? 'translate-x-4' : 'translate-x-0'
+                                }`} />
+                              </button>
+                            )}
                           </div>
                         </div>
 
