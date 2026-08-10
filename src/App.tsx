@@ -914,7 +914,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Trạng thái cây thư mục Sidebar dạng mô phỏng
   const [isDirectorGroupExpanded, setIsDirectorGroupExpanded] = useState(true);
-  const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor'>('projects');
+  const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary'>('projects');
   const [isProjectGroupExpanded, setIsProjectGroupExpanded] = useState(true);
   const [isHrGroupExpanded, setIsHrGroupExpanded] = useState(true);
   const [isFinanceGroupExpanded, setIsFinanceGroupExpanded] = useState(true);
@@ -2733,7 +2733,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                         <li>
                           <button
                             onClick={() => {
-                              const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor' };
+                              const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor', summary: 'director-summary' };
                               setActiveTab(subTabMap[directorSubDept] || 'director-projects');
                               if (mobileMenuOpen) setMobileMenuOpen(false);
                             }}
@@ -4474,7 +4474,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                   hr: 'director-hr',
                   accounting: 'director-finance',
                   warehouse: 'director-warehouse',
-                  subcontractor: 'director-subcontractor'
+                  subcontractor: 'director-subcontractor',
+                  summary: 'director-summary'
                 };
                 setActiveTab(tabMap[sub]);
               }}

@@ -27,7 +27,9 @@ import {
   PackageOpen,
   Eye,
   Building,
-  UserCheck
+  UserCheck,
+  FileDown,
+  ClipboardList
 } from 'lucide-react';
 import { Project, Task, Receipt, Payment, Employee, Customer, Supplier } from '../types';
 
@@ -39,8 +41,8 @@ interface DirectorDashboardProps {
   employees: Employee[];
   customers: Customer[];
   currentUser: Employee;
-  activeSubDepartment: 'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor';
-  onChangeSubDepartment: (sub: 'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor') => void;
+  activeSubDepartment: 'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary';
+  onChangeSubDepartment: (sub: 'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary') => void;
   onNavigateTab: (tabId: string) => void;
   onUpdateTask?: (id: string, updates: Partial<Task>) => void;
   onApprovePayment?: (id: string, status: 'approved' | 'rejected') => void;
@@ -234,7 +236,8 @@ export default function DirectorDashboard({
     { id: 'hr', label: 'Phòng Nhân Sự', icon: Users, color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
     { id: 'accounting', label: 'Phòng Kế Toán', icon: DollarSign, color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
     { id: 'warehouse', label: 'Kho & Vật Tư', icon: Warehouse, color: 'text-teal-400 bg-teal-500/10 border-teal-500/20' },
-    { id: 'subcontractor', label: 'Nhà Thầu Phụ', icon: Briefcase, color: 'text-orange-400 bg-orange-500/10 border-orange-500/20' }
+    { id: 'subcontractor', label: 'Nhà Thầu Phụ', icon: Briefcase, color: 'text-orange-400 bg-orange-500/10 border-orange-500/20' },
+    { id: 'summary', label: 'Tổng Hợp', icon: ClipboardList, color: 'text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/20' }
   ] as const;
 
   return (
@@ -1082,6 +1085,215 @@ export default function DirectorDashboard({
                 </table>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3.6 SUMMARY (TỔNG HỢP) DEPARTMENT DASHBOARD */}
+      {activeSubDepartment === 'summary' && (
+        <div className="space-y-6">
+          {/* Key Indicators */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 space-y-1 shadow-md">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Tổng doanh thu thu về</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-emerald-400 font-mono">{formatVND(totalCollected)}</span>
+                <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded font-bold">Thu quỹ</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 space-y-1 shadow-md">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Tổng chi phí đã duyệt</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-rose-400 font-mono">{formatVND(totalSpent)}</span>
+                <span className="text-[10px] bg-rose-500/15 text-rose-400 px-2 py-0.5 rounded font-bold">Chi quỹ</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 space-y-1 shadow-md">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Số dư quỹ thực tế</span>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-xl font-black font-mono ${netBalance >= 0 ? 'text-sky-400' : 'text-rose-450'}`}>
+                  {formatVND(netBalance)}
+                </span>
+                <span className="text-[10px] bg-slate-950 text-slate-400 px-1.5 py-0.5 rounded font-bold font-mono">Net Cash</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 space-y-1 shadow-md">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Tổng giá trị hợp đồng</span>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-black text-indigo-300 font-mono">{formatVND(totalContractValue)}</span>
+                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded font-bold">Hợp đồng</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Báo cáo 1: Tổng hợp công trình */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-md">
+            <div className="flex justify-between items-center border-b border-slate-850 pb-2">
+              <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px]">Bảng sổ tổng hợp lãi gộp phân mục theo công trình</span>
+              <button
+                type="button"
+                onClick={() => {
+                  // Generate plain text report in tabular format for all projects
+                  let textReport = `============================================================\n`;
+                  textReport += `           ERP HOÀNG LONG LÂM ĐỒNG - BÁO CÁO CÔNG TRÌNH\n`;
+                  textReport += `============================================================\n`;
+                  textReport += `Mã Công trình | Thực thu (Doanh thu) | Thực chi (Mua vật tư/Thầu thợ) | Lãi gộp thô\n`;
+                  textReport += `------------------------------------------------------------\n`;
+
+                  projects.forEach(p => {
+                    const recsSum = receipts.filter(r => r.projectId === p.id).reduce((s, r) => s + r.amount, 0);
+                    const paysSum = payments.filter(pay => pay.projectId === p.id && pay.status === 'approved').reduce((s, pay) => s + pay.amount, 0);
+                    const margin = recsSum - paysSum;
+                    textReport += `${p.code} | ${recsSum.toLocaleString('vi-VN')} đ | ${paysSum.toLocaleString('vi-VN')} đ | ${margin.toLocaleString('vi-VN')} đ\n`;
+                  });
+
+                  const textBlob = new Blob([textReport], { type: 'text/plain;charset=utf-8' });
+                  const url = URL.createObjectURL(textBlob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `Bao_Cao_Tong_Hop_Cong_Trinh_2026.txt`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 text-[10px] font-bold px-3 py-1.5 rounded flex items-center gap-1.5 cursor-pointer"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Báo cáo tổng hợp (TXT)
+              </button>
+            </div>
+
+            <div className="overflow-x-auto text-[10.5px]">
+              <table className="w-full text-left text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 font-bold border-b border-slate-800">
+                  <tr>
+                    <th className="px-3 py-2">Dự án thầu gốc / Phân hệ</th>
+                    <th className="px-3 py-2 text-right">Giá gốc hợp đồng</th>
+                    <th className="px-3 py-2 text-right">Lũy kế dã thu</th>
+                    <th className="px-3 py-2 text-right">Lũy kế thợ thầm + mua ván chi</th>
+                    <th className="px-3 py-2 text-right text-emerald-400 font-bold">LỢI NHUẬN GỘP DƯỚI</th>
+                    <th className="px-3 py-2 text-center">Đánh giá hành vi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projects.map((p) => {
+                    const recsSum = receipts.filter(r => r.projectId === p.id).reduce((s, r) => s + r.amount, 0);
+                    const paysSum = payments.filter(pay => pay.projectId === p.id && pay.status === 'approved').reduce((s, pay) => s + pay.amount, 0);
+                    const marginValue = recsSum - paysSum;
+                    const marginPercent = recsSum > 0 ? Math.round((marginValue / recsSum) * 100) : 0;
+                    return (
+                      <tr key={p.id} className="border-b border-slate-850/80 hover:bg-slate-950/40 font-sans">
+                        <td className="px-3 py-3">
+                          <div className="font-extrabold text-slate-100">{p.name}</div>
+                          <span className="text-[9.5px] text-slate-500 font-mono">{p.code} • {p.type === 'furniture' ? 'Nội thất gỗ An Cường' : 'Xây dựng thô/Cơ khí sắt'}</span>
+                        </td>
+                        <td className="px-3 py-3 text-right font-mono font-bold text-slate-300">{p.contractValue.toLocaleString('vi-VN')} đ</td>
+                        <td className="px-3 py-3 text-right font-mono text-emerald-400">+{recsSum.toLocaleString('vi-VN')} đ</td>
+                        <td className="px-3 py-3 text-right font-mono text-rose-500">-{paysSum.toLocaleString('vi-VN')} đ</td>
+                        <td className={`px-3 py-3 text-right font-mono font-black ${marginValue >= 0 ? 'text-sky-450 bg-sky-500/5' : 'text-red-500 bg-red-500/5'}`}>
+                          {marginValue.toLocaleString('vi-VN')} đ
+                          <span className="block text-[8.5px] font-normal text-slate-400 mt-0.5">Biên: {marginPercent}%</span>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          {marginPercent > 35 ? (
+                            <span className="bg-emerald-550/10 text-emerald-400 text-[8.5px] px-1.5 py-0.5 rounded border border-emerald-500/20 uppercase font-sans font-bold">Lợi nhuận Kịch Khung</span>
+                          ) : marginPercent >= 0 ? (
+                            <span className="bg-slate-800 text-slate-400 text-[8.5px] px-1.5 py-0.5 rounded uppercase font-sans">Bảo toàn vốn mộc</span>
+                          ) : (
+                            <span className="bg-rose-500/10 text-rose-450 text-[8.5px] px-1.5 py-0.5 rounded border border-rose-500/20 uppercase font-sans font-extrabold animate-pulse">Cảnh báo Vượt chi</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Báo cáo 2: Tổng hợp Mảng */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-md">
+            <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block border-b border-slate-850 pb-2">Báo cáo cân đối hiệu số theo Mảng phân mảng kinh doanh ERP</span>
+
+            {(() => {
+              const mFurniture = projects.filter(p => p.type === 'furniture');
+              const mConstruction = projects.filter(p => p.type === 'construction');
+              const mMechanical = projects.filter(p => p.type === 'mechanical');
+
+              const getSectorStats = (projs: Project[]) => {
+                const ids = projs.map(p => p.id);
+                const recSum = receipts.filter(r => r.projectId && ids.includes(r.projectId)).reduce((s, r) => s + r.amount, 0);
+                const paySum = payments.filter(pay => pay.projectId && ids.includes(pay.projectId) && pay.status === 'approved').reduce((s, pay) => s + pay.amount, 0);
+                return { recSum, paySum, profit: recSum - paySum };
+              };
+
+              const statsFurniture = getSectorStats(mFurniture);
+              const statsConstruction = getSectorStats(mConstruction);
+              const statsMechanical = getSectorStats(mMechanical);
+
+              const totalSectorProfits = Math.max(statsFurniture.profit + statsConstruction.profit + statsMechanical.profit, 1);
+
+              const percFurn = Math.max(Math.round((statsFurniture.profit / totalSectorProfits) * 100), 0);
+              const percConst = Math.max(Math.round((statsConstruction.profit / totalSectorProfits) * 100), 0);
+              const percMech = Math.max(Math.round((statsMechanical.profit / totalSectorProfits) * 100), 0);
+
+              return (
+                <div className="space-y-6">
+                  {/* Grid representation */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-4 bg-amber-950/10 border border-amber-900/30 rounded-xl space-y-1.5">
+                      <span className="text-amber-400 text-[10px] font-bold uppercase block tracking-wider">📦 THỢ MỘC & GỖ NỘI THẤT (MDF AN CƯỜNG)</span>
+                      <p className="text-[11px] text-slate-400">Doanh thu: <strong className="text-slate-200">{statsFurniture.recSum.toLocaleString('vi-VN')} đ</strong></p>
+                      <p className="text-[11px] text-slate-400">Đã chi mâm thợ: <strong className="text-slate-200">{statsFurniture.paySum.toLocaleString('vi-VN')} đ</strong></p>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between text-xs font-bold text-amber-400">
+                        <span>Lợi nhuận mảng gỗ:</span>
+                        <span>{statsFurniture.profit.toLocaleString('vi-VN')} đ ({percFurn}%)</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-indigo-950/10 border border-indigo-900/30 rounded-xl space-y-1.5">
+                      <span className="text-indigo-400 text-[10px] font-bold uppercase block tracking-wider">🏗️ KIẾN TRÚC & XÂY DỰNG THÔ BIỆT THỰ</span>
+                      <p className="text-[11px] text-slate-400">Doanh thu: <strong className="text-slate-200">{statsConstruction.recSum.toLocaleString('vi-VN')} đ</strong></p>
+                      <p className="text-[11px] text-slate-400">Đã chi thầu nề: <strong className="text-slate-200">{statsConstruction.paySum.toLocaleString('vi-VN')} đ</strong></p>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between text-xs font-bold text-indigo-400">
+                        <span>Lợi nhuận mảng thô:</span>
+                        <span>{statsConstruction.profit.toLocaleString('vi-VN')} đ ({percConst}%)</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-pink-955/10 border border-pink-905/30 rounded-xl space-y-1.5">
+                      <span className="text-pink-450 text-[10px] font-bold uppercase block tracking-wider">⚙️ KHUNG SẮT TIỀN CHẾ & GIA CÔNG CƠ KHÍ</span>
+                      <p className="text-[11px] text-slate-400">Doanh thu: <strong className="text-slate-200">{statsMechanical.recSum.toLocaleString('vi-VN')} đ</strong></p>
+                      <p className="text-[11px] text-slate-400">Đã chi thép hộp: <strong className="text-slate-200">{statsMechanical.paySum.toLocaleString('vi-VN')} đ</strong></p>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between text-xs font-bold text-pink-400">
+                        <span>Lợi nhuận cơ khí:</span>
+                        <span>{statsMechanical.profit.toLocaleString('vi-VN')} đ ({percMech}%)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Visual gauge bar matching percentages */}
+                  <div className="p-5 bg-slate-950 border border-slate-800 rounded-xl space-y-4">
+                    <span className="font-bold text-white text-[11px] block uppercase tracking-wide text-orange-400">📊 Tỷ lệ đóng góp lợi nhuận sạch của 3 mảng kinh doanh:</span>
+
+                    <div className="w-full bg-slate-950 rounded-full h-5 overflow-hidden flex font-mono text-[9px] font-bold text-white leading-5 text-center">
+                      {percFurn > 0 && <div className="bg-amber-600 h-full" style={{ width: `${percFurn}%` }}>Gỗ: {percFurn}%</div>}
+                      {percConst > 0 && <div className="bg-indigo-600 h-full" style={{ width: `${percConst}%` }}>Xây dựng: {percConst}%</div>}
+                      {percMech > 0 && <div className="bg-pink-600 h-full" style={{ width: `${percMech}%` }}>Cơ khí: {percMech}%</div>}
+                    </div>
+
+                    <div className="grid grid-cols-3 text-center text-[10px] text-slate-400 pt-2">
+                      <div className="flex items-center justify-center gap-1.5"><div className="w-2.5 h-2.5 bg-amber-600 rounded"></div> Cốt gỗ MDF và tủ mâm thợ</div>
+                      <div className="flex items-center justify-center gap-1.5"><div className="w-2.5 h-2.5 bg-indigo-600 rounded"></div> Xây thô móng gạch cốp pha</div>
+                      <div className="flex items-center justify-center gap-1.5"><div className="w-2.5 h-2.5 bg-pink-600 rounded"></div> Hàn sườn kẽm sườn hộp</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
