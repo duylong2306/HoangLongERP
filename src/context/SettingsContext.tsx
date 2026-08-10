@@ -279,6 +279,26 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setHrmConfig(prev => ({ ...prev, ...updates }));
   }, []);
 
+  // ── Lắng nghe realtime: refresh in-memory cache phân quyền (role groups + approval config) ──
+  useEffect(() => {
+    const handleRoleGroupsUpdated = () => {
+      dbService.hrmRoleGroups.list()
+        .then(groups => { if (groups && groups.length > 0) setRoleGroupsCache(groups); })
+        .catch(err => console.warn('SettingsContext: realtime refresh role groups failed:', err));
+    };
+    const handleApprovalConfigUpdated = () => {
+      syncApprovalConfigFromDb()
+        .then(configs => { if (configs && configs.length > 0) setApprovalConfigCache(configs); })
+        .catch(err => console.warn('SettingsContext: realtime refresh approval config failed:', err));
+    };
+    window.addEventListener('hl-hrm-role-groups-updated', handleRoleGroupsUpdated);
+    window.addEventListener('hl-hrm-approval-config-updated', handleApprovalConfigUpdated);
+    return () => {
+      window.removeEventListener('hl-hrm-role-groups-updated', handleRoleGroupsUpdated);
+      window.removeEventListener('hl-hrm-approval-config-updated', handleApprovalConfigUpdated);
+    };
+  }, []);
+
   // ── Computed accent classes (reactive) ──
   const accentClasses = useMemo(() => getAccentClasses(displaySettings.primaryAccent), [displaySettings.primaryAccent]);
 

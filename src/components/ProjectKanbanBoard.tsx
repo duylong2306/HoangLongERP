@@ -23,7 +23,7 @@ import {
 // ../types                    → Các định nghĩa TypeScript: Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote
 // ../lib/kanbanLogic          → getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS
 import TaskDetailModal from './TaskDetailModal';
-import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
+import { can as canProjectAction, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
 import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
@@ -289,6 +289,8 @@ export default function ProjectKanbanBoard({
 
   // 1. Column configuration initialized in LocalStorage or defaults
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
+  // Force re-render khi phân quyền dự án đổi từ thiết bị khác (realtime)
+  const [forcePermVersion, setForcePermVersion] = useState(0);
   const [archivedQuotesList, setArchivedQuotesList] = useState<ArchivedQuote[]>([]);
   const [subcontractorContracts, setSubcontractorContracts] = useState<ArchivedQuote[]>([]);
 
@@ -358,20 +360,46 @@ export default function ProjectKanbanBoard({
     };
   }, [projects]);
 
-  // Load columns từ Supabase khi sector thay đổi
+  // Load columns từ Supabase khi sector thay đổi + lắng nghe realtime
   useEffect(() => {
     let active = true;
-    dbService.kanbanColumns.get(sector).then(data => {
-      if (!active) return;
-      if (data && data.columns && data.columns.length > 0) {
-        setColumns(data.columns);
-        setColumnWidth(data.columnWidth);
-      } else {
-        setColumns(getDefaultColumns());
-      }
-    }).catch(() => { if (active) setColumns(getDefaultColumns()); });
-    return () => { active = false; };
+    const fetchColumns = () => {
+      dbService.kanbanColumns.get(sector).then(data => {
+        if (!active) return;
+        if (data && data.columns && data.columns.length > 0) {
+          setColumns(data.columns);
+          setColumnWidth(data.columnWidth);
+        } else {
+          setColumns(getDefaultColumns());
+        }
+      }).catch(() => { if (active) setColumns(getDefaultColumns()); });
+    };
+    fetchColumns();
+
+    // Lắng nghe realtime khi cột thay đổi từ trình duyệt khác
+    const handleColumnsRealtime = () => fetchColumns();
+    window.addEventListener('hl-kanban-columns-updated', handleColumnsRealtime);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-kanban-columns-updated', handleColumnsRealtime);
+    };
   }, [sector]);
+
+  // Lắng nghe realtime: refresh ma trận phân quyền dự án từ thiết bị khác
+  useEffect(() => {
+    let active = true;
+    const handleProjectPermissionsUpdated = async () => {
+      if (!active) return;
+      await syncProjectPermissionsFromDb();
+      // force re-render để can()/loadProjectPermissions() tính lại
+      setForcePermVersion(v => v + 1);
+    };
+    window.addEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    };
+  }, []);
 
   // ===========================================================================
   // saveColumns() - Lưu mảng columns vào state + Supabase

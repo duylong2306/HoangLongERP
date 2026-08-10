@@ -555,7 +555,7 @@ export default function FinanceManagement({
   // Custom persistent states for other accounts payable (Nhà Cung Cấp, Khác)
   const [customLiabilities, setCustomLiabilities] = useState<Liability[]>([]);
 
-  // Load data từ Supabase khi mount
+  // Load data từ Supabase khi mount + lắng nghe realtime
   useEffect(() => {
     let active = true;
     const fetchLiabilities = async () => {
@@ -567,7 +567,14 @@ export default function FinanceManagement({
       }
     };
     fetchLiabilities();
-    return () => { active = false; };
+
+    // Lắng nghe realtime khi có thay đổi từ trình duyệt khác
+    const handleLiabilitiesRealtime = () => fetchLiabilities();
+    window.addEventListener('hl-accounting-liabilities-updated', handleLiabilitiesRealtime);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-accounting-liabilities-updated', handleLiabilitiesRealtime);
+    };
   }, []);
 
   // Sync lên Supabase khi data thay đổi (skip lần đầu mount)
@@ -1541,11 +1548,23 @@ export default function FinanceManagement({
   const [formMatPrice, setFormMatPrice] = useState<number>(350000);
   const [formMatLocation, setFormMatLocation] = useState('Kho lớn xưởng mộc');
 
-  // Load hợp đồng thầu phụ từ Supabase
+  // Load hợp đồng thầu phụ từ Supabase + lắng nghe realtime
   useEffect(() => {
-    dbService.accountingSubContracts.list()
-      .then(list => { if (Array.isArray(list) && list.length > 0) setSubContracts(list); })
-      .catch(err => console.warn('Lỗi tải hợp đồng thầu phụ từ Supabase:', err));
+    let active = true;
+    const fetchSubContracts = () => {
+      dbService.accountingSubContracts.list()
+        .then(list => { if (active && Array.isArray(list) && list.length > 0) setSubContracts(list); })
+        .catch(err => console.warn('Lỗi tải hợp đồng thầu phụ từ Supabase:', err));
+    };
+    fetchSubContracts();
+
+    // Lắng nghe realtime khi có thay đổi từ trình duyệt khác
+    const handleSubContractsRealtime = () => fetchSubContracts();
+    window.addEventListener('hl-accounting-sub-contracts-updated', handleSubContractsRealtime);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-accounting-sub-contracts-updated', handleSubContractsRealtime);
+    };
   }, []);
 
   useEffect(() => {

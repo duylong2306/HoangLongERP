@@ -2,7 +2,7 @@
 import { Project, Customer, Employee, ProjectType, ProjectStatus, Receipt, Payment, ProjectDoc, ProjectDocCustomField } from '../types';
 import { Plus, Search, Eye, Filter, Calendar, TrendingUp, DollarSign, ArrowRight, FileText, Check, Trash2, FolderOpen, Settings, AlertTriangle, X, Users } from 'lucide-react';
 import { useNotification } from '../context';
-import { can, loadProjectPermissions } from './hr/hrProjectPermissions';
+import { can, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
 
 interface ProjectManagementProps {
   projects: Project[];
@@ -48,6 +48,7 @@ export default function ProjectManagement({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [forcePermVersion, setForcePermVersion] = useState(0);
   
   // Trạng thái dự án đang chọn để xem Chi tiết sâu
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projects[0]?.id || null);
@@ -56,6 +57,22 @@ export default function ProjectManagement({
   useEffect(() => {
     setIsConfirmingDelete(false);
   }, [selectedProjectId]);
+
+  // Lắng nghe realtime: refresh ma trận phân quyền dự án từ thiết bị khác
+  useEffect(() => {
+    let active = true;
+    const handleProjectPermissionsUpdated = async () => {
+      if (!active) return;
+      await syncProjectPermissionsFromDb();
+      // force re-render để can()/loadProjectPermissions() tính lại
+      setForcePermVersion(v => v + 1);
+    };
+    window.addEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    };
+  }, []);
 
   // Form dự án mới
   const [showAddForm, setShowAddForm] = useState(false);

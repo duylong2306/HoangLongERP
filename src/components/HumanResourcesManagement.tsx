@@ -1308,6 +1308,84 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     return () => window.removeEventListener('hl-hrm-leaves-updated', handleLeavesUpdated);
   }, []);
 
+  // ─── REALTIME LISTENER: holidays / trips / payroll / leave_coefficients / salary_scales / performance_criteria ───
+  // Các bảng này hiển thị trong tab Nhân sự đang mở → refetch live khi user khác sửa.
+  useEffect(() => {
+    const handleHolidaysUpdated = async () => {
+      try {
+        const d = await dbService.hrmHolidays.list();
+        if (d && d.length > 0) setHolidays(d);
+      } catch (e) { console.error('Realtime holidays sync error:', e); }
+    };
+    window.addEventListener('hl-hrm-holidays-updated', handleHolidaysUpdated);
+    return () => window.removeEventListener('hl-hrm-holidays-updated', handleHolidaysUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleTripsUpdated = async () => {
+      try {
+        const d = await dbService.hrmTrips.list();
+        if (d && d.length > 0) setTrips(d);
+      } catch (e) { console.error('Realtime trips sync error:', e); }
+    };
+    window.addEventListener('hl-hrm-trips-updated', handleTripsUpdated);
+    return () => window.removeEventListener('hl-hrm-trips-updated', handleTripsUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handlePayrollUpdated = async () => {
+      try {
+        const d = await dbService.hrmPayrollRecords.list();
+        if (d && d.length > 0) setPayroll(d);
+      } catch (e) { console.error('Realtime payroll sync error:', e); }
+    };
+    window.addEventListener('hl-hrm-payroll-records-updated', handlePayrollUpdated);
+    return () => window.removeEventListener('hl-hrm-payroll-records-updated', handlePayrollUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleLeaveCoefficientsUpdated = async () => {
+      try {
+        const d = await dbService.hrmLeaveCoefficients.list();
+        if (d && d.length > 0) setLeaveCoefficients(d);
+      } catch (e) { console.error('Realtime leave-coefficients sync error:', e); }
+    };
+    window.addEventListener('hl-hrm-leave-coefficients-updated', handleLeaveCoefficientsUpdated);
+    return () => window.removeEventListener('hl-hrm-leave-coefficients-updated', handleLeaveCoefficientsUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleSalaryScalesUpdated = async () => {
+      try {
+        const d = await dbService.hrmSalaryScales.list();
+        if (d && d.length > 0) setSalaryScales(d);
+      } catch (e) { console.error('Realtime salary-scales sync error:', e); }
+    };
+    window.addEventListener('hl-hrm-salary-scales-updated', handleSalaryScalesUpdated);
+    return () => window.removeEventListener('hl-hrm-salary-scales-updated', handleSalaryScalesUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleCriteriaUpdated = async () => {
+      try {
+        isSyncingCriteriaFromCloud.current = true;
+        const d = await dbService.hrmPerformanceCriteria.list();
+        if (d && d.length > 0) {
+          const parsed = d.map((item: any) => ({
+            ...item,
+            criteria: typeof item.criteria === 'string' ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })() : (Array.isArray(item.criteria) ? item.criteria : []),
+          }));
+          setDepartmentCriteria(parsed);
+        }
+      } catch (e) { console.error('Realtime performance-criteria sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingCriteriaFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-performance-criteria-updated', handleCriteriaUpdated);
+    return () => window.removeEventListener('hl-hrm-performance-criteria-updated', handleCriteriaUpdated);
+  }, []);
+
   useEffect(() => {
     if (payroll?.length) payroll.forEach(p => dbService.hrmPayrollRecords.save(p).catch(() => {}));
   }, [payroll]);

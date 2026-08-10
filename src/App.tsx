@@ -1374,12 +1374,22 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return () => window.removeEventListener('hl-subcontractor-advances-updated', handleAdvancesUpdated);
   }, []);
 
-  // ─── Supabase Realtime: lắng nghe thay đổi 17 bảng (primary sync, polling chỉ là backup) ───
+  // ─── Supabase Realtime: lắng nghe thay đổi bảng (primary sync, polling chỉ là backup) ───
+  // G2: nếu client chưa sẵn sàng lúc mount (env rỗng + localStorage trống, user cấu hình
+  // Supabase trong cùng phiên) → chờ event hl-supabase-client-ready rồi re-run effect.
+  // Khi client ĐƯỢC tạo MỚI (initializeSupabase chạy lại), channel cũ gắn với instance cũ
+  // sẽ chết → phải resubscribe. Dep [realtimeRetry] đảm bảo cleanup channel cũ trước.
+  const [realtimeRetry, setRealtimeRetry] = useState(0);
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) {
-      console.warn('[Realtime] Supabase not available, skipping realtime subscription');
-      return;
+      console.warn('[Realtime] Supabase not available yet, waiting for hl-supabase-client-ready');
+      const onReady = () => {
+        console.log('[Realtime] Client ready — (re)subscribing');
+        setRealtimeRetry(n => n + 1);
+      };
+      window.addEventListener('hl-supabase-client-ready', onReady);
+      return () => window.removeEventListener('hl-supabase-client-ready', onReady);
     }
 
     const fetchProjects = async (payload?: any) => {
@@ -1478,12 +1488,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       } catch {}
     };
 
-    // ─── Handlers cho bảng còn thiếu (sales_orders, purchase_orders, HRM, accounting, etc.) ──
-    const fireSalesOrdersEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-sales-orders-updated')); } catch {}
+    // ─── Handlers cho bảng còn thiếu (HRM, accounting, etc.) ──
+    // Nhóm 1: sales_orders / purchase_orders — App sở hữu state → refetch trực tiếp
+    // (không dispatch event vì không component nào khác cần; giữ sync live giữa 2 tab).
+    const fetchSalesOrders = async (payload?: any) => {
+      try {
+        console.log('[Realtime] 🔔 sales_orders event:', payload ? { event: payload.eventType } : '(manual)');
+        setSalesOrders((await dbService.salesOrders.list()).map(normalizeOrderItems));
+      } catch (e) { console.error('Realtime sales_orders sync error:', e); }
     };
-    const firePurchaseOrdersEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated')); } catch {}
+    const fetchPurchaseOrders = async (payload?: any) => {
+      try {
+        console.log('[Realtime] 🔔 purchase_orders event:', payload ? { event: payload.eventType } : '(manual)');
+        setPurchaseOrders((await dbService.purchaseOrders.list()).map(normalizeOrderItems));
+      } catch (e) { console.error('Realtime purchase_orders sync error:', e); }
     };
     const fireHrmApprovalConfigEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-hrm-approval-config-updated')); } catch {}
@@ -1512,32 +1530,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireHrmSalarySalesEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-hrm-salary-scales-updated')); } catch {}
     };
-    const fireDisplaySettingsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-display-settings-updated')); } catch {}
-    };
-    const fireDocumentTemplatesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-document-templates-updated')); } catch {}
-    };
-    const fireQuotationConfigsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-quotation-configs-updated')); } catch {}
-    };
     const fireKanbanColumnsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-kanban-columns-updated')); } catch {}
     };
     const fireProjectPermissionsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-project-permissions-updated')); } catch {}
-    };
-    const fireProjectPermissionOverridesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-project-permission-overrides-updated')); } catch {}
-    };
-    const fireProductPricesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-product-prices-updated')); } catch {}
-    };
-    const fireProductMaterialsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-product-materials-updated')); } catch {}
-    };
-    const fireAccountingProductCatalogEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-accounting-product-catalog-updated')); } catch {}
     };
     const fireAccountingLiabilitiesEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated')); } catch {}
@@ -1548,29 +1545,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireAccountingSubContractsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-accounting-sub-contracts-updated')); } catch {}
     };
-    const fireSubcontractorCatalogEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-subcontractor-catalog-updated')); } catch {}
-    };
-    const fireConstructionNormsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-construction-norms-updated')); } catch {}
-    };
-    const fireTravelNormsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-travel-norms-updated')); } catch {}
-    };
-    const fireChatMessagesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-chat-messages-updated')); } catch {}
-    };
-    const fireConversationsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-conversations-updated')); } catch {}
-    };
     const fireHrmLeaveCoefficientsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-hrm-leave-coefficients-updated')); } catch {}
-    };
-    const fireHrmDefaultSnapshotsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-default-snapshots-updated')); } catch {}
-    };
-    const fireFcmTokensEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-fcm-tokens-updated')); } catch {}
     };
 
     console.log('[Realtime] Creating channel...');
@@ -1598,8 +1574,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'business_profile' }, fireConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fireConfigEvent)
       // ── Orders (critical - realtime for instant updates) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' }, fireSalesOrdersEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, firePurchaseOrdersEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' }, fetchSalesOrders)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, fetchPurchaseOrders)
       // ── HRM Configuration & Payroll ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_approval_config' }, fireHrmApprovalConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
@@ -1611,34 +1587,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_travel_expenses' }, fireHrmTravelExpensesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_performance_criteria' }, fireHrmPerformanceCriteriaEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_salary_scales' }, fireHrmSalarySalesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_default_snapshots' }, fireHrmDefaultSnapshotsEvent)
-      // ── Configuration ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_settings' }, fireDisplaySettingsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'document_templates' }, fireDocumentTemplatesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotation_configs' }, fireQuotationConfigsEvent)
+      // ── Configuration (giữ subscription: component đang mở lắng nghe để refresh live) ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'kanban_columns' }, fireKanbanColumnsEvent)
       // ── Permissions ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_permissions' }, fireProjectPermissionsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_permission_overrides' }, fireProjectPermissionOverridesEvent)
-      // ── Products & Accounting ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_prices' }, fireProductPricesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_materials' }, fireProductMaterialsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_product_catalog' }, fireAccountingProductCatalogEvent)
+      // ── Accounting ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts' }, fireAccountingSubContractsEvent)
-      // ── Warehouse ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_catalog_items' }, fireSubcontractorCatalogEvent)
-      // ── Norms ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'construction_norms' }, fireConstructionNormsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'travel_norms' }, fireTravelNormsEvent)
-      // ── Communication ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, fireChatMessagesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, fireConversationsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'fcm_tokens' }, fireFcmTokensEvent)
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Channel ready. Listening for 45+ tables');
+          console.log('[Realtime] ✅ Channel ready. Listening for 30+ tables');
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.error('[Realtime] ❌ Connection issue:', status, err);
         } else if (status === 'CLOSED') {
@@ -1650,7 +1609,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       console.log('[Realtime] Cleaning up channel...');
       sb.removeChannel(channel);
     };
-  }, []);
+  }, [realtimeRetry]);
 
   // ─── Outbox chấm công: đồng bộ TOÀN CỤC (cấp App) ─────────────────────────
   // Quan trọng: logic outbox trước đây nằm trong DashboardOverview → CHỈ chạy khi
