@@ -353,8 +353,9 @@ export default function MessagesView({
       window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: re.id } }));
     } else if (re.type === 'project') {
       openProjectChat(re.id);
-    } else if (re.type === 'leave' || re.type === 'payment' || re.type === 'advance') {
-      // Xét duyệt → mở bảng "Công việc phải duyệt" trong tab Công việc
+    } else if (re.type === 'leave' || re.type === 'payment' || re.type === 'advance' || re.type === 'travel_expense') {
+      // Xét duyệt → mở bảng "Công việc phải duyệt" trong tab Công việc;
+      // travel_expense → mở tab Nhân Sự → Công Tác Phí (xử lý ở App.tsx).
       window.dispatchEvent(new CustomEvent('hl-open-approval', { detail: { kind: re.type, id: re.id } }));
     } else if (re.type === 'mission') {
       // Mở task chứa nhiệm vụ (tra qua props tasks)

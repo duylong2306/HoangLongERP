@@ -20,9 +20,10 @@ interface TravelAllowanceNorm {
   unitPrice: number;
   notes: string;
 }
-import { useNotification, isUserInRoleGroup } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
 import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
+import { CTPStatus } from '../lib/travelExpenseStatus';
 import UserAvatar from './UserAvatar';
 
 // Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
@@ -1642,7 +1643,7 @@ export default function TaskDetailModal({
   // thuộc vào bước "Xác Nhận Hoàn Thành" (vốn dễ bị mất do task reload từ
   // Supabase làm rỗng mảng missions giữa lúc ghi nhận và lúc hoàn thành).
   // `ta.rowId` (UUID) đảm bảo upsert lặp lại an toàn, không tạo dòng trùng.
-  const persistTravelExpense = (ta: any, missionName: string) => {
+  const persistTravelExpense = (ta: any, missionName: string, status: CTPStatus = 'pending') => {
     if (!ta) return;
     const project = projects.find(p => p.id === selectedTask.projectId);
     const customer = customers?.find(c => c.id === project?.customerId);
@@ -1657,13 +1658,17 @@ export default function TaskDetailModal({
       id: ta.id || `THCTP-${Date.now()}`,
       rowId,
       code: ta.code || `THCTP-${ta.id || Date.now()}`,
-      status: 'pending',
+      status,
       completedDate: new Date().toLocaleDateString('vi-VN'),
       projectName: project?.name || 'Chưa rõ',
       customerName: customer?.name || 'Khách hàng lẻ',
       taskName: selectedTask.name,
       missionName,
       employeeName: emp?.name || 'Chưa gán',
+      // Người khởi tạo CTP (người phụ trách nhiệm vụ thêm CTP) — dùng để lọc
+      // "Công Tác Phí Của Tôi" trong menu Tổng Quan.
+      creatorId: currentUser.id,
+      creatorName: currentUser.name,
       content: ta.content || 'Công tác phí',
       amount: ta.amount || 0,
       createdAt: new Date().toISOString(),
@@ -4096,8 +4101,8 @@ export default function TaskDetailModal({
                                 </span>
                               </div>
 
-                              {/* CTP cho phép chỉnh sửa ngay cả khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
-                              {hasMissionPermission && (
+                              {/* CTP bị khóa khi nhiệm vụ đã Hoàn thành — không xóa/đổi được (theo yêu cầu) */}
+                              {hasMissionPermission && !isMissionCompleted && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -4117,6 +4122,14 @@ export default function TaskDetailModal({
                                       return next;
                                     });
                                     onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                    // ─── XÓA ĐỒNG BỘ KHỎI BẢNG hrm_travel_expenses ───
+                                    // Trước đây chỉ xóa khỏi missions/local, dòng CTP vẫn nằm lại
+                                    // trong bảng tổng hợp → bảng Công tác phí bị nhân bản (pending
+                                    // mồ côi hiển thị mãi). Xóa cả rowId tương ứng để khỏi dư thừa.
+                                    if (item.rowId) {
+                                      dbService.hrmTravelExpenses.delete(item.rowId)
+                                        .catch((e) => console.warn('[TravelExpense] ⚠️ Xóa Supabase CTP thất bại:', e?.message || e));
+                                    }
                                   }}
                                   className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-150/80 rounded transition cursor-pointer shrink-0"
                                   title="Xóa công tác phí"
@@ -4131,14 +4144,11 @@ export default function TaskDetailModal({
                     )}
                   </div>
 
-                  {/* Form Ghi nhận CTP mới — cho phép cập nhật ngay cả khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
-                  {hasMissionPermission && (
+                  {/* Form Ghi nhận CTP mới — KHÓA khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
+                  {hasMissionPermission && !isMissionCompleted && (
                     <div className="mt-3.5 pt-3.5 border-t border-slate-150 space-y-3 bg-white p-1 rounded-xl">
                       <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-slate-600">
                         <Plus className="w-3.5 h-3.5 text-emerald-500" /> Đăng ký công tác phí chuyến đi:
-                        {isMissionCompleted && (
-                          <span className="ml-1 normal-case text-[9px] text-emerald-600 font-semibold">(Nhiệm vụ đã hoàn thành — vẫn có thể bổ sung)</span>
-                        )}
                       </div>
 
                       {mission.memberIds.length === 0 ? (
@@ -4244,9 +4254,28 @@ export default function TaskDetailModal({
                                   return next;
                                 });
                                 // ─── LƯU TỨC THÌ LÊN SUPABASE (bảng hrm_travel_expenses) ───
-                                // Đảm bảo dữ liệu CTP đã nhập được lưu lên Supabase ngay lập tức,
-                                // không chờ đến bước "Xác Nhận Hoàn Thành" (tránh mất do task reload).
-                                persistTravelExpense(newAllowance, mission.name);
+                                // CTP mới luôn ở trạng thái 'pending' (Chờ duyệt) — người được cấu
+                                // hình xét duyệt Công Tác Phí sẽ duyệt/từ chối sau đó, kể cả khi
+                                // nhiệm vụ đã hoàn thành (theo quy trình xét duyệt mới).
+                                persistTravelExpense(newAllowance, mission.name, 'pending');
+
+                                // 📩 Gửi tin nhắn CÁ NHÂN cho người xét duyệt CTP (cấu hình trong
+                                // Phân Quyền → Quyền Phê Duyệt → Công Tác Phí). Best-effort — không
+                                // chặn luồng nếu chưa cấu hình người duyệt hoặc gửi lỗi.
+                                const ctpApprover = getConfiguredApprover('travel_expense');
+                                if (ctpApprover && ctpApprover.id !== currentUser.id) {
+                                  const creatorEmp = employees.find(e => e.id === finalMemId);
+                                  const creatorName = creatorEmp?.name || currentUser.name;
+                                  sendApprovalDirectMessage({
+                                    senderId: currentUser.id,
+                                    senderName: currentUser.name,
+                                    senderRole: currentUser.role,
+                                    recipientId: ctpApprover.id,
+                                    recipientName: ctpApprover.name,
+                                    content: `🚗 ${currentUser.name} vừa đăng ký CÔNG TÁC PHÍ "${selectedNorm.content}" cho ${creatorName} (${Number(selectedNorm.unitPrice).toLocaleString('vi-VN')} đ) trong nhiệm vụ "${mission.name}". Vui lòng xét duyệt.`,
+                                    relatedEntity: { type: 'travel_expense', id: newAllowance.rowId },
+                                  }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin cho người duyệt thất bại:', e?.message || e));
+                                }
 
                                 // Reset form states
                                 setAllowanceNormId('');
@@ -4547,13 +4576,19 @@ export default function TaskDetailModal({
                             id: uniqueId,
                             rowId,
                             code,
-                            status: 'completed',
+                            // Giữ nguyên trạng thái 'pending' (Chờ duyệt) khi hoàn thành nhiệm vụ —
+                            // CTP vẫn phải chờ người xét duyệt Công Tác Phí duyệt/từ chối.
+                            status: 'pending',
                             completedDate,
                             projectName,
                             customerName,
                             taskName,
                             missionName,
                             employeeName,
+                            // Giữ nguyên thông tin người khởi tạo (đã lưu lúc "Thêm CTP") —
+                            // tránh upsert ghi đè làm mất creatorId/creatorName.
+                            creatorId: ta.creatorId || currentUser.id,
+                            creatorName: ta.creatorName || currentUser.name,
                             content,
                             amount,
                             createdAt: new Date().toISOString()

@@ -192,7 +192,7 @@ export interface HrmRoleGroup {
 
 export interface HrmApprovalConfig {
   id: string;
-  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance';
+  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense';
   documentTypeLabel: string;
   approverId: string;
   approverName: string;
@@ -322,6 +322,7 @@ export interface SubTaskMission {
     unitPrice: number;
     amount: number;
     notes?: string;
+    rowId?: string; // UUID khóa chính trong bảng hrm_travel_expenses (upsert idempotent)
   }[];
 }
 
@@ -902,8 +903,8 @@ export interface ChatMessage {
     emoji: string;
     users: string[];      // Danh sách userId đã thả emoji này
   }[];
-  relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission, leave, payment, advance)
-    type: 'task' | 'project' | 'mission' | 'leave' | 'payment' | 'advance';
+  relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission, leave, payment, advance, travel_expense)
+    type: 'task' | 'project' | 'mission' | 'leave' | 'payment' | 'advance' | 'travel_expense';
     id: string;
   };
 }

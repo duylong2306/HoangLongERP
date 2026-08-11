@@ -9,7 +9,7 @@ import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
-import { useNotification, isUserInRoleGroup } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 
 interface TaskManagementProps {
@@ -178,12 +178,15 @@ export default function TaskManagement({
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  // Công Tác Phí (hrm_travel_expenses) chờ duyệt — hiển thị trong cột Phòng Kế toán
+  const [travelExpenses, setTravelExpenses] = useState<any[]>([]);
 
   // Tải leaves & payments từ Supabase ngay khi mount (để badge "Công việc phải duyệt"
   // hiển thị đúng số ngay từ đầu, không phải chờ mở tab), và tải lại khi chuyển tab.
   React.useEffect(() => {
     dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
     dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
+    dbService.hrmTravelExpenses.list().then(data => setTravelExpenses(data || [])).catch(console.error);
   }, [taskScope]);
 
   const handleApproveLeave = async (id: string, status: 'approved' | 'rejected') => {
@@ -428,6 +431,50 @@ export default function TaskManagement({
     } catch (err) {
       addToast({ title: '❌ Lỗi', message: `Thất bại: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
     }
+  };
+
+  // Xử lý duyệt CÔNG TÁC PHÍ (cột Phòng Kế toán) — đồng bộ với handler trong
+  // HumanResourcesManagement.handleApproveTravelExpense: cập nhật status, upsert
+  // Supabase, fire sự kiện làm mới toàn cục + gửi tin nhắn cá nhân trả kết quả
+  // cho NGƯỜI KHỞI TẠO (creatorId/creatorName) của công tác phí.
+  const handleApproveTravelExpense = (rowId: string, decision: 'approved' | 'rejected') => {
+    const target = travelExpenses.find((s: any) => s.rowId === rowId || s.id === rowId);
+    if (!target) return;
+
+    const updated = travelExpenses.map((s: any) =>
+      (s.rowId === rowId || s.id === rowId) ? { ...s, status: decision } : s
+    );
+    setTravelExpenses(updated);
+
+    dbService.hrmTravelExpenses.save({ ...target, status: decision }, { rowId })
+      .then(() => window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')))
+      .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu trạng thái duyệt CTP thất bại:', e?.message || e));
+
+    // 📩 Gửi tin nhắn CÁ NHÂN trả kết quả về cho NGƯỜI KHỞI TẠO công tác phí.
+    let recipientId = target.creatorId || target.employeeId || target.empId;
+    if (!recipientId) recipientId = findEmployeeByName(employees, target.employeeName)?.id || '';
+    if (currentUser?.id && recipientId && currentUser.id !== recipientId) {
+      const decisionText = decision === 'approved'
+        ? `✅ Đã duyệt công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`
+        : `❌ Đã từ chối công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`;
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId,
+        recipientName: target.employeeName || 'Người khởi tạo',
+        content: decisionText,
+        relatedEntity: { type: 'travel_expense', id: rowId },
+      }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin kết quả duyệt thất bại:', e?.message || e));
+    }
+
+    addToast({
+      title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
+      message: decision === 'approved'
+        ? `Đã duyệt công tác phí ${target.content || ''} của ${target.employeeName || ''}.`
+        : `Đã từ chối công tác phí ${target.content || ''} của ${target.employeeName || ''}.`,
+      type: decision === 'approved' ? 'success' : 'info',
+    });
   };
 
   const handleClearPendingPayments = async () => {
@@ -690,10 +737,22 @@ export default function TaskManagement({
      (a.approverName && currentUser?.name && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
      a.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
   );
+  // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê
+  // Duyệt → Công Tác Phí) hoặc thuộc nhóm Kế toán → thấy & duyệt toàn bộ.
+  const canApproveTravelExpense = React.useMemo(() => {
+    if (!currentUser?.id) return false;
+    const configured = getConfiguredApprover('travel_expense');
+    if (configured?.id === currentUser.id) return true;
+    return isUserInRoleGroup(currentUser.id, 'role_accounting');
+  }, [currentUser]);
+  const myPendingTravelExpenses = travelExpenses.filter((t: any) =>
+    t.status === 'pending' && canApproveTravelExpense
+  );
   const toReviewUncompletedCount = toReviewTasksCount
     + myPendingLeaves.length
     + myPendingPayments.length
-    + myPendingAdvances.length;
+    + myPendingAdvances.length
+    + myPendingTravelExpenses.length;
 
   // 3. Nhiệm vụ liên quan chưa hoàn thành (mission.status !== 'completed')
   const relatedUncompletedCount = tasks.reduce((count, task) =>
@@ -1401,25 +1460,29 @@ export default function TaskManagement({
                     <Trash2 className="w-3 h-3" /> Xóa bộ nhớ tạm
                   </button>
                 )}
-                {/* Count: payments + subcontractor advances pending_approval mà user có quyền duyệt (chỉ định hoặc thuộc Kế toán/Giám đốc) */}
+                {/* Count: payments + subcontractor advances + công tác phí chờ duyệt mà user có quyền duyệt */}
                 <span className="bg-emerald-955 border border-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                   {
                     myPendingPayments.length
                     +
                     myPendingAdvances.length
+                    +
+                    myPendingTravelExpenses.length
                   } chờ duyệt
                 </span>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Combine payments and subcontractor advances */}
+              {/* Combine payments, subcontractor advances và công tác phí chờ duyệt */}
               {(() => {
                 const pendingPayments = myPendingPayments;
                 const pendingAdvances = myPendingAdvances;
+                const pendingTravelExpenses = myPendingTravelExpenses;
                 const allPending = [
                   ...pendingPayments.map(p => ({ type: 'payment' as const, data: p })),
-                  ...pendingAdvances.map(a => ({ type: 'advance' as const, data: a }))
+                  ...pendingAdvances.map(a => ({ type: 'advance' as const, data: a })),
+                  ...pendingTravelExpenses.map(t => ({ type: 'travel' as const, data: t }))
                 ];
 
                 if (allPending.length === 0) {
@@ -1432,12 +1495,66 @@ export default function TaskManagement({
 
                 // Sort by date descending
                 allPending.sort((a, b) => {
-                  const dateA = a.type === 'payment' ? a.data.date : a.data.date;
-                  const dateB = b.type === 'payment' ? b.data.date : b.data.date;
+                  const dateA = a.type === 'payment' ? a.data.date : (a.data.completedDate || a.data.createdAt || '');
+                  const dateB = b.type === 'payment' ? b.data.date : (b.data.completedDate || b.data.createdAt || '');
                   return dateB.localeCompare(dateA);
                 });
 
                 return allPending.map(item => {
+                  if (item.type === 'travel') {
+                    const t = item.data;
+                    const creatorName = t.creatorName || t.employeeName || 'Nhân viên';
+                    return (
+                      <div
+                        key={t.rowId || t.id}
+                        className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
+                      >
+                        <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
+                          <span className="text-[10px] font-mono font-extrabold text-amber-400 tracking-wider bg-amber-950/50 px-1.5 py-0.5 rounded">{t.code || t.id}</span>
+                          <span className="text-[11.5px] font-mono font-black text-rose-400">
+                            {Number(t.amount || 0).toLocaleString('vi-VN')} đ
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 text-[10.5px] text-slate-400">
+                          <div className="text-slate-200">
+                            Nhân viên: <strong className="text-slate-100 text-xs font-bold leading-none">{t.employeeName}</strong>
+                          </div>
+                          <div className="font-mono text-[10px]">
+                            Ngày: <strong className="text-slate-300">{t.completedDate || t.createdAt || ''}</strong>
+                          </div>
+                          <p>Dự án: <strong className="text-slate-355">{t.projectName || 'Chưa rõ'}</strong></p>
+                          <p>Nhiệm vụ: <strong className="text-slate-355">{t.missionName || t.taskName || ''}</strong></p>
+                          <p>Người khởi tạo: <strong className="text-slate-355">{creatorName}</strong></p>
+                          <p className="text-amber-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                            <span>Công Tác Phí</span>
+                            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
+                          </p>
+
+                          <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
+                            "{t.content || 'Công tác phí'}"
+                          </div>
+                        </div>
+
+                        <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleApproveTravelExpense(t.rowId || t.id, 'rejected')}
+                            className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                          >
+                            Từ chối
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveTravelExpense(t.rowId || t.id, 'approved')}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer"
+                          >
+                            Duyệt
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
                   if (item.type === 'payment') {
                     const p = item.data;
                     return (

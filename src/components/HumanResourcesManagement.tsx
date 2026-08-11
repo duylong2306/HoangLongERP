@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
-import { sendApprovalDirectMessage } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
@@ -21,7 +22,7 @@ import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoe
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
 import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
-import TripsTab from './hr/tabs/TripsTab';
+import TripsTab, { QuickSearchFilter } from './hr/tabs/TripsTab';
 import LeavesTab from './hr/tabs/LeavesTab';
 import PayrollTab from './hr/tabs/PayrollTab';
 import PerformanceTab from './hr/tabs/PerformanceTab';
@@ -968,7 +969,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     }).catch(() => {});
   }, []);
 
-  const [travelExpensesSummary, setTravelExpensesSummary] = useState<{ id: string; employeeId?: string; empId?: string; employeeName: string; amount: number; period: string; completedDate?: string; projectName?: string; customerName?: string; taskName?: string; missionName?: string; content?: string; month?: string; fuelFee?: number; mealFee?: number; lodgeFee?: number; otherFee?: number }[]>([]);
+  const [travelExpensesSummary, setTravelExpensesSummary] = useState<{ id: string; rowId?: string; employeeId?: string; empId?: string; employeeName: string; amount: number; period: string; completedDate?: string; projectName?: string; customerName?: string; taskName?: string; missionName?: string; content?: string; month?: string; fuelFee?: number; mealFee?: number; lodgeFee?: number; otherFee?: number; status?: CTPStatus }[]>([]);
 
 
 
@@ -977,6 +978,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [selectedEmpFilter, setSelectedEmpFilter] = useState<string>('all');
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
   const [selectedYearFilter, setSelectedYearFilter] = useState<string>(() => String(new Date().getFullYear())); // Mặc định năm hiện tại
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>('all');
 
   const handleExportExcel = () => {
     const headers = [
@@ -988,6 +990,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Nhiệm Vụ',
       'Nhân Viên',
       'Nội Dung',
+      'Trạng Thái',
       'Số Tiền'
     ];
 
@@ -997,6 +1000,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const dataRows = travelExpensesSummary.filter(item => {
       // Apply filters
       if (selectedEmpFilter !== 'all' && item.employeeName !== selectedEmpFilter) return false;
+      if (selectedProjectFilter !== 'all' && item.projectName !== selectedProjectFilter) return false;
       if (item.completedDate) {
         const parts = item.completedDate.split('/');
         if (parts.length === 3) {
@@ -1027,13 +1031,14 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;">${item.missionName || ''}</td>`;
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; font-family: Arial, sans-serif; font-size: 11px;">${item.employeeName || ''}</td>`;
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;">${item.content || ''}</td>`;
+      rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;">${ctpStatusLabel(item.status as CTPStatus)}</td>`;
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; text-align: right; font-family: Arial, sans-serif; font-size: 11px;">${Number(item.amount || 0).toLocaleString('vi-VN')} đ</td>`;
       rowData += '</tr>';
     });
 
     const totalAmount = dataRows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     rowData += '<tr>';
-    rowData += `<td colspan="8" style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; text-align: right; background-color: #f4f4f5; font-family: Arial, sans-serif; font-size: 11px;">Tổng cộng:</td>`;
+    rowData += `<td colspan="9" style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; text-align: right; background-color: #f4f4f5; font-family: Arial, sans-serif; font-size: 11px;">Tổng cộng:</td>`;
     rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; text-align: right; color: #b45309; background-color: #f4f4f5; font-family: Arial, sans-serif; font-size: 11px;">${totalAmount.toLocaleString('vi-VN')} đ</td>`;
     rowData += '</tr>';
 
@@ -1059,7 +1064,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       <body>
         <h2 style="font-family: Arial, sans-serif; color: #1e3a8a;">BẢNG TỔNG HỢP CÔNG TÁC PHÍ - HOÀNG LONG GROUP</h2>
         <p style="font-family: Arial, sans-serif;">Thời gian xuất file: ${new Date().toLocaleString('vi-VN')}</p>
-        <p style="font-family: Arial, sans-serif;">Bộ lọc đang chọn: Nhân viên: <strong>${selectedEmpFilter === 'all' ? 'Tất cả nhân viên' : selectedEmpFilter}</strong> | Tháng: <strong>${selectedMonthFilter === 'all' ? 'Tất cả' : 'Tháng ' + selectedMonthFilter}</strong> | Năm: <strong>${selectedYearFilter === 'all' ? 'Tất cả' : 'Năm ' + selectedYearFilter}</strong></p>
+        <p style="font-family: Arial, sans-serif;">Bộ lọc đang chọn: Nhân viên: <strong>${selectedEmpFilter === 'all' ? 'Tất cả nhân viên' : selectedEmpFilter}</strong> | Dự án: <strong>${selectedProjectFilter === 'all' ? 'Tất cả dự án' : selectedProjectFilter}</strong> | Tháng: <strong>${selectedMonthFilter === 'all' ? 'Tất cả' : 'Tháng ' + selectedMonthFilter}</strong> | Năm: <strong>${selectedYearFilter === 'all' ? 'Tất cả' : 'Năm ' + selectedYearFilter}</strong></p>
         <table style="font-family: Arial, sans-serif; font-size: 11px; border-collapse: collapse; border: 1px solid #3f3f46;">
           ${rowData}
         </table>
@@ -1465,6 +1470,89 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     window.addEventListener('hl-hrm-travel-expenses-updated', handler);
     return () => window.removeEventListener('hl-hrm-travel-expenses-updated', handler);
   }, [loadTravelExpensesSummary]);
+
+  // ─── XÉT DUYỆT CÔNG TÁC PHÍ (nút Duyệt/Từ chối trong TripsTab) ─────────────
+  const handleApproveTravelExpense = React.useCallback((rowId: string, decision: 'approved' | 'rejected') => {
+    const target = travelExpensesSummary.find(s => s.rowId === rowId || s.id === rowId);
+    if (!target) return;
+
+    const updated = travelExpensesSummary.map(s =>
+      (s.rowId === rowId || s.id === rowId) ? { ...s, status: decision } : s
+    );
+    setTravelExpensesSummary(updated);
+
+    // Upsert lên Supabase — cập nhật trạng thái xét duyệt (status nằm trong JSONB data).
+    dbService.hrmTravelExpenses.save({ ...target, status: decision }, { rowId })
+      .then(() => {
+        // Báo cho mọi nơi (Tổng Quan, App realtime) làm mới ngay.
+        window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
+      })
+      .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu trạng thái duyệt CTP thất bại:', e?.message || e));
+
+    // 📩 Gửi tin nhắn CÁ NHÂN trả kết quả về cho NGƯỜI KHỞI TẠO công tác phí
+    // (tìm theo employeeId/empId, fallback theo employeeName).
+    let recipientId = target.employeeId || target.empId;
+    if (!recipientId) {
+      recipientId = findEmployeeByName(employees, target.employeeName)?.id || '';
+    }
+    if (currentUser?.id && recipientId && currentUser.id !== recipientId) {
+      const decisionText = decision === 'approved'
+        ? `✅ Đã duyệt công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`
+        : `❌ Đã từ chối công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`;
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId,
+        recipientName: target.employeeName || 'Người khởi tạo',
+        content: decisionText,
+        relatedEntity: { type: 'travel_expense', id: rowId },
+      }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin kết quả duyệt thất bại:', e?.message || e));
+    }
+
+    addToast({
+      title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
+      message: decision === 'approved'
+        ? `Đã duyệt công tác phí ${target.content || ''} của ${target.employeeName || ''}.`
+        : `Đã từ chối công tác phí ${target.content || ''} của ${target.employeeName || ''}.`,
+      type: decision === 'approved' ? 'success' : 'info',
+    });
+  }, [travelExpensesSummary, employees, currentUser, addToast]);
+
+  // ─── XÓA HÀNG LOẠT CÔNG TÁC PHÍ (chọn nhiều dòng trong TripsTab) ───────────
+  // Xóa trực tiếp khỏi bảng hrm_travel_expenses theo rowId (khóa chính uuid),
+  // cập nhật state + báo làm mới toàn cục cho Tổng Quan / Việc của tôi.
+  const handleDeleteTravelExpenses = React.useCallback(async (rowIds: string[]) => {
+    if (!rowIds.length) return;
+    const targets = travelExpensesSummary.filter(s => rowIds.includes(s.rowId || s.id));
+    const remaining = travelExpensesSummary.filter(s => !rowIds.includes(s.rowId || s.id));
+    setTravelExpensesSummary(remaining);
+
+    try {
+      for (const rowId of rowIds) {
+        await dbService.hrmTravelExpenses.delete(rowId).catch((e: any) =>
+          console.warn('[TravelExpense] ⚠️ Xóa CTP thất bại trên Supabase:', e?.message || e));
+      }
+      window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
+      addToast({
+        title: '🗑️ Đã xóa',
+        message: `Đã xóa ${targets.length} công tác phí đã chọn.`,
+        type: 'info',
+      });
+    } catch (err) {
+      console.error('[TravelExpense] Lỗi xóa CTP hàng loạt:', err);
+      addToast({ title: '⚠️ Lỗi', message: 'Đã xóa trên màn hình, nhưng gặp lỗi khi đồng bộ Supabase.', type: 'error' });
+    }
+  }, [travelExpensesSummary, addToast]);
+
+  // Người được cấu hình xét duyệt Công Tác Phí (Quyền Phê Duyệt → Công Tác Phí)
+  // có quyền thấy nút Duyệt/Từ chối trong TripsTab. Fallback: vai trò Kế toán.
+  const canApproveTravelExpense = React.useMemo(() => {
+    if (!currentUser?.id) return false;
+    const configured = getConfiguredApprover('travel_expense');
+    if (configured?.id === currentUser.id) return true;
+    return isUserInRoleGroup(currentUser.id, 'role_accounting');
+  }, [currentUser]);
 
   // Form states
   const [showEmpModal, setShowEmpModal] = useState(false);
@@ -3583,19 +3671,29 @@ Generated by HL ERP Cloud v2.1 (2026)
                 {activeSubTab === 'trips' && (
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
+                      <span className="text-slate-400 text-[10px] font-bold uppercase">Dự án:</span>
+                      <QuickSearchFilter
+                        value={selectedProjectFilter}
+                        onChange={setSelectedProjectFilter}
+                        options={Array.from(new Set([
+                          ...(projects || []).map((p: any) => p?.name).filter(Boolean),
+                          ...travelExpensesSummary.map((item: any) => item.projectName).filter(Boolean),
+                        ])).sort((a: any, b: any) => a.localeCompare(b, 'vi'))
+                          .map((name: any) => ({ value: name, label: name }))}
+                        placeholder="Tất cả dự án"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
                       <span className="text-slate-400 text-[10px] font-bold uppercase">Nhân viên:</span>
-                      <select
+                      <QuickSearchFilter
                         value={selectedEmpFilter}
-                        onChange={(e) => setSelectedEmpFilter(e.target.value)}
-                        className="bg-slate-900 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] outline-none font-medium focus:border-amber-500 transition-colors cursor-pointer"
-                      >
-                        <option value="all">Tất cả nhân viên</option>
-                        {Array.from(new Set(travelExpensesSummary.map(item => item.employeeName).filter(Boolean))).map((empName: any) => (
-                          <option key={empName} value={empName}>
-                            {empName}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setSelectedEmpFilter}
+                        options={Array.from(new Set(travelExpensesSummary.map((item: any) => item.employeeName).filter(Boolean)))
+                          .sort((a: any, b: any) => a.localeCompare(b, 'vi'))
+                          .map((name: any) => ({ value: name, label: name }))}
+                        placeholder="Tất cả nhân viên"
+                      />
                     </div>
 
                     <div className="flex items-center gap-1.5">
@@ -3797,8 +3895,13 @@ Generated by HL ERP Cloud v2.1 (2026)
                 setSelectedMonthFilter={setSelectedMonthFilter}
                 selectedYearFilter={selectedYearFilter}
                 setSelectedYearFilter={setSelectedYearFilter}
+                selectedProjectFilter={selectedProjectFilter}
+                setSelectedProjectFilter={setSelectedProjectFilter}
                 handleExportExcel={handleExportExcel}
                 setClearingState={setClearingState}
+                onApproveTravelExpense={handleApproveTravelExpense}
+                canApprove={canApproveTravelExpense}
+                onDeleteTravelExpenses={handleDeleteTravelExpenses}
               />
             )}
 

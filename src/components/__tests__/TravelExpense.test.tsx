@@ -8,7 +8,10 @@ vi.mock('../ConnectedToolsModal', () => ({ default: () => null }));
 vi.mock('../MissionConfigEditor', () => ({ default: () => null }));
 vi.mock('../SearchableEmployeeSelect', () => ({ default: () => null }));
 
-const chatMock = vi.hoisted(() => ({ sendGroupChatMessage: vi.fn().mockResolvedValue(null) }));
+const chatMock = vi.hoisted(() => ({
+  sendGroupChatMessage: vi.fn().mockResolvedValue(null),
+  sendApprovalDirectMessage: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('../../lib/chatStore', () => chatMock);
 vi.mock('./hr/hrTaskPermissions', () => ({
   canDoTaskAction: () => true,
@@ -20,6 +23,7 @@ vi.mock('../../context', () => ({
   isUserInRoleGroup: () => true,
   useSettings: () => ({ settings: {} }),
   getAccentClasses: () => '',
+  getConfiguredApprover: () => null, // chưa cấu hình người duyệt CTP → không gửi tin cá nhân
 }));
 
 const hrmTravelExpensesSave = vi.fn().mockResolvedValue(undefined);

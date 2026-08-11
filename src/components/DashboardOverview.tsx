@@ -12,6 +12,7 @@ import {
 } from '../lib/attendanceOutbox';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import { sendApprovalDirectMessage, findEmployeeByName, maybeSendAttendanceChatMessage } from '../lib/chatStore';
+import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
 import PunchMediaList from './hr/PunchMediaList';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
@@ -34,7 +35,6 @@ import {
   X,
   Briefcase,
   Zap,
-  Check,
   AlertCircle,
   CalendarCheck,
   Settings,
@@ -57,6 +57,7 @@ interface DashboardProps {
   onApprovePayment?: (id: string, status: 'approved' | 'rejected') => void;
   onAddTask?: (newTask: Task) => void;
   onAddPayment?: (newPay: Payment) => void;
+  travelExpensesSummary?: any[];
 }
 
 export default function DashboardOverview({
@@ -71,6 +72,7 @@ export default function DashboardOverview({
   onApprovePayment,
   onAddTask,
   onAddPayment,
+  travelExpensesSummary = [],
 }: DashboardProps) {
 
 
@@ -213,6 +215,27 @@ export default function DashboardOverview({
   const [advAmount, setAdvAmount] = useState('');
   const [advReason, setAdvReason] = useState('');
   const [advType, setAdvType] = useState<'advance' | 'reimbursement'>('advance');
+
+  // --- LỌC TRẠNG THÁI CÔNG TÁC PHÍ (Tổng Quan) ---
+  const [ctpStatusFilter, setCtpStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
+  // CTP hiển thị trong Tổng Quan: CHỈ công tác phí do NGƯỜI KHỞI TẠO
+  // (creatorId/creatorName) gửi — để họ theo dõi trạng thái xét duyệt.
+  // Người duyệt sẽ xử lý ở tab Công tác phí (Nhân sự) hoặc cột Kế toán
+  // (Công việc phải duyệt — Việc của tôi), không duyệt trên Tổng Quan nữa.
+  const ctpList = React.useMemo(() => {
+    const list = (travelExpensesSummary || []).filter((item: any) => {
+      const creatorId = item.creatorId || item.employeeId || item.empId;
+      const creatorMatch = creatorId ? creatorId === currentUser?.id : item.employeeName === currentUser?.name;
+      return !!creatorMatch;
+    });
+    if (ctpStatusFilter === 'all') return list;
+    return list.filter((item: any) => {
+      const st = item.status as CTPStatus;
+      if (ctpStatusFilter === 'approved') return st === 'approved' || st === 'completed';
+      return st === ctpStatusFilter;
+    });
+  }, [travelExpensesSummary, ctpStatusFilter, currentUser]);
 
   // --- ACTIONS XỬ LÝ (INTERACTIVE APPROVALS) ---
   const handleApproveTaskItem = (taskId: string, actionStatus: 'completed' | 'doing' | 'todo') => {
@@ -3095,6 +3118,95 @@ export default function DashboardOverview({
 
         </div>
 
+      </div>
+
+      {/* ─── CÔNG TÁC PHÍ CỦA TÔI (THEO DÕI XÉT DUYỆT) ───────────────────────── */}
+      <div className="bg-white border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-2xl p-4 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-amber-500" />
+              Công Tác Phí Của Tôi
+            </h3>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Theo dõi trạng thái xét duyệt công tác phí của bạn.
+            </p>
+          </div>
+
+          {/* Bộ lọc trạng thái CTP */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {([
+              { key: 'all', label: 'Tất cả' },
+              { key: 'pending', label: '⏳ Chờ duyệt' },
+              { key: 'approved', label: '✅ Đã duyệt' },
+              { key: 'rejected', label: '❌ Từ chối' },
+            ] as const).map(f => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setCtpStatusFilter(f.key)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                  ctpStatusFilter === f.key
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {ctpList.length === 0 ? (
+          <div className="py-6 text-center text-slate-500 italic text-[11px]">
+            {ctpStatusFilter === 'all' ? 'Chưa có công tác phí nào.' : 'Không có công tác phí nào ở trạng thái này.'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px] border-collapse min-w-[720px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10px] text-slate-500 uppercase tracking-wider font-extrabold">
+                  <th className="py-2 px-2">Mã</th>
+                  <th className="py-2 px-2">Người Nhận</th>
+                  <th className="py-2 px-2">Nội Dung</th>
+                  <th className="py-2 px-2">Nhiệm Vụ</th>
+                  <th className="py-2 px-2">Trạng Thái</th>
+                  <th className="py-2 px-2 text-right">Số Tiền</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {ctpList.map((item: any, idx: number) => (
+                  <tr key={item.rowId || item.id || idx} className="hover:bg-slate-50 transition">
+                    <td className="py-2 px-2 font-mono font-bold text-amber-600">{item.code || item.id}</td>
+                    <td className="py-2 px-2 font-semibold text-slate-700">{item.employeeName}</td>
+                    <td className="py-2 px-2 text-slate-600 max-w-[180px] truncate" title={item.content}>{item.content}</td>
+                    <td className="py-2 px-2 text-slate-500 max-w-[160px] truncate" title={item.missionName}>{item.missionName}</td>
+                    <td className="py-2 px-2">
+                      {item.status === 'approved' || item.status === 'completed' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {ctpStatusLabel(item.status)}
+                        </span>
+                      ) : item.status === 'pending' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          {ctpStatusLabel(item.status)}
+                        </span>
+                      ) : item.status === 'rejected' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-red-50 text-red-600 border border-red-200">
+                          {ctpStatusLabel(item.status)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-800">
+                      {Number(item.amount || 0).toLocaleString('vi-VN')} đ
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* MODAL CHI TIẾT CHẤM CÔNG CỦA NGÀY (KHI CLICK VÀO NGÀY CÓ LOG) */}

@@ -76,6 +76,7 @@ export default function RolesTab(props: RolesTabProps) {
     { type: 'liquidation', label: 'Thanh Lý', group: 'Hồ Sơ Dự Án' },
     { type: 'leave', label: 'Đơn Xin Nghỉ Phép', group: 'Hồ Sơ Nhân Sự' },
     { type: 'salary_advance', label: 'Tạm Ứng Lương Nhanh', group: 'Hồ Sơ Nhân Sự' },
+    { type: 'travel_expense', label: 'Công Tác Phí', group: 'Hồ Sơ Nhân Sự' },
   ]), []);
 
   // ─── Draft states cho cơ chế Manual Save (Mỗi tab ≠ nhau) ──────────────
@@ -1140,7 +1141,7 @@ export default function RolesTab(props: RolesTabProps) {
               <Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Phê Duyệt
             </h4>
             <p className="text-[10.5px] text-slate-400 mt-1">
-              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người có quyền duyệt các hồ sơ Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý và người xét duyệt cho Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh. Thông tin này sẽ hiển thị tự động trong biểu mẫu tương ứng.
+              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người có quyền duyệt các hồ sơ Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý và người xét duyệt cho Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí. Thông tin này sẽ hiển thị tự động trong biểu mẫu tương ứng.
             </p>
           </div>
 

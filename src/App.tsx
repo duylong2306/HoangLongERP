@@ -36,7 +36,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover } from './context';
 import { Toast } from './context/NotificationContext';
 import { hashPasswordSync } from './lib/passwordUtils';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
@@ -987,6 +987,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  // Tổng hợp Công Tác Phí (dùng cho panel CTP trong Tổng Quan)
+  const [ctpSummary, setCtpSummary] = useState<any[]>([]);
   // Đơn nghỉ phép (dùng để cộng vào badge "Việc của tôi" – nhánh Công việc phải duyệt)
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
@@ -1334,12 +1336,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Deep link từ tin nhắn xét duyệt (leave/payment/advance) → mở tab Công việc
   // ở bảng "Công việc phải duyệt" để người dùng thao tác duyệt/từ chối ngay.
+  // travel_expense → mở tab Nhân Sự → Công Tác Phí (nơi kế toán duyệt/từ chối CTP).
   useEffect(() => {
     const handleOpenApproval = (e: Event) => {
       const d = (e as CustomEvent).detail;
       const kind = d?.kind as string;
       const id = d?.id as string;
       if (!kind || !id) return;
+      if (kind === 'travel_expense') {
+        setHrSubTab('trips');
+        setActiveTab('employees');
+        return;
+      }
       setApprovalDeepLink({ kind, id });
       setActiveTab('tasks');
     };
@@ -1610,6 +1618,29 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       sb.removeChannel(channel);
     };
   }, [realtimeRetry]);
+
+  // ─── Tổng hợp Công Tác Phí cho Tổng Quan (panel CTP của tôi) ─────────────
+  // Load từ hrm_travel_expenses + lắng nghe sự kiện làm mới (realtime postgres_changes
+  // cũng fire 'hl-hrm-travel-expenses-updated' ở fireHrmTravelExpensesEvent).
+  useEffect(() => {
+    const loadCtpSummary = async () => {
+      try {
+        const data = await dbService.hrmTravelExpenses.list();
+        const seen = new Map<string, any>();
+        (data || []).forEach((item: any) => {
+          const key = item?.rowId || item?.id;
+          if (key) seen.set(key, item);
+        });
+        setCtpSummary(Array.from(seen.values()));
+      } catch (e) {
+        console.warn('[TravelExpense][App] Lỗi tải tổng hợp CTP:', e?.message || e);
+      }
+    };
+    loadCtpSummary();
+    const handler = () => loadCtpSummary();
+    window.addEventListener('hl-hrm-travel-expenses-updated', handler);
+    return () => window.removeEventListener('hl-hrm-travel-expenses-updated', handler);
+  }, []);
 
   // ─── Outbox chấm công: đồng bộ TOÀN CỤC (cấp App) ─────────────────────────
   // Quan trọng: logic outbox trước đây nằm trong DashboardOverview → CHỈ chạy khi
@@ -2567,10 +2598,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
        (a.approverName && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
        a.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
     );
+    // Công tác phí chờ duyệt (đồng bộ TaskManagement myPendingTravelExpenses):
+    // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.
+    const canApproveTravelExpense = isUserInRoleGroup(currentUser.id, 'role_accounting') ||
+      (getConfiguredApprover('travel_expense')?.id === currentUser.id);
+    const myPendingTravelExpenses = ctpSummary.filter((t: any) => t.status === 'pending' && canApproveTravelExpense);
     const toReviewUncompletedCount = toReviewTasksCount
       + myPendingLeaves.length
       + myPendingPayments.length
-      + myPendingAdvances.length;
+      + myPendingAdvances.length
+      + myPendingTravelExpenses.length;
 
     return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
   })();
@@ -3213,7 +3250,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           <>
           {/* TAB 1: DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <DashboardOverview 
+            <DashboardOverview
               projects={projects}
               tasks={tasks}
               receipts={receipts}
@@ -3225,6 +3262,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onApprovePayment={handleApprovePayment}
               onAddTask={handleAddTask}
               onAddPayment={handleAddPayment}
+              travelExpensesSummary={ctpSummary}
             />
           )}
 
