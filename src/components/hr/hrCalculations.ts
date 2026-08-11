@@ -319,6 +319,65 @@ export function computeDailyWorkday(
   }
 }
 
+/**
+ * Tính điểm hiệu suất % theo số lỗi vi phạm trong kỳ.
+ * Được dùng chung ở tab Hiệu suất (PerformanceTab) và Tính Lương Tự Động
+ * (handleCalculatePayroll) để hai nơi cho ra cùng một con số %.
+ * 0→100, 1→97, 2→95, 3→90, 4→85, 5→80, ≥6→50.
+ */
+export function calculateScoreFromErrorCount(count: number): number {
+  if (count === 0) return 100;
+  if (count === 1) return 97;
+  if (count === 2) return 95;
+  if (count === 3) return 90;
+  if (count === 4) return 85;
+  if (count === 5) return 80;
+  return 50; // count >= 6
+}
+
+/**
+ * Tính tổng Công Tác Phí (CTP) ĐÃ DUYỆT của một nhân viên trong đúng kỳ lương
+ * (tháng/năm). Được dùng trong Tính Lương Tự Động (handleCalculatePayroll).
+ * - CHỈ cộng `status === 'approved'` (duyệt qua nút Duyệt) HOẶC
+ *   `status === 'completed'` (CTP legacy của cơ chế cũ — tự động "Đã duyệt" khi
+ *   hoàn thành, hiển thị như Đã duyệt). CTP "Chờ duyệt"/"Từ chối" KHÔNG tính.
+ * - Match nhân viên theo `empId` khi có; fallback theo `employeeName` cho dữ
+ *   liệu cũ (trước đây chỉ lưu tên, không lưu empId).
+ * - Khớp tháng-năm theo `completedDate` (dd/mm/yyyy hoặc ISO) — mỗi khoản chỉ
+ *   tính vào đúng kỳ lương của chuyến đi.
+ */
+export function sumApprovedTravelExpenses(
+  travelExpenses: any[],
+  emp: { id?: string; name?: string },
+  payrollMonth: string,
+  payrollYear: string,
+): number {
+  const monthNum = String(Number(payrollMonth));
+  return (travelExpenses || []).reduce((sum, s: any) => {
+    if (s.status !== 'approved' && s.status !== 'completed') return sum;
+    const empMatch = s.empId
+      ? s.empId === emp.id
+      : (s.employeeName || '') === (emp.name || '');
+    if (!empMatch) return sum;
+    if (!s.completedDate) return sum;
+    let cMonth = '';
+    let cYear = '';
+    const parts = String(s.completedDate).split('/');
+    if (parts.length === 3) {
+      cMonth = String(parseInt(parts[1], 10));
+      cYear = parts[2];
+    } else {
+      const dateObj = new Date(s.completedDate);
+      if (!isNaN(dateObj.getTime())) {
+        cMonth = String(dateObj.getMonth() + 1);
+        cYear = String(dateObj.getFullYear());
+      }
+    }
+    if (cMonth !== monthNum || cYear !== payrollYear) return sum;
+    return sum + (Number(s.amount) || 0);
+  }, 0);
+}
+
 // ─── Báo cáo vắng mặt (ngày không có bản ghi chấm công) ───────────────────
 // Hàm thuần: liệt kê các ngày mà nhân viên Đang làm KHÔNG có bản ghi chấm
 // công, để HR duyệt thủ công (gán KP / phép / bù công / bỏ qua).

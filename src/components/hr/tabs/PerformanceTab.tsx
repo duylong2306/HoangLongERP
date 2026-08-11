@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus, CheckCircle, Users, AlertTriangle, Clock } from 'lucide-react';
 import { EmployeeErrorLog } from '../hrTypes';
+import { calculateScoreFromErrorCount } from '../hrCalculations';
 
 interface Employee {
   id: string;
@@ -52,15 +53,6 @@ export default function PerformanceTab({
   handleEditErrorTrigger,
   handleDeleteError,
 }: PerformanceTabProps) {
-  const calculateScoreFromErrorCount = (count: number): number => {
-    if (count === 0) return 100;
-    if (count === 1) return 97;
-    if (count === 2) return 95;
-    if (count === 3) return 90;
-    if (count === 4) return 85;
-    if (count === 5) return 80;
-    return 50; // count >= 6
-  };
 
   // Filter errors logged in chosen employee, month, and year
   const filteredErrors = employeeErrors.filter(err => {

@@ -1654,12 +1654,23 @@ export default function TaskDetailModal({
         ? crypto.randomUUID()
         : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
     }
+    // completedDate dạng dd/mm/yyyy → rút gọn về "MM/YYYY" để khớp kỳ lương.
+    const completedDate = new Date().toLocaleDateString('vi-VN');
+    const completedParts = completedDate.split('/');
+    const completedMonth = completedParts.length === 3
+      ? `${String(Number(completedParts[1])).padStart(2, '0')}/${completedParts[2]}`
+      : '';
     const summaryItem = {
       id: ta.id || `THCTP-${Date.now()}`,
       rowId,
       code: ta.code || `THCTP-${ta.id || Date.now()}`,
       status,
-      completedDate: new Date().toLocaleDateString('vi-VN'),
+      completedDate,
+      // empId + month phục vụ tính lương: khớp CTP ĐÃ DUYỆT của nhân viên trong
+      // đúng tháng-năm của chuyến đi (trước đây chỉ lưu employeeName + amount nên
+      // không khớp được vào tab Tính Lương Tự Động).
+      empId: ta.memberId || emp?.id || undefined,
+      month: completedMonth,
       projectName: project?.name || 'Chưa rõ',
       customerName: customer?.name || 'Khách hàng lẻ',
       taskName: selectedTask.name,
@@ -4580,6 +4591,14 @@ export default function TaskDetailModal({
                             // CTP vẫn phải chờ người xét duyệt Công Tác Phí duyệt/từ chối.
                             status: 'pending',
                             completedDate,
+                            // empId + month phục vụ tính lương (khớp CTP ĐÃ DUYỆT vào đúng kỳ lương).
+                            empId: ta.memberId || emp?.id || undefined,
+                            month: (() => {
+                              const cp = String(completedDate || '').split('/');
+                              return cp.length === 3
+                                ? `${String(Number(cp[1])).padStart(2, '0')}/${cp[2]}`
+                                : '';
+                            })(),
                             projectName,
                             customerName,
                             taskName,

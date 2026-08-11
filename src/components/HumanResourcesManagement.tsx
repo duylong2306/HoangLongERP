@@ -20,7 +20,7 @@ import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
-import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll } from './hr/hrCalculations';
+import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
 import TripsTab, { QuickSearchFilter } from './hr/tabs/TripsTab';
 import LeavesTab from './hr/tabs/LeavesTab';
@@ -1442,7 +1442,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // Load Tổng hợp Công Tác Phí: nguồn Supabase
   const loadTravelExpensesSummary = useCallback(() => {
-    if (activeSubTab !== 'trips') return;
+    // Load bất kể sub-tab đang mở — CTP được tính vào lương (tab Tính Lương) nên
+    // không được gating theo activeSubTab === 'trips' (khi mở thẳng tab lương,
+    // mảng sẽ rỗng → Công Tác Phí không vào bảng lương).
     dbService.hrmTravelExpenses.list()
       .then((data: any[]) => {
         if (data && data.length > 0) {
@@ -1456,11 +1458,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         console.warn('[TravelExpense][HR] Lỗi tải Supabase:', err?.message || err);
         setTravelExpensesSummary([]);
       });
-  }, [activeSubTab]);
+  }, []);
 
   useEffect(() => {
     loadTravelExpensesSummary();
   }, [loadTravelExpensesSummary]);
+
+  // Reload CTP khi mở lại đúng tab Công tác phí — đảm bảo danh sách luôn tươi
+  // sau khi rời tab (dữ liệu phục vụ cả tab lương nên không clear khi rời nữa).
+  useEffect(() => {
+    if (activeSubTab === 'trips') loadTravelExpensesSummary();
+  }, [activeSubTab, loadTravelExpensesSummary]);
 
   // Làm mới ngay khi có nhiệm vụ hoàn thành gửi Công Tác Phí (cùng trình duyệt)
   useEffect(() => {
@@ -2318,17 +2326,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       const empErrors = (employeeErrors || []).filter((err: any) => {
         if (!err.date) return false;
         const [errYear, errMonth] = err.date.split('-');
-        return errMonth === String(Number(payrollMonth)) && errYear === payrollYear && err.employeeId === emp.id;
+        // KHÔNG dùng String(Number(payrollMonth)) — payrollMonth luôn có số 0 ở đầu
+        // (vd '08'), String(Number('08')) = '8' → so sánh '08' === '8' luôn sai với
+        // tháng 01-09, khiến KPI không bao giờ bị trừ. So sánh trực tiếp chuỗi.
+        return errMonth === payrollMonth && errYear === payrollYear && err.employeeId === emp.id;
       });
 
-      let deducedKpi = 100;
-      empErrors.forEach((err: any) => {
-        const notes = (err.notes || '').toLowerCase();
-        if (notes.includes('nặng') || notes.includes('nghiêm trọng')) deducedKpi -= 10;
-        else if (notes.includes('trung bình') || notes.includes('vừa')) deducedKpi -= 5;
-        else deducedKpi -= 2;
-      });
-      inputs.kpiScore = Math.max(0, deducedKpi);
+      // Điểm hiệu suất % theo ĐẾM SỐ LỖI vi phạm trong kỳ — dùng ĐÚNG bảng điểm của
+      // tab Hiệu suất (PerformanceTab) để hai nơi cho cùng một con số %.
+      inputs.kpiScore = calculateScoreFromErrorCount(empErrors.length);
 
       let sundayWork = 0;
       let holidayWork = 0;
@@ -2380,9 +2386,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       inputs.otHours = totalOtHrs;
       inputs.otCount = otClts;
 
-      // Sum Expenses from Business trips
-      const tripSummary = (travelExpensesSummary || []).find((s: any) => s.empId === emp.id && s.month === `${payrollMonth}/${payrollYear}`);
-      inputs.expenses = tripSummary ? ((tripSummary.fuelFee ?? 0) + (tripSummary.mealFee ?? 0) + (tripSummary.lodgeFee ?? 0) + (tripSummary.otherFee ?? 0)) : 0;
+      // ─── Công Tác Phí (CTP) ──────────────────────────────────────────────
+      // Tổng CTP ĐÃ DUYỆT (status approved/completed) của nhân viên trong đúng kỳ lương.
+      // Logic thuần (đã kiểm thử) nằm ở sumApprovedTravelExpenses (hrCalculations.ts).
+      inputs.expenses = sumApprovedTravelExpenses(travelExpensesSummary, emp, payrollMonth, payrollYear);
 
       inputs.bonusHoliday = 0;
       inputs.bonusCreative = 0;
