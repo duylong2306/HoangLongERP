@@ -56,6 +56,7 @@ import QuoteArchive from './components/QuoteArchive';
 import MaterialCoordination from './components/MaterialCoordination';
 import WarehouseSuppliers from './components/WarehouseSuppliers';
 import WarehouseManagement from './components/WarehouseManagement';
+import WarehouseDataManagement from './components/WarehouseDataManagement';
 import SubcontractorManagement from './components/SubcontractorManagement';
 import DirectorDashboard from './components/DirectorDashboard';
 import Login from './components/Login';
@@ -405,7 +406,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
       'hr-office', 'employees', 'hr-data',
       'accounting-office', 'finance', 'finance-data',
-      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management', 'warehouse-data',
       'subcontractor-office', 'subcontractor-management',
       'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor',
       'system-office', 'settings-accounts', 'settings-roles', 'settings', 'display-settings'
@@ -415,7 +416,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
       'hr-office', 'employees',
       'accounting-office', 'finance', 'finance-data',
-      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management', 'warehouse-data',
       'subcontractor-office', 'subcontractor-management',
       'library-office', 'quotes',
       'system-office', 'settings'
@@ -440,7 +441,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     ],
     purchasing: [
       'dashboard', 'tasks', 'employees', 'settings', 'messages',
-      'warehouse-office', 'material-coordination', 'warehouse-suppliers'
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-data'
     ],
     factory: [
       'dashboard', 'tasks', 'employees', 'settings', 'messages',
@@ -1469,6 +1470,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireWarehouseLogsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
     };
+    const fireWarehouseDataEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated')); } catch {}
+    };
     const fireArchivedQuotesEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
     };
@@ -1574,6 +1578,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_subcontractors' }, fireSuppliersEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fireInventoryEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs' }, fireWarehouseLogsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_product_catalog' }, fireWarehouseDataEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_product_catalog' }, fireWarehouseDataEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'archived_quotes' }, fireArchivedQuotesEvent)
       // archived_subcontractor_quotes là alias của archived_quotes (sector='subcontractor') — không có bảng riêng
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_task_permissions' }, fireTaskPermissionsEvent)
@@ -2302,7 +2308,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   };
 
-  const handleApprovePayment = (id: string, status: 'approved' | 'rejected') => {
+  const handleApprovePayment = async (id: string, status: 'approved' | 'rejected') => {
     const targetPayment = payments.find(p => p.id === id);
     const updated = payments.map(p => p.id === id ? { ...p, status } : p);
     setPayments(updated);
@@ -2324,6 +2330,40 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             : `❌ Đã từ chối phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`,
           relatedEntity: { type: 'payment', id: targetPayment.id },
         });
+      }
+
+      // 💳 Giảm công nợ đơn hàng & Công nợ Trả khi phiếu chi thanh toán đơn hàng được duyệt
+      if (status === 'approved' && targetPayment.purchaseOrderId) {
+        const order = purchaseOrders.find(o => o.id === targetPayment.purchaseOrderId);
+        if (order) {
+          const newPaid = (order.thanhToanThucTe || 0) + (targetPayment.amount || 0);
+          const newCongNo = Math.max(0, (order.tongTien || 0) - newPaid);
+          const updatedOrder: any = {
+            ...order,
+            thanhToanThucTe: newPaid,
+            congNo: newCongNo,
+            status: newCongNo <= 0 ? 'completed' : (order.status || 'confirmed'),
+          };
+          setPurchaseOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+          try {
+            await dbService.purchaseOrders.save(updatedOrder);
+          } catch (err) {
+            console.error('[App] Lỗi cập nhật công nợ đơn hàng:', err);
+          }
+          // Giảm Công nợ Trả (accounting_liabilities) theo nhà cung cấp
+          try {
+            const liabs: any[] = await dbService.accountingLiabilities.list();
+            const liab = liabs.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === order.supplierName);
+            if (liab) {
+              const newPaidL = (liab.paid || 0) + (targetPayment.amount || 0);
+              const updatedLiab = { ...liab, paid: newPaidL, remaining: (liab.value || 0) - newPaidL };
+              await dbService.accountingLiabilities.save(updatedLiab);
+              window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
+            }
+          } catch (err) {
+            console.error('[App] Lỗi cập nhật công nợ phải trả:', err);
+          }
+        }
       }
     }
   };
@@ -2470,7 +2510,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     'project-office': ['projects-construction', 'projects-furniture', 'projects-mechanical'],
     'hr-office': ['employees', 'hr-data'],
     'accounting-office': ['finance', 'finance-data'],
-    'warehouse-office': ['material-coordination', 'warehouse-suppliers', 'warehouse-management'],
+    'warehouse-office': ['material-coordination', 'warehouse-suppliers', 'warehouse-management', 'warehouse-data'],
     'subcontractor-office': ['subcontractor-management'],
     'library-office': ['quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'],
     'system-office': ['settings-accounts', 'settings-roles', 'settings', 'display-settings'],
@@ -2926,6 +2966,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             </button>
                           </li>
                         )}
+                        {isAccessible('warehouse-data') && (
+                          <li>
+                            <button onClick={() => { setActiveTab('warehouse-data'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-data' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+                              Dữ Liệu Kho
+                            </button>
+                          </li>
+                        )}
                       </ul>
                     )}
                   </li>
@@ -3097,6 +3144,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               {activeTab === 'material-coordination' && 'Quản Lý Vật Tư'}
               {activeTab === 'warehouse-suppliers' && 'Danh Mục Nhà Cung Cấp Vật Tư'}
               {activeTab === 'warehouse-management' && 'Quản Lý Tồn Kho & Sổ Kho'}
+              {activeTab === 'warehouse-data' && 'Dữ Liệu Kho — Danh Mục Mua & Bán'}
               {activeTab === 'employees' && (hrSubTab === 'hr_data' ? 'Dữ Liệu Nhân Sự' : 'Danh Sách Nhân Sự')}
               {activeTab === 'settings' && '⚙️ Cấu Hình Hệ Thống'}
               {activeTab === 'messages' && '💬 Tin Nhắn'}
@@ -3465,6 +3513,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           {/* TAB 5.7: QUẢN LÝ KHO */}
           {activeTab === 'warehouse-management' && (
             <WarehouseManagement />
+          )}
+
+          {/* TAB 5.8: DỮ LIỆU KHO (Danh mục MUA / BÁN) */}
+          {activeTab === 'warehouse-data' && (
+            <WarehouseDataManagement />
           )}
 
           {/* TAB 6: NHÂN SỰ */}

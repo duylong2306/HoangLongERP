@@ -494,6 +494,20 @@ export function getConfiguredApprover(documentType: ApprovalPermission['document
 }
 
 /**
+ * Lấy người điều phối vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_coordinator')
+ */
+export function getMaterialCoordinator(): { name: string; id: string; position?: string } | null {
+  return getConfiguredApprover('material_coordinator');
+}
+
+/**
+ * Lấy người xét duyệt vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_approver')
+ */
+export function getMaterialApprover(): { name: string; id: string; position?: string } | null {
+  return getConfiguredApprover('material_approver');
+}
+
+/**
  * Kiểm tra user có thuộc Role Group nào đó không
  * @param empId ID của nhân viên
  * @param groupId ID của Role Group (vd: 'role_admin', 'role_accounting')

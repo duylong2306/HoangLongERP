@@ -192,7 +192,7 @@ export interface HrmRoleGroup {
 
 export interface HrmApprovalConfig {
   id: string;
-  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense';
+  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver';
   documentTypeLabel: string;
   approverId: string;
   approverName: string;
@@ -358,6 +358,7 @@ export interface Payment {
   status: 'pending' | 'approved' | 'rejected';
   attachmentName?: string;
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
+  purchaseOrderId?: string;  // FK → PurchaseOrder (liên kết phiếu chi thanh toán đơn hàng)
 }
 
 export interface ProjectContract {

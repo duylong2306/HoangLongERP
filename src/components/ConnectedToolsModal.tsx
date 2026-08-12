@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Shield, DollarSign, Zap, FileText, Briefcase, CheckCircle2, Award, X, Trash2, Calculator, Sliders, AlertCircle, AlertTriangle
 } from 'lucide-react';
-import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProposal, ApprovalStep, Supplier, InventoryItem } from '../types';
+import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProposal, ApprovalStep } from '../types';
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
-import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
+import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
 
@@ -59,8 +61,8 @@ export interface ConnectedToolsModalProps {
   ctCostProposalDate?: string;
   setCtCostProposalDate?: (val: string) => void;
   
-  ctMaterialRows?: { id: string; name: string; qty: number; unit: string; spec: string; note?: string; availableQty?: number; price?: number }[];
-  setCtMaterialRows?: (val: { id: string; name: string; qty: number; unit: string; spec: string; note?: string; availableQty?: number; price?: number }[]) => void;
+  ctMaterialRows?: { id: string; name: string; qty: number; unit: string; spec: string; note?: string; availableQty?: number; price?: number; maSanPham?: string }[];
+  setCtMaterialRows?: (val: { id: string; name: string; qty: number; unit: string; spec: string; note?: string; availableQty?: number; price?: number; maSanPham?: string }[]) => void;
   ctMaterialLogs?: string[];
   setCtMaterialLogs?: (val: string[]) => void;
   ctMaterialCoordinationType?: 'self' | 'assign';
@@ -185,7 +187,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
   const ctCostProposalDate = props.ctCostProposalDate !== undefined ? props.ctCostProposalDate : localCtCostProposalDate;
   const setCtCostProposalDate = props.setCtCostProposalDate || setLocalCtCostProposalDate;
 
-  const [localCtMaterialRows, setLocalCtMaterialRows] = React.useState<{ id: string; name: string; qty: number; unit: string; spec: string; note?: string; availableQty?: number; price?: number }[]>([]);
+  const [localCtMaterialRows, setLocalCtMaterialRows] = React.useState<{ id: string; name: string; qty: number; unit: string; spec: string; note?: string; availableQty?: number; price?: number; maSanPham?: string }[]>([]);
   const ctMaterialRows = props.ctMaterialRows !== undefined ? props.ctMaterialRows : localCtMaterialRows;
   const setCtMaterialRows = props.setCtMaterialRows || setLocalCtMaterialRows;
 
@@ -201,55 +203,79 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
   const ctMaterialCoordinatorId = props.ctMaterialCoordinatorId !== undefined ? props.ctMaterialCoordinatorId : localCtMaterialCoordinatorId;
   const setCtMaterialCoordinatorId = props.setCtMaterialCoordinatorId || setLocalCtMaterialCoordinatorId;
 
-  // Custom states for types of material proposals
-  const [ctMaterialProposalType, setCtMaterialProposalType] = React.useState<'warehouse' | 'supplier'>('warehouse');
-  const [ctMaterialSupplierId, setCtMaterialSupplierId] = React.useState('');
-  const [ctMaterialSupplierSearch, setCtMaterialSupplierSearch] = React.useState('');
-  const [isAddingNewSupplierFast, setIsAddingNewSupplierFast] = React.useState(false);
-  const [newSupplierName, setNewSupplierName] = React.useState('');
-  const [newSupplierField, setNewSupplierField] = React.useState('Vật liệu xây dựng & Nội thất');
-  const [newSupplierPhone, setNewSupplierPhone] = React.useState('');
-  const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = React.useState(false);
-
-  // Load suppliers from Supabase
-  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
-
-  // Load inventory from Supabase
-  const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
+  // Danh mục MUA (autocomplete tên sản phẩm mua) — PK ma_san_pham
+  const [purchaseCatalog, setPurchaseCatalog] = React.useState<any[]>([]);
+  // Hiện/ẩn dropdown autocomplete theo từng dòng
+  const [ctCatalogOpenIdx, setCtCatalogOpenIdx] = React.useState<number | null>(null);
+  // Hướng mở dropdown: true = mở LÊN (khi ô nhập gần đáy cửa sổ để danh sách gợi ý không bị khuất)
+  const [ctCatalogOpenUp, setCtCatalogOpenUp] = React.useState<boolean>(false);
+  const ctExcelFileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    const loadSuppliers = async () => {
-      try {
-        const data = await dbService.suppliers.list();
-        setSuppliers(data);
-      } catch (e) {
-        console.error(e);
-      }
-    };
-
-    const loadInventory = async () => {
-      try {
-        const data = await dbService.inventory.list();
-        setInventory(data);
-      } catch (e) {
-        console.error(e);
-      }
-    };
-
-    loadSuppliers();
-    loadInventory();
-
-    const syncSuppliers = () => loadSuppliers();
-    const syncInventory = () => loadInventory();
-
-    window.addEventListener('hl-suppliers-updated', syncSuppliers);
-    window.addEventListener('hl-inventory-updated', syncInventory);
-
-    return () => {
-      window.removeEventListener('hl-suppliers-updated', syncSuppliers);
-      window.removeEventListener('hl-inventory-updated', syncInventory);
-    };
+    const syncCatalog = () => dbService.purchaseProductCatalog.list().then(setPurchaseCatalog).catch(e => console.error(e));
+    syncCatalog();
+    window.addEventListener('hl-warehouse-data-updated', syncCatalog);
+    return () => window.removeEventListener('hl-warehouse-data-updated', syncCatalog);
   }, []);
+
+  // Vị trí (getBoundingClientRect) của ô input đang mở dropdown — dùng để render
+  // dropdown qua React Portal ra ngoài container cuộn (tránh bị khuất / clip).
+  const [ctCatalogRect, setCtCatalogRect] = React.useState<DOMRect | null>(null);
+  const ctCatalogInputRef = React.useRef<HTMLInputElement | null>(null);
+  const ctCatalogDropdownRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Đóng dropdown khi click ra ngoài (không phải input, không phải chính dropdown)
+  // hoặc bấm Escape.
+  React.useEffect(() => {
+    if (ctCatalogOpenIdx === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ctCatalogDropdownRef.current && ctCatalogDropdownRef.current.contains(t)) return;
+      if (ctCatalogInputRef.current && (ctCatalogInputRef.current === t || ctCatalogInputRef.current.contains(t))) return;
+      setCtCatalogOpenIdx(null);
+      setCtCatalogRect(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setCtCatalogOpenIdx(null); setCtCatalogRect(null); }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [ctCatalogOpenIdx]);
+
+  // Chọn 1 sản phẩm từ Danh mục MUA → gán vào dòng đang mở và đóng dropdown.
+  const selectCatalogItem = (p: any) => {
+    const openIdx = ctCatalogOpenIdx;
+    if (openIdx === null) return;
+    const next = ctMaterialRows.map((r, i) =>
+      i === openIdx
+        ? {
+            ...r,
+            name: p.tenSanPham,
+            unit: p.donViTinh || r.unit,
+            spec: p.quyCach || r.spec,
+            maSanPham: p.ma_san_pham ?? p.maSanPham ?? '',
+            price: p.donGia ?? r.price,
+          }
+        : r,
+    );
+    setCtMaterialRows(next);
+    setCtCatalogOpenIdx(null);
+    setCtCatalogRect(null);
+  };
+
+  // Lọc Danh mục MUA theo từ khóa của dòng đang mở.
+  const getCatalogFiltered = () => {
+    if (ctCatalogOpenIdx === null) return [];
+    const openRow = ctMaterialRows[ctCatalogOpenIdx];
+    const term = (openRow?.name || '').toLowerCase();
+    return purchaseCatalog
+      .filter(p => !term || String(p.tenSanPham || '').toLowerCase().includes(term))
+      .slice(0, 30);
+  };
 
   const [localCtQuoteSector, setLocalCtQuoteSector] = React.useState<'furniture' | 'construction' | 'mechanical'>('furniture');
   const ctQuoteSector = props.ctQuoteSector !== undefined ? props.ctQuoteSector : localCtQuoteSector;
@@ -719,8 +745,8 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
   }
 
   return (
-    <div 
-      className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center z-[150] p-4 overflow-y-auto animate-fadeIn select-text text-slate-200" 
+    <div
+      className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex z-[150] p-4 overflow-y-auto animate-fadeIn select-text text-slate-200"
       id="connected-tools-modal"
       onClick={(e) => {
         e.stopPropagation();
@@ -728,8 +754,10 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
         setConnectedTaskId(null);
       }}
     >
-      <div 
-        className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl p-6 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden my-4"
+      <div
+        className={`bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl p-6 shadow-2xl flex flex-col m-auto ${
+          activeConnectedTool === 'material' ? 'h-[100vh]' : 'max-h-[96vh]'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         
@@ -783,7 +811,10 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto py-5 pr-1 space-y-5 text-[11px] leading-relaxed">
+        <div
+          className="flex-1 min-h-0 overflow-y-auto py-5 pr-1 space-y-5 text-[11px] leading-relaxed"
+          onScroll={() => { setCtCatalogOpenIdx(null); setCtCatalogRect(null); }}
+        >
           
           {/* 1. YÊU CẦU PHÊ DUYỆT */}
           {(activeConnectedTool as any) === 'approval' && (
@@ -1418,261 +1449,165 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
           {activeConnectedTool === 'material' && (
             <div className="space-y-4">
               <div className="bg-slate-950/40 p-4 border border-slate-800 rounded-xl space-y-4">
-                
+
                 {/* Header */}
                 <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                   <h4 className="font-extrabold text-white text-[12px] flex items-center gap-1.5">
                     <Zap className="w-4 h-4 text-amber-400" />
-                    ĐỀ XUẤT CUNG ỨNG VẬT TƯ & VÂN GỖ
+                    ĐỀ XUẤT VẬT TƯ
                   </h4>
-                  <span className="text-[10px] text-slate-400">Kho hàng & Nhà cung ứng liên thông</span>
+                  <span className="text-[10px] text-slate-400">Gửi tới bảng Điều phối vật tư của Kho</span>
                 </div>
 
-                {/* Form type selection tabs */}
-                <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-800 gap-1">
+                {/* Toolbar: Excel + Thêm dòng */}
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      setCtMaterialProposalType('warehouse');
-                      setCtMaterialRows([]); // reset rows
+                      exportToExcel<any>(
+                        ctMaterialRows.map(r => ({ 'Tên sản phẩm': r.name, 'Số lượng': r.qty, 'Đơn vị tính': r.unit, 'Quy cách': r.spec || '', 'Ghi chú': r.note || '' })),
+                        'Đề xuất vật tư',
+                        `De_xuat_vat_tu_${formatDateForFile()}.xlsx`,
+                        ['Tên sản phẩm', 'Số lượng', 'Đơn vị tính', 'Quy cách', 'Ghi chú'] as any,
+                        ['Tên sản phẩm', 'Số lượng', 'Đơn vị tính', 'Quy cách', 'Ghi chú']
+                      );
                     }}
-                    className={`flex-1 text-center py-2 text-[11px] font-extrabold rounded-lg transition-all cursor-pointer ${
-                      ctMaterialProposalType === 'warehouse'
-                        ? 'bg-amber-500 text-slate-950 font-black'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-850'
-                    }`}
+                    className="bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-[10.5px] px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                   >
-                    Đề xuất vật tư trong kho
+                    ⬇️ Xuất Excel
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setCtMaterialProposalType('supplier');
-                      setCtMaterialRows([]); // reset rows
-                    }}
-                    className={`flex-1 text-center py-2 text-[11px] font-extrabold rounded-lg transition-all cursor-pointer ${
-                      ctMaterialProposalType === 'supplier'
-                        ? 'bg-amber-500 text-slate-950 font-black'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-850'
-                    }`}
+                    onClick={() => ctExcelFileRef.current?.click()}
+                    className="bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-[10.5px] px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                   >
-                    Đề xuất vật tư từ nhà cung cấp
+                    ⬆️ Nhập Excel
+                  </button>
+                  <input
+                    ref={ctExcelFileRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      try {
+                        const rows = await importFromExcel<{ name: string; qty: number; unit: string; spec: string; note: string }>(file, (row) => ({
+                          name: String(row['Tên sản phẩm'] ?? row['Tên vật tư'] ?? row.name ?? '').trim(),
+                          qty: Number(row['Số lượng'] ?? row.qty ?? 1) || 1,
+                          unit: String(row['Đơn vị tính'] ?? row['Đơn vị'] ?? row.unit ?? '').trim() || 'Tấm',
+                          spec: String(row['Quy cách'] ?? row.spec ?? '').trim(),
+                          note: String(row['Ghi chú'] ?? row.note ?? '').trim(),
+                        }));
+                        const mappedRows = rows.map(r => ({
+                          id: `mat_${Date.now()}_${Math.random()}`,
+                          name: r.name,
+                          qty: r.qty,
+                          unit: r.unit,
+                          spec: r.spec,
+                          note: r.note,
+                          availableQty: 9999,
+                          price: 150000,
+                          maSanPham: '',
+                        }));
+                        if (mappedRows.length === 0) {
+                          addToast({ title: '⚠️ File trống', message: 'File Excel không có dòng dữ liệu nào.', type: 'warning' });
+                          return;
+                        }
+                        // Gộp: nếu đang có dòng chưa điền, thay bằng dòng nhập; nếu không thì thêm mới.
+                        if (ctMaterialRows.length === 0) {
+                          setCtMaterialRows(mappedRows);
+                        } else {
+                          setCtMaterialRows([...ctMaterialRows, ...mappedRows]);
+                        }
+                        addToast({ title: '✅ Nhập thành công', message: `Đã nhập ${mappedRows.length} dòng vật tư.`, type: 'success' });
+                      } catch (err: any) {
+                        console.error('Import Excel lỗi:', err);
+                        addToast({ title: '❌ Lỗi nhập Excel', message: err?.message || 'Không đọc được file.', type: 'error' });
+                      }
+                    }}
+                  />
+                  <span className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newRow = {
+                        id: `mat_${Date.now()}_${Math.random()}`,
+                        name: '',
+                        qty: 1,
+                        unit: 'Tấm',
+                        spec: '',
+                        note: '',
+                        availableQty: 9999,
+                        price: 150000,
+                        maSanPham: '',
+                      };
+                      setCtMaterialRows([...ctMaterialRows, newRow]);
+                    }}
+                    className="bg-slate-900 border border-dashed border-slate-700 text-amber-400 font-extrabold hover:bg-slate-850 px-3.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-all"
+                  >
+                    + Thêm dòng vật tư mới
                   </button>
                 </div>
-
-                {/* Supplier selection panel (only for supplier proposal) */}
-                {ctMaterialProposalType === 'supplier' && (
-                  <div className="space-y-2 bg-slate-900/40 p-3 rounded-lg border border-slate-800 relative">
-                    <label className="block text-slate-400 font-bold text-[10.5px] uppercase tracking-wider">
-                      Chọn Nhà Cung Cấp Vật Tư:
-                    </label>
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <input
-                          type="text"
-                          placeholder="🔍 Tìm nhanh nhà cung cấp trong danh mục..."
-                          value={ctMaterialSupplierSearch}
-                          onChange={(e) => {
-                            setCtMaterialSupplierSearch(e.target.value);
-                            setIsSupplierDropdownOpen(true);
-                          }}
-                          onFocus={() => setIsSupplierDropdownOpen(true)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 outline-none text-[11px] font-medium"
-                        />
-                        {isSupplierDropdownOpen && (
-                          <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-xl divide-y divide-slate-900">
-                            {suppliers
-                              .filter(s => s.name.toLowerCase().includes(ctMaterialSupplierSearch.toLowerCase()))
-                              .map(s => (
-                                <button
-                                  key={s.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setCtMaterialSupplierId(s.id);
-                                    setCtMaterialSupplierSearch(s.name);
-                                    setIsSupplierDropdownOpen(false);
-                                  }}
-                                  className="w-full text-left p-2 hover:bg-slate-800/80 text-white text-[11px] font-medium transition-colors block"
-                                >
-                                  <div className="font-bold text-amber-400">{s.name}</div>
-                                  <div className="text-slate-400 text-[9.5px]">
-                                    Lĩnh vực: {s.field} - ĐT: {s.phone || 'Chưa ghi nhận'}
-                                  </div>
-                                </button>
-                              ))
-                            }
-                            {suppliers.filter(s => s.name.toLowerCase().includes(ctMaterialSupplierSearch.toLowerCase())).length === 0 && (
-                              <div className="p-2 text-slate-500 text-[10.5px] text-center">
-                                Không tìm thấy nhà cung cấp nào
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingNewSupplierFast(!isAddingNewSupplierFast)}
-                        className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-slate-950 font-extrabold text-[10.5px] rounded-lg transition-all cursor-pointer whitespace-nowrap"
-                      >
-                        {isAddingNewSupplierFast ? 'Đóng nhanh' : '+ Thêm nhanh NCC'}
-                      </button>
-                    </div>
-
-                    {/* Fast add supplier form */}
-                    {isAddingNewSupplierFast && (
-                      <div className="mt-2 p-3 bg-slate-950 border border-teal-500/30 rounded-lg space-y-2.5 animate-fade-in text-left">
-                        <span className="text-[10px] font-black text-teal-400 block uppercase tracking-wider">
-                          Thêm Nhanh Nhà Cung Cấp Mới
-                        </span>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[9px] text-slate-400 block font-bold mb-0.5">Tên Nhà Cung Cấp *</label>
-                            <input
-                              type="text"
-                              placeholder="VD: Cty Gỗ Hoàng Long"
-                              value={newSupplierName}
-                              onChange={(e) => setNewSupplierName(e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-white text-[10.5px] outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[9px] text-slate-400 block font-bold mb-0.5">Số điện thoại</label>
-                            <input
-                              type="text"
-                              placeholder="VD: 0912..."
-                              value={newSupplierPhone}
-                              onChange={(e) => setNewSupplierPhone(e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-white text-[10.5px] outline-none"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-[9px] text-slate-400 block font-bold mb-0.5">Lĩnh vực cung cấp</label>
-                          <input
-                            type="text"
-                            placeholder="VD: Gỗ MDF, Thép dầm..."
-                            value={newSupplierField}
-                            onChange={(e) => setNewSupplierField(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-white text-[10.5px] outline-none"
-                          />
-                        </div>
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!newSupplierName.trim()) {
-                                addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng điền tên Nhà Cung Cấp!', type: 'warning' }); return;
-                              }
-                              const newSup = {
-                                id: `SUP_${Date.now()}`,
-                                name: newSupplierName.trim(),
-                                phone: newSupplierPhone.trim(),
-                                field: newSupplierField.trim(),
-                                representative: 'Người liên hệ',
-                                email: '',
-                                address: '',
-                                bankAccount: '',
-                                bankName: '',
-                                note: 'Thêm nhanh từ đề xuất vật tư',
-                                debt: 0
-                              };
-                              const updatedSups = [...suppliers, newSup];
-                              setSuppliers(updatedSups);
-                              dbService.suppliers.save(newSup).catch(() => {});
-                              window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: updatedSups }));
-
-                              setCtMaterialSupplierId(newSup.id);
-                              setCtMaterialSupplierSearch(newSup.name);
-                              setIsAddingNewSupplierFast(false);
-                              setNewSupplierName('');
-                              setNewSupplierPhone('');
-                              addToast({ title: '✅ Đã thêm', message: `Đã thêm thành công nhà cung cấp: ${newSup.name}`, type: 'success' });
-                            }}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] px-3.5 py-1.5 rounded-lg transition-all cursor-pointer"
-                          >
-                            Lưu & Chọn NCC
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Materials List Table */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-800 text-slate-400 text-[9.5px]">
-                        <th className="p-2 w-10">STT</th>
-                        <th className="p-2">Tên vật tư gỗ/Phụ kiện liên kết</th>
+                        <th className="p-2 w-8">STT</th>
+                        <th className="p-2 min-w-[220px]">Tên sản phẩm</th>
                         <th className="p-2 w-24">Số lượng</th>
-                        <th className="p-2 w-24">Đơn vị</th>
-                        <th className="p-2">Ghi chú</th>
-                        <th className="p-2 w-12 text-center">Xóa</th>
+                        <th className="p-2 w-24">Đơn vị tính</th>
+                        <th className="p-2 w-36">Quy cách</th>
+                        <th className="p-2 min-w-[140px]">Ghi chú</th>
+                        <th className="p-2 w-10 text-center">Xóa</th>
                       </tr>
                     </thead>
                     <tbody>
                       {ctMaterialRows.map((row, idx) => (
                         <tr key={row.id} className="border-b border-slate-850 hover:bg-slate-900/40">
                           <td className="p-2 font-mono text-slate-500 text-center">{idx + 1}</td>
-                          
-                          {/* Item Selector (Warehouse vs Free Text Supplier) */}
-                          <td className="p-1">
-                            {ctMaterialProposalType === 'warehouse' ? (
-                              <div>
-                                <select
-                                  value={row.name}
-                                  onChange={(e) => {
-                                    const selectedName = e.target.value;
-                                    const matchedItem = inventory.find(i => i.name === selectedName);
-                                    const next = [...ctMaterialRows];
-                                    next[idx].name = selectedName;
-                                    next[idx].unit = matchedItem ? matchedItem.unit : 'Tấm';
-                                    next[idx].availableQty = matchedItem ? matchedItem.qty : 0;
-                                    next[idx].price = matchedItem ? matchedItem.unitPrice : 0;
-                                    setCtMaterialRows(next);
-                                  }}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-[10.5px] font-semibold cursor-pointer"
-                                >
-                                  <option value="">-- Chọn vật tư sẵn có trong kho --</option>
-                                  {inventory.map(item => (
-                                    <option key={item.id} value={item.name}>
-                                      {item.name} (Sẵn có: {item.qty} {item.unit})
-                                    </option>
-                                  ))}
-                                </select>
-                                {row.qty > (row.availableQty || 0) && row.name && (
-                                  <span className="text-[9px] text-red-400 font-bold block mt-1 animate-pulse">
-                                    ⚠️ Vượt quá tồn kho khả dụng ({row.availableQty || 0})
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <input 
-                                type="text" 
-                                value={row.name} 
+
+                          {/* Tên sản phẩm — autocomplete Danh mục MUA */}
+                          <td className="p-1 relative">
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={row.name}
+                                onFocus={(e) => {
+                                  setCtCatalogOpenIdx(idx);
+                                  ctCatalogInputRef.current = e.currentTarget;
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setCtCatalogRect(rect);
+                                  // Mở LÊN nếu ô nhập nằm ở nửa dưới màn hình để danh sách gợi ý không bị khuất.
+                                  setCtCatalogOpenUp(rect.bottom > window.innerHeight * 0.6);
+                                }}
                                 onChange={(e) => {
                                   const next = [...ctMaterialRows];
                                   next[idx].name = e.target.value;
-                                  // Auto-match price & unit if exists in inventory catalog
-                                  const matched = inventory.find(i => i.name.toLowerCase() === e.target.value.toLowerCase().trim());
-                                  if (matched) {
-                                    next[idx].unit = matched.unit;
-                                    next[idx].price = matched.unitPrice;
+                                  // Nhập tay: nếu không còn khớp chính xác tên danh mục thì bỏ mã
+                                  const exact = purchaseCatalog.find(p =>
+                                    String(p.tenSanPham || '').toLowerCase().trim() === e.target.value.toLowerCase().trim());
+                                  next[idx].maSanPham = exact ? (exact.ma_san_pham ?? exact.maSanPham ?? '') : '';
+                                  if (exact) {
+                                    next[idx].unit = exact.donViTinh || next[idx].unit;
+                                    next[idx].spec = exact.quyCach || next[idx].spec;
                                   }
                                   setCtMaterialRows(next);
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-[10.5px] font-semibold"
-                                placeholder="Nhập tên vật tư gỗ hoặc phụ kiện mới..."
+                                placeholder="Nhập tên sản phẩm hoặc chọn từ Danh mục MUA..."
                               />
-                            )}
+                            </div>
                           </td>
 
-                          {/* Quantity */}
+                          {/* Số lượng */}
                           <td className="p-1">
-                            <input 
-                              type="number" 
-                              value={row.qty} 
+                            <input
+                              type="number"
+                              value={row.qty}
                               min="1"
                               onChange={(e) => {
                                 const next = [...ctMaterialRows];
@@ -1683,36 +1618,48 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                             />
                           </td>
 
-                          {/* Unit */}
+                          {/* Đơn vị tính */}
                           <td className="p-1">
-                            <input 
-                              type="text" 
-                              value={row.unit} 
-                              disabled={ctMaterialProposalType === 'warehouse'}
+                            <input
+                              type="text"
+                              value={row.unit}
                               onChange={(e) => {
                                 const next = [...ctMaterialRows];
                                 next[idx].unit = e.target.value;
                                 setCtMaterialRows(next);
                               }}
-                              className={`w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-[10.5px] ${
-                                ctMaterialProposalType === 'warehouse' ? 'opacity-50 cursor-not-allowed text-slate-400' : ''
-                              }`}
+                              className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-[10.5px]"
                               placeholder="Bộ/Cái/Tấm..."
                             />
                           </td>
 
-                          {/* Ghi chú */}
+                          {/* Quy cách */}
                           <td className="p-1">
-                            <input 
-                              type="text" 
-                              value={row.spec || ''} 
+                            <input
+                              type="text"
+                              value={row.spec || ''}
                               onChange={(e) => {
                                 const next = [...ctMaterialRows];
                                 next[idx].spec = e.target.value;
                                 setCtMaterialRows(next);
                               }}
                               className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-[10.5px]"
-                              placeholder="Quy cách, yêu cầu sản xuất hoặc lưu ý..."
+                              placeholder="Quy cách..."
+                            />
+                          </td>
+
+                          {/* Ghi chú */}
+                          <td className="p-1">
+                            <input
+                              type="text"
+                              value={row.note || row.spec || ''}
+                              onChange={(e) => {
+                                const next = [...ctMaterialRows];
+                                next[idx].note = e.target.value;
+                                setCtMaterialRows(next);
+                              }}
+                              className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-[10.5px]"
+                              placeholder="Ghi chú..."
                             />
                           </td>
 
@@ -1732,8 +1679,8 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                       ))}
                       {ctMaterialRows.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="p-4 text-center text-slate-500 text-[10.5px]">
-                            Chưa có vật tư nào được chọn. Bấm nút phía dưới để thêm!
+                          <td colSpan={7} className="p-4 text-center text-slate-500 text-[10.5px]">
+                            Chưa có vật tư nào được chọn. Bấm "+ Thêm dòng vật tư mới" hoặc nhập từ Excel.
                           </td>
                         </tr>
                       )}
@@ -1741,238 +1688,45 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                   </table>
                 </div>
 
-                {/* Add new line */}
-                <div className="flex justify-between items-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newRow = { 
-                        id: `mat_${Date.now()}_${Math.random()}`, 
-                        name: '', 
-                        qty: 1, 
-                        unit: 'Tấm', 
-                        spec: '', 
-                        availableQty: 9999, 
-                        price: 150000 
-                      };
-                      setCtMaterialRows([...ctMaterialRows, newRow]);
-                    }}
-                    className="bg-slate-900 border border-dashed border-slate-700 text-amber-400 font-extrabold hover:bg-slate-850 px-3.5 py-1.5 rounded-lg text-[10px] cursor-pointer transition-all"
-                  >
-                    + Thêm dòng vật tư mới
-                  </button>
-                </div>
-
-                {/* Action button: Bắt đầu điều phối */}
-                <div className="border-t border-slate-800 pt-4">
-                  <div className="w-full">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        try {
-                          if (!selectedProject) {
-                            if (setConfirmDialog) {
-                              setConfirmDialog({
-                                title: 'Lỗi ⚠️',
-                                message: 'Chưa chọn dự án hoặc dự án không khả dụng!',
-                                cancelText: 'Đóng'
-                              });
-                            } else {
-                              addToast({ title: '❌ Lỗi', message: 'Chưa chọn dự án hoặc dự án không khả dụng!', type: 'error' });
-                            }
-                            return;
-                          }
-                          if (ctMaterialRows.length === 0) {
-                            if (setConfirmDialog) {
-                              setConfirmDialog({
-                                title: 'Thông báo 🔔',
-                                message: 'Bảng vật tư đề xuất trống!',
-                                cancelText: 'Đóng'
-                              });
-                            } else {
-                              addToast({ title: '⚠️ Trống', message: 'Bảng vật tư đề xuất trống!', type: 'warning' });
-                            }
-                            return;
-                          }
-                          if (ctMaterialRows.some(r => !r.name.trim())) {
-                            if (setConfirmDialog) {
-                              setConfirmDialog({
-                                title: 'Thông báo 🔔',
-                                message: 'Vui lòng chọn hoặc nhập đầy đủ tên vật tư cho toàn bộ các dòng!',
-                                cancelText: 'Đóng'
-                              });
-                            } else {
-                              addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn hoặc nhập đầy đủ tên vật tư cho toàn bộ các dòng!', type: 'warning' });
-                            }
-                            return;
-                          }
-
-                          let finalSupplierId = ctMaterialSupplierId;
-                          let finalSupplierName = '';
-
-                          if (ctMaterialProposalType === 'supplier') {
-                            if (!finalSupplierId && ctMaterialSupplierSearch.trim()) {
-                              // Find matching supplier by name (case-insensitive)
-                              const matched = suppliers.find(s => s.name.toLowerCase().trim() === ctMaterialSupplierSearch.toLowerCase().trim());
-                              if (matched) {
-                                finalSupplierId = matched.id;
-                                finalSupplierName = matched.name;
-                              } else {
-                                // Auto-create supplier fast
-                                const autoSup = {
-                                  id: `SUP_${Date.now()}`,
-                                  name: ctMaterialSupplierSearch.trim(),
-                                  phone: '',
-                                  field: 'Cung cấp vật tư thô',
-                                  representative: 'Người phụ trách',
-                                  email: '',
-                                  address: '',
-                                  bankAccount: '',
-                                  bankName: '',
-                                  note: 'Tự động tạo từ biểu mẫu đề xuất',
-                                  debt: 0
-                                };
-                                const updatedSups = [...suppliers, autoSup];
-                                setSuppliers(updatedSups);
-                                dbService.suppliers.save(autoSup).catch(() => {});
-                                window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: updatedSups }));
-
-                                finalSupplierId = autoSup.id;
-                                finalSupplierName = autoSup.name;
-                              }
-                            } else if (finalSupplierId) {
-                              const selectedSup = suppliers.find(s => s.id === finalSupplierId);
-                              finalSupplierName = selectedSup?.name || '';
-                            }
-
-                            if (!finalSupplierId) {
-                              if (setConfirmDialog) {
-                                setConfirmDialog({
-                                  title: 'Thông báo 🔔',
-                                  message: 'Vui lòng tìm kiếm, chọn hoặc nhập đầy đủ một Nhà Cung Cấp trong Danh Mục!',
-                                  cancelText: 'Đóng'
-                                });
-                              } else {
-                                addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng tìm kiếm, chọn hoặc nhập đầy đủ một Nhà Cung Cấp trong Danh Mục!', type: 'warning' });
-                              }
-                              return;
-                            }
-                          }
-
-                          // Warning if exceeding stock quantity in warehouse mode
-                          let hasExceededStock = false;
-                          if (ctMaterialProposalType === 'warehouse') {
-                            hasExceededStock = ctMaterialRows.some(r => r.qty > (r.availableQty || 0));
-                          }
-
-                          const confirmMsg = hasExceededStock
-                            ? '⚠️ CẢNH BÁO: Bạn đang đề xuất số lượng VƯỢT QUÁ số lượng có sẵn trong kho!\n\nBạn có chắc chắn muốn tiếp tục khởi chạy đề xuất và Bắt đầu điều phối không?'
-                            : 'Bạn có chắc chắn muốn phê duyệt biểu mẫu và BẮT ĐẦU ĐIỀU PHỐI vật tư thô này không?';
-
-                          const executeCoordination = () => {
-                            try {
-                              const creatorId = currentUser?.id || 'emp_1';
-                              const creatorName = currentUser?.name || 'Người tạo';
-
-                              const newMatLog = `[${new Date().toLocaleTimeString()}] - 🔔 Hệ thống Kho: Đã bắt đầu phiếu đề xuất điều phối vật tư: MAT-${selectedProject.code}. Loại hình: ${
-                                ctMaterialProposalType === 'warehouse' ? 'Vật tư trong kho' : 'Từ nhà cung cấp'
-                              }. Trạng thái khởi tạo: CHỜ NCC / KHO.`;
-
-                              setCtMaterialLogs([newMatLog]);
-
-                              // Create project document matching Kanban needs
-                              const newMatDoc: ProjectDoc = {
-                                id: `doc_mat_${Date.now()}`,
-                                type: 'quotation', // keeps 'quotation' for compatibility with MaterialCoordination logic
-                                name: ctMaterialProposalType === 'warehouse'
-                                  ? `Đề xuất cấp vật tư thô từ Kho (${creatorName})`
-                                  : `Đề xuất vật tư từ NCC: ${finalSupplierName || ''} (${creatorName})`,
-                                code: `MAT-${selectedProject.code}`,
-                                createdAt: new Date().toISOString().split('T')[0],
-                                status: 'draft', // Maps directly to "CHỜ NCC / KHO"
-                                templateName: ctMaterialProposalType === 'warehouse'
-                                  ? 'Đề xuất vật tư trong kho'
-                                  : 'Đề xuất vật tư từ nhà cung cấp',
-                                materials: ctMaterialRows.map(row => ({
-                                  id: row.id,
-                                  name: row.name,
-                                  qty: row.qty,
-                                  unit: row.unit,
-                                  spec: row.spec || '',
-                                  note: row.spec || '',
-                                  price: row.price || 150000,
-                                  totalPrice: (row.qty || 0) * (row.price || 150000)
-                                })),
-                                coordinationType: 'self',
-                                coordinatorId: creatorId,
-                                coordinatorName: creatorName,
-                                creatorId: creatorId,
-                                creatorName: creatorName,
-                                proposalType: ctMaterialProposalType,
-                                supplierId: ctMaterialProposalType === 'supplier' ? finalSupplierId : undefined,
-                                supplierName: ctMaterialProposalType === 'supplier' ? finalSupplierName : undefined
-                              };
-
-                              // Update current project documents
-                              updateProjectWithRule(selectedProject.id, {
-                                documents: [...(selectedProject.documents || []), newMatDoc]
-                              });
-
-                              // Set custom confirmation dialog showing success
-                              if (setConfirmDialog) {
-                                setConfirmDialog({
-                                  title: 'Bắt Đầu Điều Phối Thành Công! 🚀',
-                                  message: `Đề xuất vật tư thô của bạn đã được lập thành công và đẩy sang bảng điều phối với trạng thái "CHỜ NCC / KHO".`,
-                                  cancelText: 'Đóng'
-                                });
-                              } else {
-                                addToast({ title: '✅ Thành công', message: 'Khởi tạo điều phối vật tư thành công!', type: 'success' });
-                              }
-
-                              // Close modal and switch user tab to Material Coordination screen
-                              setActiveConnectedTool(null);
-                              window.dispatchEvent(new CustomEvent('hl-switch-tab', { detail: 'material-coordination' }));
-                            } catch (err: any) {
-                              console.error("Lỗi thực thi điều phối:", err);
-                              addToast({ title: '❌ Lỗi', message: 'Lỗi thực thi điều phối: ' + (err?.message || err), type: 'error' });
-                            }
-                          };
-
-                          if (setConfirmDialog) {
-                            setConfirmDialog({
-                              title: 'Xác Nhận Khởi Tạo Điều Phối 📋',
-                              message: confirmMsg,
-                              cancelText: 'Hủy bỏ',
-                              confirmText: 'Bắt đầu',
-                              onConfirm: executeCoordination
-                            });
-                          } else {
-                            if (window.confirm(confirmMsg)) {
-                              executeCoordination();
-                            }
-                          }
-                        } catch (error: any) {
-                          console.error("Lỗi khi Bắt đầu điều phối:", error);
-                          if (setConfirmDialog) {
-                            setConfirmDialog({
-                              title: 'Lỗi Hệ Thống ⚠️',
-                              message: "Đã xảy ra lỗi khi Bắt đầu điều phối: " + (error?.message || error),
-                              cancelText: 'Đóng'
-                            });
-                          } else {
-                            addToast({ title: '❌ Lỗi', message: 'Đã xảy ra lỗi khi bắt đầu điều phối: ' + (error?.message || error), type: 'error' });
-                          }
-                        }
-                      }}
-                      className="w-full bg-amber-500 hover:bg-amber-400 font-extrabold py-3 rounded-xl text-slate-950 transition-all cursor-pointer text-center text-[12px] shadow-lg hover:scale-[1.01]"
-                    >
-                      Bắt đầu điều phối
-                    </button>
-                  </div>
-                </div>
-
               </div>
             </div>
+          )}
+
+          {/* Dropdown Danh mục MUA render qua Portal — thoát khỏi container cuộn
+              của modal nên không bị khuất / cắt (clip) dù ở dòng cuối cùng. */}
+          {ctCatalogOpenIdx !== null && ctCatalogRect && createPortal(
+            <div
+              ref={ctCatalogDropdownRef}
+              className={`fixed z-[9999] ${ctCatalogOpenUp ? 'mb-1' : 'mt-1'} max-h-60 overflow-y-auto bg-slate-950 border border-slate-700 rounded-lg shadow-2xl divide-y divide-slate-900`}
+              style={{
+                left: ctCatalogRect.left,
+                width: ctCatalogRect.width,
+                ...(ctCatalogOpenUp
+                  ? { bottom: window.innerHeight - ctCatalogRect.top + 4 }
+                  : { top: ctCatalogRect.bottom + 4 }),
+              }}
+            >
+              {getCatalogFiltered().map(p => (
+                <button
+                  key={p.ma_san_pham ?? p.id ?? String(p.tenSanPham)}
+                  type="button"
+                  onClick={() => selectCatalogItem(p)}
+                  className="w-full text-left p-2 hover:bg-slate-800/80 text-white text-[11px] font-medium transition-colors block"
+                >
+                  <div className="font-bold text-amber-400">{p.tenSanPham}</div>
+                  <div className="text-slate-400 text-[9.5px]">
+                    {p.ma_san_pham || p.maSanPham ? `Mã: ${p.ma_san_pham || p.maSanPham} · ` : ''}{p.donViTinh || ''} · {p.quyCach || ''}
+                  </div>
+                </button>
+              ))}
+              {getCatalogFiltered().length === 0 && (
+                <div className="p-2 text-slate-500 text-[10.5px] text-center">Không tìm thấy trong Danh mục MUA</div>
+              )}
+              {purchaseCatalog.length === 0 && (
+                <div className="p-2 text-slate-500 text-[10.5px] text-center">Danh mục MUA trống</div>
+              )}
+            </div>,
+            document.body
           )}
 
           {/* 4. LÀM BÁO GIÁ */}
@@ -2581,8 +2335,156 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
             </div>
           )}
 
-
         </div>
+
+        {/* Footer cố định sát đáy cửa sổ — Nút Gửi đề xuất (chỉ hiện với ĐỀ XUẤT CUNG ỨNG VẬT TƯ) */}
+        {activeConnectedTool === 'material' && (
+          <div className="border-t border-slate-800 pt-3 pb-1 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  if (!selectedProject) {
+                    if (setConfirmDialog) {
+                      setConfirmDialog({
+                        title: 'Lỗi ⚠️',
+                        message: 'Chưa chọn dự án hoặc dự án không khả dụng!',
+                        cancelText: 'Đóng'
+                      });
+                    } else {
+                      addToast({ title: '❌ Lỗi', message: 'Chưa chọn dự án hoặc dự án không khả dụng!', type: 'error' });
+                    }
+                    return;
+                  }
+                  if (ctMaterialRows.length === 0) {
+                    if (setConfirmDialog) {
+                      setConfirmDialog({
+                        title: 'Thông báo 🔔',
+                        message: 'Bảng vật tư đề xuất trống!',
+                        cancelText: 'Đóng'
+                      });
+                    } else {
+                      addToast({ title: '⚠️ Trống', message: 'Bảng vật tư đề xuất trống!', type: 'warning' });
+                    }
+                    return;
+                  }
+                  if (ctMaterialRows.some(r => !r.name.trim())) {
+                    if (setConfirmDialog) {
+                      setConfirmDialog({
+                        title: 'Thông báo 🔔',
+                        message: 'Vui lòng chọn hoặc nhập đầy đủ tên sản phẩm cho toàn bộ các dòng!',
+                        cancelText: 'Đóng'
+                      });
+                    } else {
+                      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn hoặc nhập đầy đủ tên sản phẩm cho toàn bộ các dòng!', type: 'warning' });
+                    }
+                    return;
+                  }
+
+                  const creatorId = currentUser?.id || 'emp_1';
+                  const creatorName = currentUser?.name || 'Người tạo';
+                  const now = new Date();
+                  const code = `DX-${selectedProject.code || 'DA'}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+
+                  // Tự động tách luồng: chia vật tư thành 2 nhóm đề xuất riêng biệt
+                  //  • Đã có mã Danh mục MUA   → CHỜ ĐẶT HÀNG (không cần xét duyệt)
+                  //  • Chưa có mã Danh mục MUA → TÌM NHÀ CUNG CẤP (cần tìm NCC & duyệt)
+                  const items = ctMaterialRows.map(row => ({
+                    id: row.id,
+                    name: row.name,
+                    qty: row.qty,
+                    unit: row.unit,
+                    spec: row.spec || '',
+                    note: row.note || '',
+                    maSanPham: row.maSanPham || '',
+                    price: row.price || 0,
+                    totalPrice: (row.qty || 0) * (row.price || 0),
+                  }));
+
+                  const withCode = items.filter(i => !!i.maSanPham);
+                  const withoutCode = items.filter(i => !i.maSanPham);
+                  const bothGroups = withCode.length > 0 && withoutCode.length > 0;
+                  const taskName = connectedTaskId ? (tasks.find(t => t.id === connectedTaskId)?.name || '') : '';
+
+                  const buildProposal = (groupItems: any[], status: string, suffix: string) => ({
+                    id: `material_prop_${Date.now()}_${suffix || '0'}`,
+                    code: `${code}${suffix}`,
+                    projectId: selectedProject.id,
+                    projectName: selectedProject.name,
+                    taskId: connectedTaskId || undefined,
+                    taskName,
+                    proposalType: 'material',
+                    createdBy: creatorId,
+                    createdByName: creatorName,
+                    status,
+                    items: groupItems,
+                    supplierId: null,
+                    supplierName: null,
+                    quotes: [],
+                    chosenQuoteId: null,
+                    purchaseOrderIds: [],
+                    debtRecorded: false,
+                    notes: '',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  });
+
+                  const created: any[] = [];
+                    if (withCode.length) {
+                      const p = buildProposal(withCode, 'waiting_order', bothGroups ? '-MUA' : '');
+                      await dbService.materialProposals.create(p);
+                      created.push(p);
+                    }
+                    if (withoutCode.length) {
+                      const p = buildProposal(withoutCode, 'find_supplier', bothGroups ? '-TNCC' : '');
+                      await dbService.materialProposals.create(p);
+                      created.push(p);
+                    }
+
+                    window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
+
+                    const muaCount = withCode.length;
+                    const timNccCount = withoutCode.length;
+                    const matLog = `[${now.toLocaleTimeString()}] - 🔔 Đã gửi ${created.length} đề xuất: ${muaCount} VT có mã → CHỜ ĐẶT HÀNG, ${timNccCount} VT chưa có mã → TÌM NCC.`;
+                    setCtMaterialLogs([matLog]);
+
+                    // Gửi tin nhắn nhóm chat Dự án
+                    try {
+                      await ensureProjectChatGroup(selectedProject);
+                      await sendGroupChatMessage({
+                        conversationId: `conv_project_${selectedProject.id}`,
+                        senderId: creatorId,
+                        senderName: creatorName,
+                        senderRole: 'pm' as any,
+                        content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${selectedProject.name}${connectedTaskId ? `\nCông việc: ${taskName}` : ''}\n— ${items.map(i => `• ${i.name} × ${i.qty} ${i.unit}${i.maSanPham ? '' : ' (chưa có mã → TÌM NCC)'}`).join('\n')}\n→ ${bothGroups ? `Đã tách thành 2 đề xuất: ${muaCount} VT có mã → CHỜ ĐẶT HÀNG, ${timNccCount} VT chưa có mã → TÌM NCC` : (muaCount ? 'Toàn bộ có mã → CHỜ ĐẶT HÀNG' : 'Cần TÌM NHÀ CUNG CẤP (chưa có mã)')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
+                        relatedEntity: { type: 'project', id: selectedProject.id } as any,
+                      });
+                    } catch (e) {
+                      console.error('Không gửi được tin nhắn nhóm dự án:', e);
+                    }
+
+                    addToast({
+                      title: '✅ Thành công',
+                      message: `Đã gửi ${created.length} đề xuất vật tư${bothGroups ? ` (${muaCount} VT có mã → CHỜ ĐẶT HÀNG, ${timNccCount} VT chưa có mã → TÌM NCC)` : (muaCount ? ' — chuyển thẳng CHỜ ĐẶT HÀNG' : ' — vào cột TÌM NHÀ CUNG CẤP')}.`,
+                      type: 'success',
+                    });
+                    setActiveConnectedTool(null);
+                    window.dispatchEvent(new CustomEvent('hl-switch-tab', { detail: 'material-coordination' }));
+                } catch (error: any) {
+                  console.error('Lỗi khi Gửi đề xuất:', error);
+                  addToast({
+                    title: '❌ Lỗi',
+                    message: 'Không thể lưu đề xuất lên cơ sở dữ liệu: ' + (error?.message || error) + '. Vui lòng kiểm tra kết nối và thử lại.',
+                    type: 'error',
+                  });
+                }
+              }}
+              className="w-full bg-amber-500 hover:bg-amber-400 font-extrabold py-3 rounded-xl text-slate-950 transition-all cursor-pointer text-center text-[12px] shadow-lg hover:scale-[1.01]"
+            >
+              Gửi đề xuất
+            </button>
+          </div>
+        )}
 
       </div>
 

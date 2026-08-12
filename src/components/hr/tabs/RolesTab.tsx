@@ -74,6 +74,8 @@ export default function RolesTab(props: RolesTabProps) {
     { type: 'contract', label: 'Hợp Đồng', group: 'Hồ Sơ Dự Án' },
     { type: 'acceptance', label: 'Nghiệm Thu', group: 'Hồ Sơ Dự Án' },
     { type: 'liquidation', label: 'Thanh Lý', group: 'Hồ Sơ Dự Án' },
+    { type: 'material_coordinator', label: 'Người Điều Phối Vật Tư', group: 'Hồ Sơ Dự Án' },
+    { type: 'material_approver', label: 'Người Xét Duyệt Vật Tư', group: 'Hồ Sơ Dự Án' },
     { type: 'leave', label: 'Đơn Xin Nghỉ Phép', group: 'Hồ Sơ Nhân Sự' },
     { type: 'salary_advance', label: 'Tạm Ứng Lương Nhanh', group: 'Hồ Sơ Nhân Sự' },
     { type: 'travel_expense', label: 'Công Tác Phí', group: 'Hồ Sơ Nhân Sự' },

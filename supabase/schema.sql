@@ -920,6 +920,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
   status text,
   attachment_name text,
   approvals jsonb,
+  purchase_order_id text,
   CONSTRAINT payments_pkey PRIMARY KEY (id),
   CONSTRAINT payments_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
 );

@@ -6,7 +6,7 @@ import {
   Plus, Search, Edit2, Check, Settings, Play, ArrowRight, CheckSquare,
   User, Calendar, DollarSign, Image as ImageIcon, MessageSquare,
   Paperclip, Tag, Trash2, X, Send, AlertCircle, FileUp, Shield,
-  HelpCircle, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
+  HelpCircle, ChevronLeft, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
   Users, Mail, Percent, ListTodo, RotateCcw, Calculator, Sliders, Type, MoreVertical,
   ZoomIn, ZoomOut, Lock
 } from 'lucide-react';
@@ -473,6 +473,15 @@ export default function ProjectKanbanBoard({
 
   // Zoom level state for Kanban columns (loaded from Supabase in useEffect above)
   const [columnWidth, setColumnWidth] = useState<number>(280);
+
+  // ─── Phân trang: số trang + số dòng/trang cho từng cột Kanban Dự án ─────
+  const KANBAN_PAGE_SIZES = [5, 10, 15, 20, 30, 50] as const;
+  const [kbColPage, setKbColPage] = useState<Record<string, number>>({});
+  const [kbColPageSize, setKbColPageSize] = useState<Record<string, number>>({});
+  const getKbColPage = (id: string) => kbColPage[id] || 1;
+  const getKbColPageSize = (id: string) => kbColPageSize[id] || 5;
+  const kbColTotalPages = (id: string, count: number) => Math.max(1, Math.ceil(count / getKbColPageSize(id)));
+  const setKbColPageSafe = (id: string, p: number) => setKbColPage(prev => ({ ...prev, [id]: Math.max(1, p) }));
 
   useEffect(() => {
     const handleOutsideClick = () => {
@@ -1224,7 +1233,7 @@ export default function ProjectKanbanBoard({
                 styleStrike: subtaskAuto.textStyleStyleStrike,
                 styleColor: subtaskAuto.textStyleStyleColor,
                 checklistTexts: subtaskAuto.checklistTexts || [],
-                missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t, i) => templateToMission(t, i)) : undefined,
+                missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t: SubTaskMissionTemplate, i: number) => templateToMission(t, i)) : undefined,
                 approvals: approvals,
                 isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                 isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -1982,6 +1991,74 @@ export default function ProjectKanbanBoard({
   // 4. Modal Workflow Automation (Cài đặt tự động hóa cho cột)
   // 5. Modal xem trước Báo giá PDF (downloadedQuoteModal)
   // ===========================================================================
+
+  // ─── Thanh phân trang tối (dùng chung cho các cột Kanban) ────────────────
+  // Luôn nằm gọn trong cột: nút "+" (Thêm dự án) đặt cùng hàng với "Số dòng:"
+  // (căn phải); khi cột hẹp (columnWidth < 240px) điều hướng trang xuống hàng riêng.
+  const KbPaginationBar = ({ page, totalPages, pageSize, onPage, onPageSize, total, onAdd }: {
+    page: number; totalPages: number; pageSize: number;
+    onPage: (p: number) => void; onPageSize: (s: number) => void; total: number; onAdd: () => void;
+  }) => {
+    const compact = columnWidth < 240;
+    const pageText = total > 0 ? `${page}/${totalPages}` : '0';
+    const navBtn = `flex items-center justify-center shrink-0 rounded border border-slate-800 bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
+    const addBtn = `flex items-center justify-center shrink-0 rounded border border-slate-800 bg-slate-950 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/60 hover:bg-slate-800 cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
+    const navGroup = (
+      <div className={`flex items-center min-w-0 gap-1 ${compact ? 'justify-center' : ''}`}>
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onPage(page - 1)}
+          className={navBtn}
+        >
+          <ChevronLeft className="w-3 h-3" />
+        </button>
+        <span className="text-[9px] font-mono font-bold text-slate-400 whitespace-nowrap shrink-0" title={total > 0 ? `Trang ${page}/${totalPages}` : '0 dự án'}>
+          {pageText}
+        </span>
+        <button
+          type="button"
+          disabled={page >= totalPages}
+          onClick={() => onPage(page + 1)}
+          className={navBtn}
+        >
+          <ChevronRight className="w-3 h-3" />
+        </button>
+      </div>
+    );
+    return (
+      <div className={`border-t border-slate-850/70 shrink-0 w-full min-w-0 pt-1.5 ${compact ? 'space-y-1 px-0.5' : 'px-1'}`}>
+        {/* Hàng 1: Số dòng (trái) + Nút thêm "+" (phải, cùng hàng với Số dòng) */}
+        <div className="flex items-center justify-between gap-1 min-w-0 w-full">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wide shrink-0">Số dòng: </span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSize(Number(e.target.value))}
+              title="Số dòng hiển thị trên 1 trang"
+              className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[9px] font-bold text-slate-300 outline-none cursor-pointer shrink-0"
+            >
+              {KANBAN_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {!compact && navGroup}
+            <button
+              type="button"
+              onClick={onAdd}
+              title="Thêm trực tiếp vào cột"
+              className={addBtn}
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        {/* Hàng 2 (chỉ khi cột hẹp): điều hướng trang căn giữa */}
+        {compact && navGroup}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4 text-xs font-sans text-slate-300" id={`board_${sector}`}>
       {/* 1. TOP HEADER & SEARCH SEARCH BOX WITH FILTER */}
@@ -2246,7 +2323,7 @@ export default function ProjectKanbanBoard({
                       styleStrike: subtaskAuto.textStyleStyleStrike,
                       styleColor: subtaskAuto.textStyleStyleColor,
                       checklistTexts: subtaskAuto.checklistTexts || [],
-                      missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t, i) => templateToMission(t, i)) : undefined,
+                      missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t: SubTaskMissionTemplate, i: number) => templateToMission(t, i)) : undefined,
                       approvals: approvals,
                       isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                       isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -2712,6 +2789,10 @@ export default function ProjectKanbanBoard({
           {columns.map((col) => {
             // Find projects mapped to this column
             const colProjects = sectorProjects.filter(p => getProjectColumnId(p, columns) === col.id);
+            const kbSize = getKbColPageSize(col.id);
+            const kbTotal = kbColTotalPages(col.id, colProjects.length);
+            const kbPageClamped = Math.min(getKbColPage(col.id), kbTotal);
+            const pagedColProjects = colProjects.slice((kbPageClamped - 1) * kbSize, kbPageClamped * kbSize);
             const styles = getColumnStyleDetails(col.color);
 
             // Check if column has any active automation rule
@@ -2820,7 +2901,7 @@ export default function ProjectKanbanBoard({
                       <span className="text-[10px]">Kéo công trình thả vào đây</span>
                     </div>
                   ) : (
-                    colProjects.map((p) => {
+                    pagedColProjects.map((p) => {
                       const custName = customers.find(c => c.id === p.customerId)?.name || 'Vãng lai';
                       const pmName = employees.find(e => e.id === p.pmId)?.name || 'Chưa gán';
                       const directorName = employees.find(e => e.role === 'director')?.name || 'Trương Hữu Long';
@@ -2889,16 +2970,15 @@ export default function ProjectKanbanBoard({
                   )}
                 </div>
 
-                {/* Footer simple add card quick trigger */}
-                <div className="shrink-0 pt-1.5 border-t border-slate-850">
-                  <button
-                    onClick={() => openAddProjectModal(col.id)}
-                    className="w-full bg-slate-950/40 hover:bg-slate-950 border border-slate-850 text-slate-400 hover:text-white px-2 py-1.5 rounded-lg flex items-center justify-center gap-1 font-bold text-[10px] cursor-pointer transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Thêm trực tiếp vào cột
-                  </button>
-                </div>
+                <KbPaginationBar
+                  page={kbPageClamped}
+                  totalPages={kbTotal}
+                  pageSize={kbSize}
+                  total={colProjects.length}
+                  onPage={(p) => setKbColPageSafe(col.id, p)}
+                  onPageSize={(s) => { setKbColPageSize(prev => ({ ...prev, [col.id]: s })); setKbColPageSafe(col.id, 1); }}
+                  onAdd={() => openAddProjectModal(col.id)}
+                />
               </div>
             );
           })}

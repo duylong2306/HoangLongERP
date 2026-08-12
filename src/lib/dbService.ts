@@ -653,6 +653,29 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
   }
 }
 
+// Delete helper theo cột tùy chỉnh — dùng cho bảng có khóa chính KHÔNG phải 'id'
+// (vd: purchase_product_catalog / sales_product_catalog có PK là ma_san_pham).
+async function deleteSupabaseByColumn(tableName: string, column: string, value: string): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error(`Supabase chưa được cấu hình — không thể xóa ${tableName}`);
+  }
+  try {
+    // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+    await enqueueWrite(async () => {
+      const { error } = await supabase.from(tableName).delete().eq(column, value);
+      if (error) {
+        console.error(`Supabase delete error for ${tableName}:`, error.message);
+        throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
+      }
+      invalidateCache(tableName);
+    });
+  } catch (err) {
+    console.error(`Supabase delete exception for ${tableName}:`, err);
+    throw err;
+  }
+}
+
 // Helper: chuẩn hóa giá trị thời gian, xử lý cả trường hợp bị lưu object timestamp
 function normalizeTime(v: any): string {
   if (!v || v === '--:--' || v === '') return '--:--';
@@ -1997,6 +2020,52 @@ export const dbService = {
     }
   },
 
+  // 12a. PURCHASE PRODUCT CATALOG (Danh mục MUA — Dữ liệu Kho, PK = ma_san_pham)
+  purchaseProductCatalog: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('purchase_product_catalog', []);
+    },
+    async save(item: any): Promise<void> {
+      await saveSupabase('purchase_product_catalog', item);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated', { detail: item }));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    },
+    async delete(maSanPham: string): Promise<void> {
+      await deleteSupabaseByColumn('purchase_product_catalog', 'ma_san_pham', maSanPham);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated'));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    }
+  },
+
+  // 12b. SALES PRODUCT CATALOG (Danh mục BÁN — Dữ liệu Kho, PK = ma_san_pham)
+  salesProductCatalog: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('sales_product_catalog', []);
+    },
+    async save(item: any): Promise<void> {
+      await saveSupabase('sales_product_catalog', item);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated', { detail: item }));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    },
+    async delete(maSanPham: string): Promise<void> {
+      await deleteSupabaseByColumn('sales_product_catalog', 'ma_san_pham', maSanPham);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated'));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    }
+  },
+
   // 9. WAREHOUSE LOGS (Đồng bộ Supabase)
   warehouseLogs: {
     async list(): Promise<any[]> {
@@ -2227,6 +2296,29 @@ export const dbService = {
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('purchase_orders', id);
+    }
+  },
+
+  // 14g. MATERIAL PROPOSALS (Đề xuất vật tư theo luồng mới — sync Supabase)
+  materialProposals: {
+    async list(): Promise<any[]> {
+      const rows = await querySupabase<any>('material_proposals', []);
+      return rows.map((r: any) => ({
+        ...r,
+        items: Array.isArray(r.items) ? r.items : [],
+        quotes: Array.isArray(r.quotes) ? r.quotes : [],
+        purchaseOrderIds: Array.isArray(r.purchaseOrderIds) ? r.purchaseOrderIds : [],
+      }));
+    },
+    async save(proposal: any): Promise<void> {
+      await saveSupabase('material_proposals', proposal);
+    },
+    /** Tạo đề xuất MỚI — không bao giờ ghi đè đề xuất cũ; tự cấp lại mã nếu trùng. */
+    async create(proposal: any): Promise<any> {
+      return createOrderUnique('material_proposals', proposal);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('material_proposals', id);
     }
   },
 

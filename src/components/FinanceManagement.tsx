@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   DollarSign,
+  ShoppingCart,
   Wallet,
   Check,
   X,
@@ -811,6 +812,64 @@ export default function FinanceManagement({
   const [poNotes, setPoNotes] = useState('');
   const [poDeleteId, setPoDeleteId] = useState<string | null>(null);
   const [poViewOrder, setPoViewOrder] = useState<PurchaseOrder | null>(null);
+  // Modal chi tiết & tạo phiếu chi cho tab "Đơn hàng" (đề xuất vật tư)
+  const [poDetailModal, setPoDetailModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
+  const [poPaymentModal, setPoPaymentModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
+  const [poPaymentAmount, setPoPaymentAmount] = useState<string>('0');
+  const [poPaymentMethod, setPoPaymentMethod] = useState<'cash' | 'transfer'>('transfer');
+  const [poPaymentDate, setPoPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [poPaymentNote, setPoPaymentNote] = useState('');
+  // Hàm helper đọc trường vật tư đơn hàng bất kể shape (Finance: tenSanPham/soLuong/donGia | Điều phối: name/qty/price)
+  const poItemName = (i: any): string => i?.tenSanPham || i?.name || '—';
+  const poItemQty = (i: any): number => (i?.soLuong ?? i?.qty ?? 0);
+  const poItemUnit = (i: any): string => i?.donViTinh || i?.unit || '';
+  const poItemPrice = (i: any): number => (i?.donGia ?? i?.price ?? 0);
+  const poItemTotal = (i: any): number => i?.thanhTien ?? i?.totalPrice ?? ((poItemQty(i) || 0) * (poItemPrice(i) || 0));
+  const poStatusLabel = (st: string): string => {
+    switch (st) {
+      case 'draft': return 'Nháp';
+      case 'confirmed': return 'Đã xác nhận';
+      case 'completed': return 'Hoàn tất';
+      case 'cancelled': return 'Đã hủy';
+      default: return st || '—';
+    }
+  };
+
+  // Tạo phiếu chi thanh toán công nợ cho 1 đơn hàng (liên kết qua purchaseOrderId).
+  // Công nợ đơn hàng & Công nợ Trả được giảm khi phiếu chi được duyệt (xử lý tại App.tsx handleApprovePayment).
+  const handleCreatePoPayment = (order: PurchaseOrder) => {
+    const amount = Number(poPaymentAmount) || 0;
+    const congNo = order.congNo || 0;
+    if (amount <= 0) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập số tiền thanh toán.', type: 'warning' });
+      return;
+    }
+    if (amount > congNo + 1) {
+      addToast({ title: '⚠️ Vượt quá công nợ', message: `Số tiền không được lớn hơn công nợ còn lại (${congNo.toLocaleString('vi-VN')} đ).`, type: 'warning' });
+      return;
+    }
+    const payId = `pay_${Date.now()}`;
+    const newPayment: Payment = {
+      id: payId,
+      code: `PC-DH-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${String(Math.floor(Math.random() * 900 + 100))}`,
+      date: poPaymentDate,
+      paymentAt: new Date().toISOString(),
+      recipient: order.supplierName,
+      category: 'supplier_payment',
+      amount,
+      paymentMethod: poPaymentMethod,
+      notes: poPaymentNote.trim() || `Thanh toán đơn hàng ${order.id} - ${order.supplierName}`,
+      proposer: currentUser?.name || 'Kế toán',
+      approver: 'Trương Hữu Long (Giám đốc)',
+      status: 'pending',
+      purchaseOrderId: order.id,
+    };
+    onAddPayment(newPayment);
+    setPoPaymentModal({ open: false, order: null });
+    setPoPaymentAmount('0');
+    setPoPaymentNote('');
+    addToast({ title: '✅ Đã lập phiếu chi', message: `Phiếu chi ${newPayment.code} cho đơn ${order.id} đã tạo. Chờ duyệt để ghi nhận thanh toán.`, type: 'success' });
+  };
   const [pagePO, setPagePO] = useState(1);
   const [pageSizePO, setPageSizePO] = useState(10);
   const poFileInputRef = useRef<HTMLInputElement>(null);
@@ -2421,6 +2480,18 @@ export default function FinanceManagement({
 
                 <button
                   type="button"
+                  onClick={() => { setActiveSubTab('don_hang'); setSearchTerm(''); }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'don_hang' ? 'bg-slate-800/90 text-white border-l-4 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <ShoppingCart className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Đơn Hàng</span>
+                  </span>
+                  <span className="bg-violet-500/10 text-violet-400 text-[8.5px] px-1 rounded font-mono">{purchaseOrders.length}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => { setActiveSubTab('nhap_thu'); setSearchTerm(''); }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'nhap_thu' ? 'bg-slate-800/90 text-white border-l-4 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
                 >
@@ -2505,6 +2576,18 @@ export default function FinanceManagement({
                           <span>Đề Xuất Thu Chi</span>
                         </button>
                       </li>
+
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => { setActiveSubTab('don_hang'); setSearchTerm(''); }}
+                          aria-current={activeSubTab === 'don_hang' ? 'page' : undefined}
+                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'don_hang' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
+                        >
+                          <ShoppingCart className={`w-4 h-4 me-2 ${activeSubTab === 'don_hang' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
+                          <span>Đơn Hàng</span>
+                        </button>
+                      </li>
                       <li>
                         <button
                           type="button"
@@ -2566,6 +2649,7 @@ export default function FinanceManagement({
               <div>
                 <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
                   {activeSubTab === 'de_xuat_thu_chi' && '📋 Phê duyệt Đề xuất Thu Chi Tạm Ứng'}
+                  {activeSubTab === 'don_hang' && '🛒 Quản lý Đơn Hàng Mua'}
                   {activeSubTab === 'dashboard' && '📊 Dashboard Thống kê Kế toán Tổng lực'}
                   {activeSubTab === 'khach_hang' && '👥 Danh mục Khách hàng'}
                   {activeSubTab === 'vat_tu' && '📦 Quản Lý kho'}
@@ -2666,6 +2750,118 @@ export default function FinanceManagement({
 
               </div>
             )}
+
+            {/* TAB: ĐƠN HÀNG MUA (từ Đề xuất vật tư qua ĐÃ NHẬN HÀNG) */}
+            {activeSubTab === 'don_hang' && (() => {
+              const keyword = (searchTerm || '').trim().toLowerCase();
+              const filteredPOs = purchaseOrders
+                .filter((o: PurchaseOrder) => {
+                  if (!keyword) return true;
+                  return (
+                    (o.id || '').toLowerCase().includes(keyword) ||
+                    (o.supplierName || '').toLowerCase().includes(keyword)
+                  );
+                })
+                .slice()
+                .sort((a: PurchaseOrder, b: PurchaseOrder) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+              return (
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
+                    <div>
+                      <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
+                        Danh sách Đơn Hàng Mua
+                      </span>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Quản lý các đơn hàng đã tạo với nhà cung cấp khi đề xuất vật tư chuyển qua cột <span className="text-emerald-400 font-bold">ĐÃ NHẬN HÀNG</span>. Xem chi tiết hoặc lập phiếu chi thanh toán công nợ.
+                      </p>
+                    </div>
+                    <span className="bg-violet-600/20 text-violet-300 border border-violet-500/30 text-[10px] font-bold px-2.5 py-1.5 rounded-lg whitespace-nowrap">
+                      {filteredPOs.length} / {purchaseOrders.length} đơn
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto text-[10.5px]">
+                    <table className="w-full text-left text-slate-300">
+                      <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                        <tr>
+                          <th className="px-3 py-2.5 w-10 text-center">#</th>
+                          <th className="px-3 py-2.5">Mã đơn</th>
+                          <th className="px-3 py-2.5">Nhà cung cấp</th>
+                          <th className="px-3 py-2.5">Ngày</th>
+                          <th className="px-3 py-2.5 text-right">Tổng tiền</th>
+                          <th className="px-3 py-2.5 text-right">Đã TT</th>
+                          <th className="px-3 py-2.5 text-right text-rose-400 font-bold">Công nợ</th>
+                          <th className="px-3 py-2.5">Trạng thái</th>
+                          <th className="px-3 py-2.5 text-center">Hành động</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredPOs.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="px-3 py-8 text-center text-slate-500 italic">
+                              {purchaseOrders.length === 0 ? 'Chưa có đơn hàng nào. Đơn hàng xuất hiện ở đây khi đề xuất vật tư được nhận hàng.' : 'Không tìm thấy đơn hàng phù hợp.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredPOs.map((o: PurchaseOrder, idx: number) => {
+                            const congNo = o.congNo || 0;
+                            const paid = o.thanhToanThucTe || 0;
+                            return (
+                              <tr key={o.id} className="border-b border-slate-850/80 hover:bg-slate-900/40 font-sans">
+                                <td className="px-3 py-3 text-center font-mono text-slate-500">{idx + 1}</td>
+                                <td className="px-3 py-3 font-mono font-bold text-slate-100 whitespace-nowrap">{o.id}</td>
+                                <td className="px-3 py-3 font-semibold text-slate-200">{o.supplierName || '—'}</td>
+                                <td className="px-3 py-3 font-mono text-slate-400 whitespace-nowrap">{(o.createdAt || '').slice(0, 10) || '—'}</td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono text-emerald-400">{(paid).toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-extrabold text-rose-450 bg-rose-500/5">
+                                  {congNo > 0 ? `${congNo.toLocaleString('vi-VN')} đ` : '0 đ'}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                                    o.status === 'completed' ? 'bg-emerald-600/15 text-emerald-300 border-emerald-500/30' :
+                                    o.status === 'cancelled' ? 'bg-rose-600/15 text-rose-300 border-rose-500/30' :
+                                    o.status === 'confirmed' ? 'bg-violet-600/15 text-violet-300 border-violet-500/30' :
+                                    'bg-slate-700/40 text-slate-300 border-slate-600/40'
+                                  }`}>
+                                    {poStatusLabel(o.status)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setPoDetailModal({ open: true, order: o })}
+                                      className="bg-sky-600 hover:bg-sky-500 text-white text-[9.5px] font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
+                                      title="Xem chi tiết đơn hàng"
+                                    >
+                                      <Eye className="w-3 h-3" /> Chi tiết
+                                    </button>
+                                    {congNo > 0 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => { setPoPaymentAmount(String(congNo)); setPoPaymentNote(''); setPoPaymentModal({ open: true, order: o }); }}
+                                        className="bg-rose-600 hover:bg-rose-700 text-white text-[9.5px] font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
+                                        title="Tạo phiếu chi thanh toán công nợ"
+                                      >
+                                        <Circle className="w-3 h-3" /> Tạo phiếu chi
+                                      </button>
+                                    ) : (
+                                      <span className="text-emerald-500 text-[9px] italic font-bold">Đã thanh toán</span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* TAB 0: ĐỀ XUẤT THU CHI */}
             {activeSubTab === 'de_xuat_thu_chi' && (() => {
@@ -4684,12 +4880,13 @@ export default function FinanceManagement({
                         <th className="px-3 py-2 text-right">Tổng thực chi</th>
                         <th className="px-3 py-2 text-center">Trạng thái duyệt</th>
                         <th className="px-3 py-2 text-center w-12">Quy trình</th>
+                        <th className="px-3 py-2 text-center">Đơn hàng</th>
                       </tr>
                     </thead>
                     <tbody>
                       {payments.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-3 py-8 text-center text-slate-500 italic">Chưa có phiếu chi nào.</td>
+                          <td colSpan={8} className="px-3 py-8 text-center text-slate-500 italic">Chưa có phiếu chi nào.</td>
                         </tr>
                       ) : payments.map((p) => {
                         return (
@@ -4729,7 +4926,7 @@ export default function FinanceManagement({
                                       onClick={() => onApprovePayment(p.id, 'rejected')}
                                       className="bg-red-650 hover:bg-rose-600 hover:scale-105 text-white text-[9px] px-2 py-0.5 rounded cursor-pointer transition-transform"
                                     >
-                                      Bác chi
+                                      Từ chối
                                     </button>
                                   </div>
                                 ) : (
@@ -4749,6 +4946,24 @@ export default function FinanceManagement({
                               >
                                 Tải
                               </button>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              {p.purchaseOrderId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const linkedOrder = purchaseOrders.find((o: PurchaseOrder) => o.id === p.purchaseOrderId);
+                                    if (linkedOrder) setPoDetailModal({ open: true, order: linkedOrder });
+                                    else addToast({ title: '⚠️ Không tìm thấy', message: `Đơn hàng ${p.purchaseOrderId} không còn tồn tại.`, type: 'warning' });
+                                  }}
+                                  className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
+                                  title="Xem đơn hàng được thanh toán"
+                                >
+                                  <ShoppingCart className="w-3 h-3" /> Xem đơn hàng
+                                </button>
+                              ) : (
+                                <span className="text-slate-600 text-[9px] italic">—</span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -5992,6 +6207,202 @@ export default function FinanceManagement({
           </div>
         </div>
       )}
+
+      {/* MODAL: CHI TIẾT ĐƠN HÀNG (tab Đơn Hàng) */}
+      {poDetailModal.open && poDetailModal.order && (() => {
+        const o = poDetailModal.order;
+        const congNo = o.congNo || 0;
+        const paid = o.thanhToanThucTe || 0;
+        return (
+          <div
+            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+            onClick={() => setPoDetailModal({ open: false, order: null })}
+          >
+            <div
+              className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 bg-slate-800/60 border-b border-slate-700 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <ShoppingCart className="w-5 h-5 text-violet-400" />
+                  <span className="font-black text-sm text-white uppercase">Chi tiết đơn hàng {o.id}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPoDetailModal({ open: false, order: null })}
+                  className="p-1.5 hover:bg-slate-700 rounded-full text-slate-300 cursor-pointer transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{o.supplierName || '—'}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Tổng tiền</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-violet-300">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Công nợ</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{congNo > 0 ? `${congNo.toLocaleString('vi-VN')} đ` : '0 đ'}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Đã thanh toán</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-emerald-400">{(paid).toLocaleString('vi-VN')} đ</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Trạng thái</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-200">{poStatusLabel(o.status)}</div>
+                  </div>
+                </div>
+                {o.notes ? (
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Ghi chú</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 whitespace-pre-line">{o.notes}</div>
+                  </div>
+                ) : null}
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Danh mục vật tư</label>
+                  <div className="border border-slate-700 rounded-xl divide-y divide-slate-800">
+                    {(o.items || []).length === 0 ? (
+                      <div className="p-4 text-center text-[11px] text-slate-500">Đơn hàng chưa có vật tư.</div>
+                    ) : (o.items || []).map((it: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between gap-2 p-2.5">
+                        <div className="flex-1">
+                          <span className="text-[11px] font-semibold text-slate-200">{poItemName(it)}</span>
+                          <span className="ml-1.5 text-[9px] text-slate-400">{poItemQty(it)} {poItemUnit(it)}</span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-violet-300">{poItemTotal(it).toLocaleString('vi-VN')} đ</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 bg-slate-800/60 border-t border-slate-700 flex gap-2">
+                {congNo > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setPoPaymentAmount(String(congNo)); setPoPaymentNote(''); setPoPaymentModal({ open: true, order: o }); setPoDetailModal({ open: false, order: null }); }}
+                    className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"
+                  >
+                    <Circle className="w-3.5 h-3.5" /> Tạo phiếu chi
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPoDetailModal({ open: false, order: null })}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: TẠO PHIẾU CHI CHO ĐƠN HÀNG */}
+      {poPaymentModal.open && poPaymentModal.order && (() => {
+        const o = poPaymentModal.order;
+        const congNo = o.congNo || 0;
+        return (
+          <div
+            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+            onClick={() => setPoPaymentModal({ open: false, order: null })}
+          >
+            <div
+              className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 bg-slate-800/60 border-b border-slate-700 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Circle className="w-5 h-5 text-rose-400" />
+                  <span className="font-black text-sm text-white uppercase">Tạo phiếu chi — {o.id}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPoPaymentModal({ open: false, order: null })}
+                  className="p-1.5 hover:bg-slate-700 rounded-full text-slate-300 cursor-pointer transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp (thụ hưởng)</label>
+                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{o.supplierName || '—'}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Công nợ còn lại</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{congNo.toLocaleString('vi-VN')} đ</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Ngày lập</label>
+                    <input
+                      type="date"
+                      value={poPaymentDate}
+                      onChange={(e) => setPoPaymentDate(e.target.value)}
+                      className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền thanh toán (đ) *</label>
+                  <input
+                    type="number"
+                    value={poPaymentAmount}
+                    onChange={(e) => setPoPaymentAmount(e.target.value)}
+                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-slate-100 outline-none focus:border-rose-500 w-full font-mono font-bold"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Hình thức thanh toán</label>
+                  <select
+                    value={poPaymentMethod}
+                    onChange={(e) => setPoPaymentMethod(e.target.value as 'cash' | 'transfer')}
+                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full"
+                  >
+                    <option value="transfer">Chuyển khoản</option>
+                    <option value="cash">Tiền mặt</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Ghi chú</label>
+                  <textarea
+                    value={poPaymentNote}
+                    onChange={(e) => setPoPaymentNote(e.target.value)}
+                    rows={2}
+                    placeholder={`Thanh toán đơn hàng ${o.id}`}
+                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full resize-none"
+                  />
+                </div>
+              </div>
+              <div className="p-4 bg-slate-800/60 border-t border-slate-700 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPoPaymentModal({ open: false, order: null })}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold py-2.5 rounded-lg cursor-pointer transition-all"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCreatePoPayment(o)}
+                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"
+                >
+                  <Circle className="w-3.5 h-3.5" /> Tạo phiếu chi
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
