@@ -115,17 +115,37 @@ export default function ProjectKanbanBoard({
   // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
   // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
   // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
+  // 🔧 FIX: Đảm bảo NHÓM CHAT DỰ ÁN tồn tại (cache + Supabase) VÀ user hiện tại là
+  // thành viên TRƯỚC KHI gửi. sendGroupChatMessage chỉ gửi khi conversation
+  // conv_project_<id> đã nằm trong cache, và MessagesView chỉ hiển thị nhóm có
+  // user là participant. Với dự án mà user KHÔNG phải PM (hoặc chưa bấm "Đồng bộ
+  // nhân sự"), conversation không được nạp vào cache → sendGroupChatMessage trả
+  // về null → tin nhắn bị bỏ qua SILENT. Gửi BÊN TRONG .then(ensureProjectChatGroup)
+  // để conversation đã upsert lên Supabase trước khi push message (tránh vi phạm FK).
   const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity']) => {
     const pid = selectedProject?.id;
     if (!pid || !currentUser) return;
-    sendGroupChatMessage({
-      conversationId: `conv_project_${pid}`,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderRole: currentUser.role,
-      content,
-      relatedEntity,
-    });
+    const convId = `conv_project_${pid}`;
+    ensureProjectChatGroup({
+      id: pid,
+      name: selectedProject?.name || '',
+      pmId: selectedProject?.pmId,
+    }).then(conv => {
+      if (!conv) return;
+      const memberIds = Array.from(new Set([
+        currentUser?.id,
+        selectedProject?.pmId,
+      ].filter(Boolean) as string[]));
+      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
+      sendGroupChatMessage({
+        conversationId: convId,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        content,
+        relatedEntity,
+      });
+    }).catch(() => {});
   };
 
   // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────

@@ -142,17 +142,43 @@ export default function TaskDetailModal({
   // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
   // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
   // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
+  // 🔧 FIX: Đảm bảo NHÓM CHAT DỰ ÁN tồn tại (cache + Supabase) VÀ user hiện tại là
+  // thành viên TRƯỚC KHI gửi. Nguyên nhân lỗi "Cơ khí/Xây dựng không cập nhật nhóm
+  // chat, Nội thất vẫn gửi được": sendGroupChatMessage chỉ gửi khi conversation
+  // conv_project_<id> đã nằm trong cache, và MessagesView chỉ hiển thị nhóm có
+  // user là participant. Với dự án mà user KHÔNG phải PM (hoặc chưa bấm "Đồng bộ
+  // nhân sự"), conversation không được nạp vào cache → sendGroupChatMessage trả
+  // về null → tin nhắn bị bỏ qua SILENT (không lỗi). Gửi tin nhắn BÊN TRONG .then
+  // của ensureProjectChatGroup để đảm bảo conversation đã được upsert lên Supabase
+  // (tránh vi phạm FK conversation_id khi push message song song).
   const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[]) => {
-    if (!selectedTask.projectId) return;
-    sendGroupChatMessage({
-      conversationId: `conv_project_${selectedTask.projectId}`,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderRole: currentUser.role,
-      content,
-      relatedEntity,
-      attachments,
-    });
+    const pid = selectedTask.projectId;
+    if (!pid) return;
+    const convId = `conv_project_${pid}`;
+    ensureProjectChatGroup({
+      id: pid,
+      name: project?.name || selectedTask.name,
+      pmId: project?.pmId,
+    }).then(conv => {
+      if (!conv) return;
+      // Thêm các nhân sự liên quan vào nhóm (idempotent) để họ mở được nhóm.
+      const memberIds = Array.from(new Set([
+        currentUser?.id,
+        selectedTask.assigneeId,
+        selectedTask.assignerId,
+        project?.pmId,
+      ].filter(Boolean) as string[]));
+      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
+      sendGroupChatMessage({
+        conversationId: convId,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        content,
+        relatedEntity,
+        attachments,
+      });
+    }).catch(() => {});
   };
 
   // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
