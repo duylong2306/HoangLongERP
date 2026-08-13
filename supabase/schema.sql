@@ -921,6 +921,8 @@ CREATE TABLE IF NOT EXISTS public.payments (
   attachment_name text,
   approvals jsonb,
   purchase_order_id text,
+  subcontractor_id text,
+  related_advance_id text,
   CONSTRAINT payments_pkey PRIMARY KEY (id),
   CONSTRAINT payments_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
 );
@@ -1128,6 +1130,7 @@ CREATE TABLE IF NOT EXISTS public.archived_quotes (
   customer_id text,
   project_id text,
   subcontractor_id text,
+  subcontractor_name text,
   contract_value numeric,
   status text,
   scope_work text,
@@ -1500,7 +1503,16 @@ CREATE TABLE IF NOT EXISTS public.accounting_sub_contracts (
 );
 CREATE TABLE IF NOT EXISTS public.accounting_liabilities (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  name text,
+  category text,
+  value numeric,
+  paid numeric,
+  remaining numeric,
+  notes text,
+  sales_order_id text,
+  paid_at timestamp with time zone,
+  related_advance_id text,
+  subcontractor_id text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT accounting_liabilities_pkey PRIMARY KEY (id)

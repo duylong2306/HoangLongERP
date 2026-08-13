@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService } from '../lib/dbService';
-import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem } from '../types';
 import { useNotification, isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover } from '../context';
 import * as XLSX from 'xlsx';
@@ -113,6 +113,10 @@ interface FinanceProps {
   onDeletePurchaseOrder?: (id: string) => void;
   initialSubTab?: string;
   initialDuLieuTab?: string;
+  /** Mã đề xuất thu chi cần tự động mở form lập phiếu khi vào module Tài Chính (deep link từ Công việc). */
+  initialProposalId?: string | null;
+  /** Gọi lại sau khi đã mở form lập phiếu cho initialProposalId, để App reset state deep link. */
+  onInitialProposalConsumed?: () => void;
 }
 
 // Subcontractor Contract interface for accounting
@@ -172,7 +176,9 @@ export default function FinanceManagement({
   onAddPurchaseOrder,
   onDeletePurchaseOrder,
   initialSubTab,
-  initialDuLieuTab
+  initialDuLieuTab,
+  initialProposalId,
+  onInitialProposalConsumed
 }: FinanceProps) {
   const { addToast } = useNotification();
   // ── Multi-row selection ──
@@ -402,6 +408,19 @@ export default function FinanceManagement({
     };
   }, []);
 
+  // Deep link từ Công việc: tự động mở form lập phiếu cho đề xuất có id tương ứng
+  // (chỉ mở 1 lần, kể cả khi danh sách đề xuất được làm mới lại).
+  const consumedVoucherRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialProposalId) return;
+    if (consumedVoucherRef.current === initialProposalId) return;
+    const proposal = subcontractorAdvances.find(p => p.id === initialProposalId);
+    if (!proposal) return; // chưa tải xong → đợi effect chạy lại khi danh sách cập nhật
+    consumedVoucherRef.current = initialProposalId;
+    handleCreateVoucherFromProposal(proposal);
+    onInitialProposalConsumed?.();
+  }, [initialProposalId, subcontractorAdvances]);
+
   // Helper: Kiểm tra user có quyền duyệt/từ chối đề xuất này không
   const canApproveProposal = useCallback((proposal: SubcontractorAdvanceProposal) => {
     if (!currentUser) return false;
@@ -416,6 +435,24 @@ export default function FinanceManagement({
     if (isUserInRoleGroup(currentUser.id, 'role_admin')) return true;
     return false;
   }, [currentUser]);
+
+  // Gửi tin nhắn NHÓM CHAT DỰ ÁN cho các hành động Đề Xuất Tạm Ứng thầu phụ
+  const notifyAdvanceProjectChat = async (proposal: SubcontractorAdvanceProposal, content: string) => {
+    if (!proposal.projectId) return;
+    const convId = `conv_project_${proposal.projectId}`;
+    try {
+      const conv = await ensureProjectChatGroup({ id: proposal.projectId, name: proposal.projectName || '', pmId: undefined });
+      if (!conv) return;
+      await sendGroupChatMessage({
+        conversationId: convId,
+        senderId: currentUser?.id || '',
+        senderName: currentUser?.name || 'Hệ thống',
+        senderRole: currentUser?.role,
+        content,
+        relatedEntity: { type: 'advance', id: proposal.id },
+      });
+    } catch (e) { /* bỏ qua nếu không gửi được */ }
+  };
 
   // Handle approver "Duyệt" action -> wait_payment
   const handleApprove = async (proposal: SubcontractorAdvanceProposal) => {
@@ -446,6 +483,18 @@ export default function FinanceManagement({
           relatedEntity: { type: 'advance', id: proposal.id },
         });
       }
+      // Tin nhắn NHÓM CHAT dự án: người xét duyệt đã duyệt đề xuất
+      await notifyAdvanceProjectChat(
+        proposal,
+        `✅ ĐÃ DUYỆT ĐỀ XUẤT TẠM ỨNG THẦU PHỤ\n` +
+        `Mã đề xuất: ${proposal.id}\n` +
+        `Thầu phụ: ${proposal.subcontractorName}\n` +
+        `Công việc: ${proposal.taskName || proposal.projectName || '—'}\n` +
+        `Số tiền: ${proposal.amount.toLocaleString('vi-VN')}đ\n` +
+        `Người lập đề xuất: ${proposal.creatorName || '—'}\n` +
+        `Người xét duyệt: ${currentUser.name}\n` +
+        `→ Công nợ Trả (${proposal.subcontractorName}) chuyển sang Chờ thanh toán.`
+      );
       try {
         addToast({ title: '✅ Đã phê duyệt', message: `✅ Đã phê duyệt Đề xuất ${proposal.id}! Trạng thái chuyển thành: Chờ Lập Phiếu.`, type: 'success' });
       } catch (e) {}
@@ -692,13 +741,17 @@ export default function FinanceManagement({
   // Combined liabilities list
   const mergedLiabilities = useMemo(() => {
     const subs = approvedSubContracts.map(sub => {
-      const paymentsMade = payments.filter(p => p.recipient === sub.subcontractorName && p.status === 'approved');
-      const totalPaidAmount = paymentsMade.reduce((sum, p) => sum + p.amount, 0);
+      const paymentsMade = payments.filter(p =>
+        (p.subcontractorId && sub.subcontractorId && p.subcontractorId === sub.subcontractorId) ||
+        (p.recipient && sub.subcontractorName && p.recipient === sub.subcontractorName)
+      );
+      const totalPaidAmount = paymentsMade.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
       const value = sub.contractValue || 0;
       const remaining = value - totalPaidAmount;
       return {
         id: sub.id,
-        name: sub.subcontractorName,
+        subcontractorId: sub.subcontractorId,
+        name: sub.subcontractorName || sub.subcontractorId || 'Vãng lai',
         category: 'Thầu Phụ',
         value,
         paid: totalPaidAmount,
@@ -709,14 +762,20 @@ export default function FinanceManagement({
     });
 
     const customs = customLiabilities.map(liab => {
-      const paymentsMade = payments.filter(p => p.recipient === liab.name && p.status === 'approved');
-      const totalPaidAmount = paymentsMade.length > 0 ? paymentsMade.reduce((sum, p) => sum + p.amount, 0) : (liab.paid || 0);
+      // Nợ tạm ứng thầu phụ: khớp chính xác theo relatedAdvanceId của phiếu chi.
+      // Nợ thủ công: khớp theo tên người nhận (fallback về số tiền đã thanh toán lưu sẵn).
+      const paymentsMade = liab.relatedAdvanceId
+        ? payments.filter(p => p.relatedAdvanceId === liab.relatedAdvanceId && p.status === 'approved')
+        : payments.filter(p => p.recipient === liab.name && p.status === 'approved');
+      const totalPaidAmount = paymentsMade.length > 0
+        ? paymentsMade.reduce((sum, p) => sum + p.amount, 0)
+        : (liab.relatedAdvanceId ? 0 : (liab.paid || 0));
       const remaining = liab.value - totalPaidAmount;
       return {
         ...liab,
         paid: totalPaidAmount,
         remaining,
-        isAuto: false
+        isAuto: !!liab.relatedAdvanceId
       };
     });
 
@@ -1867,16 +1926,20 @@ export default function FinanceManagement({
       id: `pay_${Date.now()}`,
       code: `PC-2026-${Math.floor(Math.random() * 900 + 100)}`,
       date: new Date().toISOString().split('T')[0],
-      recipient: payRecipient,
-      projectId: (payProj === 'none' || !payProj) ? undefined : payProj,
-      category: payCategory,
+      // Khi lập phiếu chi tất toán Đề Xuất Tạm Ứng thầu phụ, gắn nhận diện thầu phụ
+      // để thanh toán tự động khớp & cập nhật Công nợ Trả (không phụ thuộc tên gõ tay)
+      recipient: activeProposalForPayment?.subcontractorName || payRecipient,
+      projectId: activeProposalForPayment?.projectId || ((payProj === 'none' || !payProj) ? undefined : payProj),
+      category: activeProposalForPayment ? 'subcontractor_advance' : payCategory,
       amount: Number(payAmount),
       paymentMethod: payMethod,
       notes: payNotes,
       proposer: currentUser.name,
       approver: 'Trương Hữu Long (Giám đốc)',
       status: (currentUser && isUserInRoleGroup(currentUser.id, 'role_admin')) ? 'approved' : 'pending',
-      attachmentName: 'bien_nhan_giao_hang.pdf'
+      attachmentName: 'bien_nhan_giao_hang.pdf',
+      subcontractorId: activeProposalForPayment?.subcontractorId,
+      relatedAdvanceId: activeProposalForPayment?.id,
     };
     onAddPayment(newPay);
 
@@ -1892,6 +1955,40 @@ export default function FinanceManagement({
         // Update local state list
         setSubcontractorAdvances(prev => prev.map(p => p.id === updatedProposal.id ? updatedProposal : p));
 
+        // Cập nhật Công nợ Trả: nếu thầu phụ ĐÃ có dòng (hợp đồng hoặc nợ thủ công)
+        // thì phiếu chi tạm ứng sẽ tự động cộng vào dòng đó (khớp theo tên /
+        // subcontractorId trong mergedLiabilities). Chỉ tạo dòng MỚI khi thầu phụ
+        // chưa có bất kỳ khoản nợ nào.
+        const advSubId = activeProposalForPayment.subcontractorId;
+        const advName = activeProposalForPayment.subcontractorName || 'Thầu phụ';
+        const hasExistingRow = customLiabilities.some(l =>
+          (advSubId && l.subcontractorId && l.subcontractorId === advSubId) ||
+          (l.name && l.name === advName)
+        ) || approvedSubContracts.some(s =>
+          (advSubId && s.subcontractorId && s.subcontractorId === advSubId) ||
+          (s.subcontractorName && s.subcontractorName === advName)
+        );
+        if (!hasExistingRow) {
+          const newLiab: Liability = {
+            id: crypto.randomUUID(),
+            name: advName,
+            category: 'Thầu Phụ',
+            value: Number(payAmount),
+            paid: 0,
+            remaining: 0, // mergedLiabilities tính lại dựa trên phiếu chi đã duyệt
+            notes: `Tạm ứng thầu phụ ${activeProposalForPayment.id}`,
+            relatedAdvanceId: activeProposalForPayment.id,
+            subcontractorId: advSubId,
+          };
+          setCustomLiabilities(prev => [...prev, newLiab]);
+          try {
+            await dbService.accountingLiabilities.save(newLiab);
+          } catch (liabErr) {
+            console.error('Lỗi lưu Công nợ Trả tạm ứng:', liabErr);
+          }
+        }
+        window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
+
         // Nếu là đề xuất ứng lương -> cập nhật bảng lương của người đề xuất
         if (payCategory === 'salary_advance' && activeProposalForPayment.subcontractorName) {
           updatePayrollWithAdvance(
@@ -1903,6 +2000,18 @@ export default function FinanceManagement({
 
         // Trigger custom event to keep TaskDetailModal or others up to date
         window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updatedProposal }));
+
+        // Tin nhắn NHÓM CHAT dự án: người lập phiếu chi đã tất toán đề xuất
+        await notifyAdvanceProjectChat(
+          activeProposalForPayment,
+          `💰 ĐÃ LẬP PHIẾU CHI TẤT TOÁN ĐỀ XUẤT TẠM ỨNG\n` +
+          `Mã đề xuất: ${activeProposalForPayment.id}\n` +
+          `Thầu phụ: ${activeProposalForPayment.subcontractorName}\n` +
+          `Công việc: ${activeProposalForPayment.taskName || activeProposalForPayment.projectName || '—'}\n` +
+          `Số tiền thanh toán: ${Number(payAmount).toLocaleString('vi-VN')}đ\n` +
+          `Người lập phiếu: ${currentUser.name}\n` +
+          `→ Đã cập nhật Công nợ Trả (${activeProposalForPayment.subcontractorName}).`
+        );
         setActiveProposalForPayment(null);
       } catch (err) {
         console.error("Lỗi khi cập nhật trạng thái đề xuất:", err);

@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Search, Printer, Edit, Save, Check, FolderOpen, Calendar, User, Briefcase, FileText, Info, ShieldAlert, CreditCard, Percent } from 'lucide-react';
+import { Plus, Trash2, Search, Printer, Edit, Eye, Save, Check, FolderOpen, Calendar, User, Briefcase, FileText, Info, ShieldAlert, CreditCard, Percent, FileCheck, CheckCircle2 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { Quote, ArchivedQuote, Customer, Project, Employee, Supplier, Task } from '../types';
 import RichTextEditor from './RichTextEditor';
@@ -316,23 +316,27 @@ export default function SubcontractorEstimator({
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [activePrintTab, setActivePrintTab] = useState<'contract' | 'acceptance' | 'liquidation'>('contract');
   const [isEditingPrint, setIsEditingPrint] = useState(false);
+  // Bản sao hợp đồng dùng để sửa trực tiếp trong giao diện Xem & In (giống Lưu trữ)
+  const [tempPreviewQuote, setTempPreviewQuote] = useState<ArchivedQuote | null>(null);
   const [printContractHtml, setPrintContractHtml] = useState<string | null>(null);
   const [printAcceptanceHtml, setPrintAcceptanceHtml] = useState<string | null>(null);
   const [printLiquidationHtml, setPrintLiquidationHtml] = useState<string | null>(null);
   const printEditorRef = useRef<HTMLDivElement>(null);
 
-  // Load suppliers list from Supabase
+  // Load subcontractors from accounting_subcontractors table (DANH SÁCH THẦU PHỤ)
   useEffect(() => {
-    const loadSuppliers = () => {
-      dbService.suppliers.list()
-        .then(list => { if (Array.isArray(list) && list.length > 0) setSuppliers(list); })
-        .catch(err => console.warn("Lỗi tải danh sách thầu phụ từ Supabase:", err));
+    const loadSubcontractors = async () => {
+      try {
+        const data = await dbService.accountingSubcontractors.list();
+        if (Array.isArray(data) && data.length > 0) setSuppliers(data);
+      } catch (err) {
+        console.warn("Lỗi tải danh sách thầu phụ từ accounting_subcontractors:", err);
+      }
     };
-    loadSuppliers();
-    window.addEventListener('hl-suppliers-updated', loadSuppliers);
-    return () => {
-      window.removeEventListener('hl-suppliers-updated', loadSuppliers);
-    };
+    loadSubcontractors();
+    const handleSync = () => loadSubcontractors();
+    window.addEventListener('hl-suppliers-updated', handleSync);
+    return () => window.removeEventListener('hl-suppliers-updated', handleSync);
   }, []);
 
   // Load archived subcontractor contracts to calculate the serial number
@@ -411,6 +415,8 @@ export default function SubcontractorEstimator({
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [workName, setWorkName] = useState('');
   const [contractValue, setContractValue] = useState<number>(0);
+  // Flag: khi true thì khóa dropdown "Thầu Phụ liên kết" (đã pre-select từ công việc)
+  const [isSupplierLocked, setIsSupplierLocked] = useState(false);
   const [createdDate, setCreatedDate] = useState(() => {
     const now = new Date();
     return `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
@@ -576,10 +582,13 @@ export default function SubcontractorEstimator({
           setWorkName(foundTask.name || preselectedWorkName || '');
           if (foundTask.subcontractorId) {
             setSelectedSupplierId(foundTask.subcontractorId);
+            // Khóa dropdown khi thầu phụ đến từ công việc
+            setIsSupplierLocked(true);
           } else if (preselectedSubcontractorId) {
             setSelectedSupplierId(preselectedSubcontractorId);
+            setIsSupplierLocked(true);
           }
-          
+
           // Clear preselected keys from localStorage so it doesn't run again unexpectedly
           localStorage.removeItem('hl_preselected_task_id');
           localStorage.removeItem('hl_preselected_subcontractor_id');
@@ -588,6 +597,7 @@ export default function SubcontractorEstimator({
       } else if (preselectedSubcontractorId) {
         // Fallback if only subcontractor was specified
         setSelectedSupplierId(preselectedSubcontractorId);
+        setIsSupplierLocked(true);
         if (preselectedWorkName) {
           setWorkName(preselectedWorkName);
         }
@@ -596,7 +606,7 @@ export default function SubcontractorEstimator({
         if (matchingTask) {
           setSelectedTaskId(matchingTask.id);
         }
-        
+
         localStorage.removeItem('hl_preselected_task_id');
         localStorage.removeItem('hl_preselected_subcontractor_id');
         localStorage.removeItem('hl_preselected_work_name');
@@ -740,8 +750,13 @@ export default function SubcontractorEstimator({
     }
   }, [archivedQuotesList, loadedQuote]);
 
-  // Load data if loadedQuote is selected
+  // Load data if loadedQuote is selected — chỉ re-init khi id hợp đồng thay đổi
+  // (tránh re-init mỗi khi archivedQuotesList refetch làm mất chỉnh sửa đang thực hiện)
+  const loadedQuoteIdRef = useRef<string | null>(null);
   useEffect(() => {
+    const currentId = loadedQuote?.id ?? '__new__';
+    if (currentId === loadedQuoteIdRef.current) return;
+    loadedQuoteIdRef.current = currentId;
     if (loadedQuote) {
       setContractCode(loadedQuote.code || '');
       setSelectedProjectId(loadedQuote.projectId || '');
@@ -760,6 +775,8 @@ export default function SubcontractorEstimator({
       setEndDate(loadedQuote.endDate || '');
       setContractStatus(loadedQuote.status || 'Đã Lập');
       setNotes(loadedQuote.notes || '');
+      // Khi load quote đã lưu để chỉnh sửa, không khóa thầu phụ (cho phép đổi)
+      setIsSupplierLocked(false);
 
       // Load Bên B fields
       setHoTenB(loadedQuote.hoTenB || '');
@@ -825,8 +842,12 @@ export default function SubcontractorEstimator({
         setCustomerAddress('');
       }
       
-      setSelectedSupplierId('');
-      setWorkName('');
+      // KHÔNG reset Thầu Phụ liên kết & Công việc nếu đã bị khóa từ công việc
+      // (tránh race condition: fetchArchives chạy sau preselect làm mất thầu phụ đã chọn)
+      if (!isSupplierLocked) {
+        setSelectedSupplierId('');
+        setWorkName('');
+      }
       setContractValue(0);
       const now = new Date();
       setCreatedDate(`${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`);
@@ -838,19 +859,21 @@ export default function SubcontractorEstimator({
       const code = generateNewContractCode(archivedQuotesList);
       setContractCode(code);
 
-      // Reset Bên B fields
-      setHoTenB('');
-      setGioiTinhB('Nam');
-      setNgaySinhB('');
-      setCccdB('');
-      setNgayCapB('');
-      setNoiCapB('');
-      setDiaChiB('');
-      setSdtB('');
-      setEmailB('');
-      setMstCnB('');
-      setStkB('');
-      setNganHangB('');
+      // Reset Bên B fields (giữ nguyên nếu thầu phụ đã bị khóa từ công việc)
+      if (!isSupplierLocked) {
+        setHoTenB('');
+        setGioiTinhB('Nam');
+        setNgaySinhB('');
+        setCccdB('');
+        setNgayCapB('');
+        setNoiCapB('');
+        setDiaChiB('');
+        setSdtB('');
+        setEmailB('');
+        setMstCnB('');
+        setStkB('');
+        setNganHangB('');
+      }
 
       // Reset Điều khoản fields
       setMoTaKqBanGiao('');
@@ -965,6 +988,8 @@ export default function SubcontractorEstimator({
     const subcontractorName = matchedSupplier ? matchedSupplier.name : 'Vãng lai';
 
     const quoteId = loadedQuote ? loadedQuote.id : `archived_quote_${Date.now()}`;
+    // Giữ nguyên trạng thái duyệt nếu hợp đồng đã được duyệt (không reset về Đã Lập khi chỉnh sửa)
+    const isAlreadyApproved = !!(loadedQuote && ((loadedQuote as ArchivedQuote).isApproved || (loadedQuote.status || '').trim().toLowerCase() === 'hoàn thành'));
     const archivedRecord: ArchivedQuote = {
       id: quoteId,
       code: contractCode,
@@ -983,7 +1008,10 @@ export default function SubcontractorEstimator({
       signedDate: signedDate,
       startDate: startDate,
       endDate: endDate,
-      status: 'Đã Lập' as any, // Default status is "Đã Lập" when user saves
+      status: isAlreadyApproved ? (loadedQuote!.status || 'Hoàn thành') : 'Đã Lập' as any, // Giữ "Hoàn thành" nếu đã duyệt, ngược lại mặc định "Đã Lập"
+      isApproved: isAlreadyApproved ? true : ((loadedQuote as ArchivedQuote)?.isApproved ?? undefined),
+      approvedAt: isAlreadyApproved ? ((loadedQuote as ArchivedQuote)!.approvedAt) : undefined,
+      approvedBy: isAlreadyApproved ? ((loadedQuote as ArchivedQuote)!.approvedBy) : undefined,
       notes: notes.trim(),
       creatorId: currentUser?.id || 'emp_1',
       creatorName: currentUser?.name || 'Cán bộ Kế toán',
@@ -1138,6 +1166,112 @@ export default function SubcontractorEstimator({
   };
 
   const selectedSupplier = suppliers.find(s => s.id === selectedSupplierId);
+
+  // Khởi tạo bản sao hợp đồng dùng để sửa trực tiếp trong giao diện Xem & In (giống Lưu trữ)
+  useEffect(() => {
+    if (showPrintPreview) {
+      const base = (loadedQuote || {}) as ArchivedQuote;
+      const sel = suppliers.find(s => s.id === (base.subcontractorId || selectedSupplierId));
+      setTempPreviewQuote({
+        ...base,
+        code: base.code || contractCode,
+        projectName: base.projectName || projectName,
+        customerName: base.customerName || customerName,
+        customerPhone: base.customerPhone || customerPhone,
+        customerAddress: base.customerAddress || customerAddress,
+        subcontractorId: base.subcontractorId || selectedSupplierId,
+        subcontractorName: base.subcontractorName || (sel?.name || ''),
+        workName: base.workName || workName,
+        contractValue: base.contractValue ?? contractValue,
+        startDate: base.startDate || startDate,
+        endDate: base.endDate || endDate,
+        status: base.status || contractStatus,
+        notes: base.notes || notes,
+        // Map Bên B: ưu tiên trường đã lưu, fallback về state form / thầu phụ
+        representative: base.representative ?? hoTenB ?? sel?.representative ?? '',
+        phone: base.phone ?? sdtB ?? sel?.phone ?? '',
+        address: base.address ?? diaChiB ?? sel?.address ?? '',
+        taxCode: base.taxCode ?? mstCnB ?? sel?.taxCode ?? '',
+        createdAt: base.createdAt || createdDate,
+      } as ArchivedQuote);
+    }
+  }, [showPrintPreview, loadedQuote]);
+
+  // Đồng bộ nội dung preview ngược lại form chính (giữ Bên B nhất quán)
+  const syncPreviewBackToForm = (q: ArchivedQuote) => {
+    setProjectName(q.projectName || '');
+    setCustomerName(q.customerName || '');
+    setCustomerPhone(q.customerPhone || '');
+    setCustomerAddress(q.customerAddress || '');
+    setWorkName(q.workName || '');
+    setContractValue(Number(q.contractValue || 0));
+    setStartDate(q.startDate || '');
+    setEndDate(q.endDate || '');
+    setContractStatus(q.status || 'Đã Lập');
+    setNotes(q.notes || '');
+    setHoTenB(q.representative || hoTenB);
+    setSdtB(q.phone || sdtB);
+    setDiaChiB(q.address || diaChiB);
+    setMstCnB(q.taxCode || mstCnB);
+    setSelectedSupplierId(q.subcontractorId || selectedSupplierId);
+  };
+
+  const handleSavePreviewQuote = async () => {
+    if (!tempPreviewQuote) return;
+    const archivedRecord = {
+      ...(loadedQuote || {}),
+      ...tempPreviewQuote,
+      hoTenB: tempPreviewQuote.representative || hoTenB,
+      sdtB: tempPreviewQuote.phone || sdtB,
+      diaChiB: tempPreviewQuote.address || diaChiB,
+      mstCnB: tempPreviewQuote.taxCode || mstCnB,
+      sector: 'subcontractor',
+    } as ArchivedQuote;
+    try {
+      await dbService.archivedSubcontractorQuotes.save(archivedRecord);
+      syncPreviewBackToForm(tempPreviewQuote);
+      if (setLoadedQuote) setLoadedQuote(archivedRecord);
+      if (setIsCabinetSaved) setIsCabinetSaved(true);
+      if (setIsLocked) setIsLocked(true);
+      addToast({ title: '✅ Thành công', message: '💾 Đã lưu nội dung hợp đồng thành công!', type: 'success' });
+      window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
+      fetchArchives();
+    } catch (err) {
+      console.error('Lỗi lưu hợp đồng từ Xem & In:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi lưu hợp đồng.', type: 'error' });
+    }
+  };
+
+  const handleApprovePreviewQuote = async () => {
+    if (!tempPreviewQuote) return;
+    const updated = {
+      ...tempPreviewQuote,
+      isApproved: true,
+      approvedAt: new Date().toLocaleString('vi-VN'),
+      approvedBy: currentUser?.name || 'Ban Giám Đốc',
+      status: 'Hoàn thành',
+    } as unknown as ArchivedQuote;
+    setTempPreviewQuote(updated);
+    try {
+      const rec = {
+        ...updated,
+        hoTenB: updated.representative || hoTenB,
+        sdtB: updated.phone || sdtB,
+        diaChiB: updated.address || diaChiB,
+        mstCnB: updated.taxCode || mstCnB,
+        sector: 'subcontractor',
+      } as unknown as ArchivedQuote;
+      await dbService.archivedSubcontractorQuotes.save(rec);
+      if (setLoadedQuote) setLoadedQuote(rec);
+      addToast({ title: '✅ Thành công', message: '🎉 Phê duyệt hợp đồng thầu phụ thành công! Hợp đồng đã được đưa sang Công nợ Trả.', type: 'success' });
+      window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
+      window.dispatchEvent(new CustomEvent('hl-subcontractor-contract-approved', { detail: updated }));
+      fetchArchives();
+    } catch (err) {
+      console.error('Lỗi duyệt hợp đồng:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi phê duyệt hợp đồng.', type: 'error' });
+    }
+  };
 
   const getRenderedContractHTML = () => {
     let tpl = contractTemplate;
@@ -1912,13 +2046,13 @@ export default function SubcontractorEstimator({
 
                 {/* Tên Thầu Phụ liên kết */}
                 <div className="relative">
-                  <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Thầu Phụ liên kết <span className="text-rose-500 font-bold">*</span></label>
+                  <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Thầu Phụ liên kết <span className="text-rose-500 font-bold">*</span>{isSupplierLocked && <span className="text-emerald-400 font-normal ml-1">(Đã khóa từ công việc)</span>}</label>
                   <button
                     type="button"
-                    onClick={() => !isLocked && setIsSupDropdownOpen(!isSupDropdownOpen)}
-                    disabled={isLocked}
+                    onClick={() => !isLocked && !isSupplierLocked && setIsSupDropdownOpen(!isSupDropdownOpen)}
+                    disabled={isLocked || isSupplierLocked}
                     className={`w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-xl p-2.5 outline-none font-semibold text-xs text-left hover:border-slate-700 transition-all flex items-center justify-between shadow-md ${
-                      isLocked ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                      (isLocked || isSupplierLocked) ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
                     }`}
                   >
                     <span className="truncate">
@@ -2501,7 +2635,12 @@ export default function SubcontractorEstimator({
             {/* Nút Chỉnh sửa */}
             <button
               type="button"
-              onClick={() => setIsLocked && setIsLocked(false)}
+              onClick={() => {
+                if (loadedQuote && ((loadedQuote as ArchivedQuote).isApproved || (loadedQuote.status || '').trim().toLowerCase() === 'hoàn thành')) {
+                  if (!window.confirm('Hợp đồng này đã được DUYỆT. Bạn có chắc chắn muốn mở khóa để chỉnh sửa? Trạng thái duyệt sẽ được GIỮ NGUYÊN khi lưu.')) return;
+                }
+                if (setIsLocked) setIsLocked(false);
+              }}
               disabled={!isCabinetSaved || !isLocked}
               className="bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-30 disabled:cursor-not-allowed font-extrabold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-all duration-200 shadow-md active:scale-95"
               title={!isCabinetSaved ? "Nút Chỉnh sửa chỉ mở khi hồ sơ Đã Lưu" : !isLocked ? "Đang trong chế độ chỉnh sửa" : "Chỉnh sửa số liệu báo giá"}
@@ -2531,14 +2670,14 @@ export default function SubcontractorEstimator({
               )}
             </button>
 
-            {/* Nút Xem & In */}
+            {/* Nút Xem & In (đồng bộ biểu tượng với Hồ Sơ Lưu Trữ Hợp Đồng Thầu Phụ) */}
             <button
               type="button"
               onClick={() => setShowPrintPreview(true)}
               className="bg-slate-800 hover:bg-slate-750 text-white border border-slate-700 font-extrabold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-all duration-200 shadow-md active:scale-95"
               title="Xem & In Hợp Đồng"
             >
-              <Printer className="w-4 h-4 text-amber-400" />
+              <Eye className="w-4 h-4 text-slate-300" />
               Xem & In
             </button>
           </div>
@@ -2604,146 +2743,49 @@ export default function SubcontractorEstimator({
         </div>
       )}
 
-      {/* PRINT PREVIEW MODAL */}
-      {showPrintPreview && (
+      {/* PRINT PREVIEW MODAL — giao diện giống hệt Lưu trữ hồ sơ thầu phụ (hợp đồng sửa trực tiếp + Duyệt/Lưu/In) */}
+      {showPrintPreview && tempPreviewQuote && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4 select-text text-left">
           <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Header */}
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-4">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-600" />
                 <div>
                   <h4 className="font-extrabold text-sm text-slate-900 uppercase tracking-wider">
-                    {activePrintTab === 'contract' && "Xem Trước Hợp Đồng Giao Khoán Thầu Phụ"}
-                    {activePrintTab === 'acceptance' && "Xem Trước Biên Bản Nghiệm Thu Thầu Phụ"}
-                    {activePrintTab === 'liquidation' && "Xem Trước Biên Bản Thanh Lý Thầu Phụ"}
+                    Xem &amp; Chỉnh Sửa Hợp Đồng Thầu Phụ
                   </h4>
-                  <p className="text-[10px] text-slate-500 font-medium font-mono">{contractCode || 'HL-2026'}</p>
+                  <p className="text-[10px] text-slate-500 font-medium font-mono">
+                    Mã HĐ: {tempPreviewQuote.code} {(tempPreviewQuote.isApproved || (tempPreviewQuote.status || '').trim().toLowerCase() === 'hoàn thành') ? (
+                      <span className="ml-2 text-emerald-600 font-bold">● ĐÃ DUYỆT</span>
+                    ) : (
+                      <span className="ml-2 text-amber-500 font-bold">● CHƯA DUYỆT</span>
+                    )}
+                  </p>
                 </div>
               </div>
-
-              {/* Document select tabs */}
-              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 self-start md:self-auto shrink-0 shadow-inner">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePrintTab('contract');
-                    setIsEditingPrint(false);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                    activePrintTab === 'contract'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  📜 Hợp Đồng
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePrintTab('acceptance');
-                    setIsEditingPrint(false);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                    activePrintTab === 'acceptance'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  📋 Nghiệm Thu
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePrintTab('liquidation');
-                    setIsEditingPrint(false);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                    activePrintTab === 'liquidation'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  🤝 Thanh Lý
-                </button>
-              </div>
-
-              <button 
+              <button
                 onClick={() => {
                   setShowPrintPreview(false);
-                  setIsEditingPrint(false);
+                  setTempPreviewQuote(null);
                 }}
-                className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs self-end md:self-auto"
+                className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs"
               >
                 ✕
               </button>
             </div>
 
-            {/* Direct Edit Toolbar (only visible on screen, hidden on print) */}
-            <div className="bg-amber-50 px-6 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 print:hidden no-print">
-              <div className="flex items-center gap-1.5 text-xs text-amber-800 font-bold">
-                <Info className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>
-                  {isEditingPrint 
-                    ? "✍️ ĐANG CHỈNH SỬA TRỰC TIẾP: Bạn có thể nhập, sửa văn bản hoặc điền các trường còn thiếu trực tiếp vào bản in." 
-                    : "💡 Bạn có thể chỉnh sửa trực tiếp nội dung văn bản này để in hoặc lưu trữ lâu dài."}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                {!isEditingPrint ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingPrint(true)}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-lg cursor-pointer flex items-center gap-1 transition-all active:scale-95 shadow-sm"
-                    >
-                      ✍️ Chỉnh sửa bản in
-                    </button>
-                    {((activePrintTab === 'contract' && printContractHtml) || 
-                      (activePrintTab === 'acceptance' && printAcceptanceHtml) || 
-                      (activePrintTab === 'liquidation' && printLiquidationHtml)) && (
-                      <button
-                        type="button"
-                        onClick={handleRestorePrintDocDefault}
-                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-lg cursor-pointer transition-colors"
-                      >
-                        🔄 Khôi phục mặc định
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      disabled={savingPrint}
-                      onClick={handleSavePrintDoc}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-lg cursor-pointer flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
-                    >
-                      💾 Lưu thay đổi
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingPrint(false)}
-                      className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-lg cursor-pointer transition-colors"
-                    >
-                      Hủy
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
             {/* Print Body */}
-            <div className="p-8 bg-white overflow-y-auto flex-1 font-serif text-sm leading-relaxed text-slate-900 print-agreement" id="print-area">
+            <div className="p-8 bg-white overflow-y-auto flex-1 font-sans text-xs leading-relaxed text-slate-900 print-agreement relative" id="print-area-archive">
               <style>{`
                 @media print {
                   body * {
                     visibility: hidden;
                   }
-                  #print-area, #print-area * {
+                  #print-area-archive, #print-area-archive * {
                     visibility: visible;
                   }
-                  #print-area {
+                  #print-area-archive {
                     position: absolute;
                     left: 0;
                     top: 0;
@@ -2751,52 +2793,352 @@ export default function SubcontractorEstimator({
                     padding: 0;
                     margin: 0;
                   }
-                }
-                .print-agreement p {
-                  margin-bottom: 0.5rem;
-                }
-                .print-agreement strong {
-                  color: #000;
+                  .print-hide {
+                    display: none !important;
+                  }
                 }
               `}</style>
 
-              <div className="max-w-3xl mx-auto space-y-6">
-                <div 
-                  ref={printEditorRef}
-                  className={`rich-text-content outline-none ${isEditingPrint ? 'ring-2 ring-blue-500 rounded p-3 bg-slate-50' : ''}`}
-                  contentEditable={isEditingPrint}
-                  suppressContentEditableWarning
-                  dangerouslySetInnerHTML={{ 
-                    __html: activePrintTab === 'contract' 
-                      ? (printContractHtml || getRenderedContractHTML()) 
-                      : activePrintTab === 'acceptance' 
-                        ? (printAcceptanceHtml || getRenderedAcceptanceHTML()) 
-                        : (printLiquidationHtml || getRenderedLiquidationHTML()) 
-                  }} 
-                />
+              {/* Approval Watermark Stamp */}
+              {tempPreviewQuote.isApproved && (
+                <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 animate-pulse" />
+                  ĐÃ PHÊ DUYỆT
+                </div>
+              )}
+
+              {/* Inline Action Buttons at Top (Hidden on Print) */}
+              <div className="absolute top-6 right-6 flex items-center gap-2 print-hide no-print z-45">
+                {tempPreviewQuote.isApproved ? (
+                  <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-[10px] font-bold font-sans flex items-center gap-1 shadow-sm">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    Hợp Đồng Đã Duyệt
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleApprovePreviewQuote}
+                    className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse"
+                  >
+                    <FileCheck className="w-3.5 h-3.5" />
+                    Duyệt Hợp Đồng
+                  </button>
+                )}
+
+                <button
+                  onClick={handleSavePreviewQuote}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-750 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Lưu Nội Dung Chỉnh Sửa"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Lưu Hợp Đồng
+                </button>
+              </div>
+
+              <div className="max-w-3xl mx-auto space-y-6 pt-4">
+                {/* Header Title */}
+                <div className="text-center space-y-1">
+                  <h2 className="font-extrabold text-sm uppercase tracking-wide">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</h2>
+                  <h3 className="font-bold text-xs uppercase tracking-wide">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h3>
+                  <p className="text-xs font-bold">Độc lập – Tự do – Hạnh phúc</p>
+                  <div className="border-b border-slate-300 w-36 mx-auto pt-1"></div>
+                </div>
+
+                <div className="text-center pt-2">
+                  <h1 className="font-black text-lg uppercase tracking-wider text-slate-900">HỢP ĐỒNG THẦU PHỤ THI CÔNG</h1>
+                  <p className="font-mono text-slate-500 text-[10px] mt-0.5">Số hiệu: {tempPreviewQuote.code}</p>
+                </div>
+
+                {/* Base reference info */}
+                <div className="space-y-1 text-slate-600 italic">
+                  <p>- Căn cứ Bộ luật Dân sự số 91/2015/QH13 ban hành ngày 24/11/2015;</p>
+                  <p>- Căn cứ Luật Thương mại số 36/2005/QH11 ban hành ngày 14/06/2005;</p>
+                  <p>- Căn cứ nhu cầu thi công thực tế và năng lực của các bên;</p>
+                </div>
+
+                {/* Contract Entities */}
+                <div className="space-y-4">
+                  <p className="font-bold text-slate-900 flex flex-wrap items-center gap-1">
+                    <span>Hôm nay, ngày</span>
+                    <input
+                      type="text"
+                      value={tempPreviewQuote.day || tempPreviewQuote.createdAt?.split('/')[0] || '01'}
+                      onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, day: e.target.value })}
+                      className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-8 text-center print:border-none"
+                    />
+                    <span>tháng</span>
+                    <input
+                      type="text"
+                      value={tempPreviewQuote.month || tempPreviewQuote.createdAt?.split('/')[1] || '07'}
+                      onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, month: e.target.value })}
+                      className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-8 text-center print:border-none"
+                    />
+                    <span>năm</span>
+                    <input
+                      type="text"
+                      value={tempPreviewQuote.year || tempPreviewQuote.createdAt?.split('/')[2] || '2026'}
+                      onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, year: e.target.value })}
+                      className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-12 text-center print:border-none"
+                    />
+                    <span>, tại trụ sở Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm:</span>
+                  </p>
+
+                  {/* BÊN GIAO THẦU */}
+                  <div className="space-y-1">
+                    <h4 className="font-bold uppercase text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                      <span>Bên A (Bên giao thầu):</span>
+                      <span className="font-extrabold text-blue-600">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span>
+                    </h4>
+                    <p>• Địa chỉ: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
+                    <p>• MST: 5801452655</p>
+                    <p>• Đại diện: Ông Nguyễn Văn Hoàng - Chức vụ: Giám đốc</p>
+                    <p>• Hotline liên hệ: 0966 545 959</p>
+                  </div>
+
+                  {/* BÊN NHẬN THẦU PHỤ */}
+                  <div className="space-y-1 pt-1">
+                    <h4 className="font-bold uppercase text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                      <span>Bên B (Bên nhận thầu phụ):</span>
+                      <input
+                        type="text"
+                        value={tempPreviewQuote.subcontractorName || ''}
+                        onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, subcontractorName: e.target.value })}
+                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-emerald-500 outline-none font-extrabold text-emerald-600 transition-colors print:border-none print:p-0 print:bg-transparent flex-1 max-w-sm"
+                        placeholder="Tên thầu phụ..."
+                      />
+                    </h4>
+                    <p>• Mã Thầu Phụ: <span className="font-mono font-bold text-emerald-600">{tempPreviewQuote.subcontractorId || 'N/A'}</span></p>
+
+                    <p className="flex items-center gap-1">
+                      <span>• Người đại diện:</span>
+                      <input
+                        type="text"
+                        value={tempPreviewQuote.representative !== undefined ? tempPreviewQuote.representative : (selectedSupplier?.representative || '')}
+                        onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, representative: e.target.value })}
+                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-xs"
+                        placeholder="Họ tên người đại diện..."
+                      />
+                    </p>
+
+                    <p className="flex items-center gap-1">
+                      <span>• Điện thoại:</span>
+                      <input
+                        type="text"
+                        value={tempPreviewQuote.phone !== undefined ? tempPreviewQuote.phone : (selectedSupplier?.phone || '')}
+                        onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, phone: e.target.value })}
+                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-xs"
+                        placeholder="Số điện thoại liên hệ..."
+                      />
+                    </p>
+
+                    <p className="flex items-center gap-1">
+                      <span>• Địa chỉ:</span>
+                      <input
+                        type="text"
+                        value={tempPreviewQuote.address !== undefined ? tempPreviewQuote.address : (selectedSupplier?.address || '')}
+                        onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, address: e.target.value })}
+                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-md"
+                        placeholder="Địa chỉ thầu phụ..."
+                      />
+                    </p>
+
+                    <p className="flex items-center gap-1">
+                      <span>• MST/CCCD:</span>
+                      <input
+                        type="text"
+                        value={tempPreviewQuote.taxCode !== undefined ? tempPreviewQuote.taxCode : (selectedSupplier?.taxCode || '')}
+                        onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, taxCode: e.target.value })}
+                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-xs"
+                        placeholder="Mã số thuế hoặc CCCD..."
+                      />
+                    </p>
+                  </div>
+                </div>
+
+                {/* Contract Content clauses */}
+                <div className="space-y-4 pt-1">
+                  <div>
+                    <h4 className="font-bold text-slate-900 uppercase">Điều 1. Phạm vi liên kết dự án &amp; công việc bàn giao</h4>
+                    <div className="pl-4 space-y-2 mt-1">
+                      <div className="flex items-center gap-1">
+                        <strong>1.1. Công trình liên kết:</strong>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.projectName || ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, projectName: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent flex-1 max-w-md"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <strong>1.2. Chủ đầu tư dự án:</strong>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.customerName || ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, customerName: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent max-w-xs"
+                        />
+                        <span>- SĐT:</span>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.customerPhone || ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, customerPhone: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent max-w-xs"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <strong>1.3. Địa chỉ lắp đặt thi công:</strong>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.customerAddress || ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, customerAddress: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent flex-1 max-w-md"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <strong>1.4. Nội dung công việc giao thầu:</strong>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.workName || ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, workName: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-blue-600 transition-all print:border-none print:p-0 print:bg-transparent flex-1 max-w-lg"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-slate-900 uppercase">Điều 2. Thời gian thực hiện</h4>
+                    <div className="pl-4 space-y-2 mt-1">
+                      <div className="flex items-center gap-2">
+                        <span>• Ngày bắt đầu triển khai:</span>
+                        <input
+                          type="date"
+                          value={tempPreviewQuote.startDate ? new Date(tempPreviewQuote.startDate).toISOString().split('T')[0] : ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, startDate: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:hidden"
+                        />
+                        <span className="hidden print:inline font-bold">
+                          {tempPreviewQuote.startDate ? new Date(tempPreviewQuote.startDate).toLocaleDateString('vi-VN') : 'Đang cập nhật'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>• Ngày hoàn thiện bàn giao nghiệm thu:</span>
+                        <input
+                          type="date"
+                          value={tempPreviewQuote.endDate ? new Date(tempPreviewQuote.endDate).toISOString().split('T')[0] : ''}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, endDate: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:hidden"
+                        />
+                        <span className="hidden print:inline font-bold">
+                          {tempPreviewQuote.endDate ? new Date(tempPreviewQuote.endDate).toLocaleDateString('vi-VN') : 'Đang cập nhật'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-slate-900 uppercase">Điều 3. Giá trị hợp đồng &amp; Phương thức thanh toán</h4>
+                    <div className="pl-4 space-y-2 mt-1">
+                      <div className="flex items-center gap-1">
+                        <span>• Giá trị hợp đồng khoán:</span>
+                        <input
+                          type="number"
+                          value={tempPreviewQuote.contractValue || 0}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, contractValue: Number(e.target.value) })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-emerald-600 transition-all w-28 print:hidden"
+                        />
+                        <span className="hidden print:inline font-black text-emerald-600">
+                          {(tempPreviewQuote.contractValue || 0).toLocaleString('vi-VN')} VND
+                        </span>
+                        <span className="print:hidden text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded ml-2">
+                          👉 {(tempPreviewQuote.contractValue || 0).toLocaleString('vi-VN')} đ
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span>• Trạng thái ký hợp đồng:</span>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.signedLabel || (tempPreviewQuote.signedDate ? `Đã ký ngày ${new Date(tempPreviewQuote.signedDate).toLocaleDateString('vi-VN')}` : 'Chưa ký (Sẽ bổ sung ngày ký sau)')}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, signedLabel: e.target.value })}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-slate-800 transition-colors print:border-none print:p-0 print:bg-transparent flex-1 max-w-sm"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span>• Trạng thái thanh toán &amp; thi công:</span>
+                        <input
+                          type="text"
+                          value={tempPreviewQuote.status || 'Đã Lập'}
+                          onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, status: e.target.value } as ArchivedQuote)}
+                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-blue-600 transition-colors print:border-none print:p-0 print:bg-transparent max-w-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-slate-900 uppercase">Điều 4. Thỏa ước phụ trợ &amp; Ghi chú kỹ thuật</h4>
+                    <div className="pl-4 mt-1 bg-slate-50 p-3 rounded-lg border border-slate-200 text-[11px] text-slate-600 font-semibold print:border-none print:p-0 print:bg-transparent">
+                      <textarea
+                        value={tempPreviewQuote.notes || ''}
+                        onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, notes: e.target.value })}
+                        rows={3}
+                        className="w-full bg-transparent outline-none border border-slate-300 focus:border-blue-500 rounded p-1 text-slate-800 font-medium transition-all print:border-none print:p-0 print:resize-none print:outline-none"
+                        placeholder="Nội dung thỏa ước phụ trợ hoặc ghi chú kỹ thuật bàn giao thầu..."
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer signatures */}
+                <div className="grid grid-cols-2 text-center pt-8 gap-6 font-bold text-xs">
+                  <div className="space-y-16">
+                    <div>
+                      <p className="uppercase text-slate-500">ĐẠI DIỆN BÊN A (GIAO THẦU)</p>
+                      <p className="text-[10px] text-slate-400 font-medium">Ký, đóng dấu và ghi rõ họ tên</p>
+                    </div>
+                    <div className="text-slate-800">
+                      <p>Nguyễn Văn Hoàng</p>
+                      <p className="text-[10px] text-slate-400 font-normal">Giám đốc Hoàng Long Lâm Đồng</p>
+                    </div>
+                  </div>
+                  <div className="space-y-16">
+                    <div>
+                      <p className="uppercase text-slate-500">ĐẠI DIỆN BÊN B (NHẬN THẦU PHỤ)</p>
+                      <p className="text-[10px] text-slate-400 font-medium">Ký và ghi rõ họ tên</p>
+                    </div>
+                    <div className="text-slate-800">
+                      <p>{tempPreviewQuote.representative || selectedSupplier?.representative || 'Chưa ký'}</p>
+                      <p className="text-[10px] text-slate-400 font-normal">{tempPreviewQuote.subcontractorName || 'Tổ thợ thầu phụ'}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* Print Footer */}
-            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPrintPreview(false);
-                  setIsEditingPrint(false);
-                }}
-                className="px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-extrabold text-xs rounded-xl cursor-pointer transition-colors"
-              >
-                Đóng
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all active:scale-95 shadow-md"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                In Ấn Hồ Sơ
-              </button>
+            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center shrink-0">
+              <span className="text-[10px] text-slate-500 italic">
+                💡 Tip: Click directly on fields with dashed lines to edit the contract directly on printout.
+              </span>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPrintPreview(false);
+                    setTempPreviewQuote(null);
+                  }}
+                  className="px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-extrabold text-xs rounded-xl cursor-pointer transition-colors"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all active:scale-95 shadow-md"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  In Hợp Đồng
+                </button>
+              </div>
             </div>
           </div>
         </div>

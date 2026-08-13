@@ -359,6 +359,8 @@ export interface Payment {
   attachmentName?: string;
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
   purchaseOrderId?: string;  // FK → PurchaseOrder (liên kết phiếu chi thanh toán đơn hàng)
+  subcontractorId?: string;  // FK → Thầu Phụ (liên kết thanh toán với Công nợ Trả thầu phụ)
+  relatedAdvanceId?: string; // FK → SubcontractorAdvanceProposal (phiếu chi tất toán đề xuất tạm ứng)
 }
 
 export interface ProjectContract {
@@ -842,6 +844,9 @@ export interface Liability {
   remaining?: number;
   notes?: string;
   salesOrderId?: string;   // Liên kết với đơn hàng bán
+  relatedAdvanceId?: string; // Liên kết với Đề xuất tạm ứng thầu phụ
+  subcontractorId?: string;  // Liên kết với thầu phụ
+  isAuto?: boolean;          // Tạo tự động từ phiếu chi tạm ứng thầu phụ
 }
 
 // ─── Chat Group Types ────────────────────────────────────────────────────────

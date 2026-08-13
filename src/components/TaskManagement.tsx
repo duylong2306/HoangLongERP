@@ -27,6 +27,8 @@ interface TaskManagementProps {
   onRedirectToQuote?: (projectId: string) => void;
   onRedirectToSubcontractor?: (projectId: string, subcontractorId: string, workName: string) => void;
   onRedirectToHrLeaves?: () => void; // Điều hướng sang menu Phòng Nhân Sự > Đơn nghỉ phép
+  /** Điều hướng sang Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng. */
+  onOpenFinanceVoucher?: (proposalId: string) => void;
   subcontractorAdvances?: SubcontractorAdvanceProposal[]; // Đề xuất tạm ứng / Thu Chi từ Tài Chính
   /** Công việc cần bung modal chi tiết ngay khi vào tab (deep link từ thông báo đẩy). */
   initialTaskId?: string;
@@ -53,6 +55,7 @@ export default function TaskManagement({
   onRedirectToQuote,
   onRedirectToSubcontractor,
   onRedirectToHrLeaves,
+  onOpenFinanceVoucher,
   subcontractorAdvances = [],
   initialTaskId,
   onInitialTaskOpened,
@@ -747,6 +750,16 @@ export default function TaskManagement({
   }, [currentUser]);
   const myPendingTravelExpenses = travelExpenses.filter((t: any) =>
     t.status === 'pending' && canApproveTravelExpense
+  );
+  // ĐỀ XUẤT THU CHI chờ LẬP PHIẾU (KT) — status 'pending_payment' = "Chờ Lập Phiếu (KT)".
+  // Hiển thị những đề xuất mà user hiện tại được CHỈ ĐỊNH lập phiếu (creator = "Người Lập Phiếu"),
+  // hoặc thuộc phòng Kế toán (vì mặc định người lập phiếu là "Kế Toán").
+  const myPendingVouchers = subcontractorAdvances.filter(a =>
+    a.status === 'pending_payment' &&
+    (isFinanceApprover ||
+     a.creator === currentUser?.id ||
+     (a.creatorName && currentUser?.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase()) ||
+     (a.creator && currentUser?.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))
   );
   const toReviewUncompletedCount = toReviewTasksCount
     + myPendingLeaves.length
@@ -1468,7 +1481,9 @@ export default function TaskManagement({
                     myPendingAdvances.length
                     +
                     myPendingTravelExpenses.length
-                  } chờ duyệt
+                    +
+                    myPendingVouchers.length
+                  } cần xử lý
                 </span>
               </div>
             </div>
@@ -1656,6 +1671,66 @@ export default function TaskManagement({
                   }
                 });
               })()}
+
+              {/* PHẦN ĐỀ XUẤT THU CHI CHỜ LẬP PHIẾU (KT) — người dùng được chỉ định lập phiếu */}
+              {myPendingVouchers.length > 0 && (
+                <div className="space-y-2 pt-3 mt-3 border-t border-dashed border-slate-800">
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                    <h4 className="font-extrabold text-[11px] text-orange-400 uppercase tracking-wider">
+                      Chờ Lập Phiếu (KT)
+                    </h4>
+                    <span className="bg-orange-955 border border-orange-500/20 text-orange-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                      {myPendingVouchers.length}
+                    </span>
+                  </div>
+
+                  {myPendingVouchers.map(v => (
+                    <div
+                      key={v.id}
+                      className="bg-slate-950/80 border border-orange-500/30 p-3.5 rounded-lg hover:border-orange-400 transition-all duration-150 space-y-3 shadow-sm"
+                    >
+                      <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
+                        <span className="text-[10px] font-mono font-extrabold text-orange-400 tracking-wider bg-orange-950/50 px-1.5 py-0.5 rounded">{v.id}</span>
+                        <span className="text-[11.5px] font-mono font-black text-rose-400">
+                          {v.amount.toLocaleString('vi-VN')} đ
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 text-[10.5px] text-slate-400">
+                        <div className="text-slate-200">
+                          Dự án: <strong className="text-slate-100 text-xs font-bold leading-none">{v.projectName}</strong>
+                        </div>
+                        <div className="font-mono text-[10px]">
+                          Công việc: <strong className="text-slate-300">{v.taskName}</strong>
+                        </div>
+                        <p>Thầu phụ: <strong className="text-slate-300">{v.subcontractorName}</strong></p>
+                        <p>Người lập phiếu: <strong className="text-slate-300">{v.creatorName || v.creator || 'Kế Toán'}</strong></p>
+                        <p className="text-orange-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                          <span>Đề Xuất Thu Chi / Tạm Ứng</span>
+                          <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Lập Phiếu (KT)</span>
+                        </p>
+
+                        <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
+                          "Diễn giải: {v.reason}"
+                        </div>
+                      </div>
+
+                      <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onOpenFinanceVoucher?.(v.id)}
+                          className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer flex items-center gap-1"
+                          title="Mở Tài Chính để lập phiếu chi tất toán đề xuất này"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Lập phiếu (KT)
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="bg-slate-955 p-2 border-t border-slate-850 mt-3 text-[10px] text-slate-500 font-mono flex justify-between items-center">

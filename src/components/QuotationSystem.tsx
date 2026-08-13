@@ -937,6 +937,7 @@ export default function QuotationSystem({
     setLoadedSubcontractorQuote(null);
     setIsSubcontractorSaved(false);
     setIsSubcontractorLocked(false);
+    // Reset supplier lock state - SubcontractorEstimator will manage its own state
   };
 
   const handleStartNewQuote = () => {

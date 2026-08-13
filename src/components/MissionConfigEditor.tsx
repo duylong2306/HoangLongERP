@@ -335,7 +335,7 @@ export default function MissionConfigEditor({
           </div>
           <div className="space-y-1">
             <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">
-              Hạn hoàn thành (mặc định: +1 ngày kể từ hạn gần nhất):
+              Hạn hoàn thành:
             </label>
             <input
               type="datetime-local"

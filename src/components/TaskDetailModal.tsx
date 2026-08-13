@@ -1601,6 +1601,20 @@ export default function TaskDetailModal({
         });
       }
 
+      // 💬 Tin nhắn NHÓM CHAT dự án: người lập đề xuất đã gửi đề xuất tạm ứng
+      notifyProjectChat(
+        `📝 ĐỀ XUẤT TẠM ỨNG THẦU PHỤ\n` +
+        `Mã đề xuất: ${code}\n` +
+        `Thầu phụ: ${subcontractorName}\n` +
+        `Công việc: ${taskName}\n` +
+        `Số tiền: ${amount.toLocaleString('vi-VN')}đ\n` +
+        `Lý do: ${reason || '—'}\n` +
+        `Người lập đề xuất: ${creator}\n` +
+        `Người xét duyệt: ${approver}\n` +
+        `→ Chờ xét duyệt.`,
+        { type: 'advance', id: code }
+      );
+
       // Show high-end custom success notification
       setCustomDialog({
         show: true,
@@ -3623,9 +3637,7 @@ export default function TaskDetailModal({
                             <button
                               type="button"
                               onClick={() => {
-                                setCtCostType('contractor-advance');
-                                setActiveConnectedTool('cost');
-                                setConnectedTaskId(selectedTask.id);
+                                setIsAdvancingSubcontractor(true);
                               }}
                               className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-start gap-2 font-bold cursor-pointer transition-colors text-xs text-left"
                             >

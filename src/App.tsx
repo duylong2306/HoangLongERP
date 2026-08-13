@@ -789,6 +789,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   }, [activeTab]);
 
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
+  const [financeInitialProposalId, setFinanceInitialProposalId] = useState<string | null>(null);
+  // Mở Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng.
+  const openFinanceVoucher = (proposalId: string) => {
+    setFinanceInitialProposalId(proposalId);
+    setFinanceSubTab('de_xuat_thu_chi');
+    setActiveTab('finance');
+  };
   const [hrSubTab, setHrSubTab] = useState<string>('profiles');
   const [financeDuLieuTab, setFinanceDuLieuTab] = useState<string>('khach_hang');
   const [preselectedCustomerId, setPreselectedCustomerId] = useState<string>('');
@@ -2288,6 +2295,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       console.error('[App] Lỗi lưu phiếu chi lên Supabase:', err);
       addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu phiếu chi ${newPay.code} lên server.`, type: 'error' });
     }
+    // Đồng bộ Công nợ Trả thầu phụ (menu Quản Lý Thầu Phụ) khi có phiếu chi mới
+    window.dispatchEvent(new CustomEvent('hl-payments-updated'));
   };
 
   const handleDeleteReceipt = async (id: string) => {
@@ -2366,6 +2375,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         }
       }
     }
+    // Đồng bộ Công nợ Trả thầu phụ (menu Quản Lý Thầu Phụ) khi phiếu chi đổi trạng thái
+    window.dispatchEvent(new CustomEvent('hl-payments-updated'));
   };
 
   // HANDLERS BÁO GIÁ
@@ -3422,6 +3433,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onRedirectToQuote={handleRedirectToQuote}
               onRedirectToSubcontractor={handleRedirectToSubcontractor}
               onRedirectToHrLeaves={() => { setActiveTab('employees'); setHrSubTab('leaves'); }}
+              onOpenFinanceVoucher={openFinanceVoucher}
               subcontractorAdvances={subcontractorAdvances}
               initialTaskId={deepLinkTaskId ?? undefined}
               onInitialTaskOpened={() => setDeepLinkTaskId(null)}
@@ -3490,6 +3502,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onDeletePurchaseOrder={handleDeletePurchaseOrder}
               initialSubTab={financeSubTab}
               initialDuLieuTab={financeDuLieuTab}
+              initialProposalId={financeInitialProposalId}
+              onInitialProposalConsumed={() => setFinanceInitialProposalId(null)}
             />
           )}
 
