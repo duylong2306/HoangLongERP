@@ -82,6 +82,7 @@ export interface Customer {
   taxOrIdNumber?: string; // MST/CMND (kiểu số)
   notes?: string; // Ghi chú
   openingDebt?: number; // Công nợ đầu kỳ
+  balanceBasis?: 'opening' | 'contract'; // Căn cứ tính Còn phải thu ở mức Chủ đầu tư: 'opening' = Công Nợ Đầu Kỳ, 'contract' = Giá Trị HĐ
 }
 
 export type ProjectType = 'construction' | 'furniture' | 'mechanical' | 'general';
@@ -342,7 +343,7 @@ export interface Receipt {
   salesOrderId?: string;   // Liên kết với đơn hàng bán
   loaiThu?: 'du_an' | 'ban_hang' | 'de_xuat'; // Phân loại phiếu thu
   receiptAt?: string;       // Thời gian lập phiếu thu (ISO string)
-  source?: 'manual' | 'auto'; // 'manual' = tạo thủ công từ "Lập phiếu thu mới"
+  source?: 'manual' | 'import' | 'auto'; // 'manual' = tạo thủ công từ "Lập phiếu thu mới", 'import' = nhập từ Excel
 }
 
 export interface Payment {
@@ -368,7 +369,7 @@ export interface Payment {
   supplierId?: string;       // Mã nhà cung cấp (FK → Supplier/NCC, thay cho recipient tên khi category = supplier_payment)
   proposerId?: string;       // Mã nhân viên người lập/đề xuất (FK → Employee, thay cho proposer tên)
   approverId?: string;       // Mã nhân viên người duyệt (FK → Employee, thay cho approver tên)
-  source?: 'manual' | 'auto'; // 'manual' = tạo thủ công từ "Tạo đề xuất chi mới"
+  source?: 'manual' | 'import' | 'auto'; // 'manual' = tạo thủ công từ "Tạo đề xuất chi mới", 'import' = nhập từ Excel
 }
 
 export interface ProjectContract {
@@ -857,6 +858,8 @@ export interface Liability {
   subcontractorId?: string;  // Liên kết với thầu phụ
   isAuto?: boolean;          // Tạo tự động từ phiếu chi tạm ứng thầu phụ
   isOpeningDebt?: boolean;   // Số dư đầu kỳ từ Công Nợ đầu kỳ (Khách Hàng / Thầu Phụ / NCC)
+  openingDebt?: number;      // Công nợ đầu kỳ (cột "Công Nợ Đầu Kỳ"; căn cứ tính Còn lại khi balanceBasis = 'opening')
+  balanceBasis?: 'opening' | 'contract'; // Căn cứ tính Còn lại: 'opening' = Công Nợ Đầu Kỳ, 'contract' = Giá Trị (VNĐ)
 }
 
 // ─── Chat Group Types ────────────────────────────────────────────────────────
@@ -954,4 +957,5 @@ export interface Customer {
   taxOrIdNumber?: string; // MST/CMND (kiểu số)
   notes?: string; // Ghi chú
   openingDebt?: number; // Công nợ đầu kỳ
+  balanceBasis?: 'opening' | 'contract'; // Căn cứ tính Còn phải thu ở mức Chủ đầu tư: 'opening' = Công Nợ Đầu Kỳ, 'contract' = Giá Trị HĐ
 }
