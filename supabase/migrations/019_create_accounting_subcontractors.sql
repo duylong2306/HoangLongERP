@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS public.accounting_subcontractors (
   cccd_date text,
   cccd_place text,
   tax_code text,
+  opening_debt numeric DEFAULT 0,
   CONSTRAINT accounting_subcontractors_pkey PRIMARY KEY (id)
 );
 

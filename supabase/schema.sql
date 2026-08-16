@@ -814,6 +814,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
   representative text,
   tax_or_id_number text,
   notes text,
+  opening_debt numeric DEFAULT 0,
   CONSTRAINT customers_pkey PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public.projects (
@@ -1285,6 +1286,7 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   cccd_date text,
   cccd_place text,
   tax_code text,
+  opening_debt numeric DEFAULT 0,
   CONSTRAINT suppliers_pkey PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public.inventory (

@@ -81,6 +81,7 @@ export interface Customer {
   representative?: string; // Người đại diện (Nếu là Tổ chức)
   taxOrIdNumber?: string; // MST/CMND (kiểu số)
   notes?: string; // Ghi chú
+  openingDebt?: number; // Công nợ đầu kỳ
 }
 
 export type ProjectType = 'construction' | 'furniture' | 'mechanical' | 'general';
@@ -807,6 +808,7 @@ export interface SupplierPartner {
   field: string; // Lĩnh Vực
   note: string; // Ghi chú
   debt?: number; // Công nợ
+  openingDebt?: number; // Công nợ đầu kỳ
   region?: string; // Legacy field
   bankNo?: string; // Interoperability with SubcontractorEstimator
 }
@@ -943,4 +945,5 @@ export interface Customer {
   representative?: string; // Người đại diện (Nếu là Tổ chức)
   taxOrIdNumber?: string; // MST/CMND (kiểu số)
   notes?: string; // Ghi chú
+  openingDebt?: number; // Công nợ đầu kỳ
 }

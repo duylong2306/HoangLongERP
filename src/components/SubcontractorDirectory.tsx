@@ -59,13 +59,18 @@ export default function SubcontractorDirectory({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const filteredSuppliers = suppliers.filter(s =>
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (s.representative && s.representative.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (s.field && s.field.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (s.phone && s.phone.includes(searchTerm))
-  );
+  const [fieldFilter, setFieldFilter] = useState('all');
+  const supFields = Array.from(new Set(suppliers.map(s => (s.field || '').trim()).filter(Boolean))).sort();
+  const filteredSuppliers = suppliers.filter(s => {
+    const matchSearch =
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.representative && s.representative.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (s.field && s.field.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (s.phone && s.phone.includes(searchTerm));
+    const matchField = fieldFilter === 'all' || (s.field || '') === fieldFilter;
+    return matchSearch && matchField;
+  });
   const handleSelectAll = (checked: boolean) => {
     if (checked) setSelectedRows(new Set(filteredSuppliers.map(s => s.id)));
     else setSelectedRows(new Set());
@@ -112,6 +117,7 @@ export default function SubcontractorDirectory({
   const [formSupAddress, setFormSupAddress] = useState('');
   const [formSupTaxCode, setFormSupTaxCode] = useState('');
   const [formSupNote, setFormSupNote] = useState('');
+  const [formSupOpeningDebt, setFormSupOpeningDebt] = useState<number>(0);
   const [isRepManuallyEdited, setIsRepManuallyEdited] = useState(false);
 
   // Hợp đồng thầu phụ liên quan (cho panel chi tiết)
@@ -172,6 +178,7 @@ export default function SubcontractorDirectory({
             bankName: formSupBankName,
             field: formSupField,
             note: formSupNote,
+            openingDebt: Number(formSupOpeningDebt) || 0,
             region: formSupAddress, // sync legacy field
             bankNo: formSupBankAccount
           };
@@ -200,6 +207,7 @@ export default function SubcontractorDirectory({
           bankName: formSupBankName,
           field: formSupField,
           note: formSupNote,
+          openingDebt: Number(formSupOpeningDebt) || 0,
           region: formSupAddress,
           bankNo: formSupBankAccount
         });
@@ -231,6 +239,7 @@ export default function SubcontractorDirectory({
         bankName: formSupBankName,
         field: formSupField,
         note: formSupNote,
+        openingDebt: Number(formSupOpeningDebt) || 0,
         region: formSupAddress,
         bankNo: formSupBankAccount
       };
@@ -259,6 +268,7 @@ export default function SubcontractorDirectory({
     setFormSupAddress('');
     setFormSupTaxCode('');
     setFormSupNote('');
+    setFormSupOpeningDebt(0);
     setEditingSupId(null);
     setIsRepManuallyEdited(false);
   };
@@ -302,6 +312,7 @@ export default function SubcontractorDirectory({
       'Số tài khoản': s.bankAccount || s.bankNo || '',
       'Ngân hàng': s.bankName || '',
       'Chuyên môn': s.field || '',
+      'Công nợ đầu kỳ': s.openingDebt || 0,
       'Ghi chú': s.note || '',
     }));
     exportToExcel(data, 'DanhSachThauPhu', `DanhSachThauPhu_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.subcontractor]);
@@ -335,22 +346,32 @@ export default function SubcontractorDirectory({
           bankName: String(r['Ngân hàng'] || ''),
           field: String(r['Chuyên môn'] || 'Thợ thầu thi công'),
           note: String(r['Ghi chú'] || ''),
+          openingDebt: Number(r['Công nợ đầu kỳ'] || 0) || 0,
           region: String(r['Địa chỉ'] || 'Đà Lạt'),
         })).filter(r => r.name && r.phone);
         if (imported.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu', message: 'File không có dòng hợp lệ (cần Tên thầu phụ, Số điện thoại).', type: 'warning' });
           return;
         }
+        // Upsert theo Mã: nếu mã đã tồn tại → cập nhật dòng đó (giữ nguyên các trường khác);
+        // nếu mã chưa có → thêm mới.
         const merged = [...suppliers];
+        const toSave: SupplierPartner[] = [];
         imported.forEach(imp => {
-          const dupIdx = merged.findIndex(s => s.name.toLowerCase() === imp.name.toLowerCase() || s.id === imp.id);
-          if (dupIdx > -1) merged[dupIdx] = { ...merged[dupIdx], ...imp };
-          else merged.push(imp);
+          const dupIdx = merged.findIndex(s => s.id === imp.id);
+          if (dupIdx > -1) {
+            const updated = { ...merged[dupIdx], ...imp };
+            merged[dupIdx] = updated;
+            toSave.push(updated);
+          } else {
+            merged.push(imp);
+            toSave.push(imp);
+          }
         });
         setSuppliers(merged);
-        // Đồng bộ lên Supabase
-        imported.forEach(imp => dbService.accountingSubcontractors.save(imp).catch(err => console.warn('Lưu import thầu phụ lên Supabase thất bại:', err)));
-        addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} thầu phụ`, type: 'success' });
+        // Đồng bộ lên Supabase (upsert theo id)
+        toSave.forEach(item => dbService.accountingSubcontractors.save(item).catch(err => console.warn('Lưu import thầu phụ lên Supabase thất bại:', err)));
+        addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} thầu phụ (thêm mới / cập nhật theo Mã)`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
       }
@@ -372,6 +393,20 @@ export default function SubcontractorDirectory({
             className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none text-slate-100 placeholder-slate-500 focus:border-orange-500 transition-colors"
           />
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide hidden sm:inline">Lĩnh vực:</span>
+          <select
+            value={fieldFilter}
+            onChange={(e) => setFieldFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
+          >
+            <option value="all">Tất cả</option>
+            {supFields.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
         </div>
 
         <div className="flex justify-between items-center border-b border-slate-850 pb-0 sm:pb-2">
@@ -589,16 +624,29 @@ export default function SubcontractorDirectory({
             </div>
           </div>
 
-          {/* Row 6: Ghi chú */}
-          <div className="text-[10.5px] text-left">
-            <label className="block text-slate-400 font-semibold mb-1">Ghi chú:</label>
-            <input
-              type="text"
-              value={formSupNote}
-              onChange={(e) => setFormSupNote(e.target.value)}
-              placeholder="Ghi chú về kinh nghiệm, năng lực hoặc đội thợ..."
-              className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-            />
+          {/* Row 6: Công nợ đầu kỳ + Ghi chú */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10.5px] text-left">
+            <div>
+              <label className="block text-slate-400 font-semibold mb-1">Công nợ đầu kỳ (VNĐ):</label>
+              <input
+                type="number"
+                min={0}
+                value={formSupOpeningDebt || ''}
+                onChange={(e) => setFormSupOpeningDebt(Number(e.target.value))}
+                placeholder="Công nợ đầu kỳ (nếu có)..."
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none font-mono focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-400 font-semibold mb-1">Ghi chú:</label>
+              <input
+                type="text"
+                value={formSupNote}
+                onChange={(e) => setFormSupNote(e.target.value)}
+                placeholder="Ghi chú về kinh nghiệm, năng lực hoặc đội thợ..."
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
@@ -636,14 +684,16 @@ export default function SubcontractorDirectory({
                   </th>
                   <th className="p-3 pl-4">Mã Thầu Phụ</th>
                   <th className="p-3">Tên Thầu Phụ</th>
-                  <th className="p-3">Người Đại Diện</th>
-                  <th className="p-3">Lĩnh vực hoạt động</th>
+                  <th className="p-3">Địa Chỉ</th>
+                  <th className="p-3">SĐT</th>
+                  <th className="p-3">Lĩnh vực</th>
+                  <th className="p-3 text-right">Công Nợ đầu kỳ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {paginatedSuppliers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500 italic">
+                    <td colSpan={7} className="p-8 text-center text-slate-500 italic">
                       Không tìm thấy thầu phụ nào phù hợp.
                     </td>
                   </tr>
@@ -675,24 +725,31 @@ export default function SubcontractorDirectory({
                         <div className="font-extrabold text-white text-[12.5px]">
                           {s.name}
                         </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">
-                          Địa chỉ: <span className="text-slate-350">{s.address || s.region || 'Không có'}</span>
-                        </div>
-                      </td>
-
-                      {/* Representative */}
-                      <td className="p-3 text-slate-300 font-medium">
-                        {s.representative || s.name}
-                      </td>
-
-                      {/* Field / Contact */}
-                      <td className="p-3">
-                        <span className="text-orange-400 font-extrabold text-[11px] block">{s.field || 'Chưa phân loại'}</span>
-                        {s.phone && (
-                          <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                            ĐT: {s.phone}
+                        {s.representative && s.representative !== s.name && (
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            ĐD: <span className="text-slate-350">{s.representative}</span>
                           </div>
                         )}
+                      </td>
+
+                      {/* Address */}
+                      <td className="p-3 text-slate-300">
+                        {s.address || s.region || '—'}
+                      </td>
+
+                      {/* Phone */}
+                      <td className="p-3 whitespace-nowrap font-mono text-slate-300">
+                        {s.phone || '—'}
+                      </td>
+
+                      {/* Field */}
+                      <td className="p-3">
+                        <span className="text-orange-400 font-extrabold text-[11px] block">{s.field || 'Chưa phân loại'}</span>
+                      </td>
+
+                      {/* Opening Debt */}
+                      <td className="p-3 text-right font-mono font-bold text-amber-400">
+                        {(s.openingDebt || 0).toLocaleString('vi-VN')} đ
                       </td>
                     </tr>
                   ))
@@ -874,6 +931,11 @@ export default function SubcontractorDirectory({
                       {selectedSupDetail.note || 'Không có ghi chú'}
                     </span>
                   </div>
+
+                  <div className="pt-2 border-t border-slate-850/50 flex justify-between text-[11px]">
+                    <span className="text-slate-400">Công nợ đầu kỳ:</span>
+                    <span className="font-mono font-extrabold text-amber-400">{(selectedSupDetail.openingDebt || 0).toLocaleString('vi-VN')} đ</span>
+                  </div>
                 </div>
 
                 {/* Linked Contracts section */}
@@ -940,6 +1002,7 @@ export default function SubcontractorDirectory({
                     setFormSupAddress(selectedSupDetail.address || selectedSupDetail.region || '');
                     setFormSupTaxCode(selectedSupDetail.taxCode || '');
                     setFormSupNote(selectedSupDetail.note || '');
+                    setFormSupOpeningDebt(selectedSupDetail.openingDebt || 0);
                     setIsRepManuallyEdited(true);
                     setShowSupplierForm(true);
                     document.getElementById('subcontractor_form_anchor')?.scrollIntoView({ behavior: 'smooth' });

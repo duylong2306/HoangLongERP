@@ -85,6 +85,7 @@ export const EXCEL_HEADERS = {
     'Số điện thoại',
     'Email',
     'Địa chỉ',
+    'Công nợ đầu kỳ',
     'Ghi chú',
   ],
   supplier: [
@@ -95,6 +96,7 @@ export const EXCEL_HEADERS = {
     'Email',
     'Địa chỉ',
     'Loại vật tư',
+    'Công nợ đầu kỳ',
     'Ghi chú',
   ],
   subcontractor: [
@@ -105,6 +107,7 @@ export const EXCEL_HEADERS = {
     'Email',
     'Địa chỉ',
     'Chuyên môn',
+    'Công nợ đầu kỳ',
     'Ghi chú',
   ],
   houseEstimatePrice: [

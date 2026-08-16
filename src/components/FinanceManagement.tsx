@@ -336,8 +336,10 @@ export default function FinanceManagement({
   const [custRep, setCustRep] = useState('');
   const [custTaxId, setCustTaxId] = useState('');
   const [custNotes, setCustNotes] = useState('');
+  const [custOpeningDebt, setCustOpeningDebt] = useState<number>(0);
   const [isCustRepManuallyEdited, setIsCustRepManuallyEdited] = useState(false);
   const [editingCustId, setEditingCustId] = useState<string | null>(null);
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<'all' | 'individual' | 'organization'>('all');
 
   // Search filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -2139,6 +2141,7 @@ export default function FinanceManagement({
     setCustRep('');
     setCustTaxId('');
     setCustNotes('');
+    setCustOpeningDebt(0);
     setEditingCustId(null);
     setIsCustRepManuallyEdited(false);
     setShowAddCustomerModal(false);
@@ -2165,7 +2168,8 @@ export default function FinanceManagement({
       type: 'individual',
       representative: custRep || custName,
       taxOrIdNumber: custTaxId,
-      notes: custNotes
+      notes: custNotes,
+      openingDebt: Number(custOpeningDebt) || 0
     };
 
     if (onAddCustomer) {
@@ -2200,6 +2204,7 @@ export default function FinanceManagement({
       'Số điện thoại': c.phone || '',
       'Email': c.email || '',
       'Địa chỉ': c.address || '',
+      'Công nợ đầu kỳ': c.openingDebt || 0,
       'Ghi chú': c.notes || '',
     }));
     exportToExcel(data, 'DanhBaKhachHang', `DanhBaKhachHang_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.customer]);
@@ -2224,17 +2229,25 @@ export default function FinanceManagement({
           phone: String(r['Số điện thoại'] || ''),
           email: String(r['Email'] || ''),
           address: String(r['Địa chỉ'] || ''),
+          openingDebt: Number(r['Công nợ đầu kỳ'] || 0) || 0,
           notes: String(r['Ghi chú'] || ''),
         })).filter(r => r.name);
         if (imported.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu', message: 'File không có dòng hợp lệ (cần cột Tên khách hàng).', type: 'warning' });
           return;
         }
+        // Loại bỏ trùng Mã trong chính file import (giữ dòng đầu)
+        const seenIds = new Set<string>();
+        const deduped = imported.filter(c => {
+          if (seenIds.has(c.id)) return false;
+          seenIds.add(c.id);
+          return true;
+        });
         if (onAddCustomer) {
-          imported.forEach(c => onAddCustomer(c));
+          deduped.forEach(c => onAddCustomer(c));
         } else {
           const merged = [...customers];
-          imported.forEach(imp => {
+          deduped.forEach(imp => {
             const dupIdx = merged.findIndex(c => c.id === imp.id || c.name.toLowerCase() === imp.name.toLowerCase());
             if (dupIdx > -1) merged[dupIdx] = { ...merged[dupIdx], ...imp };
             else merged.push(imp);
@@ -2242,7 +2255,7 @@ export default function FinanceManagement({
           customers.length = 0;
           customers.push(...merged);
         }
-        addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} khách hàng`, type: 'success' });
+        addToast({ title: '✅ Nhập thành công', message: `Đã import ${deduped.length} khách hàng`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
       }
@@ -3507,11 +3520,14 @@ export default function FinanceManagement({
 
             {/* TAB 3: KHÁCH HÀNG */}
             {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'khach_hang' && (() => {
-              const filteredCustomers = customers.filter(c => 
-                c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                (c.phone && c.phone.includes(searchTerm)) || 
-                c.id.toLowerCase().includes(searchTerm.toLowerCase())
-              );
+              const filteredCustomers = customers.filter(c => {
+                const matchSearch =
+                  c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  (c.phone && c.phone.includes(searchTerm)) ||
+                  c.id.toLowerCase().includes(searchTerm.toLowerCase());
+                const matchType = customerTypeFilter === 'all' || (c.type || 'individual') === customerTypeFilter;
+                return matchSearch && matchType;
+              });
 
               const limitCust = pageSizeCust === -1 ? filteredCustomers.length : pageSizeCust;
               const startIndexCust = (pageCust - 1) * limitCust;
@@ -3561,8 +3577,22 @@ export default function FinanceManagement({
                     </div>
                   </div>
 
+                  {/* Filter: Loại khách hàng */}
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className="text-slate-400 font-bold uppercase tracking-wide">Lọc theo loại:</span>
+                    <select
+                      value={customerTypeFilter}
+                      onChange={(e) => setCustomerTypeFilter(e.target.value as 'all' | 'individual' | 'organization')}
+                      className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none cursor-pointer focus:border-orange-500 font-bold"
+                    >
+                      <option value="all">Tất cả</option>
+                      <option value="individual">Cá nhân</option>
+                      <option value="organization">Tổ chức</option>
+                    </select>
+                  </div>
+
                   <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-                    
+
                     {/* Left Table Panel */}
                     <div className={`${selectedCustDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
                       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
@@ -3579,13 +3609,15 @@ export default function FinanceManagement({
                               </th>
                               <th className="p-3 pl-4">Mã KH</th>
                               <th className="p-3">Tên Khách Hàng</th>
-                              <th className="p-3">Người đại điện</th>
+                              <th className="p-3">Địa Chỉ</th>
+                              <th className="p-3">SĐT</th>
+                              <th className="p-3 text-right">Công Nợ đầu kỳ</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
                             {paginatedCustomers.length === 0 ? (
                               <tr>
-                                <td colSpan={4} className="p-8 text-center text-slate-500 italic">
+                                <td colSpan={6} className="p-8 text-center text-slate-500 italic">
                                   Không tìm thấy khách hàng nào phù hợp.
                                 </td>
                               </tr>
@@ -3622,9 +3654,19 @@ export default function FinanceManagement({
                                     </div>
                                   </td>
 
-                                  {/* Representative Column */}
-                                  <td className="p-3 whitespace-nowrap text-slate-300 font-bold">
-                                    {c.representative || c.name}
+                                  {/* Address */}
+                                  <td className="p-3 text-slate-300">
+                                    {c.address || '—'}
+                                  </td>
+
+                                  {/* Phone */}
+                                  <td className="p-3 whitespace-nowrap font-mono text-slate-300">
+                                    {c.phone || '—'}
+                                  </td>
+
+                                  {/* Opening Debt */}
+                                  <td className="p-3 text-right font-mono font-bold text-amber-400">
+                                    {(c.openingDebt || 0).toLocaleString('vi-VN')} đ
                                   </td>
                                 </tr>
                               ))
@@ -3763,6 +3805,10 @@ export default function FinanceManagement({
                                 <span className="text-slate-400">Tổng giá trị hợp đồng:</span>
                                 <span className="font-mono font-extrabold text-orange-400">{totalVal.toLocaleString('vi-VN')} đ</span>
                               </div>
+                              <div className="flex justify-between text-[11px]">
+                                <span className="text-slate-400">Công nợ đầu kỳ:</span>
+                                <span className="font-mono font-extrabold text-amber-400">{(selectedCustDetail.openingDebt || 0).toLocaleString('vi-VN')} đ</span>
+                              </div>
                             </div>
 
                             {selectedCustDetail.notes && (
@@ -3797,6 +3843,7 @@ export default function FinanceManagement({
                                   setCustRep(selectedCustDetail.representative || selectedCustDetail.name);
                                   setCustTaxId(selectedCustDetail.taxOrIdNumber || '');
                                   setCustNotes(selectedCustDetail.notes || '');
+                                  setCustOpeningDebt(selectedCustDetail.openingDebt || 0);
                                   setIsCustRepManuallyEdited(true);
                                   setShowAddCustomerModal(true);
                                 }}
@@ -3963,6 +4010,18 @@ export default function FinanceManagement({
                         value={custNotes}
                         onChange={(e) => setCustNotes(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none focus:border-orange-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-355 font-bold mb-1">Công nợ đầu kỳ (VNĐ)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={custOpeningDebt || ''}
+                        onChange={(e) => setCustOpeningDebt(Number(e.target.value))}
+                        placeholder="Công nợ đầu kỳ (nếu có)..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none font-mono focus:border-orange-500"
                       />
                     </div>
 
