@@ -2297,6 +2297,32 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       seenEmpIds.add(emp.id);
       return true;
     });
+
+    // ─── Tạm ứng từ Phiếu chi (đồng bộ) ──────────────────────────────────
+    // Lấy các phiếu chi "Ứng Lương Nhân Sự" (category = 'salary_advance')
+    // đã lập trong ĐÚNG kỳ lương, ghép theo TÊN người nhận (recipient = tên NV),
+    // tính tổng đưa vào cột Tạm ứng của bảng lương tự động.
+    let advancePayments: any[] = [];
+    try {
+      advancePayments = await dbService.payments.list();
+    } catch (err) {
+      console.warn('Lỗi tải phiếu chi phục vụ tính tạm ứng:', err);
+    }
+    const payrollPeriodPrefix = `${payrollYear}-${payrollMonth}`;
+    const sumAdvancesForEmp = (emp: any) =>
+      (advancePayments || [])
+        .filter((p: any) => {
+          if (!p.date || !String(p.date).startsWith(payrollPeriodPrefix)) return false;
+          // Ưu tiên khớp CHÍNH XÁC theo MÃ NHÂN VIÊN (employeeId) khi có.
+          if (p.employeeId && emp.id && p.employeeId === emp.id) return true;
+          // Dự phòng cho phiếu chi cũ chưa có employeeId: ghép theo tên + nhóm ứng lương.
+          if (!p.employeeId && p.recipient && emp.name &&
+              String(p.recipient).trim().toLowerCase() === String(emp.name).trim().toLowerCase() &&
+              (p.category === 'salary_advance' || p.category === 'subcontractor_advance')) return true;
+          return false;
+        })
+        .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+
     const newPayrollItems = uniqueWorkingEmps
       .map((emp) => {
       let inputs: any = {
@@ -2394,7 +2420,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       inputs.bonusHoliday = 0;
       inputs.bonusCreative = 0;
       inputs.otherDeductions = 0;
-      inputs.advances = 0;
+      // Đồng bộ Tạm ứng từ phiếu chi "Ứng Lương Nhân Sự" (salary_advance) của kỳ lương.
+      inputs.advances = sumAdvancesForEmp(emp);
 
       const calculated = _calcPayroll(emp, monthStr, inputs);
 

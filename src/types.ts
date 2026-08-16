@@ -336,11 +336,13 @@ export interface Receipt {
   amount: number;
   paymentMethod: 'cash' | 'transfer';
   notes: string;
-  collector: string;
+  collector: string;          // Tên người thu (hiển thị)
+  collectorId?: string;       // Mã nhân viên người thu (FK → Employee, lưu id chuẩn hóa)
   attachmentName?: string;
   salesOrderId?: string;   // Liên kết với đơn hàng bán
   loaiThu?: 'du_an' | 'ban_hang' | 'de_xuat'; // Phân loại phiếu thu
   receiptAt?: string;       // Thời gian lập phiếu thu (ISO string)
+  source?: 'manual' | 'auto'; // 'manual' = tạo thủ công từ "Lập phiếu thu mới"
 }
 
 export interface Payment {
@@ -362,6 +364,11 @@ export interface Payment {
   purchaseOrderId?: string;  // FK → PurchaseOrder (liên kết phiếu chi thanh toán đơn hàng)
   subcontractorId?: string;  // FK → Thầu Phụ (liên kết thanh toán với Công nợ Trả thầu phụ)
   relatedAdvanceId?: string; // FK → SubcontractorAdvanceProposal (phiếu chi tất toán đề xuất tạm ứng)
+  employeeId?: string;       // Mã nhân viên (cho ứng lương salary_advance — đồng bộ Tạm ứng vào bảng lương CHÍNH XÁC theo mã, không ghép theo tên)
+  supplierId?: string;       // Mã nhà cung cấp (FK → Supplier/NCC, thay cho recipient tên khi category = supplier_payment)
+  proposerId?: string;       // Mã nhân viên người lập/đề xuất (FK → Employee, thay cho proposer tên)
+  approverId?: string;       // Mã nhân viên người duyệt (FK → Employee, thay cho approver tên)
+  source?: 'manual' | 'auto'; // 'manual' = tạo thủ công từ "Tạo đề xuất chi mới"
 }
 
 export interface ProjectContract {
@@ -849,6 +856,7 @@ export interface Liability {
   relatedAdvanceId?: string; // Liên kết với Đề xuất tạm ứng thầu phụ
   subcontractorId?: string;  // Liên kết với thầu phụ
   isAuto?: boolean;          // Tạo tự động từ phiếu chi tạm ứng thầu phụ
+  isOpeningDebt?: boolean;   // Số dư đầu kỳ từ Công Nợ đầu kỳ (Khách Hàng / Thầu Phụ / NCC)
 }
 
 // ─── Chat Group Types ────────────────────────────────────────────────────────

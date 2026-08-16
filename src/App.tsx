@@ -347,6 +347,60 @@ const stripPassword = (emp: any) => {
   return safe;
 };
 
+/**
+ * Nạp ngược (backfill) khóa ngoại theo MÃ cho phiếu thu/chi CŨ đã lưu bằng TÊN.
+ * Chỉ điền các trường id còn thiếu (idempotent). Trả về mảng đã làm giàu + danh sách
+ * bản ghi bị đổi (để gọi save lên Supabase).
+ * Lưu ý: salesOrderId / purchaseOrderId KHÔNG có tên để đối chiếu → bỏ qua (chỉ nạp
+ * cho các FK có thể suy từ tên: collectorId, employeeId, supplierId, proposerId, approverId).
+ */
+const backfillVoucherFks = (
+  receipts: any[],
+  payments: any[],
+  masters: { employees: any[]; suppliers: any[]; customers: any[]; projects: any[]; salesOrders: any[]; purchaseOrders: any[] }
+) => {
+  const { employees, suppliers } = masters;
+  const norm = (s?: string) => (s ? s.trim().toLowerCase() : '');
+  const empByName = (name?: string) => (name ? employees.find(e => e.name && norm(e.name) === norm(name)) : undefined);
+  const supByName = (name?: string) => (name ? suppliers.find(s => s.name && norm(s.name) === norm(name)) : undefined);
+  const changed: { table: 'receipts' | 'payments'; row: any }[] = [];
+
+  const newReceipts = (receipts || []).map(r => {
+    let upd: any = null;
+    if (!r.collectorId) {
+      const e = empByName(r.collector);
+      if (e) upd = { ...(upd || r), collectorId: e.id };
+    }
+    if (upd) { changed.push({ table: 'receipts', row: upd }); return upd; }
+    return r;
+  });
+
+  const newPayments = (payments || []).map(p => {
+    let upd: any = null;
+    const cat = p.category;
+    // Người nhận (recipient) → id theo nhóm
+    if (!p.employeeId && !p.supplierId && !p.subcontractorId && p.recipient) {
+      if (['salary', 'salary_advance', 'site_expense'].includes(cat)) {
+        const e = empByName(p.recipient); if (e) upd = { ...(upd || p), employeeId: e.id };
+      } else if (['supplier_payment', 'material', 'shipping', 'machinery', 'general', 'other'].includes(cat)) {
+        const s = supByName(p.recipient); if (s) upd = { ...(upd || p), supplierId: s.id };
+      } else {
+        // subcontractor_advance / labor: thầu phụ thủ công dùng bảng suppliers → thử supplier trước
+        const s = supByName(p.recipient); if (s) upd = { ...(upd || p), supplierId: s.id };
+      }
+    }
+    if (!p.proposerId && p.proposer) { const e = empByName(p.proposer); if (e) upd = { ...(upd || p), proposerId: e.id }; }
+    if (!p.approverId && p.approver) {
+      const e = employees.find(e => e.name && (p.approver as string).startsWith(e.name));
+      if (e) upd = { ...(upd || p), approverId: e.id };
+    }
+    if (upd) { changed.push({ table: 'payments', row: upd }); return upd; }
+    return p;
+  });
+
+  return { receipts: newReceipts, payments: newPayments, changed };
+};
+
 export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -675,8 +729,28 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             setCustomers(custRows);
             setProjects(projRows.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
             setTasks(taskRows);
-            setReceipts(recRows);
-            setPayments(payRows);
+            // ─── Nạp ngược FK (name → id) cho phiếu cũ ─────────────────────
+            let finalReceipts = recRows;
+            let finalPayments = payRows;
+            try {
+              const empRows = await dbService.employees.list().catch(() => []);
+              const bf = backfillVoucherFks(recRows, payRows, {
+                employees: empRows, suppliers: supRows, customers: custRows,
+                projects: projRows, salesOrders: sOrderRows, purchaseOrders: pOrderRows,
+              });
+              if (bf.changed.length > 0) {
+                await Promise.all(bf.changed.map(c =>
+                  c.table === 'receipts' ? dbService.receipts.save(c.row) : dbService.payments.save(c.row)
+                ));
+                console.log(`[Init] Nạp ngược ${bf.changed.length} phiếu (FK theo mã).`);
+              }
+              finalReceipts = bf.receipts;
+              finalPayments = bf.payments;
+            } catch (bfErr) {
+              console.warn('[Init] Backfill FK thất bại, dùng dữ liệu gốc:', bfErr);
+            }
+            setReceipts(finalReceipts);
+            setPayments(finalPayments);
             setSubcontractorAdvances(advRows);
             setQuotes(quoteRows);
             setSalesOrders(sOrderRows);
@@ -2317,6 +2391,25 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   };
 
+  const handleUpdateReceipt = async (updated: Receipt) => {
+    setReceipts(prev => prev.map(r => r.id === updated.id ? updated : r));
+    try {
+      await dbService.receipts.save(updated);
+    } catch (err) {
+      console.error('[App] Lỗi cập nhật phiếu thu trên Supabase:', err);
+    }
+  };
+
+  const handleUpdatePayment = async (updated: Payment) => {
+    setPayments(prev => prev.map(p => p.id === updated.id ? updated : p));
+    try {
+      await dbService.payments.save(updated);
+      window.dispatchEvent(new CustomEvent('hl-payments-updated'));
+    } catch (err) {
+      console.error('[App] Lỗi cập nhật phiếu chi trên Supabase:', err);
+    }
+  };
+
   const handleApprovePayment = async (id: string, status: 'approved' | 'rejected') => {
     const targetPayment = payments.find(p => p.id === id);
     const updated = payments.map(p => p.id === id ? { ...p, status } : p);
@@ -3496,6 +3589,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onDeleteCustomer={handleDeleteCustomer}
               onDeleteReceipt={handleDeleteReceipt}
               onDeletePayment={handleDeletePayment}
+              onUpdateReceipt={handleUpdateReceipt}
+              onUpdatePayment={handleUpdatePayment}
               onAddSalesOrder={handleAddSalesOrder}
               onDeleteSalesOrder={handleDeleteSalesOrder}
               onAddPurchaseOrder={handleAddPurchaseOrder}

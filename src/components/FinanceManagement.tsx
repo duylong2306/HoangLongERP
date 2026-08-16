@@ -102,6 +102,8 @@ interface FinanceProps {
   onDeleteCustomer?: (id: string) => void;
   onDeleteReceipt?: (id: string) => void;
   onDeletePayment?: (id: string) => void;
+  onUpdateReceipt?: (rec: Receipt) => void;
+  onUpdatePayment?: (pay: Payment) => void;
   onDeleteMaterial?: (id: string) => void;
   /** Trả về đơn đã lưu — id có thể khác nếu mã bị trùng và được cấp lại. */
   onAddSalesOrder?: (order: SalesOrder) => Promise<SalesOrder | null> | void;
@@ -168,6 +170,8 @@ export default function FinanceManagement({
   onDeleteCustomer,
   onDeleteReceipt,
   onDeletePayment,
+  onUpdateReceipt,
+  onUpdatePayment,
   onDeleteMaterial,
   onAddSalesOrder,
   onDeleteSalesOrder,
@@ -714,15 +718,23 @@ export default function FinanceManagement({
     });
 
     // Manual items: re-compute collected từ sales order receipts
+    // hoặc từ Công Nợ đầu kỳ (khớp theo customerId).
     const customs = dbCustoms.map(r => {
-      const soMatch = r.projectName.match(/ĐH\s+(\S+)/);
-      const salesOrderId = soMatch ? soMatch[1] : null;
-      const salesRecs = salesOrderId ? receipts.filter(rec => rec.salesOrderId === salesOrderId) : [];
-      const collected = salesRecs.reduce((s, rec) => s + rec.amount, 0);
+      let collected = 0;
+      if (r.customerId) {
+        // Dòng Công Nợ đầu kỳ: thu theo khách hàng (receipt.customerId).
+        collected = receipts.filter(rec => rec.customerId === r.customerId).reduce((s, rec) => s + rec.amount, 0);
+      } else {
+        const soMatch = r.projectName.match(/ĐH\s+(\S+)/);
+        const salesOrderId = soMatch ? soMatch[1] : null;
+        const salesRecs = salesOrderId ? receipts.filter(rec => rec.salesOrderId === salesOrderId) : [];
+        collected = salesRecs.reduce((s, rec) => s + rec.amount, 0);
+      }
+      const collectedFinal = collected || (r.collected || 0);
       return {
         ...r,
-        collected: collected || (r.collected || 0),
-        remaining: (r.contractValue || 0) - (collected || (r.collected || 0)),
+        collected: collectedFinal,
+        remaining: (r.contractValue || 0) - collectedFinal,
         isAuto: false,
       };
     });
@@ -759,16 +771,20 @@ export default function FinanceManagement({
         paid: totalPaidAmount,
         remaining,
         notes: sub.notes || sub.workName || 'Hợp đồng thầu phụ thi công',
-        isAuto: true
+        isAuto: true,
+        isOpeningDebt: false
       };
     });
 
     const customs = customLiabilities.map(liab => {
-      // Nợ tạm ứng thầu phụ: khớp chính xác theo relatedAdvanceId của phiếu chi.
-      // Nợ thủ công: khớp theo tên người nhận (fallback về số tiền đã thanh toán lưu sẵn).
-      const paymentsMade = liab.relatedAdvanceId
-        ? payments.filter(p => p.relatedAdvanceId === liab.relatedAdvanceId && p.status === 'approved')
-        : payments.filter(p => p.recipient === liab.name && p.status === 'approved');
+      // Công nợ đầu kỳ Thầu Phụ: khớp chính xác theo subcontractorId của phiếu chi.
+      // Nợ tạm ứng: khớp theo relatedAdvanceId.
+      // Nợ thủ công NCC / khác: khớp theo tên người nhận (recipient).
+      const paymentsMade = liab.subcontractorId
+        ? payments.filter(p => p.subcontractorId === liab.subcontractorId && p.status === 'approved')
+        : liab.relatedAdvanceId
+          ? payments.filter(p => p.relatedAdvanceId === liab.relatedAdvanceId && p.status === 'approved')
+          : payments.filter(p => p.recipient === liab.name && p.status === 'approved');
       const totalPaidAmount = paymentsMade.length > 0
         ? paymentsMade.reduce((sum, p) => sum + p.amount, 0)
         : (liab.relatedAdvanceId ? 0 : (liab.paid || 0));
@@ -783,6 +799,89 @@ export default function FinanceManagement({
 
     return [...subs, ...customs];
   }, [approvedSubContracts, customLiabilities, payments]);
+
+  // ── Cập nhật Công Nợ Đầu Kỳ (từ 3 bảng master) ──────────────────────────
+  const [allSubcontractors, setAllSubcontractors] = useState<any[]>([]);
+  useEffect(() => {
+    const loadSubs = async () => {
+      try {
+        const list = await dbService.accountingSubcontractors.list();
+        if (list && list.length > 0) setAllSubcontractors(list);
+      } catch (e) {
+        console.warn('Load subcontractors from Supabase failed:', e);
+      }
+    };
+    loadSubs();
+  }, []);
+
+  // Công nợ Thu: đẩy Công Nợ đầu kỳ > 0 của Khách Hàng vào cột Giá Trị.
+  const handleUpdateOpeningReceivables = () => {
+    const opening = (customers || []).filter(c => (c.openingDebt || 0) > 0);
+    if (opening.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Không có Khách Hàng nào có Công Nợ đầu kỳ > 0.', type: 'info' });
+      return;
+    }
+    setCustomReceivables(prev => {
+      const map = new Map(prev.map(r => [r.id, r]));
+      opening.forEach(c => {
+        map.set(`opbal_cust_${c.id}`, {
+          id: `opbal_cust_${c.id}`,
+          customerId: c.id,
+          projectName: `Số dư đầu kỳ - ${c.name}`,
+          investor: c.name,
+          field: 'Công nợ đầu kỳ',
+          contractValue: c.openingDebt || 0,
+          collected: 0,
+          remaining: c.openingDebt || 0,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (Khách Hàng)',
+          isAuto: false,
+          isOpeningDebt: true,
+        });
+      });
+      return Array.from(map.values());
+    });
+    addToast({ title: '✅ Cập nhật Công Nợ Đầu Kỳ', message: `Đã đưa ${opening.length} khách hàng (có công nợ đầu kỳ) vào Công nợ Thu.`, type: 'success' });
+  };
+
+  // Công nợ Trả: đẩy Công Nợ đầu kỳ > 0 của Thầu Phụ (subcontractorId) và NCC (name) vào cột Giá Trị.
+  const handleUpdateOpeningLiabilities = () => {
+    const subOpening = (allSubcontractors || []).filter(s => (s.openingDebt || 0) > 0);
+    const supOpening = (suppliers || []).filter(s => (s.openingDebt || 0) > 0);
+    if (subOpening.length === 0 && supOpening.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Không có Thầu Phụ / NCC nào có Công Nợ đầu kỳ > 0.', type: 'info' });
+      return;
+    }
+    setCustomLiabilities(prev => {
+      const map = new Map(prev.map(l => [l.id, l]));
+      subOpening.forEach(s => {
+        map.set(`opbal_sub_${s.id}`, {
+          id: `opbal_sub_${s.id}`,
+          subcontractorId: s.id,
+          name: s.name,
+          category: 'Thầu Phụ',
+          value: s.openingDebt || 0,
+          paid: 0,
+          remaining: s.openingDebt || 0,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (Thầu Phụ)',
+          isOpeningDebt: true,
+        });
+      });
+      supOpening.forEach(s => {
+        map.set(`opbal_sup_${s.id}`, {
+          id: `opbal_sup_${s.id}`,
+          name: s.name,
+          category: 'Nhà Cung Cấp',
+          value: s.openingDebt || 0,
+          paid: 0,
+          remaining: s.openingDebt || 0,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (NCC Vật tư)',
+          isOpeningDebt: true,
+        });
+      });
+      return Array.from(map.values());
+    });
+    addToast({ title: '✅ Cập nhật Công Nợ Đầu Kỳ', message: `Đã đưa ${subOpening.length + supOpening.length} đối tượng (Thầu Phụ/NCC) vào Công nợ Trả.`, type: 'success' });
+  };
 
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
 
@@ -1608,6 +1707,7 @@ export default function FinanceManagement({
   // Form Inputs - Thu
   const [recCust, setRecCust] = useState(customers[0]?.id || '');
   const [recProj, setRecProj] = useState(projects[0]?.id || '');
+  const [recSalesOrder, setRecSalesOrder] = useState('');
   const [recAmount, setRecAmount] = useState<number>(0);
   const [recMethod, setRecMethod] = useState<'cash' | 'transfer'>('transfer');
   const [recNotes, setRecNotes] = useState('');
@@ -1650,7 +1750,10 @@ export default function FinanceManagement({
   }, [employeesProp]);
 
   const [payRecipient, setPayRecipient] = useState('');
+  const [payRecipientId, setPayRecipientId] = useState('');   // Mã đối tượng nhận (chuẩn hóa, thay cho recipient tên)
+  const [payRecipientKind, setPayRecipientKind] = useState<'supplier' | 'employee' | 'subcontractor' | ''>('');
   const [payProj, setPayProj] = useState(projects[0]?.id || '');
+  const [payPurchaseOrder, setPayPurchaseOrder] = useState('');
   const [payCategory, setPayCategory] = useState<'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance'>('supplier_payment');
   const [payAmount, setPayAmount] = useState<number | string>('');
   const [payMethod, setPayMethod] = useState<'cash' | 'transfer'>('cash');
@@ -1766,11 +1869,14 @@ export default function FinanceManagement({
       date: new Date().toISOString().split('T')[0],
       customerId: recCust,
       projectId: recProj || undefined,
+      salesOrderId: recSalesOrder || undefined,
       amount: Number(recAmount),
       paymentMethod: recMethod,
       notes: recNotes,
       collector: currentUser.name,
-      attachmentName: 'minh_chung_giao_dich_vcb.pdf'
+      collectorId: (currentUser as any)?.id,
+      attachmentName: 'minh_chung_giao_dich_vcb.pdf',
+      source: 'manual'
     };
     onAddReceipt(newRec);
     setShowRecForm(false);
@@ -1778,30 +1884,33 @@ export default function FinanceManagement({
   };
 
   const getRecipientChoices = () => {
-    let rawList: { id: string; name: string; subText?: string }[] = [];
-    
+    let rawList: { id: string; name: string; subText?: string; kind: 'supplier' | 'employee' }[] = [];
+
     if (payCategory === 'subcontractor_advance') {
       rawList = suppliers.map(s => ({
         id: s.id,
         name: s.name,
-        subText: s.field || 'Thầu phụ thi công'
+        subText: s.field || 'Thầu phụ thi công',
+        kind: 'supplier' as const
       }));
-    } else if (payCategory === 'site_expense' || payCategory === 'salary') {
+    } else if (payCategory === 'site_expense' || payCategory === 'salary' || payCategory === 'salary_advance') {
       rawList = employees.map(emp => ({
         id: emp.id,
         name: emp.name,
-        subText: `${emp.position} - ${emp.department}`
+        subText: `${emp.position} - ${emp.department}`,
+        kind: 'employee' as const
       }));
     } else if (payCategory === 'supplier_payment') {
       rawList = suppliers.map(s => ({
         id: s.id,
         name: s.name,
-        subText: s.field || 'Nhà cung cấp'
+        subText: s.field || 'Nhà cung cấp',
+        kind: 'supplier' as const
       }));
     } else {
       rawList = [
-        ...employees.map(emp => ({ id: emp.id, name: emp.name, subText: emp.position })),
-        ...suppliers.map(s => ({ id: s.id, name: s.name, subText: s.field }))
+        ...employees.map(emp => ({ id: emp.id, name: emp.name, subText: emp.position, kind: 'employee' as const })),
+        ...suppliers.map(s => ({ id: s.id, name: s.name, subText: s.field, kind: 'supplier' as const }))
       ];
     }
 
@@ -1924,24 +2033,55 @@ export default function FinanceManagement({
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // ─── Chuẩn hóa liên kết theo MÃ (id) thay vì tên ──────────────────────
+    // Ứng lương từ đề xuất: empId nằm trong proposal.subcontractorId.
+    // Thủ công: lấy id từ form chọn (payRecipientId + payRecipientKind) — CHÍNH XÁC 100%.
+    let resolvedEmployeeId: string | undefined;
+    let resolvedSupplierId: string | undefined;
+    let resolvedSubcontractorId: string | undefined;
+
+    if (activeProposalForPayment) {
+      resolvedSubcontractorId = activeProposalForPayment.subcontractorId;
+      if (activeProposalForPayment.taskName?.startsWith('Ứng lương') && activeProposalForPayment.subcontractorId) {
+        resolvedEmployeeId = activeProposalForPayment.subcontractorId;
+      }
+    } else {
+      if (payRecipientKind === 'employee' && payRecipientId) resolvedEmployeeId = payRecipientId;
+      else if (payRecipientKind === 'supplier' && payRecipientId) resolvedSupplierId = payRecipientId;
+      else if (payRecipientKind === 'subcontractor' && payRecipientId) resolvedSubcontractorId = payRecipientId;
+    }
+
+    // Giải mã người duyệt (approver) thành id nhân viên (dự phòng theo tên tiền tố).
+    const approverName = 'Trương Hữu Long (Giám đốc)';
+    const resolvedApproverId = (employeesProp || []).find((e: any) =>
+      e.name && approverName.startsWith(e.name)
+    )?.id;
+
     const newPay: Payment = {
       id: `pay_${Date.now()}`,
       code: `PC-2026-${Math.floor(Math.random() * 900 + 100)}`,
       date: new Date().toISOString().split('T')[0],
+      employeeId: resolvedEmployeeId,
+      supplierId: resolvedSupplierId,
+      subcontractorId: resolvedSubcontractorId,
       // Khi lập phiếu chi tất toán Đề Xuất Tạm Ứng thầu phụ, gắn nhận diện thầu phụ
       // để thanh toán tự động khớp & cập nhật Công nợ Trả (không phụ thuộc tên gõ tay)
       recipient: activeProposalForPayment?.subcontractorName || payRecipient,
       projectId: activeProposalForPayment?.projectId || ((payProj === 'none' || !payProj) ? undefined : payProj),
+      purchaseOrderId: (!activeProposalForPayment && payPurchaseOrder) ? payPurchaseOrder : undefined,
       category: activeProposalForPayment ? 'subcontractor_advance' : payCategory,
       amount: Number(payAmount),
       paymentMethod: payMethod,
       notes: payNotes,
       proposer: currentUser.name,
-      approver: 'Trương Hữu Long (Giám đốc)',
+      proposerId: (currentUser as any)?.id,
+      approver: approverName,
+      approverId: resolvedApproverId,
       status: (currentUser && isUserInRoleGroup(currentUser.id, 'role_admin')) ? 'approved' : 'pending',
       attachmentName: 'bien_nhan_giao_hang.pdf',
-      subcontractorId: activeProposalForPayment?.subcontractorId,
       relatedAdvanceId: activeProposalForPayment?.id,
+      source: activeProposalForPayment ? undefined : 'manual'
     };
     onAddPayment(newPay);
 
@@ -2026,9 +2166,71 @@ export default function FinanceManagement({
       : `✍️ Đã gửi trình lên Đề xuất chi ${newPay.code} thành công.`, type: 'success' });
   };
 
+  // ── Sửa phiếu Thu / Chi thủ công (từ "Lập phiếu thu mới" / "Tạo đề xuất chi mới") ──
+  const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
+  const [editRecDate, setEditRecDate] = useState('');
+  const [editRecAmount, setEditRecAmount] = useState<number>(0);
+  const [editRecMethod, setEditRecMethod] = useState<'cash' | 'transfer'>('cash');
+  const [editRecNotes, setEditRecNotes] = useState('');
+
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [editPayDate, setEditPayDate] = useState('');
+  const [editPayAmount, setEditPayAmount] = useState<number>(0);
+  const [editPayMethod, setEditPayMethod] = useState<'cash' | 'transfer'>('cash');
+  const [editPayCategory, setEditPayCategory] = useState<Payment['category']>('supplier_payment');
+  const [editPayNotes, setEditPayNotes] = useState('');
+
+  const openEditReceipt = (rec: Receipt) => {
+    setEditingReceipt(rec);
+    setEditRecDate(rec.date || new Date().toISOString().split('T')[0]);
+    setEditRecAmount(rec.amount || 0);
+    setEditRecMethod(rec.paymentMethod || 'cash');
+    setEditRecNotes(rec.notes || '');
+  };
+
+  const handleSaveEditReceipt = () => {
+    if (!editingReceipt) return;
+    const updated: Receipt = {
+      ...editingReceipt,
+      date: editRecDate,
+      amount: Number(editRecAmount) || 0,
+      paymentMethod: editRecMethod,
+      notes: editRecNotes,
+    };
+    onUpdateReceipt?.(updated);
+    setEditingReceipt(null);
+    addToast({ title: '✅ Đã cập nhật', message: `Đã lưu phiếu thu ${updated.code}.`, type: 'success' });
+  };
+
+  const openEditPayment = (pay: Payment) => {
+    setEditingPayment(pay);
+    setEditPayDate(pay.date || new Date().toISOString().split('T')[0]);
+    setEditPayAmount(pay.amount || 0);
+    setEditPayMethod(pay.paymentMethod || 'cash');
+    setEditPayCategory(pay.category || 'supplier_payment');
+    setEditPayNotes(pay.notes || '');
+  };
+
+  const handleSaveEditPayment = () => {
+    if (!editingPayment) return;
+    const updated: Payment = {
+      ...editingPayment,
+      date: editPayDate,
+      amount: Number(editPayAmount) || 0,
+      paymentMethod: editPayMethod,
+      category: editPayCategory,
+      notes: editPayNotes,
+    };
+    onUpdatePayment?.(updated);
+    setEditingPayment(null);
+    addToast({ title: '✅ Đã cập nhật', message: `Đã lưu phiếu chi ${updated.code}.`, type: 'success' });
+  };
+
   const handleCreateVoucherFromProposal = (proposal: SubcontractorAdvanceProposal) => {
     setActiveProposalForPayment(proposal);
     setPayRecipient(proposal.subcontractorName);
+    setPayRecipientId(proposal.subcontractorId || '');
+    setPayRecipientKind(!!proposal.taskName?.startsWith('Ứng lương') ? 'employee' : (proposal.type === 'project_expense_proposal' ? 'employee' : 'subcontractor'));
     // Find matched project matching the proposal's projectName or fallback to first
     const matchedProj = projects.find(p => p.name === proposal.projectName) || projects[0];
 
@@ -2352,6 +2554,8 @@ export default function FinanceManagement({
   // Pre-fill a payment proposal when clicking "Lập ủy nhiệm chi"
   const handleQuickPayProposal = (supplier: SupplierPartner, moneyDue: number) => {
     setPayRecipient(supplier.name);
+    setPayRecipientId(supplier.id);
+    setPayRecipientKind('supplier');
     setPayAmount(moneyDue);
     setPayNotes(`Ủy nhiệm chi trả tiền mua nguyên liệu / thầu thợ cho ${supplier.name}`);
     setActiveSubTab('nhap_chi');
@@ -2359,7 +2563,11 @@ export default function FinanceManagement({
   };
 
   const handleQuickPayProposalGeneric = (recipientName: string, moneyDue: number) => {
+    const sup = suppliers.find(s => s.name === recipientName);
+    const emp = !sup ? (employeesProp || []).find((e: any) => e.name === recipientName) : undefined;
     setPayRecipient(recipientName);
+    setPayRecipientId(sup?.id || emp?.id || '');
+    setPayRecipientKind(sup ? 'supplier' : emp ? 'employee' : '');
     setPayAmount(moneyDue);
     setPayNotes(`Ủy nhiệm chi trả tiền thầu thợ / nhà cung cấp cho ${recipientName}`);
     setActiveSubTab('nhap_chi');
@@ -4616,6 +4824,19 @@ export default function FinanceManagement({
                           </select>
                         </div>
                         <div>
+                          <label className="block text-slate-400 font-semibold mb-1">Đơn hàng bán (tùy chọn):</label>
+                          <select
+                            value={recSalesOrder}
+                            onChange={(e) => setRecSalesOrder(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-medium"
+                          >
+                            <option value="">— Không gắn đơn hàng —</option>
+                            {salesOrders.map(o => (
+                              <option key={o.id} value={o.id}>{o.id} · {o.customerName || o.customerId || ''}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
                           <label className="block text-slate-400 font-semibold mb-1">Hình thức thanh toán thầu:</label>
                           <select
                             value={recMethod}
@@ -4716,6 +4937,15 @@ export default function FinanceManagement({
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </button>
+                                {rec.source === 'manual' && (
+                                  <button
+                                    onClick={() => openEditReceipt(rec)}
+                                    title="Sửa phiếu thu"
+                                    className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-950 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -4884,6 +5114,8 @@ export default function FinanceManagement({
                             const val = e.target.value as any;
                             setPayCategory(val);
                             setPayRecipient('');
+                            setPayRecipientId('');
+                            setPayRecipientKind('');
                             setRecipientSearch('');
                           }}
                           className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
@@ -4923,6 +5155,8 @@ export default function FinanceManagement({
                               value={payRecipient}
                               onChange={(e) => {
                                 setPayRecipient(e.target.value);
+                                setPayRecipientId('');
+                                setPayRecipientKind('');
                                 setRecipientSearch(e.target.value);
                                 setShowRecipientDropdown(true);
                               }}
@@ -4958,6 +5192,8 @@ export default function FinanceManagement({
                                   type="button"
                                   onClick={() => {
                                     setPayRecipient(item.name);
+                                    setPayRecipientId(item.id);
+                                    setPayRecipientKind(item.kind);
                                     setRecipientSearch(item.name);
                                     setShowRecipientDropdown(false);
                                   }}
@@ -4996,6 +5232,19 @@ export default function FinanceManagement({
                               <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                             <option value="none">Ngoài dự án (Không gán chi)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 font-semibold mb-1">Đơn hàng mua (tùy chọn):</label>
+                          <select
+                            value={payPurchaseOrder}
+                            onChange={(e) => setPayPurchaseOrder(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-medium"
+                          >
+                            <option value="">— Không gắn đơn hàng —</option>
+                            {purchaseOrders.map(o => (
+                              <option key={o.id} value={o.id}>{o.id} · {o.supplierName || o.supplierId || ''}</option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -5114,6 +5363,15 @@ export default function FinanceManagement({
                               >
                                 Tải
                               </button>
+                              {p.source === 'manual' && (
+                                <button
+                                  onClick={() => openEditPayment(p)}
+                                  title="Sửa phiếu chi"
+                                  className="bg-amber-700 hover:bg-amber-600 text-white text-[9.5px] font-extrabold px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                                >
+                                  Sửa
+                                </button>
+                              )}
                             </td>
                             <td className="px-3 py-2.5 text-center">
                               {p.purchaseOrderId ? (
@@ -5182,92 +5440,12 @@ export default function FinanceManagement({
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => {
-                        const data = mergedReceivables.map(item => ({
-                          'Dự án công trình': item.projectName,
-                          'Chủ đầu tư': item.investor,
-                          'Lĩnh vực': item.field,
-                          'Giá trị HĐ': item.contractValue,
-                          'Đã Thu': item.collected,
-                          'Còn phải thu': item.remaining,
-                          'Ghi chú': item.notes || '',
-                        }));
-                        exportToExcel(data, 'CongNoPhaiThu', `Cong_No_Phai_Thu_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.receivable]);
-                        addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} công nợ phải thu`, type: 'success' });
-                      }}
-                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
-                      title="Xuất Excel công nợ phải thu"
+                      onClick={handleUpdateOpeningReceivables}
+                      className="bg-amber-600 hover:bg-amber-555 text-white font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-amber-500 transition-colors"
+                      title="Lấy Công Nợ đầu kỳ > 0 từ Khách Hàng đưa vào cột Giá Trị"
                     >
-                      <Download className="w-3 h-3 text-blue-400" />
-                      Xuất Excel
-                    </button>
-                    <label
-                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
-                      title="Nhập Excel công nợ phải thu"
-                    >
-                      <FileUp className="w-3 h-3 text-emerald-400" />
-                      Nhập Excel
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = '';
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = (ev) => {
-                            try {
-                              const wb = XLSX.read(ev.target?.result, { type: 'binary' });
-                              const ws = wb.Sheets[wb.SheetNames[0]];
-                              const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
-                              if (rows.length === 0) {
-                                addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dữ liệu.', type: 'warning' });
-                                return;
-                              }
-                              const imported = rows.map((r, idx) => {
-                                const cv = Number(String(r['Giá trị HĐ'] || r['Giá trị'] || '0').replace(/[^\d.-]/g, '')) || 0;
-                                const cl = Number(String(r['Đã Thu'] || r['Đã thu'] || '0').replace(/[^\d.-]/g, '')) || 0;
-                                return {
-                                  id: crypto.randomUUID(),
-                                  projectName: String(r['Dự án công trình'] || r['Tên dự án'] || r['Dự án'] || '').trim(),
-                                  investor: String(r['Chủ đầu tư'] || r['Khách hàng'] || '').trim(),
-                                  field: String(r['Lĩnh vực'] || 'Xây dựng').trim(),
-                                  contractValue: cv,
-                                  collected: cl,
-                                  remaining: cv - cl,
-                                  notes: String(r['Ghi chú'] || '').trim(),
-                                };
-                              }).filter(r => r.projectName && r.contractValue > 0);
-                              if (imported.length === 0) {
-                                addToast({ title: '⚠️ Không hợp lệ', message: 'Không tìm thấy cột "Dự án công trình" hoặc dữ liệu không hợp lệ.', type: 'warning' });
-                                return;
-                              }
-                              setCustomReceivables(prev => [...prev, ...imported]);
-                              addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} công nợ phải thu từ Excel`, type: 'success' });
-                            } catch {
-                              addToast({ title: '❌ Lỗi', message: 'Không thể đọc file Excel.', type: 'error' });
-                            }
-                          };
-                          reader.readAsBinaryString(file);
-                        }}
-                      />
-                    </label>
-                    <button
-                      onClick={() => {
-                        setEditingReceivableId(null);
-                        setRecvProjectName('');
-                        setRecvInvestor('');
-                        setRecvField('Xây dựng');
-                        setRecvContractValue(0);
-                        setRecvCollected(0);
-                        setRecvNotes('');
-                        setShowReceivableModal(true);
-                      }}
-                      className={`font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 transition-colors ${canCreate ? 'bg-emerald-600 hover:bg-emerald-555 text-white cursor-pointer' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
-                    >
-                      <Plus className="w-4 h-4" />
-                      Thêm Công Nợ
+                      <Database className="w-3 h-3" />
+                      Cập nhật Công Nợ Đầu Kỳ
                     </button>
                   </div>
                 </div>
@@ -5299,7 +5477,11 @@ export default function FinanceManagement({
                             <td className="px-3 py-3">
                               <div className="font-extrabold text-slate-100 flex items-center gap-1.5 text-[12px]">
                                 <span className="text-white">{item.investor || '—'}</span>
-                                {item.isAuto ? (
+                                {item.isOpeningDebt ? (
+                                  <span className="bg-amber-600/20 text-amber-300 text-[8px] font-bold px-2 py-0.5 rounded-full border border-amber-400/40 shadow-sm" title="Số dư đầu kỳ từ Công Nợ đầu kỳ">
+                                    Số dư đầu kỳ
+                                  </span>
+                                ) : item.isAuto ? (
                                   <span className="bg-emerald-600/20 text-emerald-300 text-[8px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/40 shadow-sm" title="Tự động từ dự án đã phê duyệt">
                                     Hệ thống
                                   </span>
@@ -5465,86 +5647,13 @@ export default function FinanceManagement({
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => {
-                      const data = mergedLiabilities.map(item => ({
-                        'Tên Đơn Vị': item.name,
-                        'Phân Loại': item.category,
-                        'Giá Trị': item.value,
-                        'Đã Trả': item.paid,
-                        'Còn lại': item.remaining,
-                        'Ghi chú': item.notes || '',
-                      }));
-                      exportToExcel(data, 'CongNoPhaiTra', `Cong_No_Phai_Tra_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.liability]);
-                      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} công nợ phải trả`, type: 'success' });
-                    }}
-                    className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
-                    title="Xuất Excel công nợ phải trả"
+                    type="button"
+                    onClick={handleUpdateOpeningLiabilities}
+                    className="bg-amber-600 hover:bg-amber-555 text-white font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-amber-500 transition-colors"
+                    title="Lấy Công Nợ đầu kỳ > 0 từ Thầu Phụ & NCC Vật tư đưa vào cột Giá Trị"
                   >
-                    <Download className="w-3 h-3 text-blue-400" />
-                    Xuất Excel
-                  </button>
-                  <label
-                    className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
-                    title="Nhập Excel công nợ phải trả"
-                  >
-                    <FileUp className="w-3 h-3 text-emerald-400" />
-                    Nhập Excel
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = '';
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          try {
-                            const wb = XLSX.read(ev.target?.result, { type: 'binary' });
-                            const ws = wb.Sheets[wb.SheetNames[0]];
-                            const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
-                            if (rows.length === 0) {
-                              addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dữ liệu.', type: 'warning' });
-                              return;
-                            }
-                            const imported = rows.map((r, idx) => ({
-                              id: crypto.randomUUID(),
-                              name: String(r['Tên Đơn Vị'] || '').trim(),
-                              category: String(r['Phân Loại'] || 'Nhà Cung Cấp').trim() as 'Nhà Cung Cấp' | 'Thầu Phụ' | 'Khác',
-                              value: Number(String(r['Giá Trị'] || '0').replace(/[^\d.-]/g, '')) || 0,
-                              paid: Number(String(r['Đã Trả'] || '0').replace(/[^\d.-]/g, '')) || 0,
-                              remaining: 0,
-                              notes: String(r['Ghi chú'] || '').trim(),
-                            })).filter(l => l.name && l.value > 0);
-                            if (imported.length === 0) {
-                              addToast({ title: '⚠️ Không hợp lệ', message: 'Không tìm thấy cột "Tên Đơn Vị" hoặc dữ liệu không hợp lệ.', type: 'warning' });
-                              return;
-                            }
-                            imported.forEach(l => { l.remaining = l.value - l.paid; });
-                            setCustomLiabilities(prev => [...prev, ...imported]);
-                            addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} công nợ phải trả`, type: 'success' });
-                          } catch {
-                            addToast({ title: '❌ Lỗi', message: 'Không thể đọc file Excel.', type: 'error' });
-                          }
-                        };
-                        reader.readAsBinaryString(file);
-                      }}
-                    />
-                  </label>
-                  <button
-                    onClick={() => {
-                      setEditingLiabId(null);
-                      setLiabName('');
-                      setLiabCategory('Nhà Cung Cấp');
-                      setLiabValue(0);
-                      setLiabPaid(0);
-                      setLiabNotes('');
-                      setShowLiabModal(true);
-                    }}
-                    className={`font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 transition-colors ${canCreate ? 'bg-rose-600 hover:bg-rose-555 text-white cursor-pointer' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
-                  >
-                    <Plus className="w-4 h-4" />
-                    Thêm Công Nợ
+                    <Database className="w-3 h-3" />
+                    Cập nhật Công Nợ Đầu Kỳ
                   </button>
                   </div>
                 </div>
@@ -5593,7 +5702,11 @@ export default function FinanceManagement({
                               <td className="px-3 py-3">
                                 <div className="font-extrabold text-slate-100 flex items-center gap-1.5">
                                   <span>{item.name}</span>
-                                  {item.isAuto ? (
+                                  {item.isOpeningDebt ? (
+                                    <span className="bg-amber-600/20 text-amber-300 text-[8px] font-bold px-2 py-0.5 rounded-full border border-amber-400/40 shadow-sm" title="Số dư đầu kỳ từ Công Nợ đầu kỳ">
+                                      Số dư đầu kỳ
+                                    </span>
+                                  ) : item.isAuto ? (
                                     <span className="bg-emerald-600/20 text-emerald-300 text-[8px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/40 shadow-sm" title="Tự động đồng bộ từ Hợp đồng Thầu phụ đã phê duyệt">
                                       HĐ Đã Duyệt
                                     </span>
@@ -5872,6 +5985,107 @@ export default function FinanceManagement({
                   </div>
                 )}
 
+              </div>
+            )}
+
+            {/* ── Modal: Sửa phiếu thu (Nhập Thu thủ công) ──────────────── */}
+            {editingReceipt && (
+              <div className="fixed inset-0 z-[60] bg-slate-950/80 flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-white font-extrabold text-sm">
+                      Sửa Phiếu Thu {editingReceipt.code}
+                    </h3>
+                    <button onClick={() => setEditingReceipt(null)} className="text-slate-400 hover:text-white">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Ngày lập phiếu</label>
+                      <input type="date" value={editRecDate} onChange={e => setEditRecDate(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Số tiền (đ) <span className="text-red-400">*</span></label>
+                      <input type="number" value={editRecAmount} onChange={e => setEditRecAmount(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Hình thức</label>
+                      <select value={editRecMethod} onChange={e => setEditRecMethod(e.target.value as 'cash' | 'transfer')} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none">
+                        <option value="cash">Tiền mặt</option>
+                        <option value="transfer">Chuyển khoản</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Ghi chú</label>
+                      <textarea value={editRecNotes} onChange={e => setEditRecNotes(e.target.value)} rows={3} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none resize-none" />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={() => setEditingReceipt(null)} className="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 py-2 rounded-lg cursor-pointer">
+                        Hủy
+                      </button>
+                      <button onClick={handleSaveEditReceipt} className="bg-amber-600 hover:bg-amber-555 text-white font-bold px-4 py-2 rounded-lg cursor-pointer">
+                        Lưu thay đổi
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Modal: Sửa phiếu chi (Nhập Chi thủ công) ──────────────── */}
+            {editingPayment && (
+              <div className="fixed inset-0 z-[60] bg-slate-950/80 flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-white font-extrabold text-sm">
+                      Sửa Phiếu Chi {editingPayment.code}
+                    </h3>
+                    <button onClick={() => setEditingPayment(null)} className="text-slate-400 hover:text-white">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Ngày lập phiếu</label>
+                      <input type="date" value={editPayDate} onChange={e => setEditPayDate(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Số tiền (đ) <span className="text-red-400">*</span></label>
+                      <input type="number" value={editPayAmount} onChange={e => setEditPayAmount(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Hình thức</label>
+                      <select value={editPayMethod} onChange={e => setEditPayMethod(e.target.value as 'cash' | 'transfer')} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none">
+                        <option value="cash">Tiền mặt</option>
+                        <option value="transfer">Chuyển khoản</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Nhóm chi</label>
+                      <select value={editPayCategory} onChange={e => setEditPayCategory(e.target.value as Payment['category'])} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none">
+                        <option value="supplier_payment">Thanh toán NCC</option>
+                        <option value="subcontractor_payment">Thanh toán Thầu Phụ</option>
+                        <option value="advance_payment">Tạm ứng</option>
+                        <option value="expense">Chi phí khác</option>
+                        <option value="salary">Lương</option>
+                        <option value="travel_expense">Công tác phí</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-bold mb-1">Ghi chú</label>
+                      <textarea value={editPayNotes} onChange={e => setEditPayNotes(e.target.value)} rows={3} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none resize-none" />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={() => setEditingPayment(null)} className="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 py-2 rounded-lg cursor-pointer">
+                        Hủy
+                      </button>
+                      <button onClick={handleSaveEditPayment} className="bg-amber-600 hover:bg-amber-555 text-white font-bold px-4 py-2 rounded-lg cursor-pointer">
+                        Lưu thay đổi
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
