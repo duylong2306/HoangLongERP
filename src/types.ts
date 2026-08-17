@@ -856,6 +856,7 @@ export interface Liability {
   salesOrderId?: string;   // Liên kết với đơn hàng bán
   relatedAdvanceId?: string; // Liên kết với Đề xuất tạm ứng thầu phụ
   subcontractorId?: string;  // Liên kết với thầu phụ
+  recordedPurchaseOrderIds?: string[]; // Các mã Đơn mua hàng (PO) đã ghi nhận vào công nợ này
   isAuto?: boolean;          // Tạo tự động từ phiếu chi tạm ứng thầu phụ
   isOpeningDebt?: boolean;   // Số dư đầu kỳ từ Công Nợ đầu kỳ (Khách Hàng / Thầu Phụ / NCC)
   openingDebt?: number;      // Công nợ đầu kỳ (cột "Công Nợ Đầu Kỳ"; căn cứ tính Còn lại khi balanceBasis = 'opening')

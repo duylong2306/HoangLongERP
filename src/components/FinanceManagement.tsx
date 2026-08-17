@@ -385,6 +385,71 @@ export default function FinanceManagement({
   const [proposalTypeFilter, setProposalTypeFilter] = useState<'all' | 'subcontractor' | 'expense'>('all');
   const [viewingProposalDetail, setViewingProposalDetail] = useState<SubcontractorAdvanceProposal | null>(null);
 
+  // ── Bộ lọc & phân trang Tab Đề Xuất Thu Chi ──
+  const PROPOSAL_FILTER_KEY = 'hl_fin_proposal_filters';
+  const loadProposalFilters = (): { fromDate: string; toDate: string; projectId: string; status: string } => {
+    try {
+      const raw = localStorage.getItem(PROPOSAL_FILTER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { fromDate: p.fromDate || '', toDate: p.toDate || '', projectId: p.projectId || '', status: p.status || '' };
+      }
+    } catch {}
+    const y = new Date().getFullYear();
+    return { fromDate: `${y}-01-01`, toDate: `${y}-12-31`, projectId: '', status: '' };
+  };
+  const [proposalFilters, setProposalFilters] = useState(loadProposalFilters);
+  const [proposalPage, setProposalPage] = useState(1);
+  const [proposalPageSize, setProposalPageSize] = useState(10);
+
+  useEffect(() => {
+    try { localStorage.setItem(PROPOSAL_FILTER_KEY, JSON.stringify(proposalFilters)); } catch {}
+  }, [proposalFilters]);
+
+  const updateProposalFilter = (patch: Partial<{ fromDate: string; toDate: string; projectId: string; status: string }>) => {
+    setProposalFilters(prev => ({ ...prev, ...patch }));
+    setProposalPage(1);
+  };
+
+  // Xóa Đề xuất bị TỪ CHỐI (từng dòng hoặc hàng loạt, có xác nhận)
+  const handleDeleteProposal = async (id: string) => {
+    const target = subcontractorAdvances.find(p => p.id === id);
+    if (!target) return;
+    if (target.status !== 'rejected') {
+      addToast({ title: '⚠️ Không thể xóa', message: 'Chỉ được xóa các Đề xuất đã bị Từ chối.', type: 'warning' });
+      return;
+    }
+    if (!window.confirm(`⚠️ Xóa Đề xuất "${id}"?\nHành động này không thể hoàn tác.`)) return;
+    try {
+      await dbService.subcontractorAdvances.delete(id);
+      setSubcontractorAdvances(prev => prev.filter(p => p.id !== id));
+      setFinSelectedRows(prev => { const n = new Set(prev); n.delete(id); return n; });
+      addToast({ title: '🗑️ Đã xóa', message: `Đã xóa đề xuất ${id}.`, type: 'info' });
+    } catch (err) {
+      console.error('Lỗi xóa đề xuất:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể xóa đề xuất.', type: 'error' });
+    }
+  };
+
+  const handleBulkDeleteProposals = async () => {
+    const rejectedIds = subcontractorAdvances.filter(p => finSelectedRows.has(p.id) && p.status === 'rejected').map(p => p.id);
+    if (rejectedIds.length === 0) {
+      addToast({ title: '⚠️ Không có mục hợp lệ', message: 'Chỉ các Đề xuất bị Từ chối mới được xóa.', type: 'warning' });
+      return;
+    }
+    if (!window.confirm(`⚠️ Xóa ${rejectedIds.length} Đề xuất bị Từ chối đã chọn?\nHành động này không thể hoàn tác.`)) return;
+    try {
+      await Promise.all(rejectedIds.map(id => dbService.subcontractorAdvances.delete(id)));
+      setSubcontractorAdvances(prev => prev.filter(p => !rejectedIds.includes(p.id)));
+      setFinSelectedRows(new Set());
+      setFinSelectAll(false);
+      addToast({ title: '🗑️ Đã xóa', message: `Đã xóa ${rejectedIds.length} đề xuất.`, type: 'info' });
+    } catch (err) {
+      console.error('Lỗi xóa hàng loạt đề xuất:', err);
+      addToast({ title: '❌ Lỗi', message: 'Xóa hàng loạt thất bại.', type: 'error' });
+    }
+  };
+
   // ── Quick "Tạo Đề Xuất" modal (tạo nhanh đề xuất cho dự án cụ thể) ──
   const [showQuickProposalModal, setShowQuickProposalModal] = useState(false);
   const [quickProposalType, setQuickProposalType] = useState<'subcontractor_advance' | 'project_expense_proposal'>('project_expense_proposal');
@@ -704,39 +769,7 @@ export default function FinanceManagement({
   const [recvNotes, setRecvNotes] = useState('');
   const [receivableToDelete, setReceivableToDelete] = useState<any | null>(null);
 
-  // Công nợ Trả: căn cứ tính (CĐK/HĐ) cho dòng TỰ ĐỘNG (lấy từ approvedSubContracts,
-  // không nằm trong customLiabilities) — lưu tạm localStorage để giữ qua reload.
-  const [liabBasisOverrides, setLiabBasisOverrides] = useState<Record<string, 'opening' | 'contract'>>(
-    () => { try { const raw = localStorage.getItem('hl_liab_basis_overrides'); if (raw) return JSON.parse(raw) || {}; } catch {} return {}; }
-  );
-  useEffect(() => {
-    try { localStorage.setItem('hl_liab_basis_overrides', JSON.stringify(liabBasisOverrides)); } catch {}
-  }, [liabBasisOverrides]);
-
-  // Công nợ Thu: căn cứ tính CĐK/HĐ mức Chủ đầu tư — lưu TRỰC TIẾP lên Supabase (customers.balance_basis).
-  const [customerBasis, setCustomerBasis] = useState<Record<string, 'opening' | 'contract'>>(() => {
-    const init: Record<string, 'opening' | 'contract'> = {};
-    (customers || []).forEach((c: any) => { if (c.balanceBasis) init[c.id] = c.balanceBasis; });
-    return init;
-  });
-  useEffect(() => {
-    // Đồng bộ khách hàng đã có balanceBasis trên Supabase mà chưa có trong state (không ghi đè lựa chọn cục bộ).
-    setCustomerBasis(prev => {
-      let changed = false;
-      const next = { ...prev };
-      (customers || []).forEach((c: any) => { if (c.balanceBasis && !next[c.id]) { next[c.id] = c.balanceBasis; changed = true; } });
-      return changed ? next : prev;
-    });
-  }, [customers]);
-
-  // Fallback cho nhóm chỉ có tên (không có customerId): lưu localStorage.
-  const [nameBasisOverrides, setNameBasisOverrides] = useState<Record<string, 'opening' | 'contract'>>(
-    () => { try { const raw = localStorage.getItem('hl_name_basis_overrides'); if (raw) return JSON.parse(raw) || {}; } catch {} return {}; }
-  );
-  useEffect(() => {
-    try { localStorage.setItem('hl_name_basis_overrides', JSON.stringify(nameBasisOverrides)); } catch {}
-  }, [nameBasisOverrides]);
-
+  
   // Mở rộng chi tiết công trình theo Chủ đầu tư & modal phiếu thu.
   const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
   const [receiptDetail, setReceiptDetail] = useState<{ receipts: Receipt[]; title: string } | null>(null);
@@ -754,10 +787,10 @@ export default function FinanceManagement({
       const projRecs = receipts.filter(rec => rec.projectId === r.projectId);
       const collected = projRecs.reduce((s, rec) => s + rec.amount, 0);
       const openingDebt = r.openingDebt ?? (r.isOpeningDebt ? (r.contractValue || 0) : 0);
-      const basis = r.balanceBasis || (r.isOpeningDebt ? 'opening' : 'contract');
-      const basisValue = basis === 'opening' ? openingDebt : (r.contractValue || 0);
-      const remaining = basisValue - collected;
-      return { ...r, collected, remaining, openingDebt, balanceBasis: basis };
+      const contractValue = r.contractValue || 0;
+      // Cập nhật: remaining = (CĐK + HĐ) - Đã Thu (bỏ logic basis)
+      const remaining = (openingDebt + contractValue) - collected;
+      return { ...r, collected, remaining, openingDebt };
     });
 
     // Manual items: re-compute collected từ sales order receipts
@@ -775,15 +808,14 @@ export default function FinanceManagement({
       }
       const collectedFinal = collected || (r.collected || 0);
       const openingDebt = r.openingDebt ?? (r.isOpeningDebt ? (r.contractValue || 0) : 0);
-      const basis = r.balanceBasis || (r.isOpeningDebt ? 'opening' : 'contract');
-      const basisValue = basis === 'opening' ? openingDebt : (r.contractValue || 0);
-      const remaining = basisValue - collectedFinal;
+      const contractValue = r.contractValue || 0;
+      // Cập nhật: remaining = (CĐK + HĐ) - Đã Thu
+      const remaining = (openingDebt + contractValue) - collectedFinal;
       return {
         ...r,
         collected: collectedFinal,
         remaining,
         openingDebt,
-        balanceBasis: basis,
         isAuto: false,
       };
     });
@@ -811,15 +843,13 @@ export default function FinanceManagement({
       const cdk = g.cdkRows.reduce((s: number, p: any) => s + (p.contractValue || 0), 0);
       const customer = (customers || []).find((c: any) => c.id === g.customerId) as any;
       const cdkValue = cdk > 0 ? cdk : (customer?.openingDebt || 0);
-      const hasCdk = cdkValue > 0;
-      const basis = g.customerId
-        ? (customerBasis[g.customerId] || (hasCdk ? 'opening' : 'contract'))
-        : (nameBasisOverrides[g.key] || (hasCdk ? 'opening' : 'contract'));
-      const basisValue = basis === 'opening' ? cdkValue : tongHopDong;
-      const conLai = basisValue - daThu;
-      return { ...g, customer, tongHopDong, daThu, cdkValue, hasCdk, basis, conLai };
+      // Cập nhật: Tổng giá trị = Công nợ đầu kỳ + Giá trị HĐ (cột ảo, không lưu DB)
+      const tongGiaTri = cdkValue + tongHopDong;
+      // Cập nhật: Còn phải thu = Tổng giá trị - Đã Thu (bỏ logic căn cứ CĐK/HĐ)
+      const conLai = tongGiaTri - daThu;
+      return { ...g, customer, tongHopDong, daThu, cdkValue, tongGiaTri, conLai };
     });
-  }, [mergedReceivables, customers, customerBasis, nameBasisOverrides]);
+  }, [mergedReceivables, customers]);
 
   // Lọc phiếu thu liên quan đến một dòng công trình (theo projectId / customerId / salesOrderId).
   const getReceiptsForRow = (r: any): Receipt[] => {
@@ -829,29 +859,6 @@ export default function FinanceManagement({
     const soId = soMatch ? soMatch[1] : null;
     if (soId) return receipts.filter(rec => rec.salesOrderId === soId);
     return [];
-  };
-
-  // Chuyển căn cứ tính CĐK/HĐ mức Chủ đầu tư — lưu lên Supabase (customers.balance_basis).
-  const handleToggleCustomerBasis = async (group: any) => {
-    const next: 'opening' | 'contract' = group.basis === 'opening' ? 'contract' : 'opening';
-    let saved = true;
-    if (group.customerId) {
-      setCustomerBasis(prev => ({ ...prev, [group.customerId]: next }));
-      const cust = (customers || []).find((c: any) => c.id === group.customerId) as any;
-      if (cust) {
-        try { await dbService.customers.save({ ...cust, balanceBasis: next }); }
-        catch (e) { saved = false; console.warn('Lưu balanceBasis khách hàng thất bại:', e); }
-      }
-    } else {
-      setNameBasisOverrides(prev => ({ ...prev, [group.key]: next }));
-    }
-    addToast({
-      title: saved ? '✅ Đã đổi căn cứ tính' : '⚠️ Chưa lưu được',
-      message: saved
-        ? `Công nợ ${group.investor} giờ tính theo ${next === 'opening' ? 'Công Nợ Đầu Kỳ' : 'Giá Trị HĐ'} (đã lưu Supabase).`
-        : `Đã đổi trên giao diện nhưng lưu Supabase thất bại (kiểm tra cột balance_basis đã tạo chưa).`,
-      type: saved ? 'success' : 'warning',
-    });
   };
 
   // Form states for manual liabilities
@@ -874,9 +881,10 @@ export default function FinanceManagement({
       const totalPaidAmount = paymentsMade.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
       const value = sub.contractValue || 0;
       const openingDebt = (sub as any).openingDebt ?? 0;
-      const basis = liabBasisOverrides[sub.id] ?? ((sub as any).balanceBasis || 'contract');
-      const basisValue = basis === 'opening' ? openingDebt : value;
-      const remaining = basisValue - totalPaidAmount;
+      // Cập nhật: Tổng giá trị = Công nợ đầu kỳ + Giá Trị (VNĐ) (cột ảo, không lưu DB)
+      const tongGiaTri = openingDebt + value;
+      // Cập nhật: Còn lại = Tổng giá trị - Đã Trả (bỏ logic căn cứ CĐK/HĐ)
+      const remaining = tongGiaTri - totalPaidAmount;
       return {
         id: sub.id,
         subcontractorId: sub.subcontractorId,
@@ -886,10 +894,10 @@ export default function FinanceManagement({
         openingDebt,
         paid: totalPaidAmount,
         remaining,
+        tongGiaTri,
         notes: sub.notes || sub.workName || 'Hợp đồng thầu phụ thi công',
         isAuto: true,
-        isOpeningDebt: false,
-        balanceBasis: basis
+        isOpeningDebt: false
       };
     });
 
@@ -906,21 +914,22 @@ export default function FinanceManagement({
         ? paymentsMade.reduce((sum, p) => sum + p.amount, 0)
         : (liab.relatedAdvanceId ? 0 : (liab.paid || 0));
       const openingDebt = liab.openingDebt ?? (liab.isOpeningDebt ? liab.value : 0);
-      const basis = liabBasisOverrides[liab.id] ?? (liab.balanceBasis || (liab.isOpeningDebt ? 'opening' : 'contract'));
-      const basisValue = basis === 'opening' ? openingDebt : liab.value;
-      const remaining = basisValue - totalPaidAmount;
+      // Cập nhật: Tổng giá trị = Công nợ đầu kỳ + Giá Trị (VNĐ)
+      const tongGiaTri = openingDebt + liab.value;
+      // Cập nhật: Còn lại = Tổng giá trị - Đã Trả
+      const remaining = tongGiaTri - totalPaidAmount;
       return {
         ...liab,
         paid: totalPaidAmount,
         remaining,
         openingDebt,
-        balanceBasis: basis,
+        tongGiaTri,
         isAuto: !!liab.relatedAdvanceId
       };
     });
 
     return [...subs, ...customs];
-  }, [approvedSubContracts, customLiabilities, payments, liabBasisOverrides]);
+  }, [approvedSubContracts, customLiabilities, payments]);
 
   // ── Cập nhật Công Nợ Đầu Kỳ (từ 3 bảng master) ──────────────────────────
   const [allSubcontractors, setAllSubcontractors] = useState<any[]>([]);
@@ -1009,23 +1018,6 @@ export default function FinanceManagement({
       return Array.from(map.values());
     });
     addToast({ title: '✅ Cập nhật Công Nợ Đầu Kỳ', message: `Đã đưa ${subOpening.length + supOpening.length} đối tượng (Thầu Phụ/NCC) vào Công nợ Trả.`, type: 'success' });
-  };
-
-  // Chuyển căn cứ tính "Còn lại / Còn phải thu" (Công Nợ Đầu Kỳ <-> Giá Trị HĐ/Giá Trị VNĐ) cho từng dòng.
-  // Ghi cả vào state (để persist dòng thủ công) và override map (để hoạt động trên dòng tự động isAuto).
-  const handleToggleBalanceBasis = (kind: 'receivable' | 'liability', item: any) => {
-    const next: 'opening' | 'contract' = item.balanceBasis === 'opening' ? 'contract' : 'opening';
-    if (kind === 'receivable') {
-      setCustomReceivables(prev => prev.map(r => r.id === item.id ? { ...r, balanceBasis: next } : r));
-    } else {
-      setCustomLiabilities(prev => prev.map(l => l.id === item.id ? { ...l, balanceBasis: next } : l));
-      setLiabBasisOverrides(prev => ({ ...prev, [item.id]: next }));
-    }
-    addToast({
-      title: '✅ Đã đổi căn cứ tính',
-      message: `Cột ${kind === 'receivable' ? 'Còn phải thu' : 'Còn lại'} giờ tính theo ${next === 'opening' ? 'Công Nợ Đầu Kỳ' : 'Giá Trị HĐ'}.`,
-      type: 'success',
-    });
   };
 
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
@@ -1179,6 +1171,307 @@ export default function FinanceManagement({
   const [pageSizePO, setPageSizePO] = useState(10);
   const poFileInputRef = useRef<HTMLInputElement>(null);
   const [isSavingPO, setIsSavingPO] = useState(false);
+
+  // ── Tab Đơn Hàng: gom theo NCC, ghi nhận công nợ per-order, sửa đơn giá ──
+  const [poExpandedSuppliers, setPoExpandedSuppliers] = useState<Set<string>>(new Set());
+  const [poPage, setPoPage] = useState(1);
+  const [poPageSize, setPoPageSize] = useState(10);
+  const [poRecordingId, setPoRecordingId] = useState<string | null>(null);
+  const [poEditId, setPoEditId] = useState<string | null>(null);
+  const [poEditItems, setPoEditItems] = useState<any[]>([]);
+
+  // Tổng đã thanh toán thực tế của 1 NCC (từ phiếu chi đã duyệt, category supplier_payment)
+  const getSupplierPaid = (supplierName: string): number =>
+    payments.filter(p => p.category === 'supplier_payment' && p.recipient === supplierName && p.status === 'approved')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+
+  // Đơn hàng đã ghi nhận vào Công nợ Trả?
+  const isPoRecorded = (poId: string): boolean =>
+    customLiabilities.some(l => l.category === 'Nhà Cung Cấp' && Array.isArray(l.recordedPurchaseOrderIds) && (l.recordedPurchaseOrderIds as string[]).includes(poId));
+
+  // Trạng thái dòng đơn hàng: Công Nợ (đã ghi nhận) / Chưa ghi nhận
+  const getPoRowStatus = (order: PurchaseOrder): { label: string; tone: string } => {
+    if (isPoRecorded(order.id)) return { label: 'Công Nợ', tone: 'amber' };
+    return { label: 'Chưa ghi nhận', tone: 'rose' };
+  };
+  // Badge: chữ + viền + nền trắng (đồng bộ)
+  const poStatusToneClass = (tone: string): string => {
+    switch (tone) {
+      case 'amber': return 'bg-white text-amber-600 border border-amber-500';
+      case 'emerald': return 'bg-white text-emerald-600 border border-emerald-500';
+      default: return 'bg-white text-rose-600 border border-rose-500';
+    }
+  };
+
+  // Trạng thái đơn hàng phục vụ lọc: kết hợp 2 trục ghi nhận & thanh toán
+  // recorded = Công Nợ, unrecorded = Chưa ghi nhận, settled = Đã tất toán, unsettled = Chưa tất toán
+  const poOrderStatuses = (order: PurchaseOrder): string[] => {
+    const keys: string[] = [];
+    if (isPoRecorded(order.id)) keys.push('recorded');
+    else keys.push('unrecorded');
+    if ((order.congNo || 0) <= 0) keys.push('settled');
+    else keys.push('unsettled');
+    return keys;
+  };
+
+  // ── Tab Đơn Hàng: bộ lọc (lưu localStorage cho lần sau) ──
+  const PO_FILTER_KEY = 'hl_fin_po_filters';
+  const loadPoFilters = (): { fromDate: string; toDate: string; supplier: string; status: string } => {
+    try {
+      const raw = localStorage.getItem(PO_FILTER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { fromDate: p.fromDate || '', toDate: p.toDate || '', supplier: p.supplier || '', status: p.status || '' };
+      }
+    } catch {}
+    const y = new Date().getFullYear();
+    return { fromDate: `${y}-01-01`, toDate: `${y}-12-31`, supplier: '', status: '' };
+  };
+  const [poFilters, setPoFilters] = useState(loadPoFilters);
+  const [poSupplierOpen, setPoSupplierOpen] = useState(false);
+  useEffect(() => {
+    try { localStorage.setItem(PO_FILTER_KEY, JSON.stringify(poFilters)); } catch {}
+  }, [poFilters]);
+  const updatePoFilter = (patch: Partial<{ fromDate: string; toDate: string; supplier: string; status: string }>) => {
+    setPoFilters(prev => ({ ...prev, ...patch }));
+    setPoPage(1);
+  };
+
+  // ── Tab Nhập Thu: bộ lọc (lưu localStorage cho lần sau) ──
+  const RECEIPT_FILTER_KEY = 'hl_fin_receipt_filters';
+  const loadReceiptFilters = (): { fromDate: string; toDate: string; customer: string; form: string } => {
+    try {
+      const raw = localStorage.getItem(RECEIPT_FILTER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { fromDate: p.fromDate || '', toDate: p.toDate || '', customer: p.customer || '', form: p.form || '' };
+      }
+    } catch {}
+    const yr = new Date().getFullYear();
+    return { fromDate: `${yr}-01-01`, toDate: `${yr}-12-31`, customer: '', form: '' };
+  };
+  const [receiptFilters, setReceiptFilters] = useState(loadReceiptFilters);
+  useEffect(() => { try { localStorage.setItem(RECEIPT_FILTER_KEY, JSON.stringify(receiptFilters)); } catch {} }, [receiptFilters]);
+  const updateReceiptFilter = (patch: Partial<{ fromDate: string; toDate: string; customer: string; form: string }>) => {
+    setReceiptFilters(prev => ({ ...prev, ...patch }));
+  };
+
+  // ── Tab Nhập Chi: bộ lọc (lưu localStorage cho lần sau) ──
+  const PAYMENT_FILTER_KEY = 'hl_fin_payment_filters';
+  const loadPaymentFilters = (): { fromDate: string; toDate: string; category: string; status: string } => {
+    try {
+      const raw = localStorage.getItem(PAYMENT_FILTER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { fromDate: p.fromDate || '', toDate: p.toDate || '', category: p.category || '', status: p.status || '' };
+      }
+    } catch {}
+    const yr = new Date().getFullYear();
+    return { fromDate: `${yr}-01-01`, toDate: `${yr}-12-31`, category: '', status: '' };
+  };
+  const [paymentFilters, setPaymentFilters] = useState(loadPaymentFilters);
+  useEffect(() => { try { localStorage.setItem(PAYMENT_FILTER_KEY, JSON.stringify(paymentFilters)); } catch {} }, [paymentFilters]);
+  const updatePaymentFilter = (patch: Partial<{ fromDate: string; toDate: string; category: string; status: string }>) => {
+    setPaymentFilters(prev => ({ ...prev, ...patch }));
+  };
+
+  // ── Tab Công nợ Phải Thu: bộ lọc (lưu localStorage cho lần sau) ──
+  const RECEIVABLE_FILTER_KEY = 'hl_fin_receivable_filters';
+  const loadReceivableFilters = (): { investor: string; status: string } => {
+    try {
+      const raw = localStorage.getItem(RECEIVABLE_FILTER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { investor: p.investor || '', status: p.status || '' };
+      }
+    } catch {}
+    return { investor: '', status: '' };
+  };
+  const [receivableFilters, setReceivableFilters] = useState(loadReceivableFilters);
+  useEffect(() => { try { localStorage.setItem(RECEIVABLE_FILTER_KEY, JSON.stringify(receivableFilters)); } catch {} }, [receivableFilters]);
+  const updateReceivableFilter = (patch: Partial<{ investor: string; status: string }>) => {
+    setReceivableFilters(prev => ({ ...prev, ...patch }));
+  };
+
+  // ── Tab Công nợ Phải Trả: bộ lọc (lưu localStorage cho lần sau) ──
+  const LIABILITY_FILTER_KEY = 'hl_fin_liability_filters';
+  const loadLiabilityFilters = (): { category: string; status: string } => {
+    try {
+      const raw = localStorage.getItem(LIABILITY_FILTER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { category: p.category || '', status: p.status || '' };
+      }
+    } catch {}
+    return { category: '', status: '' };
+  };
+  const [liabilityFilters, setLiabilityFilters] = useState(loadLiabilityFilters);
+  useEffect(() => { try { localStorage.setItem(LIABILITY_FILTER_KEY, JSON.stringify(liabilityFilters)); } catch {} }, [liabilityFilters]);
+  const updateLiabilityFilter = (patch: Partial<{ category: string; status: string }>) => {
+    setLiabilityFilters(prev => ({ ...prev, ...patch }));
+  };
+
+  // ── Mảng đã lọc cho 4 tab Nhập Thu / Nhập Chi / Công nợ Thu / Công nợ Trả ──
+  const filteredReceipts = useMemo(() => {
+    const kw = (searchTerm || '').toLowerCase().trim();
+    return receipts.filter((r: Receipt) => {
+      if (receiptFilters.fromDate && (r.date || '').slice(0, 10) < receiptFilters.fromDate) return false;
+      if (receiptFilters.toDate && (r.date || '').slice(0, 10) > receiptFilters.toDate) return false;
+      if (receiptFilters.customer && r.customerId !== receiptFilters.customer) return false;
+      if (receiptFilters.form && r.paymentMethod !== receiptFilters.form) return false;
+      if (kw) {
+        const custName = (customers.find(c => c.id === r.customerId)?.name || '').toLowerCase();
+        const projName = (projects.find(p => p.id === r.projectId)?.name || '').toLowerCase();
+        const hay = `${r.code || ''} ${custName} ${projName} ${r.notes || ''}`.toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [receipts, receiptFilters, searchTerm, customers, projects]);
+
+  // Nhập Thu: phân trang + nhóm theo Chủ đầu tư
+  const [recPage, setRecPage] = useState(1);
+  const [recPageSize, setRecPageSize] = useState(10);
+  const [recExpanded, setRecExpanded] = useState<Set<string>>(new Set());
+  const [recCustFilterSearch, setRecCustFilterSearch] = useState('');
+  const [recCustFilterOpen, setRecCustFilterOpen] = useState(false);
+  const receiptGroups = useMemo(() => {
+    const map = new Map<string, { customerId: string; customerName: string; receipts: Receipt[] }>();
+    for (const r of filteredReceipts) {
+      const cid = r.customerId || '__other__';
+      const cname = customers.find(c => c.id === cid)?.name || 'Khách hàng khác';
+      if (!map.has(cid)) map.set(cid, { customerId: cid, customerName: cname, receipts: [] });
+      map.get(cid)!.receipts.push(r);
+    }
+    return Array.from(map.values()).sort((a, b) => a.customerName.localeCompare(b.customerName));
+  }, [filteredReceipts, customers]);
+  const recPageInfo = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(receiptGroups.length / recPageSize));
+    const safePage = Math.min(recPage, totalPages);
+    const pageGroups = receiptGroups.slice((safePage - 1) * recPageSize, safePage * recPageSize);
+    return { totalPages, safePage, pageGroups };
+  }, [receiptGroups, recPage, recPageSize]);
+
+  const filteredPayments = useMemo(() => {
+    const kw = (searchTerm || '').toLowerCase().trim();
+    return payments.filter((p: Payment) => {
+      if (paymentFilters.fromDate && (p.date || '').slice(0, 10) < paymentFilters.fromDate) return false;
+      if (paymentFilters.toDate && (p.date || '').slice(0, 10) > paymentFilters.toDate) return false;
+      if (paymentFilters.category && p.category !== paymentFilters.category) return false;
+      if (paymentFilters.status && p.status !== paymentFilters.status) return false;
+      if (kw) {
+        const projName = (projects.find(pr => pr.id === p.projectId)?.name || '').toLowerCase();
+        const hay = `${p.code || ''} ${p.recipient || ''} ${p.notes || ''} ${p.category || ''} ${projName}`.toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [payments, paymentFilters, searchTerm, projects]);
+
+  const filteredReceivables = useMemo(() => {
+    const kw = (searchTerm || '').toLowerCase().trim();
+    return groupedReceivables.filter((g: any) => {
+      if (receivableFilters.investor && g.investor !== receivableFilters.investor) return false;
+      if (receivableFilters.status === 'con_no' && (g.conLai || 0) <= 0) return false;
+      if (receivableFilters.status === 'da_thu' && (g.conLai || 0) > 0) return false;
+      if (kw) {
+        const hay = `${g.investor || ''} ${g.customer?.notes || ''} ${g.projects.map((r: any) => `${r.projectName || ''} ${r.notes || ''}`).join(' ')}`.toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [groupedReceivables, receivableFilters, searchTerm]);
+
+  const filteredLiabilities = useMemo(() => {
+    const kw = (searchTerm || '').toLowerCase().trim();
+    return mergedLiabilities.filter((l: any) => {
+      if (liabilityFilters.category && l.category !== liabilityFilters.category) return false;
+      if (liabilityFilters.status === 'con_no' && (l.remaining || 0) <= 0) return false;
+      if (liabilityFilters.status === 'da_thu' && (l.remaining || 0) > 0) return false;
+      if (kw) {
+        const hay = `${l.name || ''} ${l.notes || ''} ${l.category || ''}`.toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [mergedLiabilities, liabilityFilters, searchTerm]);
+
+  // Tạo phiếu chi cho toàn bộ NCC (từ dòng nhà cung cấp) — khóa khi đã tất toán
+  const [poSupplierPay, setPoSupplierPay] = useState<{ open: boolean; supplierName: string; max: number }>({ open: false, supplierName: '', max: 0 });
+  const handleOpenSupplierPayment = (supplierName: string, max: number) => {
+    if (max <= 0) return;
+    setPoPaymentAmount(String(max)); setPoPaymentNote(''); setPoPaymentMethod('transfer');
+    setPoPaymentDate(new Date().toISOString().slice(0, 10));
+    setPoSupplierPay({ open: true, supplierName, max });
+  };
+  const handleCreateSupplierPayment = () => {
+    const amount = Number(poPaymentAmount) || 0;
+    if (amount <= 0) { addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập số tiền thanh toán.', type: 'warning' }); return; }
+    if (amount > poSupplierPay.max + 1) { addToast({ title: '⚠️ Vượt quá', message: 'Số tiền không được lớn hơn còn lại.', type: 'warning' }); return; }
+    const payId = `pay_${Date.now()}`;
+    const newPayment: Payment = {
+      id: payId,
+      code: `PC-NCC-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${String(Math.floor(Math.random() * 900 + 100))}`,
+      date: poPaymentDate,
+      paymentAt: new Date().toISOString(),
+      recipient: poSupplierPay.supplierName,
+      category: 'supplier_payment',
+      amount,
+      paymentMethod: poPaymentMethod,
+      notes: poPaymentNote.trim() || `Thanh toán nhà cung cấp ${poSupplierPay.supplierName}`,
+      proposer: currentUser?.name || 'Kế toán',
+      approver: 'Trương Hữu Long (Giám đốc)',
+      status: 'pending',
+    };
+    onAddPayment(newPayment);
+    setPoSupplierPay({ open: false, supplierName: '', max: 0 });
+    setPoPaymentAmount('0'); setPoPaymentNote('');
+    addToast({ title: '✅ Đã lập phiếu chi', message: `Phiếu chi ${newPayment.code} cho ${poSupplierPay.supplierName} đã tạo. Chờ duyệt.`, type: 'success' });
+  };
+
+  // Sửa đơn giá các vật tư của 1 đơn hàng (chưa ghi nhận Công nợ)
+  const openPoPriceEdit = (order: PurchaseOrder) => {
+    if (isPoRecorded(order.id)) { addToast({ title: '⚠️ Đã ghi nhận', message: 'Đơn hàng đã ghi nhận Công nợ, không thể sửa đơn giá.', type: 'warning' }); return; }
+    setPoEditId(order.id);
+    setPoEditItems((order.items || []).map((it: any) => ({ ...it })));
+  };
+  const handlePoItemPriceChange = (idx: number, field: 'donGia' | 'soLuong', value: any) => {
+    setPoEditItems(prev => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const next = { ...it, [field]: Number(value) || 0 };
+      next.thanhTien = (Number(next.soLuong) || 0) * (Number(next.donGia) || 0);
+      return next;
+    }));
+  };
+  const handleSavePoPrices = async () => {
+    const order = purchaseOrders.find(o => o.id === poEditId);
+    if (!order) { setPoEditId(null); return; }
+    const newTong = poEditItems.reduce((s, it) => s + (Number(it.thanhTien) || 0), 0);
+    const updated: PurchaseOrder = { ...order, items: poEditItems as any, tongTien: newTong, congNo: Math.max(0, newTong - (order.thanhToanThucTe || 0)) };
+    try {
+      await dbService.purchaseOrders.save(updated);
+      setPurchaseOrders(prev => prev.map(o => o.id === poEditId ? updated : o));
+      addToast({ title: '✅ Đã cập nhật', message: `Đã cập nhật đơn giá đơn ${order.id}.`, type: 'success' });
+    } catch (err) {
+      console.error('Lỗi cập nhật đơn giá:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể lưu đơn giá.', type: 'error' });
+    }
+    setPoEditId(null); setPoEditItems([]);
+  };
+  const handleDeletePoUnrecorded = async (id: string) => {
+    if (isPoRecorded(id)) { addToast({ title: '⚠️ Đã ghi nhận', message: 'Đơn hàng đã ghi nhận Công nợ, không thể xóa.', type: 'warning' }); setPoDeleteId(null); return; }
+    if (!window.confirm(`⚠️ Xóa đơn mua ${id}?\nHành động này không thể hoàn tác.`)) { setPoDeleteId(null); return; }
+    try {
+      await dbService.purchaseOrders.delete(id);
+      setPurchaseOrders(prev => prev.filter(o => o.id !== id));
+      onDeletePurchaseOrder?.(id);
+      addToast({ title: '🗑️ Đã xóa', message: `Đã xóa đơn mua ${id}.`, type: 'info' });
+    } catch (err) {
+      console.error('Lỗi xóa đơn mua:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể xóa đơn mua.', type: 'error' });
+    }
+    setPoDeleteId(null);
+  };
 
   // Reset receipt/payment selections when switching between nhap_thu and nhap_chi
   useEffect(() => {
@@ -1857,6 +2150,12 @@ export default function FinanceManagement({
   const [recMethod, setRecMethod] = useState<'cash' | 'transfer'>('transfer');
   const [recNotes, setRecNotes] = useState('');
 
+  // Combobox tìm kiếm nhanh cho modal lập phiếu thu
+  const [recCustSearch, setRecCustSearch] = useState('');
+  const [recCustOpen, setRecCustOpen] = useState(false);
+  const [recProjSearch, setRecProjSearch] = useState('');
+  const [recProjOpen, setRecProjOpen] = useState(false);
+
   useEffect(() => {
     if (activeSubTab === 'nhap_thu') {
       const storedProj = localStorage.getItem('hl_prefill_receipt_project_id');
@@ -2008,6 +2307,14 @@ export default function FinanceManagement({
   // Forms submission handlers
   const handleAddReceiptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!recCust) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn Chủ đầu tư chi trả.', type: 'error' });
+      return;
+    }
+    if (Number(recAmount) <= 0) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Số tiền thực tế thu (VND) phải lớn hơn 0.', type: 'error' });
+      return;
+    }
     const newRec: Receipt = {
       id: `rec_${Date.now()}`,
       code: `PT-2026-${Math.floor(Math.random() * 900 + 100)}`,
@@ -2746,7 +3053,10 @@ export default function FinanceManagement({
         category: liabCategory,
         value: liabValue,
         paid: liabPaid,
-        notes: liabNotes
+        notes: liabNotes,
+        recordedPurchaseOrderIds: poRecordingId
+          ? Array.from(new Set([...(item.recordedPurchaseOrderIds || []), poRecordingId]))
+          : item.recordedPurchaseOrderIds
       } : item));
       addToast({ title: 'ℹ️ Thông báo', message: '💾 Đã cập nhật công nợ phải trả.', type: 'warning' });
     } else {
@@ -2756,7 +3066,8 @@ export default function FinanceManagement({
         category: liabCategory,
         value: liabValue,
         paid: liabPaid,
-        notes: liabNotes
+        notes: liabNotes,
+        recordedPurchaseOrderIds: poRecordingId ? [poRecordingId] : undefined
       };
       setCustomLiabilities(prev => [...prev, newLiab]);
       addToast({ title: 'ℹ️ Thông báo', message: '🎉 Đã thêm công nợ phải trả mới.', type: 'warning' });
@@ -2767,6 +3078,7 @@ export default function FinanceManagement({
     setLiabValue(0);
     setLiabPaid(0);
     setLiabNotes('');
+    setPoRecordingId(null);
   };
 
   const handleEditLiability = (item: any) => {
@@ -2781,6 +3093,38 @@ export default function FinanceManagement({
 
   const handleDeleteLiability = (item: any) => {
     setLiabToDelete(item);
+  };
+
+  // Ghi nhận công nợ nhà cung cấp từ 1 đơn hàng mua vào Công Nợ Trả (thủ công).
+  // Mở modal Thêm/Sửa công nợ đã có, tự động điền sẵn và lưu mã đơn hàng vào recordedPurchaseOrderIds.
+  const handleRecordSupplierDebt = (order: PurchaseOrder) => {
+    if (!order.supplierName) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Đơn hàng không có tên nhà cung cấp để ghi nhận.', type: 'warning' });
+      return;
+    }
+    if (isPoRecorded(order.id)) {
+      addToast({ title: 'ℹ️ Đã ghi nhận', message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả.`, type: 'info' });
+      return;
+    }
+    setPoRecordingId(order.id);
+    // Nếu nhà cung cấp này đã có công nợ thì mở chế độ sửa để cập nhật.
+    const existing = customLiabilities.find(l => l.name === order.supplierName && l.category === 'Nhà Cung Cấp');
+    if (existing) {
+      setEditingLiabId(existing.id);
+      setLiabName(existing.name);
+      setLiabCategory(existing.category);
+      setLiabValue(existing.value);
+      setLiabPaid(existing.paid);
+      setLiabNotes(existing.notes ? `${existing.notes}; Đơn mua ${order.id}` : `Từ đơn mua ${order.id}`);
+    } else {
+      setEditingLiabId(null);
+      setLiabName(order.supplierName);
+      setLiabCategory('Nhà Cung Cấp');
+      setLiabValue(order.congNo || order.tongTien || 0);
+      setLiabPaid(order.thanhToanThucTe || 0);
+      setLiabNotes(`Ghi nhận từ đơn mua ${order.id} - ${order.supplierName}`);
+    }
+    setShowLiabModal(true);
   };
 
   const confirmDeleteLiability = async () => {
@@ -3240,34 +3584,120 @@ export default function FinanceManagement({
               </div>
             )}
 
-            {/* TAB: ĐƠN HÀNG MUA (từ Đề xuất vật tư qua ĐÃ NHẬN HÀNG) */}
+            {/* TAB: ĐƠN HÀNG MUA — gom theo Nhà cung cấp */}
             {activeSubTab === 'don_hang' && (() => {
               const keyword = (searchTerm || '').trim().toLowerCase();
-              const filteredPOs = purchaseOrders
-                .filter((o: PurchaseOrder) => {
-                  if (!keyword) return true;
-                  return (
-                    (o.id || '').toLowerCase().includes(keyword) ||
-                    (o.supplierName || '').toLowerCase().includes(keyword)
-                  );
-                })
-                .slice()
-                .sort((a: PurchaseOrder, b: PurchaseOrder) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+              const poSupplierOptions = Array.from(new Set(purchaseOrders.map((o: PurchaseOrder) => o.supplierName).filter(Boolean))).sort() as string[];
+
+              // Gom đơn hàng theo Nhà cung cấp + áp dụng bộ lọc
+              const matchedPOs = purchaseOrders.filter((o: PurchaseOrder) => {
+                if (keyword && !((o.id || '').toLowerCase().includes(keyword) || (o.supplierName || '').toLowerCase().includes(keyword))) return false;
+                const od = (o.createdAt || '').slice(0, 10);
+                if (poFilters.fromDate && od && od < poFilters.fromDate) return false;
+                if (poFilters.toDate && od && od > poFilters.toDate) return false;
+                if (poFilters.supplier && !(o.supplierName || '').toLowerCase().includes(poFilters.supplier.toLowerCase())) return false;
+                if (poFilters.status && !poOrderStatuses(o).includes(poFilters.status)) return false;
+                return true;
+              });
+              const groupsMap = new Map<string, PurchaseOrder[]>();
+              matchedPOs.forEach(o => {
+                const key = o.supplierName || '—';
+                if (!groupsMap.has(key)) groupsMap.set(key, []);
+                groupsMap.get(key)!.push(o);
+              });
+              const supplierGroups = Array.from(groupsMap.entries()).map(([supplierName, orders]) => {
+                const total = orders.reduce((s, o) => s + (o.tongTien || 0), 0);
+                const paid = getSupplierPaid(supplierName);
+                const remaining = Math.max(0, total - paid);
+                const settled = remaining <= 0;
+                return { supplierName, orders, total, paid, remaining, settled };
+              }).sort((a, b) => b.total - a.total);
+
+              const totalPages = poPageSize === -1 ? 1 : Math.max(1, Math.ceil(supplierGroups.length / poPageSize));
+              const pageGroups = poPageSize === -1 ? supplierGroups : supplierGroups.slice((poPage - 1) * poPageSize, poPage * poPageSize);
+
+              const toggleSupplier = (name: string) => {
+                setPoExpandedSuppliers(prev => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n; });
+              };
 
               return (
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
                     <div>
                       <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
-                        Danh sách Đơn Hàng Mua
+                        Danh sách Đơn Hàng Mua (theo Nhà cung cấp)
                       </span>
                       <p className="text-[10px] text-slate-400 mt-1">
-                        Quản lý các đơn hàng đã tạo với nhà cung cấp khi đề xuất vật tư chuyển qua cột <span className="text-emerald-400 font-bold">ĐÃ NHẬN HÀNG</span>. Xem chi tiết hoặc lập phiếu chi thanh toán công nợ.
+                        Quản lý đơn hàng đã tạo với nhà cung cấp. Bấm vào tên NCC để xem chi tiết từng đơn.
                       </p>
                     </div>
                     <span className="bg-violet-600/20 text-violet-300 border border-violet-500/30 text-[10px] font-bold px-2.5 py-1.5 rounded-lg whitespace-nowrap">
-                      {filteredPOs.length} / {purchaseOrders.length} đơn
+                      {supplierGroups.length} NCC / {matchedPOs.length} đơn
                     </span>
+                  </div>
+
+                  {/* Bộ lọc: Từ ngày – Đến ngày, Nhà Cung Cấp (tìm kiếm nhanh), Trạng thái (lưu localStorage) */}
+                  <div className="flex flex-wrap items-end gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
+                      <input
+                        type="date"
+                        value={poFilters.fromDate}
+                        onChange={(e) => updatePoFilter({ fromDate: e.target.value })}
+                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
+                      <input
+                        type="date"
+                        value={poFilters.toDate}
+                        onChange={(e) => updatePoFilter({ toDate: e.target.value })}
+                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 relative">
+                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Nhà Cung Cấp</label>
+                      <input
+                        type="text"
+                        value={poFilters.supplier}
+                        onChange={(e) => { updatePoFilter({ supplier: e.target.value }); setPoSupplierOpen(true); }}
+                        onFocus={() => setPoSupplierOpen(true)}
+                        onBlur={() => setTimeout(() => setPoSupplierOpen(false), 150)}
+                        placeholder="Gõ để tìm NCC..."
+                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer w-48"
+                      />
+                      {poSupplierOpen && (
+                        <div className="absolute top-full left-0 z-30 mt-1 w-64 max-h-52 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1">
+                          <button type="button" onClick={() => { updatePoFilter({ supplier: '' }); setPoSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-white">Tất cả nhà cung cấp</button>
+                          {poSupplierOptions.filter(s => s.toLowerCase().includes(poFilters.supplier.toLowerCase())).map(s => (
+                            <button key={s} type="button" onClick={() => { updatePoFilter({ supplier: s }); setPoSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800">{s}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái</label>
+                      <select
+                        value={poFilters.status}
+                        onChange={(e) => updatePoFilter({ status: e.target.value })}
+                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer"
+                      >
+                        <option value="">Tất cả</option>
+                        <option value="recorded">Công Nợ</option>
+                        <option value="unrecorded">Chưa ghi nhận</option>
+                        <option value="unsettled">Chưa tất toán</option>
+                        <option value="settled">Đã tất toán</option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { const y = new Date().getFullYear(); updatePoFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, supplier: '', status: '' }); }}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                      title="Xóa bộ lọc"
+                    >
+                      <X className="w-3.5 h-3.5" /> Reset
+                    </button>
                   </div>
 
                   <div className="overflow-x-auto text-[10.5px]">
@@ -3275,79 +3705,125 @@ export default function FinanceManagement({
                       <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
                         <tr>
                           <th className="px-3 py-2.5 w-10 text-center">#</th>
-                          <th className="px-3 py-2.5">Mã đơn</th>
-                          <th className="px-3 py-2.5">Nhà cung cấp</th>
-                          <th className="px-3 py-2.5">Ngày</th>
-                          <th className="px-3 py-2.5 text-right">Tổng tiền</th>
-                          <th className="px-3 py-2.5 text-right">Đã TT</th>
-                          <th className="px-3 py-2.5 text-right text-rose-400 font-bold">Công nợ</th>
+                          <th className="px-3 py-2.5">Tên nhà cung cấp</th>
+                          <th className="px-3 py-2.5 text-right">Tổng số tiền</th>
                           <th className="px-3 py-2.5">Trạng thái</th>
                           <th className="px-3 py-2.5 text-center">Hành động</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredPOs.length === 0 ? (
+                        {supplierGroups.length === 0 ? (
                           <tr>
-                            <td colSpan={9} className="px-3 py-8 text-center text-slate-500 italic">
-                              {purchaseOrders.length === 0 ? 'Chưa có đơn hàng nào. Đơn hàng xuất hiện ở đây khi đề xuất vật tư được nhận hàng.' : 'Không tìm thấy đơn hàng phù hợp.'}
+                            <td colSpan={5} className="px-3 py-8 text-center text-slate-500 italic">
+                              {purchaseOrders.length === 0 ? 'Chưa có đơn hàng nào. Đơn hàng xuất hiện ở đây khi đề xuất vật tư được nhận hàng.' : 'Không tìm thấy đơn hàng phù hợp với bộ lọc.'}
                             </td>
                           </tr>
-                        ) : (
-                          filteredPOs.map((o: PurchaseOrder, idx: number) => {
-                            const congNo = o.congNo || 0;
-                            const paid = o.thanhToanThucTe || 0;
-                            return (
-                              <tr key={o.id} className="border-b border-slate-850/80 hover:bg-slate-900/40 font-sans">
-                                <td className="px-3 py-3 text-center font-mono text-slate-500">{idx + 1}</td>
-                                <td className="px-3 py-3 font-mono font-bold text-slate-100 whitespace-nowrap">{o.id}</td>
-                                <td className="px-3 py-3 font-semibold text-slate-200">{o.supplierName || '—'}</td>
-                                <td className="px-3 py-3 font-mono text-slate-400 whitespace-nowrap">{(o.createdAt || '').slice(0, 10) || '—'}</td>
-                                <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</td>
-                                <td className="px-3 py-3 text-right font-mono text-emerald-400">{(paid).toLocaleString('vi-VN')} đ</td>
-                                <td className="px-3 py-3 text-right font-mono font-extrabold text-rose-450 bg-rose-500/5">
-                                  {congNo > 0 ? `${congNo.toLocaleString('vi-VN')} đ` : '0 đ'}
-                                </td>
+                        ) : pageGroups.map((g, gi) => {
+                          const expanded = poExpandedSuppliers.has(g.supplierName);
+                          return (
+                            <React.Fragment key={g.supplierName}>
+                              <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
+                                <td className="px-3 py-3 text-center font-mono text-slate-500">{gi + 1}</td>
                                 <td className="px-3 py-3">
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                                    o.status === 'completed' ? 'bg-emerald-600/15 text-emerald-300 border-emerald-500/30' :
-                                    o.status === 'cancelled' ? 'bg-rose-600/15 text-rose-300 border-rose-500/30' :
-                                    o.status === 'confirmed' ? 'bg-violet-600/15 text-violet-300 border-violet-500/30' :
-                                    'bg-slate-700/40 text-slate-300 border-slate-600/40'
-                                  }`}>
-                                    {poStatusLabel(o.status)}
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSupplier(g.supplierName)}
+                                      className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer"
+                                      title={expanded ? 'Thu gọn' : 'Xem chi tiết'}
+                                    >
+                                      {expanded ? '▼' : '▶'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSupplier(g.supplierName)}
+                                      className="font-extrabold text-white text-[13px] text-left hover:underline cursor-pointer"
+                                      title="Click để xem chi tiết các đơn hàng"
+                                    >
+                                      {g.supplierName}
+                                    </button>
+                                    <span className="text-[9px] text-slate-400">({g.orders.length} đơn)</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-violet-300">{(g.total).toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3">
+                                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${poStatusToneClass(g.settled ? 'emerald' : 'rose')}`}>
+                                    {g.settled ? 'Đã tất toán' : 'chưa tất toán'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-3">
-                                  <div className="flex items-center justify-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => setPoDetailModal({ open: true, order: o })}
-                                      className="bg-sky-600 hover:bg-sky-500 text-white text-[9.5px] font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
-                                      title="Xem chi tiết đơn hàng"
-                                    >
-                                      <Eye className="w-3 h-3" /> Chi tiết
-                                    </button>
-                                    {congNo > 0 ? (
+                                  <div className="flex items-center justify-center">
+                                    {g.settled ? (
+                                      <span className="text-emerald-500 text-[9px] italic font-bold">Đã khóa</span>
+                                    ) : (
                                       <button
                                         type="button"
-                                        onClick={() => { setPoPaymentAmount(String(congNo)); setPoPaymentNote(''); setPoPaymentModal({ open: true, order: o }); }}
+                                        onClick={() => handleOpenSupplierPayment(g.supplierName, g.remaining)}
                                         className="bg-rose-600 hover:bg-rose-700 text-white text-[9.5px] font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
-                                        title="Tạo phiếu chi thanh toán công nợ"
+                                        title="Tạo phiếu chi thanh toán nhà cung cấp"
                                       >
-                                        <Circle className="w-3 h-3" /> Tạo phiếu chi
+                                        <Circle className="w-3 h-3" /> Tạo Phiếu Chi
                                       </button>
-                                    ) : (
-                                      <span className="text-emerald-500 text-[9px] italic font-bold">Đã thanh toán</span>
                                     )}
                                   </div>
                                 </td>
                               </tr>
-                            );
-                          })
-                        )}
+                              {expanded && g.orders.map((o: PurchaseOrder) => {
+                                const st = getPoRowStatus(o);
+                                const recorded = isPoRecorded(o.id);
+                                return (
+                                  <tr key={o.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
+                                    <td className="px-3 py-2.5 text-center text-slate-600">—</td>
+                                    <td className="px-3 py-2.5 pl-9">
+                                      <div className="font-semibold text-slate-200 text-[11px]">{o.id}</div>
+                                      <div className="text-[9px] text-slate-400 mt-0.5">Ngày: {(o.createdAt || '').slice(0, 10) || '—'}</div>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-100 text-[11px]">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5">
+                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      <div className="flex items-center justify-center gap-1.5">
+                                        <button type="button" onClick={() => setPoDetailModal({ open: true, order: o })} className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer" title="Xem chi tiết"><Eye className="w-3.5 h-3.5" /></button>
+                                        {recorded ? (
+                                          <span className="text-[9px] font-bold text-amber-600 border border-amber-500 bg-white px-2 py-1 rounded-lg">Đã ghi nhận</span>
+                                        ) : (
+                                          <button type="button" onClick={() => handleRecordSupplierDebt(o)} className="bg-white border border-orange-500 text-orange-500 hover:bg-orange-50 p-1.5 rounded-lg flex items-center justify-center cursor-pointer transition-all" title="Ghi nhận công nợ nhà cung cấp">
+                                            <Plus className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {!recorded && (
+                                          <button type="button" onClick={() => handleDeletePoUnrecorded(o.id)} className="text-rose-400 hover:text-rose-300 p-1 border border-rose-500/30 rounded cursor-pointer" title="Xóa đơn hàng"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Pagination */}
+                  {poPageSize !== -1 && totalPages > 1 && (
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                      <div className="flex items-center gap-2">
+                        <span>Dòng / trang:</span>
+                        <select value={poPageSize} onChange={(e) => { setPoPageSize(Number(e.target.value)); setPoPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                          {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                          <option value={-1}>Tất cả</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button type="button" disabled={poPage <= 1} onClick={() => setPoPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                        <span>Trang {poPage} / {totalPages}</span>
+                        <button type="button" disabled={poPage >= totalPages} onClick={() => setPoPage(p => Math.min(totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -3368,7 +3844,23 @@ export default function FinanceManagement({
                   a.taskName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   (a.reason && a.reason.toLowerCase().includes(searchTerm.toLowerCase()))
                 );
+              }).filter(a => {
+                const d = a.date || a.proposalDate || '';
+                if (proposalFilters.fromDate && d && d < proposalFilters.fromDate) return false;
+                if (proposalFilters.toDate && d && d > proposalFilters.toDate) return false;
+                if (proposalFilters.projectId && a.projectId !== proposalFilters.projectId) return false;
+                if (proposalFilters.status && a.status !== proposalFilters.status) return false;
+                return true;
               });
+
+              // Phân trang
+              const proposalTotal = filteredAdvances.length;
+              const proposalPageCount = proposalPageSize === -1 ? 1 : Math.max(1, Math.ceil(proposalTotal / proposalPageSize));
+              const proposalSafePage = Math.min(Math.max(1, proposalPage), proposalPageCount);
+              const proposalPaged = proposalPageSize === -1
+                ? filteredAdvances
+                : filteredAdvances.slice((proposalSafePage - 1) * proposalPageSize, proposalSafePage * proposalPageSize);
+              const proposalStartIdx = (proposalSafePage - 1) * proposalPageSize;
 
               // Quick metric counts
               const totalCount = subcontractorAdvances.length;
@@ -3486,10 +3978,93 @@ export default function FinanceManagement({
                       </div>
                     </div>
 
+                    {/* Bộ lọc: Từ ngày – Đến ngày, Dự án, Trạng thái (lưu localStorage) */}
+                    <div className="p-3 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-end gap-3">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
+                        <input
+                          type="date"
+                          value={proposalFilters.fromDate}
+                          onChange={(e) => updateProposalFilter({ fromDate: e.target.value })}
+                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
+                        <input
+                          type="date"
+                          value={proposalFilters.toDate}
+                          onChange={(e) => updateProposalFilter({ toDate: e.target.value })}
+                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Dự án</label>
+                        <select
+                          value={proposalFilters.projectId}
+                          onChange={(e) => updateProposalFilter({ projectId: e.target.value })}
+                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer min-w-[160px]"
+                        >
+                          <option value="">Tất cả dự án</option>
+                          {projects.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái</label>
+                        <select
+                          value={proposalFilters.status}
+                          onChange={(e) => updateProposalFilter({ status: e.target.value })}
+                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer min-w-[150px]"
+                        >
+                          <option value="">Tất cả trạng thái</option>
+                          <option value="pending_approval">Chờ Duyệt</option>
+                          <option value="pending_payment">Chờ Lập Phiếu (KT)</option>
+                          <option value="rejected">Từ Chối</option>
+                          <option value="completed">Hoàn Thành</option>
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const y = new Date().getFullYear();
+                          updateProposalFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, projectId: '', status: '' });
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                        title="Xóa bộ lọc"
+                      >
+                        <X className="w-3.5 h-3.5" /> Reset
+                      </button>
+                      <div className="ml-auto flex items-center gap-3 self-center">
+                        {(() => {
+                          const selRej = subcontractorAdvances.filter(p => finSelectedRows.has(p.id) && p.status === 'rejected').length;
+                          return (
+                            <>
+                              {selRej > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleBulkDeleteProposals}
+                                  className="bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-all shadow"
+                                  title="Xóa các đề xuất được chọn (chỉ Từ Chối)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Xóa {selRej} đã chọn
+                                </button>
+                              )}
+                              <div className="text-[10px] text-slate-400 font-semibold">
+                                Kết quả: <span className="text-orange-400 font-black font-mono">{proposalTotal}</span> đề xuất
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider">
+                            <th className="p-3 pl-3 w-10 text-center">#</th>
                             <th className="p-3 pl-2 w-10 text-center">
                               <input
                                 type="checkbox"
@@ -3509,15 +4084,19 @@ export default function FinanceManagement({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/50">
-                          {filteredAdvances.length === 0 ? (
+                          {proposalPaged.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="p-10 text-center text-slate-500 italic">
+                              <td colSpan={10} className="p-10 text-center text-slate-500 italic">
                                 Không có yêu cầu đề xuất nào phù hợp.
                               </td>
                             </tr>
                           ) : (
-                            filteredAdvances.map(adv => (
+                            proposalPaged.map((adv, i) => (
                               <tr key={adv.id} className={`hover:bg-slate-850/20 transition-colors ${finSelectedRows.has(adv.id) ? 'bg-amber-500/10' : ''}`}>
+                                {/* Số thứ tự # */}
+                                <td className="p-3 pl-3 text-center font-mono font-bold text-slate-500 text-[11px]">
+                                  {proposalStartIdx + i + 1}
+                                </td>
                                 {/* Checkbox */}
                                 <td className="p-3 text-center">
                                   <input
@@ -3606,6 +4185,18 @@ export default function FinanceManagement({
                                       <Eye className="w-3.5 h-3.5 text-sky-400" />
                                       <span>Chi Tiết</span>
                                     </button>
+
+                                    {adv.status === 'rejected' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteProposal(adv.id)}
+                                        className="bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[10px] px-2 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                        title="Xóa đề xuất bị từ chối"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <span>Xóa</span>
+                                      </button>
+                                    )}
                                     
                                     {/* Action for Chờ Duyệt (pending_approval) */}
                                     {adv.status === 'pending_approval' && canApproveProposal(adv) && (
@@ -3677,6 +4268,50 @@ export default function FinanceManagement({
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Phân trang Đề xuất */}
+                    {proposalTotal > 0 && (
+                      <div className="p-3 bg-slate-950/60 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                          <span>Hiển thị</span>
+                          <select
+                            value={proposalPageSize}
+                            onChange={(e) => setProposalPageSize(Number(e.target.value))}
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
+                          >
+                            <option value={5}>5</option>
+                            <option value={10}>10</option>
+                            <option value={20}>20</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                            <option value={-1}>Tất cả</option>
+                          </select>
+                          <span>dòng / trang</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setProposalPage(proposalSafePage - 1)}
+                            disabled={proposalSafePage <= 1}
+                            className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 text-[10px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-all"
+                          >
+                            ‹ Trước
+                          </button>
+                          <span className="text-[10px] text-slate-300 font-semibold">
+                            Trang <span className="text-orange-400 font-black font-mono">{proposalSafePage}</span> / {proposalPageCount}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setProposalPage(proposalSafePage + 1)}
+                            disabled={proposalSafePage >= proposalPageCount}
+                            className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 text-[10px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-all"
+                          >
+                            Sau ›
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 </div>
               );
@@ -4947,41 +5582,73 @@ export default function FinanceManagement({
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Số tiền thực tế thu (VND):</label>
+                          <label className="block text-slate-400 font-semibold mb-1">Số tiền thực tế thu (VND) <span className="text-rose-400">*</span>:</label>
                           <input
                             type="number"
                             required
+                            min={1}
                             value={recAmount}
                             onChange={(e) => setRecAmount(Number(e.target.value))}
                             className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-mono font-bold"
                           />
                         </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Chủ đầu tư chi trả:</label>
-                          <select
-                            value={recCust}
-                            onChange={(e) => setRecCust(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
-                          >
-                            {customers.map(c => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                          </select>
+                        <div className="relative">
+                          <label className="block text-slate-400 font-semibold mb-1">Chủ đầu tư chi trả <span className="text-rose-400">*</span>:</label>
+                          <input
+                            type="text"
+                            required
+                            value={recCust ? (customers.find(c => c.id === recCust)?.name || recCustSearch) : recCustSearch}
+                            onChange={(e) => { setRecCustSearch(e.target.value); setRecCustOpen(true); if (recCust) setRecCust(''); }}
+                            onFocus={() => { setRecCustSearch(recCust ? (customers.find(c => c.id === recCust)?.name || '') : ''); setRecCustOpen(true); }}
+                            placeholder="Tìm kiếm chủ đầu tư..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white"
+                          />
+                          {recCustOpen && (
+                            <>
+                              <div className="fixed inset-0 z-[190] bg-transparent cursor-default" onClick={() => setRecCustOpen(false)} />
+                              <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-[200] divide-y divide-slate-900">
+                                {customers.filter(c => !recCustSearch || c.name.toLowerCase().includes(recCustSearch.toLowerCase())).map(c => (
+                                  <button key={c.id} type="button" onClick={() => { setRecCust(c.id); setRecCustSearch(c.name); setRecCustOpen(false); setRecProj(''); setRecProjSearch(''); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-200 text-[10.5px]">
+                                    <span className="font-semibold text-slate-100">{c.name}</span>
+                                  </button>
+                                ))}
+                                {customers.filter(c => !recCustSearch || c.name.toLowerCase().includes(recCustSearch.toLowerCase())).length === 0 && (
+                                  <div className="p-3 text-slate-500 text-center">Không tìm thấy chủ đầu tư.</div>
+                                )}
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Dự án thầu liên kế:</label>
-                          <select
-                            value={recProj}
-                            onChange={(e) => setRecProj(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-medium"
-                          >
-                            {projects.map(p => (
-                              <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                          </select>
+                        <div className="relative">
+                          <label className="block text-slate-400 font-semibold mb-1">Dự án thầu liên kế <span className="text-rose-400">*</span>:</label>
+                          <input
+                            type="text"
+                            required
+                            value={recProj ? (projects.find(p => p.id === recProj)?.name || recProjSearch) : recProjSearch}
+                            onChange={(e) => { setRecProjSearch(e.target.value); setRecProjOpen(true); if (recProj) setRecProj(''); }}
+                            onFocus={() => { setRecProjSearch(recProj ? (projects.find(p => p.id === recProj)?.name || '') : ''); setRecProjOpen(true); }}
+                            placeholder={recCust ? 'Tìm kiếm dự án liên kết...' : 'Chọn chủ đầu tư trước...'}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white"
+                          />
+                          {recProjOpen && (
+                            <>
+                              <div className="fixed inset-0 z-[190] bg-transparent cursor-default" onClick={() => setRecProjOpen(false)} />
+                              <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-[200] divide-y divide-slate-900">
+                                <button type="button" onClick={() => { setRecProj(''); setRecProjSearch('Thu ngoài dự án'); setRecProjOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-amber-300 text-[10.5px] font-semibold">📭 Thu ngoài dự án (không gắn công trình)</button>
+                                {projects.filter(p => (!recCust || p.customerId === recCust) && (!recProjSearch || p.name.toLowerCase().includes(recProjSearch.toLowerCase()))).map(p => (
+                                  <button key={p.id} type="button" onClick={() => { setRecProj(p.id); setRecProjSearch(p.name); setRecProjOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-200 text-[10.5px]">
+                                    <span className="font-semibold text-slate-100">{p.name}</span>
+                                  </button>
+                                ))}
+                                {projects.filter(p => (!recCust || p.customerId === recCust) && (!recProjSearch || p.name.toLowerCase().includes(recProjSearch.toLowerCase()))).length === 0 && (
+                                  <div className="p-3 text-slate-500 text-center">Không có dự án liên kết.</div>
+                                )}
+                              </div>
+                            </>
+                          )}
                         </div>
                         <div>
                           <label className="block text-slate-400 font-semibold mb-1">Đơn hàng bán (tùy chọn):</label>
@@ -4996,17 +5663,18 @@ export default function FinanceManagement({
                             ))}
                           </select>
                         </div>
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Hình thức thanh toán thầu:</label>
-                          <select
-                            value={recMethod}
-                            onChange={(e) => setRecMethod(e.target.value as 'cash' | 'transfer')}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
-                          >
-                            <option value="transfer">Chuyển khoản Ngân hàng (MBBank/VCB)</option>
-                            <option value="cash">Tiền mặt thủ quỹ xưởng mộc</option>
-                          </select>
-                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 font-semibold mb-1">Hình thức thanh toán:</label>
+                        <select
+                          value={recMethod}
+                          onChange={(e) => setRecMethod(e.target.value as 'cash' | 'transfer')}
+                          className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
+                        >
+                          <option value="transfer">Chuyển khoản</option>
+                          <option value="cash">Tiền mặt</option>
+                        </select>
                       </div>
 
                       <div>
@@ -5029,18 +5697,58 @@ export default function FinanceManagement({
                   </div>
                 )}
 
+                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Từ ngày</label>
+                    <input type="date" value={receiptFilters.fromDate} onChange={(e) => updateReceiptFilter({ fromDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Đến ngày</label>
+                    <input type="date" value={receiptFilters.toDate} onChange={(e) => updateReceiptFilter({ toDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1 relative">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Chủ đầu tư</label>
+                    <input
+                      type="text"
+                      value={receiptFilters.customer ? (customers.find(c => c.id === receiptFilters.customer)?.name || recCustFilterSearch) : recCustFilterSearch}
+                      onChange={(e) => { setRecCustFilterSearch(e.target.value); setRecCustFilterOpen(true); if (receiptFilters.customer) updateReceiptFilter({ customer: '' }); }}
+                      onFocus={() => { setRecCustFilterSearch(receiptFilters.customer ? (customers.find(c => c.id === receiptFilters.customer)?.name || '') : ''); setRecCustFilterOpen(true); }}
+                      placeholder="Tìm kiếm chủ đầu tư..."
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer w-full"
+                    />
+                    {recCustFilterOpen && (
+                      <>
+                        <div className="fixed inset-0 z-[190] bg-transparent cursor-default" onClick={() => setRecCustFilterOpen(false)} />
+                        <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-[200] divide-y divide-slate-900">
+                          <button type="button" onClick={() => { updateReceiptFilter({ customer: '' }); setRecCustFilterSearch(''); setRecCustFilterOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-400 text-[10.5px]">Tất cả</button>
+                          {customers.filter(c => !recCustFilterSearch || c.name.toLowerCase().includes(recCustFilterSearch.toLowerCase())).map(c => (
+                            <button key={c.id} type="button" onClick={() => { updateReceiptFilter({ customer: c.id }); setRecCustFilterSearch(c.name); setRecCustFilterOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-200 text-[10.5px]">
+                              <span className="font-semibold text-slate-100">{c.name}</span>
+                            </button>
+                          ))}
+                          {customers.filter(c => !recCustFilterSearch || c.name.toLowerCase().includes(recCustFilterSearch.toLowerCase())).length === 0 && (
+                            <div className="p-3 text-slate-500 text-center">Không tìm thấy chủ đầu tư.</div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Hình thức</label>
+                    <select value={receiptFilters.form} onChange={(e) => updateReceiptFilter({ form: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      <option value="cash">Tiền mặt</option>
+                      <option value="transfer">Chuyển khoản</option>
+                    </select>
+                  </div>
+                  <button type="button" onClick={() => updateReceiptFilter({ fromDate: '', toDate: '', customer: '', form: '' })} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                </div>
+
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-slate-300 text-[10.5px]">
                     <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
                       <tr>
-                        <th className="w-10 px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={recSelectedRows.size > 0 && receipts.length > 0 && receipts.every(r => recSelectedRows.has(r.id))}
-                            onChange={(e) => handleRecSelectAll(e.target.checked, receipts)}
-                            className="w-4 h-4 text-emerald-500 border-slate-600 rounded cursor-pointer accent-emerald-500"
-                          />
-                        </th>
+                        <th className="px-3 py-2 w-12 text-center">#</th>
                         <th className="px-3 py-2">Mã Phiếu Thu</th>
                         <th className="px-3 py-2">Ngày lập sổ</th>
                         <th className="px-3 py-2">Công trình liên đới</th>
@@ -5050,93 +5758,122 @@ export default function FinanceManagement({
                       </tr>
                     </thead>
                     <tbody>
-                      {receipts.length === 0 ? (
+                      {recPageInfo.pageGroups.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-3 py-8 text-center text-slate-500 italic">Chưa có phiếu thu nào.</td>
+                          <td colSpan={7} className="px-3 py-8 text-center text-slate-500 italic">{receipts.length === 0 ? 'Chưa có phiếu thu nào.' : 'Không tìm thấy phiếu thu khớp bộ lọc.'}</td>
                         </tr>
-                      ) : receipts.map((rec) => {
-                        const projName = projects.find(p => p.id === rec.projectId)?.name || 'Văn phòng';
+                      ) : recPageInfo.pageGroups.map((g, gi) => {
+                        const groupNo = (recPageInfo.safePage - 1) * recPageSize + gi + 1;
+                        const expanded = recExpanded.has(g.customerId);
+                        const sum = g.receipts.reduce((s, r) => s + r.amount, 0);
+                        const toggle = () => setRecExpanded(prev => { const n = new Set(prev); n.has(g.customerId) ? n.delete(g.customerId) : n.add(g.customerId); return n; });
                         return (
-                          <tr key={rec.id} className={`border-b border-slate-850/80 hover:bg-slate-900/40 ${recSelectedRows.has(rec.id) ? 'bg-emerald-500/10' : ''}`}>
-                            <td className="px-3 py-2.5 text-center">
-                              <input
-                                type="checkbox"
-                                checked={recSelectedRows.has(rec.id)}
-                                onChange={(e) => handleRecRowSelect(rec.id, e.target.checked)}
-                                className="w-4 h-4 text-emerald-500 border-slate-600 rounded cursor-pointer accent-emerald-500"
-                              />
-                            </td>
-                            <td className="px-3 py-2.5 font-mono font-bold text-emerald-400">{rec.code}</td>
-                            <td className="px-3 py-2.5">{rec.date}</td>
-                            <td className="px-3 py-2.5 font-bold text-slate-100 truncate max-w-[200px]">{projName}</td>
-                            <td className="px-3 py-2.5 text-slate-450 truncate max-w-[220px]">{rec.notes}</td>
-                            <td className="px-3 py-2.5 text-right font-bold text-emerald-400 font-mono">+{rec.amount.toLocaleString('vi-VN')} đ</td>
-                            <td className="px-3 py-2.5 text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    const cust = (customers || []).find(c => c.id === rec.customerId);
-                                    const payerName = cust?.name || 'Khách hàng';
-                                    const collectorName = rec.collectorId
-                                      ? ((employeesProp || []).find(e => e.id === rec.collectorId)?.name || rec.collector)
-                                      : rec.collector;
-                                    setPreviewVoucher({
-                                      type: 'receipt',
-                                      data: rec,
-                                      meta: {
-                                        payer: payerName,
-                                        project: projName !== 'Văn phòng' ? projName : undefined,
-                                        collector: collectorName,
-                                        order: rec.salesOrderId,
-                                      },
-                                    });
-                                  }}
-                                  title="Xem chi tiết / In phiếu thu"
-                                  className="p-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-950 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                </button>
-                                {(rec.source === 'manual' || rec.source === 'import') && (
-                                  <button
-                                    onClick={() => openEditReceipt(rec)}
-                                    title="Sửa phiếu thu"
-                                    className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-950 rounded-lg transition-colors cursor-pointer"
-                                  >
-                                    <Edit className="w-3.5 h-3.5" />
+                          <React.Fragment key={g.customerId}>
+                            <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
+                              <td className="px-3 py-3 text-center font-bold text-slate-300">{groupNo}</td>
+                              <td className="px-3 py-3" colSpan={4}>
+                                <div className="flex items-center gap-2">
+                                  <button onClick={toggle} className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết'}>
+                                    {expanded ? '▼' : '▶'}
                                   </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
+                                  <div>
+                                    <button onClick={toggle} className="font-extrabold text-white text-[13px] text-left hover:underline cursor-pointer">
+                                      {g.customerName}
+                                    </button>
+                                    <div className="text-[9px] text-slate-400 mt-0.5">{g.receipts.length} phiếu thu · Nhóm theo Chủ đầu tư</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-emerald-400">+{sum.toLocaleString('vi-VN')} đ</td>
+                              <td className="px-3 py-3 text-center text-slate-600 text-[9px] italic">—</td>
+                            </tr>
+                            {expanded && g.receipts.map((rec) => {
+                              const projName = projects.find(p => p.id === rec.projectId)?.name || 'Văn phòng';
+                              return (
+                                <tr key={rec.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
+                                  <td className="px-3 py-2.5 pl-9 text-slate-500 text-center">—</td>
+                                  <td className="px-3 py-2.5 font-mono font-bold text-emerald-400">{rec.code}</td>
+                                  <td className="px-3 py-2.5">{rec.date}</td>
+                                  <td className="px-3 py-2.5 font-bold text-slate-100 truncate max-w-[200px]">{projName}</td>
+                                  <td className="px-3 py-2.5 text-slate-450 truncate max-w-[220px]">{rec.notes}</td>
+                                  <td className="px-3 py-2.5 text-right font-bold text-emerald-400 font-mono">+{rec.amount.toLocaleString('vi-VN')} đ</td>
+                                  <td className="px-3 py-2.5 text-center">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        onClick={() => {
+                                          const cust = (customers || []).find(c => c.id === rec.customerId);
+                                          const payerName = cust?.name || 'Khách hàng';
+                                          const collectorName = rec.collectorId
+                                            ? ((employeesProp || []).find(e => e.id === rec.collectorId)?.name || rec.collector)
+                                            : rec.collector;
+                                          setPreviewVoucher({
+                                            type: 'receipt',
+                                            data: rec,
+                                            meta: {
+                                              payer: payerName,
+                                              project: projName !== 'Văn phòng' ? projName : undefined,
+                                              collector: collectorName,
+                                              order: rec.salesOrderId,
+                                            },
+                                          });
+                                        }}
+                                        title="Xem chi tiết / In phiếu thu"
+                                        className="p-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-950 rounded-lg transition-colors cursor-pointer"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                      {(rec.source === 'manual' || rec.source === 'import') && (
+                                        <button
+                                          onClick={() => openEditReceipt(rec)}
+                                          title="Sửa phiếu thu"
+                                          className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-950 rounded-lg transition-colors cursor-pointer"
+                                        >
+                                          <Edit className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                      {(rec.source === 'manual' || rec.source === 'import') && (
+                                        <button
+                                          onClick={() => {
+                                            if (window.confirm(`⚠️ Xóa phiếu thu ${rec.code}?\nHành động không thể hoàn tác.`)) {
+                                              if (onDeleteReceipt) onDeleteReceipt(rec.id);
+                                              addToast({ title: '✅ Đã xóa', message: `Đã xóa phiếu thu ${rec.code}.`, type: 'success' });
+                                            }
+                                          }}
+                                          title="Xóa phiếu thu"
+                                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950 rounded-lg transition-colors cursor-pointer"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
 
-                {recSelectedRows.size > 0 && (
-                  <div className="bg-slate-950 px-4 py-2 border-t border-slate-850 flex items-center gap-2 text-[10px]">
-                    <span className="text-emerald-500 font-bold">Đã chọn: {recSelectedRows.size}</span>
-                    <button
-                      onClick={() => {
-                        if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${recSelectedRows.size} phiếu thu đã chọn không?\nHành động này không thể hoàn tác.`)) return;
-                        const idsToDelete = recSelectedRows;
-                        idsToDelete.forEach(id => { if (onDeleteReceipt) onDeleteReceipt(id); });
-                        addToast({ title: '✅ Đã xóa', message: `Đã xóa ${recSelectedRows.size} phiếu thu.`, type: 'success' });
-                        setRecSelectedRows(new Set());
-                      }}
-                      className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3 h-3" /> Xóa
-                    </button>
-                    <button
-                      onClick={() => setRecSelectedRows(new Set())}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors"
-                    >
-                      Hủy chọn
-                    </button>
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <span>Hiển thị</span>
+                    <select value={recPageSize} onChange={(e) => setRecPageSize(Number(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                    <span>chủ đầu tư/trang</span>
                   </div>
-                )}
+                  <div className="flex items-center gap-2">
+                    <span>Trang {recPageInfo.safePage}/{recPageInfo.totalPages} · {receiptGroups.length} chủ đầu tư</span>
+                    <button type="button" disabled={recPageInfo.safePage <= 1} onClick={() => setRecPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                    <button type="button" disabled={recPageInfo.safePage >= recPageInfo.totalPages} onClick={() => setRecPage(p => Math.min(recPageInfo.totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -5439,6 +6176,39 @@ export default function FinanceManagement({
                   </div>
                 )}
 
+                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Từ ngày</label>
+                    <input type="date" value={paymentFilters.fromDate} onChange={(e) => updatePaymentFilter({ fromDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Đến ngày</label>
+                    <input type="date" value={paymentFilters.toDate} onChange={(e) => updatePaymentFilter({ toDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Nhóm gốc chi</label>
+                    <select value={paymentFilters.category} onChange={(e) => updatePaymentFilter({ category: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      <option value="salary_advance">Ứng Lương Nhân Sự</option>
+                      <option value="subcontractor_advance">Tạm ứng Thầu Phụ</option>
+                      <option value="site_expense">Chi tiêu công trình</option>
+                      <option value="salary">Lương Thưởng</option>
+                      <option value="supplier_payment">Thanh Toán Nhà Cung Cấp</option>
+                      <option value="other">Chi tiêu khác</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Trạng thái</label>
+                    <select value={paymentFilters.status} onChange={(e) => updatePaymentFilter({ status: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      <option value="pending">Chờ duyệt</option>
+                      <option value="approved">Đã duyệt</option>
+                      <option value="rejected">Từ chối</option>
+                    </select>
+                  </div>
+                  <button type="button" onClick={() => updatePaymentFilter({ fromDate: '', toDate: '', category: '', status: '' })} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                </div>
+
                 <div className="overflow-x-auto animate-fadeIn">
                   <table className="w-full text-left text-slate-300 text-[10.5px]">
                     <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
@@ -5446,8 +6216,8 @@ export default function FinanceManagement({
                         <th className="w-10 px-3 py-2 text-center">
                           <input
                             type="checkbox"
-                            checked={paySelectedRows.size > 0 && payments.length > 0 && payments.every(p => paySelectedRows.has(p.id))}
-                            onChange={(e) => handlePaySelectAll(e.target.checked, payments)}
+                            checked={paySelectedRows.size > 0 && filteredPayments.length > 0 && filteredPayments.every(p => paySelectedRows.has(p.id))}
+                            onChange={(e) => handlePaySelectAll(e.target.checked, filteredPayments)}
                             className="w-4 h-4 text-rose-500 border-slate-600 rounded cursor-pointer accent-rose-500"
                           />
                         </th>
@@ -5461,11 +6231,11 @@ export default function FinanceManagement({
                       </tr>
                     </thead>
                     <tbody>
-                      {payments.length === 0 ? (
+                      {filteredPayments.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-3 py-8 text-center text-slate-500 italic">Chưa có phiếu chi nào.</td>
+                          <td colSpan={8} className="px-3 py-8 text-center text-slate-500 italic">{payments.length === 0 ? 'Chưa có phiếu chi nào.' : 'Không tìm thấy phiếu chi khớp bộ lọc.'}</td>
                         </tr>
-                      ) : payments.map((p) => {
+                      ) : filteredPayments.map((p) => {
                         return (
                           <tr key={p.id} className={`border-b border-slate-850/80 hover:bg-slate-900/40 font-sans ${paySelectedRows.has(p.id) ? 'bg-rose-500/10' : ''}`}>
                             <td className="px-3 py-2.5 text-center">
@@ -5623,6 +6393,25 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Chủ đầu tư</label>
+                    <select value={receivableFilters.investor} onChange={(e) => updateReceivableFilter({ investor: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      {Array.from(new Set(groupedReceivables.map(g => g.investor))).map(inv => (<option key={inv} value={inv}>{inv}</option>))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Trạng thái</label>
+                    <select value={receivableFilters.status} onChange={(e) => updateReceivableFilter({ status: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      <option value="con_no">Còn phải thu</option>
+                      <option value="da_thu">Đã thu hết</option>
+                    </select>
+                  </div>
+                  <button type="button" onClick={() => updateReceivableFilter({ investor: '', status: '' })} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                </div>
+
                 <div className="overflow-x-auto text-[10.5px]">
                   <table className="w-full text-left text-slate-300">
                     <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
@@ -5631,6 +6420,7 @@ export default function FinanceManagement({
                         <th className="px-3 py-2">Lĩnh vực</th>
                         <th className="px-3 py-2 text-right">Công Nợ Đầu Kỳ</th>
                         <th className="px-3 py-2 text-right">Giá trị HĐ</th>
+                        <th className="px-3 py-2 text-right">Tổng giá trị</th>
                         <th className="px-3 py-2 text-right">Đã Thu/ Tạm Ứng</th>
                         <th className="px-3 py-2 text-right text-orange-400 font-black">Còn phải thu</th>
                         <th className="px-3 py-2">Ghi chú</th>
@@ -5638,14 +6428,14 @@ export default function FinanceManagement({
                       </tr>
                     </thead>
                     <tbody>
-                      {groupedReceivables.length === 0 && (
+                      {filteredReceivables.length === 0 && (
                         <tr>
                           <td colSpan={8} className="text-center py-10 text-slate-500 font-bold font-sans">
-                            📭 Chưa có dữ liệu công nợ phải thu. Hãy import từ Excel hoặc thêm mới.
+                            {groupedReceivables.length === 0 ? '📭 Chưa có dữ liệu công nợ phải thu. Hãy import từ Excel hoặc thêm mới.' : 'Không tìm thấy công nợ phải thu khớp bộ lọc.'}
                           </td>
                         </tr>
                       )}
-                      {groupedReceivables.map((g) => {
+                      {filteredReceivables.map((g) => {
                         const expanded = expandedCustomers.has(g.key);
                         return (
                           <React.Fragment key={g.key}>
@@ -5679,6 +6469,9 @@ export default function FinanceManagement({
                               <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">
                                 {g.tongHopDong.toLocaleString('vi-VN')} đ
                               </td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-violet-300">
+                                {g.tongGiaTri.toLocaleString('vi-VN')} đ
+                              </td>
                               <td className="px-3 py-3 text-right font-mono text-emerald-400 font-bold">+{g.daThu.toLocaleString('vi-VN')} đ</td>
                               <td className="px-3 py-3 text-right font-mono font-black text-orange-500 bg-orange-500/5">
                                 {g.conLai > 0 ? `${g.conLai.toLocaleString('vi-VN')} đ` : '0 đ'}
@@ -5688,17 +6481,7 @@ export default function FinanceManagement({
                               </td>
                               <td className="px-3 py-3">
                                 <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => handleToggleCustomerBasis(g)}
-                                    className={`px-1.5 py-0.5 rounded text-[8.5px] font-extrabold border cursor-pointer transition-colors ${
-                                      g.basis === 'opening'
-                                        ? 'bg-amber-600/20 text-amber-300 border-amber-400/40 hover:bg-amber-600/30'
-                                        : 'bg-slate-700/40 text-slate-300 border-slate-600/40 hover:bg-slate-700/60'
-                                    }`}
-                                    title="Căn cứ tính Còn phải thu: bấm để chuyển giữa Công Nợ Đầu Kỳ (CĐK) và Giá Trị HĐ (HĐ)"
-                                  >
-                                    {g.basis === 'opening' ? 'CĐK' : 'HĐ'}
-                                  </button>
+                                  {/* Đã xóa nút CĐK/HĐ theo yêu cầu */}
                                 </div>
                               </td>
                             </tr>
@@ -5880,6 +6663,27 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Phân Loại</label>
+                    <select value={liabilityFilters.category} onChange={(e) => updateLiabilityFilter({ category: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      <option value="Thầu Phụ">Thầu Phụ</option>
+                      <option value="Nhà Cung Cấp">Nhà Cung Cấp</option>
+                      <option value="Khác">Khác</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Trạng thái</label>
+                    <select value={liabilityFilters.status} onChange={(e) => updateLiabilityFilter({ status: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                      <option value="">Tất cả</option>
+                      <option value="con_no">Còn nợ</option>
+                      <option value="da_thu">Đã tất toán</option>
+                    </select>
+                  </div>
+                  <button type="button" onClick={() => updateLiabilityFilter({ category: '', status: '' })} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                </div>
+
                 <div className="overflow-x-auto text-[10.5px]">
                   <table className="w-full text-left text-slate-300">
                     <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
@@ -5887,8 +6691,8 @@ export default function FinanceManagement({
                         <th className="px-3 py-2.5 w-10 text-center">
                           <input
                             type="checkbox"
-                            checked={finSelectAll && mergedLiabilities.length > 0 && mergedLiabilities.every(l => finSelectedRows.has(l.id))}
-                            onChange={(e) => handleFinSelectAll(e.target.checked, mergedLiabilities)}
+                            checked={finSelectAll && filteredLiabilities.length > 0 && filteredLiabilities.every(l => finSelectedRows.has(l.id))}
+                            onChange={(e) => handleFinSelectAll(e.target.checked, filteredLiabilities)}
                             className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
                           />
                         </th>
@@ -5896,6 +6700,7 @@ export default function FinanceManagement({
                         <th className="px-3 py-2.5">Phân Loại</th>
                         <th className="px-3 py-2.5 text-right">Công Nợ Đầu Kỳ</th>
                         <th className="px-3 py-2.5 text-right">Giá Trị (VNĐ)</th>
+                        <th className="px-3 py-2.5 text-right">Tổng giá trị</th>
                         <th className="px-3 py-2.5 text-right">Đã Trả</th>
                         <th className="px-3 py-2.5 text-right text-rose-400 font-bold">Còn lại</th>
                         <th className="px-3 py-2.5">Ghi chú</th>
@@ -5903,14 +6708,14 @@ export default function FinanceManagement({
                       </tr>
                     </thead>
                     <tbody>
-                      {mergedLiabilities.length === 0 ? (
+                      {filteredLiabilities.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-3 py-8 text-center text-slate-500 italic">
-                            Chưa có dữ liệu công nợ phải trả. Hãy duyệt hợp đồng thầu phụ hoặc thêm mới.
+                          <td colSpan={10} className="px-3 py-8 text-center text-slate-500 italic">
+                            {mergedLiabilities.length === 0 ? 'Chưa có dữ liệu công nợ phải trả. Hãy duyệt hợp đồng thầu phụ hoặc thêm mới.' : 'Không tìm thấy công nợ phải trả khớp bộ lọc.'}
                           </td>
                         </tr>
                       ) : (
-                        mergedLiabilities.map((item) => {
+                        filteredLiabilities.map((item) => {
                           return (
                             <tr key={item.id} className={`border-b border-slate-850/80 hover:bg-slate-900/40 font-sans ${finSelectedRows.has(item.id) ? 'bg-amber-500/10' : ''}`}>
                               {/* Checkbox */}
@@ -5958,6 +6763,9 @@ export default function FinanceManagement({
                               <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">
                                 {item.value.toLocaleString('vi-VN')} đ
                               </td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-violet-300">
+                                {item.tongGiaTri.toLocaleString('vi-VN')} đ
+                              </td>
                               <td className="px-3 py-3 text-right font-mono text-emerald-400">
                                 -{item.paid.toLocaleString('vi-VN')} đ
                               </td>
@@ -5969,17 +6777,7 @@ export default function FinanceManagement({
                               </td>
                               <td className="px-3 py-3">
                                 <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => handleToggleBalanceBasis('liability', item)}
-                                    className={`px-1.5 py-0.5 rounded text-[8.5px] font-extrabold border cursor-pointer transition-colors ${
-                                      (item.balanceBasis || (item.isOpeningDebt ? 'opening' : 'contract')) === 'opening'
-                                        ? 'bg-amber-600/20 text-amber-300 border-amber-400/40 hover:bg-amber-600/30'
-                                        : 'bg-slate-700/40 text-slate-300 border-slate-600/40 hover:bg-slate-700/60'
-                                    }`}
-                                    title="Căn cứ tính Còn lại: bấm để chuyển giữa Công Nợ Đầu Kỳ (CĐK) và Giá Trị (VNĐ) (HĐ)"
-                                  >
-                                    {(item.balanceBasis || (item.isOpeningDebt ? 'opening' : 'contract')) === 'opening' ? 'CĐK' : 'HĐ'}
-                                  </button>
+                                  {/* Đã xóa nút CĐK/HĐ theo yêu cầu */}
                                   {item.remaining > 0 ? (
                                     <button
                                       onClick={() => handleQuickPayProposalGeneric(item.name || '', item.remaining)}
@@ -6904,21 +7702,24 @@ export default function FinanceManagement({
         </div>
       )}
 
-      {/* MODAL: CHI TIẾT ĐƠN HÀNG (tab Đơn Hàng) */}
+      {/* MODAL: CHI TIẾT ĐƠN HÀNG (tab Đơn Hàng) — đồng bộ, cho sửa đơn giá */}
       {poDetailModal.open && poDetailModal.order && (() => {
         const o = poDetailModal.order;
-        const congNo = o.congNo || 0;
-        const paid = o.thanhToanThucTe || 0;
+        const recorded = isPoRecorded(o.id);
+        const st = getPoRowStatus(o);
+        const editing = poEditId === o.id;
+        const displayItems = editing ? poEditItems : (o.items || []);
+        const displayTong = editing ? (poEditItems || []).reduce((s: number, it: any) => s + (Number(it.thanhTien) || 0), 0) : (o.tongTien || 0);
         return (
           <div
-            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
             onClick={() => setPoDetailModal({ open: false, order: null })}
           >
             <div
-              className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+              className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-700 flex justify-between items-center">
+              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ShoppingCart className="w-5 h-5 text-violet-400" />
                   <span className="font-black text-sm text-white uppercase">Chi tiết đơn hàng {o.id}</span>
@@ -6926,34 +7727,59 @@ export default function FinanceManagement({
                 <button
                   type="button"
                   onClick={() => setPoDetailModal({ open: false, order: null })}
-                  className="p-1.5 hover:bg-slate-700 rounded-full text-slate-300 cursor-pointer transition-all"
+                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  ✕
                 </button>
               </div>
-              <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-5 space-y-4 max-h-[85vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
                     <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{o.supplierName || '—'}</div>
                   </div>
                   <div className="space-y-1">
                     <label className="block text-slate-400 font-bold text-[10px] uppercase">Tổng tiền</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-violet-300">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Công nợ</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{congNo > 0 ? `${congNo.toLocaleString('vi-VN')} đ` : '0 đ'}</div>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-violet-300">{displayTong.toLocaleString('vi-VN')} đ</div>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Đã thanh toán</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-emerald-400">{(paid).toLocaleString('vi-VN')} đ</div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
+                  <span className="text-[10px] text-slate-500">Ngày tạo: {(o.createdAt || '').slice(0, 10) || '—'}</span>
+                </div>
+                {recorded && (
+                  <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-2.5 text-amber-300 text-[10px] font-semibold">
+                    Đơn hàng đã ghi nhận vào Công nợ Trả — không thể sửa đơn giá hay xóa.
                   </div>
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Trạng thái</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-200">{poStatusLabel(o.status)}</div>
+                )}
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">
+                    Danh mục vật tư {editing && <span className="text-amber-400 ml-1">(đang sửa đơn giá)</span>}
+                  </label>
+                  <div className="border border-slate-700 rounded-xl divide-y divide-slate-800">
+                    {(displayItems || []).length === 0 ? (
+                      <div className="p-4 text-center text-[11px] text-slate-500">Đơn hàng chưa có vật tư.</div>
+                    ) : (displayItems || []).map((it: any, idx: number) => (
+                      <div key={idx} className="flex items-center gap-2 p-2.5">
+                        <div className="flex-1">
+                          <span className="text-[11px] font-semibold text-slate-200">{poItemName(it)}</span>
+                          <span className="ml-1.5 text-[9px] text-slate-400">{poItemQty(it)} {poItemUnit(it)}</span>
+                        </div>
+                        {editing ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={it.donGia ?? 0}
+                              onChange={(e) => handlePoItemPriceChange(idx, 'donGia', e.target.value)}
+                              className="w-24 bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-[11px] text-slate-100 outline-none focus:border-amber-500 font-mono text-right"
+                            />
+                            <span className="text-[10px] font-mono font-bold text-violet-300 w-20 text-right">{((Number(it.thanhTien) || 0)).toLocaleString('vi-VN')}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] font-mono font-bold text-violet-300">{poItemTotal(it).toLocaleString('vi-VN')} đ</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
                 {o.notes ? (
@@ -6962,37 +7788,62 @@ export default function FinanceManagement({
                     <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 whitespace-pre-line">{o.notes}</div>
                   </div>
                 ) : null}
-                <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Danh mục vật tư</label>
-                  <div className="border border-slate-700 rounded-xl divide-y divide-slate-800">
-                    {(o.items || []).length === 0 ? (
-                      <div className="p-4 text-center text-[11px] text-slate-500">Đơn hàng chưa có vật tư.</div>
-                    ) : (o.items || []).map((it: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between gap-2 p-2.5">
-                        <div className="flex-1">
-                          <span className="text-[11px] font-semibold text-slate-200">{poItemName(it)}</span>
-                          <span className="ml-1.5 text-[9px] text-slate-400">{poItemQty(it)} {poItemUnit(it)}</span>
-                        </div>
-                        <span className="text-[10px] font-mono font-bold text-violet-300">{poItemTotal(it).toLocaleString('vi-VN')} đ</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-700 flex gap-2">
-                {congNo > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => { setPoPaymentAmount(String(congNo)); setPoPaymentNote(''); setPoPaymentModal({ open: true, order: o }); setPoDetailModal({ open: false, order: null }); }}
-                    className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"
-                  >
-                    <Circle className="w-3.5 h-3.5" /> Tạo phiếu chi
-                  </button>
+              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex flex-wrap items-center gap-2">
+                {!recorded && (
+                  editing ? (
+                    <div className="flex flex-1 gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSavePoPrices}
+                        className="flex-1 bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                      >
+                        <Check className="w-3.5 h-3.5" /> Lưu đơn giá
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPoEditId(null); setPoEditItems([]); }}
+                        className="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                      >
+                        Hủy sửa
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openPoPriceEdit(o)}
+                        className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                      >
+                        <Edit className="w-3.5 h-3.5" /> Sửa đơn giá
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPoDetailModal({ open: false, order: null }); handleDeletePoUnrecorded(o.id); }}
+                        className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-extrabold px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Xóa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRecordSupplierDebt(o)}
+                        className="bg-white border border-orange-500 text-orange-500 hover:bg-orange-50 p-2 rounded-xl flex items-center justify-center cursor-pointer transition-all"
+                        title="Ghi nhận công nợ nhà cung cấp"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </>
+                  )
+                )}
+                {recorded && (
+                  <span className="text-[10px] font-semibold text-amber-300 flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Đã ghi nhận Công nợ Trả
+                  </span>
                 )}
                 <button
                   type="button"
                   onClick={() => setPoDetailModal({ open: false, order: null })}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"
+                  className="ml-auto bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold px-4 py-2.5 rounded-xl cursor-pointer transition-all"
                 >
                   Đóng
                 </button>
@@ -7002,41 +7853,40 @@ export default function FinanceManagement({
         );
       })()}
 
-      {/* MODAL: TẠO PHIẾU CHI CHO ĐƠN HÀNG */}
-      {poPaymentModal.open && poPaymentModal.order && (() => {
-        const o = poPaymentModal.order;
-        const congNo = o.congNo || 0;
+      {/* MODAL: TẠO PHIẾU CHI CHO NHÀ CUNG CẤP (từ dòng NCC) */}
+      {poSupplierPay.open && (() => {
+        const remaining = poSupplierPay.max;
         return (
           <div
-            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
-            onClick={() => setPoPaymentModal({ open: false, order: null })}
+            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setPoSupplierPay({ open: false, supplierName: '', max: 0 })}
           >
             <div
-              className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+              className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-700 flex justify-between items-center">
+              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Circle className="w-5 h-5 text-rose-400" />
-                  <span className="font-black text-sm text-white uppercase">Tạo phiếu chi — {o.id}</span>
+                  <span className="font-black text-sm text-white uppercase">Tạo phiếu chi — {poSupplierPay.supplierName}</span>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setPoPaymentModal({ open: false, order: null })}
-                  className="p-1.5 hover:bg-slate-700 rounded-full text-slate-300 cursor-pointer transition-all"
+                  onClick={() => setPoSupplierPay({ open: false, supplierName: '', max: 0 })}
+                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  ✕
                 </button>
               </div>
               <div className="p-5 space-y-4">
                 <div className="space-y-1">
                   <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp (thụ hưởng)</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{o.supplierName || '—'}</div>
+                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{poSupplierPay.supplierName || '—'}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Công nợ còn lại</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{congNo.toLocaleString('vi-VN')} đ</div>
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Còn lại phải trả</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{remaining.toLocaleString('vi-VN')} đ</div>
                   </div>
                   <div className="space-y-1">
                     <label className="block text-slate-400 font-bold text-[10px] uppercase">Ngày lập</label>
@@ -7062,7 +7912,7 @@ export default function FinanceManagement({
                   <select
                     value={poPaymentMethod}
                     onChange={(e) => setPoPaymentMethod(e.target.value as 'cash' | 'transfer')}
-                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full"
+                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full cursor-pointer"
                   >
                     <option value="transfer">Chuyển khoản</option>
                     <option value="cash">Tiền mặt</option>
@@ -7074,23 +7924,23 @@ export default function FinanceManagement({
                     value={poPaymentNote}
                     onChange={(e) => setPoPaymentNote(e.target.value)}
                     rows={2}
-                    placeholder={`Thanh toán đơn hàng ${o.id}`}
+                    placeholder={`Thanh toán nhà cung cấp ${poSupplierPay.supplierName}`}
                     className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full resize-none"
                   />
                 </div>
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-700 flex gap-2">
+              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setPoPaymentModal({ open: false, order: null })}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold py-2.5 rounded-lg cursor-pointer transition-all"
+                  onClick={() => setPoSupplierPay({ open: false, supplierName: '', max: 0 })}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
                 >
                   Hủy
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleCreatePoPayment(o)}
-                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"
+                  onClick={handleCreateSupplierPayment}
+                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
                 >
                   <Circle className="w-3.5 h-3.5" /> Tạo phiếu chi
                 </button>
