@@ -28,6 +28,20 @@
   accountantBaseSalary?: number; // Thêm vào SystemConfig
   staffBaseSalary?: number; // Thêm vào SystemConfig
   constructionSites: string[];
+  companyProfile?: CompanyProfile; // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
+}
+
+// ─── Company Profile (Hồ sơ Thông tin doanh nghiệp) ──────────────────────────
+export interface CompanyProfile {
+  companyName: string;   // Tên doanh nghiệp
+  taxCode: string;       // Mã số thuế (MST)
+  address: string;       // Địa chỉ trụ sở
+  phone: string;         // Điện thoại
+  email: string;         // Email
+  representative: string;// Người đại diện
+  website?: string;      // Website (tùy chọn)
+  bankName?: string;     // Tên ngân hàng (tùy chọn)
+  bankAccount?: string;  // Số tài khoản (tùy chọn)
 }
 
 export interface Employee {
@@ -194,11 +208,15 @@ export interface HrmRoleGroup {
 
 export interface HrmApprovalConfig {
   id: string;
-  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver';
+  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal';
   documentTypeLabel: string;
   approverId: string;
   approverName: string;
   approverPosition?: string;
+  // Người quyết toán (kế toán thực hiện lập phiếu chi / quyết toán) — cấu hình trong Quyền Phê Duyệt
+  settlerId?: string;
+  settlerName?: string;
+  settlerPosition?: string;
   canApprove: boolean;
 }
 
@@ -361,6 +379,7 @@ export interface Payment {
   approver: string;
   status: 'pending' | 'approved' | 'rejected';
   attachmentName?: string;
+  images?: string[]; // Base64 data URLs của sao kê / biên lai đính kèm phiếu chi
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
   purchaseOrderId?: string;  // FK → PurchaseOrder (liên kết phiếu chi thanh toán đơn hàng)
   subcontractorId?: string;  // FK → Thầu Phụ (liên kết thanh toán với Công nợ Trả thầu phụ)
@@ -651,6 +670,8 @@ export interface PurchaseOrder {
   supplierName: string;     // Snapshot tên NCC
   supplierPhone: string;    // Snapshot SĐT
   supplierAddress: string;  // Snapshot địa chỉ
+  projectId?: string;        // FK → Project (để tổng hợp chi phí dự án)
+  projectName?: string;      // Snapshot tên dự án / công trình
   items: PurchaseOrderItem[]; // Chi tiết sản phẩm
   tongTien: number;         // Tổng tiền đơn hàng
   thanhToanThucTe: number;  // Số tiền đã thanh toán
@@ -833,14 +854,19 @@ export interface SubcontractorAdvanceProposal {
   reason: string; // Diễn Giải
   approver: string; // Người Xét Duyệt (Default: "Ban Giám Đốc")
   creator: string; // Người Lập Phiếu (Default: "Kế Toán")
-  status: 'pending_approval' | 'pending_payment' | 'rejected' | 'completed'; // Chờ Duyệt, Chờ Lập Phiếu, Từ Chối, Hoàn Thành
+  status: 'pending_approval' | 'pending_payment' | 'awaiting_voucher_update' | 'rejected' | 'completed'; // Chờ Duyệt, Chờ Lập Phiếu, Cập Nhật Chứng Từ, Từ Chối, Hoàn Thành
   date: string; // YYYY-MM-DD
   proposalDate?: string; // Ngày đề xuất
-  type?: 'subcontractor_advance' | 'project_expense_proposal';
+  type?: 'subcontractor_advance' | 'project_expense_proposal' | 'salary_advance' | 'supplier_payment_proposal';
   creatorName?: string;
   approverName?: string;
   settlerId?: string;
   settlerName?: string;
+  paymentId?: string; // Mã phiếu chi đã lập (sinh khi Người quyết toán lập phiếu thành công)
+  approvedAmount?: number; // Số tiền duyệt chi (người xét duyệt nhập; Người lập phiếu dựa vào đây). Giữ amount làm Số tiền đề xuất tham chiếu lịch sử.
+  rejectedAt?: string; // ISO timestamp lúc bị Từ Chối (dùng để tự động xóa sau 30 ngày trong Thùng rác)
+  payCreatorId?: string;   // Người lập phiếu chi (Kế toán thực hiện "Lập Phiếu") — ghi nhận riêng
+  payCreatorName?: string; // Tên người lập phiếu chi
   expenseItems?: { id: string; item: string; amount: number; note: string }[];
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
 }
@@ -850,6 +876,7 @@ export interface Liability {
   category: 'Thầu Phụ' | 'Nhà Cung Cấp' | 'Khác';
   value: number;
   paid: number;
+  date?: string;           // Ngày phát sinh / ghi nhận công nợ (YYYY-MM-DD) — dùng cho lọc theo ngày
   paidAt?: string;         // Thời gian thanh toán gần nhất (ISO string)
   remaining?: number;
   notes?: string;

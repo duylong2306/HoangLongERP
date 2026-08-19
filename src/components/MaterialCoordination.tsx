@@ -27,13 +27,13 @@ import {
   AlertTriangle,
   Info,
   Share2,
-  Download,
-  Copy,
   Send,
   RefreshCcw,
   Store,
   PackageCheck,
   ShieldCheck,
+  Truck,
+  MapPin,
   Pencil,
   Eye,
 } from 'lucide-react';
@@ -136,12 +136,17 @@ export default function MaterialCoordination({
   // Order edit & share modal state
   const [orderEditModal, setOrderEditModal] = useState<{ open: boolean; order: any | null }>({ open: false, order: null });
   const [orderEditDraft, setOrderEditDraft] = useState<any>(null);
-  const [orderShareModal, setOrderShareModal] = useState<{ open: boolean; order: any | null }>({ open: false, order: null });
-  const [orderDetailModal, setOrderDetailModal] = useState<{ open: boolean; order: any | null }>({ open: false, order: null });
+  const [orderDetailModal, setOrderDetailModal] = useState<{ open: boolean; order: any | null; proposal?: any; project?: any }>({ open: false, order: null });
   const [orderSupplierOpen, setOrderSupplierOpen] = useState(false);
   // Thùng rác: cửa sổ đề xuất bị HỦY + cột đích khi khôi phục
   const [trashOpen, setTrashOpen] = useState(false);
   const [restoreTargets, setRestoreTargets] = useState<Record<string, ProposalStatus>>({});
+  // Nhận hàng từng phần: chọn đơn hàng + modal nhận hàng
+  const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<string | null>(null);
+  const [receiveModal, setReceiveModal] = useState<{ open: boolean; order: any | null; proposal: any | null }>({ open: false, order: null, proposal: null });
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({});
+  // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
+  const [systemConfig, setSystemConfig] = useState<any>(null);
 
   // ─── Phân trang: số trang + số dòng/trang cho từng cột ──────────────────
   const COL_PAGE_SIZES = [5, 10, 15, 20] as const;
@@ -192,6 +197,14 @@ export default function MaterialCoordination({
     loadSuppliers();
   }, [loadProposals, loadOrders, loadSuppliers]);
 
+  // Load hồ sơ doanh nghiệp (company profile) để hiển thị header Đơn Mua Hàng
+  React.useEffect(() => {
+    dbService.shiftConfig.get().then((c: any) => setSystemConfig(c)).catch(() => {});
+    const reloadCfg = () => dbService.shiftConfig.get().then((c: any) => setSystemConfig(c)).catch(() => {});
+    window.addEventListener('hl_system_settings_updated', reloadCfg);
+    return () => window.removeEventListener('hl_system_settings_updated', reloadCfg);
+  }, []);
+
   React.useEffect(() => {
     const reload = () => { loadProposals(); loadOrders(); };
     const reloadSuppliers = () => loadSuppliers();
@@ -234,7 +247,7 @@ export default function MaterialCoordination({
     getDocItems(doc).reduce((s, m) => s + (m.qty || 0) * (m.price || 0), 0);
 
   const quoteTotal = (q: any): number =>
-    (q.items || []).reduce((s, m) => s + (m.totalPrice || 0), 0);
+    (q.items || []).reduce((s: number, m: any) => s + (m.totalPrice || 0), 0);
 
   // Label trạng thái hiển thị cho bất kỳ doc nào (proposal, ProjectDoc cũ, đơn mua PO)
   const statusText = (doc: any): string => {
@@ -270,6 +283,13 @@ export default function MaterialCoordination({
 
   const isCoordinator = canCoordinate(currentUser?.id);
   const isApprover = canApprove(currentUser?.id);
+  // Người khởi tạo đề xuất cũng được thao tác nhận hàng
+  const canActOnOrder = (prop: any) => {
+    if (!currentUser?.id) return true;
+    if (isCoordinator) return true;
+    if (prop.createdBy === currentUser.id) return true;
+    return false;
+  };
 
   // Gửi tin nhắn nhóm chat Dự án
   const sendProjectChat = React.useCallback(async (prop: any, content: string) => {
@@ -488,7 +508,7 @@ export default function MaterialCoordination({
           matchedSup.debt = (matchedSup.debt || 0) + debt;
           await dbService.suppliers.save(matchedSup).catch(() => {});
           // Ghi nhận công nợ vào tab Công nợ Trả (bảng accounting_liabilities)
-          const liabList: any[] = await dbService.accountingLiabilities.list().catch(() => []);
+          const liabList: any[] = await dbService.accountingLiabilities.list().catch((): any[] => []);
           const existing = liabList.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === matchedSup.name);
           if (existing) {
             const newValue = (existing.value || 0) + debt;
@@ -565,8 +585,8 @@ export default function MaterialCoordination({
     const prop = proposals.find(p => p.id === quoteModal.proposalId);
     if (!prop) return;
     const items = prop.items || [];
-    const supplierIds = items.map(it => quoteItemSuppliers[it.id] || '');
-    if (supplierIds.some(id => !id)) { showNotification('Vui lòng chọn Nhà Cung Cấp cho TẤT CẢ sản phẩm!', 'Thiếu NCC', 'warning'); return; }
+    const supplierIds = items.map((it: any) => quoteItemSuppliers[it.id] || '');
+    if (supplierIds.some((id: any) => !id)) { showNotification('Vui lòng chọn Nhà Cung Cấp cho TẤT CẢ sản phẩm!', 'Thiếu NCC', 'warning'); return; }
     // Tránh trùng bộ nhà cung cấp đã có báo giá (bỏ qua chính báo giá đang sửa)
     const key = [...new Set(supplierIds)].sort().join(',');
     const dup = (prop.quotes || []).some((q: any) => {
@@ -582,9 +602,9 @@ export default function MaterialCoordination({
       const price = quotePrices[it.id] ?? it.price ?? 0;
       return { id: it.id, name: it.name, qty: it.qty, unit: it.unit, spec: it.spec, supplierId: sid, supplierName: sup?.name || '', price, totalPrice: price * (it.qty || 0) };
     });
-    const names = [...new Set(qItems.map(q => q.supplierName).filter(Boolean))];
+    const names = [...new Set(qItems.map((q: any) => q.supplierName).filter(Boolean))];
     const supplierName = names.length === 1 ? names[0] : `${names.length} nhà cung cấp`;
-    const primarySid = qItems.find(q => q.supplierId)?.supplierId || '';
+    const primarySid = qItems.find((q: any) => q.supplierId)?.supplierId || '';
     const quotes = editingQuoteId
       ? (prop.quotes || []).map((q: any) => q.id === editingQuoteId
           ? { ...q, supplierId: primarySid, supplierName, items: qItems, updatedAt: new Date().toISOString() }
@@ -635,9 +655,116 @@ export default function MaterialCoordination({
   };
 
   // ─── ORDER: edit / delete / print / share ────────────────────────────────
-  const buildOrderShareText = (o: any) => {
-    const lines = (o.items || []).map((it: any) => `  - ${it.name} × ${it.qty} ${it.unit}: ${((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ`).join('\n');
-    return `ĐƠN HÀNG MUA HÀNG\nMã: ${o.id}\nNCC: ${o.supplierName || ''}\nNgày: ${formatVietnameseDateTime(o.createdAt)}\nTổng: ${(o.tongTien || 0).toLocaleString('vi-VN')} đ\nChi tiết:\n${lines}`;
+  // html2pdf.js (dynamic import) — chỉ load khi cần chia sẻ/in PDF
+  const loadHtml2Pdf = async () => {
+    const mod = await import('html2pdf.js');
+    return (mod as any).default || mod;
+  };
+
+  // Escape HTML để tránh lỗi khi tên/vị trí chứa ký tự đặc biệt
+  const esc = (s: any): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  // Tính toán context (bên mua/nhận/điều phối) cho Đơn Mua Hàng
+  const resolveOrderCtx = (order: any) => {
+    const prop = proposals.find((p: any) => (p.purchaseOrderIds || []).includes(order.id))
+      || orderDetailModal.proposal;
+    const proj = projects.find((pr: any) => pr.id === (prop?.projectId))
+      || orderDetailModal.project;
+    const proposerEmp = employees.find((e: any) => e.id === prop?.createdBy);
+    const coordinatorEmp = employees.find((e: any) => e.id === prop?.coordinatorId);
+    return {
+      companyProfile: systemConfig?.companyProfile || {},
+      projectName: proj?.name || prop?.projectName || '',
+      receiverName: prop?.createdByName || '—',
+      receiverPhone: proposerEmp?.phone || '—',
+      deliveryAddress: proj?.address || '—',
+      coordinatorName: prop?.coordinatorName || '—',
+      coordinatorPhone: coordinatorEmp?.phone || '—',
+    };
+  };
+
+  // Sinh HTML tài liệu Đơn Mua Hàng (dùng chung cho preview / in / chia sẻ PDF)
+  const buildPurchaseOrderHtml = (order: any, ctx: any) => {
+    const cp = ctx.companyProfile || {};
+    const rows = (order.items || []).map((it: any, i: number) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${esc(it.name)}</td>
+        <td style="text-align:center">${it.qty || 0}</td>
+        <td style="text-align:center">${esc(it.unit)}</td>
+        <td>${esc(it.spec || '—')}</td>
+        <td style="text-align:right">${((it.price || 0).toLocaleString('vi-VN'))} đ</td>
+        <td style="text-align:right">${((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</td>
+      </tr>`).join('');
+    const total = order.tongTien || (order.items || []).reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
+    return `<!doctype html><html><head><meta charset="utf-8"><title>DonMuaHang_${esc(order.id)}</title>
+      <style>
+        @page { size: A4; margin: 12mm; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Times New Roman', serif; color:#111; font-size: 12px; margin: 0; padding: 16px 20px; }
+        .head { display:flex; justify-content:space-between; gap:16px; }
+        .buyer b { font-size: 13px; }
+        .buyer div { margin:1px 0; }
+        .title { text-align:center; }
+        .title h1 { font-size: 20px; margin:0 0 2px; letter-spacing:1px; }
+        .title .code { font-weight:bold; }
+        .meta { text-align:right; font-size:11px; }
+        hr { border:none; border-top:1.5px solid #111; margin:10px 0; }
+        table.info { width:100%; border-collapse:collapse; margin:8px 0; }
+        table.info td { vertical-align:top; padding:3px 6px; font-size:11.5px; }
+        table.info .lbl { font-weight:bold; white-space:nowrap; width:120px; }
+        table.items { width:100%; border-collapse:collapse; margin-top:8px; }
+        table.items th, table.items td { border:1px solid #111; padding:5px 6px; font-size:11.5px; }
+        table.items th { background:#eee; }
+        .total { text-align:right; font-weight:bold; font-size:14px; margin-top:8px; }
+        .sign { display:flex; justify-content:space-between; margin-top:40px; text-align:center; font-size:11.5px; }
+        .sign div { width:30%; }
+        .small { font-size:10.5px; color:#444; }
+      </style></head><body>
+      <div class="head">
+        <div class="buyer">
+          <b>${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</b>
+          <div>${esc(cp.taxCode ? 'MST: ' + cp.taxCode : '')}</div>
+          <div>${esc(cp.address ? 'Địa chỉ: ' + cp.address : '')}</div>
+          <div>${esc(cp.phone ? 'ĐT: ' + cp.phone : '')}${esc(cp.email ? ' &nbsp; Email: ' + cp.email : '')}</div>
+          <div>${esc(cp.representative ? 'Người ĐL: ' + cp.representative : '')}</div>
+        </div>
+        <div class="title">
+          <h1>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h1>
+          <div class="small">Độc lập – Tự do – Hạnh phúc</div>
+          <h1 style="margin-top:10px">ĐƠN MUA HÀNG</h1>
+          <div class="code">Mã: ${esc(order.id)}</div>
+          <div class="meta">Ngày: ${esc(formatVietnameseDateTime(order.createdAt))}</div>
+        </div>
+      </div>
+      <hr/>
+      <table class="info">
+        <tr><td class="lbl">Bên mua</td><td>${esc(cp.companyName || '—')}</td>
+            <td class="lbl">Bên bán</td><td>${esc(order.supplierName || '—')}</td></tr>
+        <tr><td class="lbl">Điện thoại</td><td>${esc(cp.phone || '—')}</td>
+            <td class="lbl">Điện thoại</td><td>${esc(order.supplierPhone || '—')}</td></tr>
+        <tr><td class="lbl">Địa chỉ</td><td>${esc(cp.address || '—')}</td>
+            <td class="lbl">Địa chỉ</td><td>${esc(order.supplierAddress || '—')}</td></tr>
+      </table>
+      <table class="info">
+        <tr><td class="lbl">Tên người nhận hàng</td><td>${esc(ctx.receiverName)}</td>
+            <td class="lbl">SĐT người đặt</td><td>${esc(ctx.receiverPhone)}</td></tr>
+        <tr><td class="lbl">Địa chỉ nhận hàng</td><td colspan="3">${esc(ctx.deliveryAddress)}</td></tr>
+        <tr><td class="lbl">Người điều phối</td><td>${esc(ctx.coordinatorName)}</td>
+            <td class="lbl">SĐT điều phối</td><td>${esc(ctx.coordinatorPhone)}</td></tr>
+        <tr><td class="lbl">Dự án</td><td colspan="3">${esc(ctx.projectName)}</td></tr>
+      </table>
+      <table class="items">
+        <thead><tr><th style="width:30px">STT</th><th>Tên sản phẩm</th><th style="width:46px">SL</th><th style="width:46px">ĐVT</th><th>Quy cách</th><th style="width:90px">Đơn giá</th><th style="width:100px">Thành tiền</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="total">TỔNG CỘNG: ${total.toLocaleString('vi-VN')} đ</div>
+      <div class="sign">
+        <div>NGƯỜI LẬP<br/><br/><span class="small">${esc(order.createdBy || '')}</span></div>
+        <div>NGƯỜI ĐIỀU PHỐI<br/><br/><span class="small">${esc(ctx.coordinatorName)}</span></div>
+        <div>ĐẠI DIỆN BÊN BÁN<br/><br/><span class="small">${esc(order.supplierName || '')}</span></div>
+      </div>
+      </body></html>`;
   };
 
   const openOrderEdit = (order: any) => {
@@ -680,59 +807,50 @@ export default function MaterialCoordination({
   const printOrder = (order: any) => {
     const w = window.open('', '_blank');
     if (!w) { showNotification('Vui lòng cho phép mở popup để in đơn hàng.', 'Không thể in', 'warning'); return; }
-    const rows = (order.items || []).map((it: any, i: number) => `
-      <tr>
-        <td>${i + 1}</td>
-        <td>${it.name || ''}</td>
-        <td style="text-align:center">${it.qty || 0}</td>
-        <td style="text-align:center">${it.unit || ''}</td>
-        <td>${it.spec || ''}</td>
-        <td style="text-align:right">${(it.price || 0).toLocaleString('vi-VN')} đ</td>
-        <td style="text-align:right">${((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</td>
-      </tr>`).join('');
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>DonHang_${order.id}</title>
-      <style>
-        body{font-family:'Times New Roman',serif;margin:28px;color:#000;font-size:13px}
-        h2{text-align:center;margin:0 0 4px}
-        .sub{text-align:center;margin-bottom:14px;font-size:11px}
-        table{width:100%;border-collapse:collapse;margin-top:10px}
-        th,td{border:1px solid #000;padding:5px 7px;font-size:12px}
-        th{background:#f0f0f0}
-        .info{margin:10px 0}
-        .total{text-align:right;font-weight:bold;margin-top:10px;font-size:14px}
-      </style></head><body>
-      <h2>ĐƠN HÀNG MUA HÀNG</h2>
-      <div class="sub">Mã đơn: ${order.id}</div>
-      <div class="info">
-        <div><strong>Nhà cung cấp:</strong> ${order.supplierName || ''}</div>
-        <div><strong>Điện thoại:</strong> ${order.supplierPhone || ''} &nbsp; <strong>Địa chỉ:</strong> ${order.supplierAddress || ''}</div>
-        <div><strong>Ngày tạo:</strong> ${formatVietnameseDateTime(order.createdAt)}</div>
-        <div><strong>Ghi chú:</strong> ${order.notes || ''}</div>
-      </div>
-      <table>
-        <thead><tr><th>STT</th><th>Tên sản phẩm</th><th>SL</th><th>ĐVT</th><th>Quy cách</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="total">TỔNG CỘNG: ${(order.tongTien || 0).toLocaleString('vi-VN')} đ</div>
-      <div style="margin-top:40px;display:flex;justify-content:space-between"><span>Người lập</span><span>Người duyệt</span></div>
-      <script>setTimeout(function(){window.print();},300);</script>
-      </body></html>`);
+    const ctx = resolveOrderCtx(order);
+    w.document.write(buildPurchaseOrderHtml(order, ctx));
     w.document.close();
+    // Chờ tài liệu render xong rồi mở hộp thoại in
+    w.focus();
+    setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 400);
   };
 
+  // Chia sẻ trực tiếp file PDF Đơn Mua Hàng (thay vì chỉ chia sẻ link)
   const shareOrder = async (order: any) => {
-    const text = buildOrderShareText(order);
-    const url = `${window.location.origin}/?po=${encodeURIComponent(order.id)}`;
-    const shareData: any = { title: `Đơn hàng ${order.id}`, text: `${text}\n${url}`, url };
-    const nav: any = navigator;
-    if (nav && nav.share) {
-      try { await nav.share(shareData); return; } catch (e) { /* người dùng huỷ */ }
+    const ctx = resolveOrderCtx(order);
+    const html = buildPurchaseOrderHtml(order, ctx);
+    const opt = {
+      margin: 10,
+      filename: `DonMuaHang_${order.id}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    };
+    try {
+      const html2pdf = (await loadHtml2Pdf()) as any;
+      const blob: Blob = await html2pdf().from(html).set(opt).outputPdf('blob');
+      const file = new File([blob], `DonMuaHang_${order.id}.pdf`, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Đơn mua hàng ${order.id}`, text: `Đơn mua hàng ${order.id}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      // Thiết bị không hỗ trợ chia sẻ file → tải PDF về máy để gửi thủ công
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      showNotification('Đã tải file PDF Đơn Mua Hàng về máy để gửi thủ công.', 'Đã tải PDF', 'info');
+    } catch (e) {
+      showNotification('Không thể tạo file PDF để chia sẻ.', 'Lỗi', 'warning');
     }
-    setOrderShareModal({ open: true, order: { ...order, _shareText: text, _shareUrl: url } });
   };
 
   const removeQuote = async (prop: any, quoteId: string) => {
-    await saveProposal({ ...prop, quotes: (prop.quotes || []).filter(q => q.id !== quoteId) });
+    await saveProposal({ ...prop, quotes: (prop.quotes || []).filter((q: any) => q.id !== quoteId) });
   };
 
   const submitForApproval = async (prop: any) => {
@@ -747,7 +865,7 @@ export default function MaterialCoordination({
 
   // ─── CHỜ DUYỆT ───────────────────────────────────────────────────────────
   const handleApprove = async (prop: any) => {
-    const quote = (prop.quotes || []).find(q => q.id === chosenQuoteId);
+    const quote = (prop.quotes || []).find((q: any) => q.id === chosenQuoteId);
     if (!quote) { showNotification('Vui lòng chọn 1 báo giá để duyệt.', 'Chưa chọn báo giá', 'warning'); return; }
     const items = (prop.items || []).map((it: any) => {
       const qi = (quote.items || []).find((x: any) => x.id === it.id);
@@ -831,6 +949,8 @@ export default function MaterialCoordination({
         supplierName: sup?.name || '',
         supplierPhone: sup?.phone || '',
         supplierAddress: sup?.address || '',
+        projectId: prop.projectId || '',
+        projectName: prop.projectName || '',
         items: groupItems.map((it: any) => ({
           id: it.id,
           name: it.name,
@@ -885,62 +1005,57 @@ export default function MaterialCoordination({
     setIsEditing(false);
   };
 
-  const receiveGoods = async (prop: any) => {
-    const items = prop.items || [];
-    const groups: Record<string, { name: string; total: number }> = {};
-    items.forEach((it: any) => {
-      if (it.supplierId) {
-        groups[it.supplierId] = groups[it.supplierId] || { name: it.supplierName || '', total: 0 };
-        groups[it.supplierId].total += (it.qty || 0) * (it.price || 0);
-      }
+  // ─── NHẬN HÀNG TỪNG PHẦN (ĐẶT HÀNG THÀNH CÔNG) ──────────────────────
+  const openReceiveModal = (prop: any, orderId: string) => {
+    const order = purchaseOrders.find((o: any) => o.id === orderId);
+    if (!order) return;
+    const defaults: Record<string, number> = {};
+    (order.items || []).forEach((it: any) => {
+      const remain = it.qty - (it.receivedQty || 0);
+      if (remain > 0) defaults[it.id] = remain;
     });
-    const sups: any[] = await dbService.suppliers.list();
-    const liabs: any[] = await dbService.accountingLiabilities.list().catch(() => []);
-    let debtTotal = 0;
-    for (const [sid, g] of Object.entries(groups)) {
-      const sup = sups.find(s => s.id === sid);
-      if (sup && g.total > 0) {
-        sup.debt = (sup.debt || 0) + g.total;
-        await dbService.suppliers.save(sup).catch(() => {});
-        debtTotal += g.total;
-        const existing = liabs.find(l => l.category === 'Nhà Cung Cấp' && l.name === sup.name);
-        if (existing) {
-          const newValue = (existing.value || 0) + g.total;
-          await dbService.accountingLiabilities.save({
-            ...existing,
-            value: newValue,
-            remaining: newValue - (existing.paid || 0),
-          }).catch(() => {});
-        } else {
-          await dbService.accountingLiabilities.save({
-            id: crypto.randomUUID(),
-            name: sup.name,
-            category: 'Nhà Cung Cấp',
-            value: g.total,
-            paid: 0,
-            remaining: g.total,
-            notes: `Công nợ vật tư — Đề xuất ${prop.code}`,
-          }).catch(() => {});
-        }
-      }
+    setReceiveQuantities(defaults);
+    setReceiveModal({ open: true, order, proposal: prop });
+  };
+
+  const handleReceiveOrder = async () => {
+    const { order, proposal } = receiveModal;
+    if (!order || !proposal) return;
+    const updatedItems = (order.items || []).map((item: any) => {
+      const actualReceive = receiveQuantities[item.id] ?? 0;
+      return {
+        ...item,
+        receivedQty: (item.receivedQty || 0) + actualReceive,
+      };
+    });
+    const allReceived = updatedItems.every((i: any) => (i.receivedQty || 0) >= i.qty);
+    const anyReceived = updatedItems.some((i: any) => (i.receivedQty || 0) > 0);
+    await dbService.purchaseOrders.save({
+      ...order,
+      items: updatedItems,
+      hasPartialReceive: !allReceived && anyReceived,
+    });
+    loadOrders();
+    const allPOsReceived = (proposal.purchaseOrderIds || []).every((oid: string) => {
+      if (oid === order.id) return allReceived;
+      const otherPO = purchaseOrders.find((o: any) => o.id === oid);
+      return otherPO?.items?.every((i: any) => (i.receivedQty || 0) >= i.qty);
+    });
+    if (allPOsReceived) {
+      await saveProposal({ ...proposal, status: 'received' });
+    } else {
+      await saveProposal({ ...proposal });
     }
-    window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
-    // Cập nhật công nợ trên các đơn hàng liên quan
-    const orders = await dbService.purchaseOrders.list();
-    for (const oid of (prop.purchaseOrderIds || [])) {
-      const o = orders.find((ord: any) => ord.id === oid);
-      if (o) {
-        const tong = o.tongTien || 0;
-        const paid = o.thanhToanThucTe || 0;
-        await dbService.purchaseOrders.save({ ...o, congNo: tong - paid }).catch(() => {});
-      }
-    }
-    if (debtTotal > 0) window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
-    await saveProposal({ ...prop, status: 'received', debtRecorded: true });
-    await sendProjectChat(prop, `📦 ĐỀ XUẤT VẬT TƯ ${prop.code} ĐÃ NHẬN HÀNG\nDự án: ${prop.projectName}\nNgười điều phối: ${currentUser?.name || '—'}\nĐã ghi nhận công nợ nhà cung cấp.`);
-    showNotification(`Đã nhận hàng và chuyển sang ĐÃ NHẬN HÀNG.${debtTotal > 0 ? ` Công nợ NCC tăng +${debtTotal.toLocaleString('vi-VN')} đ.` : ''}`, 'Nhận hàng', 'success');
-    setSelectedDocKey(null);
-    setIsEditing(false);
+    await sendProjectChat(proposal, `📦 ĐỀ XUẤT VẬT TƯ ${proposal.code} ĐÃ NHẬN HÀNG${allReceived ? '' : ' MỘT PHẦN'}\nĐơn hàng: ${order.id}\nNhà cung cấp: ${order.supplierName}\nNgười nhận: ${currentUser?.name || '—'}${allReceived ? '\n→ Đã nhận đủ đơn hàng này.' : '\n→ Còn lại hàng chờ nhận tiếp.'}`);
+    showNotification(
+      allReceived ? `Đã nhận đủ đơn hàng ${order.id}.` : `Đã nhận một phần đơn hàng ${order.id}. Số lượng còn lại được giữ lại.`,
+      'Nhận hàng', 'success'
+    );
+    setSelectedOrderForReceive(null);
+    setReceiveModal({ open: false, order: null, proposal: null });
+    setReceiveQuantities({});
+    window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+    window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
   };
 
   // ─── Columns config (5 cột chính — HỦY nằm ở thùng rác) ─────────────────
@@ -1130,7 +1245,8 @@ export default function MaterialCoordination({
                             <div className="flex items-center justify-end text-[9px] text-slate-500 pt-0.5">
                               <span className="font-mono text-slate-400">{formatVietnameseDateTime(item.doc.createdAt)}</span>
                             </div>
-                          </div>
+
+                            </div>
                         );
                       })
                     )}
@@ -1265,7 +1381,7 @@ export default function MaterialCoordination({
 
       {/* DETAIL DRAWER */}
       {selectedDocKey && activeDetail && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => { setSelectedDocKey(null); setIsEditing(false); }}>
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => { setSelectedDocKey(null); setIsEditing(false); setSelectedOrderForReceive(null); }}>
           <div className="w-full max-w-[1536px] bg-white border-l border-slate-200 h-full flex flex-col text-xs text-slate-800 overflow-hidden" onClick={(e) => e.stopPropagation()}>
             {/* Drawer Header */}
             <div className="p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center">
@@ -1297,7 +1413,7 @@ export default function MaterialCoordination({
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => { setSelectedDocKey(null); setIsEditing(false); }}
+                  onClick={() => { setSelectedDocKey(null); setIsEditing(false); setSelectedOrderForReceive(null); }}
                   className="p-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all"
                 >
                   <X className="w-4 h-4" />
@@ -1346,6 +1462,38 @@ export default function MaterialCoordination({
                     )}
                   </div>
                 </div>
+
+                {/* THÔNG TIN GIAO NHẬN & ĐIỀU PHỐI */}
+                {activeDetail.kind === 'proposal' && (() => {
+                  const pd = activeDetail.doc;
+                  const pdProject = activeDetail.project;
+                  const proposerEmp = employees.find((e: any) => e.id === pd.createdBy);
+                  const coordinatorEmp = employees.find((e: any) => e.id === pd.coordinatorId);
+                  const fieldBlock = (label: string, value: any, icon?: any) => (
+                    <div>
+                      <span className="text-slate-500 block font-semibold mb-1">{label}</span>
+                      <div className="bg-slate-50 border border-slate-200 rounded p-1.5 text-[11px] font-semibold flex items-center gap-1.5">
+                        {icon ? <span className="text-teal-600 shrink-0">{icon}</span> : null}
+                        <span className="break-words">{value || '—'}</span>
+                      </div>
+                    </div>
+                  );
+                  return (
+                    <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-4 shadow-xs">
+                      <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                        <Truck className="w-4 h-4" />
+                        Thông tin giao nhận &amp; điều phối
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-slate-700">
+                        {fieldBlock('Tên người nhận hàng (người đề xuất)', pd.createdByName)}
+                        {fieldBlock('SĐT người đặt hàng', proposerEmp?.phone)}
+                        {fieldBlock('Địa chỉ nhận hàng', pdProject?.address, <MapPin className="w-3.5 h-3.5" />)}
+                        {fieldBlock('Thông tin người điều phối', pd.coordinatorName)}
+                        {fieldBlock('SĐT người điều phối', coordinatorEmp?.phone)}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* BẢNG VẬT TƯ */}
                 <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
@@ -1579,37 +1727,107 @@ export default function MaterialCoordination({
                   );
                 })()}
 
-                {/* ── ĐƠN HÀNG ĐÃ TẠO (Sửa / Xóa / In / Chia sẻ) ── */}
+                {/* ── ĐƠN HÀNG ĐÃ TẠO (chọn để nhận hàng) ── */}
                 {activeDetail.kind === 'proposal' && (() => {
                   const prop = activeDetail.doc;
-                  const relatedOrders = purchaseOrders.filter(o => (prop.purchaseOrderIds || []).includes(o.id));
+                  const relatedOrders = purchaseOrders.filter((o: any) => (prop.purchaseOrderIds || []).includes(o.id));
                   if (relatedOrders.length === 0) return null;
+                  const showRadio = prop.status === 'ordered';
                   return (
                     <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
                       <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
                         <FileText className="w-4 h-4" /> Đơn hàng đã tạo ({relatedOrders.length})
                       </span>
                       <div className="space-y-2.5">
-                        {relatedOrders.map(o => (
-                          <div key={o.id} className="border border-slate-200 rounded-xl p-3 bg-teal-50/30">
-                            <div className="flex items-center justify-between gap-2">
-                              <div>
-                                <span className="font-mono font-black text-[11px] text-teal-700">{o.id}</span>
-                                <span className="ml-1.5 text-[10px] text-slate-600">· {o.supplierName}</span>
+                        {relatedOrders.map((o: any) => {
+                          const totalItems = (o.items || []).length;
+                          const receivedItems = (o.items || []).filter((i: any) => (i.receivedQty || 0) > 0).length;
+                          const someReceived = (o.items || []).some((i: any) => (i.receivedQty || 0) > 0);
+                          const allReceived = (o.items || []).every((i: any) => (i.receivedQty || 0) >= i.qty);
+                          return (
+                            <div
+                              key={o.id}
+                              className={`border rounded-xl transition-all ${
+                                allReceived
+                                  ? 'border-emerald-200 bg-emerald-50/40'
+                                  : someReceived
+                                  ? 'border-amber-200 bg-amber-50/40'
+                                  : showRadio && selectedOrderForReceive === o.id
+                                  ? 'border-teal-300 bg-teal-50/60 ring-1 ring-teal-300/50'
+                                  : 'border-slate-200 bg-teal-50/30'
+                              }`}
+                            >
+                              {/* Header row */}
+                              <div className={`flex items-center justify-between gap-2 p-3 ${showRadio ? 'pb-2' : ''}`}>
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {showRadio && (
+                                    <div
+                                      className="shrink-0 cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedOrderForReceive(selectedOrderForReceive === o.id ? null : o.id);
+                                      }}
+                                    >
+                                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${
+                                        selectedOrderForReceive === o.id ? 'border-teal-600 bg-teal-600' : 'border-slate-300 bg-white'
+                                      }`}>
+                                        {selectedOrderForReceive === o.id && (
+                                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <span className="font-mono font-black text-[11px] text-teal-700">{o.id}</span>
+                                    <span className="ml-1.5 text-[10px] text-slate-600">· {o.supplierName}</span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {allReceived ? (
+                                    <span className="text-[10px] text-emerald-600 font-bold">Da nhan du ({totalItems} muc)</span>
+                                  ) : (
+                                    <span className="font-mono font-black text-[11px] text-slate-800">
+                                      {(o.tongTien || 0).toLocaleString('vi-VN')} đ
+                                      {someReceived && (
+                                        <span className="text-amber-600 font-bold ml-1">· Da nhan {receivedItems}/{totalItems}</span>
+                                      )}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setOrderDetailModal({ open: true, order: o, proposal: prop, project: activeDetail.project })}
+                                    className="bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
+                                  >
+                                    <Eye className="w-3 h-3" /> Xem chi tiết
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-black text-[11px] text-slate-800">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setOrderDetailModal({ open: true, order: o })}
-                                  className="bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
-                                >
-                                  <Eye className="w-3 h-3" /> Xem chi tiết
-                                </button>
-                              </div>
+                              {/* Item summary tags (only for not fully received) */}
+                              {!allReceived && (
+                                <div className="px-3 pb-3 flex flex-wrap gap-1">
+                                  {(o.items || []).map((it: any, idx: number) => {
+                                    const remain = it.qty - (it.receivedQty || 0);
+                                    return (
+                                      <span
+                                        key={it.id || idx}
+                                        className={`inline-block text-[9px] px-1.5 py-0.5 rounded font-medium border ${
+                                          remain <= 0
+                                            ? 'bg-emerald-50 text-emerald-600 border-emerald-200 line-through'
+                                            : (it.receivedQty || 0) > 0
+                                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                                        }`}
+                                      >
+                                        {it.name} ({it.qty}{it.unit ? ' ' + it.unit : ''}
+                                        {(it.receivedQty || 0) > 0 && ` con ${remain}`})
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -1721,21 +1939,26 @@ export default function MaterialCoordination({
                     }
 
                     if (st === 'ordered') {
+                      const hasSelectedOrder = selectedOrderForReceive && (prop.purchaseOrderIds || []).includes(selectedOrderForReceive);
                       return (
                         <div className="space-y-3 pt-1">
                           <span className="font-extrabold text-[11px] text-teal-700 uppercase tracking-wide flex items-center gap-1.5">
                             <PackageCheck className="w-4 h-4" /> ĐẶT HÀNG THÀNH CÔNG
                           </span>
                           <p className="text-[11px] text-slate-600 bg-teal-50 border border-teal-200 rounded-xl p-3">
-                            Đơn hàng đã được đặt. Nhấn <strong>Nhận hàng</strong> khi hàng về để ghi nhận công nợ nhà cung cấp và hoàn tất quy trình. Dùng <strong>Đổi NCC</strong> nếu cần quay lại chọn nhà cung cấp.
+                            Đơn hàng đã được đặt. Chọn một đơn hàng trong mục <strong>Đơn hàng đã tạo</strong> bên trái, nhấn <strong>Nhận hàng</strong> khi hàng về và nhập số lượng thực nhận. Dùng <strong>Đổi NCC</strong> nếu cần quay lại chọn nhà cung cấp.
                           </p>
-                          
-                          {isCoordinator && (
+
+                          {canActOnOrder(prop) && (
                             <div className="flex flex-col gap-2 pt-1">
                               <button
                                 type="button"
-                                onClick={() => receiveGoods(prop)}
-                                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                onClick={() => {
+                                  if (hasSelectedOrder) openReceiveModal(prop, selectedOrderForReceive);
+                                }}
+                                disabled={!hasSelectedOrder}
+                                title={!hasSelectedOrder ? 'Chọn một đơn hàng trong mục Đơn hàng đã tạo bên trái' : ''}
+                                className={`flex-1 ${!hasSelectedOrder ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all`}
                               >
                                 <PackageCheck className="w-4 h-4" /> Nhận hàng
                               </button>
@@ -1764,7 +1987,7 @@ export default function MaterialCoordination({
                         <div className="space-y-3 pt-1">
                           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
                             <span className="text-[11.5px] font-black text-emerald-700 uppercase tracking-wide">🎉 ĐÃ NHẬN HÀNG HOÀN TẤT</span>
-                            <p className="text-[10px] text-emerald-600 mt-1">Công nợ nhà cung cấp đã được ghi nhận vào tab Công nợ Trả.</p>
+                            <p className="text-[10px] text-emerald-600 mt-1">Tất cả đơn hàng trong đề xuất đã được nhận đủ.</p>
                           </div>
                         </div>
                       );
@@ -2060,96 +2283,39 @@ export default function MaterialCoordination({
       </div>
     )}
 
-    {/* ORDER SHARE MODAL */}
-    {orderShareModal.open && orderShareModal.order && (() => {
-      const sh: any = orderShareModal.order;
-      const text = sh._shareText || '';
-      const url = sh._shareUrl || window.location.href;
-      const copy = async () => {
-        try { await navigator.clipboard.writeText(`${text}\n${url}`); showNotification('Đã sao chép nội dung chia sẻ.', 'Sao chép', 'success'); }
-        catch (e) { showNotification('Không thể sao chép nội dung.', 'Lỗi', 'warning'); }
-      };
-      return (
-        <div className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderShareModal({ open: false, order: null })}>
-          <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Share2 className="w-5 h-5 text-violet-600" />
-                <span className="font-black text-sm text-slate-900 uppercase">Chia sẻ đơn hàng {sh.id}</span>
-              </div>
-              <button type="button" onClick={() => setOrderShareModal({ open: false, order: null })} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-5 space-y-3">
-              <p className="text-[11px] text-slate-600 whitespace-pre-line bg-slate-50 border border-slate-200 rounded-lg p-3 max-h-40 overflow-y-auto">{text}</p>
-              <div className="grid grid-cols-1 gap-2">
-                <button type="button" onClick={copy} className="w-full bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Copy className="w-4 h-4" /> Sao chép nội dung</button>
-                <a href="https://zalo.me/" target="_blank" rel="noopener noreferrer" onClick={copy} className="w-full bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Share2 className="w-4 h-4" /> Mở Zalo &amp; dán</a>
-                <a href={`mailto:?subject=${encodeURIComponent('Đơn hàng ' + sh.id)}&body=${encodeURIComponent(text + '\n' + url)}`} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Send className="w-4 h-4" /> Gửi Email</a>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    })()}
-
     {/* ORDER DETAIL MODAL */}
     {orderDetailModal.open && orderDetailModal.order && (() => {
       const od: any = orderDetailModal.order;
-      const odItems: any[] = od.items || [];
-      const odTotal = od.tongTien || odItems.reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
+      const odCtx = resolveOrderCtx(od);
+      const odHtml = buildPurchaseOrderHtml(od, odCtx);
+      const canDelete = isCoordinator && !(orderDetailModal.proposal?.status === 'received');
       return (
-        <div className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderDetailModal({ open: false, order: null })}>
-          <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-teal-600" />
-                <span className="font-black text-sm text-slate-900 uppercase">Chi tiết đơn hàng {od.id}</span>
+        <div className="fixed inset-0 z-[9700] flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderDetailModal({ open: false, order: null })}>
+          <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[94vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-5 h-5 text-teal-600 shrink-0" />
+                <span className="font-black text-sm text-slate-900 uppercase truncate">Đơn Mua Hàng {od.id}</span>
               </div>
-              <button type="button" onClick={() => setOrderDetailModal({ open: false, order: null })} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all"><X className="w-5 h-5" /></button>
+              <button type="button" onClick={() => setOrderDetailModal({ open: false, order: null })} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all shrink-0"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-slate-500 font-bold text-[10px] uppercase">Nhà cung cấp</label>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-800">{od.supplierName || '—'}</div>
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-slate-500 font-bold text-[10px] uppercase">Tổng tiền</label>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-black text-teal-700">{odTotal.toLocaleString('vi-VN')} đ</div>
-                </div>
-              </div>
-              {od.notes ? (
-                <div className="space-y-1">
-                  <label className="block text-slate-500 font-bold text-[10px] uppercase">Ghi chú</label>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-700 whitespace-pre-line">{od.notes}</div>
-                </div>
-              ) : null}
-              <div className="space-y-1">
-                <label className="block text-slate-500 font-bold text-[10px] uppercase">Danh mục vật tư</label>
-                <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
-                  {odItems.length === 0 ? (
-                    <div className="p-4 text-center text-[11px] text-slate-500">Đơn hàng chưa có vật tư.</div>
-                  ) : odItems.map((it: any, idx: number) => (
-                    <div key={it.id || idx} className="flex items-center justify-between gap-2 p-2.5">
-                      <div className="flex-1">
-                        <span className="text-[11px] font-semibold text-slate-700">{it.name}</span>
-                        <span className="ml-1.5 text-[9px] text-slate-400">{it.qty} {it.unit}</span>
-                      </div>
-                      <span className="text-[10px] font-mono font-bold text-teal-600">{((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* Xem trước PDF Đơn Mua Hàng */}
+            <div className="flex-1 overflow-auto bg-slate-300 p-2 sm:p-4" style={{ maxHeight: 'calc(94vh - 120px)' }}>
+              <iframe
+                title={`DonMuaHang_${od.id}`}
+                srcDoc={odHtml}
+                className="w-full bg-white shadow-xl mx-auto block"
+                style={{ height: '100%', minHeight: '70vh', border: 'none' }}
+              />
             </div>
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2">
-              {isCoordinator && !(activeDetail?.kind === 'proposal' && (activeDetail.doc.status === 'ordered' || activeDetail.doc.status === 'received')) && (
-                <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); openOrderEdit(od); }} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Pencil className="w-3.5 h-3.5" /> Sửa</button>
+            <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-3 gap-2">
+              {canDelete ? (
+                <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Trash2 className="w-4 h-4" /> Xóa</button>
+              ) : (
+                <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-not-allowed"><Trash2 className="w-4 h-4" /> Xóa</button>
               )}
-              {isCoordinator && !(activeDetail?.kind === 'proposal' && activeDetail.doc.status === 'received') && (
-                <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
-              )}
-              <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] font-bold py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-3.5" /> In</button>
-              <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-3.5" /> Chia sẻ</button>
+              <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Printer className="w-4 h-4" /> In</button>
+              <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Share2 className="w-4 h-4" /> Chia sẻ</button>
             </div>
           </div>
         </div>
@@ -2190,7 +2356,7 @@ export default function MaterialCoordination({
               </div>
               {names.length > 1 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {names.map((n: string, i: number) => (
+                  {names.map((n: any, i: number) => (
                     <span key={i} className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">{n}</span>
                   ))}
                 </div>
@@ -2224,6 +2390,135 @@ export default function MaterialCoordination({
               <div className="flex justify-between items-center bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
                 <span className="text-[10.5px] font-bold text-slate-600 uppercase">Tổng cộng</span>
                 <span className="font-black text-teal-600">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
+    {/* RECEIVE ORDER MODAL — Nhận hàng từng phần */}
+    {receiveModal.open && receiveModal.order && (() => {
+      const order = receiveModal.order;
+      const prop = receiveModal.proposal;
+      const totalRemain = (order.items || []).reduce((s: number, it: any) => s + Math.max(0, it.qty - (it.receivedQty || 0)), 0);
+      return (
+        <div
+          className="fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in"
+          onClick={() => { setReceiveModal({ open: false, order: null, proposal: null }); setReceiveQuantities({}); }}
+        >
+          <div
+            className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-4 bg-teal-50 border-b border-teal-200 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <PackageCheck className="w-5 h-5 text-teal-600" />
+                <span className="font-black text-sm text-slate-900 uppercase">Nhận hàng</span>
+                <span className="font-mono font-extrabold text-[10px] text-teal-600 bg-white border border-teal-200 px-2 py-0.5 rounded ml-1">{order.id}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setReceiveModal({ open: false, order: null, proposal: null }); setReceiveQuantities({}); }}
+                className="p-1.5 hover:bg-teal-100 rounded-full text-slate-600 cursor-pointer transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-slate-800">🏢 {order.supplierName}</span>
+                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-500">{(order.tongTien || 0).toLocaleString('vi-VN')} đ</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">{formatVietnameseDateTime(order.createdAt)}</span>
+              </div>
+              {order.supplierPhone && (
+                <div className="text-[10px] text-slate-500">📞 {order.supplierPhone}{order.supplierAddress ? ` · ${order.supplierAddress}` : ''}</div>
+              )}
+              {/* Items table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-[10.5px]">
+                  <thead className="bg-slate-100 text-slate-600 font-bold">
+                    <tr>
+                      <th className="p-2 text-center w-10">STT</th>
+                      <th className="p-2 text-left">Tên vật tư</th>
+                      <th className="p-2 text-center w-16">SL đặt</th>
+                      <th className="p-2 text-center w-16">Đã nhận</th>
+                      <th className="p-2 text-center w-24">Nhận lần này</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(order.items || []).length === 0 ? (
+                      <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-[11px]">Đơn hàng không có vật tư.</td></tr>
+                    ) : (
+                      (order.items || []).map((it: any, idx: number) => {
+                        const alreadyReceived = it.receivedQty || 0;
+                        const remain = it.qty - alreadyReceived;
+                        const isDone = remain <= 0;
+                        return (
+                          <tr key={it.id || idx} className={`bg-white ${isDone ? 'opacity-50' : ''}`}>
+                            <td className="p-2 text-center font-mono text-slate-500">{idx + 1}</td>
+                            <td className="p-2">
+                              <div className="font-semibold text-slate-800">{it.name}</div>
+                              {it.spec && <div className="text-[8.5px] text-slate-400 italic">{it.spec}</div>}
+                              {it.unit && <span className="text-[8.5px] text-slate-400">ĐVT: {it.unit}</span>}
+                            </td>
+                            <td className="p-2 text-center font-mono font-bold text-slate-700">{it.qty}</td>
+                            <td className="p-2 text-center font-mono text-emerald-600 font-bold">{alreadyReceived > 0 ? alreadyReceived : '—'}</td>
+                            <td className="p-2 text-center">
+                              {isDone ? (
+                                <span className="text-[9px] text-emerald-600 font-bold">✅ Đã đủ</span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={remain}
+                                  value={receiveQuantities[it.id] ?? remain}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, Math.min(remain, Number(e.target.value) || 0));
+                                    setReceiveQuantities(prev => ({ ...prev, [it.id]: val }));
+                                  }}
+                                  className="w-20 text-center border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-mono font-bold outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30"
+                                />
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {/* Summary */}
+              <div className="flex justify-between items-center bg-teal-50 border border-teal-100 rounded-lg px-3 py-2 text-[11px]">
+                <span className="font-bold text-slate-600">Còn {totalRemain} vật tư chờ nhận</span>
+                <span className="text-slate-400">
+                  Số lượng nhận lần này: {
+                    Object.values(receiveQuantities).reduce((s: number, v) => s + (v as number), 0)
+                  } / {totalRemain}
+                </span>
+              </div>
+              {/* Actions */}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setReceiveModal({ open: false, order: null, proposal: null }); setReceiveQuantities({}); }}
+                  className="px-5 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg cursor-pointer transition-all"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReceiveOrder}
+                  disabled={Object.values(receiveQuantities).every((v) => (v as number) === 0)}
+                  className={`px-5 py-2 ${Object.values(receiveQuantities).every((v) => (v as number) === 0) ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black rounded-lg flex items-center gap-1.5 transition-all`}
+                >
+                  <PackageCheck className="w-4 h-4" /> Nhận hàng
+                </button>
               </div>
             </div>
           </div>

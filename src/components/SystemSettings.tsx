@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Settings, Calendar, Clock, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Save, Settings, Calendar, Clock, Loader2, AlertCircle, CheckCircle, Building2 } from 'lucide-react';
 import { SystemConfig } from '../types';
 import { dbService } from '../lib/dbService';
 
@@ -255,7 +255,46 @@ export default function SystemSettings({ currentConfig, onConfigUpdate, isAdmin 
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-800 flex justify-end">
+        {/* Hồ sơ Thông tin doanh nghiệp — header Đơn Mua Hàng */}
+        <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 md:col-span-1 lg:col-span-3">
+          <h3 className="text-teal-400 font-bold mb-3 flex items-center gap-2">
+            <Building2 className="w-4 h-4" /> Hồ sơ Thông tin doanh nghiệp
+          </h3>
+          {(() => {
+            const cp: any = config.companyProfile || {};
+            const setCp = (field: string, value: string) =>
+              handleChange('companyProfile', { ...cp, [field]: value });
+            const field = (label: string, field: string, placeholder: string, type: string = 'text') => (
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">{label}</label>
+                <input
+                  type={type}
+                  value={(cp[field] as string) || ''}
+                  placeholder={placeholder}
+                  onChange={(e) => setCp(field, e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded px-3 py-2 text-sm focus:border-teal-500 focus:outline-none"
+                />
+              </div>
+            );
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {field('Tên doanh nghiệp', 'companyName', 'CÔNG TY TNHH ...')}
+                {field('Mã số thuế (MST)', 'taxCode', '01 02 03 45 67')}
+                {field('Người đại diện', 'representative', 'Nguyễn Văn A')}
+                {field('Điện thoại', 'phone', '0263 123 456', 'tel')}
+                {field('Email', 'email', 'info@hoanglong.vn', 'email')}
+                {field('Website', 'website', 'https://...')}
+                <div className="md:col-span-2 lg:col-span-3">
+                  {field('Địa chỉ trụ sở', 'address', 'Số nhà, đường, phường, TP...')}
+                </div>
+                {field('Tên ngân hàng', 'bankName', 'Vietcombank - CN ...')}
+                {field('Số tài khoản', 'bankAccount', '1234567890')}
+              </div>
+            );
+          })()}
+        </div>
+
+      <div className="pt-4 border-t border-slate-800 flex justify-end">
           <button
             onClick={handleSave}
             disabled={isLoading || !isAdmin}

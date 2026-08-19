@@ -3595,10 +3595,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onDeleteSalesOrder={handleDeleteSalesOrder}
               onAddPurchaseOrder={handleAddPurchaseOrder}
               onDeletePurchaseOrder={handleDeletePurchaseOrder}
+              tasks={tasks}
               initialSubTab={financeSubTab}
               initialDuLieuTab={financeDuLieuTab}
               initialProposalId={financeInitialProposalId}
               onInitialProposalConsumed={() => setFinanceInitialProposalId(null)}
+              systemConfig={hrmConfig}
             />
           )}
 

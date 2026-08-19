@@ -1641,7 +1641,7 @@ export default function TaskManagement({
                           <p>Thầu phụ: <strong className="text-slate-355">{a.subcontractorName}</strong></p>
                           <p>Người lập: <strong className="text-slate-355">{a.creatorName || 'Kế Toán'}</strong></p>
                           <p className="text-sky-400 font-bold text-[9px] uppercase flex items-center gap-2">
-                            <span>Đề Xuất Thu Chi / Tạm Ứng</span>
+                            <span>Đề Xuất Chi / Tạm Ứng</span>
                             <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
                           </p>
 

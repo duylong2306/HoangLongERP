@@ -79,6 +79,8 @@ export default function RolesTab(props: RolesTabProps) {
     { type: 'leave', label: 'Đơn Xin Nghỉ Phép', group: 'Hồ Sơ Nhân Sự' },
     { type: 'salary_advance', label: 'Tạm Ứng Lương Nhanh', group: 'Hồ Sơ Nhân Sự' },
     { type: 'travel_expense', label: 'Công Tác Phí', group: 'Hồ Sơ Nhân Sự' },
+    { type: 'finance_expense_proposal', label: 'Đề Xuất Chi Phí', group: 'Tài Chính - Kế Toán' },
+    { type: 'finance_advance_proposal', label: 'Tạm Ứng Thầu Phụ', group: 'Tài Chính - Kế Toán' },
   ]), []);
 
   // ─── Draft states cho cơ chế Manual Save (Mỗi tab ≠ nhau) ──────────────
@@ -345,6 +347,28 @@ export default function RolesTab(props: RolesTabProps) {
 
   const getCurrentApprovalPerm = React.useCallback((docType: string): ApprovalPermission | undefined => {
     return draftApprovalConfig.find(p => p.documentType === docType);
+  }, [draftApprovalConfig]);
+
+  const handleChangeSettler = React.useCallback((docType: ApprovalPermission['documentType'], empId: string, empName: string, empPosition?: string) => {
+    const existing = [...draftApprovalConfig];
+    const idx = existing.findIndex(p => p.documentType === docType);
+    if (idx >= 0) {
+      existing[idx] = { ...existing[idx], settlerId: empId, settlerName: empName, settlerPosition: empPosition || '' };
+    } else {
+      existing.push({
+        id: `ap_${docType}`,
+        documentType: docType,
+        documentTypeLabel: docType,
+        approverId: empId,
+        approverName: empName,
+        approverPosition: empPosition || '',
+        settlerId: empId,
+        settlerName: empName,
+        settlerPosition: empPosition || '',
+        canApprove: true
+      });
+    }
+    setDraftApprovalConfig(existing);
   }, [draftApprovalConfig]);
 
   return (
@@ -1234,8 +1258,70 @@ export default function RolesTab(props: RolesTabProps) {
                 </div>
               </div>
 
+              {/* TÀI CHÍNH - KẾ TOÁN */}
+              <div className="border border-slate-800 rounded-xl overflow-hidden">
+                <div className="bg-emerald-500/10 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-emerald-400 uppercase tracking-wider">Tài Chính - Kế Toán</h5>
+                </div>
+                <div className="divide-y divide-slate-850">
+                  {approvalDocumentTypes.filter(t => t.group === 'Tài Chính - Kế Toán').map(t => {
+                    const perm = getCurrentApprovalPerm(t.type);
+                    const enabled = !!perm?.canApprove;
+                    return (
+                      <div key={t.type} className="p-4 bg-slate-950/40 flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
+                          />
+                          <span className="font-bold text-xs text-white">{t.label}</span>
+                        </div>
+                        {enabled && (
+                          <div className="flex flex-col sm:flex-row gap-3 pl-7">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400">Người xét duyệt:</span>
+                              <select
+                                value={perm?.approverId || ''}
+                                onChange={(e) => {
+                                  const emp = employees.find(em => em.id === e.target.value);
+                                  handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                }}
+                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[170px]"
+                              >
+                                <option value="">— Chọn —</option>
+                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400">Người quyết toán:</span>
+                              <select
+                                value={perm?.settlerId || ''}
+                                onChange={(e) => {
+                                  const emp = employees.find(em => em.id === e.target.value);
+                                  handleChangeSettler(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                }}
+                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[170px]"
+                              >
+                                <option value="">— Chọn —</option>
+                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <p className="text-[9.5px] text-slate-500 italic">
-                * Trường "Người Xét Duyệt" trong Lập Đơn Nghỉ Phép & Chi Tiết Nhân Sự và "Người Duyệt" trong Đề Xuất Tạm Ứng Lương Nhân Sự sẽ hiển thị tên người được chỉ định ở đây và không cho phép sửa.
+                * Trường "Người Xét Duyệt" trong Lập Đơn Nghỉ Phép & Chi Tiết Nhân Sự và "Người Duyệt" trong Đề Xuất Tạm Ứng Lương Nhân Sự sẽ hiển thị tên người được chỉ định ở đây và không cho phép sửa. Tại "Trung tâm Lập chi & Đề xuất" (Tài Chính - Kế Toán), "Người xét duyệt" & "Người quyết toán" được đọc từ đây, hiển thị ở dạng chỉ đọc.
               </p>
           </div>
         </div>

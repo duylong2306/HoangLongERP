@@ -1135,7 +1135,8 @@ export const dbService = {
           pmBaseSalary: data.pm_base_salary,
           accountantBaseSalary: data.accountant_base_salary,
           staffBaseSalary: data.staff_base_salary,
-          constructionSites: data.construction_sites
+          constructionSites: data.construction_sites,
+          companyProfile: data.company_profile
         } : null;
       } catch (e) {
         console.warn('Supabase shift_config load error:', e);
@@ -1178,7 +1179,8 @@ export const dbService = {
           pm_base_salary: config.pmBaseSalary,
           accountant_base_salary: config.accountantBaseSalary,
           staff_base_salary: config.staffBaseSalary,
-          construction_sites: config.constructionSites
+          construction_sites: config.constructionSites,
+          company_profile: config.companyProfile
         });
         if (error) console.warn('Supabase shift_config save error:', error.message);
       } catch (e) {

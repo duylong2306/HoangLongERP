@@ -494,6 +494,19 @@ export function getConfiguredApprover(documentType: ApprovalPermission['document
 }
 
 /**
+ * Lấy người quyết toán (kế toán lập phiếu chi) được cấu hình trong Quyền Phê Duyệt
+ * theo loại hồ sơ (toàn cục). Dùng cho Đề Xuất Chi Phí & Tạm Ứng Thầu Phụ.
+ */
+export function getConfiguredSettler(documentType: ApprovalPermission['documentType']): { name: string; id: string; position?: string } | null {
+  const configs = loadApprovalConfig();
+  const match = configs.find(p => p.documentType === documentType && p.canApprove);
+  if (match && match.settlerId) {
+    return { name: match.settlerName || '', id: match.settlerId, position: match.settlerPosition };
+  }
+  return null;
+}
+
+/**
  * Lấy người điều phối vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_coordinator')
  */
 export function getMaterialCoordinator(): { name: string; id: string; position?: string } | null {

@@ -2062,7 +2062,7 @@ export default function DashboardOverview({
     setAdvanceApproverId('');
     setAdvanceModalOpen(false);
 
-    alert(`💰 Đã gửi Đề Xuất Tạm Ứng Lương thành công!\nMã đề xuất: ${proposalId}\nSố tiền: ${amount.toLocaleString('vi-VN')} đ\nNgười xét duyệt: ${finalApproverName}\nTrạng thái: Chờ duyệt\n\nNgười xét duyệt sẽ thấy đề xuất trong "Đề Xuất Thu Chi" và thực hiện duyệt để tạo Phiếu Chi Ứng Lương.`);
+    alert(`💰 Đã gửi Đề Xuất Tạm Ứng Lương thành công!\nMã đề xuất: ${proposalId}\nSố tiền: ${amount.toLocaleString('vi-VN')} đ\nNgười xét duyệt: ${finalApproverName}\nTrạng thái: Chờ duyệt\n\nNgười xét duyệt sẽ thấy đề xuất trong "Đề Xuất Chi" và thực hiện duyệt để tạo Phiếu Chi Ứng Lương.`);
   };
 
   // Calc aggregated values for current employee

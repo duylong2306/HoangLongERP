@@ -153,7 +153,8 @@ create table if not exists public.payments (
   approver        text,
   status          text,                        -- pending|approved|rejected
   attachment_name text,
-  approvals       jsonb                        -- ApprovalStep[]
+  approvals       jsonb,                       -- ApprovalStep[]
+  images          text[] default '{}'          -- Base64 data URLs sao kê / biên lai đính kèm phiếu chi
 );
 
 -- -----------------------------------------------------------------------------
@@ -921,6 +922,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
   status text,
   attachment_name text,
   approvals jsonb,
+  images text[] DEFAULT '{}'::text[],
   purchase_order_id text,
   subcontractor_id text,
   related_advance_id text,
@@ -1197,8 +1199,13 @@ CREATE TABLE IF NOT EXISTS public.subcontractor_advances (
   task_id text,
   task_name text,
   amount numeric,
+  approved_amount numeric,
   reason text,
   approver text,
+  rejected_at text,
+  payment_id text,
+  pay_creator_id text,
+  pay_creator_name text,
   creator text,
   status text,
   date text,
@@ -1444,6 +1451,7 @@ CREATE TABLE IF NOT EXISTS public.shift_config (
   allowed_late_minutes integer DEFAULT 15,
   allowed_late_count integer DEFAULT 3,
   weekend_days integer[] DEFAULT '{0}'::integer[],
+  company_profile jsonb,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT shift_config_pkey PRIMARY KEY (id)
@@ -1504,7 +1512,7 @@ CREATE TABLE IF NOT EXISTS public.accounting_sub_contracts (
   CONSTRAINT accounting_sub_contracts_pkey PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public.accounting_liabilities (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  id text NOT NULL,
   name text,
   category text,
   value numeric,
