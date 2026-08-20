@@ -36,6 +36,9 @@ import {
   MapPin,
   Pencil,
   Eye,
+  PanelRightOpen,
+  PanelRightClose,
+  Zap,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 
@@ -153,6 +156,14 @@ export default function MaterialCoordination({
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({});
   // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
   const [systemConfig, setSystemConfig] = useState<any>(null);
+  // Mobile: toggle right tools pane trong detail drawer
+  const [showRightPane, setShowRightPane] = useState(false);
+  // Quick proposal modal state
+  const [quickPropModal, setQuickPropModal] = useState(false);
+  const [quickPropProject, setQuickPropProject] = useState('');
+  const [quickPropTask, setQuickPropTask] = useState('');
+  const [quickPropItems, setQuickPropItems] = useState<any[]>([]);
+  const [quickPropNotes, setQuickPropNotes] = useState('');
 
   // ─── Phân trang: số trang + số dòng/trang cho từng cột ──────────────────
   const COL_PAGE_SIZES = [5, 10, 15, 20] as const;
@@ -429,6 +440,90 @@ export default function MaterialCoordination({
     const timer = setInterval(() => { cleanupCancelledProposals(); }, 60 * 60 * 1000);
     return () => clearInterval(timer);
   }, [cleanupCancelledProposals]);
+
+  // ─── Quick Proposal: tạo đề xuất vật tư nhanh ─────────────────────────────
+  const addQuickPropItem = () => {
+    setQuickPropItems(prev => [...prev, {
+      id: `item_${Date.now()}_${prev.length}`,
+      name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '',
+    }]);
+  };
+  const updateQuickPropItem = (idx: number, field: string, value: any) => {
+    setQuickPropItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
+  };
+  const removeQuickPropItem = (idx: number) => {
+    setQuickPropItems(prev => prev.filter((_, i) => i !== idx));
+  };
+  const submitQuickProposal = async () => {
+    const proj = projects.find(p => p.id === quickPropProject);
+    if (!proj) { showNotification('Vui lòng chọn dự án.', 'Thiếu dự án', 'warning'); return; }
+    const validItems = quickPropItems.filter(it => it.name.trim());
+    if (validItems.length === 0) { showNotification('Cần ít nhất 1 vật tư có tên.', 'Thiếu vật tư', 'warning'); return; }
+    // Tách nhóm: có mã MUA → waiting_order, chưa có mã → find_supplier
+    const withCode = validItems.filter(it => it.maSanPham);
+    const withoutCode = validItems.filter(it => !it.maSanPham);
+    const now = new Date();
+    const code = `VATTU-${proj.code || proj.name?.slice(0, 6).toUpperCase() || 'DA'}-${now.getFullYear()}`;
+    const creatorId = currentUser?.id || '';
+    const creatorName = currentUser?.name || '—';
+    const buildProposal = (items: any[], status: ProposalStatus, suffix: string) => ({
+      id: `material_prop_${Date.now()}_${suffix || '0'}`,
+      code: `${code}${suffix}`,
+      projectId: proj.id,
+      projectName: proj.name,
+      taskId: quickPropTask || undefined,
+      taskName: quickPropTask ? (proj as any).tasks?.find((t: any) => t.id === quickPropTask)?.name || '' : '',
+      proposalType: 'material',
+      createdBy: creatorId,
+      createdByName: creatorName,
+      status,
+      items: items.map(it => ({
+        id: it.id, name: it.name, qty: it.qty, unit: it.unit, spec: it.spec,
+        price: it.price || 0, totalPrice: (it.price || 0) * (it.qty || 0),
+        note: it.note || '', maSanPham: it.maSanPham || '',
+      })),
+      supplierId: null, supplierName: null, quotes: [], chosenQuoteId: null,
+      purchaseOrderIds: [], debtRecorded: false, notes: quickPropNotes,
+      createdAt: now.toISOString(), updatedAt: now.toISOString(),
+    });
+    try {
+      const created: any[] = [];
+      if (withCode.length) {
+        const p = buildProposal(withCode, 'waiting_order', withCode.length < validItems.length ? '-MUA' : '');
+        await dbService.materialProposals.create(p);
+        created.push(p);
+      }
+      if (withoutCode.length) {
+        const p = buildProposal(withoutCode, 'find_supplier', withoutCode.length < validItems.length ? '-TNCC' : '');
+        await dbService.materialProposals.create(p);
+        created.push(p);
+      }
+      if (created.length === 0) {
+        // fallback: nếu không có item nào pass filter, tạo 1 proposal chung
+        const p = buildProposal(validItems, 'find_supplier', '');
+        await dbService.materialProposals.create(p);
+        created.push(p);
+      }
+      window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
+      // Gửi chat nhóm dự án
+      try {
+        await ensureProjectChatGroup(proj);
+        await sendGroupChatMessage({
+          conversationId: `conv_project_${proj.id}`,
+          senderId: creatorId,
+          senderName: creatorName,
+          senderRole: 'pm' as any,
+          content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${proj.name}\n— ${validItems.map(i => `• ${i.name} × ${i.qty} ${i.unit}`).join('\n')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
+          relatedEntity: { type: 'project', id: proj.id } as any,
+        });
+      } catch (e) { /* ignore */ }
+      showNotification(`Đã tạo ${created.length} đề xuất vật tư.`, 'Tạo đề xuất thành công', 'success');
+      setQuickPropModal(false);
+      setQuickPropProject(''); setQuickPropTask(''); setQuickPropItems([]); setQuickPropNotes('');
+    } catch (e) {
+      showNotification('Lỗi khi tạo đề xuất. Vui lòng thử lại.', 'Lỗi', 'warning');
+    }
+  };
 
   // Tính toán bản đề xuất "vừa bước vào" cột `target` — chỉ giữ dữ liệu hợp lệ
   // cho bước đó, xóa sạch dữ liệu của các bước sau (tránh trạng thái lệch).
@@ -802,81 +897,115 @@ export default function MaterialCoordination({
     const cp = ctx.companyProfile || {};
     const rows = (order.items || []).map((it: any, i: number) => `
       <tr>
-        <td>${i + 1}</td>
+        <td style="text-align:center">${i + 1}</td>
         <td>${esc(it.name)}</td>
         <td style="text-align:center">${it.qty || 0}</td>
         <td style="text-align:center">${esc(it.unit)}</td>
         <td>${esc(it.spec || '—')}</td>
-        <td style="text-align:right">${((it.price || 0).toLocaleString('vi-VN'))} đ</td>
-        <td style="text-align:right">${((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</td>
+        <td style="text-align:right;white-space:nowrap">${((it.price || 0).toLocaleString('vi-VN'))} ₫</td>
+        <td style="text-align:right;white-space:nowrap">${((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} ₫</td>
       </tr>`).join('');
     const total = order.tongTien || (order.items || []).reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
-    return `<!doctype html><html><head><meta charset="utf-8"><title>DonMuaHang_${esc(order.id)}</title>
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Đơn Mua Hàng ${esc(order.id)}</title>
       <style>
-        @page { size: A4; margin: 12mm; }
-        * { box-sizing: border-box; }
-        body { font-family: 'Times New Roman', serif; color:#111; font-size: 12px; margin: 0; padding: 16px 20px; }
-        .head { display:flex; justify-content:space-between; gap:16px; }
-        .buyer b { font-size: 13px; }
-        .buyer div { margin:1px 0; }
-        .title { text-align:center; }
-        .title h1 { font-size: 20px; margin:0 0 2px; letter-spacing:1px; }
-        .title .code { font-weight:bold; }
-        .meta { text-align:right; font-size:11px; }
-        hr { border:none; border-top:1.5px solid #111; margin:10px 0; }
-        table.info { width:100%; border-collapse:collapse; margin:8px 0; }
-        table.info td { vertical-align:top; padding:3px 6px; font-size:11.5px; }
-        table.info .lbl { font-weight:bold; white-space:nowrap; width:120px; }
-        table.items { width:100%; border-collapse:collapse; margin-top:8px; }
-        table.items th, table.items td { border:1px solid #111; padding:5px 6px; font-size:11.5px; }
-        table.items th { background:#eee; }
-        .total { text-align:right; font-weight:bold; font-size:14px; margin-top:8px; }
-        .sign { display:flex; justify-content:space-between; margin-top:40px; text-align:center; font-size:11.5px; }
-        .sign div { width:30%; }
-        .small { font-size:10.5px; color:#444; }
+        @page { size: A4; margin: 15mm 18mm; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }
+        .page { padding: 0; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+        .company-info { flex: 1; }
+        .company-info .name { font-size: 14px; font-weight: bold; margin-bottom: 2px; }
+        .company-info .detail { font-size: 10.5px; color: #333; margin: 1px 0; }
+        .center-title { text-align: center; flex: 1.2; }
+        .center-title .country { font-size: 12px; font-weight: bold; letter-spacing: 0.5px; }
+        .center-title .motto { font-size: 10px; font-style: italic; color: #444; }
+        .center-title .divider { width: 60px; height: 1px; background: #111; margin: 4px auto; }
+        .center-title .doc-title { font-size: 18px; font-weight: bold; letter-spacing: 1px; margin-top: 8px; text-transform: uppercase; }
+        .center-title .doc-code { font-size: 11px; font-weight: bold; margin-top: 3px; }
+        .center-title .doc-date { font-size: 10px; color: #555; margin-top: 2px; }
+        hr { border: none; border-top: 1.5px solid #222; margin: 10px 0; }
+        table.info { width: 100%; border-collapse: collapse; margin: 6px 0; }
+        table.info td { vertical-align: top; padding: 3px 8px; font-size: 11px; }
+        table.info .lbl { font-weight: bold; white-space: nowrap; width: 130px; color: #222; }
+        table.info .val { color: #1a1a1a; }
+        table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        table.items th, table.items td { border: 1px solid #222; padding: 5px 7px; font-size: 11px; }
+        table.items th { background: #e8e8e8; font-weight: bold; text-align: center; }
+        table.items td { vertical-align: middle; }
+        .total-row { text-align: right; font-weight: bold; font-size: 13px; margin-top: 8px; padding: 6px 0; }
+        .total-words { font-size: 11px; color: #333; margin: 4px 0 16px; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 40px; text-align: center; font-size: 11px; }
+        .signatures .sig-block { width: 30%; }
+        .signatures .sig-title { font-weight: bold; font-size: 11px; }
+        .signatures .sig-note { font-size: 9.5px; color: #666; font-style: italic; margin-top: 4px; }
+        .signatures .sig-name { font-weight: bold; margin-top: 40px; font-size: 11px; }
       </style></head><body>
-      <div class="head">
-        <div class="buyer">
-          <b>${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</b>
-          <div>${esc(cp.taxCode ? 'MST: ' + cp.taxCode : '')}</div>
-          <div>${esc(cp.address ? 'Địa chỉ: ' + cp.address : '')}</div>
-          <div>${esc(cp.phone ? 'ĐT: ' + cp.phone : '')}${esc(cp.email ? ' &nbsp; Email: ' + cp.email : '')}</div>
-          <div>${esc(cp.representative ? 'Người ĐL: ' + cp.representative : '')}</div>
+      <div class="page">
+        <div class="header">
+          <div class="company-info">
+            <div class="name">${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
+            ${cp.taxCode ? `<div class="detail">MST: ${esc(cp.taxCode)}</div>` : ''}
+            ${cp.address ? `<div class="detail">Địa chỉ: ${esc(cp.address)}</div>` : ''}
+            ${cp.phone ? `<div class="detail">Điện thoại: ${esc(cp.phone)}</div>` : ''}
+            ${cp.email ? `<div class="detail">Email: ${esc(cp.email)}</div>` : ''}
+            ${cp.representative ? `<div class="detail">Người đại diện: ${esc(cp.representative)}</div>` : ''}
+          </div>
+          <div class="center-title">
+            <div class="country">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+            <div class="motto">Độc lập – Tự do – Hạnh phúc</div>
+            <div class="divider"></div>
+            <div class="doc-title">ĐƠN MUA HÀNG</div>
+            <div class="doc-code">Mã: ${esc(order.id)}</div>
+            <div class="doc-date">Ngày: ${esc(formatVietnameseDateTime(order.createdAt))}</div>
+          </div>
         </div>
-        <div class="title">
-          <h1>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h1>
-          <div class="small">Độc lập – Tự do – Hạnh phúc</div>
-          <h1 style="margin-top:10px">ĐƠN MUA HÀNG</h1>
-          <div class="code">Mã: ${esc(order.id)}</div>
-          <div class="meta">Ngày: ${esc(formatVietnameseDateTime(order.createdAt))}</div>
+        <hr/>
+        <table class="info">
+          <tr>
+            <td class="lbl">Bên bán:</td><td class="val">${esc(order.supplierName || '—')}</td>
+          </tr>
+          ${order.supplierPhone ? `<tr><td class="lbl">Điện thoại NCC:</td><td class="val">${esc(order.supplierPhone)}</td></tr>` : ''}
+          ${order.supplierAddress ? `<tr><td class="lbl">Địa chỉ NCC:</td><td class="val">${esc(order.supplierAddress)}</td></tr>` : ''}
+        </table>
+        <table class="info">
+          <tr><td class="lbl">Người nhận hàng:</td><td class="val">${esc(ctx.receiverName)}</td>
+              <td class="lbl">SĐT người đặt:</td><td class="val">${esc(ctx.receiverPhone)}</td></tr>
+          <tr><td class="lbl">Địa chỉ nhận hàng:</td><td class="val" colspan="3">${esc(ctx.deliveryAddress)}</td></tr>
+          <tr><td class="lbl">Người điều phối:</td><td class="val">${esc(ctx.coordinatorName)}</td>
+              <td class="lbl">SĐT điều phối:</td><td class="val">${esc(ctx.coordinatorPhone)}</td></tr>
+          <tr><td class="lbl">Dự án:</td><td class="val" colspan="3">${esc(ctx.projectName)}</td></tr>
+        </table>
+        <table class="items">
+          <thead><tr>
+            <th style="width:32px">STT</th>
+            <th>Tên sản phẩm</th>
+            <th style="width:42px">SL</th>
+            <th style="width:42px">ĐVT</th>
+            <th>Quy cách</th>
+            <th style="width:90px;text-align:right">Đơn giá</th>
+            <th style="width:100px;text-align:right">Thành tiền</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="total-row">TỔNG CỘNG: ${total.toLocaleString('vi-VN')} ₫</div>
+        <div class="total-words">Bằng chữ: ${esc(numberToVietnameseWords(total))}</div>
+        <div class="signatures">
+          <div class="sig-block">
+            <div class="sig-title">NGƯỜI LẬP PHIẾU</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${esc(order.createdByName || order.createdBy || '')}</div>
+          </div>
+          <div class="sig-block">
+            <div class="sig-title">NGƯỜI ĐIỀU PHỐI</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${esc(ctx.coordinatorName)}</div>
+          </div>
+          <div class="sig-block">
+            <div class="sig-title">ĐẠI DIỆN BÊN BÁN</div>
+            <div class="sig-note">(Ký, đóng dấu)</div>
+            <div class="sig-name">${esc(order.supplierName || '')}</div>
+          </div>
         </div>
-      </div>
-      <hr/>
-      <table class="info">
-        <tr><td class="lbl">Bên mua</td><td>${esc(cp.companyName || '—')}</td>
-            <td class="lbl">Bên bán</td><td>${esc(order.supplierName || '—')}</td></tr>
-        <tr><td class="lbl">Điện thoại</td><td>${esc(cp.phone || '—')}</td>
-            <td class="lbl">Điện thoại</td><td>${esc(order.supplierPhone || '—')}</td></tr>
-        <tr><td class="lbl">Địa chỉ</td><td>${esc(cp.address || '—')}</td>
-            <td class="lbl">Địa chỉ</td><td>${esc(order.supplierAddress || '—')}</td></tr>
-      </table>
-      <table class="info">
-        <tr><td class="lbl">Tên người nhận hàng</td><td>${esc(ctx.receiverName)}</td>
-            <td class="lbl">SĐT người đặt</td><td>${esc(ctx.receiverPhone)}</td></tr>
-        <tr><td class="lbl">Địa chỉ nhận hàng</td><td colspan="3">${esc(ctx.deliveryAddress)}</td></tr>
-        <tr><td class="lbl">Người điều phối</td><td>${esc(ctx.coordinatorName)}</td>
-            <td class="lbl">SĐT điều phối</td><td>${esc(ctx.coordinatorPhone)}</td></tr>
-        <tr><td class="lbl">Dự án</td><td colspan="3">${esc(ctx.projectName)}</td></tr>
-      </table>
-      <table class="items">
-        <thead><tr><th style="width:30px">STT</th><th>Tên sản phẩm</th><th style="width:46px">SL</th><th style="width:46px">ĐVT</th><th>Quy cách</th><th style="width:90px">Đơn giá</th><th style="width:100px">Thành tiền</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="total">TỔNG CỘNG: ${total.toLocaleString('vi-VN')} đ</div>
-      <div class="sign">
-        <div>NGƯỜI LẬP<br/><br/><span class="small">${esc(order.createdBy || '')}</span></div>
-        <div>NGƯỜI ĐIỀU PHỐI<br/><br/><span class="small">${esc(ctx.coordinatorName)}</span></div>
-        <div>ĐẠI DIỆN BÊN BÁN<br/><br/><span class="small">${esc(order.supplierName || '')}</span></div>
       </div>
       </body></html>`;
   };
@@ -1231,40 +1360,46 @@ export default function MaterialCoordination({
               <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
                 <Boxes className="w-5 h-5 animate-pulse" />
               </span>
-              <h1 className="text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tight">
+              <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tight">
                 Điều Phối Cung Ứng Vật Tư
               </h1>
             </div>
-            <p className="text-[11px] text-slate-500">Quy trình: TÌM NCC → CHỜ DUYỆT → CHỜ ĐẶT HÀNG → ĐẶT HÀNG THÀNH CÔNG → ĐÃ NHẬN HÀNG (đề xuất HỦY vào Thùng rác — tự xóa sau 30 ngày)</p>
+            <p className="text-[10px] sm:text-[11px] text-slate-500 hidden sm:block">Quy trình: TÌM NCC → CHỜ DUYỆT → CHỜ ĐẶT HÀNG → ĐẶT HÀNG THÀNH CÔNG → ĐÃ NHẬN HÀNG (đề xuất HỦY vào Thùng rác — tự xóa sau 30 ngày)</p>
           </div>
-          <div className="flex flex-col items-end gap-2 shrink-0">
-            <div className="text-[10.5px] font-mono bg-white border border-slate-200 rounded-lg p-2.5 text-slate-600 flex flex-col items-end">
-              <span>Tổng đề xuất: <strong className="text-amber-600">{stats.total}</strong></span>
-              <span>Tài khoản thao tác: <strong className="text-slate-800">{currentUser?.name || 'Hệ thống'}</strong></span>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => { setQuickPropItems([{ id: `item_${Date.now()}_0`, name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '' }]); setQuickPropModal(true); }}
+              className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl px-3 py-2 text-[11px] font-black shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+            >
+              <Zap className="w-4 h-4" /> Tạo Đề Xuất Nhanh
+            </button>
+            <div className="text-[10px] font-mono bg-white border border-slate-200 rounded-lg p-2 text-slate-600 flex flex-col items-end">
+              <span>Tổng: <strong className="text-amber-600">{stats.total}</strong></span>
+              <span className="hidden sm:inline">Tài khoản: <strong className="text-slate-800">{currentUser?.name || 'Hệ thống'}</strong></span>
             </div>
           </div>
         </div>
 
         {/* FILTERS */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row gap-4">
+        <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-3">
           <div className="flex-1 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Tìm theo mã dự án, tên công trình, vật tư..."
+              placeholder="Tìm mã dự án, tên, vật tư..."
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setColPage({}); }}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-slate-400 focus:bg-white transition-all font-sans"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Trạng thái:</span>
+          <div className="flex items-center gap-2 flex-wrap">
             <select
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setColPage({}); }}
-              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 outline-none cursor-pointer focus:border-slate-400 font-sans"
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-[11px] text-slate-700 outline-none cursor-pointer focus:border-slate-400 font-sans font-bold"
             >
-              <option value="all">Tất cả trạng thái</option>
+              <option value="all">Tất cả</option>
               {(Object.keys(STATUS_LABEL) as ProposalStatus[]).filter(s => s !== 'cancelled').map(s => (
                 <option key={s} value={s}>{STATUS_LABEL[s]}</option>
               ))}
@@ -1272,11 +1407,11 @@ export default function MaterialCoordination({
             <button
               type="button"
               onClick={() => { setRestoreTargets({}); setTrashPage(1); setTrashOpen(true); }}
-              className="relative flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all cursor-pointer"
+              className="relative flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-xl px-2.5 py-1.5 text-[11px] font-extrabold transition-all cursor-pointer"
               title="Xem đề xuất đã HỦY"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Hủy</span>
+              <span className="hidden sm:inline">Hủy</span>
               <span className="font-mono font-black text-[10px] bg-white/80 border border-rose-200 rounded-full px-1.5 py-0.5">
                 {cancelledProposals.length}
               </span>
@@ -1285,8 +1420,8 @@ export default function MaterialCoordination({
         </div>
 
         {/* KANBAN BOARD — 5 cột trên 1 hàng */}
-        <div className="w-full overflow-x-auto">
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3 min-w-[1080px]">
+        <div className="w-full overflow-x-auto -mx-2 px-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3" style={{ minWidth: '100%' }}>
             {columns.map(col => {
               const colDocs = filteredDocs.filter(item => resolveStatus(item) === col.id);
               const colSize = getColPageSize(col.id);
@@ -1294,7 +1429,7 @@ export default function MaterialCoordination({
               const colPageClamped = Math.min(getColPage(col.id), colTotal);
               const pagedDocs = colDocs.slice((colPageClamped - 1) * colSize, colPageClamped * colSize);
               return (
-                <div key={col.id} className={`flex flex-col h-[680px] rounded-3xl bg-white/50 border ${col.borderColor} overflow-hidden shadow-2xl relative transition-all duration-300 hover:shadow-xl hover:shadow-slate-100`}>
+                <div key={col.id} className={`flex flex-col h-[400px] sm:h-[540px] lg:h-[680px] rounded-2xl sm:rounded-3xl bg-white/50 border ${col.borderColor} overflow-hidden shadow-lg sm:shadow-2xl relative transition-all duration-300 hover:shadow-xl hover:shadow-slate-100`}>
                   <div className={`p-4 border-b border-slate-200/80 flex items-center justify-between ${col.bgColor}`}>
                     <div className="flex items-center gap-2">
                       <col.icon className={`w-4.5 h-4.5 ${col.textColor}`} />
@@ -1495,20 +1630,20 @@ export default function MaterialCoordination({
 
       {/* DETAIL DRAWER */}
       {selectedDocKey && activeDetail && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => { setSelectedDocKey(null); setIsEditing(false); setSelectedOrderForReceive(null); }}>
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => { setSelectedDocKey(null); setIsEditing(false); setSelectedOrderForReceive(null); setShowRightPane(false); }}>
           <div className="w-full max-w-[1536px] bg-white border-l border-slate-200 h-full flex flex-col text-xs text-slate-800 overflow-hidden" onClick={(e) => e.stopPropagation()}>
             {/* Drawer Header */}
-            <div className="p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 bg-teal-500 rounded-lg flex items-center justify-center shadow-md shrink-0">
-                  <Boxes className="w-5 h-5 text-white" />
+            <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-teal-500 rounded-lg flex items-center justify-center shadow-md shrink-0">
+                  <Boxes className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                     <span className="font-mono font-extrabold text-[10px] text-teal-600 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
                       {activeDetail.doc.code || 'MAT-NEW'}
                     </span>
-                    <span className={`font-bold text-[9.5px] uppercase tracking-wider px-2 py-0.5 rounded ${
+                    <span className={`font-bold text-[9px] sm:text-[9.5px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded ${
                       resolveStatus(activeDetail) === 'cancelled' ? 'bg-rose-100 text-rose-700 border border-rose-200'
                       : resolveStatus(activeDetail) === 'received' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                       : 'bg-teal-100 text-teal-700 border border-teal-200'
@@ -1516,31 +1651,40 @@ export default function MaterialCoordination({
                       {STATUS_LABEL[resolveStatus(activeDetail)]}
                     </span>
                   </div>
-                  <h4 className="font-black text-slate-900 text-base mt-0.5">{activeDetail.project.name}</h4>
-                  <div className="text-slate-500 text-[10px]">
+                  <h4 className="font-black text-slate-900 text-sm sm:text-base mt-0.5 truncate">{activeDetail.project.name}</h4>
+                  <div className="text-slate-500 text-[10px] hidden sm:block">
                     {activeDetail.kind === 'proposal'
                       ? `Người tạo: ${activeDetail.doc.createdByName || ''} · ${formatVietnameseDateTime(activeDetail.doc.createdAt)}`
                       : `Đề xuất cũ (luồng cũ) · ${formatVietnameseDateTime(activeDetail.doc.createdAt)}`}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                {/* Toggle right tools pane — mobile */}
                 <button
                   type="button"
-                  onClick={() => { setSelectedDocKey(null); setIsEditing(false); setSelectedOrderForReceive(null); }}
-                  className="p-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all"
+                  onClick={() => setShowRightPane(v => !v)}
+                  className="lg:hidden p-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 rounded-lg border border-teal-200 cursor-pointer transition-all"
+                  title={showRightPane ? 'Ẩn công cụ' : 'Hiện công cụ'}
+                >
+                  {showRightPane ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSelectedDocKey(null); setIsEditing(false); setSelectedOrderForReceive(null); setShowRightPane(false); }}
+                  className="p-1.5 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all"
                 >
                   <X className="w-4 h-4" />
-                  Đóng
+                  <span className="hidden sm:inline">Đóng</span>
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto flex bg-slate-50" id="drawer_scrollable_body">
+            <div className="flex-1 overflow-y-auto flex flex-col lg:flex-row bg-slate-50" id="drawer_scrollable_body">
               {/* Left pane */}
-              <div className="flex-1 p-5 space-y-5 overflow-y-auto h-full border-r border-slate-200" id="drawer_left_pane">
+              <div className="flex-1 p-3 sm:p-5 space-y-4 sm:space-y-5 overflow-y-auto h-full border-b lg:border-b-0 lg:border-r border-slate-200" id="drawer_left_pane">
                 {/* THÔNG TIN */}
-                <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-4 shadow-xs">
+                <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
                   <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
                     <FileText className="w-4 h-4" />
                     Thông tin đề xuất
@@ -1593,12 +1737,12 @@ export default function MaterialCoordination({
                     </div>
                   );
                   return (
-                    <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-4 shadow-xs">
-                      <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                    <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
                         <Truck className="w-4 h-4" />
                         Thông tin giao nhận &amp; điều phối
                       </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-slate-700">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-slate-700">
                         {fieldBlock('Tên người nhận hàng (người đề xuất)', pd.createdByName)}
                         {fieldBlock('SĐT người đặt hàng', proposerEmp?.phone)}
                         {fieldBlock('Địa chỉ nhận hàng', pdProject?.address, <MapPin className="w-3.5 h-3.5" />)}
@@ -1610,16 +1754,53 @@ export default function MaterialCoordination({
                 })()}
 
                 {/* BẢNG VẬT TƯ */}
-                <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
+                <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
                   <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-1">
-                    <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide">
+                    <span className="font-extrabold text-[11px] sm:text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide">
                       <Boxes className="w-4 h-4" />
-                      Danh mục vật tư đề xuất
+                      Danh mục vật tư
                     </span>
-                    <span className="text-[10.5px] font-black text-teal-600">Tổng: {proposalTotal(activeDetail.doc).toLocaleString('vi-VN')} đ</span>
+                    <span className="text-[10px] sm:text-[10.5px] font-black text-teal-600">Tổng: {proposalTotal(activeDetail.doc).toLocaleString('vi-VN')} ₫</span>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl bg-slate-50/50">
+                  {/* Mobile: card layout */}
+                  <div className="block lg:hidden space-y-2">
+                    {getDocItems(activeDetail.doc).length === 0 ? (
+                      <p className="p-4 text-center text-slate-500 text-[11px] font-medium">Chưa có vật tư.</p>
+                    ) : (
+                      getDocItems(activeDetail.doc).map((m: any, idx: number) => {
+                        const price = m.price || 0;
+                        const total = (m.qty || 0) * price;
+                        return (
+                          <div key={m.id || idx} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/50">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[9px] font-mono font-bold text-slate-400">{idx + 1}.</span>
+                                  <span className="font-semibold text-[11px] text-slate-800 truncate">{m.name}</span>
+                                </div>
+                                {m.maSanPham && (
+                                  <span className="ml-4 text-[8px] text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5 font-bold">Mã: {m.maSanPham}</span>
+                                )}
+                                <div className="flex items-center gap-2 mt-1 ml-4 text-[9px] text-slate-500">
+                                  <span>SL: <strong className="text-teal-600 font-mono">{m.qty}</strong> {m.unit}</span>
+                                  {m.spec && <span className="italic">· {m.spec}</span>}
+                                </div>
+                                {m.supplierName && <div className="ml-4 text-[9px] text-slate-600 font-bold mt-0.5">NCC: {m.supplierName}</div>}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-[10px] font-mono text-slate-500">{price.toLocaleString('vi-VN')} ₫</div>
+                                <div className="text-[11px] font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Desktop: table layout */}
+                  <div className="hidden lg:block overflow-x-auto border border-slate-200 rounded-xl bg-slate-50/50">
                     <table className="w-full text-xs text-left">
                       <thead className="bg-slate-50 text-slate-600 uppercase text-[9px] font-black border-b border-slate-200 sticky top-0">
                         <tr>
@@ -1653,8 +1834,8 @@ export default function MaterialCoordination({
                                 <td className="p-2.5 text-center text-slate-600 font-medium">{m.unit}</td>
                                 <td className="p-2.5 text-slate-500 italic">{m.spec || '—'}</td>
                                 <td className="p-2.5 font-bold">{m.supplierName || '—'}</td>
-                                <td className="p-2.5 text-right font-mono text-slate-600">{price.toLocaleString('vi-VN')} đ</td>
-                                <td className="p-2.5 text-right font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} đ</td>
+                                <td className="p-2.5 text-right font-mono text-slate-600">{price.toLocaleString('vi-VN')} ₫</td>
+                                <td className="p-2.5 text-right font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</td>
                               </tr>
                             );
                           })
@@ -1663,7 +1844,7 @@ export default function MaterialCoordination({
                     </table>
                   </div>
 
-                  
+
                 </div>
 
                 {/* ── BÁO GIÁ NHÀ CUNG CẤP ── */}
@@ -1671,7 +1852,7 @@ export default function MaterialCoordination({
                   const prop = activeDetail.doc;
                   if (prop.status !== 'find_supplier') return null;
                   return (
-                    <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
+                    <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
                       <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                         <span className="font-extrabold text-[11.5px] text-amber-600 flex items-center gap-1.5 uppercase tracking-wide">
                           <Store className="w-4 h-4" /> Báo giá nhà cung cấp ({prop.quotes?.length || 0}/3)
@@ -1737,7 +1918,7 @@ export default function MaterialCoordination({
                   const prop = activeDetail.doc;
                   if (prop.status !== 'waiting_approval') return null;
                   return (
-                    <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
+                    <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
                       <span className="font-extrabold text-[11.5px] text-sky-700 uppercase tracking-wide flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <ShieldCheck className="w-4 h-4" /> Xét duyệt — chọn 1 báo giá
                       </span>
@@ -1813,8 +1994,8 @@ export default function MaterialCoordination({
                   const uniformSid = allSids.length > 0 && allSids.every((s: string) => s === allSids[0]) ? allSids[0] : '';
 
                   return (
-                    <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-4 shadow-xs">
-                      <span className="font-extrabold text-[11.5px] text-violet-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                    <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-violet-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
                         <Layers className="w-4 h-4" /> Gán nhà cung cấp & Tạo đơn hàng
                       </span>
 
@@ -1892,8 +2073,8 @@ export default function MaterialCoordination({
                   if (relatedOrders.length === 0) return null;
                   const showRadio = prop.status === 'ordered';
                   return (
-                    <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
-                      <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                    <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
                         <FileText className="w-4 h-4" /> Đơn hàng đã tạo ({relatedOrders.length})
                       </span>
                       <div className="space-y-2.5">
@@ -1993,8 +2174,12 @@ export default function MaterialCoordination({
 
               </div>
 
-              {/* Right tools pane */}
-              <div className="w-[280px] shrink-0 p-5 bg-slate-50 border-l border-slate-200 space-y-4 h-full overflow-y-auto" id="drawer_right_pane">
+              {/* Right tools pane — hidden on mobile unless toggled */}
+              <div
+                className={`${showRightPane ? 'fixed inset-0 z-[56] bg-black/40 lg:bg-transparent lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:block lg:w-[280px] shrink-0`}
+                onClick={(e) => { if (showRightPane && e.target === e.currentTarget) setShowRightPane(false); }}
+              >
+                <div className={`${showRightPane ? 'absolute right-0 top-0 h-full w-[85vw] max-w-[320px] shadow-2xl' : ''} lg:relative lg:w-full lg:max-w-none lg:shadow-none p-4 sm:p-5 bg-white lg:bg-slate-50 border-l border-slate-200 space-y-4 h-full overflow-y-auto`} id="drawer_right_pane">
                 <span className="font-extrabold text-[10px] text-slate-600 block uppercase tracking-wider mb-1">
                   CÔNG CỤ ĐIỀU PHỐI
                 </span>
@@ -2208,6 +2393,7 @@ export default function MaterialCoordination({
                     💡 <strong>Quy trình:</strong> Sản phẩm có mã Danh mục MUA đi thẳng vào <strong>CHỜ ĐẶT HÀNG</strong>; sản phẩm chưa có mã vào <strong>TÌM NHÀ CUNG CẤP</strong>.
                   </p>
                 </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2374,18 +2560,18 @@ export default function MaterialCoordination({
 
     {/* ORDER EDIT MODAL */}
     {orderEditModal.open && orderEditDraft && (
-      <div className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }}>
-        <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-          <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-indigo-600" />
-              <span className="font-black text-sm text-slate-900 uppercase">Sửa đơn hàng {orderEditDraft.id}</span>
+      <div className="fixed inset-0 z-[9600] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }}>
+        <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileText className="w-5 h-5 text-indigo-600 shrink-0" />
+              <span className="font-black text-xs sm:text-sm text-slate-900 uppercase truncate">Sửa đơn hàng {orderEditDraft.id}</span>
             </div>
-            <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all">
+            <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all shrink-0">
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1 relative">
                 <label className="block text-slate-500 font-bold text-[10px] uppercase">Nhà cung cấp</label>
@@ -2428,12 +2614,16 @@ export default function MaterialCoordination({
             </div>
             <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
               {(orderEditDraft.items || []).map((it: any, idx: number) => (
-                <div key={it.id || idx} className="flex items-center gap-2 p-2.5">
-                  <span className="flex-1 text-[11px] font-semibold text-slate-700">{it.name}</span>
-                  <input type="number" value={it.qty || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, qty: Number(e.target.value) } : x) }))} className="w-16 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-right text-slate-800 outline-none" />
-                  <span className="text-[10px] text-slate-400">{it.unit}</span>
-                  <input type="number" value={it.price || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, price: Number(e.target.value) } : x) }))} className="w-24 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-right text-slate-800 outline-none" />
-                  <span className="text-[10px] font-mono font-bold text-teal-600 w-24 text-right">{((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</span>
+                <div key={it.id || idx} className="p-2.5 space-y-1.5 sm:space-y-0 sm:flex sm:items-center sm:gap-2">
+                  <span className="flex-1 text-[11px] font-semibold text-slate-700 block sm:inline">{it.name}</span>
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
+                    <div className="flex items-center gap-1">
+                      <input type="number" value={it.qty || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, qty: Number(e.target.value) } : x) }))} className="w-14 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none" />
+                      <span className="text-[9px] text-slate-400">{it.unit}</span>
+                    </div>
+                    <input type="number" value={it.price || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, price: Number(e.target.value) } : x) }))} className="w-20 sm:w-24 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none" />
+                    <span className="text-[10px] font-mono font-bold text-teal-600 min-w-[80px] text-right">{((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} ₫</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2457,32 +2647,32 @@ export default function MaterialCoordination({
       const odHtml = buildPurchaseOrderHtml(od, odCtx);
       const canDelete = isCoordinator && !(orderDetailModal.proposal?.status === 'received');
       return (
-        <div className="fixed inset-0 z-[9700] flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderDetailModal({ open: false, order: null })}>
-          <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[94vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[9700] flex items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderDetailModal({ open: false, order: null })}>
+          <div className="w-full max-w-3xl bg-white sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[94vh]" onClick={(e) => e.stopPropagation()}>
             <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <FileText className="w-5 h-5 text-teal-600 shrink-0" />
-                <span className="font-black text-sm text-slate-900 uppercase truncate">Đơn Mua Hàng {od.id}</span>
+                <span className="font-black text-xs sm:text-sm text-slate-900 uppercase truncate">Đơn Hàng {od.id}</span>
               </div>
               <button type="button" onClick={() => setOrderDetailModal({ open: false, order: null })} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all shrink-0"><X className="w-5 h-5" /></button>
             </div>
             {/* Xem trước PDF Đơn Mua Hàng */}
-            <div className="flex-1 overflow-auto bg-slate-300 p-2 sm:p-4" style={{ maxHeight: 'calc(94vh - 120px)' }}>
+            <div className="flex-1 overflow-auto bg-slate-300 p-2 sm:p-4" style={{ maxHeight: 'calc(100vh - 140px)' }}>
               <iframe
                 title={`DonMuaHang_${od.id}`}
                 srcDoc={odHtml}
                 className="w-full bg-white shadow-xl mx-auto block"
-                style={{ height: '100%', minHeight: '70vh', border: 'none' }}
+                style={{ height: '100%', minHeight: '50vh', border: 'none' }}
               />
             </div>
-            <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-3 gap-2">
+            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-3 gap-1.5 sm:gap-2">
               {canDelete ? (
-                <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Trash2 className="w-4 h-4" /> Xóa</button>
+                <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               ) : (
-                <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-not-allowed"><Trash2 className="w-4 h-4" /> Xóa</button>
+                <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               )}
-              <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Printer className="w-4 h-4" /> In</button>
-              <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] sm:text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"><Share2 className="w-4 h-4" /> Chia sẻ</button>
+              <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
+              <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
             </div>
           </div>
         </div>
@@ -2571,11 +2761,11 @@ export default function MaterialCoordination({
       const totalRemain = (order.items || []).reduce((s: number, it: any) => s + Math.max(0, it.qty - (it.receivedQty || 0)), 0);
       return (
         <div
-          className="fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in"
+          className="fixed inset-0 z-[9500] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in"
           onClick={() => { setReceiveModal({ open: false, order: null, proposal: null }); setReceiveQuantities({}); }}
         >
           <div
-            className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+            className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -2594,7 +2784,7 @@ export default function MaterialCoordination({
               </button>
             </div>
             {/* Body */}
-            <div className="p-5 space-y-4">
+            <div className="p-3 sm:p-5 space-y-3 sm:space-y-4 overflow-y-auto flex-1">
               <div className="flex items-center justify-between text-[11px]">
                 <div className="flex items-center gap-2">
                   <span className="font-black text-slate-800">🏢 {order.supplierName}</span>
@@ -2692,6 +2882,136 @@ export default function MaterialCoordination({
         </div>
       );
     })()}
+
+    {/* QUICK PROPOSAL MODAL — Tạo đề xuất vật tư nhanh */}
+    {quickPropModal && (
+      <div
+        className="fixed inset-0 z-[9800] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in"
+        onClick={() => setQuickPropModal(false)}
+      >
+        <div
+          className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-4 bg-gradient-to-r from-amber-500 to-orange-500 flex justify-between items-center shrink-0">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-white" />
+              <span className="font-black text-sm text-white uppercase">Tạo Đề Xuất Vật Tư Nhanh</span>
+            </div>
+            <button type="button" onClick={() => setQuickPropModal(false)} className="p-1.5 hover:bg-white/20 rounded-full text-white cursor-pointer transition-all">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
+            {/* Dự án + Công việc */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="block text-slate-500 font-bold text-[10px] uppercase">Dự án *</label>
+                <SearchableSelect
+                  options={projects.map(p => ({ id: p.id, label: `${p.code ? p.code + ' — ' : ''}${p.name}` }))}
+                  value={quickPropProject}
+                  onChange={setQuickPropProject}
+                  placeholder="-- Chọn dự án --"
+                  searchPlaceholder="🔍 Tìm dự án..."
+                  className="w-full"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-slate-500 font-bold text-[10px] uppercase">Ghi chú</label>
+                <input
+                  value={quickPropNotes}
+                  onChange={(e) => setQuickPropNotes(e.target.value)}
+                  placeholder="Ghi chú cho đề xuất..."
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* Danh mục vật tư */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-[11px] text-slate-700">Danh mục vật tư ({quickPropItems.length})</span>
+                <button
+                  type="button"
+                  onClick={addQuickPropItem}
+                  className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:text-amber-700 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" /> Thêm vật tư
+                </button>
+              </div>
+              {quickPropItems.length === 0 && (
+                <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-dashed border-slate-300 rounded-lg p-3 text-center">
+                  Nhấn "Thêm vật tư" để bắt đầu.
+                </p>
+              )}
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[34vh] overflow-y-auto">
+                {quickPropItems.map((it, idx) => (
+                  <div key={it.id} className="p-2.5 space-y-2 bg-white">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono font-bold text-slate-400 w-5 text-center shrink-0">{idx + 1}</span>
+                      <input
+                        value={it.name}
+                        onChange={(e) => updateQuickPropItem(idx, 'name', e.target.value)}
+                        placeholder="Tên vật tư *"
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-amber-400"
+                      />
+                      <button type="button" onClick={() => removeQuickPropItem(idx)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer shrink-0">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 pl-7">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number" min={1}
+                          value={it.qty}
+                          onChange={(e) => updateQuickPropItem(idx, 'qty', Math.max(1, Number(e.target.value) || 1))}
+                          className="w-14 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-amber-400"
+                        />
+                        <input
+                          value={it.unit}
+                          onChange={(e) => updateQuickPropItem(idx, 'unit', e.target.value)}
+                          className="w-12 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-amber-400"
+                          placeholder="ĐVT"
+                        />
+                      </div>
+                      <input
+                        value={it.spec || ''}
+                        onChange={(e) => updateQuickPropItem(idx, 'spec', e.target.value)}
+                        placeholder="Quy cách"
+                        className="flex-1 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-amber-400"
+                      />
+                      <input
+                        value={(it as any).maSanPham || ''}
+                        onChange={(e) => updateQuickPropItem(idx, 'maSanPham', e.target.value)}
+                        placeholder="Mã MUA"
+                        className="w-20 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-amber-400 font-mono"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Footer */}
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setQuickPropModal(false)}
+              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-lg cursor-pointer transition-all text-xs"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={submitQuickProposal}
+              className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all text-xs shadow-md shadow-amber-500/20"
+            >
+              <Zap className="w-4 h-4" /> Tạo đề xuất
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* QUOTE MODAL — Thêm báo giá nhà cung cấp */}
     {quoteModal.open && (
