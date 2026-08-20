@@ -202,23 +202,30 @@ export const getColumnStyleDetails = (colorClass: string): ColumnStyleDetails =>
  * otherwise falls back to a status/progress heuristic.
  */
 export const getProjectColumnId = (project: Project, columns: KanbanColumn[]): string => {
+  const has = (id: string) => columns.some(c => c.id === id);
+  // Tìm cột theo statusSet (quy trình tự động gán trạng thái)
+  const colWithStatus = (status: string) => columns.find(c => c.automation?.statusSet === status)?.id;
+
   const kanbanColumnId = (project as any).kanbanColumnId as string | undefined;
   if (kanbanColumnId) {
-    if (columns.some(c => c.id === kanbanColumnId)) {
-      return kanbanColumnId;
-    }
+    if (has(kanbanColumnId)) return kanbanColumnId;
+    // kanbanColumnId cũ không còn tồn tại (cột đã bị xóa/đổi tên) → bỏ qua,
+    // fallback xuống logic bên dưới để tìm cột phù hợp nhất.
   }
-  if (project.status === 'completed') return 'col_done';
-  if (project.status === 'new') return 'col_design';
-  // Trạng thái đặc biệt: Đang Bảo Trì / Tạm dừng / Đã Hủy → cột cố định riêng
-  // (đúng như cấu hình "Cập nhật trạng thái" trong quy trình tự động cột).
-  if (project.status === 'maintenance') return columns.some(c => c.id === 'col_maintenance') ? 'col_maintenance' : 'col_fix';
-  if (project.status === 'paused') return 'col_waiting';
-  if (project.status === 'cancelled') return columns.some(c => c.id === 'col_cancelled') ? 'col_cancelled' : 'col_design';
-  if (project.progress >= 90) return 'col_fix';
-  if (project.progress >= 70) return 'col_accept';
-  if (project.progress > 0) return 'col_active';
-  return 'col_design';
+
+  // ── Fallback theo status / progress ──
+  // Dùng colWithStatus() thay vì ID cứng để tương thích với mọi cấu hình cột.
+  if (project.status === 'completed') return colWithStatus('completed') || (has('col_done') ? 'col_done' : columns[columns.length - 1]?.id || 'col_design');
+  if (project.status === 'new') return has('col_design') ? 'col_design' : columns[0]?.id || 'col_design';
+  if (project.status === 'maintenance') return colWithStatus('maintenance') || (has('col_maintenance') ? 'col_maintenance' : (has('col_fix') ? 'col_fix' : columns[0]?.id || 'col_design'));
+  if (project.status === 'paused') return colWithStatus('paused') || (has('col_waiting') ? 'col_waiting' : columns[0]?.id || 'col_design');
+  if (project.status === 'cancelled') return colWithStatus('cancelled') || (has('col_cancelled') ? 'col_cancelled' : columns[columns.length - 1]?.id || 'col_design');
+
+  // Progress-based: tìm cột có auto_progress param gần nhất
+  if (project.progress >= 90) return colWithStatus('processing') || (has('col_fix') ? 'col_fix' : columns[columns.length - 2]?.id || 'col_design');
+  if (project.progress >= 70) return colWithStatus('processing') || (has('col_accept') ? 'col_accept' : (has('col_fix') ? 'col_fix' : columns[columns.length - 2]?.id || 'col_design'));
+  if (project.progress > 0) return colWithStatus('processing') || (has('col_active') ? 'col_active' : columns[1]?.id || 'col_design');
+  return has('col_design') ? 'col_design' : columns[0]?.id || 'col_design';
 };
 
 // ─── Column reducers (pure, return new arrays) ──────────────────────────────
