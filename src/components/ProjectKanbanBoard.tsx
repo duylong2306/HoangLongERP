@@ -1074,6 +1074,20 @@ export default function ProjectKanbanBoard({
 
   // Get project columns configuration (Default mapping if columnId is absent in project object)
 
+  // Tìm cột "Hoàn thành" / "Done" theo cấu hình hiện tại — KHÔNG dùng ID cứng.
+  // Ưu tiên: cột có statusSet='completed' → cột tên chứa "HOÀN THÀNH" → col_done → cột cuối cùng.
+  const findDoneColumnId = useCallback((): string | undefined => {
+    const byStatus = columns.find(c => c.automation?.statusSet === 'completed');
+    if (byStatus) return byStatus.id;
+    const byName = columns.find(c => c.name.toUpperCase().includes('HOÀN THÀNH'));
+    if (byName) return byName.id;
+    if (columns.some(c => c.id === 'col_done')) return 'col_done';
+    return columns.length > 0 ? columns[columns.length - 1].id : undefined;
+  }, [columns]);
+
+  // Kiểm tra cột có tồn tại trong danh sách cột hiện tại
+  const hasColumn = useCallback((colId: string) => columns.some(c => c.id === colId), [columns]);
+
   // ===========================================================================
   // updateProjectWithRule() → Cập nhật Project kèm kích hoạt automation của cột
   // Tự động: chuyển cột, tạo subtask, gán PM, phê duyệt, log comment vào Documents
@@ -1117,14 +1131,17 @@ export default function ProjectKanbanBoard({
       const currentCol = columns.find(c => c.id === originalColId);
       if (currentCol?.automation?.statusUpdate) {
         const autoTargetId = currentCol.automation.statusUpdate as string;
-        if (autoTargetId && autoTargetId !== originalColId) {
+        if (autoTargetId && autoTargetId !== originalColId && hasColumn(autoTargetId)) {
           targetColId = autoTargetId;
           updates.kanbanColumnId = autoTargetId;
         }
       } else {
-        if (originalColId !== 'col_done') {
-          targetColId = 'col_done';
-          updates.kanbanColumnId = 'col_done';
+        // Không hardcode 'col_done' — tìm cột hoàn thành theo cấu hình hiện tại.
+        // Nếu cột đích không tồn tại → KHÔNG ép chuyển (tránh project biến mất).
+        const doneId = findDoneColumnId();
+        if (doneId && doneId !== originalColId && hasColumn(doneId)) {
+          targetColId = doneId;
+          updates.kanbanColumnId = doneId;
         }
       }
     }
@@ -1373,11 +1390,14 @@ export default function ProjectKanbanBoard({
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
 
+    // KHÔNG reject project không có task — project không có task cũng cần được
+    // hiển thị đúng cột (ví dụ: vừa tạo xong, task chưa thêm).
     const projTasks = tasks.filter(t => t.projectId === projectId);
-    if (projTasks.length === 0) return;
 
-    // Check if all tasks are completed
-    const allCompleted = projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
+    // Check if all tasks are completed (project 0 task → coi như "chưa hoàn thành",
+    // KHÔNG trigger auto-move — tránh project nhảy vô cột done ngay khi tạo).
+    const allCompleted = projTasks.length > 0
+      && projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
     const wasCompleted = prevAllCompletedRef.current.get(projectId) ?? false;
     prevAllCompletedRef.current.set(projectId, allCompleted);
     if (!allCompleted) return;
@@ -1389,26 +1409,29 @@ export default function ProjectKanbanBoard({
     if (wasCompleted) return;
 
     // Trigger auto-move using the existing updateProjectWithRule logic
-    // This will handle: blocking tasks check, delete todo tasks, run target column automation
     const currentColId = getProjectColumnId(proj, columns);
     const currentCol = columns.find(c => c.id === currentColId);
 
     let targetColId: string | undefined;
     if (currentCol?.automation?.statusUpdate) {
       const cand = currentCol.automation.statusUpdate;
-      if (cand && cand !== currentColId) {
+      if (cand && cand !== currentColId && hasColumn(cand)) {
         targetColId = cand;
       }
-    } else if (currentColId !== 'col_done') {
-      // Fallback to col_done if no statusUpdate automation
-      targetColId = 'col_done';
+    } else {
+      // Không hardcode 'col_done' — tìm cột hoàn thành theo cấu hình hiện tại
+      const doneId = findDoneColumnId();
+      if (doneId && doneId !== currentColId) {
+        targetColId = doneId;
+      }
     }
 
-    if (targetColId) {
+    // CHỈ gọi updateProjectWithRule khi targetColId hợp lệ (tồn tại trong columns)
+    if (targetColId && hasColumn(targetColId)) {
       autoMovedDoneRef.current.add(projectId);
       await updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
     }
-  }, [projects, tasks, columns, getProjectColumnId, updateProjectWithRule]);
+  }, [projects, tasks, columns, getProjectColumnId, updateProjectWithRule, findDoneColumnId, hasColumn]);
 
   // ===========================================================================
   // Auto-move check when tasks change
@@ -4842,7 +4865,7 @@ export default function ProjectKanbanBoard({
           } else {
             // Activate with default value
             if (selectedActionType === 'assignee') updates.assignId = employees[0]?.id || 'emp_3';
-            else if (selectedActionType === 'status') updates.statusUpdate = 'col_done';
+            else if (selectedActionType === 'status') updates.statusUpdate = findDoneColumnId() || columns[columns.length - 1]?.id || 'col_done';
             else if (selectedActionType === 'approval') updates.approvalRole = 'director';
             else if (selectedActionType === 'subtask') {
               updates.subtaskTitle = 'Khảo sát hiện trạng công xưởng thực tế';
