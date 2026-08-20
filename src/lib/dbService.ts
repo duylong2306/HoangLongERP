@@ -264,13 +264,14 @@ function enqueueUpload<T>(task: () => Promise<T>): Promise<T> {
 }
 
 // Query helper for Supabase (cached per table)
-async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T[]> {
-  // Trả cache nếu có
-  if (_queryCache.has(tableName)) {
+async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh = false): Promise<T[]> {
+  // Trả cache nếu có (trừ khi forceFresh — dùng cho purchase_orders sau khi lưu
+  // đơn giá / gán dự án, để realtime refetch KHÔNG trả dữ liệu cũ ghi đè state)
+  if (!forceFresh && _queryCache.has(tableName)) {
     return _queryCache.get(tableName) as T[];
   }
   // Deduplicate concurrent requests cho cùng 1 table
-  if (_inflight.has(tableName)) {
+  if (!forceFresh && _inflight.has(tableName)) {
     return _inflight.get(tableName) as Promise<T[]>;
   }
 
@@ -2288,7 +2289,11 @@ export const dbService = {
   // 14f. PURCHASE ORDERS (Đơn mua hàng — sync Supabase)
   purchaseOrders: {
     async list(): Promise<any[]> {
-      const rows = await querySupabase<any>('purchase_orders', []);
+      // forceFresh: bỏ QUA CẢ _queryCache lẫn _inflight để realtime refetch (sau khi
+      // lưu đơn giá / gán dự án) luôn trả dữ liệu MỚI nhất từ Supabase, không bao giờ
+      // ghi đè state local vừa cập nhật bằng dữ liệu cũ (nguyên nhân "đơn giá lưu rồi
+      // lại về 0" do race đọc cache/in-flight trả giá cũ).
+      const rows = await querySupabase<any>('purchase_orders', [], true);
       return rows.map(normalizeOrderItems);
     },
     async save(order: any): Promise<void> {

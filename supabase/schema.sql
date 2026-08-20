@@ -1523,6 +1523,12 @@ CREATE TABLE IF NOT EXISTS public.accounting_liabilities (
   paid_at timestamp with time zone,
   related_advance_id text,
   subcontractor_id text,
+  recorded_purchase_order_ids text[] DEFAULT '{}',
+  date text,
+  is_auto boolean DEFAULT false,
+  is_opening_debt boolean DEFAULT false,
+  opening_debt numeric DEFAULT 0,
+  balance_basis text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT accounting_liabilities_pkey PRIMARY KEY (id)

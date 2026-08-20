@@ -870,6 +870,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setFinanceSubTab('de_xuat_thu_chi');
     setActiveTab('finance');
   };
+  // Mở Điều Phối Vật Tư và tự động mở chi tiết Đề Xuất Vật Tư tương ứng (từ tab Đơn Hàng).
+  const [materialInitialProposalId, setMaterialInitialProposalId] = useState<string | null>(null);
+  const openMaterialProposal = (proposalId: string) => {
+    setMaterialInitialProposalId(proposalId);
+    setActiveTab('material-coordination');
+  };
   const [hrSubTab, setHrSubTab] = useState<string>('profiles');
   const [financeDuLieuTab, setFinanceDuLieuTab] = useState<string>('khach_hang');
   const [preselectedCustomerId, setPreselectedCustomerId] = useState<string>('');
@@ -2272,7 +2278,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // HANDLERS TÀI CHÍNH
   const handleAddReceipt = async (newRec: Receipt) => {
-    setReceipts([newRec, ...receipts]);
+    setReceipts(prev => [newRec, ...prev]);
     try {
       await dbService.receipts.save(newRec);
     } catch (err) {
@@ -2282,15 +2288,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     // Nếu có dự án kết nối, tăng nhẹ tiến trình ngẫu nhiên
     if (newRec.projectId) {
-      const updatedProjs = projects.map(p => {
+      setProjects(prev => prev.map(p => {
         if (p.id === newRec.projectId) {
           const nextp = { ...p, progress: Math.min(p.progress + 5, 100) };
           dbService.projects.save(nextp).catch(e => console.error('[App] Lỗi lưu tiến trình project:', e));
           return nextp;
         }
         return p;
-      });
-      setProjects(updatedProjs);
+      }));
     }
   };
 
@@ -2380,6 +2385,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     } catch (err) {
       console.error('[App] Lỗi xóa phiếu thu trên Supabase:', err);
     }
+    // Thông báo FinanceManagement dọn dẹp Công Nợ Thu tự động mồ côi
+    window.dispatchEvent(new CustomEvent('hl-receipt-deleted'));
   };
 
   const handleDeletePayment = async (id: string) => {
@@ -3600,19 +3607,22 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               initialDuLieuTab={financeDuLieuTab}
               initialProposalId={financeInitialProposalId}
               onInitialProposalConsumed={() => setFinanceInitialProposalId(null)}
+              onOpenMaterialProposal={openMaterialProposal}
               systemConfig={hrmConfig}
             />
           )}
 
           {/* TAB 5.5: ĐIỀU PHỐI VẬT TƯ */}
           {activeTab === 'material-coordination' && (
-            <MaterialCoordination 
+            <MaterialCoordination
               projects={projects}
               employees={employees}
               onUpdateProject={handleUpdateProject}
               onUpdateMultipleProjects={handleUpdateMultipleProjects}
               currentUser={currentUser}
               customers={customers}
+              initialProposalId={materialInitialProposalId}
+              onInitialProposalConsumed={() => setMaterialInitialProposalId(null)}
             />
           )}
 

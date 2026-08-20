@@ -37,6 +37,7 @@ import {
   Pencil,
   Eye,
 } from 'lucide-react';
+import SearchableSelect from './SearchableSelect';
 
 interface MaterialCoordinationProps {
   projects: Project[];
@@ -45,6 +46,9 @@ interface MaterialCoordinationProps {
   onUpdateMultipleProjects?: (updatedProjectsList: Project[]) => Promise<void>;
   currentUser?: Employee;
   customers?: Customer[];
+  /** Deep-link: mở chi tiết 1 đề xuất từ module khác (vd: từ tab Đơn Hàng) */
+  initialProposalId?: string | null;
+  onInitialProposalConsumed?: () => void;
 }
 
 type ProposalStatus = 'find_supplier' | 'waiting_approval' | 'waiting_order' | 'ordered' | 'received' | 'cancelled';
@@ -81,6 +85,8 @@ export default function MaterialCoordination({
   onUpdateMultipleProjects,
   currentUser,
   customers,
+  initialProposalId,
+  onInitialProposalConsumed,
 }: MaterialCoordinationProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -217,6 +223,13 @@ export default function MaterialCoordination({
       window.removeEventListener('hl-inventory-updated', reloadSuppliers);
     };
   }, [loadProposals, loadOrders, loadSuppliers]);
+
+  // Deep-link: mở chi tiết đề xuất khi được gọi từ module khác (tab Đơn Hàng)
+  React.useEffect(() => {
+    if (!initialProposalId) return;
+    setSelectedDocKey(initialProposalId);
+    onInitialProposalConsumed?.();
+  }, [initialProposalId, onInitialProposalConsumed]);
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
   const isLegacyMaterialDoc = (d: any) => {
@@ -417,11 +430,112 @@ export default function MaterialCoordination({
     return () => clearInterval(timer);
   }, [cleanupCancelledProposals]);
 
-  // Khôi phục 1 đề xuất đã HỦY về cột đã chọn
+  // Tính toán bản đề xuất "vừa bước vào" cột `target` — chỉ giữ dữ liệu hợp lệ
+  // cho bước đó, xóa sạch dữ liệu của các bước sau (tránh trạng thái lệch).
+  const buildResetProposalForColumn = (p: any, target: ProposalStatus): any => {
+    // Chỉ giữ thông tin cơ bản của vật tư (tên, sl, đvt, quy cách, mã)
+    const baseItems = (p.items || []).map((it: any) => ({
+      id: it.id,
+      name: it.name,
+      qty: it.qty,
+      unit: it.unit,
+      spec: it.spec,
+      note: it.note,
+      maSanPham: it.maSanPham,
+    }));
+    // Vật tư chưa gán NCC/giá (sẽ được báo giá/thiết lập ở các bước sau)
+    const blankItems = baseItems.map((it: any) => ({
+      ...it, price: 0, totalPrice: 0, supplierId: undefined, supplierName: undefined,
+    }));
+
+    const base: any = {
+      ...p,
+      status: target,
+      quotes: [],
+      chosenQuoteId: null,
+      supplierId: null,
+      supplierName: null,
+      purchaseOrderIds: [],
+      items: blankItems,
+    };
+
+    // TÌM NHÀ CUNG CẤP: khởi đầu hoàn toàn trắng — chỉ có danh sách vật tư
+    if (target === 'find_supplier') return base;
+
+    // CHỜ DUYỆT: cần giữ báo giá (để gửi xét duyệt), xóa quote được chọn & NCC
+    if (target === 'waiting_approval') {
+      return { ...base, quotes: p.quotes || [] };
+    }
+
+    // CHỜ ĐẶT HÀNG: sau duyệt → áp dụng NCC + giá từ báo giá được chọn vào vật tư
+    if (target === 'waiting_order') {
+      const quotes = p.quotes || [];
+      const chosen = quotes.find((q: any) => q.id === p.chosenQuoteId)
+        || (quotes.length ? quotes[0] : null);
+      const items = (p.items || []).map((it: any) => {
+        const qi = chosen ? (chosen.items || []).find((x: any) => x.id === it.id) : null;
+        const price = qi ? qi.price : 0;
+        return {
+          ...it,
+          supplierId: qi?.supplierId || '',
+          supplierName: qi?.supplierName || '',
+          price,
+          totalPrice: price * (it.qty || 0),
+        };
+      });
+      return {
+        ...base,
+        quotes,
+        chosenQuoteId: chosen ? chosen.id : null,
+        supplierId: chosen?.supplierId || null,
+        supplierName: chosen?.supplierName || null,
+        items,
+      };
+    }
+
+    // ĐẶT HÀNG THÀNH CÔNG / ĐÃ NHẬN HÀNG: giữ nguyên báo giá, NCC, đơn hàng đã có
+    return {
+      ...base,
+      quotes: p.quotes || [],
+      chosenQuoteId: p.chosenQuoteId || null,
+      supplierId: p.supplierId || null,
+      supplierName: p.supplierName || null,
+      purchaseOrderIds: p.purchaseOrderIds || [],
+      items: (p.items || []).map((it: any) => ({ ...it })),
+    };
+  };
+
+  // Đồng bộ receivedQty trên các đơn hàng liên kết để khớp với cột đích:
+  // - 'reset' (ĐẶT HÀNG THÀNH CÔNG): chưa nhận hàng → receivedQty = 0
+  // - 'full'  (ĐÃ NHẬN HÀNG)        : nhận đủ        → receivedQty = qty
+  const applyReceiveStateToPOs = async (poIds: string[], mode: 'reset' | 'full') => {
+    if (!poIds || poIds.length === 0) return;
+    for (const id of poIds) {
+      const po = purchaseOrders.find((o: any) => o.id === id);
+      if (!po) continue; // đơn không tồn tại (đã bị xóa) → bỏ qua
+      const items = (po.items || []).map((it: any) => ({
+        ...it,
+        receivedQty: mode === 'full' ? (it.qty || 0) : 0,
+      }));
+      await dbService.purchaseOrders.save({ ...po, items }).catch(() => {});
+    }
+    loadOrders();
+  };
+
+  // Khôi phục 1 đề xuất đã HỦY về cột đã chọn, đồng thời reset dữ liệu
+  // cho phù hợp với bước của cột đó.
   const restoreProposal = async (p: any) => {
     const target = restoreTargets[p.id] || 'waiting_order';
-    await saveProposal({ ...p, status: target });
-    showNotification(`Đã khôi phục đề xuất ${p.code} về cột ${STATUS_LABEL[target]}.`, 'Khôi phục thành công', 'success');
+    const patched = buildResetProposalForColumn(p, target);
+    // Đồng bộ receivedQty trên đơn hàng liên kết (nếu có)
+    if (target === 'ordered') await applyReceiveStateToPOs(p.purchaseOrderIds || [], 'reset');
+    if (target === 'received') await applyReceiveStateToPOs(p.purchaseOrderIds || [], 'full');
+    await saveProposal(patched);
+    showNotification(
+      `Đã khôi phục đề xuất ${p.code} về cột ${STATUS_LABEL[target]} (đã reset dữ liệu cho bước này).`,
+      'Khôi phục thành công',
+      'success'
+    );
   };
 
   // Xóa vĩnh viễn 1 đề xuất đã HỦY (không chờ 30 ngày)
@@ -951,6 +1065,8 @@ export default function MaterialCoordination({
         supplierAddress: sup?.address || '',
         projectId: prop.projectId || '',
         projectName: prop.projectName || '',
+        proposalId: prop.id,
+        proposalCode: prop.code,
         items: groupItems.map((it: any) => ({
           id: it.id,
           name: it.name,
@@ -1029,11 +1145,9 @@ export default function MaterialCoordination({
       };
     });
     const allReceived = updatedItems.every((i: any) => (i.receivedQty || 0) >= i.qty);
-    const anyReceived = updatedItems.some((i: any) => (i.receivedQty || 0) > 0);
     await dbService.purchaseOrders.save({
       ...order,
       items: updatedItems,
-      hasPartialReceive: !allReceived && anyReceived,
     });
     loadOrders();
     const allPOsReceived = (proposal.purchaseOrderIds || []).every((oid: string) => {
@@ -1678,11 +1792,55 @@ export default function MaterialCoordination({
                   const prop = activeDetail.doc;
                   if (prop.status !== 'waiting_order') return null;
                   const hasOrder = (prop.purchaseOrderIds || []).length > 0;
+
+                  // Áp dụng nhanh 1 NCC cho TOÀN BỘ danh mục vật tư
+                  const applySupplierToAll = (sid: string) => {
+                    setItemSupplierDraft(prev => {
+                      const next = { ...prev };
+                      (prop.items || []).forEach((it: any) => { next[it.id] = sid; });
+                      return next;
+                    });
+                  };
+                  const clearAllSuppliers = () => {
+                    setItemSupplierDraft(prev => {
+                      const next = { ...prev };
+                      (prop.items || []).forEach((it: any) => { delete next[it.id]; });
+                      return next;
+                    });
+                  };
+                  // NCC đang được áp dụng đồng nhất cho mọi dòng (nếu có)
+                  const allSids = (prop.items || []).map((it: any) => it.supplierId || itemSupplierDraft[it.id] || '');
+                  const uniformSid = allSids.length > 0 && allSids.every((s: string) => s === allSids[0]) ? allSids[0] : '';
+
                   return (
                     <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-4 shadow-xs">
                       <span className="font-extrabold text-[11.5px] text-violet-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
                         <Layers className="w-4 h-4" /> Gán nhà cung cấp & Tạo đơn hàng
                       </span>
+
+                      {/* Áp dụng nhanh 1 NCC cho toàn bộ danh mục */}
+                      <div className="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-violet-700">Áp dụng 1 NCC cho toàn bộ danh mục</span>
+                          {uniformSid && (
+                            <button
+                              type="button"
+                              onClick={clearAllSuppliers}
+                              className="text-[9px] font-bold text-slate-500 hover:text-rose-500 underline cursor-pointer"
+                            >Xóa tất cả</button>
+                          )}
+                        </div>
+                        <SearchableSelect
+                          options={suppliers.map((s: any) => ({ id: s.id, label: s.name }))}
+                          value={uniformSid}
+                          onChange={applySupplierToAll}
+                          placeholder="-- Chọn NCC --"
+                          searchPlaceholder="🔍 Tìm nhà cung cấp..."
+                          disabled={!isCoordinator || hasOrder}
+                          className="w-full"
+                        />
+                      </div>
+
                       <div className="space-y-2">
                         {(prop.items || []).map((it: any, idx: number) => {
                           const currentSid = it.supplierId || itemSupplierDraft[it.id] || '';
@@ -1693,15 +1851,15 @@ export default function MaterialCoordination({
                                   <span className="text-[11px] font-bold text-slate-800">{it.name}</span>
                                   <span className="ml-1.5 text-[9px] text-slate-500">× {it.qty} {it.unit} · {((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</span>
                                 </div>
-                                <select
+                                <SearchableSelect
+                                  options={suppliers.map((s: any) => ({ id: s.id, label: s.name }))}
                                   value={currentSid}
-                                  onChange={(e) => setItemSupplier(prop, it.id, e.target.value)}
+                                  onChange={(sid) => setItemSupplier(prop, it.id, sid)}
+                                  placeholder="-- Chọn NCC --"
+                                  searchPlaceholder="🔍 Tìm nhà cung cấp..."
                                   disabled={!isCoordinator || hasOrder}
-                                  className="bg-white border border-slate-300 rounded p-1 text-[10.5px] text-slate-800 outline-none disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                >
-                                  <option value="">-- Chọn NCC --</option>
-                                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                </select>
+                                  className="min-w-[180px]"
+                                />
                               </div>
                               {currentSid && (
                                 <p className="text-[9px] text-violet-600 font-bold mt-1">✔ Đã chọn: {suppliers.find(s => s.id === currentSid)?.name || ''}</p>
@@ -1989,6 +2147,15 @@ export default function MaterialCoordination({
                             <span className="text-[11.5px] font-black text-emerald-700 uppercase tracking-wide">🎉 ĐÃ NHẬN HÀNG HOÀN TẤT</span>
                             <p className="text-[10px] text-emerald-600 mt-1">Tất cả đơn hàng trong đề xuất đã được nhận đủ.</p>
                           </div>
+                          {(isCoordinator || isApprover) && (
+                            <button
+                              type="button"
+                              onClick={() => handleCancel(prop)}
+                              className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                            >
+                              Hủy bỏ
+                            </button>
+                          )}
                         </div>
                       );
                     }
@@ -2595,14 +2762,14 @@ export default function MaterialCoordination({
                           <span className="text-[10px] text-slate-400 w-16 text-right">{it.qty} {it.unit}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <select
+                          <SearchableSelect
+                            options={suppliers.map((s: any) => ({ id: s.id, label: s.name }))}
                             value={sid}
-                            onChange={(e) => setQuoteItemSuppliers((prev: Record<string, string>) => ({ ...prev, [it.id]: e.target.value }))}
-                            className="flex-1 bg-white border border-slate-300 rounded-lg p-1.5 text-[10.5px] text-slate-800 outline-none focus:border-teal-500"
-                          >
-                            <option value="">-- Chọn NCC --</option>
-                            {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                          </select>
+                            onChange={(selId) => setQuoteItemSuppliers((prev: Record<string, string>) => ({ ...prev, [it.id]: selId }))}
+                            placeholder="-- Chọn NCC --"
+                            searchPlaceholder="🔍 Tìm nhà cung cấp..."
+                            className="flex-1"
+                          />
                           <div className="flex items-center gap-1">
                             <input
                               type="number"

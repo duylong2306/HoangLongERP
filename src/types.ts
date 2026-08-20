@@ -678,6 +678,8 @@ export interface PurchaseOrder {
   congNo: number;           // Công nợ = tongTien - thanhToanThucTe
   status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
   paymentId?: string;       // FK → Payment (liên kết phiếu chi)
+  proposalId?: string;      // FK → material_proposals.id (nếu đơn tạo từ Đề Xuất Vật Tư)
+  proposalCode?: string;    // Mã đề xuất nguồn (hiển thị trong Chi tiết đơn hàng)
   notes?: string;
   createdAt: string;
   createdBy: string;

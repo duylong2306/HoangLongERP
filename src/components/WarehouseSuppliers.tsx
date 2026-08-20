@@ -10,7 +10,7 @@ import { useNotification } from '../context';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
-export default function WarehouseSuppliers() {
+export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpenAddSignal?: number }) {
   const { addToast } = useNotification();
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -242,6 +242,15 @@ export default function WarehouseSuppliers() {
     setFormOpeningDebt(0);
     setEditingId(null);
   };
+
+  // Mở nhanh form "Thêm Nhà Cung Cấp" khi nhận tín hiệu từ bên ngoài (vd: từ nút Chi Nhà Cung Cấp).
+  useEffect(() => {
+    if (autoOpenAddSignal > 0) {
+      setEditingId(null);
+      resetForm();
+      setIsAdding(true);
+    }
+  }, [autoOpenAddSignal]);
 
   // ===================== BLOCK EXCEL (DANH MỤC NHÀ CUNG CẤP VẬT TƯ) =====================
   const handleExportNccExcel = () => {
