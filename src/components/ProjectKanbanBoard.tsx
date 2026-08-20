@@ -1129,19 +1129,15 @@ export default function ProjectKanbanBoard({
 
     if (justCompleted) {
       const currentCol = columns.find(c => c.id === originalColId);
+      // CHỈ tự động chuyển khi cột HIỆN TẠI thực sự được bật "Chuyển cột khi hoàn thành"
+      // (có statusUpdate hợp lệ). Nếu cột không bật feature này → KHÔNG ép chuyển,
+      // để project yên vị ở cột hiện tại. Tránh hiện tượng "nhảy lung tung" khi user
+      // chưa/không cấu hình auto-move.
       if (currentCol?.automation?.statusUpdate) {
         const autoTargetId = currentCol.automation.statusUpdate as string;
         if (autoTargetId && autoTargetId !== originalColId && hasColumn(autoTargetId)) {
           targetColId = autoTargetId;
           updates.kanbanColumnId = autoTargetId;
-        }
-      } else {
-        // Không hardcode 'col_done' — tìm cột hoàn thành theo cấu hình hiện tại.
-        // Nếu cột đích không tồn tại → KHÔNG ép chuyển (tránh project biến mất).
-        const doneId = findDoneColumnId();
-        if (doneId && doneId !== originalColId && hasColumn(doneId)) {
-          targetColId = doneId;
-          updates.kanbanColumnId = doneId;
         }
       }
     }
@@ -1413,16 +1409,12 @@ export default function ProjectKanbanBoard({
     const currentCol = columns.find(c => c.id === currentColId);
 
     let targetColId: string | undefined;
+    // CHỈ auto-move khi cột hiện tại được bật "Chuyển cột khi hoàn thành"
+    // (có statusUpdate hợp lệ). Nếu không → KHÔNG tự chuyển, để project ở nguyên vị trí.
     if (currentCol?.automation?.statusUpdate) {
       const cand = currentCol.automation.statusUpdate;
       if (cand && cand !== currentColId && hasColumn(cand)) {
         targetColId = cand;
-      }
-    } else {
-      // Không hardcode 'col_done' — tìm cột hoàn thành theo cấu hình hiện tại
-      const doneId = findDoneColumnId();
-      if (doneId && doneId !== currentColId) {
-        targetColId = doneId;
       }
     }
 
