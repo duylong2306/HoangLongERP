@@ -224,12 +224,15 @@ export default function MaterialCoordination({
 
   React.useEffect(() => {
     const reload = () => { loadProposals(); loadOrders(); };
+    const reloadOrdersOnly = () => { loadOrders(); };
     const reloadSuppliers = () => loadSuppliers();
     window.addEventListener('hl-material-proposals-updated', reload);
+    window.addEventListener('hl-purchase-orders-updated', reloadOrdersOnly);
     window.addEventListener('hl-suppliers-updated', reloadSuppliers);
     window.addEventListener('hl-inventory-updated', reloadSuppliers);
     return () => {
       window.removeEventListener('hl-material-proposals-updated', reload);
+      window.removeEventListener('hl-purchase-orders-updated', reloadOrdersOnly);
       window.removeEventListener('hl-suppliers-updated', reloadSuppliers);
       window.removeEventListener('hl-inventory-updated', reloadSuppliers);
     };

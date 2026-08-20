@@ -1632,6 +1632,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireKanbanColumnsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-kanban-columns-updated')); } catch {}
     };
+    const fireMaterialProposalsEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-material-proposals-updated')); } catch {}
+    };
+    const firePurchaseOrdersEvent = () => {
+      try { window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated')); } catch {}
+    };
     const fireProjectPermissionsEvent = () => {
       try { window.dispatchEvent(new CustomEvent('hl-project-permissions-updated')); } catch {}
     };
@@ -1676,7 +1682,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fireConfigEvent)
       // ── Orders (critical - realtime for instant updates) ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' }, fetchSalesOrders)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, fetchPurchaseOrders)
       // ── HRM Configuration & Payroll ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_approval_config' }, fireHrmApprovalConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
@@ -1696,6 +1701,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts' }, fireAccountingSubContractsEvent)
+      // ── Material Proposals (Đề xuất vật tư) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'material_proposals' }, fireMaterialProposalsEvent)
+      // ── Purchase Orders (đơn hàng mua — dispatch event cho MaterialCoordination sync cross-tab) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, (payload) => {
+        fetchPurchaseOrders(payload);
+        firePurchaseOrdersEvent();
+      })
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Realtime] ✅ Channel ready. Listening for 30+ tables');
