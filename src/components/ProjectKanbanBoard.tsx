@@ -1365,15 +1365,27 @@ export default function ProjectKanbanBoard({
       }
     }
     await onUpdateProject(projectId, updates);
+
+    // ── Chain auto-move: Sau khi project di chuyển thành công sang cột mới,
+    // clear marker autoMovedDoneRef để lần complete tiếp theo tại cột MỚI
+    // có thể trigger auto-move tiếp (chain multi-step: A → B → C).
+    // Chỉ clear khi cột đích có statusUpdate (tức có bước tiếp theo trong chain).
+    if (updates.kanbanColumnId && updates.kanbanColumnId !== originalColId) {
+      const targetStillHasChain = columns.find(c => c.id === updates.kanbanColumnId)?.automation?.statusUpdate;
+      if (targetStillHasChain) {
+        autoMovedDoneRef.current.delete(projectId);
+      }
+    }
   };
 
   // ===========================================================================
   // checkAutoMoveProject() → Kiểm tra và thực hiện auto-move project khi tất cả task hoàn thành
   // Được gọi từ useEffect khi tasks thay đổi
   // ===========================================================================
-  // Lưu trạng thái "tất cả công việc con đã hoàn thành" của mỗi dự án ở lần
-  // chạy trước (dùng để phát hiện transition false -> true).
+  // Lưu trạng thái "tất cả công việc con đã hoàn thành" + cột hiện tại của mỗi dự án
+  // ở lần chạy trước (dùng để phát hiện transition false -> true).
   const prevAllCompletedRef = useRef<Map<string, boolean>>(new Map());
+  const prevColumnIdRef = useRef<Map<string, string>>(new Map());
   // Đánh dấu dự án ĐÃ được tự động chuyển cột khi hoàn thành. Quan trọng: marker
   // này "dính" (sticky) — KHÔNG bị xoá khi công việc con bị tạo/mở lại (ví dụ cột
   // đích có tự động thêm công việc con, làm allCompleted tạm thời = false). Nhờ vậy
@@ -1437,14 +1449,26 @@ export default function ProjectKanbanBoard({
     // khi mở trang, đồng thời không cản trở tự động chuyển khi công việc thực sự
     // chuyển từ "chưa xong" sang "đã xong" trong phiên làm việc.
     projects.forEach(p => {
+      const pts = tasks.filter(t => t.projectId === p.id);
+      const currentAllDone = pts.length > 0
+        ? pts.every(t => t.status === 'completed' || t.completionRate === 100)
+        : false;
+      const currentColId = getProjectColumnId(p, columns);
+      const prevColId = prevColumnIdRef.current.get(p.id);
+
       if (!prevAllCompletedRef.current.has(p.id)) {
-        const pts = tasks.filter(t => t.projectId === p.id);
-        if (pts.length > 0) {
-          prevAllCompletedRef.current.set(
-            p.id,
-            pts.every(t => t.status === 'completed' || t.completionRate === 100)
-          );
-        }
+        // Lần đầu thấy project — ghi nhận state hiện tại
+        prevAllCompletedRef.current.set(p.id, currentAllDone);
+        prevColumnIdRef.current.set(p.id, currentColId);
+      } else if (prevColId && prevColId !== currentColId) {
+        // ── Chain support: Project DI CHUYỂN CỘT (do auto-move ở bước trước).
+        // Reset wasCompleted = false để checkAutoMoveProject có thể trigger
+        // auto-move tiếp ở cột mới (chain multi-step: A → B → C).
+        prevAllCompletedRef.current.set(p.id, false);
+        prevColumnIdRef.current.set(p.id, currentColId);
+      } else {
+        // Cập nhật column tracking khi project di chuyển thủ công
+        prevColumnIdRef.current.set(p.id, currentColId);
       }
     });
 
