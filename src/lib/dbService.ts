@@ -67,6 +67,19 @@ export function rowToCamel(row: any): any {
 }
 
 /**
+ * So sánh sâu bất biến: serialize có sắp xếp key để 2 object cùng nội dung
+ * (dù khác thứ tự key / tham chiếu) cho ra chuỗi giống nhau. Dùng để CHẶN
+ * vòng lặp realtime: event → setState(object mới cùng nội dung) → effect save
+ * → INSERT → event mới → ... (đã xảy ra thật với business_profile: >100K
+ * INSERT làm cháy CPU Supabase).
+ */
+export function stableStr(v: any): string {
+  if (v === null || v === undefined || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return '[' + v.map(stableStr).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stableStr(v[k])).join(',') + '}';
+}
+
+/**
  * Chuẩn hóa cột `items` của sales_orders / purchase_orders về đúng array.
  * Dữ liệu cũ đã bị JSON.stringify trước khi ghi vào cột JSONB nên đọc ra
  * là string thay vì array → UI crash khi gọi .map(). Hàm này parse lại,

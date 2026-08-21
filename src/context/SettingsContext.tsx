@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
-import { dbService } from '../lib/dbService';
+import { dbService, stableStr } from '../lib/dbService';
 import { refreshHrmConfigCache } from '../components/hr/hrCalculations';
 import type { HrmRoleGroup, HrmApprovalConfig, HrmApprovalConfig as ApprovalPermission } from '../types';
 
@@ -230,9 +230,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return DEFAULT_BUSINESS_INFO;
   });
 
+  // Chặn vòng lặp realtime: chỉ save khi NỘI DUNG thật sự khác lần lưu trước
+  // (setState từ realtime tạo object mới cùng nội dung → không save).
+  const lastSavedBizRef = React.useRef<string | null>(null);
   useEffect(() => {
-    // Update both localStorage and Supabase when businessInfo changes
     localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
+    const next = stableStr(businessInfo);
+    if (lastSavedBizRef.current !== null && next === lastSavedBizRef.current) return;
+    lastSavedBizRef.current = next;
     dbService.businessProfile.save(businessInfo).catch(err => console.warn('SettingsContext: save businessProfile failed:', err));
   }, [businessInfo]);
 
@@ -269,9 +274,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  // Save Supabase only khi hrmConfig thay đổi SAU KHI đã load xong
+  // Save Supabase only khi hrmConfig thay đổi SAU KHI đã load xong.
+  // Chặn vòng lặp realtime: chỉ save khi NỘI DUNG thật sự khác lần lưu trước.
+  const lastSavedCfgRef = React.useRef<string | null>(null);
   useEffect(() => {
     if (!hrmConfigLoadedRef.current) return;
+    const next = stableStr(hrmConfig);
+    if (lastSavedCfgRef.current !== null && next === lastSavedCfgRef.current) return;
+    lastSavedCfgRef.current = next;
     dbService.shiftConfig.save(hrmConfig).catch(err => console.warn('SettingsContext: save shiftConfig failed:', err));
   }, [hrmConfig]);
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange } from './lib/dbService';
+import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
 import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
 import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations, sendApprovalDirectMessage, findEmployeeByName, ensureAttendanceChatGroup } from './lib/chatStore';
@@ -308,7 +308,11 @@ function ShiftMinuteInput({
     const val = rawVal === '' ? '' : Math.max(0, parseInt(rawVal, 10));
     const updated = { ...hrmConfig, [field]: val };
     setHrmConfig?.(updated);
-    dbService.shiftConfig.save(updated).catch(e => console.error('Supabase shiftConfig save error:', e));
+    // Chỉ save khi nội dung thật sự khác state hiện có (chặn save trùng lặp
+    // mỗi lần render lại từ realtime event với cùng giá trị).
+    if (stableStr(updated) !== stableStr(hrmConfig)) {
+      dbService.shiftConfig.save(updated).catch(e => console.error('Supabase shiftConfig save error:', e));
+    }
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
   };
@@ -547,12 +551,22 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   });
 
   const isBusinessInfoInitRef = React.useRef(true);
+  // Chuỗi stableStr của giá trị ĐÃ lưu lần gần nhất — chặn vòng lặp realtime:
+  // fireConfigEvent → setBusinessInfo(object mới cùng nội dung) → nếu không
+  // chặn, effect sẽ INSERT lại → event mới → mọi tab lặp lại vô hạn.
+  const lastSavedBizRef = React.useRef<string | null>(null);
   useEffect(() => {
-    // Skip save lần đầu (khi load từ cloud) — chỉ save khi user thay đổi thực sự
+    // Skip save lần đầu (khi load từ cloud) — chỉ ghi nhớ nội dung để so sánh sau
     if (isBusinessInfoInitRef.current) {
       isBusinessInfoInitRef.current = false;
+      lastSavedBizRef.current = stableStr(businessInfo);
       return;
     }
+    const next = stableStr(businessInfo);
+    if (next === lastSavedBizRef.current) {
+      return; // chỉ đổi tham chiếu, KHÔNG đổi nội dung → không save, không sinh event
+    }
+    lastSavedBizRef.current = next;
     dbService.businessProfile.save(businessInfo);
   }, [businessInfo]);
 
@@ -1488,34 +1502,101 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       return () => window.removeEventListener('hl-supabase-client-ready', onReady);
     }
 
-    const fetchProjects = async (payload?: any) => {
+    // ─── Coalescer: gom burst realtime event trong 3s thành 1 lần chạy ──────
+    // Vấn đề: 1 thao tác của user A (vd lưu task) sinh N event (tasks + projects +
+    // kanban...), và M tab đang mở đều nhận → M×N lần refetch full bảng. Với 25
+    // user online thì tải nhân bản theo cả 2 chiều → cháy CPU/egress Supabase.
+    // Giải pháp: mỗi "job" (1 bảng) chỉ được lên lịch 1 lần; nếu có event mới trong
+    // cửa sổ 3s thì job đang chờ gộp thêm rồi CHẠY 1 LẦN duy nhất.
+    const COALESCE_MS = 3000;
+    const pendingJobs = new Map<string, { timer: any; run: () => void }>();
+    const scheduleCoalesced = (key: string, run: () => void) => {
+      if (pendingJobs.has(key)) return; // đã có job chờ cho key này → bỏ qua
+      const entry = {
+        timer: setTimeout(() => {
+          pendingJobs.delete(key);
+          try { run(); } catch (e) { console.error(`[Realtime] coalesced job ${key} error:`, e); }
+        }, COALESCE_MS),
+        run,
+      };
+      pendingJobs.set(key, entry);
+    };
+    // Cleanup mọi timer còn treo khi effect teardown (resubscribe/unmount)
+    const flushPendingJobs = () => {
+      pendingJobs.forEach(j => clearTimeout(j.timer));
+      pendingJobs.clear();
+    };
+
+    // ─── Patch TẠI CHỖ từ payload realtime (không cần refetch full bảng) ────
+    // INSERT/UPDATE: payload.new chứa ĐỦ dòng mới → upsert vào state + cache.
+    // DELETE: payload.old.id → xóa khỏi state + cache.
+    // Trả về true nếu đã vá xong (không cần refetch), false nếu payload thiếu
+    // dữ liệu (REPLICA IDENTITY FULL chưa bật cho DELETE...) → caller fallback refetch.
+    const patchStateRow = (
+      setter: React.Dispatch<React.SetStateAction<any[]>>,
+      tableName: string,
+      payload: any,
+      transform?: (row: any) => any,
+    ): boolean => {
+      const eventType = payload?.eventType;
+      if (!eventType || eventType === '*') return false;
+      if (eventType === 'DELETE') {
+        const delId = payload?.old?.id;
+        if (!delId) return false; // không biết id nào bị xóa → phải refetch
+        setter(prev => prev.filter((r: any) => r.id !== delId));
+        // Vô hiệu cache để polling/mở tab không trả lại dòng đã xóa.
+        try { invalidateCache(tableName); } catch {}
+        return true;
+      }
+      const rawNew = payload?.new;
+      if (!rawNew || !rawNew.id) return false;
+      const row = transform ? transform(rawNew) : rawNew;
+      setter(prev => {
+        const idx = prev.findIndex((r: any) => r.id === row.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = row;
+          return copy;
+        }
+        return [row, ...prev];
+      });
+      // Vô hiệu cache dbService để lần list() kế tiếp (polling/mở tab) fetch mới,
+      // không trả dữ liệu cũ ghi đè mất dòng vừa vá.
+      try { invalidateCache(tableName); } catch {}
+      return true;
+    };
+
+    // Filter loại "Dự án độc lập" dùng chung cho projects (state App không chứa chúng)
+    const isStandaloneProject = (p: any) =>
+      p && (p.name?.startsWith('Dự án độc lập - ')
+        ? !!p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')
+        : false);
+
+    // ── Full refetch (chạy qua coalescer — tối đa 1 lần / 3s / bảng) ─────────
+    const fetchProjects = async () => {
       try {
-        console.log('[Realtime] 🔔 projects event received:', payload ? { event: payload.eventType, table: payload.table } : '(manual)');
         invalidateCache('projects');
         const projs = await dbService.projects.list();
         console.log('[Realtime] 📦 projects fetched:', projs.length, 'rows');
-        setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
+        setProjects(projs.filter(p => !isStandaloneProject(p)));
       } catch (e) { console.error('Realtime projects sync error:', e); }
     };
-    const fetchTasks = async (payload?: any) => {
+    const fetchTasks = async () => {
       try {
-        console.log('[Realtime] 🔔 tasks event:', payload ? { event: payload.eventType } : '(manual)');
         invalidateCache('tasks');
         const list = await dbService.tasks.list();
         // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu (vd mission vừa hoàn thành).
         applyTasksWithLocalOverrides(list);
       } catch (e) { console.error('Realtime tasks sync error:', e); }
     };
-    const fetchPayments = async (payload?: any) => {
+    const fetchPayments = async () => {
       try {
-        console.log('[Realtime] 🔔 payments event:', payload ? { event: payload.eventType } : '(manual)');
         invalidateCache('payments');
         setPayments(await dbService.payments.list());
       } catch (e) { console.error('Realtime payments sync error:', e); }
     };
-    const fetchReceipts = async (payload?: any) => {
+    const fetchReceipts = async () => {
       try {
-        console.log('[Realtime] 🔔 receipts event:', payload ? { event: payload.eventType } : '(manual)');
         invalidateCache('receipts');
         setReceipts(await dbService.receipts.list());
       } catch (e) { console.error('Realtime receipts sync error:', e); }
@@ -1548,122 +1629,140 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
 
     // ─── Handlers cho các bảng phụ (fire custom events để component lắng nghe) ──
-    const fireSuppliersEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
+    // Bọc qua coalescer: burst N event cùng bảng → component con chỉ refetch 1 lần.
+    const coalescedEvent = (key: string, eventName: string) => () => {
+      scheduleCoalesced(`event:${key}`, () => {
+        try { window.dispatchEvent(new CustomEvent(eventName)); } catch {}
+      });
     };
-    const fireInventoryEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
-    };
-    const fireWarehouseLogsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
-    };
-    const fireWarehouseDataEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated')); } catch {}
-    };
-    const fireArchivedQuotesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
-    };
-    const fireTaskPermissionsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-task-permissions-updated')); } catch {}
-    };
-    const fireHrmRoleGroupsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-role-groups-updated')); } catch {}
-    };
-    const fireEmployeesEvent = async () => {
-      try {
-        invalidateCache('employees');
-        const emps = await dbService.employees.list();
-        window.dispatchEvent(new CustomEvent('hl-employees-updated', { detail: { employees: emps } }));
-      } catch {}
+    const fireSuppliersEvent = coalescedEvent('suppliers', 'hl-suppliers-updated');
+    const fireInventoryEvent = coalescedEvent('inventory', 'hl-inventory-updated');
+    const fireWarehouseLogsEvent = coalescedEvent('warehouse_logs', 'hl-warehouse-logs-updated');
+    const fireWarehouseDataEvent = coalescedEvent('warehouse_data', 'hl-warehouse-data-updated');
+    const fireArchivedQuotesEvent = coalescedEvent('archived_quotes', 'hl-archived-quotes-updated');
+    const fireTaskPermissionsEvent = coalescedEvent('hrm_task_permissions', 'hl-task-permissions-updated');
+    const fireHrmRoleGroupsEvent = coalescedEvent('hrm_role_groups', 'hl-hrm-role-groups-updated');
+    const fireEmployeesEvent = () => {
+      scheduleCoalesced('event:employees', async () => {
+        try {
+          invalidateCache('employees');
+          const emps = await dbService.employees.list();
+          window.dispatchEvent(new CustomEvent('hl-employees-updated', { detail: { employees: emps } }));
+        } catch {}
+      });
     };
     const fireConfigEvent = async () => {
       try {
+        // CHẶN VÒNG LẶP REALTIME: chỉ setState nếu NỘI DUNG khác hẳn state hiện tại.
+        // Không chặn thì event → setState(object mới) → effect save → INSERT →
+        // event mới → mọi tab lặp vô hạn (đã gây >100K INSERT business_profile).
         const profile = await dbService.businessProfile.get();
         if (profile) {
-          setBusinessInfo(profile);
+          setBusinessInfo(prev => stableStr(prev) === stableStr(profile) ? prev : profile);
         }
         const config = await dbService.shiftConfig.get();
-        if (config) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...config }));
+        if (config) {
+          setHrmConfig(prev => {
+            const next = { ...DEFAULT_SYSTEM_CONFIG, ...config };
+            return stableStr(prev) === stableStr(next) ? prev : next;
+          });
+        }
       } catch {}
     };
 
     // ─── Handlers cho bảng còn thiếu (HRM, accounting, etc.) ──
     // Nhóm 1: sales_orders / purchase_orders — App sở hữu state → refetch trực tiếp
     // (không dispatch event vì không component nào khác cần; giữ sync live giữa 2 tab).
-    const fetchSalesOrders = async (payload?: any) => {
+    const fetchSalesOrders = async () => {
       try {
-        console.log('[Realtime] 🔔 sales_orders event:', payload ? { event: payload.eventType } : '(manual)');
         setSalesOrders((await dbService.salesOrders.list()).map(normalizeOrderItems));
       } catch (e) { console.error('Realtime sales_orders sync error:', e); }
     };
-    const fetchPurchaseOrders = async (payload?: any) => {
+    const fetchPurchaseOrders = async () => {
       try {
-        console.log('[Realtime] 🔔 purchase_orders event:', payload ? { event: payload.eventType } : '(manual)');
         setPurchaseOrders((await dbService.purchaseOrders.list()).map(normalizeOrderItems));
       } catch (e) { console.error('Realtime purchase_orders sync error:', e); }
     };
-    const fireHrmApprovalConfigEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-approval-config-updated')); } catch {}
+    const fireHrmApprovalConfigEvent = coalescedEvent('hrm_approval_config', 'hl-hrm-approval-config-updated');
+    const fireHrmLeavesEvent = coalescedEvent('hrm_leaves', 'hl-hrm-leaves-updated');
+    const fireHrmPayrollRecordsEvent = coalescedEvent('hrm_payroll_records', 'hl-hrm-payroll-records-updated');
+    const fireHrmEmployeeErrorsEvent = coalescedEvent('hrm_employee_errors', 'hl-hrm-employee-errors-updated');
+    const fireHrmHolidaysEvent = coalescedEvent('hrm_holidays', 'hl-hrm-holidays-updated');
+    const fireHrmTripsEvent = coalescedEvent('hrm_trips', 'hl-hrm-trips-updated');
+    const fireHrmTravelExpensesEvent = coalescedEvent('hrm_travel_expenses', 'hl-hrm-travel-expenses-updated');
+    const fireHrmPerformanceCriteriaEvent = coalescedEvent('hrm_performance_criteria', 'hl-hrm-performance-criteria-updated');
+    const fireHrmSalarySalesEvent = coalescedEvent('hrm_salary_scales', 'hl-hrm-salary-scales-updated');
+    const fireKanbanColumnsEvent = coalescedEvent('kanban_columns', 'hl-kanban-columns-updated');
+    const fireMaterialProposalsEvent = coalescedEvent('material_proposals', 'hl-material-proposals-updated');
+    const firePurchaseOrdersEvent = coalescedEvent('purchase_orders_event', 'hl-purchase-orders-updated');
+    const fireProjectPermissionsEvent = coalescedEvent('project_permissions', 'hl-project-permissions-updated');
+    const fireAccountingLiabilitiesEvent = coalescedEvent('accounting_liabilities', 'hl-accounting-liabilities-updated');
+    const fireAccountingReceivablesEvent = coalescedEvent('accounting_receivables', 'hl-accounting-receivables-updated');
+    const fireAccountingSubContractsEvent = coalescedEvent('accounting_sub_contracts', 'hl-accounting-sub-contracts-updated');
+    const fireHrmLeaveCoefficientsEvent = coalescedEvent('hrm_leave_coefficients', 'hl-hrm-leave-coefficients-updated');
+
+    // ─── Bọc handler realtime: patch tại chỗ trước, refetch coalesced sau ────
+    // Chiến lược 2 lớp cho bảng có state ở App:
+    //   Lớp 1 (ngay, 0 request): INSERT/UPDATE/DELETE → vá state từ payload.
+    //     UI cập nhật tức thì, không tốn băng thông.
+    //   Lớp 2 (coalesced 3s): lên lịch full-refetch để tự sửa sai số (payload
+    //     thiếu cột do REPLICA IDENTITY, cache lệch...). Nhiều event cùng bảng
+    //     trong 3s chỉ sinh ĐÚNG 1 lần refetch → tải trọng không còn nhân bản.
+    const REFETCHERS: Record<string, () => void> = {};
+    const scheduleRefetch = (key: string, tableName: string) => {
+      scheduleCoalesced(`refetch:${key}`, () => {
+        invalidateCache(tableName);
+        REFETCHERS[key]?.();
+      });
     };
-    const fireHrmLeavesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-leaves-updated')); } catch {}
+    const withPatchAndCoalesce = (
+      key: string,
+      tableName: string,
+      setter: React.Dispatch<React.SetStateAction<any[]>>,
+      transform?: (row: any) => any,
+      exclude?: (r: any) => boolean,
+    ) => (payload?: any) => {
+      if (payload?.eventType && patchStateRow(setter, tableName, payload, transform)) {
+        // Đã vá state từ payload. Với projects cần áp thêm bộ lọc loại trừ:
+        if (exclude) {
+          setter(prev => prev.filter(r => !exclude(r)));
+        }
+        scheduleRefetch(key, tableName);
+        return;
+      }
+      // Payload không dùng được (manual call / thiếu dữ liệu) → refetch coalesced luôn.
+      scheduleRefetch(key, tableName);
     };
-    const fireHrmPayrollRecordsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-payroll-records-updated')); } catch {}
-    };
-    const fireHrmEmployeeErrorsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
-    };
-    const fireHrmHolidaysEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-holidays-updated')); } catch {}
-    };
-    const fireHrmTripsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-trips-updated')); } catch {}
-    };
-    const fireHrmTravelExpensesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')); } catch {}
-    };
-    const fireHrmPerformanceCriteriaEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-performance-criteria-updated')); } catch {}
-    };
-    const fireHrmSalarySalesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-salary-scales-updated')); } catch {}
-    };
-    const fireKanbanColumnsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-kanban-columns-updated')); } catch {}
-    };
-    const fireMaterialProposalsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-material-proposals-updated')); } catch {}
-    };
-    const firePurchaseOrdersEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated')); } catch {}
-    };
-    const fireProjectPermissionsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-project-permissions-updated')); } catch {}
-    };
-    const fireAccountingLiabilitiesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated')); } catch {}
-    };
-    const fireAccountingReceivablesEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-accounting-receivables-updated')); } catch {}
-    };
-    const fireAccountingSubContractsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-accounting-sub-contracts-updated')); } catch {}
-    };
-    const fireHrmLeaveCoefficientsEvent = () => {
-      try { window.dispatchEvent(new CustomEvent('hl-hrm-leave-coefficients-updated')); } catch {}
-    };
+
+    // Đăng ký hàm refetch cho coalescer (các hàm đã định nghĩa phía trên)
+    Object.assign(REFETCHERS, {
+      projects: fetchProjects,
+      tasks: fetchTasks,
+      payments: fetchPayments,
+      receipts: fetchReceipts,
+      quotes: fetchQuotes,
+      customers: fetchCustomers,
+      sales_orders: fetchSalesOrders,
+      purchase_orders: fetchPurchaseOrders,
+    });
 
     console.log('[Realtime] Creating channel...');
     const channel = sb
       .channel('app-realtime-sync-v2')
       // ── Core tables (state setters) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, fetchProjects)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, fetchTasks)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, fetchReceipts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' }, fetchQuotes)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, fetchCustomers)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' },
+        withPatchAndCoalesce('projects', 'projects', setProjects as any,
+          rowToCamel, isStandaloneProject))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
+        withPatchAndCoalesce('tasks', 'tasks', setTasks as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' },
+        withPatchAndCoalesce('payments', 'payments', setPayments as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' },
+        withPatchAndCoalesce('receipts', 'receipts', setReceipts as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' },
+        withPatchAndCoalesce('quotes', 'quotes', setQuotes as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' },
+        withPatchAndCoalesce('customers', 'customers', setCustomers as any, rowToCamel))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, fireAttendanceEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
       // ── Supporting tables (fire events) ──
@@ -1681,7 +1780,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'business_profile' }, fireConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fireConfigEvent)
       // ── Orders (critical - realtime for instant updates) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' }, fetchSalesOrders)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' },
+        withPatchAndCoalesce('sales_orders', 'sales_orders', setSalesOrders as any,
+          (row) => normalizeOrderItems(rowToCamel(row))))
       // ── HRM Configuration & Payroll ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_approval_config' }, fireHrmApprovalConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
@@ -1705,7 +1806,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'material_proposals' }, fireMaterialProposalsEvent)
       // ── Purchase Orders (đơn hàng mua — dispatch event cho MaterialCoordination sync cross-tab) ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, (payload) => {
-        fetchPurchaseOrders(payload);
+        withPatchAndCoalesce('purchase_orders', 'purchase_orders', setPurchaseOrders as any,
+          (row) => normalizeOrderItems(rowToCamel(row)))(payload);
         firePurchaseOrdersEvent();
       })
       .subscribe((status: string, err: any) => {
@@ -1720,6 +1822,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     return () => {
       console.log('[Realtime] Cleaning up channel...');
+      flushPendingJobs();
       sb.removeChannel(channel);
     };
   }, [realtimeRetry]);
