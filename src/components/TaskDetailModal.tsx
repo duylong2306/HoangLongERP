@@ -1110,22 +1110,11 @@ export default function TaskDetailModal({
             createdKeys.add(autoKey);
             const assignee = employees.find(e => e.id === selectedTask.assigneeId);
             if (assignee) {
-              // Resolve employee ID mapped to HRM
-              let resolvedEmployeeId = assignee.id;
-              try {
-                const hrmEmpsStr = localStorage.getItem('hl_hrm_employees_v3');
-                if (hrmEmpsStr) {
-                  const hrmEmps = JSON.parse(hrmEmpsStr);
-                  if (Array.isArray(hrmEmps)) {
-                    const matchedHrmEmp = hrmEmps.find((he: any) => he.name && assignee.name && (he.name.toLowerCase().trim() === assignee.name.toLowerCase().trim()));
-                    if (matchedHrmEmp) {
-                      resolvedEmployeeId = matchedHrmEmp.id;
-                    }
-                  }
-                }
-              } catch (e) {
-                console.error(e);
-              }
+              // employee_id trong bảng hrm_employee_errors có khóa ngoại tới employees(id)
+              // → PHẢI dùng đúng id từ danh sách employees (đã chuẩn), KHÔNG được đoán
+              // lại theo tên qua cache localStorage 'hl_hrm_employees_v3' (id khác hệ,
+              // có thể lệch/cũ → insert vi phạm khóa ngoại, gửi vi phạm thất bại).
+              const resolvedEmployeeId = assignee.id;
 
               const criterion = allCriteria.find((c: any) => c.content === 'Làm chậm công việc và ảnh hưởng đến phòng ban khác') || { id: 'crit_B_10', content: 'Làm chậm công việc và ảnh hưởng đến phòng ban khác', category: 'progress' };
               // id DETERMINISTIC theo autoKey (không dùng Date.now()):
@@ -1171,22 +1160,10 @@ export default function TaskDetailModal({
                   createdKeys.add(autoKey);
                   const emp = employees.find(e => e.id === empId);
                   if (emp) {
-                    // Resolve employee ID mapped to HRM
-                    let resolvedEmployeeId = emp.id;
-                    try {
-                      const hrmEmpsStr = localStorage.getItem('hl_hrm_employees_v3');
-                      if (hrmEmpsStr) {
-                        const hrmEmps = JSON.parse(hrmEmpsStr);
-                        if (Array.isArray(hrmEmps)) {
-                          const matchedHrmEmp = hrmEmps.find((he: any) => he.name && emp.name && (he.name.toLowerCase().trim() === emp.name.toLowerCase().trim()));
-                          if (matchedHrmEmp) {
-                            resolvedEmployeeId = matchedHrmEmp.id;
-                          }
-                        }
-                      }
-                    } catch (e) {
-                      console.error(e);
-                    }
+                    // employee_id có khóa ngoại tới employees(id) → dùng thẳng id chuẩn,
+                    // không đoán lại theo tên qua cache 'hl_hrm_employees_v3' (xem giải
+                    // thích ở nhánh "task overdue" phía trên).
+                    const resolvedEmployeeId = emp.id;
 
                     const criterion = allCriteria.find((c: any) => c.content === 'Làm chậm công việc và ảnh hưởng đến phòng ban khác') || { id: 'crit_B_10', content: 'Làm chậm công việc và ảnh hưởng đến phòng ban khác', category: 'progress' };
                     // id DETERMINISTIC theo autoKey (không dùng Date.now()):
@@ -1271,21 +1248,10 @@ export default function TaskDetailModal({
         const emp = employees.find(e => e.id === empId);
         if (!emp) return;
 
-        let resolvedEmployeeId = emp.id;
-        try {
-          const hrmEmpsStr = localStorage.getItem('hl_hrm_employees_v3');
-          if (hrmEmpsStr) {
-            const hrmEmps = JSON.parse(hrmEmpsStr);
-            if (Array.isArray(hrmEmps)) {
-              const matchedHrmEmp = hrmEmps.find((he: any) => he.name && emp.name && (he.name.toLowerCase().trim() === emp.name.toLowerCase().trim()));
-              if (matchedHrmEmp) {
-                resolvedEmployeeId = matchedHrmEmp.id;
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Failed to map employee name to HRM id:", err);
-        }
+        // employee_id có khóa ngoại tới employees(id) → dùng thẳng id chuẩn từ
+        // danh sách employees, không đoán lại theo tên qua cache 'hl_hrm_employees_v3'
+        // (id khác hệ/cũ → vi phạm khóa ngoại khi insert, khiến "Gửi vi phạm" báo lỗi).
+        const resolvedEmployeeId = emp.id;
 
         const logId = `err_log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         newLogsToInsert.push({

@@ -1431,11 +1431,33 @@ export const dbService = {
 
   // 4. TASKS
   tasks: {
+    // "missions" (nhiệm vụ con) không còn nằm trong cột jsonb của bảng tasks —
+    // đã tách sang bảng task_missions (mỗi mission 1 dòng, xem taskMissions
+    // bên dưới) để tránh mất dữ liệu khi 2 client sửa 2 mission khác nhau gần
+    // như đồng thời (upsert cả cột jsonb trước đây sẽ ghi đè lẫn nhau).
+    // list() gắn lại `.missions` từ bảng mới để phía trên (App.tsx và mọi
+    // component đọc `task.missions`) không cần thay đổi gì.
     async list(): Promise<Task[]> {
-      return querySupabase<Task>('tasks', INITIAL_TASKS);
+      const rows = await querySupabase<Task>('tasks', INITIAL_TASKS);
+      // Supabase chưa cấu hình → giữ nguyên dữ liệu demo trong INITIAL_TASKS
+      // (đã có sẵn missions mẫu), không override bằng mảng rỗng.
+      if (!getSupabase()) return rows;
+      const missionRows = await querySupabase<any>('task_missions', []);
+      const missionsByTask = new Map<string, any[]>();
+      missionRows.forEach((r: any) => {
+        const list = missionsByTask.get(r.taskId) || [];
+        list.push({ id: r.id, ...(r.data || {}) });
+        missionsByTask.set(r.taskId, list);
+      });
+      return rows.map(t => ({ ...t, missions: missionsByTask.get(t.id) || [] } as Task));
     },
     async save(task: Task): Promise<void> {
-      await saveSupabase('tasks', task);
+      // Bỏ "missions" khỏi row ghi vào bảng tasks — việc đồng bộ từng mission
+      // sang task_missions do nơi gọi chủ động làm qua taskMissions.save()/
+      // delete() (cần biết bản CŨ để chỉ ghi mission thực sự thay đổi, xem
+      // App.tsx performUpdateTask), tasks.save() không tự làm việc đó.
+      const { missions, ...taskRow } = task as any;
+      await saveSupabase('tasks', taskRow);
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('tasks', id);
@@ -1451,6 +1473,54 @@ export const dbService = {
         console.error('Supabase delete multiple error:', err);
         throw err;
       }
+    }
+  },
+
+  // 4b. TASK_MISSIONS (Nhiệm vụ con trong 1 Công việc — bảng riêng, mỗi
+  // mission 1 dòng. Xem migration 20260824_task_missions_table.sql,
+  // 20260824b_fix_task_missions_id_collision.sql và ghi chú ở tasks.list()/
+  // save() phía trên.)
+  //
+  // ⚠️ Khóa chính (cột id) của bảng task_missions KHÔNG dùng thẳng mission.id
+  // — một số nơi sinh mission.id kiểu `mission_${Date.now()}` (không có phần
+  // ngẫu nhiên), chỉ đảm bảo duy nhất TRONG PHẠM VI 1 task, KHÔNG đảm bảo duy
+  // nhất giữa các task khác nhau (2 mission ở 2 task khác nhau có thể trùng id
+  // nếu tạo cùng mili-giây). Vì id là khóa chính TOÀN CỤC của bảng, dùng thẳng
+  // mission.id có thể làm 1 upsert ghi ĐÈ NHẦM mission của task khác, hoặc
+  // khiến backfill bỏ sót dữ liệu (ON CONFLICT DO NOTHING). → Dùng khóa ghép
+  // `${taskId}::${mission.id}` làm id thật của dòng — luôn duy nhất toàn cục.
+  // mission.id GỐC vẫn được giữ nguyên bên trong cột data (data.id).
+  taskMissions: {
+    // Toàn bộ mission của TẤT CẢ task, gom nhóm theo taskId — dùng nội bộ bởi
+    // tasks.list() và listByTask() bên dưới (tận dụng chung cache của
+    // querySupabase, tránh gọi lại nhiều lần).
+    async _listAllGrouped(): Promise<Map<string, any[]>> {
+      const missionRows = await querySupabase<any>('task_missions', []);
+      const grouped = new Map<string, any[]>();
+      missionRows.forEach((r: any) => {
+        const list = grouped.get(r.taskId) || [];
+        // r.data đã chứa đầy đủ mission (gồm cả id gốc của mission) — không
+        // dùng r.id (đó là khóa ghép task_id::mission.id của DÒNG, không phải
+        // id thật của mission).
+        list.push({ ...(r.data || {}) });
+        grouped.set(r.taskId, list);
+      });
+      return grouped;
+    },
+    async listByTask(taskId: string): Promise<any[]> {
+      const grouped = await this._listAllGrouped();
+      return grouped.get(taskId) || [];
+    },
+    async save(taskId: string, mission: any): Promise<void> {
+      if (!mission?.id) throw new Error('taskMissions.save: thiếu mission.id');
+      const rowId = `${taskId}::${mission.id}`;
+      // saveSupabase() chỉ convert key TẦNG NGOÀI (id/taskId/data) sang
+      // snake_case — nội dung "data" (toàn bộ mission, gồm cả id gốc) giữ
+      // nguyên camelCase, đúng hành vi mảng missions jsonb cũ trước khi tách bảng.
+      await saveSupabase('task_missions', { id: rowId, taskId, data: mission });
+    },
+    async delete(taskId: string, missionId: string): Promise<void> {
+      await deleteSupabase('task_missions', `${taskId}::${missionId}`);
     }
   },
 

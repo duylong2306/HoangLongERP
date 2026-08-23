@@ -1555,7 +1555,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         const idx = prev.findIndex((r: any) => r.id === row.id);
         if (idx >= 0) {
           const copy = [...prev];
-          copy[idx] = row;
+          // Merge thay vì ghi đè hoàn toàn: giữ lại các field mà bản ghi
+          // realtime KHÔNG mang theo (vd `tasks.missions` — cột cũ không còn
+          // được ghi mới, xem dbService.tasks; nếu ghi đè cả object sẽ vô
+          // tình xoá/làm cũ missions đang hiển thị đúng mỗi khi có 1 field
+          // KHÁC của task đổi ở tab khác). Với các bảng khác, row luôn đủ
+          // field nên merge cho kết quả giống hệt ghi đè — an toàn.
+          copy[idx] = { ...copy[idx], ...row };
           return copy;
         }
         return [row, ...prev];
@@ -1600,6 +1606,29 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         invalidateCache('receipts');
         setReceipts(await dbService.receipts.list());
       } catch (e) { console.error('Realtime receipts sync error:', e); }
+    };
+    // task_missions (nhiệm vụ con, bảng riêng — xem dbService.taskMissions):
+    // payload mang task_id của dòng vừa đổi → chỉ nạp lại missions của ĐÚNG
+    // task đó rồi vá vào state (không refetch toàn bộ bảng tasks). Coalesce
+    // theo TỪNG task_id để nhiều thay đổi liên tiếp trên các task khác nhau
+    // trong cùng cửa sổ 3s không bị gộp nhầm/mất id.
+    const fireTaskMissionsEvent = (payload?: any) => {
+      const taskId = payload?.new?.task_id || payload?.old?.task_id;
+      if (!taskId) {
+        // Không rõ task nào đổi (vd gọi thủ công, không có payload) → an toàn
+        // nhất là refetch lại toàn bộ tasks (đã gồm missions mới, xem dbService.tasks.list()).
+        scheduleCoalesced('task_missions:*', () => { fetchTasks(); });
+        return;
+      }
+      scheduleCoalesced(`task_missions:${taskId}`, () => {
+        (async () => {
+          try {
+            invalidateCache('task_missions');
+            const missions = await dbService.taskMissions.listByTask(taskId);
+            setTasks(prev => prev.map(t => t.id === taskId ? { ...t, missions } : t));
+          } catch (e) { console.error('Realtime task_missions sync error:', e); }
+        })();
+      });
     };
     const fireAdvancesEvent = (payload?: any) => {
       console.log('[Realtime] 🔔 subcontractor_advances event:', payload ? { event: payload.eventType } : '(manual)');
@@ -1754,7 +1783,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         withPatchAndCoalesce('projects', 'projects', setProjects as any,
           rowToCamel, isStandaloneProject))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
-        withPatchAndCoalesce('tasks', 'tasks', setTasks as any, rowToCamel))
+        withPatchAndCoalesce('tasks', 'tasks', setTasks as any, (row) => {
+          // Cột tasks.missions cũ không còn được ghi mới (đã tách sang bảng
+          // task_missions) — LOẠI hẳn key này khỏi bản vá realtime để merge ở
+          // patchStateRow() giữ nguyên `.missions` đang đúng trong state hiện
+          // tại, không bị đè bằng giá trị cũ/rỗng đóng băng trong cột đó.
+          const { missions, ...rest } = rowToCamel(row);
+          return rest;
+        }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_missions' }, fireTaskMissionsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' },
         withPatchAndCoalesce('payments', 'payments', setPayments as any, rowToCamel))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' },
@@ -2277,10 +2314,62 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const handleAddTask = async (newTask: Task): Promise<void> => {
     setTasks(prev => [newTask, ...prev]);
     await dbService.tasks.save(newTask);
+    // Task mới có thể kèm sẵn missions (vd sub-task tự động sinh từ mẫu ở
+    // ProjectKanbanBoard) — tasks.save() không còn ghi cột missions cũ nữa,
+    // nên phải lưu riêng từng mission sang bảng task_missions. An toàn vì
+    // task_id vừa tạo chưa có dòng nào tồn tại (không có gì để ghi đè).
+    if (newTask.missions && newTask.missions.length > 0) {
+      await Promise.all(newTask.missions.map(m => dbService.taskMissions.save(newTask.id, m)));
+    }
     window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
   };
 
+  // Hàng đợi lưu công việc theo TỪNG task id — chống mất dữ liệu khi 2 lệnh cập
+  // nhật cùng 1 task (VD: 2 nhiệm vụ trong "missions" được xác nhận liên tiếp
+  // thật nhanh) chạy gần như đồng thời. Vì "missions" được lưu là 1 mảng jsonb
+  // duy nhất (ghi đè toàn bộ khi save), nếu lệnh thứ 2 tính toán dựa trên
+  // `tasksRef.current` CHƯA kịp cập nhật bởi lệnh thứ 1 (tasksRef chỉ đồng bộ
+  // lại vào lần re-render kế tiếp, không đồng bộ ngay khi setState được gọi),
+  // nó sẽ ghi đè mất thay đổi của lệnh thứ 1. Xếp hàng theo id đảm bảo lệnh
+  // sau luôn đọc bản đã-được-lệnh-trước cập nhật.
+  const taskUpdateQueues = useRef(new Map<string, Promise<boolean>>());
+
   const handleUpdateTask = (id: string, updates: Partial<Task>): Promise<boolean> => {
+    const prevInQueue = taskUpdateQueues.current.get(id) || Promise.resolve(true);
+    const queued = prevInQueue.then(() => performUpdateTask(id, updates));
+    taskUpdateQueues.current.set(id, queued);
+    queued.finally(() => {
+      // Chỉ xóa khỏi hàng đợi nếu không có lệnh mới nào được thêm vào sau đó.
+      if (taskUpdateQueues.current.get(id) === queued) {
+        taskUpdateQueues.current.delete(id);
+      }
+    });
+    return queued;
+  };
+
+  // So sánh missions CŨ (mà client này biết) với missions MỚI trong `updates`,
+  // rồi chỉ upsert/xóa đúng những mission THỰC SỰ thay đổi ở bảng task_missions
+  // riêng — không ghi lại nguyên mảng. Đây là điểm mấu chốt chống mất dữ liệu
+  // khi nhiều người sửa các mission khác nhau của cùng 1 task gần như đồng
+  // thời: mission nào không đổi so với bản mà client này biết thì KHÔNG bao
+  // giờ bị ghi đè, dù client đó không hay biết mission khác đã bị người khác
+  // sửa ở giữa chừng.
+  const syncMissionsDiff = (taskId: string, oldMissions: any[] | undefined, newMissions: any[] | undefined): Promise<any> => {
+    if (newMissions === undefined) return Promise.resolve();
+    const oldById = new Map((oldMissions || []).map((m: any) => [m.id, m]));
+    const newIds = new Set((newMissions || []).map((m: any) => m.id));
+    const toSave = (newMissions || []).filter((m: any) => {
+      const old = oldById.get(m.id);
+      return !old || stableStr(old) !== stableStr(m);
+    });
+    const toDelete = (oldMissions || []).filter((m: any) => !newIds.has(m.id)).map((m: any) => m.id);
+    return Promise.all([
+      ...toSave.map((m: any) => dbService.taskMissions.save(taskId, m)),
+      ...toDelete.map((mid: string) => dbService.taskMissions.delete(taskId, mid))
+    ]);
+  };
+
+  const performUpdateTask = (id: string, updates: Partial<Task>): Promise<boolean> => {
     // Tìm task từ state hiện tại (ref) — không chạy side-effect bên trong updater.
     const oldTask = tasksRef.current.find(t => t.id === id);
     const baseTask = oldTask;
@@ -2322,7 +2411,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     // Nếu task đã có trong state → save trực tiếp lên Supabase và trả về kết quả.
     if (baseTask) {
-      return dbService.tasks.save(changedTask).then(() => {
+      return Promise.all([
+        dbService.tasks.save(changedTask),
+        syncMissionsDiff(id, baseTask.missions, updates.missions)
+      ]).then(() => {
         runTaskNotifications(baseTask, changedTask);
         window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
         return true;
@@ -2340,7 +2432,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return dbService.tasks.list().then(serverTasks => {
       const serverTask = serverTasks.find(t => t.id === id);
       const target = serverTask ? { ...serverTask, ...updates } : changedTask;
-      return dbService.tasks.save(target).then(() => {
+      return Promise.all([
+        dbService.tasks.save(target),
+        syncMissionsDiff(id, serverTask?.missions, updates.missions)
+      ]).then(() => {
         runTaskNotifications(serverTask, target);
         window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
         // Cập nhật state với bản đã save — giữ bản này làm bản gốc.

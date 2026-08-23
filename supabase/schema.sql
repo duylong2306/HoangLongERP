@@ -116,8 +116,26 @@ create table if not exists public.tasks (
   is_material_self_coordinated boolean,
   material_coordinator_id     text,
   subcontractor_approver_id   text,
-  subcontractor_settler_id    text,
-  missions                    jsonb            -- SubTaskMission[]
+  subcontractor_settler_id    text
+  -- Cột "missions" (jsonb) đã bị xóa — xem migration 20260824d. Dữ liệu nằm
+  -- ở bảng public.task_missions (mục 4b bên dưới).
+);
+
+-- -----------------------------------------------------------------------------
+-- 4b. TASK_MISSIONS (Nhiệm vụ con trong 1 Công việc — tách từ tasks.missions,
+-- xem migration 20260824_task_missions_table.sql +
+-- 20260824b_fix_task_missions_id_collision.sql +
+-- 20260824c_fix_task_missions_duplicate_ids_keep_latest.sql +
+-- 20260824d_drop_tasks_missions_column.sql. Mỗi mission 1 dòng, để lưu 1
+-- mission không ghi đè toàn bộ mảng của các mission khác.)
+-- -----------------------------------------------------------------------------
+create table if not exists public.task_missions (
+  -- id = khóa GHÉP "task_id::mission.id" (KHÔNG phải mission.id đơn thuần) —
+  -- mission.id chỉ đảm bảo duy nhất trong 1 task, có thể trùng giữa 2 task
+  -- khác nhau (xem 20260824b). data.id mới là id thật của mission.
+  id      text primary key,
+  task_id text not null references public.tasks(id) on delete cascade,
+  data    jsonb not null default '{}'::jsonb    -- SubTaskMission đầy đủ (gồm cả id), giữ camelCase
 );
 
 -- -----------------------------------------------------------------------------
@@ -760,7 +778,7 @@ begin
       'quotation_configs','notifications','suppliers','inventory','warehouse_logs',
       'subcontractor_catalog_items','attendance_records','conversations',
       'chat_messages','fcm_tokens','construction_norms',
-      'product_prices','product_materials'
+      'product_prices','product_materials','task_missions'
     ])
   loop
     execute format('alter table public.%I enable row level security;', t);
@@ -888,9 +906,16 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   material_coordinator_id text,
   subcontractor_approver_id text,
   subcontractor_settler_id text,
-  missions jsonb,
+  -- Cột "missions" đã bị xóa (migration 20260824d) — xem public.task_missions
   CONSTRAINT tasks_pkey PRIMARY KEY (id),
   CONSTRAINT tasks_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
+);
+CREATE TABLE IF NOT EXISTS public.task_missions (
+  id text NOT NULL,
+  task_id text NOT NULL,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT task_missions_pkey PRIMARY KEY (id),
+  CONSTRAINT task_missions_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS public.receipts (
   id text NOT NULL,
