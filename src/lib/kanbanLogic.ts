@@ -99,8 +99,11 @@ export const getAbbrev = (nameStr: string): string => {
     .replace(/[̀-ͯ]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
-  const words = norm.trim().split(/\s+/).filter(Boolean);
-  return words.map(w => w[0].toUpperCase()).join('');
+  // Bỏ các "từ" chỉ toàn ký tự đặc biệt (vd: "-") và bỏ dấu ngoặc/ký tự đặc biệt
+  // đứng đầu mỗi từ (vd: "(Minh" → lấy "M" thay vì "("), tránh mã sinh ra dính
+  // dấu ngoặc/gạch ngang xấu như "AH-PHT(H".
+  const words = norm.trim().split(/\s+/).filter(w => /[a-zA-Z0-9]/.test(w));
+  return words.map(w => (w.match(/[a-zA-Z0-9]/) as RegExpMatchArray)[0].toUpperCase()).join('');
 };
 
 export interface ColumnStyleDetails {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { isUserInRoleGroup, getMaterialCoordinator, getMaterialApprover } from '../context';
+import { useSettings } from '../context/SettingsContext';
 import {
   Project,
   Employee,
@@ -39,6 +40,7 @@ import {
   PanelRightOpen,
   PanelRightClose,
   Zap,
+  Download,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 
@@ -59,18 +61,14 @@ type ProposalStatus = 'find_supplier' | 'waiting_approval' | 'waiting_order' | '
 // Trạng thái hiển thị của 1 thẻ trên bảng điều phối
 interface BoardItem {
   key: string;
-  kind: 'proposal' | 'legacy';
+  kind: 'proposal';
   project: Project;
-  doc: any; // material_proposals hoặc ProjectDoc cũ
+  doc: any; // material_proposals
 }
 
-const LEGACY_STATUS_MAP: Record<string, ProposalStatus> = {
-  draft: 'waiting_order',
-  active: 'ordered',
-  approved: 'received',
-  rejected: 'cancelled',
-  archived: 'cancelled',
-};
+// Sentinel "supplierId" đại diện cho nguồn "Kho có sẵn" (thay vì Nhà cung cấp thật) khi
+// gán nguồn vật tư cho 1 dòng đề xuất — khôi phục lại phân biệt kho/NCC của luồng cũ.
+const WAREHOUSE_SOURCE_ID = '__warehouse__';
 
 const STATUS_LABEL: Record<ProposalStatus, string> = {
   find_supplier: 'TÌM NHÀ CUNG CẤP',
@@ -122,11 +120,6 @@ export default function MaterialCoordination({
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
-  // Form states for legacy docs editing/viewing details
-  const [editMaterials, setEditMaterials] = useState<any[]>([]);
-  const [editCoordType, setEditCoordType] = useState<'self' | 'assign'>('self');
-  const [editCoordinatorId, setEditCoordinatorId] = useState('');
-
   // Quote modal state
   const [quoteModal, setQuoteModal] = useState<{ open: boolean; proposalId: string }>({ open: false, proposalId: '' });
   const [quoteSupplierId, setQuoteSupplierId] = useState('');
@@ -155,7 +148,11 @@ export default function MaterialCoordination({
   const [receiveModal, setReceiveModal] = useState<{ open: boolean; order: any | null; proposal: any | null }>({ open: false, order: null, proposal: null });
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({});
   // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
-  const [systemConfig, setSystemConfig] = useState<any>(null);
+  // Hồ sơ doanh nghiệp lấy trực tiếp từ SettingsContext (nguồn thật duy nhất,
+  // nơi màn hình "Thông Tin Doanh Nghiệp" lưu vào bảng business_profile) —
+  // KHÔNG tự fetch riêng từ shift_config nữa (đó là 1 bảng khác, không liên
+  // quan, khiến header Đơn Mua Hàng trước đây luôn hiện placeholder trống).
+  const { businessInfo } = useSettings();
   // Mobile: toggle right tools pane trong detail drawer
   const [showRightPane, setShowRightPane] = useState(false);
   // Quick proposal modal state
@@ -214,14 +211,6 @@ export default function MaterialCoordination({
     loadSuppliers();
   }, [loadProposals, loadOrders, loadSuppliers]);
 
-  // Load hồ sơ doanh nghiệp (company profile) để hiển thị header Đơn Mua Hàng
-  React.useEffect(() => {
-    dbService.shiftConfig.get().then((c: any) => setSystemConfig(c)).catch(() => {});
-    const reloadCfg = () => dbService.shiftConfig.get().then((c: any) => setSystemConfig(c)).catch(() => {});
-    window.addEventListener('hl_system_settings_updated', reloadCfg);
-    return () => window.removeEventListener('hl_system_settings_updated', reloadCfg);
-  }, []);
-
   React.useEffect(() => {
     const reload = () => { loadProposals(); loadOrders(); };
     const reloadOrdersOnly = () => { loadOrders(); };
@@ -246,28 +235,25 @@ export default function MaterialCoordination({
   }, [initialProposalId, onInitialProposalConsumed]);
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
-  const isLegacyMaterialDoc = (d: any) => {
-    if (!d) return false;
-    const codeLower = d.code?.toLowerCase() || '';
-    const idLower = d.id?.toLowerCase() || '';
-    return (
-      codeLower.includes('mat-') ||
-      idLower.includes('doc_mat_') ||
-      (d.materials && Array.isArray(d.materials)) ||
-      d.templateName === 'Bản thô đặt sản xuất phôi Hoàng Long'
-    );
-  };
-
-  const resolveStatus = (item: BoardItem): ProposalStatus => {
-    if (item.kind === 'proposal') return item.doc.status as ProposalStatus;
-    return LEGACY_STATUS_MAP[item.doc.status] || 'waiting_order';
-  };
+  const resolveStatus = (item: BoardItem): ProposalStatus => item.doc.status as ProposalStatus;
 
   // Lấy danh sách dòng vật tư của 1 thẻ (mới: items; cũ: materials)
   const getDocItems = (doc: any): any[] => {
     if (doc && Array.isArray(doc.items)) return doc.items;
     if (doc && Array.isArray(doc.materials)) return doc.materials;
     return [];
+  };
+
+  // Tra cứu tình trạng nhận hàng thực tế của 1 dòng vật tư trong đề xuất, dựa
+  // theo Đơn Mua Hàng (PO) đã tạo cho dòng đó (khớp theo id). poQty là SL hiện
+  // tại trên PO (có thể đã bị hạ sau khi "Chốt số lượng thực nhận").
+  const getReceivedInfo = (doc: any, itemId: string): { received: number; poQty: number | null } => {
+    for (const oid of doc.purchaseOrderIds || []) {
+      const po = purchaseOrders.find((o: any) => o.id === oid);
+      const it = po?.items?.find((i: any) => i.id === itemId);
+      if (it) return { received: it.receivedQty || 0, poQty: it.qty };
+    }
+    return { received: 0, poQty: null };
   };
 
   const proposalTotal = (doc: any): number =>
@@ -290,7 +276,7 @@ export default function MaterialCoordination({
 
   // Quyền thao tác
   const canCoordinate = React.useCallback((uid?: string): boolean => {
-    if (!uid) return true;
+    if (!uid) return false;
     if (isUserInRoleGroup(uid, 'role_admin')) return true;
     if (isUserInRoleGroup(uid, 'role_accounting')) return true;
     if (isUserInRoleGroup(uid, 'role_office')) return true;
@@ -301,7 +287,7 @@ export default function MaterialCoordination({
   }, [currentUser]);
 
   const canApprove = React.useCallback((uid?: string): boolean => {
-    if (!uid) return true;
+    if (!uid) return false;
     if (isUserInRoleGroup(uid, 'role_admin')) return true;
     if (currentUser?.username === 'admin') return true;
     const appr = getMaterialApprover();
@@ -312,7 +298,7 @@ export default function MaterialCoordination({
   const isApprover = canApprove(currentUser?.id);
   // Người khởi tạo đề xuất cũng được thao tác nhận hàng
   const canActOnOrder = (prop: any) => {
-    if (!currentUser?.id) return true;
+    if (!currentUser?.id) return false;
     if (isCoordinator) return true;
     if (prop.createdBy === currentUser.id) return true;
     return false;
@@ -356,13 +342,6 @@ export default function MaterialCoordination({
         progress: 0,
       };
       result.push({ key: p.id, kind: 'proposal', project: project || fallback, doc: p });
-    });
-    projects.forEach(p => {
-      (p.documents || []).forEach(d => {
-        if (isLegacyMaterialDoc(d)) {
-          result.push({ key: d.id, kind: 'legacy', project: p, doc: d });
-        }
-      });
     });
     return result;
   }, [proposals, projects]);
@@ -486,7 +465,7 @@ export default function MaterialCoordination({
         note: it.note || '', maSanPham: it.maSanPham || '',
       })),
       supplierId: null, supplierName: null, quotes: [], chosenQuoteId: null,
-      purchaseOrderIds: [], debtRecorded: false, notes: quickPropNotes,
+      purchaseOrderIds: [], notes: quickPropNotes,
       createdAt: now.toISOString(), updatedAt: now.toISOString(),
     });
     try {
@@ -603,31 +582,13 @@ export default function MaterialCoordination({
     };
   };
 
-  // Đồng bộ receivedQty trên các đơn hàng liên kết để khớp với cột đích:
-  // - 'reset' (ĐẶT HÀNG THÀNH CÔNG): chưa nhận hàng → receivedQty = 0
-  // - 'full'  (ĐÃ NHẬN HÀNG)        : nhận đủ        → receivedQty = qty
-  const applyReceiveStateToPOs = async (poIds: string[], mode: 'reset' | 'full') => {
-    if (!poIds || poIds.length === 0) return;
-    for (const id of poIds) {
-      const po = purchaseOrders.find((o: any) => o.id === id);
-      if (!po) continue; // đơn không tồn tại (đã bị xóa) → bỏ qua
-      const items = (po.items || []).map((it: any) => ({
-        ...it,
-        receivedQty: mode === 'full' ? (it.qty || 0) : 0,
-      }));
-      await dbService.purchaseOrders.save({ ...po, items }).catch(() => {});
-    }
-    loadOrders();
-  };
-
-  // Khôi phục 1 đề xuất đã HỦY về cột đã chọn, đồng thời reset dữ liệu
-  // cho phù hợp với bước của cột đó.
+  // Khôi phục 1 đề xuất đã HỦY về cột đã chọn. CHỦ Ý KHÔNG đụng vào receivedQty
+  // của các đơn hàng liên kết — trước đây ép receivedQty về 0 (cột ĐẶT HÀNG
+  // THÀNH CÔNG) hoặc về đủ số lượng (cột ĐÃ NHẬN HÀNG), có nguy cơ ghi đè mất
+  // dữ liệu nhận hàng từng phần thực tế đã ghi nhận trước khi đề xuất bị hủy.
   const restoreProposal = async (p: any) => {
     const target = restoreTargets[p.id] || 'waiting_order';
     const patched = buildResetProposalForColumn(p, target);
-    // Đồng bộ receivedQty trên đơn hàng liên kết (nếu có)
-    if (target === 'ordered') await applyReceiveStateToPOs(p.purchaseOrderIds || [], 'reset');
-    if (target === 'received') await applyReceiveStateToPOs(p.purchaseOrderIds || [], 'full');
     await saveProposal(patched);
     showNotification(
       `Đã khôi phục đề xuất ${p.code} về cột ${STATUS_LABEL[target]} (đã reset dữ liệu cho bước này).`,
@@ -651,120 +612,12 @@ export default function MaterialCoordination({
     );
   };
 
-  // ─── Legacy handlers (giữ luồng cũ cho dữ liệu ProjectDoc cũ) ──────────
   const activeDetail = boardItems.find(item => item.key === selectedDocKey);
 
   const handleSelectDoc = (key: string) => {
     setSelectedDocKey(key);
     setChosenQuoteId('');
     setItemSupplierDraft({});
-    const found = boardItems.find(item => item.key === key);
-    if (found && found.kind === 'legacy') {
-      setEditMaterials(found.doc.materials ? [...found.doc.materials] : []);
-      setEditCoordType(found.doc.coordinationType || 'self');
-      setEditCoordinatorId(found.doc.coordinatorId || '');
-      setIsEditing(false);
-    }
-  };
-
-  const handleLegacySaveDocChanges = () => {
-    if (!activeDetail || activeDetail.kind !== 'legacy') return;
-    const found = activeDetail;
-    const coordinatorName = editCoordType === 'assign'
-      ? (employees.find(e => e.id === editCoordinatorId)?.name || 'Người điều phối')
-      : 'Tự điều phối';
-    const updatedDocs = (found.project.documents || []).map((doc: any) => {
-      if (doc.id === found.doc.id) {
-        return {
-          ...doc,
-          materials: editMaterials,
-          coordinationType: editCoordType,
-          coordinatorId: editCoordinatorId,
-          coordinatorName,
-          name: `Đề xuất cấp vật tư thô: ${editMaterials.length} chủng loại (${coordinatorName})`,
-        };
-      }
-      return doc;
-    });
-    onUpdateProject(found.project.id, { documents: updatedDocs });
-    setIsEditing(false);
-    showNotification('Cập nhật thông tin điều phối vật tư thành công!', 'Thành công', 'success');
-  };
-
-  // Giữ luồng cũ: Xuất kho / Đã nhận hàng cho các đề xuất cũ
-  const handleLegacyStatus = async (doc: any, project: Project, newStatus: 'draft' | 'active' | 'approved' | 'archived' | 'rejected') => {
-    let notificationMsg = '';
-    if (newStatus === 'approved') {
-      const isSupplier = doc.proposalType === 'supplier' || !!doc.supplierId || doc.templateName?.includes('nhà cung cấp') || doc.templateName?.includes('NCC');
-      if (!isSupplier) {
-        const currentInv: any[] = await dbService.inventory.list();
-        const docMaterials = doc.materials || [];
-        let stockUpdatedCount = 0;
-        for (const m of docMaterials) {
-          const matchedStock = currentInv.find((i: any) => i.code?.toLowerCase() === m.name?.toLowerCase() || i.name?.toLowerCase() === m.name?.toLowerCase());
-          if (matchedStock) {
-            matchedStock.qty = Math.max(0, matchedStock.qty - (m.qty || 0));
-            stockUpdatedCount++;
-            await dbService.inventory.save(matchedStock).catch(() => {});
-          }
-        }
-        if (stockUpdatedCount > 0) window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
-        notificationMsg = `Đã hoàn tất nhận hàng từ Kho!\n- Đã trừ kho ${stockUpdatedCount} mặt hàng.`;
-      } else {
-        const supplierIdToUse = doc.supplierId || 'SUP_001';
-        const currentSups: any[] = await dbService.suppliers.list();
-        const matchedSup = currentSups.find((s: any) => s.id === supplierIdToUse || s.name === doc.supplierName);
-        if (matchedSup) {
-          let debt = 0;
-          (doc.materials || []).forEach((m: any) => { debt += (m.qty || 0) * (m.price || 150000); });
-          matchedSup.debt = (matchedSup.debt || 0) + debt;
-          await dbService.suppliers.save(matchedSup).catch(() => {});
-          // Ghi nhận công nợ vào tab Công nợ Trả (bảng accounting_liabilities)
-          const liabList: any[] = await dbService.accountingLiabilities.list().catch((): any[] => []);
-          const existing = liabList.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === matchedSup.name);
-          if (existing) {
-            const newValue = (existing.value || 0) + debt;
-            await dbService.accountingLiabilities.save({
-              ...existing,
-              value: newValue,
-              remaining: newValue - (existing.paid || 0),
-            }).catch(() => {});
-          } else {
-            await dbService.accountingLiabilities.save({
-              id: crypto.randomUUID(),
-              name: matchedSup.name,
-              category: 'Nhà Cung Cấp',
-              value: debt,
-              paid: 0,
-              remaining: debt,
-              notes: `Công nợ vật tư — Đề xuất ${doc.id || ''}`,
-            }).catch(() => {});
-          }
-          window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
-          window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
-          notificationMsg = `Đã hoàn tất nhận hàng từ NCC ${matchedSup.name}!\n- Công nợ tăng: +${debt.toLocaleString('vi-VN')} đ.`;
-        }
-      }
-    }
-    const updatedDocs = (project.documents || []).map((d: any) => (d.id === doc.id ? { ...d, status: newStatus } : d));
-    onUpdateProject(project.id, { documents: updatedDocs });
-    showNotification(notificationMsg || `Đã chuyển trạng thái đề xuất.`, 'Cập nhật trạng thái', 'success');
-  };
-
-  const handleLegacyDeleteDoc = (doc: any, project: Project) => {
-    askConfirmation(
-      "⚠️ Bạn có chắc chắn muốn XÓA vĩnh viễn đề xuất điều phối vật tư này không?",
-      "Xác nhận xóa vĩnh viễn",
-      () => {
-        const updatedDocs = (project.documents || []).filter((d: any) => d.id !== doc.id);
-        onUpdateProject(project.id, { documents: updatedDocs });
-        setSelectedDocKey(null);
-        setIsEditing(false);
-        showNotification('Đã xóa đề xuất điều phối vật tư!', 'Xóa thành công', 'success');
-      },
-      "Xóa vĩnh viễn",
-      "Hủy bỏ"
-    );
   };
 
   // ─── Quote (TÌM NHÀ CUNG CẤP) ───────────────────────────────────────────
@@ -885,7 +738,7 @@ export default function MaterialCoordination({
     const proposerEmp = employees.find((e: any) => e.id === prop?.createdBy);
     const coordinatorEmp = employees.find((e: any) => e.id === prop?.coordinatorId);
     return {
-      companyProfile: systemConfig?.companyProfile || {},
+      companyProfile: businessInfo || {},
       projectName: proj?.name || prop?.projectName || '',
       receiverName: prop?.createdByName || '—',
       receiverPhone: proposerEmp?.phone || '—',
@@ -915,11 +768,15 @@ export default function MaterialCoordination({
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }
         .page { padding: 0; }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
-        .company-info { flex: 1; }
+        /* Header dùng table thay vì flex: flex render không ổn định trong
+           html2canvas (PDF chia sẻ) khiến 2 cột lệch/đè nhau — table thì luôn
+           khớp giữa bản in trình duyệt và PDF xuất ra. */
+        table.header { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+        table.header td { vertical-align: top; padding: 0; }
+        .company-info { width: 58%; }
         .company-info .name { font-size: 14px; font-weight: bold; margin-bottom: 2px; }
         .company-info .detail { font-size: 10.5px; color: #333; margin: 1px 0; }
-        .center-title { text-align: center; flex: 1.2; }
+        .center-title { text-align: center; width: 42%; }
         .center-title .country { font-size: 12px; font-weight: bold; letter-spacing: 0.5px; }
         .center-title .motto { font-size: 10px; font-style: italic; color: #444; }
         .center-title .divider { width: 60px; height: 1px; background: #111; margin: 4px auto; }
@@ -927,8 +784,12 @@ export default function MaterialCoordination({
         .center-title .doc-code { font-size: 11px; font-weight: bold; margin-top: 3px; }
         .center-title .doc-date { font-size: 10px; color: #555; margin-top: 2px; }
         hr { border: none; border-top: 1.5px solid #222; margin: 10px 0; }
-        table.info { width: 100%; border-collapse: collapse; margin: 6px 0; }
-        table.info td { vertical-align: top; padding: 3px 8px; font-size: 11px; }
+        /* table-layout: fixed để trình duyệt chốt độ rộng cột theo dòng đầu
+           tiên, không tính lại theo nội dung — tránh html2canvas (PDF chia
+           sẻ) tính sai độ rộng cột khi có dòng dùng colspan (VD: "Dự án"),
+           gây đè chữ lên bảng vật tư bên dưới. */
+        table.info { width: 100%; border-collapse: collapse; margin: 6px 0; table-layout: fixed; }
+        table.info td { vertical-align: top; padding: 3px 8px; font-size: 11px; overflow-wrap: break-word; }
         table.info .lbl { font-weight: bold; white-space: nowrap; width: 130px; color: #222; }
         table.info .val { color: #1a1a1a; }
         table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -937,31 +798,31 @@ export default function MaterialCoordination({
         table.items td { vertical-align: middle; }
         .total-row { text-align: right; font-weight: bold; font-size: 13px; margin-top: 8px; padding: 6px 0; }
         .total-words { font-size: 11px; color: #333; margin: 4px 0 16px; }
-        .signatures { display: flex; justify-content: space-between; margin-top: 40px; text-align: center; font-size: 11px; }
-        .signatures .sig-block { width: 30%; }
+        table.signatures { width: 100%; border-collapse: collapse; margin-top: 40px; text-align: center; font-size: 11px; }
+        table.signatures td { vertical-align: top; width: 33.33%; padding: 0; }
         .signatures .sig-title { font-weight: bold; font-size: 11px; }
         .signatures .sig-note { font-size: 9.5px; color: #666; font-style: italic; margin-top: 4px; }
         .signatures .sig-name { font-weight: bold; margin-top: 40px; font-size: 11px; }
       </style></head><body>
       <div class="page">
-        <div class="header">
-          <div class="company-info">
+        <table class="header"><tr>
+          <td class="company-info">
             <div class="name">${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
             ${cp.taxCode ? `<div class="detail">MST: ${esc(cp.taxCode)}</div>` : ''}
             ${cp.address ? `<div class="detail">Địa chỉ: ${esc(cp.address)}</div>` : ''}
             ${cp.phone ? `<div class="detail">Điện thoại: ${esc(cp.phone)}</div>` : ''}
             ${cp.email ? `<div class="detail">Email: ${esc(cp.email)}</div>` : ''}
             ${cp.representative ? `<div class="detail">Người đại diện: ${esc(cp.representative)}</div>` : ''}
-          </div>
-          <div class="center-title">
+          </td>
+          <td class="center-title">
             <div class="country">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
             <div class="motto">Độc lập – Tự do – Hạnh phúc</div>
             <div class="divider"></div>
             <div class="doc-title">ĐƠN MUA HÀNG</div>
             <div class="doc-code">Mã: ${esc(order.id)}</div>
             <div class="doc-date">Ngày: ${esc(formatVietnameseDateTime(order.createdAt))}</div>
-          </div>
-        </div>
+          </td>
+        </tr></table>
         <hr/>
         <table class="info">
           <tr>
@@ -992,23 +853,23 @@ export default function MaterialCoordination({
         </table>
         <div class="total-row">TỔNG CỘNG: ${total.toLocaleString('vi-VN')} ₫</div>
         <div class="total-words">Bằng chữ: ${esc(numberToVietnameseWords(total))}</div>
-        <div class="signatures">
-          <div class="sig-block">
+        <table class="signatures"><tr>
+          <td>
             <div class="sig-title">NGƯỜI LẬP PHIẾU</div>
             <div class="sig-note">(Ký, ghi rõ họ tên)</div>
             <div class="sig-name">${esc(order.createdByName || order.createdBy || '')}</div>
-          </div>
-          <div class="sig-block">
+          </td>
+          <td>
             <div class="sig-title">NGƯỜI ĐIỀU PHỐI</div>
             <div class="sig-note">(Ký, ghi rõ họ tên)</div>
             <div class="sig-name">${esc(ctx.coordinatorName)}</div>
-          </div>
-          <div class="sig-block">
+          </td>
+          <td>
             <div class="sig-title">ĐẠI DIỆN BÊN BÁN</div>
             <div class="sig-note">(Ký, đóng dấu)</div>
             <div class="sig-name">${esc(order.supplierName || '')}</div>
-          </div>
-        </div>
+          </td>
+        </tr></table>
       </div>
       </body></html>`;
   };
@@ -1061,20 +922,68 @@ export default function MaterialCoordination({
     setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 400);
   };
 
-  // Chia sẻ trực tiếp file PDF Đơn Mua Hàng (thay vì chỉ chia sẻ link)
-  const shareOrder = async (order: any) => {
+  // Dựng PDF Đơn Mua Hàng thành Blob — dùng chung cho cả "Chia sẻ" và "Tải PDF".
+  // Render trong 1 iframe ẩn thật (cùng cơ chế với "Xem trước"/"In" đang đúng)
+  // rồi mới chụp bằng html2canvas — truyền thẳng chuỗi HTML cho
+  // html2pdf().from(string) trước đây khiến nó không tính đúng layout bảng/CSS
+  // (không nằm trong 1 document/khung hình thật), gây vỡ layout trong PDF.
+  const generateOrderPdfBlob = async (order: any): Promise<Blob> => {
     const ctx = resolveOrderCtx(order);
     const html = buildPurchaseOrderHtml(order, ctx);
-    const opt = {
-      margin: 10,
-      filename: `DonMuaHang_${order.id}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    };
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-99999px';
+    iframe.style.top = '0';
+    iframe.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
     try {
+      await new Promise<void>((resolve, reject) => {
+        iframe.onload = () => resolve();
+        iframe.onerror = () => reject(new Error('Không dựng được nội dung để xuất PDF.'));
+        iframe.srcdoc = html;
+      });
+      // Đợi 1 nhịp để trình duyệt layout xong hẳn trước khi chụp
+      await new Promise((r) => setTimeout(r, 80));
+      const targetEl = iframe.contentDocument?.body;
+      if (!targetEl) throw new Error('Không dựng được nội dung để xuất PDF.');
+
+      const opt = {
+        // Khớp đúng lề với @page trong buildPurchaseOrderHtml (15mm trên/dưới,
+        // 18mm trái/phải) để PDF chia sẻ giống hệt bản in, không lệch lề.
+        margin: [15, 18, 15, 18],
+        filename: `DonMuaHang_${order.id}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', windowWidth: 794 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      };
       const html2pdf = (await loadHtml2Pdf()) as any;
-      const blob: Blob = await html2pdf().from(html).set(opt).outputPdf('blob');
+      return await html2pdf().from(targetEl).set(opt).outputPdf('blob');
+    } finally {
+      document.body.removeChild(iframe);
+    }
+  };
+
+  // Tải PDF Đơn Mua Hàng thẳng về máy — KHÔNG qua hộp thoại Share của hệ điều
+  // hành (Windows Share không có lựa chọn "Lưu về máy" trực tiếp).
+  const downloadOrderPdf = async (order: any) => {
+    try {
+      const blob = await generateOrderPdfBlob(order);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `DonMuaHang_${order.id}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      showNotification('Đã tải file PDF Đơn Mua Hàng về máy.', 'Đã tải PDF', 'success');
+    } catch (e) {
+      showNotification('Không thể tạo file PDF.', 'Lỗi', 'warning');
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF Đơn Mua Hàng (thay vì chỉ chia sẻ link)
+  const shareOrder = async (order: any) => {
+    try {
+      const blob = await generateOrderPdfBlob(order);
       const file = new File([blob], `DonMuaHang_${order.id}.pdf`, { type: 'application/pdf' });
       const navAny: any = navigator;
       if (navAny.canShare && navAny.canShare({ files: [file] })) {
@@ -1169,7 +1078,7 @@ export default function MaterialCoordination({
   const createOrders = async (prop: any) => {
     const items = prop.items || [];
     if (!items.some((it: any) => it.supplierId || itemSupplierDraft[it.id])) {
-      showNotification('Chưa gán nhà cung cấp cho sản phẩm nào.', 'Thiếu NCC', 'warning');
+      showNotification('Chưa gán nhà cung cấp hoặc chọn "Xuất từ Kho có sẵn" cho sản phẩm nào.', 'Thiếu nguồn vật tư', 'warning');
       return;
     }
     if ((prop.purchaseOrderIds || []).length > 0) {
@@ -1178,12 +1087,34 @@ export default function MaterialCoordination({
     }
     const enrichedItems = items.map((it: any) => {
       const sid = it.supplierId || itemSupplierDraft[it.id] || '';
+      if (sid === WAREHOUSE_SOURCE_ID) {
+        return { ...it, supplierId: WAREHOUSE_SOURCE_ID, supplierName: 'Kho có sẵn', fromWarehouse: true };
+      }
       const sup = suppliers.find((s: any) => s.id === sid);
       return { ...it, supplierId: sid, supplierName: sup?.name || it.supplierName || '' };
     });
-    // Mỗi sản phẩm thuộc đúng 1 đơn (gom theo nhà cung cấp) → tối đa 1 đơn / sản phẩm
+
+    // ── Vật tư chọn "Xuất từ Kho có sẵn": trừ tồn kho ngay, KHÔNG tạo Đơn Mua
+    // Hàng / không phát sinh công nợ NCC.
+    const warehouseItems = enrichedItems.filter((it: any) => it.supplierId === WAREHOUSE_SOURCE_ID);
+    let stockDeductedCount = 0;
+    if (warehouseItems.length > 0) {
+      const currentInv: any[] = await dbService.inventory.list();
+      for (const it of warehouseItems) {
+        const matched = currentInv.find((i: any) =>
+          i.code?.toLowerCase() === it.name?.toLowerCase() || i.name?.toLowerCase() === it.name?.toLowerCase());
+        if (matched) {
+          matched.qty = Math.max(0, matched.qty - (it.qty || 0));
+          stockDeductedCount++;
+          await dbService.inventory.save(matched).catch(() => {});
+        }
+      }
+      if (stockDeductedCount > 0) window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
+    }
+
+    // Mỗi sản phẩm còn lại (gán NCC thật) thuộc đúng 1 đơn (gom theo nhà cung cấp) → tối đa 1 đơn / sản phẩm
     const groups: Record<string, any[]> = {};
-    enrichedItems.forEach((it: any) => { if (it.supplierId) { (groups[it.supplierId] = groups[it.supplierId] || []).push(it); } });
+    enrichedItems.forEach((it: any) => { if (it.supplierId && it.supplierId !== WAREHOUSE_SOURCE_ID) { (groups[it.supplierId] = groups[it.supplierId] || []).push(it); } });
     const createdIds: string[] = [];
     let orderIdx = 0;
     for (const [sid, groupItems] of Object.entries(groups)) {
@@ -1220,13 +1151,26 @@ export default function MaterialCoordination({
       const saved = await dbService.purchaseOrders.create(order);
       createdIds.push(saved.id);
     }
-    await saveProposal({ ...prop, items: enrichedItems, purchaseOrderIds: [...(prop.purchaseOrderIds || []), ...createdIds] });
+    // Nếu TOÀN BỘ vật tư đều xuất từ kho (không có đơn hàng nào) → coi như đã
+    // nhận hàng xong ngay, không cần qua bước "Đặt hàng thành công" (vốn dành
+    // cho việc theo dõi PO chờ giao).
+    const allWarehouseOnly = createdIds.length === 0 && warehouseItems.length > 0;
+    await saveProposal({
+      ...prop,
+      items: enrichedItems,
+      purchaseOrderIds: [...(prop.purchaseOrderIds || []), ...createdIds],
+      status: allWarehouseOnly ? 'received' : prop.status,
+    });
     setItemSupplierDraft({});
     loadOrders();
     const proposer = prop.createdByName || currentUser?.name || '—';
     const coordinator = currentUser?.name || '—';
-    await sendProjectChat(prop, `🛒 ĐÃ TẠO ${createdIds.length} ĐƠN HÀNG CHO ĐỀ XUẤT ${prop.code}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười điều phối: ${coordinator}\n→ Chờ Đặt hàng.`);
-    showNotification(`Đã tạo ${createdIds.length} đơn hàng mua (${createdIds.join(', ')}).`, 'Tạo đơn hàng', 'success');
+    const summaryParts: string[] = [];
+    if (createdIds.length > 0) summaryParts.push(`${createdIds.length} đơn hàng mua (${createdIds.join(', ')})`);
+    if (stockDeductedCount > 0) summaryParts.push(`trừ kho ${stockDeductedCount} mặt hàng`);
+    const summary = summaryParts.join(', ') || 'không có thay đổi';
+    await sendProjectChat(prop, `🛒 ĐÃ XỬ LÝ ĐỀ XUẤT ${prop.code}: ${summary}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười điều phối: ${coordinator}\n→ ${allWarehouseOnly ? 'Đã nhận hàng (xuất kho).' : 'Chờ Đặt hàng.'}`);
+    showNotification(`Đã xử lý đề xuất: ${summary}.`, 'Xử lý đề xuất vật tư', 'success');
   };
 
   const markOrdered = async (prop: any) => {
@@ -1302,6 +1246,50 @@ export default function MaterialCoordination({
     setReceiveQuantities({});
     window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
     window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
+  };
+
+  // Chốt số lượng thực nhận cho 1 đơn giao thiếu: hạ vĩnh viễn SL đặt + giá trị
+  // đơn về đúng bằng SL đã thực nhận (không chờ giao phần còn thiếu nữa), giúp
+  // đơn được coi là "đã nhận đủ" để chuyển đề xuất sang ĐÃ NHẬN HÀNG và đưa đúng
+  // giá trị (đã giảm) qua tab Đơn Hàng của Tài Chính - Kế Toán.
+  const handleFinalizeShortDelivery = (prop: any, order: any) => {
+    const shortItems = (order.items || []).filter((it: any) => (it.receivedQty || 0) < (it.qty || 0));
+    if (shortItems.length === 0) return;
+    const shortSummary = shortItems.map((it: any) => `${it.name} thiếu ${(it.qty || 0) - (it.receivedQty || 0)}${it.unit ? ' ' + it.unit : ''}`).join(', ');
+    askConfirmation(
+      `⚠️ Chốt số lượng thực nhận cho đơn ${order.id}?\nCác dòng sau sẽ bị hạ SL đặt về đúng SL đã nhận (không chờ giao thêm):\n${shortSummary}\n\nGiá trị đơn & công nợ sẽ giảm tương ứng. Không thể hoàn tác.`,
+      'Xác nhận chốt số lượng',
+      async () => {
+        const adjustedItems = (order.items || []).map((it: any) => {
+          const receivedQty = it.receivedQty || 0;
+          return { ...it, qty: receivedQty, receivedQty, totalPrice: receivedQty * (it.price || 0) };
+        });
+        const newTongTien = adjustedItems.reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
+        const updatedOrder = {
+          ...order,
+          items: adjustedItems,
+          tongTien: newTongTien,
+          congNo: Math.max(0, newTongTien - (order.thanhToanThucTe || 0)),
+          notes: `${order.notes || ''}${order.notes ? ' | ' : ''}Đã chốt thiếu hàng (${new Date().toLocaleDateString('vi-VN')}): ${shortSummary}`.trim(),
+        };
+        await dbService.purchaseOrders.save(updatedOrder);
+        loadOrders();
+        const allPOsReceived = (prop.purchaseOrderIds || []).every((oid: string) => {
+          if (oid === order.id) return true;
+          const otherPO = purchaseOrders.find((o: any) => o.id === oid);
+          return otherPO?.items?.every((i: any) => (i.receivedQty || 0) >= i.qty);
+        });
+        if (allPOsReceived) {
+          await saveProposal({ ...prop, status: 'received' });
+        }
+        await sendProjectChat(prop, `⚠️ ĐÃ CHỐT THIẾU HÀNG cho đơn ${order.id}\nNhà cung cấp: ${order.supplierName}\nThiếu: ${shortSummary}\nNgười chốt: ${currentUser?.name || '—'}\n→ Giá trị đơn đã giảm về đúng phần đã nhận, không chờ giao thêm.`);
+        showNotification(`Đã chốt số lượng thực nhận cho đơn ${order.id}. Giá trị đơn giảm còn ${newTongTien.toLocaleString('vi-VN')} đ.`, 'Chốt số lượng', 'success');
+        window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+        window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
+      },
+      'Chốt số lượng',
+      'Hủy bỏ'
+    );
   };
 
   // ─── Columns config (5 cột chính — HỦY nằm ở thùng rác) ─────────────────
@@ -1492,6 +1480,16 @@ export default function MaterialCoordination({
                                   {maCount}/{items.length} dòng có mã MUA · {item.doc.createdByName || ''}
                                 </p>
                               )}
+                              {isProposal && (() => {
+                                const relatedPOs = purchaseOrders.filter((o: any) => (item.doc.purchaseOrderIds || []).includes(o.id));
+                                const hasShortage = relatedPOs.some((o: any) => (o.items || []).some((it: any) => (it.receivedQty || 0) > 0 && (it.receivedQty || 0) < (it.qty || 0)));
+                                if (!hasShortage) return null;
+                                return (
+                                  <p className="text-[8.5px] text-amber-600 font-black mt-0.5 flex items-center gap-1">
+                                    ⚠️ Giao thiếu hàng
+                                  </p>
+                                );
+                              })()}
                             </div>
 
                             <div className="flex items-center justify-end text-[9px] text-slate-500 pt-0.5">
@@ -1656,9 +1654,7 @@ export default function MaterialCoordination({
                   </div>
                   <h4 className="font-black text-slate-900 text-sm sm:text-base mt-0.5 truncate">{activeDetail.project.name}</h4>
                   <div className="text-slate-500 text-[10px] hidden sm:block">
-                    {activeDetail.kind === 'proposal'
-                      ? `Người tạo: ${activeDetail.doc.createdByName || ''} · ${formatVietnameseDateTime(activeDetail.doc.createdAt)}`
-                      : `Đề xuất cũ (luồng cũ) · ${formatVietnameseDateTime(activeDetail.doc.createdAt)}`}
+                    Người tạo: {activeDetail.doc.createdByName || ''} · {formatVietnameseDateTime(activeDetail.doc.createdAt)}
                   </div>
                 </div>
               </div>
@@ -1774,6 +1770,8 @@ export default function MaterialCoordination({
                       getDocItems(activeDetail.doc).map((m: any, idx: number) => {
                         const price = m.price || 0;
                         const total = (m.qty || 0) * price;
+                        const { received, poQty } = activeDetail.kind === 'proposal' ? getReceivedInfo(activeDetail.doc, m.id) : { received: 0, poQty: null };
+                        const shortage = poQty !== null ? Math.max(0, poQty - received) : null;
                         return (
                           <div key={m.id || idx} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/50">
                             <div className="flex items-start justify-between gap-2">
@@ -1789,6 +1787,12 @@ export default function MaterialCoordination({
                                   <span>SL: <strong className="text-teal-600 font-mono">{m.qty}</strong> {m.unit}</span>
                                   {m.spec && <span className="italic">· {m.spec}</span>}
                                 </div>
+                                {poQty !== null && (
+                                  <div className="ml-4 text-[9px] mt-0.5">
+                                    <span className="text-slate-500">Đã nhận: <strong className="font-mono text-slate-700">{received}</strong></span>
+                                    {!!shortage && <span className="ml-2 text-amber-600 font-bold">Còn thiếu: {shortage}</span>}
+                                  </div>
+                                )}
                                 {m.supplierName && <div className="ml-4 text-[9px] text-slate-600 font-bold mt-0.5">NCC: {m.supplierName}</div>}
                               </div>
                               <div className="text-right shrink-0">
@@ -1815,15 +1819,19 @@ export default function MaterialCoordination({
                           <th className="p-2.5 min-w-[130px]">Nhà Cung Cấp</th>
                           <th className="p-2.5 text-right w-20">Đơn giá</th>
                           <th className="p-2.5 text-right w-24">Thành tiền</th>
+                          <th className="p-2.5 text-center w-16">Đã nhận</th>
+                          <th className="p-2.5 text-center w-16">Còn thiếu</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
                         {getDocItems(activeDetail.doc).length === 0 ? (
-                          <tr><td colSpan={8} className="p-8 text-center text-slate-600 font-medium">Chưa có vật tư nào trong đề xuất này.</td></tr>
+                          <tr><td colSpan={10} className="p-8 text-center text-slate-600 font-medium">Chưa có vật tư nào trong đề xuất này.</td></tr>
                         ) : (
                           getDocItems(activeDetail.doc).map((m: any, idx: number) => {
                             const price = m.price || 0;
                             const total = (m.qty || 0) * price;
+                            const { received, poQty } = activeDetail.kind === 'proposal' ? getReceivedInfo(activeDetail.doc, m.id) : { received: 0, poQty: null };
+                            const shortage = poQty !== null ? Math.max(0, poQty - received) : null;
                             return (
                               <tr key={m.id || idx} className="hover:bg-slate-50/40">
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600">{idx + 1}</td>
@@ -1839,6 +1847,8 @@ export default function MaterialCoordination({
                                 <td className="p-2.5 font-bold">{m.supplierName || '—'}</td>
                                 <td className="p-2.5 text-right font-mono text-slate-600">{price.toLocaleString('vi-VN')} ₫</td>
                                 <td className="p-2.5 text-right font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</td>
+                                <td className="p-2.5 text-center font-mono font-bold text-slate-600">{poQty !== null ? received : '—'}</td>
+                                <td className={`p-2.5 text-center font-mono font-bold ${shortage ? 'text-amber-600' : 'text-slate-400'}`}>{shortage !== null ? shortage : '—'}</td>
                               </tr>
                             );
                           })
@@ -1999,13 +2009,13 @@ export default function MaterialCoordination({
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
                       <span className="font-extrabold text-[11px] sm:text-[11.5px] text-violet-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
-                        <Layers className="w-4 h-4" /> Gán nhà cung cấp & Tạo đơn hàng
+                        <Layers className="w-4 h-4" /> Gán nguồn vật tư & Tạo đơn hàng
                       </span>
 
-                      {/* Áp dụng nhanh 1 NCC cho toàn bộ danh mục */}
+                      {/* Áp dụng nhanh 1 nguồn (NCC hoặc Kho có sẵn) cho toàn bộ danh mục */}
                       <div className="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-violet-700">Áp dụng 1 NCC cho toàn bộ danh mục</span>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-violet-700">Áp dụng 1 nguồn cho toàn bộ danh mục</span>
                           {uniformSid && (
                             <button
                               type="button"
@@ -2015,10 +2025,10 @@ export default function MaterialCoordination({
                           )}
                         </div>
                         <SearchableSelect
-                          options={suppliers.map((s: any) => ({ id: s.id, label: s.name }))}
+                          options={[{ id: WAREHOUSE_SOURCE_ID, label: '📦 Xuất từ Kho có sẵn' }, ...suppliers.map((s: any) => ({ id: s.id, label: s.name }))]}
                           value={uniformSid}
                           onChange={applySupplierToAll}
-                          placeholder="-- Chọn NCC --"
+                          placeholder="-- Chọn NCC hoặc Kho có sẵn --"
                           searchPlaceholder="🔍 Tìm nhà cung cấp..."
                           disabled={!isCoordinator || hasOrder}
                           className="w-full"
@@ -2036,17 +2046,17 @@ export default function MaterialCoordination({
                                   <span className="ml-1.5 text-[9px] text-slate-500">× {it.qty} {it.unit} · {((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</span>
                                 </div>
                                 <SearchableSelect
-                                  options={suppliers.map((s: any) => ({ id: s.id, label: s.name }))}
+                                  options={[{ id: WAREHOUSE_SOURCE_ID, label: '📦 Xuất từ Kho có sẵn' }, ...suppliers.map((s: any) => ({ id: s.id, label: s.name }))]}
                                   value={currentSid}
                                   onChange={(sid) => setItemSupplier(prop, it.id, sid)}
-                                  placeholder="-- Chọn NCC --"
+                                  placeholder="-- Chọn NCC hoặc Kho có sẵn --"
                                   searchPlaceholder="🔍 Tìm nhà cung cấp..."
                                   disabled={!isCoordinator || hasOrder}
                                   className="min-w-[180px]"
                                 />
                               </div>
                               {currentSid && (
-                                <p className="text-[9px] text-violet-600 font-bold mt-1">✔ Đã chọn: {suppliers.find(s => s.id === currentSid)?.name || ''}</p>
+                                <p className="text-[9px] text-violet-600 font-bold mt-1">✔ Đã chọn: {currentSid === WAREHOUSE_SOURCE_ID ? '📦 Kho có sẵn' : (suppliers.find(s => s.id === currentSid)?.name || '')}</p>
                               )}
                             </div>
                           );
@@ -2060,10 +2070,10 @@ export default function MaterialCoordination({
                           onClick={() => createOrders(prop)}
                           className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                         >
-                          <FileText className="w-4 h-4" /> Tạo đơn hàng
+                          <FileText className="w-4 h-4" /> Tạo đơn hàng / Xuất kho
                         </button>
                       ) : (
-                        <p className="text-[10px] text-slate-500 italic">Chỉ Người điều phối mới được gán NCC &amp; tạo đơn hàng.</p>
+                        <p className="text-[10px] text-slate-500 italic">Chỉ Người điều phối mới được gán nguồn vật tư &amp; tạo đơn hàng.</p>
                       )}
                     </div>
                   );
@@ -2126,12 +2136,12 @@ export default function MaterialCoordination({
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   {allReceived ? (
-                                    <span className="text-[10px] text-emerald-600 font-bold">Da nhan du ({totalItems} muc)</span>
+                                    <span className="text-[10px] text-emerald-600 font-bold">Đã nhận đủ ({totalItems} mục)</span>
                                   ) : (
                                     <span className="font-mono font-black text-[11px] text-slate-800">
                                       {(o.tongTien || 0).toLocaleString('vi-VN')} đ
                                       {someReceived && (
-                                        <span className="text-amber-600 font-bold ml-1">· Da nhan {receivedItems}/{totalItems}</span>
+                                        <span className="text-amber-600 font-bold ml-1">· Đã nhận {receivedItems}/{totalItems}</span>
                                       )}
                                     </span>
                                   )}
@@ -2144,6 +2154,22 @@ export default function MaterialCoordination({
                                   </button>
                                 </div>
                               </div>
+                              {/* Cảnh báo giao thiếu hàng + nút Chốt số lượng thực nhận */}
+                              {someReceived && !allReceived && isCoordinator && (
+                                <div className="px-3 pb-2 flex items-center justify-between gap-2 bg-amber-50/80 border-t border-amber-200/60 py-1.5">
+                                  <span className="text-[9.5px] text-amber-700 font-bold flex items-center gap-1">
+                                    ⚠️ Đơn giao thiếu hàng — còn thiếu {(o.items || []).reduce((s: number, it: any) => s + Math.max(0, (it.qty || 0) - (it.receivedQty || 0)), 0)} món chưa về
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFinalizeShortDelivery(prop, o)}
+                                    className="bg-amber-600 hover:bg-amber-500 text-white text-[9.5px] font-black px-2 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap shrink-0"
+                                    title="Chốt số lượng thực nhận — không chờ giao phần còn thiếu nữa"
+                                  >
+                                    Chốt số lượng thực nhận
+                                  </button>
+                                </div>
+                              )}
                               {/* Item summary tags (only for not fully received) */}
                               {!allReceived && (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1">
@@ -2161,7 +2187,7 @@ export default function MaterialCoordination({
                                         }`}
                                       >
                                         {it.name} ({it.qty}{it.unit ? ' ' + it.unit : ''}
-                                        {(it.receivedQty || 0) > 0 && ` con ${remain}`})
+                                        {(it.receivedQty || 0) > 0 && ` còn ${remain}`})
                                       </span>
                                     );
                                   })}
@@ -2356,40 +2382,6 @@ export default function MaterialCoordination({
                       </div>
                     );
                   })()}
-
-                  {/* Legacy doc actions */}
-                  {activeDetail.kind === 'legacy' && (
-                    <div className="space-y-2 pt-1">
-                      <p className="text-[10.5px] text-slate-500 italic">Đề xuất từ luồng cũ (ProjectDoc).</p>
-                      {resolveStatus(activeDetail) === 'waiting_order' && (
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleLegacyStatus(activeDetail.doc, activeDetail.project, 'active')}
-                            className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black py-2 rounded-lg cursor-pointer transition-all"
-                          >
-                            Xuất Kho
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleLegacyDeleteDoc(activeDetail.doc, activeDetail.project)}
-                            className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black px-4 py-2 rounded-lg cursor-pointer transition-all"
-                          >
-                            Xóa
-                          </button>
-                        </div>
-                      )}
-                      {resolveStatus(activeDetail) === 'ordered' && (
-                        <button
-                          type="button"
-                          onClick={() => handleLegacyStatus(activeDetail.doc, activeDetail.project, 'approved')}
-                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black py-2 rounded-lg cursor-pointer transition-all"
-                        >
-                          Đã Nhận Hàng
-                        </button>
-                      )}
-                    </div>
-                  )}
 
                 <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl">
                   <p className="text-[10px] text-indigo-700 leading-relaxed font-medium">
@@ -2668,13 +2660,14 @@ export default function MaterialCoordination({
                 style={{ height: '100%', minHeight: '50vh', border: 'none' }}
               />
             </div>
-            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-3 gap-1.5 sm:gap-2">
+            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-4 gap-1.5 sm:gap-2">
               {canDelete ? (
                 <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               ) : (
                 <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               )}
               <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
+              <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF thẳng về máy, không qua hộp thoại Share"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
               <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
             </div>
           </div>

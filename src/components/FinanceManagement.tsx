@@ -127,8 +127,11 @@ const getAbbreviation = (name: string): string => {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
-  const words = normalized.trim().split(/\s+/).filter(Boolean);
-  const initials = words.map(w => w[0].toUpperCase()).join('');
+  // Bỏ các "từ" chỉ toàn ký tự đặc biệt (vd: "-") và bỏ dấu ngoặc/ký tự đặc biệt
+  // đứng đầu mỗi từ (vd: "(Minh" → lấy "M" thay vì "("), tránh mã sinh ra dính
+  // dấu ngoặc/gạch ngang xấu như "AH-PHT(H".
+  const words = normalized.trim().split(/\s+/).filter(w => /[a-zA-Z0-9]/.test(w));
+  const initials = words.map(w => (w.match(/[a-zA-Z0-9]/) as RegExpMatchArray)[0].toUpperCase()).join('');
   return initials;
 };
 
@@ -1262,6 +1265,8 @@ export default function FinanceManagement({
   // Mở rộng chi tiết công trình theo Chủ đầu tư & modal phiếu thu.
   const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
   const [receiptDetail, setReceiptDetail] = useState<{ receipts: Receipt[]; title: string } | null>(null);
+  // Mở rộng chi tiết khoản nợ theo Nhà Cung Cấp / Thầu Phụ (Công nợ Trả) — tương tự expandedCustomers.
+  const [expandedLiabilities, setExpandedLiabilities] = useState<Set<string>>(new Set());
 
   // ── Tab Công nợ Phải Thu: bộ lọc (lưu localStorage cho lần sau) ──
   const RECEIVABLE_FILTER_KEY = 'hl_fin_receivable_filters';
@@ -1808,6 +1813,19 @@ export default function FinanceManagement({
   // Đơn hàng "đã hoạt động" = đã xác nhận / hoàn tất. Nháp hoặc đã hủy là chưa hoạt động.
   const isOrderActive = (order: PurchaseOrder): boolean =>
     order.status === 'confirmed' || order.status === 'completed';
+
+  // Đơn hàng chỉ nên xuất hiện ở tab Đơn Hàng (Tài Chính) sau khi Điều Phối Vật Tư
+  // đã xác nhận NHẬN ĐƯỢC ít nhất 1 phần hàng — tránh kế toán thấy/ghi nhận công nợ
+  // cho đơn còn đang chờ giao. Dùng proposalId (chỉ PO sinh từ Điều Phối Vật Tư mới
+  // có) để nhận diện, KHÔNG dùng sự có/không của field receivedQty — vì PO mới tạo,
+  // chưa từng nhận hàng lần nào, hoàn toàn chưa có field này trên các dòng (chứ
+  // không phải = 0), nên không thể dùng làm dấu hiệu "không theo dõi nhận hàng".
+  // Đơn tạo ngoài Điều Phối Vật Tư (không có proposalId) vẫn hiện ngay như trước.
+  const poHasAnyReceived = (order: PurchaseOrder): boolean => {
+    if (!(order as any).proposalId) return true;
+    const items = (order as any).items || [];
+    return items.some((it: any) => (Number(it.receivedQty) || 0) > 0);
+  };
   // Badge: chữ + viền + nền trắng (đồng bộ)
   const poStatusToneClass = (tone: string): string => {
     switch (tone) {
@@ -2035,25 +2053,115 @@ export default function FinanceManagement({
     return { total, totalPages, safePage, pageGroups, totals };
   }, [filteredReceivables, receivablePage, receivablePageSize]);
 
-  const filteredLiabilities = useMemo(() => {
-    const kw = (searchTerm || '').toLowerCase().trim();
+  // Gom nhóm Công nợ Trả theo Nhà Cung Cấp / Thầu Phụ: mỗi đơn vị = 1 dòng tổng
+  // hợp, mở rộng để xem chi tiết từng khoản nợ (giống groupedReceivables ở Công
+  // nợ Thu). Gom theo subcontractorId khi có, nếu không thì theo tên + phân loại
+  // (NCC hiện chưa có ID ổn định để gom theo ID).
+  const groupedLiabilities = useMemo(() => {
+    const catFilter = liabilityFilters.category;
     const from = liabilityFilters.fromDate;
     const to = liabilityFilters.toDate;
-    return mergedLiabilities.filter((l: any) => {
-      if (liabilityFilters.category && l.category !== liabilityFilters.category) return false;
-      if (liabilityFilters.status === 'con_no' && (l.remaining || 0) <= 0) return false;
-      if (liabilityFilters.status === 'da_thu' && (l.remaining || 0) > 0) return false;
+    const src = mergedLiabilities.filter((l: any) => {
+      if (catFilter && l.category !== catFilter) return false;
       // Lọc theo ngày: công nợ không có ngày vẫn được giữ (tránh ẩn dữ liệu cũ chưa có ngày)
       const d = (l.date || '').slice(0, 10);
       if (from && d && d < from) return false;
       if (to && d && d > to) return false;
+      return true;
+    });
+    // Tách 1 khoản nợ NCC có nhiều Đơn Mua Hàng (PO) đã ghi nhận thành nhiều dòng
+    // chi tiết riêng — mỗi PO 1 dòng (số liệu lấy trực tiếp từ chính PO đó: tongTien/
+    // thanhToanThucTe/congNo), thay vì gộp chung 1 dòng "Phát Sinh" duy nhất như trước.
+    // Giúp dễ nhận biết & xóa đúng PO khi cần (tránh nhầm lẫn như vụ Tinh Tú Cát).
+    const expandToDetailRows = (l: any): any[] => {
+      const poIds: string[] = Array.isArray(l.recordedPurchaseOrderIds) ? l.recordedPurchaseOrderIds : [];
+      if (l.category !== 'Nhà Cung Cấp' || poIds.length === 0) return [l];
+      const rows: any[] = [];
+      const openingDebt = (l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0;
+      if (openingDebt > 0) {
+        rows.push({
+          ...l,
+          id: `${l.id}_cdk`,
+          notes: 'Công nợ đầu kỳ',
+          value: 0,
+          openingDebt,
+          tongGiaTri: openingDebt,
+          paid: 0,
+          remaining: openingDebt,
+        });
+      }
+      poIds.forEach(poId => {
+        const po = purchaseOrders.find(p => p.id === poId);
+        if (!po) return; // PO đã bị xóa — bỏ qua, không hiện dòng "ma"
+        const items = po.items || [];
+        // Chỉ tính công nợ theo PHẦN ĐÃ NHẬN nếu PO có dữ liệu receivedQty (tức đã
+        // đi qua bước "Nhận hàng" ở Điều Phối Vật Tư). Với PO cũ/tạo tay chưa từng
+        // theo dõi receivedQty theo dòng, coi như đã nhận đủ (giữ hành vi cũ) —
+        // tránh làm "biến mất" công nợ thật của các đơn hàng không dùng luồng này.
+        const hasReceiveTracking = items.some((it: any) => it.receivedQty !== undefined && it.receivedQty !== null);
+        const isFullyReceived = !hasReceiveTracking || items.every((it: any) => (Number(it.receivedQty) || 0) >= (Number(it.qty) || 0));
+        const tongTien = po.tongTien || 0;
+        // Đã nhận đủ → dùng thẳng tongTien gốc (tránh lệch vài đồng do cộng dồn
+        // qty × đơn giá qua nhiều dòng số lẻ, ví dụ vật tư tính theo m²).
+        const receivedValue = isFullyReceived
+          ? tongTien
+          : items.reduce((s: number, it: any) => s + (Number(it.receivedQty) || 0) * (Number(it.price) || 0), 0);
+        const isPartial = !isFullyReceived;
+        rows.push({
+          ...l,
+          id: `po:${po.id}`,
+          notes: `Đơn hàng ${po.id}${po.projectName ? ` — ${po.projectName}` : ''}` +
+            (isPartial ? ` (đã nhận ${receivedValue.toLocaleString('vi-VN')}/${tongTien.toLocaleString('vi-VN')}đ hàng)` : ''),
+          value: receivedValue,
+          openingDebt: 0,
+          tongGiaTri: receivedValue,
+          paid: po.thanhToanThucTe || 0,
+          remaining: receivedValue - (po.thanhToanThucTe || 0),
+          purchaseOrderId: po.id,
+        });
+      });
+      return rows.length > 0 ? rows : [l];
+    };
+
+    // rawItems: bản ghi Liability gốc (chưa tách PO) — dùng để tính "Đã Trả" thật,
+    // đối chiếu theo tên/subcontractorId với phiếu chi đã duyệt (nguồn tin cậy nhất
+    // cho số tiền thực đã chi, không phụ thuộc phiếu chi có gắn đúng 1 PO cụ thể hay
+    // không). items: bản ghi đã tách theo PO — dùng để tính "Phát Sinh/Tổng giá trị/
+    // Còn lại" (chỉ ghi nhận theo phần đã nhận hàng thật) VÀ để hiển thị chi tiết khi
+    // xổ xuống — 2 số này phải khớp nhau giữa dòng tổng hợp và dòng chi tiết.
+    const groups = new Map<string, any>();
+    src.forEach(l => {
+      const key = l.subcontractorId ? `sub:${l.subcontractorId}` : `name:${l.category || ''}:${l.name || 'Không xác định'}`;
+      if (!groups.has(key)) {
+        groups.set(key, { key, name: l.name || 'Không xác định', category: l.category, rawItems: [], items: [] });
+      }
+      const g = groups.get(key)!;
+      g.rawItems.push(l);
+      g.items.push(...expandToDetailRows(l));
+    });
+    return Array.from(groups.values()).map(g => {
+      const openingDebt = g.items.reduce((s: number, l: any) => s + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
+      const value = g.items.reduce((s: number, l: any) => s + (l.value || 0), 0);
+      const tongGiaTri = g.items.reduce((s: number, l: any) => s + (l.tongGiaTri || 0), 0);
+      const paid = g.rawItems.reduce((s: number, l: any) => s + (l.paid || 0), 0);
+      const remaining = tongGiaTri - paid;
+      const notes = g.items.length === 1 ? g.items[0].notes : `${g.items.length} khoản nợ`;
+      return { ...g, openingDebt, value, tongGiaTri, paid, remaining, notes };
+    }).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
+  }, [mergedLiabilities, purchaseOrders, liabilityFilters.category, liabilityFilters.fromDate, liabilityFilters.toDate]);
+
+  const filteredLiabilities = useMemo(() => {
+    const kw = (searchTerm || '').toLowerCase().trim();
+    return groupedLiabilities.filter((g: any) => {
+      if (liabilityFilters.status === 'con_no' && (g.remaining || 0) <= 0) return false;
+      if (liabilityFilters.status === 'da_thu' && (g.remaining || 0) > 0) return false;
       if (kw) {
-        const hay = `${l.name || ''} ${l.notes || ''} ${l.category || ''}`.toLowerCase();
+        const hay = `${g.name || ''} ${g.category || ''} ${g.items.map((l: any) => l.notes || '').join(' ')}`.toLowerCase();
         if (!hay.includes(kw)) return false;
       }
       return true;
     });
-  }, [mergedLiabilities, liabilityFilters, searchTerm]);
+  }, [groupedLiabilities, liabilityFilters.status, searchTerm]);
 
   // Phân trang + tổng hợp Tổng cộng cho tab Công nợ Trả (tính trên toàn bộ filteredLiabilities)
   const liabilityPageInfo = useMemo(() => {
@@ -3265,7 +3373,14 @@ export default function FinanceManagement({
       recipient: activeProposalForPayment?.subcontractorName || payRecipient,
       projectId: activeProposalForPayment?.projectId || ((payProj === 'none' || !payProj) ? undefined : payProj),
       purchaseOrderId: (!activeProposalForPayment && payPurchaseOrder) ? payPurchaseOrder : undefined,
-      category: activeProposalForPayment ? 'subcontractor_advance' : payCategory,
+      // Xác định category theo ĐÚNG loại đề xuất (không hardcode 'subcontractor_advance'
+      // cho mọi đề xuất — trước đây làm Đề Xuất Chi Phí Công Trình / Ứng Lương bị gắn
+      // nhầm vào category Thầu Phụ, hiển thị tên người quyết toán thay vì tên thầu phụ).
+      category: activeProposalForPayment
+        ? (activeProposalForPayment.taskName?.startsWith('Ứng lương') ? 'salary_advance'
+          : activeProposalForPayment.type === 'project_expense_proposal' ? 'site_expense'
+          : 'subcontractor_advance')
+        : payCategory,
       amount: Number(payAmount),
       paymentMethod: payMethod,
       notes: payNotes,
@@ -3297,20 +3412,26 @@ export default function FinanceManagement({
         // Update local state list
         setSubcontractorAdvances(prev => prev.map(p => p.id === updatedProposal.id ? updatedProposal : p));
 
-        // Cập nhật Công nợ Trả: nếu thầu phụ ĐÃ có dòng (hợp đồng hoặc nợ thủ công)
-        // thì phiếu chi tạm ứng sẽ tự động cộng vào dòng đó (khớp theo tên /
-        // subcontractorId trong mergedLiabilities). Chỉ tạo dòng MỚI khi thầu phụ
-        // chưa có bất kỳ khoản nợ nào.
+        // Cập nhật Công nợ Trả: CHỈ áp dụng cho đề xuất Tạm ứng Thầu Phụ thật sự
+        // (type === 'subcontractor_advance') — đây mới là khoản nợ còn phải trả
+        // cho bên thứ ba. "Đề xuất Chi phí Công trình" / "Ứng lương" được thanh
+        // toán dứt điểm ngay khi lập phiếu chi nên KHÔNG tạo dòng Công nợ Trả
+        // (trước đây tạo nhầm dòng "Thầu Phụ" mang tên người quyết toán/nhân viên).
+        // Nếu thầu phụ ĐÃ có dòng (hợp đồng hoặc nợ thủ công) thì phiếu chi tạm ứng
+        // sẽ tự động cộng vào dòng đó (khớp theo tên / subcontractorId trong
+        // mergedLiabilities). Chỉ tạo dòng MỚI khi thầu phụ chưa có bất kỳ khoản nợ nào.
         const advSubId = activeProposalForPayment.subcontractorId;
         const advName = activeProposalForPayment.subcontractorName || 'Thầu phụ';
+        const isRealSubcontractorAdvance = activeProposalForPayment.type === 'subcontractor_advance';
         const hasExistingRow = customLiabilities.some(l =>
           (advSubId && l.subcontractorId && l.subcontractorId === advSubId) ||
-          (l.name && l.name === advName)
+          (l.name && l.name === advName) ||
+          (l.relatedAdvanceId && l.relatedAdvanceId === activeProposalForPayment.id)
         ) || approvedSubContracts.some(s =>
           (advSubId && s.subcontractorId && s.subcontractorId === advSubId) ||
           (s.subcontractorName && s.subcontractorName === advName)
         );
-        if (!hasExistingRow) {
+        if (isRealSubcontractorAdvance && !hasExistingRow) {
           const newLiab: Liability = {
             id: crypto.randomUUID(),
             name: advName,
@@ -3771,8 +3892,10 @@ export default function FinanceManagement({
     if (!targetId) {
       // Mã KH tự sinh: KH_chữ cái đầu họ tên KH_số thứ tự hàng nhập
       const abbrev = getAbbreviation(custName);
-      const orderIndex = customers.length + 1;
-      targetId = `KH_${abbrev}_${orderIndex}`;
+      // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
+      // trùng khi 2 người tạo khách gần như đồng thời, hoặc khi khách cũ đã bị
+      // xóa làm độ dài mảng tụt xuống rồi tái sử dụng lại đúng số thứ tự cũ.
+      targetId = `KH_${abbrev}_${Date.now()}`;
     }
 
     const newCust: Customer = {
@@ -4608,6 +4731,9 @@ export default function FinanceManagement({
 
               // Gom đơn hàng theo Nhà cung cấp + áp dụng bộ lọc
               const matchedPOs = purchaseOrders.filter((o: PurchaseOrder) => {
+                // Chỉ hiện đơn đã được xác nhận nhận ít nhất 1 phần hàng — đơn còn
+                // chờ giao chưa xuất hiện ở đây, tránh ghi nhận công nợ quá sớm.
+                if (!poHasAnyReceived(o)) return false;
                 if (keyword && !((o.id || '').toLowerCase().includes(keyword) || (o.supplierName || '').toLowerCase().includes(keyword))) return false;
                 const od = (o.createdAt || '').slice(0, 10);
                 if (poFilters.fromDate && od && od < poFilters.fromDate) return false;
@@ -6219,7 +6345,7 @@ export default function FinanceManagement({
                       <input
                         type="text"
                         disabled
-                        value={editingCustId ? editingCustId : (custName ? `KH_${getAbbreviation(custName)}_${customers.length + 1}` : 'KH_[Initials]_[Index]')}
+                        value={editingCustId ? editingCustId : (custName ? `KH_${getAbbreviation(custName)}_...` : 'KH_[Chữ viết tắt]_[Mã duy nhất]')}
                         className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-orange-400 font-mono font-bold cursor-not-allowed outline-none"
                       />
                     </div>
@@ -7918,55 +8044,107 @@ export default function FinanceManagement({
                           </td>
                         </tr>
                       ) : (
-                        liabilityPageInfo.pageItems.map((item) => {
+                        liabilityPageInfo.pageItems.map((g: any) => {
+                          const expanded = expandedLiabilities.has(g.key);
+                          const toggle = () => setExpandedLiabilities(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
                           return (
-                            <tr key={item.id} className="border-b border-slate-850/80 hover:bg-slate-900/40 font-sans">
-                              <td className="px-3 py-3">
-                                <div className="font-extrabold text-slate-100">
-                                  <span>{item.name}</span>
-                                </div>
-                              </td>
-                              <td className="px-3 py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                  item.category === 'Thầu Phụ' ? 'bg-white text-emerald-700 border border-emerald-600' :
-                                  item.category === 'Nhà Cung Cấp' ? 'bg-white text-purple-700 border border-purple-600' :
-                                  'bg-slate-700/40 text-slate-300 border border-slate-600/40'
-                                }`}>
-                                  {item.category}
-                                </span>
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-amber-400">
-                                {(() => {
-                                  const od = (item.openingDebt ?? (item.isOpeningDebt ? item.value : 0)) || 0;
-                                  return od > 0 ? `${od.toLocaleString('vi-VN')} đ` : '—';
-                                })()}
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">
-                                {item.value.toLocaleString('vi-VN')} đ
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-violet-400">
-                                {item.tongGiaTri.toLocaleString('vi-VN')} đ
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono text-emerald-400">
-                                -{item.paid.toLocaleString('vi-VN')} đ
-                              </td>
-                              <td className={`px-3 py-3 text-right font-mono font-extrabold ${item.remaining < 0 ? 'text-emerald-400 bg-emerald-500/5' : 'text-rose-450 bg-rose-500/5'}`}>
-                                {item.remaining >= 0 ? `${item.remaining.toLocaleString('vi-VN')} đ` : `-${Math.abs(item.remaining).toLocaleString('vi-VN')} đ`}
-                              </td>
-                              <td className="px-3 py-3 text-slate-400 max-w-xs truncate" title={item.notes}>
-                                {item.notes}
-                              </td>
-                              <td className="px-3 py-3 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenProposalFromLiability(item)}
-                                  className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
-                                  title="Tạo Đề Xuất Chi từ công nợ này"
-                                >
-                                  <FileText className="w-3 h-3" /> Đề Xuất Chi
-                                </button>
-                              </td>
-                            </tr>
+                            <React.Fragment key={g.key}>
+                              {/* Dòng Đơn vị (tổng hợp) */}
+                              <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
+                                <td className="px-3 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={toggle}
+                                      className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer"
+                                      title={expanded ? 'Thu gọn' : 'Xem chi tiết khoản nợ'}
+                                    >
+                                      {expanded ? '▼' : '▶'}
+                                    </button>
+                                    <div>
+                                      <button
+                                        onClick={toggle}
+                                        className="font-extrabold text-slate-100 text-left hover:underline cursor-pointer"
+                                        title="Click để xem chi tiết các khoản nợ"
+                                      >
+                                        {g.name}
+                                      </button>
+                                      <div className="text-[9px] text-slate-400 mt-0.5">{g.items.length} khoản nợ</div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                    g.category === 'Thầu Phụ' ? 'bg-white text-emerald-700 border border-emerald-600' :
+                                    g.category === 'Nhà Cung Cấp' ? 'bg-white text-purple-700 border border-purple-600' :
+                                    'bg-slate-700/40 text-slate-300 border border-slate-600/40'
+                                  }`}>
+                                    {g.category}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-amber-400">
+                                  {g.openingDebt > 0 ? `${g.openingDebt.toLocaleString('vi-VN')} đ` : '—'}
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">
+                                  {g.value.toLocaleString('vi-VN')} đ
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-violet-400">
+                                  {g.tongGiaTri.toLocaleString('vi-VN')} đ
+                                </td>
+                                <td className="px-3 py-3 text-right font-mono text-emerald-400">
+                                  -{g.paid.toLocaleString('vi-VN')} đ
+                                </td>
+                                <td className={`px-3 py-3 text-right font-mono font-extrabold ${g.remaining < 0 ? 'text-emerald-400 bg-emerald-500/5' : 'text-rose-450 bg-rose-500/5'}`}>
+                                  {g.remaining >= 0 ? `${g.remaining.toLocaleString('vi-VN')} đ` : `-${Math.abs(g.remaining).toLocaleString('vi-VN')} đ`}
+                                </td>
+                                <td className="px-3 py-3 text-slate-400 italic max-w-xs truncate" title={g.notes}>
+                                  {g.notes}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="flex items-center justify-center gap-2">
+                                    {/* Dòng tổng hợp không có nút thao tác — thao tác ở dòng chi tiết */}
+                                  </div>
+                                </td>
+                              </tr>
+
+                              {/* Chi tiết từng khoản nợ khi mở rộng */}
+                              {expanded && g.items.map((item: any) => (
+                                <tr key={item.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
+                                  <td className="px-3 py-2.5 pl-9">
+                                    <div className="font-semibold text-slate-200 text-[11px]">{item.notes || item.name}</div>
+                                  </td>
+                                  <td className="px-3 py-2.5 text-[10px] text-slate-400 italic">—</td>
+                                  <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-400">
+                                    {(() => {
+                                      const od = (item.openingDebt ?? (item.isOpeningDebt ? item.value : 0)) || 0;
+                                      return od > 0 ? `${od.toLocaleString('vi-VN')} đ` : '—';
+                                    })()}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-200">
+                                    {item.value.toLocaleString('vi-VN')} đ
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-slate-500 text-[10px] italic">—</td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-emerald-400">
+                                    -{item.paid.toLocaleString('vi-VN')} đ
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right font-mono font-black text-slate-400">
+                                    {item.remaining >= 0 ? `${item.remaining.toLocaleString('vi-VN')} đ` : `-${Math.abs(item.remaining).toLocaleString('vi-VN')} đ`}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-slate-400 text-[10px] max-w-xs truncate" title={item.notes}>
+                                    {item.notes || '-'}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenProposalFromLiability(item)}
+                                      className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
+                                      title="Tạo Đề Xuất Chi từ công nợ này"
+                                    >
+                                      <FileText className="w-3 h-3" /> Đề Xuất Chi
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
                           );
                         })
                       )}
@@ -7974,7 +8152,7 @@ export default function FinanceManagement({
                     <tfoot>
                       <tr className="border-t-2 border-slate-700 bg-slate-900/80 font-sans">
                         <td className="px-3 py-3 font-extrabold text-white text-[11px] uppercase tracking-wider" colSpan={2}>
-                          Tổng cộng ({liabilityPageInfo.total} khoản nợ)
+                          Tổng cộng ({liabilityPageInfo.total} đơn vị)
                         </td>
                         <td className="px-3 py-3 text-right font-mono font-black text-amber-400">
                           {liabilityPageInfo.totals.openingDebt > 0 ? `${liabilityPageInfo.totals.openingDebt.toLocaleString('vi-VN')} đ` : '—'}
@@ -8011,7 +8189,7 @@ export default function FinanceManagement({
                     <span>khoản nợ/trang</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span>Trang {liabilityPageInfo.safePage}/{liabilityPageInfo.totalPages} · {liabilityPageInfo.total} khoản nợ</span>
+                    <span>Trang {liabilityPageInfo.safePage}/{liabilityPageInfo.totalPages} · {liabilityPageInfo.total} đơn vị</span>
                     <button type="button" disabled={liabilityPageInfo.safePage <= 1} onClick={() => setLiabilityPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
                     <button type="button" disabled={liabilityPageInfo.safePage >= liabilityPageInfo.totalPages} onClick={() => setLiabilityPage(p => Math.min(liabilityPageInfo.totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
                   </div>

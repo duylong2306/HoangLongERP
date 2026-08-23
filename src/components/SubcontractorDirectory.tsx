@@ -144,9 +144,12 @@ export default function SubcontractorDirectory({
 
   const getAbbreviation = (str: string) => {
     if (!str) return '';
+    // Bỏ các "từ" chỉ toàn ký tự đặc biệt (vd: "-") và bỏ dấu ngoặc/ký tự đặc
+    // biệt đứng đầu mỗi từ, tránh mã sinh ra dính dấu ngoặc/gạch ngang xấu.
     return str
       .split(' ')
-      .map(w => w.charAt(0))
+      .filter(w => /[a-zA-Z0-9]/.test(w))
+      .map(w => (w.match(/[a-zA-Z0-9]/) as RegExpMatchArray)[0])
       .join('')
       .toUpperCase();
   };

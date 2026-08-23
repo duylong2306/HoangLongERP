@@ -1012,8 +1012,10 @@ export default function ProjectKanbanBoard({
     if (!quickCustName) return;
 
     const abbrev = getAbbrev(quickCustName);
-    const orderIndex = customers.length + 1;
-    const generatedId = `KH_${abbrev}_${orderIndex}`;
+    // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
+    // trùng khi 2 người tạo khách gần như đồng thời, hoặc khi khách cũ đã bị
+    // xóa làm độ dài mảng tụt xuống rồi tái sử dụng lại đúng số thứ tự cũ.
+    const generatedId = `KH_${abbrev}_${Date.now()}`;
 
     const newCust: Customer = {
       id: generatedId,
@@ -2710,7 +2712,7 @@ export default function ProjectKanbanBoard({
                 <input
                   type="text"
                   disabled
-                  value={quickCustName ? `KH_${getAbbrev(quickCustName)}_${customers.length + 1}` : 'KH_[Tên viết tắt]_[STT]'}
+                  value={quickCustName ? `KH_${getAbbrev(quickCustName)}_...` : 'KH_[Tên viết tắt]_[Mã duy nhất]'}
                   className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-orange-400 font-mono font-bold cursor-not-allowed outline-none"
                 />
               </div>

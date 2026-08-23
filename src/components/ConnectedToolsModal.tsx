@@ -2423,7 +2423,6 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                     quotes: [],
                     chosenQuoteId: null,
                     purchaseOrderIds: [],
-                    debtRecorded: false,
                     notes: '',
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),

@@ -71,6 +71,7 @@ interface QuotationTableSheetProps {
   quoteData: {
     name?: string;
     code?: string;
+    customerId?: string;
     customerName?: string;
     customerPhone?: string;
     customerAddress?: string;
@@ -274,6 +275,10 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
               const recPayload: any = {
                 projectName: quoteData.projectName || '',
                 investor: quoteData.customerName || '',
+                // Gắn customerId để dòng Công nợ Thu tự sinh này gom đúng nhóm
+                // với khách hàng (tránh tách thành dòng riêng theo tên trong
+                // Công nợ Thu — xem sự cố Nguyễn Thị Xuân Quỳnh 2026-08-23).
+                customerId: quoteData.customerId || undefined,
                 field: sectorLabel,
                 contractValue: grandTotal,
                 collected: 0,
