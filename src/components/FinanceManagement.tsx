@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { dbService } from '../lib/dbService';
+import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task } from '../types';
 import { useNotification, isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, getConfiguredSettler } from '../context';
@@ -1098,6 +1098,33 @@ export default function FinanceManagement({
   // Custom persistent states for other accounts payable (Nhà Cung Cấp, Khác)
   const [customLiabilities, setCustomLiabilities] = useState<Liability[]>([]);
 
+  /**
+   * Chữ ký nội dung 1 dòng để phát hiện THAY ĐỔI THẬT.
+   * - Loại bỏ cột hệ thống DB tự sinh (created_at / updated_at): chúng thay đổi
+   *   sau mỗi lần save/refetch dù dữ liệu người dùng không đổi.
+   * - Bỏ qua key có giá trị null/undefined: Supabase không lưu trường undefined,
+   *   nên sau khi lưu rồi refetch, key biến mất — nếu tính vào chữ ký thì dòng
+   *   nào cũng bị coi là "đã sửa" → save lại → realtime event → vòng lặp vô hạn.
+   * Kết quả: chỉ khi người dùng thật sự sửa dữ liệu thì dòng mới được ghi lên DB.
+   */
+  const liabRowSig = (l: any): string => {
+    const canon = (v: any): any => {
+      if (v === null || v === undefined) return undefined;
+      if (Array.isArray(v)) return v.map(canon);
+      if (typeof v === 'object') {
+        const out: any = {};
+        Object.keys(v).forEach(k => {
+          if (k === 'createdAt' || k === 'updatedAt') return;
+          const cv = canon((v as any)[k]);
+          if (cv !== undefined) out[k] = cv;
+        });
+        return out;
+      }
+      return v;
+    };
+    return stableStr(canon(l));
+  };
+
   // Load data từ Supabase khi mount + lắng nghe realtime
   useEffect(() => {
     let active = true;
@@ -1121,14 +1148,31 @@ export default function FinanceManagement({
   }, []);
 
   // Sync lên Supabase khi data thay đổi (skip lần đầu mount)
+  // CHẶN VÒNG LẶP REALTIME: chỉ save những dòng NỘI DUNG thật sự khác DB.
+  // Trước đây effect này save TOÀN BỘ array sau MỌI setState (kể cả setState do
+  // realtime refetch) → N request POST → invalidateCache → event → refetch →
+  // setState mới → save lại... lặp vô hạn khiến bảng Công nợ Trả nhảy số liệu
+  // và position liên tục, đồng thời đốt tài nguyên Supabase.
   const isFirstRenderLiabilities = useRef(true);
+  const prevLiabilitiesRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     if (isFirstRenderLiabilities.current) {
       isFirstRenderLiabilities.current = false;
+      customLiabilities.forEach(l => prevLiabilitiesRef.current.set(l.id, liabRowSig(l)));
       return;
     }
+    const prevMap = prevLiabilitiesRef.current;
+    const nextSigs = new Map(customLiabilities.map(l => [l.id, liabRowSig(l)]));
+    // Dòng bị XÓA khỏi state → bỏ khỏi bản đồ so sánh
+    prevMap.forEach((_, id) => { if (!nextSigs.has(id)) prevMap.delete(id); });
     customLiabilities.forEach(l => {
-      dbService.accountingLiabilities.save(l).catch(() => {});
+      if (prevMap.get(l.id) !== nextSigs.get(l.id)) {
+        // Chỉ cập nhật "đã sync" KHI save thành công — save lỗi thì giữ chữ ký cũ,
+        // lần render sau vẫn được nhận diện là cần retry.
+        dbService.accountingLiabilities.save(l).then(() => {
+          prevMap.set(l.id, nextSigs.get(l.id)!);
+        }).catch(() => {});
+      }
     });
   }, [customLiabilities]);
 
@@ -1178,15 +1222,28 @@ export default function FinanceManagement({
     return () => window.removeEventListener('hl-receipt-deleted', handleReceiptDeleted);
   }, [receipts]);
 
-  // Sync lên Supabase khi data thay đổi (skip lần đầu mount) — chỉ sync items thủ công
+  // Sync lên Supabase khi data thay đổi (skip lần đầu mount) — chỉ sync items thủ công.
+  // CHẶN VÒNG LẶP REALTIME: như effect liabilities ở trên — chỉ save dòng thật sự
+  // khác DB (bỏ qua cột hệ thống created_at/updated_at), tránh realtime refetch →
+  // setState → bulk-save → event → lặp vô hạn làm Công nợ Thu nhảy liên tục.
   const isFirstRenderReceivables = useRef(true);
+  const prevReceivablesRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
+    const manual = customReceivables.filter(r => !r.isAuto);
     if (isFirstRenderReceivables.current) {
       isFirstRenderReceivables.current = false;
+      manual.forEach(r => prevReceivablesRef.current.set(r.id, liabRowSig(r)));
       return;
     }
-    customReceivables.filter(r => !r.isAuto).forEach(r => {
-      dbService.accountingReceivables.save(r).catch(() => {});
+    const prevMap = prevReceivablesRef.current;
+    const nextSigs = new Map(manual.map(r => [r.id, liabRowSig(r)]));
+    prevMap.forEach((_, id) => { if (!nextSigs.has(id)) prevMap.delete(id); });
+    manual.forEach(r => {
+      if (prevMap.get(r.id) !== nextSigs.get(r.id)) {
+        dbService.accountingReceivables.save(r).then(() => {
+          prevMap.set(r.id, nextSigs.get(r.id)!);
+        }).catch(() => {});
+      }
     });
   }, [customReceivables]);
 
@@ -1269,7 +1326,11 @@ export default function FinanceManagement({
       return true;
     });
 
-    return [...auto, ...customs];
+    // Sắp xếp cố định theo Chủ đầu tư: tránh thứ tự dòng thay đổi sau mỗi lần
+    // realtime refetch (SELECT không ORDER BY) làm bảng công nợ thu nhảy vị trí.
+    return [...auto, ...customs].sort((a, b) =>
+      (a.investor || '').localeCompare(b.investor || '', 'vi') ||
+      (a.projectName || '').localeCompare(b.projectName || '', 'vi'));
   }, [customReceivables, receipts, customers]);
 
   // Gom nhóm Công nợ Thu theo Chủ đầu tư (Khách Hàng): mỗi khách = 1 dòng tổng hợp,
@@ -1675,7 +1736,9 @@ export default function FinanceManagement({
       };
     });
 
-    return [...subs, ...customs];
+    // Sắp xếp cố định theo tên đơn vị: SELECT '*' không có ORDER BY nên mỗi lần
+    // realtime refetch thứ tự dòng trả về có thể khác → bảng nhảy vị trí liên tục.
+    return [...subs, ...customs].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
   }, [approvedSubContracts, customLiabilities, payments, purchaseOrders]);
 
   // Tạo phiếu chi thanh toán công nợ cho 1 đơn hàng (liên kết qua purchaseOrderId).
