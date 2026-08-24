@@ -3429,6 +3429,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               <span className="text-[9px] text-gray-400 block font-semibold mb-1">Cán bộ: {currentUser.name}</span>
               <div className="text-2xl font-black font-sans leading-none text-gray-900">{currentTime || '12:00 PM'}</div>
               <div className="text-[9px] text-gray-400 mt-1.5 leading-normal">{displaySettings.motivationQuote}</div>
+              {/* Mã build ngắn (ngày + commit) — theo dõi bản đang chạy sau mỗi lần deploy */}
+              <div className="text-[8px] text-gray-300 mt-1 font-mono">v{import.meta.env.VITE_BUILD_DATE} · {import.meta.env.VITE_BUILD_COMMIT}</div>
             </div>
           </div>
         </aside>

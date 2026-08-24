@@ -374,6 +374,27 @@ export default function MaterialCoordination({
     window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
   }, []);
 
+  // Cho phép sửa SL/Đơn giá của từng dòng vật tư trong bảng "Danh mục vật tư"
+  // khi đề xuất còn ở giai đoạn TÌM NHÀ CUNG CẤP / CHỜ DUYỆT (chưa lên đơn
+  // hàng) — đúng lúc dữ liệu (đặc biệt là đơn giá 0đ do NCC chưa báo giá dòng
+  // đó) cần được người có trách nhiệm điều chỉnh trước khi đề xuất được DUYỆT.
+  // Sau khi đã "Chờ đặt hàng" trở đi, số liệu phải khớp với báo giá đã chọn
+  // nên KHÔNG cho sửa tay ở đây nữa (tránh lệch với báo giá NCC đã duyệt).
+  const canEditProposalItems = (prop: any): boolean => {
+    if (!prop) return false;
+    if (prop.status === 'find_supplier') return isCoordinator;
+    if (prop.status === 'waiting_approval') return isApprover;
+    return false;
+  };
+
+  const updateProposalItemField = async (prop: any, itemId: string, field: 'qty' | 'price', rawValue: string) => {
+    const value = Math.max(0, Number(rawValue) || 0);
+    const items = (prop.items || []).map((it: any) =>
+      it.id === itemId ? { ...it, [field]: value, totalPrice: field === 'qty' ? value * (it.price || 0) : (it.qty || 0) * value } : it
+    );
+    await saveProposal({ ...prop, items });
+  };
+
   // ─── Thùng rác: đề xuất bị HỦY (tự xóa sau 30 ngày + khôi phục) ─────────
   const DAYS_TO_AUTO_DELETE = 30;
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1772,6 +1793,7 @@ export default function MaterialCoordination({
                         const total = (m.qty || 0) * price;
                         const { received, poQty } = activeDetail.kind === 'proposal' ? getReceivedInfo(activeDetail.doc, m.id) : { received: 0, poQty: null };
                         const shortage = poQty !== null ? Math.max(0, poQty - received) : null;
+                        const canEditRow = activeDetail.kind === 'proposal' && canEditProposalItems(activeDetail.doc);
                         return (
                           <div key={m.id || idx} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/50">
                             <div className="flex items-start justify-between gap-2">
@@ -1784,7 +1806,23 @@ export default function MaterialCoordination({
                                   <span className="ml-4 text-[8px] text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5 font-bold">Mã: {m.maSanPham}</span>
                                 )}
                                 <div className="flex items-center gap-2 mt-1 ml-4 text-[9px] text-slate-500">
-                                  <span>SL: <strong className="text-teal-600 font-mono">{m.qty}</strong> {m.unit}</span>
+                                  {canEditRow ? (
+                                    <span className="flex items-center gap-1">
+                                      SL:
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        defaultValue={m.qty}
+                                        onBlur={(e) => {
+                                          if (Number(e.target.value) !== m.qty) updateProposalItemField(activeDetail.doc, m.id, 'qty', e.target.value);
+                                        }}
+                                        className="w-12 text-center bg-white border border-teal-300 rounded px-1 py-0.5 font-mono font-bold text-teal-700 outline-none focus:border-teal-500"
+                                      />
+                                    </span>
+                                  ) : (
+                                    <span>SL: <strong className="text-teal-600 font-mono">{m.qty}</strong></span>
+                                  )}
+                                  {m.unit}
                                   {m.spec && <span className="italic">· {m.spec}</span>}
                                 </div>
                                 {poQty !== null && (
@@ -1796,8 +1834,20 @@ export default function MaterialCoordination({
                                 {m.supplierName && <div className="ml-4 text-[9px] text-slate-600 font-bold mt-0.5">NCC: {m.supplierName}</div>}
                               </div>
                               <div className="text-right shrink-0">
-                                <div className="text-[10px] font-mono text-slate-500">{price.toLocaleString('vi-VN')} ₫</div>
-                                <div className="text-[11px] font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</div>
+                                {canEditRow ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    defaultValue={price}
+                                    onBlur={(e) => {
+                                      if (Number(e.target.value) !== price) updateProposalItemField(activeDetail.doc, m.id, 'price', e.target.value);
+                                    }}
+                                    className="w-20 text-right bg-white border border-teal-300 rounded px-1 py-0.5 font-mono text-[10px] text-slate-700 outline-none focus:border-teal-500"
+                                  />
+                                ) : (
+                                  <div className="text-[10px] font-mono text-slate-500">{price.toLocaleString('vi-VN')} ₫</div>
+                                )}
+                                <div className="text-[11px] font-mono font-black text-teal-600 mt-0.5">{total.toLocaleString('vi-VN')} ₫</div>
                               </div>
                             </div>
                           </div>
@@ -1832,6 +1882,7 @@ export default function MaterialCoordination({
                             const total = (m.qty || 0) * price;
                             const { received, poQty } = activeDetail.kind === 'proposal' ? getReceivedInfo(activeDetail.doc, m.id) : { received: 0, poQty: null };
                             const shortage = poQty !== null ? Math.max(0, poQty - received) : null;
+                            const canEditRow = activeDetail.kind === 'proposal' && canEditProposalItems(activeDetail.doc);
                             return (
                               <tr key={m.id || idx} className="hover:bg-slate-50/40">
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600">{idx + 1}</td>
@@ -1841,11 +1892,35 @@ export default function MaterialCoordination({
                                     <span className="ml-1.5 text-[8.5px] text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5 font-bold">Mã: {m.maSanPham}</span>
                                   )}
                                 </td>
-                                <td className="p-2.5 text-center font-bold text-teal-600 font-mono">{m.qty}</td>
+                                <td className="p-2.5 text-center font-bold text-teal-600 font-mono">
+                                  {canEditRow ? (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      defaultValue={m.qty}
+                                      onBlur={(e) => {
+                                        if (Number(e.target.value) !== m.qty) updateProposalItemField(activeDetail.doc, m.id, 'qty', e.target.value);
+                                      }}
+                                      className="w-14 text-center bg-white border border-teal-300 rounded px-1 py-0.5 font-mono font-bold text-teal-700 outline-none focus:border-teal-500"
+                                    />
+                                  ) : m.qty}
+                                </td>
                                 <td className="p-2.5 text-center text-slate-600 font-medium">{m.unit}</td>
                                 <td className="p-2.5 text-slate-500 italic">{m.spec || '—'}</td>
                                 <td className="p-2.5 font-bold">{m.supplierName || '—'}</td>
-                                <td className="p-2.5 text-right font-mono text-slate-600">{price.toLocaleString('vi-VN')} ₫</td>
+                                <td className="p-2.5 text-right font-mono text-slate-600">
+                                  {canEditRow ? (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      defaultValue={price}
+                                      onBlur={(e) => {
+                                        if (Number(e.target.value) !== price) updateProposalItemField(activeDetail.doc, m.id, 'price', e.target.value);
+                                      }}
+                                      className="w-20 text-right bg-white border border-teal-300 rounded px-1 py-0.5 font-mono text-slate-700 outline-none focus:border-teal-500"
+                                    />
+                                  ) : `${price.toLocaleString('vi-VN')} ₫`}
+                                </td>
                                 <td className="p-2.5 text-right font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</td>
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600">{poQty !== null ? received : '—'}</td>
                                 <td className={`p-2.5 text-center font-mono font-bold ${shortage ? 'text-amber-600' : 'text-slate-400'}`}>{shortage !== null ? shortage : '—'}</td>

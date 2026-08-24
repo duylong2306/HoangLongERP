@@ -3,6 +3,7 @@ import { Plus, X, Check } from 'lucide-react';
 import { Project, Customer, Employee, Task, ProjectDoc } from '../types';
 import { KanbanColumn } from './ProjectKanbanBoard';
 import { QuickAddCustomerModal } from './QuickAddCustomerModal';
+import { generateProjectId } from '../lib/projectId';
 
 interface ProjectCreationModalProps {
   isOpen: boolean;
@@ -93,7 +94,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
     }
 
     const customProject: Project = {
-      id: `proj_${Date.now()}`,
+      id: generateProjectId(newProjType),
       code,
       name: newProjName.trim(),
       customerId: newProjCustomer,

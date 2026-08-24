@@ -848,9 +848,14 @@ export interface SubcontractorAdvanceProposal {
   id: string; // Mã Đề Xuất (DX-YYYYMMDD-XXXX)
   subcontractorId: string;
   subcontractorName: string;
-  projectId: string;
+  // Optional: Chi Nhà Cung Cấp / Thanh Toán Công Nợ không gắn dự án cụ thể — để
+  // undefined (NULL), không phải '' (xem comment tại FinanceManagement.tsx nơi tạo proposal).
+  projectId?: string;
   projectName: string;
-  taskId: string;
+  // Tùy chọn: Đề Xuất Nhanh (không gắn với 1 công việc cụ thể) để trống — cột
+  // task_id có khóa ngoại tới tasks(id), '' không hợp lệ (chỉ NULL/undefined
+  // mới được FK bỏ qua). Xem FinanceManagement.tsx handleQuickProposalSubmit.
+  taskId?: string;
   taskName: string;
   amount: number; // Số Tiền Đề Xuất Tạm Ứng (VNĐ)
   reason: string; // Diễn Giải
@@ -869,7 +874,11 @@ export interface SubcontractorAdvanceProposal {
   rejectedAt?: string; // ISO timestamp lúc bị Từ Chối (dùng để tự động xóa sau 30 ngày trong Thùng rác)
   payCreatorId?: string;   // Người lập phiếu chi (Kế toán thực hiện "Lập Phiếu") — ghi nhận riêng
   payCreatorName?: string; // Tên người lập phiếu chi
-  expenseItems?: { id: string; item: string; amount: number; note: string }[];
+  // projectId/projectName: công trình mà DÒNG chi tiêu này thuộc về — cho phép
+  // 1 đề xuất "Chi phí Công trình" gom nhiều khoản chi của CÙNG 1 người nhận
+  // (nhân viên) nhưng thuộc các công trình khác nhau, thay vì gán cứng đối
+  // tượng nhận = tên công trình (không hợp lý vì công trình không "nhận tiền").
+  expenseItems?: { id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[];
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
 }
 export interface Liability {

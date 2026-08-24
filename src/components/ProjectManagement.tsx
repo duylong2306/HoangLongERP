@@ -3,6 +3,7 @@ import { Project, Customer, Employee, ProjectType, ProjectStatus, Receipt, Payme
 import { Plus, Search, Eye, Filter, Calendar, TrendingUp, DollarSign, ArrowRight, FileText, Check, Trash2, FolderOpen, Settings, AlertTriangle, X, Users } from 'lucide-react';
 import { useNotification } from '../context';
 import { can, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
+import { generateProjectId } from '../lib/projectId';
 
 interface ProjectManagementProps {
   projects: Project[];
@@ -227,7 +228,7 @@ export default function ProjectManagement({
     }
 
     const newProj: Project = {
-      id: `proj_${Date.now()}`,
+      id: generateProjectId(newProjType),
       code: autoCode,
       name: newProjName,
       customerId: newProjCust,

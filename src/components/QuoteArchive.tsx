@@ -3,6 +3,7 @@ import { dbService } from '../lib/dbService';
 import { Employee, Quote, Project, ArchivedQuote, ProjectType } from '../types';
 import { useNotification } from '../context';
 import { isUserInRoleGroup } from '../context';
+import { generateProjectId } from '../lib/projectId';
 
 /** Map a quote sector to a project type */
 function sectorToProjectType(sector?: string): ProjectType {
@@ -83,7 +84,7 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
     }
 
     try {
-      const generatedProjId = selectedQuote.projectId || `proj_${Date.now()}`;
+      const generatedProjId = selectedQuote.projectId || generateProjectId(sectorToProjectType(selectedQuote?.sector));
       const generatedCode = `DA-${selectedQuote.sector === 'furniture' ? 'NT' : selectedQuote.sector === 'construction' ? 'XD' : 'CK'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 101)}`;
 
       const newProjPayload: Project = {

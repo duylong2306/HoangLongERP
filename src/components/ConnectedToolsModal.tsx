@@ -1349,10 +1349,14 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                               const approverEmp = employees.find(e => e.id === ctCostApproverId);
                               const settlerEmp = employees.find(e => e.id === ctCostSettlerId);
 
+                              // Đối tượng chi = NGƯỜI LẬP ĐỀ XUẤT (currentUser) — không phải người
+                              // quyết toán và không phải tên công trình. Giúp "Nhập Chi"/"Công Nợ Trả"
+                              // nhóm đúng theo người chịu trách nhiệm khoản chi phát sinh; công trình
+                              // cụ thể của đề xuất vẫn xem được qua projectId/projectName bên dưới.
                               const proposal: SubcontractorAdvanceProposal & { proposalDate?: string } = {
                                 id: ctCostProposalId,
-                                subcontractorId: 'expense_recipient',
-                                subcontractorName: settlerEmp?.name || 'Nhân sự quyết toán',
+                                subcontractorId: currentUser?.id || 'expense_recipient',
+                                subcontractorName: currentUser?.name || 'Nhân sự lập đề xuất',
                                 projectId: selectedProject.id,
                                 projectName: selectedProject.name,
                                 taskId: connectedTaskId || overlayTaskId || '',

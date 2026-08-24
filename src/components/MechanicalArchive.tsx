@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { dbService } from '../lib/dbService';
 import { Employee, Project, ArchivedQuote } from '../types';
+import { generateProjectId } from '../lib/projectId';
 import { useNotification } from '../context';
 import { isUserInRoleGroup } from '../context';
 import {
@@ -281,7 +282,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
     }
 
     try {
-      const generatedProjId = selectedQuote.projectId || `proj_${Date.now()}`;
+      const generatedProjId = selectedQuote.projectId || generateProjectId('mechanical');
       const generatedCode = `DA-CK-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 101)}`;
 
       const newProjPayload: Project = {

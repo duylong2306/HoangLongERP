@@ -607,6 +607,11 @@ export default function FinanceManagement({
 
   // Approved Subcontractor Contracts loaded from Firestore database
   const [approvedSubContracts, setApprovedSubContracts] = useState<ArchivedQuote[]>([]);
+  // TẤT CẢ Hợp Đồng Thầu Phụ (không lọc theo isApproved) — dùng để xác định
+  // "dự án nào có thầu phụ liên kết" và "thầu phụ nào thuộc dự án nào" ở màn
+  // Trung tâm Lập chi & Đề xuất (Chi Thầu Phụ), vì thầu phụ có thể đã được ký
+  // hợp đồng nhưng CHƯA được duyệt (isApproved=false) vẫn cần hiện ra để chọn.
+  const [allSubcontractorQuotes, setAllSubcontractorQuotes] = useState<ArchivedQuote[]>([]);
 
   // Load approved subcontractor contracts from Firebase
   useEffect(() => {
@@ -614,6 +619,7 @@ export default function FinanceManagement({
       try {
         const list = await dbService.archivedQuotes.list('subcontractor');
         setApprovedSubContracts(list.filter((q: any) => q.isApproved === true));
+        setAllSubcontractorQuotes(list);
       } catch (error) {
         console.error("Lỗi khi tải hợp đồng thầu phụ đã duyệt:", error);
       }
@@ -806,7 +812,8 @@ export default function FinanceManagement({
   const [quickProposalTaskId, setQuickProposalTaskId] = useState('');
   const [quickProposalTaskName, setQuickProposalTaskName] = useState('');
   // Bảng hạng mục chi tiêu (danh sách chi phí cần đề xuất) — chỉ dùng cho Đề Xuất Chi Phí (project_expense_proposal)
-  const [quickProposalExpenseItems, setQuickProposalExpenseItems] = useState<{ id: string; item: string; amount: number; note: string }[]>([]);
+  // projectId/projectName: công trình của TỪNG dòng chi tiêu (xem giải thích ở types.ts).
+  const [quickProposalExpenseItems, setQuickProposalExpenseItems] = useState<{ id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[]>([]);
   const [quickProposalSettlerId, setQuickProposalSettlerId] = useState('');
 
   // Helper: Mở thẳng form tạo đề xuất (bỏ qua bước chọn trong launcher) theo loại đã định.
@@ -824,7 +831,10 @@ export default function FinanceManagement({
       item.key === 'adv_salary' ? 'salary_advance' :
       'supplier_payment_proposal'
     );
-    setQuickProposalRecipientKind(item.recipientKind);
+    // Chi phí Công trình (adv_site) LUÔN chọn nhân viên làm đối tượng nhận —
+    // ghi đè config gốc của nút (item.recipientKind = 'project') vì công trình
+    // không thể "nhận tiền" (xem giải thích ở handleQuickProposalSubmit).
+    setQuickProposalRecipientKind(item.key === 'adv_site' ? 'employee' : item.recipientKind);
     setQuickProposalSubMode(initial?.subMode ?? 'advance');
     // Chi Nhà Cung Cấp không gắn dự án (trường Dự án/Công trình đã ẩn) → để trống.
     setQuickProposalProjId(item.key === 'adv_supplier' ? '' : (initial?.projId ?? projects[0]?.id ?? ''));
@@ -3182,7 +3192,7 @@ export default function FinanceManagement({
   const handleQuickProposalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     let amount = Number(quickProposalAmount);
-    let expenseItems: { id: string; item: string; amount: number; note: string }[] | undefined;
+    let expenseItems: { id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[] | undefined;
     let settlerId = '';
     let settlerName = '';
     if (quickProposalType === 'project_expense_proposal') {
@@ -3191,8 +3201,16 @@ export default function FinanceManagement({
         addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng thêm ít nhất một hạng mục chi tiêu hợp lệ!', type: 'error' });
         return;
       }
+      // Mỗi dòng chi tiêu PHẢI gắn đúng công trình của nó — đây là điều kiện để
+      // "Công Nợ Trả" nhóm đúng theo NGƯỜI nhận tiền mà vẫn tra được khoản chi
+      // nào thuộc công trình nào (thay vì gán cứng đối tượng nhận = tên công trình).
+      const rowMissingProject = validRows.find(r => !r.projectId);
+      if (rowMissingProject) {
+        addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng chọn Công trình cho từng dòng chi tiêu!', type: 'error' });
+        return;
+      }
       amount = validRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-      expenseItems = validRows.map(r => ({ id: r.id, item: r.item, amount: Number(r.amount) || 0, note: r.note }));
+      expenseItems = validRows.map(r => ({ id: r.id, item: r.item, amount: Number(r.amount) || 0, note: r.note, projectId: r.projectId, projectName: r.projectName }));
     }
     if (!amount || amount <= 0) {
       addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng nhập số tiền đề xuất hợp lệ!', type: 'error' });
@@ -3202,21 +3220,44 @@ export default function FinanceManagement({
     // Xác định dự án & hình thức (Chi Thầu Phụ: Tạm ứng / Thanh toán công nợ)
     const isDebtMode = quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt';
     const selProject = projects.find(p => p.id === quickProposalProjId);
-    const projectRequired = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance') || quickProposalType === 'project_expense_proposal';
+    const projectRequired = quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance';
     if (projectRequired && !selProject) {
       addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng chọn Dự án / Công trình!', type: 'error' });
       return;
     }
-    // Tên dự án: Thanh Toán Công Nợ (cố định, không gắn dự án) | theo dự án chọn | rỗng
-    const projectNameForSave = isDebtMode ? 'Thanh Toán Công Nợ' : (selProject?.name || '');
-    const projectIdForSave = isDebtMode ? '' : (selProject?.id || '');
+    // Tên dự án cấp đề xuất: với Chi phí Công trình, mỗi DÒNG đã tự mang công
+    // trình riêng (xem expenseItems) — trường này chỉ để hiển thị tóm tắt: nếu
+    // mọi dòng cùng 1 công trình thì lấy đúng tên đó, khác nhau thì ghi số lượng.
+    let projectNameForSave: string;
+    let projectIdForSave: string;
+    if (quickProposalType === 'project_expense_proposal') {
+      const distinctProjIds = [...new Set((expenseItems || []).map(r => r.projectId).filter(Boolean))] as string[];
+      if (distinctProjIds.length === 1) {
+        projectIdForSave = distinctProjIds[0];
+        projectNameForSave = expenseItems?.find(r => r.projectId === distinctProjIds[0])?.projectName || '';
+      } else {
+        projectIdForSave = '';
+        projectNameForSave = `${distinctProjIds.length} công trình`;
+      }
+    } else {
+      // Tên dự án: Thanh Toán Công Nợ (cố định, không gắn dự án) | theo dự án chọn | rỗng
+      projectNameForSave = isDebtMode ? 'Thanh Toán Công Nợ' : (selProject?.name || '');
+      projectIdForSave = isDebtMode ? '' : (selProject?.id || '');
+    }
 
-    // Xác định đối tượng nhận: Đề Xuất Chi Phí (project_expense_proposal) LUÔN lấy
-    // Công trình / Dự án làm Đối tượng chi (không cho nhận thầu phụ / nhân viên).
-    const effectiveRecipientKind: QuickRecipientKind = quickProposalType === 'project_expense_proposal' ? 'project' : quickProposalRecipientKind;
+    // Xác định đối tượng nhận: Đề Xuất Chi Phí (project_expense_proposal) LUÔN
+    // gán NGƯỜI LẬP ĐỀ XUẤT (currentUser) làm Đối tượng chi — không dùng tên
+    // công trình (công trình không "nhận tiền"), không cho chọn tay người khác
+    // (mỗi đề xuất do 1 người chịu trách nhiệm lập, xem "Nhập Chi"/"Công Nợ Trả"
+    // muốn nhóm đúng theo người này). Công trình cụ thể của từng khoản chi vẫn
+    // được lưu riêng trong expenseItems[].projectId/projectName ở trên.
+    const effectiveRecipientKind: QuickRecipientKind = quickProposalType === 'project_expense_proposal' ? 'employee' : quickProposalRecipientKind;
     let subId = '';
     let subName = '';
-    if (effectiveRecipientKind === 'supplier') {
+    if (quickProposalType === 'project_expense_proposal') {
+      subId = (currentUser as any)?.id || '';
+      subName = (currentUser as any)?.name || 'Nhân sự lập đề xuất';
+    } else if (effectiveRecipientKind === 'supplier') {
       const selSub = suppliers.find(s => s.id === quickProposalSubId);
       if (!selSub) {
         addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng chọn Thầu phụ / Nhà thầu!', type: 'error' });
@@ -3238,9 +3279,13 @@ export default function FinanceManagement({
       subName = selProject?.name || '';
     }
 
-    // taskName minh bạch: Ứng lương nhân sự phải bắt đầu bằng "Ứng lương" để map đúng phiếu chi
-    let taskName = isDebtMode ? 'Thanh Toán Công Nợ Thầu Phụ' : (selProject?.name || '');
-    if (quickProposalRecipientKind === 'employee') {
+    // taskName minh bạch: Ứng lương nhân sự phải bắt đầu bằng "Ứng lương" để map đúng phiếu chi.
+    // Kiểm tra theo quickProposalType (KHÔNG phải effectiveRecipientKind) — vì Chi phí Công
+    // trình giờ cũng dùng recipientKind 'employee' nhưng KHÔNG phải là ứng lương.
+    let taskName = isDebtMode ? 'Thanh Toán Công Nợ Thầu Phụ'
+      : quickProposalType === 'project_expense_proposal' ? projectNameForSave
+      : (selProject?.name || '');
+    if (quickProposalType === 'salary_advance') {
       const period = new Date().toLocaleDateString('vi-VN', { month: '2-digit', year: 'numeric' });
       taskName = `Ứng lương kỳ ${period}`;
     }
@@ -3275,9 +3320,16 @@ export default function FinanceManagement({
       id: proposalCode,
       subcontractorId: subId,
       subcontractorName: subName,
-      projectId: projectIdForSave,
+      // '' (chuỗi rỗng) KHÔNG hợp lệ cho cột project_id có khóa ngoại tới projects(id) —
+      // cùng lý do như taskId phía dưới. Chi Nhà Cung Cấp / Thanh Toán Công Nợ không gắn
+      // dự án cụ thể → phải để undefined (NULL), không phải ''.
+      projectId: projectIdForSave || undefined,
       projectName: projectNameForSave,
-      taskId: quickProposalTaskId || '',
+      // '' (chuỗi rỗng) KHÔNG hợp lệ cho cột task_id có khóa ngoại tới tasks(id) —
+      // insert sẽ báo lỗi "violates foreign key constraint" vì '' không khớp bất
+      // kỳ task nào (khác NULL, vốn được FK bỏ qua). Đề Xuất Nhanh thường KHÔNG
+      // gắn với 1 công việc cụ thể nào → phải để undefined (NULL), không phải ''.
+      taskId: quickProposalTaskId || undefined,
       taskName: quickProposalTaskName || taskName,
       amount,
       reason: quickProposalReason || `Đề xuất chi${projectNameForSave ? ` cho: ${projectNameForSave}` : ''}`,
@@ -3626,8 +3678,8 @@ export default function FinanceManagement({
       awaiting_voucher_update: 'Cập Nhật Chứng Từ', completed: 'Hoàn Thành', rejected: 'Từ Chối',
     };
     const expenseRows = (adv.expenseItems && adv.expenseItems.length > 0)
-      ? `<table class="items"><thead><tr><th>Mục chi tiêu</th><th class="r">Số tiền</th><th>Ghi chú</th></tr></thead><tbody>
-          ${adv.expenseItems.map((it: any) => `<tr><td>${esc(it.item)}</td><td class="r">${fmt(it.amount)}</td><td>${esc(it.note || '—')}</td></tr>`).join('')}
+      ? `<table class="items"><thead><tr><th>Mục chi tiêu</th><th>Công trình</th><th class="r">Số tiền</th><th>Ghi chú</th></tr></thead><tbody>
+          ${adv.expenseItems.map((it: any) => `<tr><td>${esc(it.item)}</td><td>${esc(it.projectName || '—')}</td><td class="r">${fmt(it.amount)}</td><td>${esc(it.note || '—')}</td></tr>`).join('')}
         </tbody></table>`
       : '';
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>DeXuat_${esc(adv.id)}</title>
@@ -5551,10 +5603,19 @@ export default function FinanceManagement({
                         ) : (
                           <div>
                             <label className="block text-slate-400 font-semibold mb-1">
-                              Dự án / Công trình {quickProposalType === 'subcontractor_advance' || quickProposalType === 'project_expense_proposal' ? <span className="text-rose-500">*</span> : null}:
+                              Dự án / Công trình {quickProposalType === 'subcontractor_advance' ? <span className="text-rose-500">*</span> : null}:
                             </label>
                             <SearchableSelect
-                              options={projects.map(p => ({ id: p.id, label: p.name }))}
+                              options={
+                                (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance')
+                                  // Tạm ứng Thầu Phụ: CHỈ cho chọn dự án đã có ít nhất 1 Hợp Đồng
+                                  // Thầu Phụ liên kết — dự án chưa ký hợp đồng thầu phụ nào thì
+                                  // chưa có đối tượng để chi, không cho chọn nhầm.
+                                  ? projects
+                                      .filter(p => allSubcontractorQuotes.some(q => q.projectId === p.id))
+                                      .map(p => ({ id: p.id, label: p.name }))
+                                  : projects.map(p => ({ id: p.id, label: p.name }))
+                              }
                               value={quickProposalProjId}
                               onChange={(id) => {
                                 setQuickProposalProjId(id);
@@ -5562,11 +5623,16 @@ export default function FinanceManagement({
                               }}
                               placeholder="— Chọn dự án / công trình —"
                               searchPlaceholder="🔍 Gõ tên dự án..."
-                              required={quickProposalType === 'subcontractor_advance' || quickProposalType === 'project_expense_proposal'}
+                              required={quickProposalType === 'subcontractor_advance'}
                             />
                             {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && (
                               <div className="text-[9px] text-sky-300/80 flex items-center gap-1 mt-1">
                                 <CheckCircle2 className="w-3 h-3" /> Bắt buộc chọn dự án — thầu phụ được tự động lọc theo danh sách đã liên kết trong dự án này.
+                              </div>
+                            )}
+                            {quickProposalType === 'project_expense_proposal' && (
+                              <div className="text-[9px] text-slate-500 flex items-center gap-1 mt-1">
+                                <CheckCircle2 className="w-3 h-3" /> Không bắt buộc — chỉ dùng để điền sẵn công trình khi bấm "+ Thêm dòng chi mới" bên dưới. Mỗi dòng chi tiêu chọn công trình riêng.
                               </div>
                             )}
                           </div>
@@ -5575,16 +5641,30 @@ export default function FinanceManagement({
 
                       {/* Chọn thầu phụ / nhà cung cấp (nhóm supplier) — ẩn với Đề Xuất Chi Phí */}
                       {quickProposalRecipientKind === 'supplier' && quickProposalType !== 'project_expense_proposal' && (() => {
-                        const selSub = suppliers.find(s => s.id === quickProposalSubId);
+                        // Thầu Phụ (bảng accounting_subcontractors) là danh mục RIÊNG, khác với
+                        // Nhà Cung Cấp (bảng suppliers) — ID của 2 bảng không trùng nhau (thầu
+                        // phụ import có id dạng "TP_IMP_..."). Chọn đúng danh mục theo loại đề
+                        // xuất, nếu không thì tìm nhầm bảng sẽ luôn ra "không tìm thấy".
+                        const subDataSource = quickProposalType === 'subcontractor_advance' ? allSubcontractors : suppliers;
+                        const selSub = subDataSource.find((s: any) => s.id === quickProposalSubId);
                         const subLiab = selSub ? mergedLiabilities.find(l => l.name === selSub.name) : undefined;
+                        // Tạm ứng Thầu Phụ: lấy thầu phụ theo Hợp Đồng Thầu Phụ đã ký với DỰ ÁN
+                        // đang chọn (không lọc theo trạng thái duyệt — hợp đồng "Đã Lập" (chờ
+                        // duyệt) hay "Hoàn thành" (đã duyệt) đều cho chọn, để không chặn nhầm
+                        // thầu phụ vừa ký hợp đồng nhưng chưa kịp duyệt). Mỗi thầu phụ giữ lại
+                        // hợp đồng MỚI NHẤT của mình trong dự án để hiển thị trạng thái kèm theo.
+                        const subContractByProject = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance')
+                          ? allSubcontractorQuotes.filter(q => q.projectId === quickProposalProjId && q.subcontractorId)
+                          : [];
                         const subList = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance')
                           ? [...new Map(
-                              tasksProp
-                                .filter(t => t.projectId === quickProposalProjId && t.subcontractorId)
-                                .map(t => [t.subcontractorId, suppliers.find(s => s.id === t.subcontractorId)] as [string, any])
-                                .filter(([, s]) => !!s)
-                            ).values()] as any[]
-                          : suppliers;
+                              subContractByProject.map(q => [q.subcontractorId, {
+                                ...(subDataSource.find((s: any) => s.id === q.subcontractorId) || {}),
+                                id: q.subcontractorId,
+                                contractStatusLabel: (q.isApproved || (q.status || '').trim().toLowerCase() === 'hoàn thành') ? 'Duyệt' : 'Chờ duyệt',
+                              }] as [string, any])
+                            ).values()].filter((s: any) => !!s.name)
+                          : subDataSource;
                         return (
                           <div className="space-y-2">
                             <div>
@@ -5608,9 +5688,16 @@ export default function FinanceManagement({
                                 >
                                   <option value="">— Chọn thầu phụ —</option>
                                   {subList.map((s: any) => (
-                                    <option key={s.id} value={s.id}>{s.name} ({s.field || 'Thầu phụ'})</option>
+                                    <option key={s.id} value={s.id}>
+                                      {s.name} ({s.field || 'Thầu phụ'}){s.contractStatusLabel ? ` · HĐ: ${s.contractStatusLabel}` : ''}
+                                    </option>
                                   ))}
                                 </select>
+                              )}
+                              {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && quickProposalProjId && subList.length === 0 && (
+                                <div className="text-[9px] text-amber-400/90 flex items-center gap-1 mt-1">
+                                  <CheckCircle2 className="w-3 h-3" /> Dự án này chưa có Hợp Đồng Thầu Phụ nào — vào "Hồ Sơ Thầu Phụ" để lập hợp đồng trước.
+                                </div>
                               )}
                               {quickProposalType === 'supplier_payment_proposal' && (
                                 <button
@@ -5657,7 +5744,8 @@ export default function FinanceManagement({
                         );
                       })()}
 
-                      {/* Chọn nhân viên (nhóm ứng lương) — ẩn với Đề Xuất Chi Phí */}
+                      {/* Chọn nhân viên: chỉ dùng cho Ứng Lương (project_expense_proposal có
+                          đối tượng chi cố định = người lập đề xuất, xem info box bên dưới) */}
                       {quickProposalRecipientKind === 'employee' && quickProposalType !== 'project_expense_proposal' && (
                         <div>
                           <label className="block text-slate-400 font-semibold mb-1">Nhân viên <span className="text-rose-500">*</span>:</label>
@@ -5674,10 +5762,19 @@ export default function FinanceManagement({
                         </div>
                       )}
 
-                      {/* Đối tượng = Công trình (không cần chọn thêm) — luôn hiện với Đề Xuất Chi Phí */}
-                      {(quickProposalRecipientKind === 'project' || quickProposalType === 'project_expense_proposal') && (
+                      {/* Đối tượng = Công trình (không cần chọn thêm) */}
+                      {quickProposalRecipientKind === 'project' && (
                         <div className="text-[10px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded p-2">
                           Đối tượng nhận: <b className="text-slate-200">Công trình / Dự án</b> (lấy từ dự án đã chọn ở trên).
+                        </div>
+                      )}
+
+                      {/* Chi phí Công trình: đối tượng chi LUÔN là người đang lập đề xuất này —
+                          không cho chọn tay, để "Nhập Chi"/"Công Nợ Trả" nhóm đúng theo người
+                          chịu trách nhiệm. Công trình cụ thể xem ở cột "Công trình" từng dòng bên dưới. */}
+                      {quickProposalType === 'project_expense_proposal' && (
+                        <div className="text-[10px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded p-2">
+                          Đối tượng nhận: <b className="text-slate-200">{(currentUser as any)?.name || 'Bạn'}</b> (người lập đề xuất này).
                         </div>
                       )}
 
@@ -5697,6 +5794,7 @@ export default function FinanceManagement({
                                   <tr className="border-b border-slate-800 text-slate-400 text-[9.5px] uppercase font-black tracking-wider">
                                     <th className="p-1.5 w-8 text-center">STT</th>
                                     <th className="p-1.5">Hạng mục chi tiêu</th>
+                                    <th className="p-1.5 w-40">Công trình</th>
                                     <th className="p-1.5 w-36">Số tiền (đ)</th>
                                     <th className="p-1.5">Ghi chú</th>
                                     <th className="p-1.5 w-10 text-center">Xóa</th>
@@ -5718,6 +5816,24 @@ export default function FinanceManagement({
                                           className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none text-[10.5px] focus:border-emerald-500"
                                           placeholder="Nhập hạng mục..."
                                         />
+                                      </td>
+                                      <td className="p-1">
+                                        <select
+                                          value={row.projectId || ''}
+                                          onChange={(e) => {
+                                            const next = [...quickProposalExpenseItems];
+                                            const p = projects.find(pr => pr.id === e.target.value);
+                                            next[idx].projectId = e.target.value || undefined;
+                                            next[idx].projectName = p?.name;
+                                            setQuickProposalExpenseItems(next);
+                                          }}
+                                          className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none text-[10.5px] cursor-pointer focus:border-emerald-500"
+                                        >
+                                          <option value="">— Chọn công trình —</option>
+                                          {projects.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                          ))}
+                                        </select>
                                       </td>
                                       <td className="p-1">
                                         <input
@@ -5757,7 +5873,7 @@ export default function FinanceManagement({
                                   ))}
                                   {quickProposalExpenseItems.length === 0 && (
                                     <tr>
-                                      <td colSpan={5} className="p-5 text-center text-slate-500 italic text-[11px]">
+                                      <td colSpan={6} className="p-5 text-center text-slate-500 italic text-[11px]">
                                         Chưa có hạng mục chi tiêu nào. Bấm nút bên dưới để thêm mới.
                                       </td>
                                     </tr>
@@ -5768,7 +5884,12 @@ export default function FinanceManagement({
                             <div className="flex justify-between items-center pt-1">
                               <button
                                 type="button"
-                                onClick={() => setQuickProposalExpenseItems([...quickProposalExpenseItems, { id: `row_${Date.now()}`, item: '', amount: 0, note: '' }])}
+                                onClick={() => {
+                                  // Điền sẵn công trình từ dự án đã chọn ở trên (nếu có) — người dùng vẫn có
+                                  // thể đổi lại riêng cho từng dòng, vì mỗi khoản chi có thể thuộc công trình khác nhau.
+                                  const defaultProj = projects.find(p => p.id === quickProposalProjId);
+                                  setQuickProposalExpenseItems([...quickProposalExpenseItems, { id: `row_${Date.now()}`, item: '', amount: 0, note: '', projectId: defaultProj?.id, projectName: defaultProj?.name }]);
+                                }}
                                 className="bg-slate-900 border border-dashed border-slate-750 text-indigo-400 font-extrabold hover:bg-slate-850 px-3 py-1.5 rounded-lg text-[10px] cursor-pointer"
                               >
                                 + Thêm dòng chi mới
@@ -7501,7 +7622,7 @@ export default function FinanceManagement({
                                   const all = total > 0 && withDocs === total;
                                   return (
                                     <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${all ? 'bg-white text-emerald-700 border-emerald-600' : 'bg-white text-orange-600 border-orange-500'}`}>
-                                      Đã thêm chứng từ: {withDocs}/{total}
+                                      Chứng từ: {withDocs}/{total}
                                     </span>
                                   );
                                 })()}
@@ -7524,7 +7645,15 @@ export default function FinanceManagement({
                                     <span className={`text-[9.5px] uppercase font-extrabold px-1.5 py-0.5 rounded border ${PAYMENT_CAT_BADGE[p.category] || 'bg-white text-slate-600 border-slate-400'}`}>{PAYMENT_CAT_LABEL[p.category] || p.category}</span>
                                   </td>
                                   <td className="px-3 py-2.5">
-                                    <div className="font-extrabold text-slate-100">{p.recipient}</div>
+                                    {/* Chi phí Công trình: nhóm cha đã hiện tên người lập đề xuất rồi
+                                        (đối tượng chi = người lập), lặp lại ở đây thừa — hiện tên
+                                        Dự án/Công trình của khoản chi này thay thế, đúng yêu cầu
+                                        "tổng hợp theo người lập, xổ chi tiết theo công trình". */}
+                                    {p.category === 'site_expense' ? (
+                                      <div className="font-extrabold text-slate-100">🏗️ {payProj || 'Không rõ công trình'}</div>
+                                    ) : (
+                                      <div className="font-extrabold text-slate-100">{p.recipient}</div>
+                                    )}
                                     <div className="text-[9.5px] text-slate-500 italic mt-0.5">{p.notes}</div>
                                   </td>
                                   <td className="px-3 py-2.5 text-right font-bold text-rose-450 font-mono">-{p.amount.toLocaleString('vi-VN')} đ</td>
@@ -8932,6 +9061,7 @@ export default function FinanceManagement({
                         <thead className="bg-slate-900 text-slate-400 uppercase text-[9px] font-bold">
                           <tr>
                             <th className="p-2 pl-3">Mục chi tiêu</th>
+                            <th className="p-2">Công trình</th>
                             <th className="p-2 text-right">Số tiền</th>
                             <th className="p-2 pr-3">Ghi chú</th>
                           </tr>
@@ -8940,6 +9070,7 @@ export default function FinanceManagement({
                           {viewingProposalDetail.expenseItems.map((item, idx) => (
                             <tr key={item.id || idx} className="hover:bg-slate-900/40">
                               <td className="p-2 pl-3 font-bold text-slate-200">{item.item}</td>
+                              <td className="p-2 text-slate-300">{item.projectName || '—'}</td>
                               <td className="p-2 text-right font-mono font-bold text-orange-400">{item.amount.toLocaleString('vi-VN')} đ</td>
                               <td className="p-2 pr-3 text-slate-400 italic text-[10px]">{item.note || '—'}</td>
                             </tr>

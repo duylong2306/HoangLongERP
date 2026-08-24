@@ -28,6 +28,7 @@ import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
+import { generateProjectId } from '../lib/projectId';
 import UserAvatar from './UserAvatar';
 import { sendGroupChatMessage, sendApprovalDirectMessage, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
@@ -1060,8 +1061,17 @@ export default function ProjectKanbanBoard({
   // Find selected project
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
+  // BUG ĐÃ SỬA: trước đây tìm theo projectId mà KHÔNG lọc lĩnh vực (_sectorType), nên
+  // nếu dự án XÂY DỰNG chưa từng có Hồ Sơ Báo Giá Xây Dựng nào, .find() sẽ "vơ" luôn
+  // Hợp Đồng THẦU PHỤ (sector='subcontractor') cùng projectId làm "Giá trị Hợp đồng
+  // Đồng bộ từ báo giá" — hiển thị sai giá trị/trạng thái không liên quan đến dự án.
+  // Phải lọc đúng _sectorType khớp selectedProject.type, giống cách đã làm ở nơi khác
+  // (xem "Hồ sơ dự án" trong card công việc con, phía dưới trong file này).
   const latestArchivedQuote = selectedProject
-    ? (archivedQuotesList.find(q => q.projectId === selectedProject.id) || null)
+    ? (archivedQuotesList.find(q =>
+        q.projectId === selectedProject.id &&
+        (q._sectorType === selectedProject.type || (!q._sectorType && selectedProject.type === 'general'))
+      ) || null)
     : null;
 
   // Filter projects by this sector (construction, furniture, mechanical) and search state
@@ -2282,7 +2292,7 @@ export default function ProjectKanbanBoard({
               }
 
               const customProject: Project = {
-                id: `proj_${Date.now()}`,
+                id: generateProjectId(newProjType),
                 code,
                 name: newProjName.trim(),
                 customerId: newProjCustomer,
@@ -3459,6 +3469,63 @@ export default function ProjectKanbanBoard({
                               </button>
                             </div>
                           </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Tổng giá trị HĐ Thầu Phụ + danh sách chi tiết từng thầu phụ của dự án này */}
+                    <div className="col-span-2 bg-slate-900/40 border border-slate-850/60 p-4 rounded-xl space-y-3">
+                      <span className="text-slate-400 font-bold block text-[10.5px] uppercase tracking-wider">
+                        🤝 Tổng giá trị HĐ Thầu Phụ
+                      </span>
+                      {(() => {
+                        // Mỗi thầu phụ chỉ lấy 1 HĐ MỚI NHẤT trong dự án này (nếu thầu phụ có nhiều
+                        // HĐ do lập lại/điều chỉnh) — tránh cộng trùng khi tính tổng giá trị.
+                        const projectSubContracts = subcontractorContracts.filter(q => q.projectId === selectedProject.id);
+                        const latestBySub = [...new Map(
+                          projectSubContracts.map(q => [q.subcontractorId || q.id, q])
+                        ).values()];
+                        const totalSubValue = latestBySub.reduce((sum, q) => sum + (q.contractValue || q.totalAmount || 0), 0);
+
+                        if (latestBySub.length === 0) {
+                          return (
+                            <div className="text-[10.5px] text-slate-500 italic bg-slate-950/60 border border-dashed border-slate-800 rounded-lg p-3 text-center">
+                              Dự án này chưa có Hợp Đồng Thầu Phụ nào.
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <>
+                            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-slate-800">
+                              <div className="text-[9.5px] text-orange-700 bg-orange-50 border border-orange-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded w-fit mb-1.5">
+                                {latestBySub.length} thầu phụ
+                              </div>
+                              <div className="text-orange-700 font-mono text-2xl font-black tracking-tight">
+                                {totalSubValue.toLocaleString('vi-VN')} VNĐ
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {latestBySub.map((q) => {
+                                const statusNormalized = (q.status || '').trim().toLowerCase();
+                                const isApproved = q.isApproved === true || statusNormalized === 'hoàn thành';
+                                return (
+                                  <div key={q.id} className="flex items-center justify-between bg-slate-950/60 border border-slate-850 rounded-lg px-3 py-2">
+                                    <div className="min-w-0">
+                                      <div className="text-[11px] text-slate-200 font-bold truncate">{q.subcontractorName || 'Thầu phụ vãng lai'}</div>
+                                      <div className={`text-[9px] font-bold mt-0.5 ${isApproved ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                        {isApproved ? 'Đã Duyệt' : 'Chưa Duyệt'}
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] font-mono font-black text-orange-300 shrink-0 ml-2">
+                                      {(q.contractValue || q.totalAmount || 0).toLocaleString('vi-VN')} đ
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
                         );
                       })()}
                     </div>

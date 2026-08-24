@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { dbService } from '../lib/dbService';
 import { Employee, Project, ArchivedQuote, ProjectType } from '../types';
+import { generateProjectId } from '../lib/projectId';
 import { useNotification, isUserInRoleGroup } from '../context';
 import {
   FileText,
@@ -82,7 +83,7 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
     }
 
     try {
-      const generatedProjId = selectedQuote.projectId || `proj_${Date.now()}`;
+      const generatedProjId = selectedQuote.projectId || generateProjectId('furniture');
       const generatedCode = `DA-NT-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 101)}`;
 
       const newProjPayload: Project = {
