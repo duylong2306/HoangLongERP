@@ -731,6 +731,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // (nguồn gốc bão POST làm nghẽn kết nối → chấm công tải chậm/không tải được).
   const isSyncingAttendanceFromCloud = useRef(false);
   const isSyncingTravelNormsFromCloud = useRef(false);
+  // 5 cờ dưới đây chặn vòng lặp cho payroll/trips/holidays/leaveCoefficients/
+  // salaryScales — trước đây effect bulk-save của các bảng này KHÔNG có chốt
+  // chặn, khiến realtime event → tải lại → save lại toàn bộ mảng → tự sinh
+  // event mới → lặp vô hạn (xác nhận qua pg_stat_statements: 154.187 lần
+  // INSERT hrm_payroll_records — nguồn ngốn CPU chính trong cảnh báo
+  // "exhausting multiple resources" của Supabase).
+  const isSyncingPayrollFromCloud = useRef(false);
+  const isSyncingTripsFromCloud = useRef(false);
+  const isSyncingHolidaysFromCloud = useRef(false);
+  const isSyncingLeaveCoefficientsFromCloud = useRef(false);
+  const isSyncingSalaryScalesFromCloud = useRef(false);
 
   const [errorSearchEmpId, setErrorSearchEmpId] = useState<string>('all');
   const [errorFilterMonth, setErrorFilterMonth] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
@@ -1318,9 +1329,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   useEffect(() => {
     const handleHolidaysUpdated = async () => {
       try {
+        isSyncingHolidaysFromCloud.current = true;
         const d = await dbService.hrmHolidays.list();
         if (d && d.length > 0) setHolidays(d);
       } catch (e) { console.error('Realtime holidays sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingHolidaysFromCloud.current = false; }, 500);
+      }
     };
     window.addEventListener('hl-hrm-holidays-updated', handleHolidaysUpdated);
     return () => window.removeEventListener('hl-hrm-holidays-updated', handleHolidaysUpdated);
@@ -1329,9 +1344,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   useEffect(() => {
     const handleTripsUpdated = async () => {
       try {
+        isSyncingTripsFromCloud.current = true;
         const d = await dbService.hrmTrips.list();
         if (d && d.length > 0) setTrips(d);
       } catch (e) { console.error('Realtime trips sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingTripsFromCloud.current = false; }, 500);
+      }
     };
     window.addEventListener('hl-hrm-trips-updated', handleTripsUpdated);
     return () => window.removeEventListener('hl-hrm-trips-updated', handleTripsUpdated);
@@ -1340,9 +1359,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   useEffect(() => {
     const handlePayrollUpdated = async () => {
       try {
+        isSyncingPayrollFromCloud.current = true;
         const d = await dbService.hrmPayrollRecords.list();
         if (d && d.length > 0) setPayroll(d);
       } catch (e) { console.error('Realtime payroll sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingPayrollFromCloud.current = false; }, 500);
+      }
     };
     window.addEventListener('hl-hrm-payroll-records-updated', handlePayrollUpdated);
     return () => window.removeEventListener('hl-hrm-payroll-records-updated', handlePayrollUpdated);
@@ -1351,9 +1374,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   useEffect(() => {
     const handleLeaveCoefficientsUpdated = async () => {
       try {
+        isSyncingLeaveCoefficientsFromCloud.current = true;
         const d = await dbService.hrmLeaveCoefficients.list();
         if (d && d.length > 0) setLeaveCoefficients(d);
       } catch (e) { console.error('Realtime leave-coefficients sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingLeaveCoefficientsFromCloud.current = false; }, 500);
+      }
     };
     window.addEventListener('hl-hrm-leave-coefficients-updated', handleLeaveCoefficientsUpdated);
     return () => window.removeEventListener('hl-hrm-leave-coefficients-updated', handleLeaveCoefficientsUpdated);
@@ -1362,9 +1389,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   useEffect(() => {
     const handleSalaryScalesUpdated = async () => {
       try {
+        isSyncingSalaryScalesFromCloud.current = true;
         const d = await dbService.hrmSalaryScales.list();
         if (d && d.length > 0) setSalaryScales(d);
       } catch (e) { console.error('Realtime salary-scales sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingSalaryScalesFromCloud.current = false; }, 500);
+      }
     };
     window.addEventListener('hl-hrm-salary-scales-updated', handleSalaryScalesUpdated);
     return () => window.removeEventListener('hl-hrm-salary-scales-updated', handleSalaryScalesUpdated);
@@ -1392,18 +1423,22 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, []);
 
   useEffect(() => {
+    if (isSyncingPayrollFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (payroll?.length) payroll.forEach(p => dbService.hrmPayrollRecords.save(p).catch(() => {}));
   }, [payroll]);
 
   useEffect(() => {
+    if (isSyncingTripsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (trips?.length) trips.forEach(t => dbService.hrmTrips.save(t).catch(() => {}));
   }, [trips]);
 
   useEffect(() => {
+    if (isSyncingHolidaysFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (holidays?.length) holidays.forEach(h => dbService.hrmHolidays.save(h).catch(() => {}));
   }, [holidays]);
 
   useEffect(() => {
+    if (isSyncingLeaveCoefficientsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (leaveCoefficients?.length) leaveCoefficients.forEach(c => dbService.hrmLeaveCoefficients.save(c).catch(() => {}));
   }, [leaveCoefficients]);
 
@@ -1413,6 +1448,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [employeeErrors]);
 
   useEffect(() => {
+    if (isSyncingSalaryScalesFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (salaryScales?.length) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
   }, [salaryScales]);
 

@@ -184,7 +184,9 @@ BEGIN
   RETURN n;
 END $$;
 
-SELECT 'tasks.missions'            AS location, hl_count_base64('public.tasks', 'missions')             AS base64_rows
+-- tasks.missions đã bị xóa (migration 20260824d) — missions giờ nằm ở bảng
+-- task_missions riêng (mỗi mission 1 dòng, cột data jsonb), quét base64 ở đó.
+SELECT 'task_missions.data'         AS location, hl_count_base64('public.task_missions', 'data')        AS base64_rows
 UNION ALL SELECT 'tasks.comments',        hl_count_base64('public.tasks', 'comments')
 UNION ALL SELECT 'tasks.work_logs',       hl_count_base64('public.tasks', 'work_logs')
 UNION ALL SELECT 'payments.images',       hl_count_base64('public.payments', 'images')
