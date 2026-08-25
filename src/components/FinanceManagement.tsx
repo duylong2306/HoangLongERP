@@ -1426,17 +1426,6 @@ export default function FinanceManagement({
     return [];
   };
 
-  // Form states for manual liabilities
-  const [showLiabModal, setShowLiabModal] = useState(false);
-  const [editingLiabId, setEditingLiabId] = useState<string | null>(null);
-  const [liabName, setLiabName] = useState('');
-  const [liabCategory, setLiabCategory] = useState<'Thầu Phụ' | 'Nhà Cung Cấp' | 'Khác'>('Nhà Cung Cấp');
-  const [liabValue, setLiabValue] = useState<number>(0);
-  const [liabPaid, setLiabPaid] = useState<number>(0);
-  const [liabNotes, setLiabNotes] = useState('');
-  const [liabDate, setLiabDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [liabToDelete, setLiabToDelete] = useState<Liability | null>(null);
-
   // ── Cập nhật Công Nợ Đầu Kỳ (từ 3 bảng master) ──────────────────────────
   const [allSubcontractors, setAllSubcontractors] = useState<any[]>([]);
   useEffect(() => {
@@ -1657,6 +1646,7 @@ export default function FinanceManagement({
   const [poDetailModal, setPoDetailModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
   // Xác nhận trước khi "Ghi nhận công nợ" — cảnh báo nếu đơn chưa hoạt động.
   const [poRecordConfirm, setPoRecordConfirm] = useState<PurchaseOrder | null>(null);
+  const [poUndoConfirm, setPoUndoConfirm] = useState<PurchaseOrder | null>(null);
   const [poPaymentModal, setPoPaymentModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
   const [poPaymentAmount, setPoPaymentAmount] = useState<string>('0');
   const [poPaymentMethod, setPoPaymentMethod] = useState<'cash' | 'transfer'>('transfer');
@@ -1800,7 +1790,6 @@ export default function FinanceManagement({
   const [poExpandedSuppliers, setPoExpandedSuppliers] = useState<Set<string>>(new Set());
   const [poPage, setPoPage] = useState(1);
   const [poPageSize, setPoPageSize] = useState(10);
-  const [poRecordingId, setPoRecordingId] = useState<string | null>(null);
   const [poEditId, setPoEditId] = useState<string | null>(null);
   const [poEditItems, setPoEditItems] = useState<any[]>([]);
   const [poNotesEditing, setPoNotesEditing] = useState(false);
@@ -4164,97 +4153,6 @@ export default function FinanceManagement({
     setShowPayForm(true);
   };
 
-  const handleSaveLiability = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!liabName) {
-      addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập Tên Đơn vị', type: 'warning' });
-      return;
-    }
-    // Xây dựng object công nợ (gắn PO đang ghi nhận nếu có)
-    const builtLiab: any = (() => {
-      if (editingLiabId) {
-        const item = customLiabilities.find(i => i.id === editingLiabId);
-        return {
-          ...(item || {}),
-          id: editingLiabId,
-          name: liabName,
-          category: liabCategory,
-          value: liabValue,
-          paid: liabPaid,
-          date: liabDate,
-          notes: liabNotes,
-          recordedPurchaseOrderIds: poRecordingId
-            ? Array.from(new Set([...(item?.recordedPurchaseOrderIds || []), poRecordingId]))
-            : (item?.recordedPurchaseOrderIds || undefined),
-        };
-      }
-      return {
-        id: crypto.randomUUID(),
-        name: liabName,
-        category: liabCategory,
-        value: liabValue,
-        paid: liabPaid,
-        date: liabDate,
-        notes: liabNotes,
-        recordedPurchaseOrderIds: poRecordingId ? [poRecordingId] : undefined,
-      };
-    })();
-    if (editingLiabId) {
-      setCustomLiabilities(prev => prev.map(item => item.id === editingLiabId ? builtLiab : item));
-      addToast({ title: 'ℹ️ Thông báo', message: '💾 Đã cập nhật công nợ phải trả.', type: 'warning' });
-    } else {
-      setCustomLiabilities(prev => [...prev, builtLiab]);
-      addToast({ title: 'ℹ️ Thông báo', message: '🎉 Đã thêm công nợ phải trả mới.', type: 'warning' });
-    }
-    const recPoId = poRecordingId;
-    try {
-      // 1) Lưu công nợ lên Supabase — verify trước
-      await dbService.accountingLiabilities.save(builtLiab);
-      // 2) Nếu đang ghi nhận từ 1 đơn mua → đổi trạng thái đơn SAU KHI lưu thành công
-      if (recPoId) {
-        const po = purchaseOrders.find(o => o.id === recPoId);
-        if (po) {
-          const updatedPo = { ...po, status: 'completed' as const };
-          try {
-            await dbService.purchaseOrders.save(updatedPo);
-            setPurchaseOrders(prev => prev.map(o => o.id === recPoId ? updatedPo : o));
-          } catch (err) {
-            console.error('[DB] Cập nhật trạng thái đơn thất bại:', err);
-            addToast({ title: '⚠️ Lưu ý', message: `Đã ghi nhận công nợ nhưng chưa cập nhật được trạng thái đơn ${recPoId}.`, type: 'warning' });
-          }
-        }
-        addToast({ title: '✅ Đã ghi nhận', message: `Đơn ${recPoId} đã được ghi nhận vào Công nợ Trả.`, type: 'success' });
-      }
-    } catch (err) {
-      console.error('[DB] Lưu công nợ thất bại:', err);
-      addToast({ title: '❌ Lỗi', message: 'Không thể lưu công nợ lên server. Vui lòng thử lại.', type: 'error' });
-    } finally {
-      setShowLiabModal(false);
-      setEditingLiabId(null);
-      setLiabName('');
-      setLiabValue(0);
-      setLiabPaid(0);
-      setLiabNotes('');
-      setLiabDate(new Date().toISOString().slice(0, 10));
-      setPoRecordingId(null);
-    }
-  };
-
-  const handleEditLiability = (item: any) => {
-    setEditingLiabId(item.id);
-    setLiabName(item.name);
-    setLiabCategory(item.category);
-    setLiabValue(item.value);
-    setLiabPaid(item.paid);
-    setLiabDate(item.date || new Date().toISOString().slice(0, 10));
-    setLiabNotes(item.notes || '');
-    setShowLiabModal(true);
-  };
-
-  const handleDeleteLiability = (item: any) => {
-    setLiabToDelete(item);
-  };
-
   // Ghi nhận công nợ nhà cung cấp từ 1 đơn hàng mua vào Công Nợ Trả (thủ công).
   // Ghi nhận công nợ nhà cung cấp từ 1 đơn hàng mua vào Công Nợ Trả.
   // Nếu NCC đã có công nợ → tự động merge PO (không mở modal).
@@ -4305,34 +4203,94 @@ export default function FinanceManagement({
       });
       return true;
     }
-    // NCC chưa có → mở modal để tạo mới (việc cập nhật trạng thái đơn thực hiện ở
-    // handleSaveLiability SAU KHI liability được lưu thành công lên Supabase)
-    setPoRecordingId(order.id);
-    setEditingLiabId(null);
-    setLiabName(order.supplierName);
-    setLiabCategory('Nhà Cung Cấp');
-    setLiabValue(0);  // Phát Sinh NCC tự tính từ PO
-    setLiabPaid(order.thanhToanThucTe || 0);
-    setLiabDate(new Date().toISOString().slice(0, 10));
-    setLiabNotes(`Ghi nhận từ đơn mua ${order.id} - ${order.supplierName}`);
-    setShowLiabModal(true);
+    // NCC chưa có công nợ nào → tạo mới TRỰC TIẾP (không mở modal thủ công nhập
+    // liệu nữa — mọi thông tin cần thiết (tên NCC, số tiền, dự án) đã có sẵn từ
+    // đơn hàng và người dùng vừa xác nhận ở hộp thoại trước đó rồi, bắt nhập lại
+    // là thừa). Công Nợ Trả hiện chỉ liên kết từ Hợp Đồng Thầu Phụ và Đơn Hàng,
+    // không còn đường nhập thủ công nữa.
+    const newLiab = {
+      id: crypto.randomUUID(),
+      name: order.supplierName,
+      category: 'Nhà Cung Cấp' as const,
+      value: order.congNo || order.tongTien || 0,
+      paid: order.thanhToanThucTe || 0,
+      date: new Date().toISOString().slice(0, 10),
+      notes: `Ghi nhận từ đơn mua ${order.id} - ${order.supplierName}`,
+      recordedPurchaseOrderIds: [order.id],
+    };
+    try {
+      await dbService.accountingLiabilities.save(newLiab);
+    } catch (err) {
+      console.error('[DB] Lưu công nợ mới thất bại:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể lưu công nợ lên server. Vui lòng thử lại.', type: 'error' });
+      return false;
+    }
+    setCustomLiabilities(prev => [...prev, newLiab]);
+    const updatedPo = { ...order, status: 'completed' as const };
+    try {
+      await dbService.purchaseOrders.save(updatedPo);
+      setPurchaseOrders(prev => prev.map(o => o.id === order.id ? updatedPo : o));
+    } catch (err) {
+      console.error('[DB] Cập nhật trạng thái đơn thất bại:', err);
+      addToast({ title: '⚠️ Lưu ý', message: `Đã ghi nhận công nợ nhưng chưa cập nhật được trạng thái đơn ${order.id}.`, type: 'warning' });
+      return true;
+    }
+    addToast({
+      title: '✅ Đã ghi nhận',
+      message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả của ${order.supplierName}.`,
+      type: 'success'
+    });
     return true;
   };
 
-  const confirmDeleteLiability = async () => {
-    if (liabToDelete) {
+  // Hoàn tác ghi nhận công nợ của 1 đơn hàng — dùng khi lỡ ghi nhận nhầm (vd
+  // nhập sai thông tin đơn hàng). Gỡ đơn khỏi công nợ NCC liên quan và đưa đơn
+  // về trạng thái "Chưa ghi nhận" (status 'confirmed') để có thể sửa rồi ghi
+  // nhận lại. Ngược lại chính xác với handleRecordSupplierDebt ở trên.
+  const handleUndoSupplierDebt = async (order: PurchaseOrder): Promise<boolean> => {
+    const liab = customLiabilities.find(l =>
+      l.category === 'Nhà Cung Cấp' && Array.isArray(l.recordedPurchaseOrderIds) && l.recordedPurchaseOrderIds.includes(order.id)
+    );
+    if (liab) {
+      const remainingIds = liab.recordedPurchaseOrderIds!.filter((id: string) => id !== order.id);
+      // Công nợ được TẠO MỚI THUẦN TUÝ cho đúng 1 đơn hàng này (ghi chú đúng định
+      // dạng tự sinh ở nhánh "NCC chưa có" của handleRecordSupplierDebt) và giờ
+      // không còn đơn nào gắn vào → xóa hẳn để hoàn tác trọn vẹn, không để lại
+      // công nợ 0đ mồ côi. Công nợ có nguồn gốc khác (công nợ đầu kỳ / đang gắn
+      // nhiều đơn khác) chỉ gỡ liên kết đơn này, GIỮ NGUYÊN bản ghi.
+      const isSoleAutoCreated = remainingIds.length === 0 && liab.notes === `Ghi nhận từ đơn mua ${order.id} - ${order.supplierName}`;
       try {
-        // Xóa trên Supabase
-        await dbService.accountingLiabilities.delete(liabToDelete.id);
-        // Cập nhật local state
-        setCustomLiabilities(prev => prev.filter(x => x.id !== liabToDelete.id));
-        addToast({ title: '🗑️ Đã xóa', message: `🗑️ Đã xóa công nợ phải trả của đơn vị "${liabToDelete.name}".`, type: 'info' });
+        if (isSoleAutoCreated) {
+          await dbService.accountingLiabilities.delete(liab.id);
+        } else {
+          await dbService.accountingLiabilities.save({ ...liab, recordedPurchaseOrderIds: remainingIds });
+        }
       } catch (err) {
-        console.error('Lỗi xóa công nợ phải trả:', err);
-        addToast({ title: '❌ Lỗi', message: `Không thể xóa: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
+        console.error('[DB] Hoàn tác công nợ thất bại:', err);
+        addToast({ title: '❌ Lỗi', message: 'Không thể hoàn tác công nợ. Vui lòng thử lại.', type: 'error' });
+        return false;
       }
-      setLiabToDelete(null);
+      if (isSoleAutoCreated) {
+        setCustomLiabilities(prev => prev.filter(l => l.id !== liab.id));
+      } else {
+        setCustomLiabilities(prev => prev.map(l => l.id === liab.id ? { ...l, recordedPurchaseOrderIds: remainingIds } : l));
+      }
     }
+    const updatedPo = { ...order, status: 'confirmed' as const };
+    try {
+      await dbService.purchaseOrders.save(updatedPo);
+      setPurchaseOrders(prev => prev.map(o => o.id === order.id ? updatedPo : o));
+    } catch (err) {
+      console.error('[DB] Cập nhật trạng thái đơn thất bại:', err);
+      addToast({ title: '⚠️ Lưu ý', message: `Đã gỡ công nợ nhưng chưa cập nhật được trạng thái đơn ${order.id}.`, type: 'warning' });
+      return true;
+    }
+    addToast({
+      title: '✅ Đã hoàn tác',
+      message: `Đơn ${order.id} đã được đưa về "Chưa ghi nhận" và gỡ khỏi Công nợ Trả của ${order.supplierName}.`,
+      type: 'success'
+    });
+    return true;
   };
 
   // ── Receivable CRUD handlers (Công nợ phải thu) ────────────────────────────
@@ -5013,7 +4971,12 @@ export default function FinanceManagement({
                                       <div className="flex items-center justify-center gap-1.5">
                                         <button type="button" onClick={() => setPoDetailModal({ open: true, order: o })} className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer" title="Xem chi tiết"><Eye className="w-3.5 h-3.5" /></button>
                                         {recorded ? (
-                                          <span className="text-[9px] font-bold text-amber-600 border border-amber-500 bg-white px-2 py-1 rounded-lg">Đã ghi nhận</span>
+                                          <>
+                                            <span className="text-[9px] font-bold text-amber-600 border border-amber-500 bg-white px-2 py-1 rounded-lg">Đã ghi nhận</span>
+                                            <button type="button" onClick={() => setPoUndoConfirm(o)} className="text-slate-400 hover:text-rose-400 p-1 border border-slate-700 hover:border-rose-500/50 rounded cursor-pointer transition-all" title="Hoàn tác ghi nhận công nợ (dùng khi nhập sai thông tin đơn hàng)">
+                                              <RefreshCcw className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
                                         ) : (
                                           <button type="button" onClick={() => setPoRecordConfirm(o)} className="bg-white border border-orange-500 text-orange-500 hover:bg-orange-50 p-1.5 rounded-lg flex items-center justify-center cursor-pointer transition-all" title="Ghi nhận công nợ nhà cung cấp">
                                             <Plus className="w-3.5 h-3.5" />
@@ -8324,206 +8287,6 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
-                {/* MODAL THÊM / SỬA CÔNG NỢ */}
-                {showLiabModal && (
-                  <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
-                      <button
-                        onClick={() => setShowLiabModal(false)}
-                        className="absolute right-4 top-4 text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center"
-                      >
-                        ✕
-                      </button>
-                      <h3 className="font-extrabold text-sm uppercase tracking-wide border-b border-slate-850 pb-3 flex items-center gap-2">
-                        <Database className="w-4 h-4 text-blue-500" />
-                        {editingLiabId ? "Chỉnh Sửa Công Nợ Phải Trả" : "Thêm Công Nợ Phải Trả Mới"}
-                      </h3>
-
-                      <form onSubmit={handleSaveLiability} className="space-y-4 pt-4 text-xs">
-                        <div className="space-y-1">
-                          <label className="block text-slate-400 font-bold">Tên Đơn Vị (Thầu phụ / Nhà cung cấp / Khác):</label>
-                          <input
-                            type="text"
-                            required
-                            value={liabName}
-                            onChange={(e) => setLiabName(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 outline-none focus:border-blue-500"
-                            placeholder="Nhập tên đối tác hoặc đơn vị thợ..."
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block text-slate-400 font-bold">Ngày phát sinh:</label>
-                          <input
-                            type="date"
-                            value={liabDate}
-                            onChange={(e) => setLiabDate(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 outline-none focus:border-blue-500 font-mono"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <label className="block text-slate-400 font-bold">Phân Loại:</label>
-                            <select
-                              value={liabCategory}
-                              onChange={(e: any) => setLiabCategory(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 outline-none focus:border-blue-500"
-                            >
-                              <option value="Thầu Phụ">Thầu Phụ</option>
-                              <option value="Nhà Cung Cấp">Nhà Cung Cấp</option>
-                              <option value="Khác">Khác</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="block text-slate-400 font-bold">Phát Sinh (VNĐ):</label>
-                            <input
-                              type="number"
-                              required
-                              value={liabValue || ''}
-                              onChange={(e) => setLiabValue(Number(e.target.value))}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 outline-none focus:border-blue-500 font-mono font-bold"
-                              placeholder="0"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block text-slate-400 font-bold">Số Tiền Đã Trả Ban Đầu (VNĐ):</label>
-                          <input
-                            type="number"
-                            value={liabPaid || ''}
-                            onChange={(e) => setLiabPaid(Number(e.target.value))}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 outline-none focus:border-blue-500 font-mono"
-                            placeholder="0"
-                          />
-                          <p className="text-[9px] text-slate-500 italic mt-0.5">
-                            (Hệ thống sẽ tự động cộng thêm lũy kế từ các phiếu chi đã duyệt cho đơn vị này)
-                          </p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block text-slate-400 font-bold">Ghi chú:</label>
-                          <textarea
-                            value={liabNotes}
-                            onChange={(e) => setLiabNotes(e.target.value)}
-                            rows={3}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 outline-none focus:border-blue-500"
-                            placeholder="Chi tiết công nợ hoặc vật tư tương ứng..."
-                          />
-                        </div>
-
-                        <div className="flex justify-end gap-2 pt-2 border-t border-slate-850">
-                          <button
-                            type="button"
-                            onClick={() => setShowLiabModal(false)}
-                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl cursor-pointer"
-                          >
-                            Hủy
-                          </button>
-                          <button
-                            type="submit"
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl cursor-pointer"
-                          >
-                            {editingLiabId ? "Cập Nhật" : "Lưu Công Nợ"}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  </div>
-                )}
-
-                {/* MODAL CẢNH BÁO XÓA CÔNG NỢ */}
-                {liabToDelete && (
-                  <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-red-900/40 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
-                      <button
-                        onClick={() => setLiabToDelete(null)}
-                        className="absolute right-4 top-4 text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center"
-                      >
-                        ✕
-                      </button>
-                      
-                      <div className="flex items-center gap-3 border-b border-slate-850 pb-3 text-red-400">
-                        <div className="w-9 h-9 bg-red-500/10 border border-red-500/20 text-red-500 rounded-full flex items-center justify-center">
-                          <Trash2 className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h3 className="font-extrabold text-sm uppercase tracking-wide">
-                            Cảnh Báo Xóa Công Nợ
-                          </h3>
-                          <p className="text-[9px] text-slate-400 uppercase tracking-widest font-mono mt-0.5">Xác nhận xóa vĩnh viễn</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 pt-4 text-xs">
-                        <div className="bg-red-950/20 border border-red-900/30 rounded-2xl p-4 text-red-200/90 leading-relaxed font-sans font-medium">
-                          ⚠️ <strong className="text-red-400 uppercase text-[10.5px]">CẢNH BÁO NGUY HIỂM CAO ĐỘ:</strong>
-                          <p className="mt-1">
-                            Bạn đang yêu cầu xóa vĩnh viễn ghi nhận công nợ phải trả của đơn vị dưới đây. Hành động này <strong className="text-white underline">không thể hoàn tác</strong> và sẽ xóa sạch mọi thông số liên quan trong danh mục công nợ thủ công!
-                          </p>
-                        </div>
-
-                        <div className="bg-slate-950/80 border border-slate-850 rounded-2xl p-4 space-y-2 font-sans">
-                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
-                            <span className="text-slate-450 font-semibold">Tên đơn vị:</span>
-                            <span className="font-extrabold text-slate-100 max-w-[200px] truncate text-right" title={liabToDelete.name}>
-                              {liabToDelete.name}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
-                            <span className="text-slate-450 font-semibold">Phân loại:</span>
-                            <span className="font-bold text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-900/30 text-[9.5px]">
-                              {liabToDelete.category}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
-                            <span className="text-slate-450 font-semibold">Tổng giá trị nợ:</span>
-                            <span className="font-bold text-slate-100 font-mono">
-                              {liabToDelete.value?.toLocaleString('vi-VN')} đ
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
-                            <span className="text-slate-450 font-semibold">Đã thanh toán:</span>
-                            <span className="font-bold text-emerald-400 font-mono">
-                              {liabToDelete.paid?.toLocaleString('vi-VN')} đ
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center font-bold">
-                            <span className="text-slate-450">Dư nợ còn lại:</span>
-                            <span className="font-extrabold text-rose-450 font-mono text-[13px]">
-                              {liabToDelete.remaining?.toLocaleString('vi-VN')} đ
-                            </span>
-                          </div>
-                        </div>
-
-                        <p className="text-[10px] text-slate-500 italic text-center">
-                          Vui lòng kiểm tra kỹ lưỡng trước khi bấm nút "Thực Sự Xóa".
-                        </p>
-
-                        <div className="flex justify-end gap-2 pt-3 border-t border-slate-850">
-                          <button
-                            type="button"
-                            onClick={() => setLiabToDelete(null)}
-                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl cursor-pointer transition-colors"
-                          >
-                            Hủy bỏ
-                          </button>
-                          <button
-                            type="button"
-                            onClick={confirmDeleteLiability}
-                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-xl cursor-pointer transition-all active:scale-95 shadow-md flex items-center gap-1.5"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            Thực Sự Xóa
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
               </div>
             )}
 
@@ -9728,9 +9491,19 @@ export default function FinanceManagement({
                   )
                 )}
                 {recorded && (
-                  <span className="text-[10px] font-semibold text-amber-300 flex items-center gap-1">
-                    <Check className="w-3.5 h-3.5" /> Đã ghi nhận Công nợ Trả
-                  </span>
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="text-[10px] font-semibold text-amber-300 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Đã ghi nhận Công nợ Trả
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setPoDetailModal({ open: false, order: null }); setPoUndoConfirm(o); }}
+                      className="ml-auto bg-slate-700 hover:bg-rose-600 text-white text-[11px] font-bold px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                      title="Hoàn tác ghi nhận công nợ (dùng khi nhập sai thông tin đơn hàng)"
+                    >
+                      <RefreshCcw className="w-3.5 h-3.5" /> Hoàn tác
+                    </button>
+                  </div>
                 )}
                 <button
                   type="button"
@@ -9780,7 +9553,7 @@ export default function FinanceManagement({
                   </div>
                   <div className="space-y-1">
                     <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền ghi nhận</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-orange-300">{amount.toLocaleString('vi-VN')} đ</div>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-orange-600">{amount.toLocaleString('vi-VN')} đ</div>
                   </div>
                 </div>
                 <div className="space-y-1">
@@ -9789,7 +9562,7 @@ export default function FinanceManagement({
                 </div>
                 <div className="space-y-1">
                   <label className="block text-slate-400 font-bold text-[10px] uppercase">Dự án</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-sky-300">{ro.projectName || '— Chưa gắn dự án —'}</div>
+                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-sky-600">{ro.projectName || '— Chưa gắn dự án —'}</div>
                 </div>
                 <div className="bg-amber-950/30 border border-amber-800/60 rounded-xl p-2.5 text-amber-300 text-[10px] font-semibold">
                   ⚠️ Hãy kiểm tra lại số tiền trước khi ghi nhận vào Công nợ Trả.
@@ -9804,7 +9577,7 @@ export default function FinanceManagement({
                 <button
                   type="button"
                   onClick={() => { setPoRecordConfirm(null); }}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
                 >
                   Hủy
                 </button>
@@ -9814,6 +9587,72 @@ export default function FinanceManagement({
                   className={`flex-1 text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all ${active ? 'bg-orange-500 hover:bg-orange-400 text-white' : 'bg-amber-500 hover:bg-amber-400 text-black'}`}
                 >
                   <Check className="w-3.5 h-3.5" /> {active ? 'Xác nhận ghi nhận' : 'Vẫn ghi nhận'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: XÁC NHẬN HOÀN TÁC GHI NHẬN CÔNG NỢ (dùng khi nhập sai thông tin đơn hàng) */}
+      {poUndoConfirm && (() => {
+        const ro = poUndoConfirm;
+        const amount = ro.congNo || ro.tongTien || 0;
+        return (
+          <div
+            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setPoUndoConfirm(null)}
+          >
+            <div
+              className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-rose-400" />
+                  <span className="font-black text-sm text-white uppercase">Xác nhận hoàn tác ghi nhận công nợ</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPoUndoConfirm(null)}
+                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Mã đơn hàng</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{ro.id}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền đã ghi nhận</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-600">{amount.toLocaleString('vi-VN')} đ</div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
+                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{ro.supplierName || '—'}</div>
+                </div>
+                <div className="bg-rose-950/30 border border-rose-900/50 rounded-xl p-2.5 text-rose-300 text-[10px] font-semibold">
+                  ⚠️ Đơn hàng sẽ gỡ khỏi Công nợ Trả của {ro.supplierName || 'NCC'} và quay về trạng thái "Chưa ghi nhận". Dùng khi lỡ ghi nhận nhầm (vd nhập sai thông tin đơn hàng).
+                </div>
+              </div>
+              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setPoUndoConfirm(null); }}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => { setPoUndoConfirm(null); await handleUndoSupplierDebt(ro); }}
+                  className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                >
+                  <RefreshCcw className="w-3.5 h-3.5" /> Xác nhận hoàn tác
                 </button>
               </div>
             </div>

@@ -2014,9 +2014,10 @@ export default function DashboardOverview({
       id: proposalId,
       subcontractorId: empId,
       subcontractorName: currentUser.name,
-      projectId: '', // Ứng lương nhân sự không gán dự án cụ thể
+      // projectId/taskId: KHÔNG gán '' — 2 cột này có khóa ngoại tới projects(id)/tasks(id),
+      // '' không khớp bản ghi nào nên bị Postgres từ chối (foreign key violation).
+      // Phải để undefined (NULL) khi ứng lương không gắn dự án/công việc cụ thể.
       projectName: 'Ứng Lương Nhân Sự',
-      taskId: '',
       taskName: `Ứng lương kỳ ${advancePeriod}`,
       amount: amount,
       reason: `Ứng lương kỳ ${advancePeriod}. Lý do: ${advanceReasonText || 'Chi tiêu cá nhân'}`,
