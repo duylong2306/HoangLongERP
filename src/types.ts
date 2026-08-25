@@ -886,7 +886,7 @@ export interface SubcontractorAdvanceProposal {
   status: 'pending_approval' | 'pending_payment' | 'awaiting_voucher_update' | 'rejected' | 'completed'; // Chờ Duyệt, Chờ Lập Phiếu, Cập Nhật Chứng Từ, Từ Chối, Hoàn Thành
   date: string; // YYYY-MM-DD
   proposalDate?: string; // Ngày đề xuất
-  type?: 'subcontractor_advance' | 'project_expense_proposal' | 'salary_advance' | 'supplier_payment_proposal';
+  type?: 'subcontractor_advance' | 'project_expense_proposal' | 'salary_advance' | 'supplier_payment_proposal' | 'cash_fund_deposit';
   creatorName?: string;
   approverName?: string;
   settlerId?: string;
