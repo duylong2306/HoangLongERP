@@ -2414,6 +2414,22 @@ export const dbService = {
     }
   },
 
+  // 14h. CASH FUND CONFIG (Số dư đầu kỳ Quỹ tiền mặt — bản ghi đơn/singleton)
+  cashFundConfig: {
+    async get(): Promise<any | null> {
+      const rows = await querySupabase<any>('cash_fund_config', []);
+      return rows[0] || null;
+    },
+    async save(cfg: any): Promise<void> {
+      await saveSupabase('cash_fund_config', cfg);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-cash-fund-config-updated', { detail: cfg }));
+      } catch (e) {
+        console.warn('Failed to dispatch cash fund config event:', e);
+      }
+    }
+  },
+
   // 15. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
   attendance: {
     async list(): Promise<any[]> {

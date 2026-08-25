@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
-import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task } from '../types';
+import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, getConfiguredSettler } from '../context';
 import SearchableSelect from './SearchableSelect';
 import { useSettings } from '../context/SettingsContext';
@@ -87,6 +87,7 @@ export const PAYMENT_CAT_LABEL: Record<string, string> = {
   salary: 'Lương',
   supplier_payment: 'Nhà cung cấp',
   salary_advance: 'Ứng lương',
+  cash_fund: 'Nạp Quỹ tiền mặt',
 };
 export const PAYMENT_CAT_BADGE: Record<string, string> = {
   material: 'bg-white text-sky-600 border-sky-500',
@@ -100,6 +101,7 @@ export const PAYMENT_CAT_BADGE: Record<string, string> = {
   salary: 'bg-white text-rose-600 border-rose-500',
   supplier_payment: 'bg-white text-purple-600 border-purple-500',
   salary_advance: 'bg-white text-pink-600 border-pink-500',
+  cash_fund: 'bg-white text-teal-600 border-teal-500',
 };
 
 // Nhãn "Loại Đề Xuất" theo type của đề xuất chi.
@@ -1110,6 +1112,58 @@ export default function FinanceManagement({
 
   // Custom persistent states for other accounts payable (Nhà Cung Cấp, Khác)
   const [customLiabilities, setCustomLiabilities] = useState<Liability[]>([]);
+
+  // ─── Quỹ Tiền Mặt: số dư đầu kỳ (bản ghi đơn/singleton) ───────────────────
+  const [cashFundConfig, setCashFundConfig] = useState<CashFundConfig | null>(null);
+  useEffect(() => {
+    let active = true;
+    const fetchCashFundConfig = async () => {
+      try {
+        const cfg = await dbService.cashFundConfig.get();
+        if (active) setCashFundConfig(cfg);
+      } catch (err) {
+        console.error('Lỗi khi tải cấu hình Quỹ tiền mặt:', err);
+      }
+    };
+    fetchCashFundConfig();
+    const handleRealtime = () => fetchCashFundConfig();
+    window.addEventListener('hl-cash-fund-config-updated', handleRealtime);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-cash-fund-config-updated', handleRealtime);
+    };
+  }, []);
+
+  // Số dư Quỹ tiền mặt = số dư đầu kỳ + tổng phiếu chi NẠP quỹ (category='cash_fund')
+  // đã duyệt − tổng phiếu chi RÚT từ quỹ (paymentMethod='cash_fund', mọi hạng mục) đã duyệt.
+  // Không lưu số dư trực tiếp — luôn tính lại từ Payment để tránh lệch dữ liệu.
+  const cashFundDeposited = useMemo(() =>
+    payments.filter(p => p.category === 'cash_fund' && p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0),
+    [payments]);
+  const cashFundSpent = useMemo(() =>
+    payments.filter(p => p.paymentMethod === 'cash_fund' && p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0),
+    [payments]);
+  const cashFundBalance = (cashFundConfig?.openingBalance || 0) + cashFundDeposited - cashFundSpent;
+  const [editingOpeningBalance, setEditingOpeningBalance] = useState(false);
+  const [openingBalanceInput, setOpeningBalanceInput] = useState('0');
+  const canEditCashFundOpening = !!currentUser && (isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_accounting'));
+  const handleSaveCashFundOpening = async () => {
+    const cfg: CashFundConfig = {
+      id: cashFundConfig?.id || 'cash_fund_main',
+      openingBalance: Number(openingBalanceInput) || 0,
+      openingDate: cashFundConfig?.openingDate || new Date().toISOString().slice(0, 10),
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name || '',
+    };
+    try {
+      await dbService.cashFundConfig.save(cfg);
+      setCashFundConfig(cfg);
+      setEditingOpeningBalance(false);
+      addToast({ title: '✅ Đã lưu', message: 'Đã cập nhật số dư đầu kỳ Quỹ tiền mặt.', type: 'success' });
+    } catch (err) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể lưu số dư đầu kỳ. Vui lòng thử lại.', type: 'error' });
+    }
+  };
 
   /**
    * Chữ ký nội dung 1 dòng để phát hiện THAY ĐỔI THẬT.
@@ -3031,9 +3085,9 @@ export default function FinanceManagement({
   const [payRecipientKind, setPayRecipientKind] = useState<'supplier' | 'employee' | 'subcontractor' | ''>('');
   const [payProj, setPayProj] = useState(projects[0]?.id || '');
   const [payPurchaseOrder, setPayPurchaseOrder] = useState('');
-  const [payCategory, setPayCategory] = useState<'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance'>('supplier_payment');
+  const [payCategory, setPayCategory] = useState<'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance' | 'cash_fund'>('supplier_payment');
   const [payAmount, setPayAmount] = useState<number | string>('');
-  const [payMethod, setPayMethod] = useState<'cash' | 'transfer'>('cash');
+  const [payMethod, setPayMethod] = useState<'cash' | 'transfer' | 'cash_fund'>('cash');
   const [payNotes, setPayNotes] = useState('');
 
   const [recipientSearch, setRecipientSearch] = useState('');
@@ -3385,10 +3439,24 @@ export default function FinanceManagement({
     let resolvedSupplierId: string | undefined;
     let resolvedSubcontractorId: string | undefined;
 
+    // Loại đề xuất — dùng chung để chuẩn hóa FK người nhận, category, dự án bên dưới
+    // (KHỚP với logic phân loại trong handleCreateVoucherFromProposal).
+    const proposalIsSalaryAdvance = activeProposalForPayment
+      ? (activeProposalForPayment.type === 'salary_advance' || !!activeProposalForPayment.taskName?.startsWith('Ứng lương'))
+      : false;
+    const proposalIsProjectExpense = activeProposalForPayment?.type === 'project_expense_proposal';
+    const proposalIsSupplierPayment = activeProposalForPayment?.type === 'supplier_payment_proposal';
+
     if (activeProposalForPayment) {
-      resolvedSubcontractorId = activeProposalForPayment.subcontractorId;
-      if (activeProposalForPayment.taskName?.startsWith('Ứng lương') && activeProposalForPayment.subcontractorId) {
+      // `subcontractorId` trên SubcontractorAdvanceProposal là trường ID người nhận
+      // DÙNG CHUNG cho mọi loại đề xuất (đặt tên theo lịch sử) — thực chất có thể là
+      // nhân viên (ứng lương/chi phí công trình), nhà cung cấp, hoặc thầu phụ tùy `type`.
+      if (proposalIsSalaryAdvance || proposalIsProjectExpense) {
         resolvedEmployeeId = activeProposalForPayment.subcontractorId;
+      } else if (proposalIsSupplierPayment) {
+        resolvedSupplierId = activeProposalForPayment.subcontractorId;
+      } else {
+        resolvedSubcontractorId = activeProposalForPayment.subcontractorId;
       }
     } else {
       if (payRecipientKind === 'employee' && payRecipientId) resolvedEmployeeId = payRecipientId;
@@ -3412,14 +3480,22 @@ export default function FinanceManagement({
       // Khi lập phiếu chi tất toán Đề Xuất Tạm Ứng thầu phụ, gắn nhận diện thầu phụ
       // để thanh toán tự động khớp & cập nhật Công nợ Trả (không phụ thuộc tên gõ tay)
       recipient: activeProposalForPayment?.subcontractorName || payRecipient,
-      projectId: activeProposalForPayment?.projectId || ((payProj === 'none' || !payProj) ? undefined : payProj),
+      // Dự án gán chi: khi lập phiếu từ đề xuất, CHỈ lấy đúng projectId thật của đề
+      // xuất — KHÔNG fallback sang payProj (trước đây fallback này có thể lấy nhầm
+      // dự án đầu tiên trong danh sách khi đề xuất Chi Nhà Cung Cấp/Thanh Toán Công
+      // Nợ Thầu Phụ/Ứng Lương vốn không gắn dự án). Thủ công (không qua đề xuất) vẫn
+      // lấy từ payProj như cũ.
+      projectId: activeProposalForPayment
+        ? (activeProposalForPayment.projectId || undefined)
+        : ((payProj === 'none' || !payProj) ? undefined : payProj),
       purchaseOrderId: (!activeProposalForPayment && payPurchaseOrder) ? payPurchaseOrder : undefined,
-      // Xác định category theo ĐÚNG loại đề xuất (không hardcode 'subcontractor_advance'
-      // cho mọi đề xuất — trước đây làm Đề Xuất Chi Phí Công Trình / Ứng Lương bị gắn
-      // nhầm vào category Thầu Phụ, hiển thị tên người quyết toán thay vì tên thầu phụ).
+      // Xác định category theo ĐÚNG loại đề xuất (`type`), không hardcode
+      // 'subcontractor_advance' cho mọi đề xuất — trước đây làm Đề Xuất Chi Phí Công
+      // Trình / Ứng Lương / Chi Nhà Cung Cấp đều bị gắn nhầm vào category Thầu Phụ.
       category: activeProposalForPayment
-        ? (activeProposalForPayment.taskName?.startsWith('Ứng lương') ? 'salary_advance'
-          : activeProposalForPayment.type === 'project_expense_proposal' ? 'site_expense'
+        ? (proposalIsSalaryAdvance ? 'salary_advance'
+          : proposalIsProjectExpense ? 'site_expense'
+          : proposalIsSupplierPayment ? 'supplier_payment'
           : 'subcontractor_advance')
         : payCategory,
       amount: Number(payAmount),
@@ -3538,7 +3614,7 @@ export default function FinanceManagement({
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [editPayDate, setEditPayDate] = useState('');
   const [editPayAmount, setEditPayAmount] = useState<number>(0);
-  const [editPayMethod, setEditPayMethod] = useState<'cash' | 'transfer'>('cash');
+  const [editPayMethod, setEditPayMethod] = useState<'cash' | 'transfer' | 'cash_fund'>('cash');
   const [editPayCategory, setEditPayCategory] = useState<Payment['category']>('supplier_payment');
   const [editPayNotes, setEditPayNotes] = useState('');
 
@@ -3603,28 +3679,64 @@ export default function FinanceManagement({
   };
 
   const handleCreateVoucherFromProposal = (proposal: SubcontractorAdvanceProposal) => {
+    // Chặn lập phiếu chi nếu Đề Xuất Chi Phí Công Trình gộp nhiều công trình khác
+    // nhau (mỗi dòng expenseItems tự gắn 1 công trình riêng — xem handleQuickProposalSubmit).
+    // Payment (phiếu chi) chỉ có 1 trường projectId duy nhất nên không thể "lấy đúng
+    // Dự Án" khi đề xuất trải trên nhiều công trình — theo yêu cầu chủ dự án, phải
+    // tách thành đề xuất riêng theo từng công trình trước khi lập phiếu.
+    if (proposal.type === 'project_expense_proposal') {
+      const distinctProjIds = [...new Set((proposal.expenseItems || []).map(i => i.projectId).filter(Boolean))];
+      if (distinctProjIds.length > 1) {
+        addToast({
+          title: '⚠️ Không thể lập phiếu chi',
+          message: `Đề xuất ${proposal.id} gồm chi phí của ${distinctProjIds.length} công trình khác nhau. Vui lòng tách thành các đề xuất riêng theo từng công trình (mỗi phiếu chi chỉ gán được 1 Dự án) trước khi lập phiếu.`,
+          type: 'error'
+        });
+        return;
+      }
+    }
+
     setActiveProposalForPayment(proposal);
     setPayRecipient(proposal.subcontractorName);
     setPayRecipientId(proposal.subcontractorId || '');
-    setPayRecipientKind(!!proposal.taskName?.startsWith('Ứng lương') ? 'employee' : (proposal.type === 'project_expense_proposal' ? 'employee' : 'subcontractor'));
-    // Find matched project matching the proposal's projectName or fallback to first
-    const matchedProj = projects.find(p => p.name === proposal.projectName) || projects[0];
 
-    // Kiểm tra nếu là đề xuất ứng lương nhân sự (có taskName bắt đầu bằng "Ứng lương" hoặc type = 'salary_advance')
-    const isSalaryAdvance = proposal.taskName?.startsWith('Ứng lương');
+    // Phân loại đề xuất theo đúng trường `type` (KHÔNG chỉ dựa vào tiền tố taskName)
+    // để tránh gán nhầm Chi Nhà Cung Cấp / Thanh Toán Công Nợ Thầu Phụ vào nhánh
+    // "Tạm ứng Thầu Phụ" như bug trước đây.
+    const isSalaryAdvance = proposal.type === 'salary_advance' || !!proposal.taskName?.startsWith('Ứng lương');
+    const isProjectExpense = proposal.type === 'project_expense_proposal';
+    const isSupplierPayment = proposal.type === 'supplier_payment_proposal';
+
+    setPayRecipientKind(
+      isSalaryAdvance || isProjectExpense ? 'employee'
+        : isSupplierPayment ? 'supplier'
+        : 'subcontractor'
+    );
+
+    // Dự án gán chi: CHỈ lấy đúng projectId thật của đề xuất — không tự chọn dự án
+    // thay thế khi đề xuất không có project. Trước đây fallback về "dự án đầu tiên
+    // trong danh sách" (projects[0]) khiến Ứng Lương / Chi Nhà Cung Cấp / Thanh Toán
+    // Công Nợ Thầu Phụ (vốn không gắn dự án khi tạo đề xuất) bị gán NHẦM vào 1 dự án
+    // cố định, làm sai dữ liệu tổng hợp báo cáo theo dự án khi Nộp đề xuất chi.
+    // Dùng 'none' (không phải '') khi để trống: dropdown <select> "Dự án gán chi"
+    // KHÔNG có <option value=""> — chỉ có danh sách dự án thật + <option value="none">
+    // "Ngoài dự án". Set '' sẽ không khớp option nào, khiến trình duyệt tự hiển thị
+    // MẶC ĐỊNH option đầu tiên (1 dự án thật bất kỳ) trông như đã gán nhầm dự án.
+    setPayProj(proposal.projectId || 'none');
 
     if (isSalaryAdvance) {
-      // Ứng lương nhân sự: không gán dự án, category = 'salary_advance'
-      setPayProj(''); // Bỏ trống dự án
       setPayCategory('salary_advance');
       setPayNotes(`[${proposal.id}] Ứng lương cho ${proposal.subcontractorName}. ${proposal.reason || 'Trống'}`);
-    } else if (proposal.type === 'project_expense_proposal') {
-      setPayProj(proposal.projectId || matchedProj?.id || '');
+    } else if (isProjectExpense) {
       setPayCategory('site_expense');
       setPayNotes(`[${proposal.id}] Đề xuất chi phí cho công việc: ${proposal.taskName}. Diễn giải: ${proposal.reason || 'Trống'}`);
+    } else if (isSupplierPayment) {
+      setPayCategory('supplier_payment');
+      setPayNotes(`[${proposal.id}] Thanh toán Nhà Cung Cấp: ${proposal.subcontractorName}. Diễn giải: ${proposal.reason || 'Trống'}`);
     } else {
-      setPayProj(proposal.projectId || matchedProj?.id || '');
-      setPayCategory('labor');
+      // subcontractor_advance: Tạm ứng Thầu Phụ (có dự án, bắt buộc khi tạo đề xuất)
+      // hoặc Thanh Toán Công Nợ Thầu Phụ (không gắn dự án) — payProj đã lấy đúng ở trên.
+      setPayCategory('subcontractor_advance');
       setPayNotes(`[${proposal.id}] Chi tạm ứng thầu phụ cho công việc: ${proposal.taskName}. Diễn giải: ${proposal.reason || 'Trống'}`);
     }
 
@@ -4163,6 +4275,12 @@ export default function FinanceManagement({
   // không đổi trạng thái và báo lỗi.
   // Trả về true nếu đã ghi nhận xong (hoặc đang mở modal để ghi nhận), false nếu lỗi.
   const handleRecordSupplierDebt = async (order: PurchaseOrder): Promise<boolean> => {
+    // Đơn nội bộ xuất từ Kho có sẵn cho công trình: không phải mua hàng từ NCC
+    // thật → không có công nợ để ghi nhận.
+    if ((order as any).fromWarehouse || order.supplierId === WAREHOUSE_SOURCE_ID) {
+      addToast({ title: 'ℹ️ Đơn nội bộ', message: 'Đơn xuất từ Kho có sẵn không phát sinh công nợ NCC.', type: 'info' });
+      return false;
+    }
     if (!order.supplierName) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Đơn hàng không có tên nhà cung cấp để ghi nhận.', type: 'warning' });
       return false;
@@ -4499,6 +4617,17 @@ export default function FinanceManagement({
 
                 <button
                   type="button"
+                  onClick={() => { setActiveSubTab('quy_tien_mat'); setSearchTerm(''); }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'quy_tien_mat' ? 'bg-slate-800/90 text-white border-l-4 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Wallet className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Quỹ Tiền Mặt</span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => { setActiveSubTab('cong_no_phai_thu'); setSearchTerm(''); }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'cong_no_phai_thu' ? 'bg-slate-800/90 text-white border-l-4 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
                 >
@@ -4598,6 +4727,18 @@ export default function FinanceManagement({
                       <li>
                         <button
                           type="button"
+                          onClick={() => { setActiveSubTab('quy_tien_mat'); setSearchTerm(''); }}
+                          aria-current={activeSubTab === 'quy_tien_mat' ? 'page' : undefined}
+                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'quy_tien_mat' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
+                        >
+                          <Wallet className={`w-4 h-4 me-2 ${activeSubTab === 'quy_tien_mat' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
+                          <span>Quỹ Tiền Mặt</span>
+                        </button>
+                      </li>
+
+                      <li>
+                        <button
+                          type="button"
                           onClick={() => { setActiveSubTab('cong_no_phai_thu'); setSearchTerm(''); }}
                           aria-current={activeSubTab === 'cong_no_phai_thu' ? 'page' : undefined}
                           className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'cong_no_phai_thu' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
@@ -4638,6 +4779,7 @@ export default function FinanceManagement({
                   {activeSubTab === 'vat_tu' && '📦 Quản Lý kho'}
                   {activeSubTab === 'nhap_thu' && '💚 Quản lý THU'}
                   {activeSubTab === 'nhap_chi' && '🔴 Quản lý CHI'}
+                  {activeSubTab === 'quy_tien_mat' && '💵 Quỹ Tiền Mặt'}
                   {activeSubTab === 'cong_no_phai_thu' && '📈 Chi tiết nợ Phải Thu '}
                   {activeSubTab === 'cong_no_phai_tra' && '📉 Chi tiết nợ Phải Trả '}
                   {activeSubTab === 'du_lieu_ke_toan' && (
@@ -4941,6 +5083,7 @@ export default function FinanceManagement({
                               {expanded && g.orders.map((o: PurchaseOrder) => {
                                 const st = getPoRowStatus(o);
                                 const recorded = isPoRecorded(o.id);
+                                const isFromWarehouse = (o as any).fromWarehouse || o.supplierId === WAREHOUSE_SOURCE_ID;
                                 return (
                                   <tr key={o.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
                                     <td className="px-3 py-2.5 text-center text-slate-600">—</td>
@@ -4970,7 +5113,9 @@ export default function FinanceManagement({
                                     <td className="px-3 py-2.5">
                                       <div className="flex items-center justify-center gap-1.5">
                                         <button type="button" onClick={() => setPoDetailModal({ open: true, order: o })} className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer" title="Xem chi tiết"><Eye className="w-3.5 h-3.5" /></button>
-                                        {recorded ? (
+                                        {isFromWarehouse ? (
+                                          <span className="text-[9px] font-bold text-teal-600 border border-teal-500 bg-white px-2 py-1 rounded-lg" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">📦 Nội bộ (Kho)</span>
+                                        ) : recorded ? (
                                           <>
                                             <span className="text-[9px] font-bold text-amber-600 border border-amber-500 bg-white px-2 py-1 rounded-lg">Đã ghi nhận</span>
                                             <button type="button" onClick={() => setPoUndoConfirm(o)} className="text-slate-400 hover:text-rose-400 p-1 border border-slate-700 hover:border-rose-500/50 rounded cursor-pointer transition-all" title="Hoàn tác ghi nhận công nợ (dùng khi nhập sai thông tin đơn hàng)">
@@ -4982,7 +5127,7 @@ export default function FinanceManagement({
                                             <Plus className="w-3.5 h-3.5" />
                                           </button>
                                         )}
-                                        {!recorded && (
+                                        {!recorded && !isFromWarehouse && (
                                           <button type="button" onClick={() => handleDeletePoUnrecorded(o.id)} className="text-rose-400 hover:text-rose-300 p-1 border border-rose-500/30 rounded cursor-pointer" title="Xóa đơn hàng"><Trash2 className="w-3.5 h-3.5" /></button>
                                         )}
                                       </div>
@@ -7342,14 +7487,20 @@ export default function FinanceManagement({
                             setPayRecipientId('');
                             setPayRecipientKind('');
                             setRecipientSearch('');
+                            // Nạp quỹ không thể lấy tiền từ chính quỹ đó
+                            if (val === 'cash_fund' && payMethod === 'cash_fund') setPayMethod('cash');
                           }}
-                          className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
+                          // Lập phiếu từ một Đề Xuất đã duyệt: khóa Hạng mục chi phí,
+                          // giữ nguyên đúng mục đích chi đã ghi trong đề xuất gốc.
+                          disabled={!!activeProposalForPayment}
+                          className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <option value="salary_advance">Ứng Lương Nhân Sự</option>
                           <option value="subcontractor_advance">Tạm ứng Thầu Phụ</option>
                           <option value="site_expense">Chi tiêu công trình</option>
                           <option value="salary">Lương Thưởng</option>
                           <option value="supplier_payment">Thanh Toán Nhà Cung Cấp</option>
+                          <option value="cash_fund">Nạp Quỹ Tiền Mặt</option>
                           <option value="other">Chi tiêu khác</option>
                         </select>
                       </div>
@@ -7362,7 +7513,10 @@ export default function FinanceManagement({
                             required
                             value={payAmount}
                             onChange={(e) => setPayAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-mono font-bold"
+                            // Lập phiếu từ một Đề Xuất đã duyệt: khóa số tiền, không cho sửa lệch
+                            // so với số tiền đã duyệt trong đề xuất gốc.
+                            disabled={!!activeProposalForPayment}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-mono font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                           />
                         </div>
                         <div className="relative">
@@ -7389,12 +7543,16 @@ export default function FinanceManagement({
                                 setRecipientSearch(payRecipient);
                                 setShowRecipientDropdown(true);
                               }}
-                              className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white pr-8"
+                              // Lập phiếu từ một Đề Xuất đã duyệt: khóa Người nhận tiền,
+                              // giữ đúng người/đơn vị đã ghi trong đề xuất gốc.
+                              disabled={!!activeProposalForPayment}
+                              className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white pr-8 disabled:opacity-40 disabled:cursor-not-allowed"
                             />
                             <button
                               type="button"
                               onClick={() => setShowRecipientDropdown(!showRecipientDropdown)}
-                              className="absolute right-2 top-1.5 text-slate-400 hover:text-white"
+                              disabled={!!activeProposalForPayment}
+                              className="absolute right-2 top-1.5 text-slate-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               <Search className="w-3.5 h-3.5" />
                             </button>
@@ -7451,7 +7609,11 @@ export default function FinanceManagement({
                           <select
                             value={payProj}
                             onChange={(e) => setPayProj(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer"
+                            // Lập phiếu từ một Đề Xuất đã duyệt: khóa Dự án gán chi, giữ đúng
+                            // dự án của đề xuất gốc (để trống nếu là ứng lương/nhà cung cấp/
+                            // công nợ thầu phụ/quỹ tiền mặt).
+                            disabled={!!activeProposalForPayment}
+                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {projects.map(p => (
                               <option key={p.id} value={p.id}>{p.name}</option>
@@ -7476,12 +7638,17 @@ export default function FinanceManagement({
                           <label className="block text-slate-400 font-semibold mb-1">Hình thức thanh toán:</label>
                           <select
                             value={payMethod}
-                            onChange={(e) => setPayMethod(e.target.value as 'cash' | 'transfer')}
+                            onChange={(e) => setPayMethod(e.target.value as 'cash' | 'transfer' | 'cash_fund')}
                             className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
                           >
                             <option value="cash">Tiền mặt</option>
                             <option value="transfer">Chuyển khoản</option>
+                            {/* Nạp quỹ phải lấy tiền từ Tiền mặt/Chuyển khoản công ty, không thể "rút từ chính quỹ" để nạp quỹ */}
+                            {payCategory !== 'cash_fund' && <option value="cash_fund">Quỹ tiền mặt</option>}
                           </select>
+                          {payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance && (
+                            <p className="text-[9px] text-rose-400 font-bold mt-1">⚠ Vượt số dư Quỹ hiện tại ({cashFundBalance.toLocaleString('vi-VN')}đ).</p>
+                          )}
                         </div>
                       </div>
 
@@ -7522,6 +7689,7 @@ export default function FinanceManagement({
                       <option value="site_expense">Chi tiêu công trình</option>
                       <option value="salary">Lương Thưởng</option>
                       <option value="supplier_payment">Thanh Toán Nhà Cung Cấp</option>
+                      <option value="cash_fund">Nạp Quỹ Tiền Mặt</option>
                       <option value="other">Chi tiêu khác</option>
                     </select>
                   </div>
@@ -7738,6 +7906,117 @@ export default function FinanceManagement({
                 </div>
               </div>
             )}
+
+            {/* TAB: QUỸ TIỀN MẶT */}
+            {activeSubTab === 'quy_tien_mat' && (() => {
+              // Các khoản CHI RA từ Quỹ (mọi hạng mục, paymentMethod='cash_fund'), nhóm theo người tạo đề xuất
+              const cashFundPayments = payments.filter(p => p.paymentMethod === 'cash_fund');
+              const spentGroups = new Map<string, { proposer: string; items: Payment[] }>();
+              cashFundPayments.forEach(p => {
+                const key = p.proposerId || p.proposer || '—';
+                if (!spentGroups.has(key)) spentGroups.set(key, { proposer: p.proposer || '—', items: [] });
+                spentGroups.get(key)!.items.push(p);
+              });
+              const spentGroupList = Array.from(spentGroups.values()).sort((a, b) =>
+                b.items.reduce((s, p) => s + (p.amount || 0), 0) - a.items.reduce((s, p) => s + (p.amount || 0), 0));
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Số dư hiện tại</span>
+                      <span className={`text-xl font-black font-mono ${cashFundBalance < 0 ? 'text-rose-400' : 'text-teal-400'}`}>{cashFundBalance.toLocaleString('vi-VN')}đ</span>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Số dư đầu kỳ</span>
+                      {editingOpeningBalance ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            value={openingBalanceInput}
+                            onChange={(e) => setOpeningBalanceInput(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-sm outline-none focus:border-teal-500"
+                          />
+                          <button type="button" onClick={handleSaveCashFundOpening} className="p-1.5 bg-teal-600 hover:bg-teal-500 rounded text-white cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => setEditingOpeningBalance(false)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xl font-black text-white font-mono">{(cashFundConfig?.openingBalance || 0).toLocaleString('vi-VN')}đ</span>
+                          {canEditCashFundOpening && (
+                            <button type="button" onClick={() => { setOpeningBalanceInput(String(cashFundConfig?.openingBalance || 0)); setEditingOpeningBalance(true); }} className="p-1 text-slate-400 hover:text-teal-400 cursor-pointer" title="Sửa số dư đầu kỳ">
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Tổng đã nạp</span>
+                      <span className="text-xl font-black text-emerald-400 font-mono">+{cashFundDeposited.toLocaleString('vi-VN')}đ</span>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Tổng đã chi từ Quỹ</span>
+                      <span className="text-xl font-black text-rose-400 font-mono">-{cashFundSpent.toLocaleString('vi-VN')}đ</span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPayCategory('cash_fund');
+                        setPayMethod('cash');
+                        setPayRecipient('');
+                        setPayRecipientId('');
+                        setPayRecipientKind('');
+                        setRecipientSearch('');
+                        // Form "Tạo Đề Xuất Chi Mới" (showPayForm) chỉ render trong tab Nhập Chi
+                        setActiveSubTab('nhap_chi');
+                        setShowPayForm(true);
+                      }}
+                      className="flex items-center gap-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl px-3 py-2 text-[11px] font-black shadow-md shadow-teal-500/20 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" /> Đề xuất tiền mặt (Nạp Quỹ)
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block border-b border-slate-850 pb-2">Chi tiêu từ Quỹ theo người tạo đề xuất</span>
+                    {spentGroupList.length === 0 ? (
+                      <p className="text-[11px] text-slate-500 italic bg-slate-900 border border-dashed border-slate-800 rounded-xl p-4 text-center">Chưa có khoản chi nào lấy từ Quỹ tiền mặt.</p>
+                    ) : spentGroupList.map((g, gi) => {
+                      const groupTotal = g.items.reduce((s, p) => s + (p.amount || 0), 0);
+                      return (
+                        <div key={gi} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                          <div className="flex items-center justify-between px-3 py-2 bg-slate-850/60">
+                            <span className="font-bold text-slate-200 text-[11px]">{g.proposer}</span>
+                            <span className="text-rose-400 font-mono font-bold text-[11px]">-{groupTotal.toLocaleString('vi-VN')}đ ({g.items.length} khoản)</span>
+                          </div>
+                          <table className="w-full text-[10.5px]">
+                            <tbody className="divide-y divide-slate-850">
+                              {g.items.map(p => (
+                                <tr key={p.id}>
+                                  <td className="px-3 py-1.5 font-mono text-slate-400">{p.code}</td>
+                                  <td className="px-3 py-1.5 text-slate-300">{PAYMENT_CAT_LABEL[p.category] || p.category}</td>
+                                  <td className="px-3 py-1.5 text-slate-500">{p.date}</td>
+                                  <td className="px-3 py-1.5 text-slate-400 italic truncate max-w-[240px]">{p.notes}</td>
+                                  <td className="px-3 py-1.5 text-right">
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${p.status === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : p.status === 'rejected' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                                      {p.status === 'approved' ? 'Đã duyệt' : p.status === 'rejected' ? 'Từ chối' : 'Chờ duyệt'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-1.5 text-right font-mono font-bold text-rose-400">-{p.amount.toLocaleString('vi-VN')}đ</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* TAB 9: CÔNG NỢ PHẢI THU */}
             {activeSubTab === 'cong_no_phai_thu' && (
@@ -8358,9 +8637,10 @@ export default function FinanceManagement({
                     </div>
                     <div>
                       <label className="block text-slate-400 font-bold mb-1">Hình thức</label>
-                      <select value={editPayMethod} onChange={e => setEditPayMethod(e.target.value as 'cash' | 'transfer')} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none">
+                      <select value={editPayMethod} onChange={e => setEditPayMethod(e.target.value as 'cash' | 'transfer' | 'cash_fund')} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none">
                         <option value="cash">Tiền mặt</option>
                         <option value="transfer">Chuyển khoản</option>
+                        <option value="cash_fund">Quỹ tiền mặt</option>
                       </select>
                     </div>
                     <div>
@@ -9318,6 +9598,7 @@ export default function FinanceManagement({
       {poDetailModal.open && poDetailModal.order && (() => {
         const o = poDetailModal.order;
         const recorded = isPoRecorded(o.id);
+        const isFromWarehouse = (o as any).fromWarehouse || o.supplierId === WAREHOUSE_SOURCE_ID;
         const st = getPoRowStatus(o);
         const editing = poEditId === o.id;
         const displayItems = editing ? poEditItems : (o.items || []);
@@ -9456,20 +9737,24 @@ export default function FinanceManagement({
                     </div>
                   ) : (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => openPoPriceEdit(o)}
-                        className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
-                      >
-                        <Edit className="w-3.5 h-3.5" /> Sửa đơn giá
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setPoDetailModal({ open: false, order: null }); handleDeletePoUnrecorded(o.id); }}
-                        className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-extrabold px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Xóa
-                      </button>
+                      {!isFromWarehouse && (
+                        <button
+                          type="button"
+                          onClick={() => openPoPriceEdit(o)}
+                          className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                        >
+                          <Edit className="w-3.5 h-3.5" /> Sửa đơn giá
+                        </button>
+                      )}
+                      {!isFromWarehouse && (
+                        <button
+                          type="button"
+                          onClick={() => { setPoDetailModal({ open: false, order: null }); handleDeletePoUnrecorded(o.id); }}
+                          className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-extrabold px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Xóa
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => { if (onOpenMaterialProposal && o.proposalId) onOpenMaterialProposal(o.proposalId); }}
@@ -9479,14 +9764,20 @@ export default function FinanceManagement({
                       >
                         <ExternalLink className="w-3.5 h-3.5" /> Chi tiết đơn hàng
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => { setPoDetailModal({ open: false, order: null }); setPoRecordConfirm(o); }}
-                        className="bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-black px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
-                        title="Ghi nhận công nợ nhà cung cấp"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Ghi nhận Công nợ
-                      </button>
+                      {isFromWarehouse ? (
+                        <span className="bg-teal-950/40 border border-teal-800/60 text-teal-300 text-[10px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">
+                          📦 Đơn nội bộ (Kho) — không công nợ
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setPoDetailModal({ open: false, order: null }); setPoRecordConfirm(o); }}
+                          className="bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-black px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                          title="Ghi nhận công nợ nhà cung cấp"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Ghi nhận Công nợ
+                        </button>
+                      )}
                     </>
                   )
                 )}

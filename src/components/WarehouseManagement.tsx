@@ -333,7 +333,7 @@ export default function WarehouseManagement() {
   return (
     <div className="space-y-6 text-slate-200" id="warehouse_management_panel">
       {/* Header cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {/* Total Stock Items */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
           <div className="p-3 rounded-lg bg-teal-500/10 text-teal-400">
@@ -343,6 +343,20 @@ export default function WarehouseManagement() {
             <span className="text-[10px] uppercase font-bold text-slate-455 block">Tổng số chủng loại</span>
             <span className="text-xl font-black text-white font-mono">{inventory.length}</span>
             <span className="text-[9.5px] text-slate-500 block">vật tư phụ kiện lưu trữ</span>
+          </div>
+        </div>
+
+        {/* Total Stock Value */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
+          <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400">
+            <DollarSign className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-455 block">Giá trị tồn kho</span>
+            <span className="text-xl font-black text-white font-mono">
+              {inventory.reduce((s, m) => s + (m.qty || 0) * (m.unitPrice || 0), 0).toLocaleString('vi-VN')}đ
+            </span>
+            <span className="text-[9.5px] text-slate-500 block">tổng SL × đơn giá nhập</span>
           </div>
         </div>
 

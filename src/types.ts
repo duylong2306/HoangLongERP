@@ -371,9 +371,11 @@ export interface Payment {
   paymentAt?: string;      // Thời gian lập phiếu chi tùy chỉnh (ISO string)
   recipient: string; // Nhà cung cấp / nhân viên / thầu phụ
   projectId?: string;
-  category: 'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance';
+  // 'cash_fund' = phiếu chi NẠP tiền vào Quỹ tiền mặt (không phát sinh công nợ, không gắn purchaseOrderId)
+  category: 'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance' | 'cash_fund';
   amount: number;
-  paymentMethod: 'cash' | 'transfer';
+  // 'cash_fund' = khoản chi này được RÚT/lấy từ Quỹ tiền mặt (áp dụng cho mọi category, không riêng category='cash_fund')
+  paymentMethod: 'cash' | 'transfer' | 'cash_fund';
   notes: string;
   proposer: string;
   approver: string;
@@ -680,9 +682,29 @@ export interface PurchaseOrder {
   paymentId?: string;       // FK → Payment (liên kết phiếu chi)
   proposalId?: string;      // FK → material_proposals.id (nếu đơn tạo từ Đề Xuất Vật Tư)
   proposalCode?: string;    // Mã đề xuất nguồn (hiển thị trong Chi tiết đơn hàng)
+  // Đơn nội bộ: vật tư lấy từ Kho có sẵn cho công trình (supplierId = WAREHOUSE_SOURCE_ID),
+  // không phát sinh công nợ NCC — chỉ ghi nhận để tổng hợp chi phí công trình.
+  fromWarehouse?: boolean;
   notes?: string;
   createdAt: string;
   createdBy: string;
+}
+
+// Sentinel supplierId đại diện nguồn "Kho có sẵn" (thay vì Nhà cung cấp thật) khi gán
+// nguồn vật tư cho 1 dòng đề xuất, hoặc đánh dấu 1 PurchaseOrder là đơn nội bộ xuất từ
+// kho cho công trình (không có công nợ). Dùng chung giữa MaterialCoordination và
+// FinanceManagement — định nghĩa 1 nơi duy nhất để tránh lệch giá trị.
+export const WAREHOUSE_SOURCE_ID = '__warehouse__';
+
+// Số dư đầu kỳ Quỹ tiền mặt — bản ghi đơn (singleton). Số dư hiện tại được TÍNH từ
+// openingBalance + tổng các Payment (category='cash_fund' cộng, paymentMethod='cash_fund'
+// trừ) đã duyệt — không lưu số dư trực tiếp để tránh lệch dữ liệu.
+export interface CashFundConfig {
+  id: string;
+  openingBalance: number;
+  openingDate: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // ─── Archived Quote Types ─────────────────────────────────────────────────────

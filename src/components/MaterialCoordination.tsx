@@ -6,6 +6,7 @@ import {
   Employee,
   Customer,
   Supplier,
+  WAREHOUSE_SOURCE_ID,
 } from '../types';
 import { dbService } from '../lib/dbService';
 import { ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
@@ -66,9 +67,12 @@ interface BoardItem {
   doc: any; // material_proposals
 }
 
-// Sentinel "supplierId" đại diện cho nguồn "Kho có sẵn" (thay vì Nhà cung cấp thật) khi
-// gán nguồn vật tư cho 1 dòng đề xuất — khôi phục lại phân biệt kho/NCC của luồng cũ.
-const WAREHOUSE_SOURCE_ID = '__warehouse__';
+// Sentinel "projectId" đại diện cho đề xuất "Đề Xuất Kho" — mua hàng từ NCC để NHẬP
+// KHO (không thuộc công trình nào). Board coi đây như 1 "dự án ảo" (boardItems đã có
+// sẵn cơ chế fallback dựng project giả từ projectId/projectName khi không khớp project
+// thật nào trong `projects`) nên tái dùng được toàn bộ luồng board hiện có.
+const WAREHOUSE_PROJECT_ID = '__warehouse_restock__';
+const WAREHOUSE_PROJECT_NAME = '📦 Kho Tổng (Nhập hàng)';
 
 const STATUS_LABEL: Record<ProposalStatus, string> = {
   find_supplier: 'TÌM NHÀ CUNG CẤP',
@@ -161,6 +165,10 @@ export default function MaterialCoordination({
   const [quickPropTask, setQuickPropTask] = useState('');
   const [quickPropItems, setQuickPropItems] = useState<any[]>([]);
   const [quickPropNotes, setQuickPropNotes] = useState('');
+  // true = modal đang tạo "Đề Xuất Kho" (mua hàng nhập kho, không thuộc công trình)
+  const [quickPropIsWarehouse, setQuickPropIsWarehouse] = useState(false);
+  // Tồn kho hiện tại — dùng để tự điền đơn giá & chặn vượt tồn khi chọn "Xuất từ Kho có sẵn"
+  const [inventory, setInventory] = useState<any[]>([]);
 
   // ─── Phân trang: số trang + số dòng/trang cho từng cột ──────────────────
   const COL_PAGE_SIZES = [5, 10, 15, 20] as const;
@@ -204,28 +212,35 @@ export default function MaterialCoordination({
   const loadSuppliers = React.useCallback(() => {
     dbService.suppliers.list().then(list => setSuppliers(list)).catch(() => {});
   }, []);
+  const loadInventory = React.useCallback(() => {
+    dbService.inventory.list().then(list => setInventory(list)).catch(() => {});
+  }, []);
 
   React.useEffect(() => {
     loadProposals();
     loadOrders();
     loadSuppliers();
-  }, [loadProposals, loadOrders, loadSuppliers]);
+    loadInventory();
+  }, [loadProposals, loadOrders, loadSuppliers, loadInventory]);
 
   React.useEffect(() => {
     const reload = () => { loadProposals(); loadOrders(); };
     const reloadOrdersOnly = () => { loadOrders(); };
     const reloadSuppliers = () => loadSuppliers();
+    const reloadInventory = () => loadInventory();
     window.addEventListener('hl-material-proposals-updated', reload);
     window.addEventListener('hl-purchase-orders-updated', reloadOrdersOnly);
     window.addEventListener('hl-suppliers-updated', reloadSuppliers);
     window.addEventListener('hl-inventory-updated', reloadSuppliers);
+    window.addEventListener('hl-inventory-updated', reloadInventory);
     return () => {
       window.removeEventListener('hl-material-proposals-updated', reload);
       window.removeEventListener('hl-purchase-orders-updated', reloadOrdersOnly);
       window.removeEventListener('hl-suppliers-updated', reloadSuppliers);
       window.removeEventListener('hl-inventory-updated', reloadSuppliers);
+      window.removeEventListener('hl-inventory-updated', reloadInventory);
     };
-  }, [loadProposals, loadOrders, loadSuppliers]);
+  }, [loadProposals, loadOrders, loadSuppliers, loadInventory]);
 
   // Deep-link: mở chi tiết đề xuất khi được gọi từ module khác (tab Đơn Hàng)
   React.useEffect(() => {
@@ -306,6 +321,9 @@ export default function MaterialCoordination({
 
   // Gửi tin nhắn nhóm chat Dự án
   const sendProjectChat = React.useCallback(async (prop: any, content: string) => {
+    // "Đề Xuất Kho" không gắn với dự án thật nào (projectId là sentinel ảo) → bảng
+    // conversations có FK ràng buộc project_id phải tồn tại thật, luôn lỗi nếu gọi.
+    if (prop.projectId === WAREHOUSE_PROJECT_ID) return;
     try {
       const project = projects.find(pr => pr.id === prop.projectId);
       await ensureProjectChatGroup(project || { id: prop.projectId, name: prop.projectName });
@@ -458,7 +476,11 @@ export default function MaterialCoordination({
     setQuickPropItems(prev => prev.filter((_, i) => i !== idx));
   };
   const submitQuickProposal = async () => {
-    const proj = projects.find(p => p.id === quickPropProject);
+    // "Đề Xuất Kho": không thuộc dự án thật nào — dùng "dự án ảo" Kho Tổng
+    // (board đã có sẵn cơ chế fallback dựng project giả từ projectId/projectName).
+    const proj: any = quickPropIsWarehouse
+      ? { id: WAREHOUSE_PROJECT_ID, name: WAREHOUSE_PROJECT_NAME, code: 'KHO' }
+      : projects.find(p => p.id === quickPropProject);
     if (!proj) { showNotification('Vui lòng chọn dự án.', 'Thiếu dự án', 'warning'); return; }
     const validItems = quickPropItems.filter(it => it.name.trim());
     if (validItems.length === 0) { showNotification('Cần ít nhất 1 vật tư có tên.', 'Thiếu vật tư', 'warning'); return; }
@@ -508,21 +530,23 @@ export default function MaterialCoordination({
         created.push(p);
       }
       window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
-      // Gửi chat nhóm dự án
-      try {
-        await ensureProjectChatGroup(proj);
-        await sendGroupChatMessage({
-          conversationId: `conv_project_${proj.id}`,
-          senderId: creatorId,
-          senderName: creatorName,
-          senderRole: 'pm' as any,
-          content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${proj.name}\n— ${validItems.map(i => `• ${i.name} × ${i.qty} ${i.unit}`).join('\n')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
-          relatedEntity: { type: 'project', id: proj.id } as any,
-        });
-      } catch (e) { /* ignore */ }
+      // Gửi chat nhóm dự án — "Đề Xuất Kho" không có dự án thật (FK conversations.project_id sẽ lỗi) nên bỏ qua
+      if (!quickPropIsWarehouse) {
+        try {
+          await ensureProjectChatGroup(proj);
+          await sendGroupChatMessage({
+            conversationId: `conv_project_${proj.id}`,
+            senderId: creatorId,
+            senderName: creatorName,
+            senderRole: 'pm' as any,
+            content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${proj.name}\n— ${validItems.map(i => `• ${i.name} × ${i.qty} ${i.unit}`).join('\n')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
+            relatedEntity: { type: 'project', id: proj.id } as any,
+          });
+        } catch (e) { /* ignore */ }
+      }
       showNotification(`Đã tạo ${created.length} đề xuất vật tư.`, 'Tạo đề xuất thành công', 'success');
       setQuickPropModal(false);
-      setQuickPropProject(''); setQuickPropTask(''); setQuickPropItems([]); setQuickPropNotes('');
+      setQuickPropProject(''); setQuickPropTask(''); setQuickPropItems([]); setQuickPropNotes(''); setQuickPropIsWarehouse(false);
     } catch (e) {
       showNotification('Lỗi khi tạo đề xuất. Vui lòng thử lại.', 'Lỗi', 'warning');
     }
@@ -1106,7 +1130,7 @@ export default function MaterialCoordination({
       showNotification('Đề xuất này đã có đơn hàng, không thể tạo thêm.', 'Đã có đơn hàng', 'warning');
       return;
     }
-    const enrichedItems = items.map((it: any) => {
+    const rawEnrichedItems = items.map((it: any) => {
       const sid = it.supplierId || itemSupplierDraft[it.id] || '';
       if (sid === WAREHOUSE_SOURCE_ID) {
         return { ...it, supplierId: WAREHOUSE_SOURCE_ID, supplierName: 'Kho có sẵn', fromWarehouse: true };
@@ -1115,15 +1139,42 @@ export default function MaterialCoordination({
       return { ...it, supplierId: sid, supplierName: sup?.name || it.supplierName || '' };
     });
 
-    // ── Vật tư chọn "Xuất từ Kho có sẵn": trừ tồn kho ngay, KHÔNG tạo Đơn Mua
-    // Hàng / không phát sinh công nợ NCC.
+    // ── Vật tư chọn "Xuất từ Kho có sẵn": kiểm tra tồn kho TRƯỚC (chặn vượt tồn),
+    // tự lấy đơn giá nhập từ kho (KHÔNG dùng giá gõ tay), rồi mới trừ tồn kho —
+    // KHÔNG tạo Đơn Mua Hàng / không phát sinh công nợ NCC.
+    const warehouseItemsRaw = rawEnrichedItems.filter((it: any) => it.supplierId === WAREHOUSE_SOURCE_ID);
+    const currentInv: any[] = warehouseItemsRaw.length > 0 ? await dbService.inventory.list() : [];
+    const matchInv = (name: string) => currentInv.find((i: any) =>
+      i.code?.toLowerCase() === name?.toLowerCase() || i.name?.toLowerCase() === name?.toLowerCase());
+
+    if (warehouseItemsRaw.length > 0) {
+      const violations: string[] = [];
+      for (const it of warehouseItemsRaw) {
+        const matched = matchInv(it.name);
+        if (!matched) { violations.push(`${it.name}: không tìm thấy trong kho`); continue; }
+        if ((it.qty || 0) > (matched.qty || 0)) {
+          violations.push(`${it.name}: đề xuất ${it.qty} ${it.unit}, kho chỉ còn ${matched.qty}`);
+        }
+      }
+      if (violations.length > 0) {
+        showNotification(`Vượt tồn kho hoặc không có trong kho:\n${violations.join('\n')}`, 'Không thể xuất kho', 'warning');
+        return;
+      }
+    }
+
+    // Đơn giá của dòng "Xuất từ Kho có sẵn" LUÔN lấy theo đơn giá nhập hiện tại của kho
+    // (không dùng giá gõ tay trong đề xuất) — đúng đơn giá thực tế xuất kho.
+    const enrichedItems = rawEnrichedItems.map((it: any) => {
+      if (it.supplierId !== WAREHOUSE_SOURCE_ID) return it;
+      const matched = matchInv(it.name);
+      return matched ? { ...it, price: matched.unitPrice || 0 } : it;
+    });
     const warehouseItems = enrichedItems.filter((it: any) => it.supplierId === WAREHOUSE_SOURCE_ID);
+
     let stockDeductedCount = 0;
     if (warehouseItems.length > 0) {
-      const currentInv: any[] = await dbService.inventory.list();
       for (const it of warehouseItems) {
-        const matched = currentInv.find((i: any) =>
-          i.code?.toLowerCase() === it.name?.toLowerCase() || i.name?.toLowerCase() === it.name?.toLowerCase());
+        const matched = matchInv(it.name);
         if (matched) {
           matched.qty = Math.max(0, matched.qty - (it.qty || 0));
           stockDeductedCount++;
@@ -1172,10 +1223,51 @@ export default function MaterialCoordination({
       const saved = await dbService.purchaseOrders.create(order);
       createdIds.push(saved.id);
     }
-    // Nếu TOÀN BỘ vật tư đều xuất từ kho (không có đơn hàng nào) → coi như đã
-    // nhận hàng xong ngay, không cần qua bước "Đặt hàng thành công" (vốn dành
-    // cho việc theo dõi PO chờ giao).
-    const allWarehouseOnly = createdIds.length === 0 && warehouseItems.length > 0;
+
+    // Vật tư "Xuất từ Kho có sẵn" cho CÔNG TRÌNH (không phải Đề Xuất Kho): tạo thêm 1
+    // "đơn hàng nội bộ" (fromWarehouse=true, congNo=0, đã coi như thanh toán xong) để
+    // tổng hợp vào chi phí công trình (tab Đơn Hàng lọc theo dự án) — không phát sinh
+    // công nợ NCC vì đây không phải mua hàng từ bên ngoài.
+    if (warehouseItems.length > 0 && prop.projectId !== WAREHOUSE_PROJECT_ID) {
+      const tongTien = warehouseItems.reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
+      const order = {
+        id: `PO-${Date.now()}-${orderIdx++}`,
+        supplierId: WAREHOUSE_SOURCE_ID,
+        supplierName: 'Kho có sẵn',
+        supplierPhone: '',
+        supplierAddress: '',
+        projectId: prop.projectId || '',
+        projectName: prop.projectName || '',
+        proposalId: prop.id,
+        proposalCode: prop.code,
+        fromWarehouse: true,
+        items: warehouseItems.map((it: any) => ({
+          id: it.id,
+          name: it.name,
+          qty: it.qty,
+          unit: it.unit,
+          spec: it.spec || '',
+          note: it.note || '',
+          price: it.price || 0,
+          totalPrice: (it.qty || 0) * (it.price || 0),
+          receivedQty: it.qty, // xuất kho = nhận hàng ngay, không có bước chờ giao
+        })),
+        tongTien,
+        thanhToanThucTe: tongTien, // coi như đã "thanh toán" xong — không công nợ
+        congNo: 0,
+        status: 'completed',
+        notes: `Xuất kho cho đề xuất ${prop.code}`,
+        createdAt: new Date().toISOString(),
+        createdBy: currentUser?.id || '',
+      };
+      const saved = await dbService.purchaseOrders.create(order);
+      createdIds.push(saved.id);
+    }
+
+    // Nếu TOÀN BỘ vật tư đều xuất từ kho (không gán NCC thật nào) → coi như đã nhận
+    // hàng xong ngay, không cần qua bước "Đặt hàng thành công" (vốn dành cho việc
+    // theo dõi PO chờ giao từ NCC thật).
+    const allWarehouseOnly = Object.keys(groups).length === 0 && warehouseItems.length > 0;
     await saveProposal({
       ...prop,
       items: enrichedItems,
@@ -1242,6 +1334,37 @@ export default function MaterialCoordination({
       };
     });
     const allReceived = updatedItems.every((i: any) => (i.receivedQty || 0) >= i.qty);
+
+    // Đơn thuộc "Đề Xuất Kho" (mua hàng nhập kho, không thuộc công trình): nhận
+    // hàng = CỘNG vào tồn kho (ngược với luồng xuất kho cho công trình), tự cập
+    // nhật đơn giá nhập theo giá của lần nhập mới nhất.
+    if (proposal.projectId === WAREHOUSE_PROJECT_ID) {
+      const currentInv: any[] = await dbService.inventory.list();
+      let addedCount = 0;
+      for (const item of order.items || []) {
+        const actualReceive = receiveQuantities[item.id] ?? 0;
+        if (actualReceive <= 0) continue;
+        const matched = currentInv.find((i: any) =>
+          i.code?.toLowerCase() === item.name?.toLowerCase() || i.name?.toLowerCase() === item.name?.toLowerCase());
+        if (matched) {
+          await dbService.inventory.save({ ...matched, qty: (matched.qty || 0) + actualReceive, unitPrice: item.price || matched.unitPrice || 0 }).catch(() => {});
+        } else {
+          await dbService.inventory.save({
+            id: `inv_${Date.now()}_${addedCount}`,
+            code: item.name,
+            name: item.name,
+            unit: item.unit || '',
+            qty: actualReceive,
+            unitPrice: item.price || 0,
+            minAlert: 0,
+            location: '',
+          }).catch(() => {});
+        }
+        addedCount++;
+      }
+      if (addedCount > 0) window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
+    }
+
     await dbService.purchaseOrders.save({
       ...order,
       items: updatedItems,
@@ -1381,10 +1504,18 @@ export default function MaterialCoordination({
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => { setQuickPropItems([{ id: `item_${Date.now()}_0`, name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '' }]); setQuickPropModal(true); }}
+              onClick={() => { setQuickPropIsWarehouse(false); setQuickPropProject(''); setQuickPropItems([{ id: `item_${Date.now()}_0`, name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '' }]); setQuickPropModal(true); }}
               className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl px-3 py-2 text-[11px] font-black shadow-md shadow-amber-500/20 transition-all cursor-pointer"
             >
               <Zap className="w-4 h-4" /> Tạo Đề Xuất Nhanh
+            </button>
+            <button
+              type="button"
+              title="Đề xuất mua hàng từ NCC để nhập vào Kho (không thuộc công trình nào)"
+              onClick={() => { setQuickPropIsWarehouse(true); setQuickPropProject(WAREHOUSE_PROJECT_ID); setQuickPropItems([{ id: `item_${Date.now()}_0`, name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '' }]); setQuickPropModal(true); }}
+              className="flex items-center gap-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl px-3 py-2 text-[11px] font-black shadow-md shadow-teal-500/20 transition-all cursor-pointer"
+            >
+              📦 Đề Xuất Kho
             </button>
             <div className="text-[10px] font-mono bg-white border border-slate-200 rounded-lg p-2 text-slate-600 flex flex-col items-end">
               <span>Tổng: <strong className="text-amber-600">{stats.total}</strong></span>
@@ -2081,6 +2212,23 @@ export default function MaterialCoordination({
                   const allSids = (prop.items || []).map((it: any) => it.supplierId || itemSupplierDraft[it.id] || '');
                   const uniformSid = allSids.length > 0 && allSids.every((s: string) => s === allSids[0]) ? allSids[0] : '';
 
+                  // "Đề Xuất Kho" (mua hàng nhập kho) không được phép tự chọn "Xuất từ
+                  // Kho có sẵn" làm nguồn — kho không thể tự cấp cho chính nó.
+                  const isWarehouseDest = prop.projectId === WAREHOUSE_PROJECT_ID;
+                  const sourceOptions = [
+                    ...(isWarehouseDest ? [] : [{ id: WAREHOUSE_SOURCE_ID, label: '📦 Xuất từ Kho có sẵn' }]),
+                    ...suppliers.map((s: any) => ({ id: s.id, label: s.name })),
+                  ];
+                  const findInvMatch = (name: string) => inventory.find((i: any) =>
+                    i.code?.toLowerCase() === name?.toLowerCase() || i.name?.toLowerCase() === name?.toLowerCase());
+                  // Chặn tạo đơn nếu có dòng "Xuất từ Kho có sẵn" vượt tồn kho hiện tại
+                  const hasStockViolation = (prop.items || []).some((it: any) => {
+                    const sid = it.supplierId || itemSupplierDraft[it.id] || '';
+                    if (sid !== WAREHOUSE_SOURCE_ID) return false;
+                    const matched = findInvMatch(it.name);
+                    return !matched || (it.qty || 0) > (matched.qty || 0);
+                  });
+
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
                       <span className="font-extrabold text-[11px] sm:text-[11.5px] text-violet-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
@@ -2100,7 +2248,7 @@ export default function MaterialCoordination({
                           )}
                         </div>
                         <SearchableSelect
-                          options={[{ id: WAREHOUSE_SOURCE_ID, label: '📦 Xuất từ Kho có sẵn' }, ...suppliers.map((s: any) => ({ id: s.id, label: s.name }))]}
+                          options={sourceOptions}
                           value={uniformSid}
                           onChange={applySupplierToAll}
                           placeholder="-- Chọn NCC hoặc Kho có sẵn --"
@@ -2113,15 +2261,18 @@ export default function MaterialCoordination({
                       <div className="space-y-2">
                         {(prop.items || []).map((it: any, idx: number) => {
                           const currentSid = it.supplierId || itemSupplierDraft[it.id] || '';
+                          const isFromKho = currentSid === WAREHOUSE_SOURCE_ID;
+                          const invMatch = isFromKho ? findInvMatch(it.name) : null;
+                          const overStock = isFromKho && (!invMatch || (it.qty || 0) > (invMatch.qty || 0));
                           return (
-                            <div key={it.id || idx} className="border border-slate-200 rounded-xl p-2.5 bg-violet-50/30">
+                            <div key={it.id || idx} className={`border rounded-xl p-2.5 ${overStock ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200 bg-violet-50/30'}`}>
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div className="flex-1 min-w-[150px]">
                                   <span className="text-[11px] font-bold text-slate-800">{it.name}</span>
                                   <span className="ml-1.5 text-[9px] text-slate-500">× {it.qty} {it.unit} · {((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} đ</span>
                                 </div>
                                 <SearchableSelect
-                                  options={[{ id: WAREHOUSE_SOURCE_ID, label: '📦 Xuất từ Kho có sẵn' }, ...suppliers.map((s: any) => ({ id: s.id, label: s.name }))]}
+                                  options={sourceOptions}
                                   value={currentSid}
                                   onChange={(sid) => setItemSupplier(prop, it.id, sid)}
                                   placeholder="-- Chọn NCC hoặc Kho có sẵn --"
@@ -2130,8 +2281,17 @@ export default function MaterialCoordination({
                                   className="min-w-[180px]"
                                 />
                               </div>
-                              {currentSid && (
-                                <p className="text-[9px] text-violet-600 font-bold mt-1">✔ Đã chọn: {currentSid === WAREHOUSE_SOURCE_ID ? '📦 Kho có sẵn' : (suppliers.find(s => s.id === currentSid)?.name || '')}</p>
+                              {currentSid && !isFromKho && (
+                                <p className="text-[9px] text-violet-600 font-bold mt-1">✔ Đã chọn: {suppliers.find(s => s.id === currentSid)?.name || ''}</p>
+                              )}
+                              {isFromKho && invMatch && (
+                                <p className={`text-[9px] font-bold mt-1 ${overStock ? 'text-rose-600' : 'text-violet-600'}`}>
+                                  ✔ Kho có sẵn — đơn giá nhập: {(invMatch.unitPrice || 0).toLocaleString('vi-VN')}đ · tồn: {invMatch.qty} {invMatch.unit}
+                                  {overStock && ` — VƯỢT TỒN KHO (đề xuất ${it.qty}, còn ${invMatch.qty})`}
+                                </p>
+                              )}
+                              {isFromKho && !invMatch && (
+                                <p className="text-[9px] text-rose-600 font-bold mt-1">✘ Không tìm thấy "{it.name}" trong kho — không thể xuất.</p>
                               )}
                             </div>
                           );
@@ -2140,13 +2300,19 @@ export default function MaterialCoordination({
                       {hasOrder ? (
                         <p className="text-[10px] text-slate-500 italic bg-slate-50 border border-slate-200 rounded-lg p-2.5">Đã tạo đơn hàng cho đề xuất này. Các trường đã bị khóa.</p>
                       ) : isCoordinator ? (
-                        <button
-                          type="button"
-                          onClick={() => createOrders(prop)}
-                          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-                        >
-                          <FileText className="w-4 h-4" /> Tạo đơn hàng / Xuất kho
-                        </button>
+                        <>
+                          {hasStockViolation && (
+                            <p className="text-[10px] text-rose-600 font-bold bg-rose-50 border border-rose-200 rounded-lg p-2.5">⚠ Có dòng vượt tồn kho hoặc không có trong kho — sửa lại nguồn/số lượng trước khi tạo đơn.</p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => createOrders(prop)}
+                            disabled={hasStockViolation}
+                            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[12px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                          >
+                            <FileText className="w-4 h-4" /> Tạo đơn hàng / Xuất kho
+                          </button>
+                        </>
                       ) : (
                         <p className="text-[10px] text-slate-500 italic">Chỉ Người điều phối mới được gán nguồn vật tư &amp; tạo đơn hàng.</p>
                       )}
@@ -2964,10 +3130,10 @@ export default function MaterialCoordination({
           className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="p-4 bg-gradient-to-r from-amber-500 to-orange-500 flex justify-between items-center shrink-0">
+          <div className={`p-4 flex justify-between items-center shrink-0 bg-gradient-to-r ${quickPropIsWarehouse ? 'from-teal-600 to-emerald-600' : 'from-amber-500 to-orange-500'}`}>
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-white" />
-              <span className="font-black text-sm text-white uppercase">Tạo Đề Xuất Vật Tư Nhanh</span>
+              <span className="font-black text-sm text-white uppercase">{quickPropIsWarehouse ? '📦 Tạo Đề Xuất Kho (Nhập hàng)' : 'Tạo Đề Xuất Vật Tư Nhanh'}</span>
             </div>
             <button type="button" onClick={() => setQuickPropModal(false)} className="p-1.5 hover:bg-white/20 rounded-full text-white cursor-pointer transition-all">
               <X className="w-5 h-5" />
@@ -2978,14 +3144,20 @@ export default function MaterialCoordination({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="block text-slate-500 font-bold text-[10px] uppercase">Dự án *</label>
-                <SearchableSelect
-                  options={projects.map(p => ({ id: p.id, label: `${p.code ? p.code + ' — ' : ''}${p.name}` }))}
-                  value={quickPropProject}
-                  onChange={setQuickPropProject}
-                  placeholder="-- Chọn dự án --"
-                  searchPlaceholder="🔍 Tìm dự án..."
-                  className="w-full"
-                />
+                {quickPropIsWarehouse ? (
+                  <div className="w-full bg-teal-50 border border-teal-200 rounded-lg p-2 text-xs text-teal-700 font-bold">
+                    📦 Kho Tổng (Nhập hàng) — không thuộc công trình
+                  </div>
+                ) : (
+                  <SearchableSelect
+                    options={projects.map(p => ({ id: p.id, label: `${p.code ? p.code + ' — ' : ''}${p.name}` }))}
+                    value={quickPropProject}
+                    onChange={setQuickPropProject}
+                    placeholder="-- Chọn dự án --"
+                    searchPlaceholder="🔍 Tìm dự án..."
+                    className="w-full"
+                  />
+                )}
               </div>
               <div className="space-y-1">
                 <label className="block text-slate-500 font-bold text-[10px] uppercase">Ghi chú</label>
@@ -3057,6 +3229,16 @@ export default function MaterialCoordination({
                         placeholder="Mã MUA"
                         className="w-20 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-amber-400 font-mono"
                       />
+                      {quickPropIsWarehouse && (
+                        <input
+                          type="number" min={0}
+                          value={it.price || 0}
+                          onChange={(e) => updateQuickPropItem(idx, 'price', Math.max(0, Number(e.target.value) || 0))}
+                          placeholder="Đơn giá"
+                          title="Đơn giá nhập kho dự kiến (đ)"
+                          className="w-24 bg-white border border-teal-200 rounded p-1 text-[11px] text-right text-teal-700 font-bold outline-none focus:border-teal-400"
+                        />
+                      )}
                     </div>
                   </div>
                 ))}
@@ -3075,7 +3257,7 @@ export default function MaterialCoordination({
             <button
               type="button"
               onClick={submitQuickProposal}
-              className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all text-xs shadow-md shadow-amber-500/20"
+              className={`flex-1 text-white font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all text-xs shadow-md bg-gradient-to-r ${quickPropIsWarehouse ? 'from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 shadow-teal-500/20' : 'from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-amber-500/20'}`}
             >
               <Zap className="w-4 h-4" /> Tạo đề xuất
             </button>
