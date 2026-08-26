@@ -1253,7 +1253,19 @@ export default function FinanceManagement({
     const fetchLiabilities = async () => {
       try {
         const list = await dbService.accountingLiabilities.list();
-        if (active) setCustomLiabilities(list);
+        if (active) {
+          setCustomLiabilities(list);
+          // Đồng bộ luôn baseline chữ ký (prevLiabilitiesRef) ngay khi có dữ liệu
+          // THẬT từ server — nếu không, effect "chặn vòng lặp" bên dưới sẽ tiêu
+          // mất cờ isFirstRenderLiabilities ở lần render với state RỖNG ([])
+          // ngay lúc mount (trước khi fetch này xong), khiến lần setState THẬT
+          // (list đầy đủ) bị hiểu nhầm là "toàn bộ đều đổi so với DB" → tự lưu
+          // lại hết mọi dòng Công Nợ Trả mỗi lần mở trang (bug đã xác nhận qua
+          // log thực tế: hàng chục dòng "Saved to accounting_liabilities" liên
+          // tiếp ngay sau khi tải trang, dù không ai sửa gì).
+          prevLiabilitiesRef.current = new Map(list.map((l: any) => [l.id, liabRowSig(l)]));
+          isFirstRenderLiabilities.current = false;
+        }
       } catch (err) {
         console.error("Lỗi khi tải công nợ phải trả:", err);
       }
@@ -1309,6 +1321,16 @@ export default function FinanceManagement({
         const list = await dbService.accountingReceivables.list();
         if (active) {
           setCustomReceivables(list);
+          // Đồng bộ luôn baseline chữ ký (prevReceivablesRef) ngay khi có dữ liệu
+          // THẬT từ server — cùng lý do như fetchLiabilities ở trên: nếu không,
+          // effect "chặn vòng lặp" bên dưới sẽ tiêu mất cờ isFirstRenderReceivables
+          // ở lần render với state RỖNG ([]) ngay lúc mount (trước khi fetch này
+          // xong), khiến lần setState THẬT (list đầy đủ, chỉ gồm dòng thủ công)
+          // bị hiểu nhầm là "toàn bộ đều đổi so với DB" → tự lưu lại hết mọi
+          // dòng Công Nợ Thu mỗi lần mở trang.
+          const manual = list.filter((r: any) => !r.isAuto);
+          prevReceivablesRef.current = new Map(manual.map((r: any) => [r.id, liabRowSig(r)]));
+          isFirstRenderReceivables.current = false;
         }
       } catch (err) {
         console.error("Lỗi khi tải công nợ phải thu:", err);
