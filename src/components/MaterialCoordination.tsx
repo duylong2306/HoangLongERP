@@ -7,6 +7,7 @@ import {
   Customer,
   Supplier,
   WAREHOUSE_SOURCE_ID,
+  WAREHOUSE_PROJECT_ID,
 } from '../types';
 import { dbService } from '../lib/dbService';
 import { ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
@@ -71,7 +72,8 @@ interface BoardItem {
 // KHO (không thuộc công trình nào). Board coi đây như 1 "dự án ảo" (boardItems đã có
 // sẵn cơ chế fallback dựng project giả từ projectId/projectName khi không khớp project
 // thật nào trong `projects`) nên tái dùng được toàn bộ luồng board hiện có.
-const WAREHOUSE_PROJECT_ID = '__warehouse_restock__';
+// (WAREHOUSE_PROJECT_ID định nghĩa dùng chung trong types.ts để FinanceManagement
+// cũng nhận diện được đơn hàng thuộc luồng nhập kho.)
 const WAREHOUSE_PROJECT_NAME = '📦 Kho Tổng (Nhập hàng)';
 
 const STATUS_LABEL: Record<ProposalStatus, string> = {

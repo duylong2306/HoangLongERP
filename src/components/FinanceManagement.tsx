@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
-import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, CashFundConfig } from '../types';
+import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, getConfiguredSettler } from '../context';
 import SearchableSelect from './SearchableSelect';
 import { useSettings } from '../context/SettingsContext';
@@ -2352,6 +2352,31 @@ export default function FinanceManagement({
       await dbService.purchaseOrders.save(updated);
       setPurchaseOrders(prev => prev.map(o => o.id === poEditId ? updated : o));
       setPoDetailModal(prev => prev.order ? { ...prev, order: updated } : prev);
+
+      // Đơn thuộc "Đề Xuất Kho" (mua hàng nhập kho): hàng đã được cộng vào tồn kho
+      // lúc "Nhận hàng" theo đơn giá tại thời điểm đó. Nếu kế toán sửa lại đơn giá
+      // ở đây SAU KHI hàng đã về kho, phải đồng bộ luôn đơn giá mới vào Kho — nếu
+      // không, giá trị tồn kho sẽ vĩnh viễn lệch với giá đã thực trả cho NCC.
+      if (order.projectId === WAREHOUSE_PROJECT_ID) {
+        try {
+          const currentInv: any[] = await dbService.inventory.list();
+          let syncedCount = 0;
+          for (const it of poEditItems as any[]) {
+            const name = poItemName(it);
+            const newPrice = poItemPrice(it);
+            const matched = currentInv.find((i: any) =>
+              i.code?.toLowerCase() === name?.toLowerCase() || i.name?.toLowerCase() === name?.toLowerCase());
+            if (matched && matched.unitPrice !== newPrice) {
+              await dbService.inventory.save({ ...matched, unitPrice: newPrice }).catch(() => {});
+              syncedCount++;
+            }
+          }
+          if (syncedCount > 0) window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
+        } catch (invErr) {
+          console.error('Lỗi đồng bộ đơn giá vào Kho:', invErr);
+        }
+      }
+
       addToast({ title: '✅ Đã cập nhật', message: `Đã cập nhật đơn giá đơn ${order.id}.`, type: 'success' });
     } catch (err) {
       console.error('Lỗi cập nhật đơn giá:', err);

@@ -696,6 +696,12 @@ export interface PurchaseOrder {
 // FinanceManagement — định nghĩa 1 nơi duy nhất để tránh lệch giá trị.
 export const WAREHOUSE_SOURCE_ID = '__warehouse__';
 
+// Sentinel projectId đại diện đề xuất "Đề Xuất Kho" (mua hàng từ NCC để nhập kho,
+// không thuộc công trình nào — xem MaterialCoordination.tsx). Dùng chung với
+// FinanceManagement để nhận diện đơn hàng thuộc luồng nhập kho khi cần đồng bộ
+// ngược đơn giá vào Kho lúc sửa đơn giá ở tab Đơn Hàng.
+export const WAREHOUSE_PROJECT_ID = '__warehouse_restock__';
+
 // Số dư đầu kỳ Quỹ tiền mặt — bản ghi đơn (singleton). Số dư hiện tại được TÍNH từ
 // openingBalance + tổng các Payment (category='cash_fund' cộng, paymentMethod='cash_fund'
 // trừ) đã duyệt — không lưu số dư trực tiếp để tránh lệch dữ liệu.
