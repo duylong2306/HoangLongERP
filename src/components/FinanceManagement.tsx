@@ -2006,7 +2006,10 @@ export default function FinanceManagement({
       const raw = localStorage.getItem(RECEIPT_FILTER_KEY);
       if (raw) {
         const p = JSON.parse(raw);
-        return { fromDate: p.fromDate || '', toDate: p.toDate || '', customer: p.customer || '', form: p.form || '' };
+        const y = new Date().getFullYear();
+        // Lỡ lưu rỗng từ trước (bug nút "Đặt lại" cũ) → tự phục hồi về khoảng
+        // mặc định thay vì giữ mãi mãi rỗng ở những lần tải trang sau.
+        return { fromDate: p.fromDate || `${y}-01-01`, toDate: p.toDate || `${y}-12-31`, customer: p.customer || '', form: p.form || '' };
       }
     } catch {}
     const yr = new Date().getFullYear();
@@ -2025,7 +2028,10 @@ export default function FinanceManagement({
       const raw = localStorage.getItem(PAYMENT_FILTER_KEY);
       if (raw) {
         const p = JSON.parse(raw);
-        return { fromDate: p.fromDate || '', toDate: p.toDate || '', category: p.category || '', status: p.status || '' };
+        const y = new Date().getFullYear();
+        // Lỡ lưu rỗng từ trước (bug nút "Đặt lại" cũ) → tự phục hồi về khoảng
+        // mặc định thay vì giữ mãi mãi rỗng ở những lần tải trang sau.
+        return { fromDate: p.fromDate || `${y}-01-01`, toDate: p.toDate || `${y}-12-31`, category: p.category || '', status: p.status || '' };
       }
     } catch {}
     const yr = new Date().getFullYear();
@@ -7489,7 +7495,7 @@ export default function FinanceManagement({
                       <option value="transfer">Chuyển khoản</option>
                     </select>
                   </div>
-                  <button type="button" onClick={() => updateReceiptFilter({ fromDate: '', toDate: '', customer: '', form: '' })} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateReceiptFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, customer: '', form: '' }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -7920,7 +7926,7 @@ export default function FinanceManagement({
                       <option value="rejected">Bác thầu</option>
                     </select>
                   </div>
-                  <button type="button" onClick={() => updatePaymentFilter({ fromDate: '', toDate: '', category: '', status: '' })} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updatePaymentFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, category: '', status: '' }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
                 </div>
 
                 <div className="overflow-x-auto animate-fadeIn">
