@@ -32,24 +32,23 @@ on conflict (id) do update set
   allowed_mime_types = array['application/pdf']::text[];
 
 -- ----------------------------------------------------------------------------
--- 2) Policies cho phép anon / authenticated đọc, upload, sửa, xóa file
---    trong bucket này. Viết qua DO block để chạy lại không lỗi.
+-- 2) Policies cho phép anon / authenticated upload, sửa, xóa file trong bucket
+--    này. Viết qua DO block để chạy lại không lỗi.
+--
+--    KHÔNG tạo policy "select" (đọc/liệt kê): bucket đã public = true nên ai
+--    có ĐÚNG link (đường dẫn) đều tải được file bình thường — Supabase phục
+--    vụ public URL này KHÔNG cần policy select. Nếu thêm policy select không
+--    giới hạn vai trò như các bucket khác (avatars, attendance-photos), bất
+--    kỳ ai có anon key (vốn công khai trong mã nguồn JS) sẽ liệt kê được
+--    TOÀN BỘ tên file trong bucket qua API list() — tức xem được PDF đơn
+--    hàng của mọi đơn khác, không chỉ đơn được gửi link. Bỏ hẳn policy này
+--    để chặn liệt kê, trong khi link trực tiếp dán vào Zalo vẫn hoạt động
+--    bình thường.
 -- ----------------------------------------------------------------------------
 do $$
 declare
   b text := 'purchase-order-pdfs';
 begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'storage' and tablename = 'objects'
-      and policyname = 'purchase_order_pdfs_select'
-  ) then
-    execute format(
-      'create policy purchase_order_pdfs_select on storage.objects for select using (bucket_id = %L);',
-      b
-    );
-  end if;
-
   if not exists (
     select 1 from pg_policies
     where schemaname = 'storage' and tablename = 'objects'

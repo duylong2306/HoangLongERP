@@ -1,0 +1,22 @@
+-- ============================================================================
+-- Migration: Gỡ policy "select" (đọc/liệt kê) khỏi bucket "purchase-order-pdfs"
+--
+-- LÝ DO: Migration 20260826_create_purchase_order_pdfs_bucket.sql (đã chạy)
+-- tạo policy select KHÔNG giới hạn vai trò (using (bucket_id = ...) không có
+-- "to <role>") cho bucket này. Vì app dùng anon key (vốn công khai sẵn trong
+-- mã nguồn JS gửi về trình duyệt), bất kỳ ai cũng có thể gọi API list() của
+-- Supabase Storage để liệt kê TOÀN BỘ tên file PDF đã từng upload vào bucket
+-- này — tức xem được PDF đơn mua hàng của MỌI đơn, không chỉ đơn được chủ
+-- động gửi link.
+--
+-- Bucket này đã để public = true, nên việc TẢI 1 file qua ĐÚNG public URL
+-- (như link dán vào Zalo) hoàn toàn KHÔNG cần policy select — Supabase phục
+-- vụ trực tiếp không qua RLS cho trường hợp này. Gỡ policy select chỉ chặn
+-- hành vi LIỆT KÊ (duyệt/đoán danh sách file), không ảnh hưởng gì đến việc
+-- mở link đã có sẵn.
+--
+-- Chạy 1 lần trong Supabase Dashboard > SQL Editor. Idempotent (an toàn chạy
+-- lại nhiều lần, kể cả khi policy đã bị gỡ hoặc chưa từng tồn tại).
+-- ============================================================================
+
+drop policy if exists purchase_order_pdfs_select on storage.objects;
