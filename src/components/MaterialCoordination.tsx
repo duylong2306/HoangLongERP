@@ -805,10 +805,22 @@ export default function MaterialCoordination({
   };
 
   // ─── ORDER: edit / delete / print / share ────────────────────────────────
-  // html2pdf.js (dynamic import) — chỉ load khi cần chia sẻ/in PDF
-  const loadHtml2Pdf = async () => {
-    const mod = await import('html2pdf.js');
+  // html2canvas + jsPDF (dynamic import) — chỉ load khi cần chia sẻ/in PDF.
+  // KHÔNG dùng html2pdf.js cho bước chụp+ghép PDF: hàm toContainer() nội bộ
+  // của html2pdf.js clone phần tử nguồn vào 1 wrapper riêng rồi gán
+  // `container.height = ...` (gán thẳng property, KHÔNG phải `.style.height`)
+  // — với <div>, property "height" không tồn tại nên dòng này không có tác
+  // dụng gì, khiến container luôn cao 0 và html2canvas chụp ra ảnh trắng hoàn
+  // toàn (đã xác minh bằng cách chụp trực tiếp qua html2canvas: ra ảnh đúng,
+  // còn qua html2pdf().toCanvas(): ảnh cao 0px). Gọi html2canvas trực tiếp rồi
+  // tự ghép ảnh vào PDF bằng jsPDF (tự chia trang nếu nội dung dài hơn 1 trang).
+  const loadHtml2Canvas = async () => {
+    const mod = await import('html2canvas');
     return (mod as any).default || mod;
+  };
+  const loadJsPdf = async () => {
+    const mod = await import('jspdf');
+    return (mod as any).jsPDF || (mod as any).default;
   };
 
   // Escape HTML để tránh lỗi khi tên/vị trí chứa ký tự đặc biệt
@@ -851,7 +863,11 @@ export default function MaterialCoordination({
       <style>
         @page { size: A4; margin: 15mm 18mm; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }
+        /* .pdf-export-root: khi xuất PDF (html2canvas), nội dung được nhúng
+           trực tiếp vào 1 div của trang chính thay vì thẻ <body> thật (xem
+           generateOrderPdfBlob) — nhân đôi selector để font/màu gốc vẫn áp
+           dụng đúng trong cả 2 trường hợp (in trực tiếp qua <body> và xuất PDF). */
+        body, .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }
         .page { padding: 0; }
         /* Header dùng table thay vì flex: flex render không ổn định trong
            html2canvas (PDF chia sẻ) khiến 2 cột lệch/đè nhau — table thì luôn
@@ -889,7 +905,7 @@ export default function MaterialCoordination({
         .signatures .sig-note { font-size: 9.5px; color: #666; font-style: italic; margin-top: 4px; }
         .signatures .sig-name { font-weight: bold; margin-top: 40px; font-size: 11px; }
       </style></head><body>
-      <div class="page">
+      <div class="page pdf-export-root">
         <table class="header"><tr>
           <td class="company-info">
             <div class="name">${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
@@ -1008,44 +1024,78 @@ export default function MaterialCoordination({
   };
 
   // Dựng PDF Đơn Mua Hàng thành Blob — dùng chung cho cả "Chia sẻ" và "Tải PDF".
-  // Render trong 1 iframe ẩn thật (cùng cơ chế với "Xem trước"/"In" đang đúng)
-  // rồi mới chụp bằng html2canvas — truyền thẳng chuỗi HTML cho
-  // html2pdf().from(string) trước đây khiến nó không tính đúng layout bảng/CSS
-  // (không nằm trong 1 document/khung hình thật), gây vỡ layout trong PDF.
+  // TRƯỚC ĐÂY: render trong 1 <iframe> ẩn (srcdoc) rồi chụp bằng html2canvas —
+  // tưởng là đúng cách (giống "Xem trước"/"In") nhưng html2canvas không đọc
+  // được CSS của 1 document KHÁC (document bên trong iframe) khi được gọi từ
+  // window cha, nên toàn bộ style (viền bảng, màu nền tiêu đề cột, canh phải
+  // "TỔNG CỘNG", cỡ chữ "ĐƠN MUA HÀNG"...) bị bỏ qua hoàn toàn — PDF xuất ra
+  // chỉ còn cấu trúc <table> mặc định của trình duyệt, trông rất khác bản in
+  // thật (bản in dùng w.print() ngay trên chính iframe/tab đó nên không lỗi).
+  // NAY: dựng nội dung ngay trong 1 <div> ẩn của CHÍNH document đang chạy (như
+  // cách xuất PDF phiếu lương ở HumanResourcesManagement.tsx đã dùng ổn định)
+  // — html2canvas đọc đúng style vì phần tử thuộc cùng document với nơi gọi nó.
   const generateOrderPdfBlob = async (order: any): Promise<Blob> => {
     const ctx = resolveOrderCtx(order);
     const html = buildPurchaseOrderHtml(order, ctx);
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.left = '-99999px';
-    iframe.style.top = '0';
-    iframe.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
-    iframe.style.border = 'none';
-    document.body.appendChild(iframe);
+
+    // Tách riêng <style> và nội dung ".page" từ chuỗi HTML đầy đủ (vốn dựng
+    // sẵn cho window.print()) để nhúng vào document chính — không thể gán
+    // thẳng cả chuỗi <!doctype html>...<body> vào innerHTML của 1 div vì các
+    // thẻ html/head/body sẽ bị trình duyệt bỏ qua khi parse dạng fragment.
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    const styleText = parsed.querySelector('style')?.textContent || '';
+    const rootEl = parsed.querySelector('.page');
+    if (!rootEl) throw new Error('Không dựng được nội dung để xuất PDF.');
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.background = '#ffffff';
+    const styleEl = document.createElement('style');
+    styleEl.textContent = styleText;
+    container.appendChild(styleEl);
+    container.appendChild(rootEl.cloneNode(true));
+    document.body.appendChild(container);
     try {
-      await new Promise<void>((resolve, reject) => {
-        iframe.onload = () => resolve();
-        iframe.onerror = () => reject(new Error('Không dựng được nội dung để xuất PDF.'));
-        iframe.srcdoc = html;
-      });
       // Đợi 1 nhịp để trình duyệt layout xong hẳn trước khi chụp
       await new Promise((r) => setTimeout(r, 80));
-      const targetEl = iframe.contentDocument?.body;
-      if (!targetEl) throw new Error('Không dựng được nội dung để xuất PDF.');
 
-      const opt = {
-        // Khớp đúng lề với @page trong buildPurchaseOrderHtml (15mm trên/dưới,
-        // 18mm trái/phải) để PDF chia sẻ giống hệt bản in, không lệch lề.
-        margin: [15, 18, 15, 18],
-        filename: `DonMuaHang_${order.id}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', windowWidth: 794 },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      };
-      const html2pdf = (await loadHtml2Pdf()) as any;
-      return await html2pdf().from(targetEl).set(opt).outputPdf('blob');
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+
+      // Khớp đúng lề với @page trong buildPurchaseOrderHtml (15mm trên/dưới,
+      // 18mm trái/phải) để PDF giống hệt bản in, không lệch lề.
+      const marginTop = 15, marginSide = 18;
+      const pageWidthMm = 210, pageHeightMm = 297;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      // Chiều cao 1 trang, quy đổi ra px của canvas theo đúng tỉ lệ chiều rộng
+      // (canvas.width px ứng với contentWidthMm) — dùng để cắt canvas thành
+      // nhiều lát, mỗi lát 1 trang PDF khi nội dung dài hơn 1 trang A4.
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
     } finally {
-      document.body.removeChild(iframe);
+      document.body.removeChild(container);
     }
   };
 
