@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { isUserInRoleGroup, getMaterialCoordinator, getMaterialApprover } from '../context';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -172,6 +173,15 @@ export default function MaterialCoordination({
   const [quickPropIsWarehouse, setQuickPropIsWarehouse] = useState(false);
   // Tồn kho hiện tại — dùng để tự điền đơn giá & chặn vượt tồn khi chọn "Xuất từ Kho có sẵn"
   const [inventory, setInventory] = useState<any[]>([]);
+
+  // ─── Autocomplete "Tên vật tư" theo Danh mục MUA (purchase_product_catalog) —
+  // giống hệt cơ chế ở cửa sổ "ĐỀ XUẤT CUNG ỨNG VẬT TƯ" (ConnectedToolsModal.tsx) ──
+  const [purchaseCatalog, setPurchaseCatalog] = React.useState<any[]>([]);
+  const [quickPropCatalogOpenIdx, setQuickPropCatalogOpenIdx] = React.useState<number | null>(null);
+  const [quickPropCatalogOpenUp, setQuickPropCatalogOpenUp] = React.useState<boolean>(false);
+  const [quickPropCatalogRect, setQuickPropCatalogRect] = React.useState<DOMRect | null>(null);
+  const quickPropCatalogInputRef = React.useRef<HTMLInputElement | null>(null);
+  const quickPropCatalogDropdownRef = React.useRef<HTMLDivElement | null>(null);
 
   // ─── Phân trang: số trang + số dòng/trang cho từng cột ──────────────────
   const COL_PAGE_SIZES = [5, 10, 15, 20] as const;
@@ -464,6 +474,63 @@ export default function MaterialCoordination({
     const timer = setInterval(() => { cleanupCancelledProposals(); }, 60 * 60 * 1000);
     return () => clearInterval(timer);
   }, [cleanupCancelledProposals]);
+
+  // Nạp Danh mục MUA (autocomplete "Tên vật tư") — giống ConnectedToolsModal.tsx
+  React.useEffect(() => {
+    const syncCatalog = () => dbService.purchaseProductCatalog.list().then(setPurchaseCatalog).catch(e => console.error(e));
+    syncCatalog();
+    window.addEventListener('hl-warehouse-data-updated', syncCatalog);
+    return () => window.removeEventListener('hl-warehouse-data-updated', syncCatalog);
+  }, []);
+
+  // Đóng dropdown Danh mục MUA khi click ra ngoài hoặc bấm Escape
+  React.useEffect(() => {
+    if (quickPropCatalogOpenIdx === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (quickPropCatalogDropdownRef.current && quickPropCatalogDropdownRef.current.contains(t)) return;
+      if (quickPropCatalogInputRef.current && (quickPropCatalogInputRef.current === t || quickPropCatalogInputRef.current.contains(t))) return;
+      setQuickPropCatalogOpenIdx(null);
+      setQuickPropCatalogRect(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setQuickPropCatalogOpenIdx(null); setQuickPropCatalogRect(null); }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [quickPropCatalogOpenIdx]);
+
+  // Chọn 1 sản phẩm từ Danh mục MUA → gán vào dòng đang mở (tên, ĐVT, quy cách, mã, đơn giá)
+  const selectQuickPropCatalogItem = (p: any) => {
+    const openIdx = quickPropCatalogOpenIdx;
+    if (openIdx === null) return;
+    setQuickPropItems(prev => prev.map((it, i) => i === openIdx
+      ? {
+          ...it,
+          name: p.tenSanPham,
+          unit: p.donViTinh || it.unit,
+          spec: p.quyCach || it.spec,
+          maSanPham: p.ma_san_pham ?? p.maSanPham ?? '',
+          price: p.donGia ?? it.price,
+        }
+      : it));
+    setQuickPropCatalogOpenIdx(null);
+    setQuickPropCatalogRect(null);
+  };
+
+  // Lọc Danh mục MUA theo từ khóa của dòng đang mở dropdown
+  const getQuickPropCatalogFiltered = () => {
+    if (quickPropCatalogOpenIdx === null) return [];
+    const openRow = quickPropItems[quickPropCatalogOpenIdx];
+    const term = (openRow?.name || '').toLowerCase();
+    return purchaseCatalog
+      .filter(p => !term || String(p.tenSanPham || '').toLowerCase().includes(term))
+      .slice(0, 30);
+  };
 
   // ─── Quick Proposal: tạo đề xuất vật tư nhanh ─────────────────────────────
   const addQuickPropItem = () => {
@@ -3167,8 +3234,30 @@ export default function MaterialCoordination({
                       <span className="text-[10px] font-mono font-bold text-slate-400 w-5 text-center shrink-0">{idx + 1}</span>
                       <input
                         value={it.name}
-                        onChange={(e) => updateQuickPropItem(idx, 'name', e.target.value)}
-                        placeholder="Tên vật tư *"
+                        onFocus={(e) => {
+                          setQuickPropCatalogOpenIdx(idx);
+                          quickPropCatalogInputRef.current = e.currentTarget;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setQuickPropCatalogRect(rect);
+                          // Mở LÊN nếu ô nhập nằm ở nửa dưới màn hình để danh sách gợi ý không bị khuất.
+                          setQuickPropCatalogOpenUp(rect.bottom > window.innerHeight * 0.6);
+                        }}
+                        onChange={(e) => {
+                          updateQuickPropItem(idx, 'name', e.target.value);
+                          // Nhập tay: nếu khớp chính xác tên trong Danh mục MUA thì tự gán mã, ngược lại bỏ mã.
+                          const exact = purchaseCatalog.find(p =>
+                            String(p.tenSanPham || '').toLowerCase().trim() === e.target.value.toLowerCase().trim());
+                          setQuickPropItems(prev => prev.map((row, i) => i === idx
+                            ? {
+                                ...row,
+                                name: e.target.value,
+                                maSanPham: exact ? (exact.ma_san_pham ?? exact.maSanPham ?? '') : '',
+                                unit: exact ? (exact.donViTinh || row.unit) : row.unit,
+                                spec: exact ? (exact.quyCach || row.spec) : row.spec,
+                              }
+                            : row));
+                        }}
+                        placeholder="Tên vật tư * (gõ để tìm Danh mục MUA...)"
                         className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-amber-400"
                       />
                       <button type="button" onClick={() => removeQuickPropItem(idx)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer shrink-0">
@@ -3235,6 +3324,45 @@ export default function MaterialCoordination({
               <Zap className="w-4 h-4" /> Tạo đề xuất
             </button>
           </div>
+
+          {/* Dropdown Danh mục MUA render qua Portal — thoát khỏi container cuộn
+              của modal nên không bị khuất / cắt (clip) dù ở dòng cuối cùng. Đặt
+              BÊN TRONG modal box (trước dấu đóng có onClick={stopPropagation})
+              để click chọn gợi ý không bị bong bóng ra ngoài làm đóng cả modal. */}
+          {quickPropCatalogOpenIdx !== null && quickPropCatalogRect && createPortal(
+          <div
+            ref={quickPropCatalogDropdownRef}
+            className={`fixed z-[9900] ${quickPropCatalogOpenUp ? 'mb-1' : 'mt-1'} max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-2xl divide-y divide-slate-100`}
+            style={{
+              left: quickPropCatalogRect.left,
+              width: quickPropCatalogRect.width,
+              ...(quickPropCatalogOpenUp
+                ? { bottom: window.innerHeight - quickPropCatalogRect.top + 4 }
+                : { top: quickPropCatalogRect.bottom + 4 }),
+            }}
+          >
+            {getQuickPropCatalogFiltered().map(p => (
+              <button
+                key={p.ma_san_pham ?? p.id ?? String(p.tenSanPham)}
+                type="button"
+                onClick={() => selectQuickPropCatalogItem(p)}
+                className="w-full text-left p-2 hover:bg-amber-50 text-slate-800 text-[11px] font-medium transition-colors block"
+              >
+                <div className="font-bold text-amber-600">{p.tenSanPham}</div>
+                <div className="text-slate-500 text-[9.5px]">
+                  {p.ma_san_pham || p.maSanPham ? `Mã: ${p.ma_san_pham || p.maSanPham} · ` : ''}{p.donViTinh || ''} · {p.quyCach || ''}
+                </div>
+              </button>
+            ))}
+            {getQuickPropCatalogFiltered().length === 0 && (
+              <div className="p-2 text-slate-400 text-[10.5px] text-center">Không tìm thấy trong Danh mục MUA</div>
+            )}
+            {purchaseCatalog.length === 0 && (
+              <div className="p-2 text-slate-400 text-[10.5px] text-center">Danh mục MUA trống</div>
+            )}
+          </div>,
+          document.body
+        )}
         </div>
       </div>
     )}
