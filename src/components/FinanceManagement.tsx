@@ -112,6 +112,7 @@ export const proposalTypeLabel = (type?: string): string => {
     case 'supplier_payment_proposal': return 'Chi Nhà Cung Cấp';
     case 'salary_advance': return 'Ứng Lương Nhân Sự';
     case 'cash_fund_deposit': return 'Quỹ Tiền Mặt (Nạp Quỹ)';
+    case 'other_expense_proposal': return 'Chi Khác';
     default: return 'Khác';
   }
 };
@@ -122,6 +123,7 @@ export const PROPOSAL_TYPE_BADGE: Record<string, string> = {
   supplier_payment_proposal: 'bg-white text-purple-700 border-purple-400',
   salary_advance: 'bg-white text-pink-700 border-pink-400',
   cash_fund_deposit: 'bg-white text-teal-700 border-teal-400',
+  other_expense_proposal: 'bg-white text-slate-700 border-slate-400',
 };
 
 const getAbbreviation = (name: string): string => {
@@ -178,6 +180,10 @@ const QUICK_LAUNCH_ITEMS: QuickLaunchItem[] = [
   { key: 'adv_site', group: 'proposal', label: 'Chi phí Công trình', emoji: '🏗️', desc: 'Đối tượng: Công trình / Dự án', paymentCategory: 'site_expense', recipientKind: 'project' },
   { key: 'adv_sub', group: 'proposal', label: 'Chi Thầu Phụ', emoji: '🤝', desc: 'Tạm ứng / Thanh toán công nợ thầu phụ', paymentCategory: 'subcontractor_advance', recipientKind: 'supplier' },
   { key: 'adv_cash_fund', group: 'proposal', label: 'Quỹ Tiền Mặt (Nạp Quỹ)', emoji: '💰', desc: 'Nạp tiền vào Quỹ tiền mặt công ty', paymentCategory: 'cash_fund', recipientKind: 'employee' },
+  // Đề xuất Chi Khác: dùng cho khoản chi không thuộc 5 nhóm còn lại (Thầu Phụ, Chi
+  // phí Công trình, Nhà Cung Cấp, Ứng lương, Nạp Quỹ) — đối tượng chi là 1 nhân
+  // viên do người lập đề xuất chọn tay, không bắt buộc gắn dự án.
+  { key: 'adv_other', group: 'proposal', label: 'Chi Khác', emoji: '📦', desc: 'Đề xuất chi không thuộc các nhóm còn lại', paymentCategory: 'other', recipientKind: 'employee' },
   // Nhóm B — LẬP PHIẾU CHI TRỰC TIẾP (mở form Payment, pre-select category)
   { key: 'pay_site', group: 'direct', label: 'Chi tiêu Công trình', emoji: '🏗️', desc: 'Chi thực tế công trình', paymentCategory: 'site_expense', recipientKind: 'project' },
   { key: 'pay_salary', group: 'direct', label: 'Lương Thưởng', emoji: '💵', desc: 'Trả lương / thưởng nhân viên', paymentCategory: 'salary', recipientKind: 'employee' },
@@ -190,6 +196,7 @@ const proposalTargetCatLabel = (p: { type?: string; taskName?: string }): string
   if (p.type === 'supplier_payment_proposal') return 'Chi Nhà Cung Cấp';
   if (p.type === 'subcontractor_advance') return 'Chi Thầu Phụ';
   if (p.type === 'cash_fund_deposit') return 'Quỹ Tiền Mặt (Nạp Quỹ)';
+  if (p.type === 'other_expense_proposal') return 'Chi Khác';
   if ((p.taskName || '').startsWith('Ứng lương')) return 'Ứng Lương Nhân Sự';
   return 'Chi phí Công trình';
 };
@@ -658,7 +665,7 @@ export default function FinanceManagement({
   const [revertProposalModal, setRevertProposalModal] = useState<SubcontractorAdvanceProposal | null>(null);
   const [editingAmountProposal, setEditingAmountProposal] = useState<SubcontractorAdvanceProposal | null>(null);
   const [editAmountValue, setEditAmountValue] = useState<string>('');
-  const [proposalTypeFilter, setProposalTypeFilter] = useState<'all' | 'subcontractor' | 'expense' | 'salary' | 'supplier' | 'cash_fund'>('all');
+  const [proposalTypeFilter, setProposalTypeFilter] = useState<'all' | 'subcontractor' | 'expense' | 'salary' | 'supplier' | 'cash_fund' | 'other'>('all');
   const [viewingProposalDetail, setViewingProposalDetail] = useState<SubcontractorAdvanceProposal | null>(null);
   // Input "Số tiền duyệt chi" trong cửa sổ chi tiết (người xét duyệt nhập)
   const [approveAmountInput, setApproveAmountInput] = useState<string>('');
@@ -805,7 +812,7 @@ export default function FinanceManagement({
   const [showQuickProposalModal, setShowQuickProposalModal] = useState(false);
   // Tín hiệu mở nhanh form "Thêm Nhà Cung Cấp" ở tab Nhà cung cấp vật tư (tăng để trigger).
   const [addSupplierSignal, setAddSupplierSignal] = useState(0);
-  const [quickProposalType, setQuickProposalType] = useState<'subcontractor_advance' | 'project_expense_proposal' | 'salary_advance' | 'supplier_payment_proposal' | 'cash_fund_deposit'>('project_expense_proposal');
+  const [quickProposalType, setQuickProposalType] = useState<'subcontractor_advance' | 'project_expense_proposal' | 'salary_advance' | 'supplier_payment_proposal' | 'cash_fund_deposit' | 'other_expense_proposal'>('project_expense_proposal');
   const [quickLaunchItem, setQuickLaunchItem] = useState<QuickLaunchItem | null>(null);
   // Hình thức Chi Thầu Phụ: 'advance' = Tạm ứng Thầu Phụ | 'debt' = Thanh Toán Công Nợ Thầu Phụ
   const [quickProposalSubMode, setQuickProposalSubMode] = useState<'advance' | 'debt'>('advance');
@@ -836,6 +843,7 @@ export default function FinanceManagement({
       item.key === 'adv_site' ? 'project_expense_proposal' :
       item.key === 'adv_salary' ? 'salary_advance' :
       item.key === 'adv_cash_fund' ? 'cash_fund_deposit' :
+      item.key === 'adv_other' ? 'other_expense_proposal' :
       'supplier_payment_proposal'
     );
     // Chi phí Công trình (adv_site) LUÔN chọn nhân viên làm đối tượng nhận —
@@ -843,9 +851,9 @@ export default function FinanceManagement({
     // không thể "nhận tiền" (xem giải thích ở handleQuickProposalSubmit).
     setQuickProposalRecipientKind(item.key === 'adv_site' ? 'employee' : item.recipientKind);
     setQuickProposalSubMode(initial?.subMode ?? 'advance');
-    // Chi Nhà Cung Cấp / Nạp Quỹ Tiền Mặt không gắn dự án (trường Dự án/Công
-    // trình đã ẩn) → để trống.
-    setQuickProposalProjId((item.key === 'adv_supplier' || item.key === 'adv_cash_fund') ? '' : (initial?.projId ?? projects[0]?.id ?? ''));
+    // Chi Nhà Cung Cấp / Nạp Quỹ Tiền Mặt / Chi Khác không gắn dự án (trường Dự
+    // án/Công trình đã ẩn) → để trống.
+    setQuickProposalProjId((item.key === 'adv_supplier' || item.key === 'adv_cash_fund' || item.key === 'adv_other') ? '' : (initial?.projId ?? projects[0]?.id ?? ''));
     setQuickProposalSubId(initial?.subId ?? '');
     setQuickProposalAmount(initial?.amount != null ? String(initial.amount) : '');
     setQuickProposalReason(initial?.reason ?? '');
@@ -3402,6 +3410,7 @@ export default function FinanceManagement({
     let taskName = isDebtMode ? 'Thanh Toán Công Nợ Thầu Phụ'
       : quickProposalType === 'project_expense_proposal' ? projectNameForSave
       : quickProposalType === 'cash_fund_deposit' ? 'Nạp Quỹ Tiền Mặt'
+      : quickProposalType === 'other_expense_proposal' ? 'Chi Khác'
       : (selProject?.name || '');
     if (quickProposalType === 'salary_advance') {
       const period = new Date().toLocaleDateString('vi-VN', { month: '2-digit', year: 'numeric' });
@@ -3417,7 +3426,7 @@ export default function FinanceManagement({
     let approverId = '';
     const cfgDocType: 'finance_expense_proposal' | 'finance_advance_proposal' | 'salary_advance' =
       quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal'
-      : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit') ? 'finance_expense_proposal'
+      : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal'
       : 'salary_advance';
     const configuredApprover = getConfiguredApprover(cfgDocType);
     if (configuredApprover?.name) {
@@ -3479,7 +3488,7 @@ export default function FinanceManagement({
           senderRole: (currentUser as any)?.role,
           recipientId: approverEmp.id,
           recipientName: approverEmp.name || approverName,
-          content: `🔔 Đề xuất ${quickProposalType === 'subcontractor_advance' ? (isDebtMode ? 'THANH TOÁN CÔNG NỢ THẦU PHỤ' : 'TẠM ỨNG THẦU PHỤ') : quickProposalType === 'supplier_payment_proposal' ? 'CHI NHÀ CUNG CẤP' : quickProposalType === 'cash_fund_deposit' ? 'NẠP QUỸ TIỀN MẶT' : 'CHI PHÍ DỰ ÁN'} ${proposalCode} (${projectNameForSave}) ${amount.toLocaleString('vi-VN')}đ. Lý do: ${newProposal.reason}. Vui lòng xem xét.`,
+          content: `🔔 Đề xuất ${quickProposalType === 'subcontractor_advance' ? (isDebtMode ? 'THANH TOÁN CÔNG NỢ THẦU PHỤ' : 'TẠM ỨNG THẦU PHỤ') : quickProposalType === 'supplier_payment_proposal' ? 'CHI NHÀ CUNG CẤP' : quickProposalType === 'cash_fund_deposit' ? 'NẠP QUỸ TIỀN MẶT' : quickProposalType === 'other_expense_proposal' ? 'CHI KHÁC' : 'CHI PHÍ DỰ ÁN'} ${proposalCode} (${projectNameForSave}) ${amount.toLocaleString('vi-VN')}đ. Lý do: ${newProposal.reason}. Vui lòng xem xét.`,
           relatedEntity: { type: 'advance', id: proposalCode },
         });
       }
@@ -3533,12 +3542,13 @@ export default function FinanceManagement({
     const proposalIsProjectExpense = activeProposalForPayment?.type === 'project_expense_proposal';
     const proposalIsSupplierPayment = activeProposalForPayment?.type === 'supplier_payment_proposal';
     const proposalIsCashFundDeposit = activeProposalForPayment?.type === 'cash_fund_deposit';
+    const proposalIsOtherExpense = activeProposalForPayment?.type === 'other_expense_proposal';
 
     if (activeProposalForPayment) {
       // `subcontractorId` trên SubcontractorAdvanceProposal là trường ID người nhận
       // DÙNG CHUNG cho mọi loại đề xuất (đặt tên theo lịch sử) — thực chất có thể là
-      // nhân viên (ứng lương/chi phí công trình/nạp quỹ), nhà cung cấp, hoặc thầu phụ tùy `type`.
-      if (proposalIsSalaryAdvance || proposalIsProjectExpense || proposalIsCashFundDeposit) {
+      // nhân viên (ứng lương/chi phí công trình/nạp quỹ/chi khác), nhà cung cấp, hoặc thầu phụ tùy `type`.
+      if (proposalIsSalaryAdvance || proposalIsProjectExpense || proposalIsCashFundDeposit || proposalIsOtherExpense) {
         resolvedEmployeeId = activeProposalForPayment.subcontractorId;
       } else if (proposalIsSupplierPayment) {
         resolvedSupplierId = activeProposalForPayment.subcontractorId;
@@ -3584,6 +3594,7 @@ export default function FinanceManagement({
           : proposalIsProjectExpense ? 'site_expense'
           : proposalIsSupplierPayment ? 'supplier_payment'
           : proposalIsCashFundDeposit ? 'cash_fund'
+          : proposalIsOtherExpense ? 'other'
           : 'subcontractor_advance')
         : payCategory,
       amount: Number(payAmount),
@@ -3795,9 +3806,10 @@ export default function FinanceManagement({
     const isProjectExpense = proposal.type === 'project_expense_proposal';
     const isSupplierPayment = proposal.type === 'supplier_payment_proposal';
     const isCashFundDeposit = proposal.type === 'cash_fund_deposit';
+    const isOtherExpense = proposal.type === 'other_expense_proposal';
 
     setPayRecipientKind(
-      isSalaryAdvance || isProjectExpense || isCashFundDeposit ? 'employee'
+      isSalaryAdvance || isProjectExpense || isCashFundDeposit || isOtherExpense ? 'employee'
         : isSupplierPayment ? 'supplier'
         : 'subcontractor'
     );
@@ -3825,6 +3837,9 @@ export default function FinanceManagement({
     } else if (isCashFundDeposit) {
       setPayCategory('cash_fund');
       setPayNotes(`[${proposal.id}] Nạp Quỹ Tiền Mặt. Diễn giải: ${proposal.reason || 'Trống'}`);
+    } else if (isOtherExpense) {
+      setPayCategory('other');
+      setPayNotes(`[${proposal.id}] Chi Khác cho ${proposal.subcontractorName}. Diễn giải: ${proposal.reason || 'Trống'}`);
     } else {
       // subcontractor_advance: Tạm ứng Thầu Phụ (có dự án, bắt buộc khi tạo đề xuất)
       // hoặc Thanh Toán Công Nợ Thầu Phụ (không gắn dự án) — payProj đã lấy đúng ở trên.
@@ -5281,6 +5296,8 @@ export default function FinanceManagement({
                   if (a.type !== 'supplier_payment_proposal') return false;
                 } else if (proposalTypeFilter === 'cash_fund') {
                   if (a.type !== 'cash_fund_deposit') return false;
+                } else if (proposalTypeFilter === 'other') {
+                  if (a.type !== 'other_expense_proposal') return false;
                 }
                 if (!searchTerm) return true;
                 return (
@@ -5322,6 +5339,7 @@ export default function FinanceManagement({
               const countSup = activeProposalList.filter(a => a.type === 'supplier_payment_proposal').length;
               const countSal = activeProposalList.filter(a => a.type === 'salary_advance').length;
               const countCashFund = activeProposalList.filter(a => a.type === 'cash_fund_deposit').length;
+              const countOther = activeProposalList.filter(a => a.type === 'other_expense_proposal').length;
 
               const getStatusBadge = (status: SubcontractorAdvanceProposal['status']) => {
                 switch (status) {
@@ -5360,6 +5378,7 @@ export default function FinanceManagement({
                           item.key === 'adv_site' ? 'bg-emerald-600 hover:bg-emerald-500' :
                           item.key === 'adv_sub' ? 'bg-sky-600 hover:bg-sky-500' :
                           item.key === 'adv_cash_fund' ? 'bg-teal-600 hover:bg-teal-500' :
+                          item.key === 'adv_other' ? 'bg-slate-600 hover:bg-slate-500' :
                           'bg-pink-600 hover:bg-pink-500';
                         return (
                           <button
@@ -5389,6 +5408,7 @@ export default function FinanceManagement({
                           {proposalTypeFilter === 'supplier' && "Danh sách Đề xuất Chi Nhà Cung Cấp"}
                           {proposalTypeFilter === 'salary' && "Danh sách Đề xuất Ứng Lương Nhân sự"}
                           {proposalTypeFilter === 'cash_fund' && "Danh sách Đề xuất Quỹ Tiền Mặt (Nạp Quỹ)"}
+                          {proposalTypeFilter === 'other' && "Danh sách Đề xuất Chi Khác"}
                         </h3>
                         <p className="text-[10px] text-slate-400 mt-0.5">Xử lý phê duyệt tạm ứng thầu phụ, chi phí phát sinh công trình và kết nối sổ quỹ kế toán chi tiền.</p>
                       </div>
@@ -5477,6 +5497,17 @@ export default function FinanceManagement({
                           }`}
                         >
                           Nạp Quỹ ({countCashFund})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProposalTypeFilter('other')}
+                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                            proposalTypeFilter === 'other'
+                              ? 'bg-slate-500/10 text-slate-300 font-black'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Chi Khác ({countOther})
                         </button>
                         </div>
                       </div>
@@ -5617,13 +5648,14 @@ export default function FinanceManagement({
                                   adv.type === 'supplier_payment_proposal' ? 'text-purple-700 group-hover:text-purple-800'
                                   : adv.type === 'salary_advance' ? 'text-pink-700 group-hover:text-pink-800'
                                   : adv.type === 'cash_fund_deposit' ? 'text-teal-700 group-hover:text-teal-800'
+                                  : adv.type === 'other_expense_proposal' ? 'text-slate-700 group-hover:text-slate-800'
                                   : isExpense ? 'text-emerald-700 group-hover:text-emerald-800'
                                   : 'text-sky-700 group-hover:text-sky-800'
                                 }`}>
                                   {adv.subcontractorName}
                                 </h4>
                                 <p className="text-[8.5px] text-slate-500 mt-0.5 truncate">
-                                  {adv.type === 'supplier_payment_proposal' ? 'Chi Nhà Cung Cấp' : adv.type === 'salary_advance' ? 'Ứng Lương' : adv.type === 'cash_fund_deposit' ? 'Nạp Quỹ Tiền Mặt' : isExpense ? 'Đề Xuất Chi' : 'Chi Thầu Phụ'} · {adv.creatorName || '—'}
+                                  {adv.type === 'supplier_payment_proposal' ? 'Chi Nhà Cung Cấp' : adv.type === 'salary_advance' ? 'Ứng Lương' : adv.type === 'cash_fund_deposit' ? 'Nạp Quỹ Tiền Mặt' : adv.type === 'other_expense_proposal' ? 'Chi Khác' : isExpense ? 'Đề Xuất Chi' : 'Chi Thầu Phụ'} · {adv.creatorName || '—'}
                                 </p>
                               </div>
 
@@ -5802,8 +5834,8 @@ export default function FinanceManagement({
                         </div>
                       )}
 
-                      {/* Chọn dự án / công trình — ẩn với Ứng Lương, Chi Nhà Cung Cấp, Nạp Quỹ Tiền Mặt */}
-                      {quickProposalType === 'salary_advance' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' ? null : (
+                      {/* Chọn dự án / công trình — ẩn với Ứng Lương, Chi Nhà Cung Cấp, Nạp Quỹ Tiền Mặt, Chi Khác */}
+                      {quickProposalType === 'salary_advance' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal' ? null : (
                         quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' ? (
                           <div>
                             <label className="block text-slate-400 font-semibold mb-1">Dự án / Công trình:</label>
@@ -5961,8 +5993,8 @@ export default function FinanceManagement({
                         );
                       })()}
 
-                      {/* Chọn nhân viên: chỉ dùng cho Ứng Lương (project_expense_proposal / cash_fund_deposit
-                          có đối tượng chi cố định = người lập đề xuất, xem info box bên dưới) */}
+                      {/* Chọn nhân viên: dùng cho Ứng Lương và Chi Khác (project_expense_proposal /
+                          cash_fund_deposit có đối tượng chi cố định = người lập đề xuất, xem info box bên dưới) */}
                       {quickProposalRecipientKind === 'employee' && quickProposalType !== 'project_expense_proposal' && quickProposalType !== 'cash_fund_deposit' && (
                         <div>
                           <label className="block text-slate-400 font-semibold mb-1">Nhân viên <span className="text-rose-500">*</span>:</label>
@@ -6167,13 +6199,13 @@ export default function FinanceManagement({
                           <div>
                             <span className="text-[9px] text-slate-400 block mb-0.5">Người xét duyệt</span>
                             <div className="text-[11px] font-bold text-white">
-                              {getConfiguredApprover(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit') ? 'finance_expense_proposal' : 'salary_advance')?.name || <span className="text-amber-400">Chưa cấu hình</span>}
+                              {getConfiguredApprover(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance')?.name || <span className="text-amber-400">Chưa cấu hình</span>}
                             </div>
                           </div>
                           <div>
                             <span className="text-[9px] text-slate-400 block mb-0.5">Người quyết toán</span>
                             <div className="text-[11px] font-bold text-white">
-                              {getConfiguredSettler(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit') ? 'finance_expense_proposal' : 'salary_advance')?.name || <span className="text-amber-400">Chưa cấu hình</span>}
+                              {getConfiguredSettler(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance')?.name || <span className="text-amber-400">Chưa cấu hình</span>}
                             </div>
                           </div>
                         </div>
