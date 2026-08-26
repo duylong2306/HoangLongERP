@@ -2442,7 +2442,6 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                     type: 'success',
                   });
                   setActiveConnectedTool(null);
-                  window.dispatchEvent(new CustomEvent('hl-switch-tab', { detail: 'material-coordination' }));
                 } catch (error: any) {
                   console.error('Lỗi khi Gửi đề xuất:', error);
                   addToast({
