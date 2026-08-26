@@ -2464,19 +2464,37 @@ export default function FinanceManagement({
   }, [activeSubTab]);
 
   // ── Danh mục sản phẩm kế toán: Load from Supabase on mount ──
+  // CHẶN VÒNG LẶP: effect sync bên dưới trước đây KHÔNG so sánh nội dung, chỉ
+  // check cờ accProdLoaded — nhưng setAccProducts(cloudData) và
+  // setAccProdLoaded(true) cùng nằm trong 1 callback nên React batch chung 1
+  // lần render, khiến effect sync chạy ngay với accProdLoaded=true → tự lưu
+  // lại TOÀN BỘ danh mục vừa tải về lên Supabase mỗi lần mở tab (cùng bug với
+  // Công Nợ Thu/Trả). Thêm prevAccProductsRef để chỉ lưu dòng THẬT SỰ khác DB,
+  // giống hệt cách accounting_liabilities/accounting_receivables đã sửa.
+  const prevAccProductsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     dbService.accountingProductCatalog.list().then((cloudData) => {
       if (cloudData && cloudData.length > 0) {
         setAccProducts(cloudData);
+        prevAccProductsRef.current = new Map(cloudData.map((p: any) => [p.id, liabRowSig(p)]));
       }
       setAccProdLoaded(true);
     }).catch(() => setAccProdLoaded(true));
   }, []);
 
-  // ── Danh mục sản phẩm kế toán: Sync to Supabase on change ──
+  // ── Danh mục sản phẩm kế toán: Sync to Supabase on change (chỉ dòng thật sự đổi) ──
   useEffect(() => {
     if (!accProdLoaded) return;
-    accProducts.forEach(p => dbService.accountingProductCatalog.save(p).catch(() => {}));
+    const prevMap = prevAccProductsRef.current;
+    const nextSigs = new Map(accProducts.map(p => [p.id, liabRowSig(p)]));
+    prevMap.forEach((_, id) => { if (!nextSigs.has(id)) prevMap.delete(id); });
+    accProducts.forEach(p => {
+      if (prevMap.get(p.id) !== nextSigs.get(p.id)) {
+        dbService.accountingProductCatalog.save(p).then(() => {
+          prevMap.set(p.id, nextSigs.get(p.id)!);
+        }).catch(() => {});
+      }
+    });
   }, [accProducts, accProdLoaded]);
 
   // ── Đơn hàng bán: Sync salesOrders when prop changes ──

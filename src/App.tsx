@@ -775,6 +775,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             if (cloudData.business_profile?.[0]) {
               const bp = toCamel([cloudData.business_profile[0]])[0];
               setBusinessInfo(bp);
+              // Đồng bộ luôn baseline (lastSavedBizRef) tại đây — nếu không, effect
+              // "chặn vòng lặp" phía trên có thể đã tiêu cờ isBusinessInfoInitRef ở
+              // lần render với businessInfo còn là giá trị mặc định hard-code (trước
+              // khi cloud load xong), khiến setBusinessInfo(bp) THẬT ở đây bị hiểu
+              // nhầm là "vừa sửa" nếu bp khác mặc định dù chỉ 1 field → lưu thừa 1 lần.
+              isBusinessInfoInitRef.current = false;
+              lastSavedBizRef.current = stableStr(bp);
             }
             if (cloudData.shift_config?.[0]) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...toCamel([cloudData.shift_config[0]])[0] }));
 

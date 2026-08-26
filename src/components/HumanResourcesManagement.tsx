@@ -1170,8 +1170,18 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // =====================================================================
 
   // ─── CLOUD SYNC: Load từ Supabase khi mount ───
+  // LƯU Ý: Roles/Employees/Holidays/Payroll/LeaveCoefficients/Trips/SalaryScales
+  // đều có sẵn cờ isSyncingXxxFromCloud (dùng đúng cho các listener "REALTIME
+  // LISTENER" refetch-khi-có-sự-kiện bên dưới), nhưng TRƯỚC ĐÂY không được bật
+  // ở LẦN TẢI ĐẦU TIÊN này — khiến effect "SYNC TO SUPABASE" hiểu nhầm dữ liệu
+  // vừa tải về là "người dùng vừa sửa" và tự lưu lại TOÀN BỘ từng dòng lên
+  // Supabase ngay mỗi khi mở tab Nhân sự (đã xác nhận qua log thực tế, cùng
+  // bug với Công Nợ Thu/Trả ở FinanceManagement.tsx). Bật cờ trước khi fetch,
+  // tắt sau 500ms kể từ lúc có dữ liệu — giống đúng cách Leaves/EmployeeErrors/
+  // Criteria/TravelNorms đã làm đúng ở dưới.
   useEffect(() => {
     // Roles
+    isSyncingRolesFromCloud.current = true;
     dbService.hrmRoleGroups.list().then((cloudRoles: any[]) => {
       if (cloudRoles && cloudRoles.length > 0) {
         if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
@@ -1182,15 +1192,24 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           permissions: r.permissions || {}, memberIds: r.memberIds || [],
         })));
       }
-    }).catch(err => { console.warn('Load roles from Supabase thất bại:', err); });
-    // Employees
+    }).catch(err => { console.warn('Load roles from Supabase thất bại:', err); }).finally(() => {
+      setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
+    });
+    // Employees (dùng chung cờ isSyncingRolesFromCloud — 2 effect sync bên dưới
+    // đều check đúng cờ này, xem dòng "SYNC TO SUPABASE" cho employees/roles).
+    isSyncingRolesFromCloud.current = true;
     dbService.employees.list().then((cloudEmps: any[]) => {
       if (cloudEmps && cloudEmps.length > 0) {
         setEmployees(cloudEmps);
       }
-    }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); });
+    }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); }).finally(() => {
+      setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
+    });
     // Holidays
-    dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {});
+    isSyncingHolidaysFromCloud.current = true;
+    dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingHolidaysFromCloud.current = false; }, 500);
+    });
     // Leaves
     isSyncingLeavesFromCloud.current = true;
     dbService.hrmLeaves.list().then((d: any[]) => {
@@ -1199,7 +1218,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       setTimeout(() => { isSyncingLeavesFromCloud.current = false; }, 500);
     });
     // Payroll
-    dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {});
+    isSyncingPayrollFromCloud.current = true;
+    dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingPayrollFromCloud.current = false; }, 500);
+    });
     // Employee Errors
     isSyncingEmployeeErrorsFromCloud.current = true;
     dbService.hrmEmployeeErrors.list().then((d: any[]) => {
@@ -1208,11 +1230,20 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       setTimeout(() => { isSyncingEmployeeErrorsFromCloud.current = false; }, 500);
     });
     // Leave Coefficients
-    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {});
+    isSyncingLeaveCoefficientsFromCloud.current = true;
+    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingLeaveCoefficientsFromCloud.current = false; }, 500);
+    });
     // Trips
-    dbService.hrmTrips.list().then((d: any[]) => { if (d?.length) setTrips(d); }).catch(() => {});
+    isSyncingTripsFromCloud.current = true;
+    dbService.hrmTrips.list().then((d: any[]) => { if (d?.length) setTrips(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingTripsFromCloud.current = false; }, 500);
+    });
     // Salary Scales
-    dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {});
+    isSyncingSalaryScalesFromCloud.current = true;
+    dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingSalaryScalesFromCloud.current = false; }, 500);
+    });
     // Performance Criteria
     isSyncingCriteriaFromCloud.current = true;
     dbService.hrmPerformanceCriteria.list().then((d: any[]) => {

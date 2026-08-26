@@ -426,43 +426,50 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
 
   const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => INITIAL_MATERIALS);
 
+  // Cờ chặn "tự lưu lại toàn bộ danh mục lên Supabase ngay khi vừa tải xong":
+  // products/pricesList/materialsList khởi tạo bằng dữ liệu MẪU hard-code
+  // (INITIAL_PRODUCTS/PRICES/MATERIALS) — nếu không chặn, effect sync bên dưới
+  // chạy ngay ở lần render ĐẦU TIÊN (với dữ liệu mẫu) rồi LẦN NỮA khi
+  // setState(cloudData) thật xong, ghi đè lại TOÀN BỘ danh mục lên Supabase 2
+  // lần mỗi khi mở tab này — không phải do người dùng sửa gì. Bắt đầu = true
+  // để chặn luôn cả lần render với dữ liệu mẫu, tắt sau khi có dữ liệu thật.
+  const isSyncingProductsFromCloud = useRef(true);
+  const isSyncingPricesFromCloud = useRef(true);
+  const isSyncingMaterialsFromCloud = useRef(true);
+
   // ── Load from Supabase on mount & sync prices to Supabase ──
   useEffect(() => {
     dbService.productPrices.list().then((cloudPrices) => {
       if (cloudPrices && cloudPrices.length > 0) {
         setPricesList(cloudPrices);
       }
-    }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err));
+    }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err)).finally(() => {
+      setTimeout(() => { isSyncingPricesFromCloud.current = false; }, 500);
+    });
 
     dbService.productMaterials.list().then((cloudMats) => {
       if (cloudMats && cloudMats.length > 0) {
         setMaterialsList(cloudMats);
       }
-    }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err));
+    }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err)).finally(() => {
+      setTimeout(() => { isSyncingMaterialsFromCloud.current = false; }, 500);
+    });
   }, []);
 
-  // Sync prices to Supabase when changed (only after initial load to avoid overwrite)
-  const [pricesLoaded, setPricesLoaded] = useState(false);
+  // Sync prices to Supabase when changed (chỉ khi người dùng thật sự sửa)
   useEffect(() => {
-    if (!pricesLoaded) {
-      if (pricesList.length >= 0) setPricesLoaded(true);
-      return;
-    }
+    if (isSyncingPricesFromCloud.current) return;
     if (pricesList.length > 0) {
       pricesList.forEach(p => dbService.productPrices.save(p).catch(() => {}));
     }
-  }, [pricesList, pricesLoaded]);
+  }, [pricesList]);
 
-  const [materialsLoaded, setMaterialsLoaded] = useState(false);
   useEffect(() => {
-    if (!materialsLoaded) {
-      if (materialsList.length >= 0) setMaterialsLoaded(true);
-      return;
-    }
+    if (isSyncingMaterialsFromCloud.current) return;
     if (materialsList.length > 0) {
       materialsList.forEach(m => dbService.productMaterials.save(m).catch(() => {}));
     }
-  }, [materialsList, materialsLoaded]);
+  }, [materialsList]);
 
   // ── Load from Supabase on mount & sync products to Supabase ──
   useEffect(() => {
@@ -470,11 +477,14 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       if (cloudProducts && cloudProducts.length > 0) {
         setProducts(cloudProducts);
       }
-    }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err));
+    }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err)).finally(() => {
+      setTimeout(() => { isSyncingProductsFromCloud.current = false; }, 500);
+    });
   }, []);
 
-  // Sync products to Supabase when changed
+  // Sync products to Supabase when changed (chỉ khi người dùng thật sự sửa)
   useEffect(() => {
+    if (isSyncingProductsFromCloud.current) return;
     if (products.length > 0) {
       products.forEach(p => dbService.subcontractorCatalog.save(p).catch(() => {}));
     }
