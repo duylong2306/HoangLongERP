@@ -925,9 +925,35 @@ export default function FinanceManagement({
     onInitialProposalConsumed?.();
   }, [initialProposalId, subcontractorAdvances]);
 
+  // Có ai KHÁC (ngoài chính người tạo đề xuất) đủ điều kiện duyệt/từ chối không?
+  // Chỉ tính nhân sự còn hoạt động (status='working') và có tài khoản đăng nhập
+  // (hasSystemAccount) — nhân viên đã nghỉ hoặc chưa cấp tài khoản thì không thể
+  // vào hệ thống để duyệt, tính vào sẽ khiến fallback không bao giờ kích hoạt dù
+  // thực tế không ai duyệt được.
+  const hasOtherEligibleApprover = useCallback((proposal: SubcontractorAdvanceProposal): boolean => {
+    return (employeesProp || []).some(emp => {
+      if (emp.id === proposal.creator) return false;
+      if (emp.status === 'retired' || emp.hasSystemAccount === false) return false;
+      if (emp.id === proposal.approver) return true;
+      if (proposal.approverName && emp.name?.toLowerCase() === proposal.approverName.toLowerCase()) return true;
+      if (isUserInRoleGroup(emp.id, 'role_accounting')) return true;
+      if (isUserInRoleGroup(emp.id, 'role_admin')) return true;
+      return false;
+    });
+  }, [employeesProp]);
+
   // Helper: Kiểm tra user có quyền duyệt/từ chối đề xuất này không
+  // NGUYÊN TẮC: người TẠO đề xuất KHÔNG được tự duyệt đề xuất của chính mình — kể
+  // cả khi họ là admin/Giám đốc. Trước đây admin tự tạo rồi tự duyệt được (vì
+  // role_admin luôn pass ở nhánh dưới), khiến "Đề Xuất Chi" do admin lập mất hẳn ý
+  // nghĩa xét duyệt độc lập.
+  // FALLBACK: nếu KHÔNG CÒN AI KHÁC đủ điều kiện duyệt (vd công ty chỉ có 1 admin,
+  // chưa có ai thuộc role_accounting/được gán duyệt riêng) thì cho phép người tạo
+  // tự duyệt để tránh đề xuất bị kẹt vĩnh viễn — chỉ áp dụng khi thực sự bế tắc.
   const canApproveProposal = useCallback((proposal: SubcontractorAdvanceProposal) => {
     if (!currentUser) return false;
+    const isCreator = !!proposal.creator && proposal.creator === currentUser.id;
+    if (isCreator && hasOtherEligibleApprover(proposal)) return false;
 
     // 1. Là người được gán duyệt trong đề xuất (so sánh theo ID hoặc tên)
     if (proposal.approver === currentUser.id) return true;
@@ -937,8 +963,10 @@ export default function FinanceManagement({
     if (isUserInRoleGroup(currentUser.id, 'role_accounting')) return true;
     // 3. Là Giám đốc (role_admin) - có quyền duyệt tất cả
     if (isUserInRoleGroup(currentUser.id, 'role_admin')) return true;
+    // 4. Fallback tự duyệt: chỉ khi là người tạo VÀ không còn ai khác đủ điều kiện
+    if (isCreator) return true;
     return false;
-  }, [currentUser]);
+  }, [currentUser, hasOtherEligibleApprover]);
 
   // Gửi tin nhắn NHÓM CHAT DỰ ÁN cho các hành động Đề Xuất Tạm Ứng thầu phụ
   const notifyAdvanceProjectChat = async (proposal: SubcontractorAdvanceProposal, content: string) => {
@@ -965,6 +993,12 @@ export default function FinanceManagement({
     if (!canApproveProposal(proposal)) {
       addToast({ title: '⛔ Không có quyền', message: '❌ Bạn không phải người xét duyệt cho đề xuất này!', type: 'error' });
       return;
+    }
+    // Tự duyệt qua fallback (không còn ai khác đủ điều kiện) — cảnh báo rõ để minh bạch,
+    // không âm thầm coi như duyệt bình thường.
+    const isSelfApprovalFallback = proposal.creator === currentUser?.id;
+    if (isSelfApprovalFallback) {
+      addToast({ title: '⚠️ Tự duyệt (fallback)', message: 'Không có người khác đủ điều kiện duyệt — hệ thống cho phép bạn tự duyệt đề xuất của chính mình.', type: 'warning' });
     }
     try {
       const finalApproved = (approvedAmount != null && !isNaN(approvedAmount)) ? approvedAmount : proposal.amount;
@@ -1013,8 +1047,13 @@ export default function FinanceManagement({
   };
 
   // Handle approver "Từ Chối" action -> rejected
+  // Cùng nguyên tắc với canApproveProposal: người tạo không được tự xử lý (duyệt/từ
+  // chối) đề xuất của chính mình, kể cả admin — tránh vừa đá bóng vừa thổi còi.
+  // Cũng có cùng fallback: nếu không còn ai khác đủ điều kiện, người tạo được tự xử lý.
   const canRejectProposal = useCallback((proposal: SubcontractorAdvanceProposal) => {
     if (!currentUser) return false;
+    const isCreator = !!proposal.creator && proposal.creator === currentUser.id;
+    if (isCreator && hasOtherEligibleApprover(proposal)) return false;
     // 1. Là người được gán duyệt trong đề xuất (so sánh theo ID hoặc tên)
     if (proposal.approver === currentUser.id) return true;
     if (proposal.approverName && proposal.approverName.toLowerCase() === currentUser.name.toLowerCase()) return true;
@@ -1022,8 +1061,10 @@ export default function FinanceManagement({
     if (isUserInRoleGroup(currentUser.id, 'role_accounting')) return true;
     // 3. Là Giám đốc (role_admin) - có quyền từ chối tất cả
     if (isUserInRoleGroup(currentUser.id, 'role_admin')) return true;
+    // 4. Fallback tự xử lý: chỉ khi là người tạo VÀ không còn ai khác đủ điều kiện
+    if (isCreator) return true;
     return false;
-  }, [currentUser]);
+  }, [currentUser, hasOtherEligibleApprover]);
 
   // Handle approver "Từ Chối" action -> rejected
   const handleRejectByApprover = async (proposal: SubcontractorAdvanceProposal) => {
@@ -3440,6 +3481,17 @@ export default function FinanceManagement({
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Chặn CỨNG: không cho lập phiếu chi nếu số tiền vượt số dư Quỹ tiền mặt hiện có
+    // (trước đây chỉ cảnh báo mềm — quỹ thực tế không thể chi âm nên phải chặn hẳn).
+    if (payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance) {
+      addToast({
+        title: '⛔ Vượt số dư Quỹ',
+        message: `Số tiền ${Number(payAmount).toLocaleString('vi-VN')}đ vượt số dư Quỹ tiền mặt hiện có (${cashFundBalance.toLocaleString('vi-VN')}đ). Không thể lập phiếu.`,
+        type: 'error'
+      });
+      return;
+    }
 
     // ─── Chuẩn hóa liên kết theo MÃ (id) thay vì tên ──────────────────────
     // Ứng lương từ đề xuất: empId nằm trong proposal.subcontractorId.
@@ -7694,7 +7746,7 @@ export default function FinanceManagement({
                             {payCategory !== 'cash_fund' && <option value="cash_fund">Quỹ tiền mặt</option>}
                           </select>
                           {payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance && (
-                            <p className="text-[9px] text-rose-400 font-bold mt-1">⚠ Vượt số dư Quỹ hiện tại ({cashFundBalance.toLocaleString('vi-VN')}đ).</p>
+                            <p className="text-[9px] text-rose-400 font-bold mt-1">⛔ Vượt số dư Quỹ hiện tại ({cashFundBalance.toLocaleString('vi-VN')}đ) — không thể lập phiếu.</p>
                           )}
                         </div>
                       </div>
@@ -7712,7 +7764,13 @@ export default function FinanceManagement({
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                         <button type="button" onClick={() => setShowPayForm(false)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 cursor-pointer">Bỏ qua</button>
-                        <button type="submit" className="bg-rose-600 hover:bg-rose-555 text-white px-3 py-1.5 rounded font-bold cursor-pointer">Nộp đề xuất chi</button>
+                        <button
+                          type="submit"
+                          disabled={payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance}
+                          className="bg-rose-600 hover:bg-rose-555 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 text-white px-3 py-1.5 rounded font-bold cursor-pointer"
+                        >
+                          Nộp đề xuất chi
+                        </button>
                       </div>
                     </form>
                   </div>
