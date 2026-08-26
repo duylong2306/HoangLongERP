@@ -3101,6 +3101,11 @@ export default function FinanceManagement({
   // Quick insertion Forms Status
   const [showRecForm, setShowRecForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
+  // Chặn double-submit "Nộp đề xuất chi": nếu người dùng bấm 2 lần liên tiếp
+  // (hoặc mạng chậm rồi bấm lại) trước khi request đầu hoàn tất, handleAddPaymentSubmit
+  // chạy 2 lần song song → tạo 2 phiếu chi trùng nhau (đã xảy ra thực tế, xem
+  // PC-2026-853/863 trùng lặp cho cùng 1 đề xuất DX-20260825-0023).
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [showSubContractForm, setShowSubContractForm] = useState(false);
   const [showMaterialForm, setShowMaterialForm] = useState(false);
 
@@ -3516,6 +3521,17 @@ export default function FinanceManagement({
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Chặn double-submit: request trước còn đang chạy thì bỏ qua request sau.
+    if (isSubmittingPayment) return;
+    setIsSubmittingPayment(true);
+    try {
+      await handleAddPaymentSubmitInner();
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleAddPaymentSubmitInner = async () => {
     // Chặn CỨNG: không cho lập phiếu chi nếu số tiền vượt số dư Quỹ tiền mặt hiện có
     // (trước đây chỉ cảnh báo mềm — quỹ thực tế không thể chi âm nên phải chặn hẳn).
     if (payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance) {
@@ -7823,10 +7839,10 @@ export default function FinanceManagement({
                         <button type="button" onClick={() => setShowPayForm(false)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 cursor-pointer">Bỏ qua</button>
                         <button
                           type="submit"
-                          disabled={payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance}
+                          disabled={isSubmittingPayment || (payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance)}
                           className="bg-rose-600 hover:bg-rose-555 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 text-white px-3 py-1.5 rounded font-bold cursor-pointer"
                         >
-                          Nộp đề xuất chi
+                          {isSubmittingPayment ? 'Đang xử lý...' : 'Nộp đề xuất chi'}
                         </button>
                       </div>
                     </form>
