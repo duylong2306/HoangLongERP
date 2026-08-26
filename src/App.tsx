@@ -1811,11 +1811,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_product_catalog' }, fireWarehouseDataEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'archived_quotes' }, fireArchivedQuotesEvent)
       // archived_subcontractor_quotes là alias của archived_quotes (sector='subcontractor') — không có bảng riêng
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_task_permissions' }, fireTaskPermissionsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_role_groups' }, fireHrmRoleGroupsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, fireEmployeesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'business_profile' }, fireConfigEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_config' }, fireConfigEvent)
+      // hrm_task_permissions/hrm_role_groups/business_profile/shift_config: đã
+      // bỏ khỏi realtime — xem POLLED_LOW_CHURN_MS bên dưới.
       // ── Orders (critical - realtime for instant updates) ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' },
         withPatchAndCoalesce('sales_orders', 'sales_orders', setSalesOrders as any,
@@ -1823,18 +1821,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       // ── HRM Configuration & Payroll ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_approval_config' }, fireHrmApprovalConfigEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leave_coefficients' }, fireHrmLeaveCoefficientsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_payroll_records' }, fireHrmPayrollRecordsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_employee_errors' }, fireHrmEmployeeErrorsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_holidays' }, fireHrmHolidaysEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_trips' }, fireHrmTripsEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_travel_expenses' }, fireHrmTravelExpensesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_performance_criteria' }, fireHrmPerformanceCriteriaEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_salary_scales' }, fireHrmSalarySalesEvent)
-      // ── Configuration (giữ subscription: component đang mở lắng nghe để refresh live) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'kanban_columns' }, fireKanbanColumnsEvent)
-      // ── Permissions ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_permissions' }, fireProjectPermissionsEvent)
+      // hrm_leave_coefficients/hrm_holidays/hrm_performance_criteria/hrm_salary_scales/
+      // kanban_columns/project_permissions: đã bỏ khỏi realtime — xem POLLED_LOW_CHURN_MS bên dưới.
       // ── Accounting ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
@@ -1849,7 +1841,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       })
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Channel ready. Listening for 30+ tables');
+          console.log('[Realtime] ✅ Channel ready. Listening for ~25 tables (10 bảng ít đổi chuyển sang polling 5 phút)');
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.error('[Realtime] ❌ Connection issue:', status, err);
         } else if (status === 'CLOSED') {
@@ -1857,9 +1849,32 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         }
       });
 
+    // ─── Bảng ít thay đổi: làm mới định kỳ thay vì Realtime ──────────────
+    // 10 bảng này (cấu hình hệ thống/nhân sự/phân quyền) hầu như không đổi
+    // trong ngày làm việc bình thường, nhưng vẫn tính phí "Tin nhắn thời
+    // gian thực" của Supabase MỖI LẦN đổi × MỖI tab đang mở — với ~25 nhân
+    // viên mở app cả ngày, việc giữ Realtime cho các bảng này góp phần lớn
+    // vào việc vượt hạn mức 5 triệu tin nhắn/tháng dù bản thân bảng ít đổi.
+    // Đổi sang polling mỗi 5 phút: dùng lại ĐÚNG các hàm fire*Event/refetch
+    // đã có (cùng logic dispatch event / setState), chỉ khác nơi gọi.
+    const POLLED_LOW_CHURN_MS = 5 * 60 * 1000; // 5 phút
+    const pollLowChurnTables = () => {
+      fireTaskPermissionsEvent();
+      fireHrmRoleGroupsEvent();
+      fireConfigEvent();
+      fireHrmHolidaysEvent();
+      fireHrmPerformanceCriteriaEvent();
+      fireHrmSalarySalesEvent();
+      fireKanbanColumnsEvent();
+      fireProjectPermissionsEvent();
+      fireHrmLeaveCoefficientsEvent();
+    };
+    const lowChurnInterval = setInterval(pollLowChurnTables, POLLED_LOW_CHURN_MS);
+
     return () => {
       console.log('[Realtime] Cleaning up channel...');
       flushPendingJobs();
+      clearInterval(lowChurnInterval);
       sb.removeChannel(channel);
     };
   }, [realtimeRetry]);
