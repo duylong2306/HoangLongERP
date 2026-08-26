@@ -659,7 +659,12 @@ export default function FinanceManagement({
   const [proposalColPageSize, setProposalColPageSize] = useState<Record<string, number>>({});
   const getProposalColPage = (id: string) => proposalColPage[id] || 1;
   const getProposalColPageSize = (id: string) => proposalColPageSize[id] || 5;
-  const proposalColTotalPages = (id: string, count: number) => Math.max(1, Math.ceil(count / getProposalColPageSize(id)));
+  // -1 = "Tất cả" (hiện hết, không phân trang) — cột Kanban đã tự cuộn riêng
+  // (overflow-y-auto) nên hiện hết không làm vỡ layout trang.
+  const proposalColTotalPages = (id: string, count: number) => {
+    const size = getProposalColPageSize(id);
+    return size === -1 ? 1 : Math.max(1, Math.ceil(count / size));
+  };
   const setProposalColPageSafe = (id: string, p: number) => setProposalColPage(prev => ({ ...prev, [id]: Math.max(1, p) }));
   const [rejectProposalModal, setRejectProposalModal] = useState<SubcontractorAdvanceProposal | null>(null);
   const [revertProposalModal, setRevertProposalModal] = useState<SubcontractorAdvanceProposal | null>(null);
@@ -2110,9 +2115,10 @@ export default function FinanceManagement({
     return Array.from(map.values()).sort((a, b) => a.customerName.localeCompare(b.customerName));
   }, [filteredReceipts, customers]);
   const recPageInfo = useMemo(() => {
-    const totalPages = Math.max(1, Math.ceil(receiptGroups.length / recPageSize));
+    // recPageSize === -1 = "Tất cả" (hiện hết, không phân trang)
+    const totalPages = recPageSize === -1 ? 1 : Math.max(1, Math.ceil(receiptGroups.length / recPageSize));
     const safePage = Math.min(recPage, totalPages);
-    const pageGroups = receiptGroups.slice((safePage - 1) * recPageSize, safePage * recPageSize);
+    const pageGroups = recPageSize === -1 ? receiptGroups : receiptGroups.slice((safePage - 1) * recPageSize, safePage * recPageSize);
     return { totalPages, safePage, pageGroups };
   }, [receiptGroups, recPage, recPageSize]);
 
@@ -2146,9 +2152,10 @@ export default function FinanceManagement({
     return Array.from(map.values()).sort((a, b) => a.recipient.localeCompare(b.recipient, 'vi'));
   }, [filteredPayments]);
   const payPageInfo = useMemo(() => {
-    const totalPages = Math.max(1, Math.ceil(paymentGroups.length / payPageSize));
+    // payPageSize === -1 = "Tất cả" (hiện hết, không phân trang)
+    const totalPages = payPageSize === -1 ? 1 : Math.max(1, Math.ceil(paymentGroups.length / payPageSize));
     const safePage = Math.min(payPage, totalPages);
-    const pageGroups = paymentGroups.slice((safePage - 1) * payPageSize, safePage * payPageSize);
+    const pageGroups = payPageSize === -1 ? paymentGroups : paymentGroups.slice((safePage - 1) * payPageSize, safePage * payPageSize);
     return { totalPages, safePage, pageGroups };
   }, [paymentGroups, payPage, payPageSize]);
   // Tổng cộng (theo bộ lọc, không chỉ trang hiện tại)
@@ -2174,10 +2181,11 @@ export default function FinanceManagement({
   // Phân trang + tổng hợp Tổng cộng cho tab Công nợ Thu (tính trên toàn bộ filteredReceivables, không chỉ trang hiện tại)
   const receivablePageInfo = useMemo(() => {
     const total = filteredReceivables.length;
-    const totalPages = Math.max(1, Math.ceil(total / receivablePageSize));
+    // receivablePageSize === -1 = "Tất cả" (hiện hết, không phân trang)
+    const totalPages = receivablePageSize === -1 ? 1 : Math.max(1, Math.ceil(total / receivablePageSize));
     const safePage = Math.min(Math.max(1, receivablePage), totalPages);
     const start = (safePage - 1) * receivablePageSize;
-    const pageGroups = filteredReceivables.slice(start, start + receivablePageSize);
+    const pageGroups = receivablePageSize === -1 ? filteredReceivables : filteredReceivables.slice(start, start + receivablePageSize);
     const totals = filteredReceivables.reduce((acc: any, g: any) => {
       acc.cdkValue += g.cdkValue || 0;
       acc.tongHopDong += g.tongHopDong || 0;
@@ -2302,10 +2310,11 @@ export default function FinanceManagement({
   // Phân trang + tổng hợp Tổng cộng cho tab Công nợ Trả (tính trên toàn bộ filteredLiabilities)
   const liabilityPageInfo = useMemo(() => {
     const total = filteredLiabilities.length;
-    const totalPages = Math.max(1, Math.ceil(total / liabilityPageSize));
+    // liabilityPageSize === -1 = "Tất cả" (hiện hết, không phân trang)
+    const totalPages = liabilityPageSize === -1 ? 1 : Math.max(1, Math.ceil(total / liabilityPageSize));
     const safePage = Math.min(Math.max(1, liabilityPage), totalPages);
     const start = (safePage - 1) * liabilityPageSize;
-    const pageItems = filteredLiabilities.slice(start, start + liabilityPageSize);
+    const pageItems = liabilityPageSize === -1 ? filteredLiabilities : filteredLiabilities.slice(start, start + liabilityPageSize);
     const totals = filteredLiabilities.reduce((acc: any, l: any) => {
       const od = (l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0;
       acc.openingDebt += od;
@@ -5769,6 +5778,7 @@ export default function FinanceManagement({
                                 className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[9px] font-bold text-slate-200 outline-none cursor-pointer"
                               >
                                 {PROPOSAL_COL_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                                <option value={-1}>Tất cả</option>
                               </select>
                             </div>
                             <div className="flex items-center gap-1">
@@ -5803,7 +5813,7 @@ export default function FinanceManagement({
                                 const colSize = getProposalColPageSize(col.key);
                                 const colTotal = proposalColTotalPages(col.key, colItems.length);
                                 const colPageClamped = Math.min(getProposalColPage(col.key), colTotal);
-                                const paged = colItems.slice((colPageClamped - 1) * colSize, colPageClamped * colSize);
+                                const paged = colSize === -1 ? colItems : colItems.slice((colPageClamped - 1) * colSize, colPageClamped * colSize);
                                 const colTotalAmount = colItems.reduce((s, a) => s + (a.amount || 0), 0);
                                 return (
                                   <div key={col.key} className={`flex flex-col h-[60vh] sm:h-[680px] rounded-2xl bg-slate-900/50 border ${col.accent} overflow-hidden shadow-xl transition-all duration-300`}>
@@ -7622,11 +7632,12 @@ export default function FinanceManagement({
                 <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
                   <div className="flex items-center gap-2">
                     <span>Hiển thị</span>
-                    <select value={recPageSize} onChange={(e) => setRecPageSize(Number(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                    <select value={recPageSize} onChange={(e) => { setRecPageSize(Number(e.target.value)); setRecPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
                       <option value={5}>5</option>
                       <option value={10}>10</option>
                       <option value={20}>20</option>
                       <option value={50}>50</option>
+                      <option value={-1}>Tất cả</option>
                     </select>
                     <span>chủ đầu tư/trang</span>
                   </div>
@@ -8114,11 +8125,12 @@ export default function FinanceManagement({
                 <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
                   <div className="flex items-center gap-2">
                     <span>Hiển thị</span>
-                    <select value={payPageSize} onChange={(e) => setPayPageSize(Number(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                    <select value={payPageSize} onChange={(e) => { setPayPageSize(Number(e.target.value)); setPayPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
                       <option value={5}>5</option>
                       <option value={10}>10</option>
                       <option value={20}>20</option>
                       <option value={50}>50</option>
+                      <option value={-1}>Tất cả</option>
                     </select>
                     <span>đối tượng chi/trang</span>
                   </div>
@@ -8444,11 +8456,12 @@ export default function FinanceManagement({
                 <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
                   <div className="flex items-center gap-2">
                     <span>Hiển thị</span>
-                    <select value={receivablePageSize} onChange={(e) => setReceivablePageSize(Number(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                    <select value={receivablePageSize} onChange={(e) => { setReceivablePageSize(Number(e.target.value)); setReceivablePage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
                       <option value={5}>5</option>
                       <option value={10}>10</option>
                       <option value={20}>20</option>
                       <option value={50}>50</option>
+                      <option value={-1}>Tất cả</option>
                     </select>
                     <span>chủ đầu tư/trang</span>
                   </div>
@@ -8760,11 +8773,12 @@ export default function FinanceManagement({
                 <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
                   <div className="flex items-center gap-2">
                     <span>Hiển thị</span>
-                    <select value={liabilityPageSize} onChange={(e) => setLiabilityPageSize(Number(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                    <select value={liabilityPageSize} onChange={(e) => { setLiabilityPageSize(Number(e.target.value)); setLiabilityPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
                       <option value={5}>5</option>
                       <option value={10}>10</option>
                       <option value={20}>20</option>
                       <option value={50}>50</option>
+                      <option value={-1}>Tất cả</option>
                     </select>
                     <span>khoản nợ/trang</span>
                   </div>
