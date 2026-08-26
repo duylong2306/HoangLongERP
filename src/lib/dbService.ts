@@ -2854,6 +2854,30 @@ export const dbService = {
     }
   },
 
+  // ===== UPLOAD PDF ĐƠN MUA HÀNG (xem migration 20260826_create_purchase_order_pdfs_bucket.sql) =====
+  // Dùng cho nút "Copy Link" ở Điều Phối Vật Tư — upload file PDF đơn mua hàng
+  // vừa xuất lên Supabase Storage rồi trả public URL để copy vào clipboard,
+  // dán trực tiếp vào Zalo (Zalo desktop không nhận file qua Web Share API
+  // trên Windows nên không dùng navigator.share() được cho nút này).
+  // Không có fallback local: nếu upload lỗi, ném lỗi để phía gọi báo người
+  // dùng thử lại — link cục bộ (blob:) sẽ không dùng được ở ứng dụng khác.
+  async uploadPurchaseOrderPdf(orderId: string, blob: Blob): Promise<string> {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Chưa kết nối Supabase.');
+
+    const BUCKET = 'purchase-order-pdfs';
+    const safeId = String(orderId || 'don-hang').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `orders/${safeId}_${ts}.pdf`;
+
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, blob, { contentType: 'application/pdf', upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  },
+
   // ===== UPLOAD ẢNH SELFIE CHẤM CÔNG =====
   // Ảnh lúc điểm danh được upload lên bucket 'attendance-photos' (migration 029)
   // thay vì lưu base64 vào cột photo_in/photo_out/punch_meta.photo — nguồn gốc

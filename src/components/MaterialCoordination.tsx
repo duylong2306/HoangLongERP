@@ -45,6 +45,7 @@ import {
   PanelRightClose,
   Zap,
   Download,
+  Link2,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 
@@ -1060,10 +1061,21 @@ export default function MaterialCoordination({
     document.body.appendChild(container);
     try {
       // Đợi 1 nhịp để trình duyệt layout xong hẳn trước khi chụp
-      await new Promise((r) => setTimeout(r, 80));
+      await new Promise((r) => setTimeout(r, 120));
+
+      // Tự đo chiều cao thật (thay vì để html2canvas tự đoán) rồi truyền thẳng
+      // qua option height/windowHeight, cộng thêm chút đệm — nếu không, dòng
+      // cuối cùng (tên người ký, có margin-top) đôi khi bị chụp thiếu 1 phần
+      // vì html2canvas đo hụt chiều cao ngay sát mép dưới nội dung.
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
 
       const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
-      const canvas = await html2canvas(container, { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
 
       // Khớp đúng lề với @page trong buildPurchaseOrderHtml (15mm trên/dưới,
       // 18mm trái/phải) để PDF giống hệt bản in, không lệch lề.
@@ -1136,6 +1148,23 @@ export default function MaterialCoordination({
       showNotification('Đã tải file PDF Đơn Mua Hàng về máy để gửi thủ công.', 'Đã tải PDF', 'info');
     } catch (e) {
       showNotification('Không thể tạo file PDF để chia sẻ.', 'Lỗi', 'warning');
+    }
+  };
+
+  // Tải PDF Đơn Mua Hàng lên Supabase Storage rồi copy public URL vào
+  // clipboard — dùng để dán trực tiếp vào Zalo (Zalo desktop trên Windows
+  // không đăng ký nhận qua Web Share API nên nút "Chia sẻ" ở trên không mở
+  // được Zalo trên máy tính, chỉ dùng tốt trên điện thoại).
+  const copyOrderPdfLink = async (order: any) => {
+    try {
+      showNotification('Đang tạo PDF và tải lên máy chủ...', 'Đang xử lý', 'info');
+      const blob = await generateOrderPdfBlob(order);
+      const url = await dbService.uploadPurchaseOrderPdf(order.id, blob);
+      await navigator.clipboard.writeText(url);
+      showNotification('Đã copy link PDF vào clipboard — dán trực tiếp vào Zalo để gửi.', 'Đã copy link', 'success');
+    } catch (e) {
+      console.error('Lỗi khi tạo link PDF đơn mua hàng:', e);
+      showNotification('Không thể tạo link chia sẻ. Vui lòng thử lại.', 'Lỗi', 'warning');
     }
   };
 
@@ -2991,7 +3020,7 @@ export default function MaterialCoordination({
                 style={{ height: '100%', minHeight: '50vh', border: 'none' }}
               />
             </div>
-            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-4 gap-1.5 sm:gap-2">
+            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-5 gap-1.5 sm:gap-2">
               {canDelete ? (
                 <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               ) : (
@@ -2999,6 +3028,7 @@ export default function MaterialCoordination({
               )}
               <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
               <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF thẳng về máy, không qua hộp thoại Share"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
+              <button type="button" onClick={() => copyOrderPdfLink(od)} className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF lên máy chủ & copy link — dán trực tiếp vào Zalo"><Link2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Copy Link</span></button>
               <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
             </div>
           </div>
