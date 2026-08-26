@@ -45,7 +45,6 @@ import {
   PanelRightClose,
   Zap,
   Download,
-  Link2,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 
@@ -1121,7 +1120,7 @@ export default function MaterialCoordination({
       a.href = url; a.download = `DonMuaHang_${order.id}.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-      showNotification('Đã tải file PDF Đơn Mua Hàng về máy.', 'Đã tải PDF', 'success');
+      showNotification(`Đã tải "DonMuaHang_${order.id}.pdf" về thư mục Tải xuống — kéo thả file này vào khung chat Zalo để gửi.`, 'Đã tải PDF', 'success');
     } catch (e) {
       showNotification('Không thể tạo file PDF.', 'Lỗi', 'warning');
     }
@@ -1148,23 +1147,6 @@ export default function MaterialCoordination({
       showNotification('Đã tải file PDF Đơn Mua Hàng về máy để gửi thủ công.', 'Đã tải PDF', 'info');
     } catch (e) {
       showNotification('Không thể tạo file PDF để chia sẻ.', 'Lỗi', 'warning');
-    }
-  };
-
-  // Tải PDF Đơn Mua Hàng lên Supabase Storage rồi copy public URL vào
-  // clipboard — dùng để dán trực tiếp vào Zalo (Zalo desktop trên Windows
-  // không đăng ký nhận qua Web Share API nên nút "Chia sẻ" ở trên không mở
-  // được Zalo trên máy tính, chỉ dùng tốt trên điện thoại).
-  const copyOrderPdfLink = async (order: any) => {
-    try {
-      showNotification('Đang tạo PDF và tải lên máy chủ...', 'Đang xử lý', 'info');
-      const blob = await generateOrderPdfBlob(order);
-      const url = await dbService.uploadPurchaseOrderPdf(order.id, blob);
-      await navigator.clipboard.writeText(url);
-      showNotification('Đã copy link PDF vào clipboard — dán trực tiếp vào Zalo để gửi.', 'Đã copy link', 'success');
-    } catch (e) {
-      console.error('Lỗi khi tạo link PDF đơn mua hàng:', e);
-      showNotification('Không thể tạo link chia sẻ. Vui lòng thử lại.', 'Lỗi', 'warning');
     }
   };
 
@@ -3020,15 +3002,14 @@ export default function MaterialCoordination({
                 style={{ height: '100%', minHeight: '50vh', border: 'none' }}
               />
             </div>
-            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-5 gap-1.5 sm:gap-2">
+            <div className="p-2 sm:p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-4 gap-1.5 sm:gap-2">
               {canDelete ? (
                 <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); deleteOrder(od); }} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               ) : (
                 <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               )}
               <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
-              <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF thẳng về máy, không qua hộp thoại Share"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
-              <button type="button" onClick={() => copyOrderPdfLink(od)} className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF lên máy chủ & copy link — dán trực tiếp vào Zalo"><Link2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Copy Link</span></button>
+              <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
               <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
             </div>
           </div>
