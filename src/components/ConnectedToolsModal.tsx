@@ -6,6 +6,7 @@ import {
 import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProposal, ApprovalStep } from '../types';
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
+import { createMaterialProposalsFromItems } from '../lib/materialProposals';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
 import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
@@ -2389,90 +2390,59 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                   const creatorName = currentUser?.name || 'Người tạo';
                   const now = new Date();
                   const code = `DX-${selectedProject.code || 'DA'}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+                  const taskName = connectedTaskId ? (tasks.find(t => t.id === connectedTaskId)?.name || '') : '';
 
                   // Tự động tách luồng: chia vật tư thành 2 nhóm đề xuất riêng biệt
                   //  • Đã có mã Danh mục MUA   → CHỜ ĐẶT HÀNG (không cần xét duyệt)
                   //  • Chưa có mã Danh mục MUA → TÌM NHÀ CUNG CẤP (cần tìm NCC & duyệt)
-                  const items = ctMaterialRows.map(row => ({
-                    id: row.id,
-                    name: row.name,
-                    qty: row.qty,
-                    unit: row.unit,
-                    spec: row.spec || '',
-                    note: row.note || '',
-                    maSanPham: row.maSanPham || '',
-                    price: row.price || 0,
-                    totalPrice: (row.qty || 0) * (row.price || 0),
-                  }));
-
-                  const withCode = items.filter(i => !!i.maSanPham);
-                  const withoutCode = items.filter(i => !i.maSanPham);
-                  const bothGroups = withCode.length > 0 && withoutCode.length > 0;
-                  const taskName = connectedTaskId ? (tasks.find(t => t.id === connectedTaskId)?.name || '') : '';
-
-                  const buildProposal = (groupItems: any[], status: string, suffix: string) => ({
-                    id: `material_prop_${Date.now()}_${suffix || '0'}`,
-                    code: `${code}${suffix}`,
+                  // (logic tách nhóm + tạo bản ghi dùng chung với "Tạo Đề Xuất Nhanh" ở
+                  // MaterialCoordination.tsx — xem src/lib/materialProposals.ts)
+                  const { created, withCodeCount, withoutCodeCount } = await createMaterialProposalsFromItems({
+                    items: ctMaterialRows.map(row => ({
+                      id: row.id,
+                      name: row.name,
+                      qty: row.qty,
+                      unit: row.unit,
+                      spec: row.spec || '',
+                      note: row.note || '',
+                      maSanPham: row.maSanPham || '',
+                      price: row.price || 0,
+                    })),
+                    code,
                     projectId: selectedProject.id,
                     projectName: selectedProject.name,
                     taskId: connectedTaskId || undefined,
                     taskName,
-                    proposalType: 'material',
                     createdBy: creatorId,
                     createdByName: creatorName,
-                    status,
-                    items: groupItems,
-                    supplierId: null,
-                    supplierName: null,
-                    quotes: [],
-                    chosenQuoteId: null,
-                    purchaseOrderIds: [],
-                    notes: '',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
                   });
+                  const bothGroups = withCodeCount > 0 && withoutCodeCount > 0;
 
-                  const created: any[] = [];
-                    if (withCode.length) {
-                      const p = buildProposal(withCode, 'waiting_order', bothGroups ? '-MUA' : '');
-                      await dbService.materialProposals.create(p);
-                      created.push(p);
-                    }
-                    if (withoutCode.length) {
-                      const p = buildProposal(withoutCode, 'find_supplier', bothGroups ? '-TNCC' : '');
-                      await dbService.materialProposals.create(p);
-                      created.push(p);
-                    }
+                  const matLog = `[${now.toLocaleTimeString()}] - 🔔 Đã gửi ${created.length} đề xuất: ${withCodeCount} VT có mã → CHỜ ĐẶT HÀNG, ${withoutCodeCount} VT chưa có mã → TÌM NCC.`;
+                  setCtMaterialLogs([matLog]);
 
-                    window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
-
-                    const muaCount = withCode.length;
-                    const timNccCount = withoutCode.length;
-                    const matLog = `[${now.toLocaleTimeString()}] - 🔔 Đã gửi ${created.length} đề xuất: ${muaCount} VT có mã → CHỜ ĐẶT HÀNG, ${timNccCount} VT chưa có mã → TÌM NCC.`;
-                    setCtMaterialLogs([matLog]);
-
-                    // Gửi tin nhắn nhóm chat Dự án
-                    try {
-                      await ensureProjectChatGroup(selectedProject);
-                      await sendGroupChatMessage({
-                        conversationId: `conv_project_${selectedProject.id}`,
-                        senderId: creatorId,
-                        senderName: creatorName,
-                        senderRole: 'pm' as any,
-                        content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${selectedProject.name}${connectedTaskId ? `\nCông việc: ${taskName}` : ''}\n— ${items.map(i => `• ${i.name} × ${i.qty} ${i.unit}${i.maSanPham ? '' : ' (chưa có mã → TÌM NCC)'}`).join('\n')}\n→ ${bothGroups ? `Đã tách thành 2 đề xuất: ${muaCount} VT có mã → CHỜ ĐẶT HÀNG, ${timNccCount} VT chưa có mã → TÌM NCC` : (muaCount ? 'Toàn bộ có mã → CHỜ ĐẶT HÀNG' : 'Cần TÌM NHÀ CUNG CẤP (chưa có mã)')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
-                        relatedEntity: { type: 'project', id: selectedProject.id } as any,
-                      });
-                    } catch (e) {
-                      console.error('Không gửi được tin nhắn nhóm dự án:', e);
-                    }
-
-                    addToast({
-                      title: '✅ Thành công',
-                      message: `Đã gửi ${created.length} đề xuất vật tư${bothGroups ? ` (${muaCount} VT có mã → CHỜ ĐẶT HÀNG, ${timNccCount} VT chưa có mã → TÌM NCC)` : (muaCount ? ' — chuyển thẳng CHỜ ĐẶT HÀNG' : ' — vào cột TÌM NHÀ CUNG CẤP')}.`,
-                      type: 'success',
+                  // Gửi tin nhắn nhóm chat Dự án
+                  try {
+                    await ensureProjectChatGroup(selectedProject);
+                    await sendGroupChatMessage({
+                      conversationId: `conv_project_${selectedProject.id}`,
+                      senderId: creatorId,
+                      senderName: creatorName,
+                      senderRole: 'pm' as any,
+                      content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${selectedProject.name}${connectedTaskId ? `\nCông việc: ${taskName}` : ''}\n— ${ctMaterialRows.map(i => `• ${i.name} × ${i.qty} ${i.unit}${i.maSanPham ? '' : ' (chưa có mã → TÌM NCC)'}`).join('\n')}\n→ ${bothGroups ? `Đã tách thành 2 đề xuất: ${withCodeCount} VT có mã → CHỜ ĐẶT HÀNG, ${withoutCodeCount} VT chưa có mã → TÌM NCC` : (withCodeCount ? 'Toàn bộ có mã → CHỜ ĐẶT HÀNG' : 'Cần TÌM NHÀ CUNG CẤP (chưa có mã)')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
+                      relatedEntity: { type: 'project', id: selectedProject.id } as any,
                     });
-                    setActiveConnectedTool(null);
-                    window.dispatchEvent(new CustomEvent('hl-switch-tab', { detail: 'material-coordination' }));
+                  } catch (e) {
+                    console.error('Không gửi được tin nhắn nhóm dự án:', e);
+                  }
+
+                  addToast({
+                    title: '✅ Thành công',
+                    message: `Đã gửi ${created.length} đề xuất vật tư${bothGroups ? ` (${withCodeCount} VT có mã → CHỜ ĐẶT HÀNG, ${withoutCodeCount} VT chưa có mã → TÌM NCC)` : (withCodeCount ? ' — chuyển thẳng CHỜ ĐẶT HÀNG' : ' — vào cột TÌM NHÀ CUNG CẤP')}.`,
+                    type: 'success',
+                  });
+                  setActiveConnectedTool(null);
+                  window.dispatchEvent(new CustomEvent('hl-switch-tab', { detail: 'material-coordination' }));
                 } catch (error: any) {
                   console.error('Lỗi khi Gửi đề xuất:', error);
                   addToast({

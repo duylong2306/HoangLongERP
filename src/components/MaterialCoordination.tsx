@@ -10,6 +10,7 @@ import {
   WAREHOUSE_PROJECT_ID,
 } from '../types';
 import { dbService } from '../lib/dbService';
+import { createMaterialProposalsFromItems } from '../lib/materialProposals';
 import { ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
 import {
   Boxes,
@@ -486,52 +487,22 @@ export default function MaterialCoordination({
     if (!proj) { showNotification('Vui lòng chọn dự án.', 'Thiếu dự án', 'warning'); return; }
     const validItems = quickPropItems.filter(it => it.name.trim());
     if (validItems.length === 0) { showNotification('Cần ít nhất 1 vật tư có tên.', 'Thiếu vật tư', 'warning'); return; }
-    // Tách nhóm: có mã MUA → waiting_order, chưa có mã → find_supplier
-    const withCode = validItems.filter(it => it.maSanPham);
-    const withoutCode = validItems.filter(it => !it.maSanPham);
     const now = new Date();
     const code = `VATTU-${proj.code || proj.name?.slice(0, 6).toUpperCase() || 'DA'}-${now.getFullYear()}`;
     const creatorId = currentUser?.id || '';
     const creatorName = currentUser?.name || '—';
-    const buildProposal = (items: any[], status: ProposalStatus, suffix: string) => ({
-      id: `material_prop_${Date.now()}_${suffix || '0'}`,
-      code: `${code}${suffix}`,
-      projectId: proj.id,
-      projectName: proj.name,
-      taskId: quickPropTask || undefined,
-      taskName: quickPropTask ? (proj as any).tasks?.find((t: any) => t.id === quickPropTask)?.name || '' : '',
-      proposalType: 'material',
-      createdBy: creatorId,
-      createdByName: creatorName,
-      status,
-      items: items.map(it => ({
-        id: it.id, name: it.name, qty: it.qty, unit: it.unit, spec: it.spec,
-        price: it.price || 0, totalPrice: (it.price || 0) * (it.qty || 0),
-        note: it.note || '', maSanPham: it.maSanPham || '',
-      })),
-      supplierId: null, supplierName: null, quotes: [], chosenQuoteId: null,
-      purchaseOrderIds: [], notes: quickPropNotes,
-      createdAt: now.toISOString(), updatedAt: now.toISOString(),
-    });
     try {
-      const created: any[] = [];
-      if (withCode.length) {
-        const p = buildProposal(withCode, 'waiting_order', withCode.length < validItems.length ? '-MUA' : '');
-        await dbService.materialProposals.create(p);
-        created.push(p);
-      }
-      if (withoutCode.length) {
-        const p = buildProposal(withoutCode, 'find_supplier', withoutCode.length < validItems.length ? '-TNCC' : '');
-        await dbService.materialProposals.create(p);
-        created.push(p);
-      }
-      if (created.length === 0) {
-        // fallback: nếu không có item nào pass filter, tạo 1 proposal chung
-        const p = buildProposal(validItems, 'find_supplier', '');
-        await dbService.materialProposals.create(p);
-        created.push(p);
-      }
-      window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
+      const { created } = await createMaterialProposalsFromItems({
+        items: validItems,
+        code,
+        projectId: proj.id,
+        projectName: proj.name,
+        taskId: quickPropTask || undefined,
+        taskName: quickPropTask ? (proj as any).tasks?.find((t: any) => t.id === quickPropTask)?.name || '' : '',
+        createdBy: creatorId,
+        createdByName: creatorName,
+        notes: quickPropNotes,
+      });
       // Gửi chat nhóm dự án — "Đề Xuất Kho" không có dự án thật (FK conversations.project_id sẽ lỗi) nên bỏ qua
       if (!quickPropIsWarehouse) {
         try {
