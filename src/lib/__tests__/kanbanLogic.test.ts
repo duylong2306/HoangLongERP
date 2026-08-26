@@ -168,7 +168,12 @@ describe('Kanban Logic Module', () => {
       expect(getProjectColumnId(project, columnList)).not.toBe('invalid_col_id');
     });
 
-    it('should fallback to status for completed project', () => {
+    // Quyết định nghiệp vụ (2026-08-26): vị trí cột CHỈ do kanbanColumnId quyết
+    // định (kéo thả thủ công hoặc quy tắc "Chuyển cột khi hoàn thành") — không
+    // còn đoán theo status/progress nữa (cơ chế cũ từng gây "nhảy cột lung
+    // tung"). Khi kanbanColumnId thiếu/không hợp lệ, LUÔN về cột đầu tiên,
+    // bất kể status hay progress là gì.
+    it('should fallback to the FIRST column when kanbanColumnId is missing, regardless of status', () => {
       const project: MockProject = {
         id: 'proj3',
         code: 'PRJ003',
@@ -185,7 +190,7 @@ describe('Kanban Logic Module', () => {
         kanbanColumnId: undefined,
       };
       const columnList = colors.map(id => ({ id, name: '', color: '', iconColor: '' }));
-      expect(getProjectColumnId(project, columnList)).toBe('col_done');
+      expect(getProjectColumnId(project, columnList)).toBe('col_design');
     });
 
     it('should fallback to status for new project', () => {
@@ -208,7 +213,10 @@ describe('Kanban Logic Module', () => {
       expect(getProjectColumnId(project, columnList)).toBe('col_design');
     });
 
-    it('should fallback to progress for high progress', () => {
+    // Cũ: đoán cột theo % tiến độ (90/70/>0) — nay đã bỏ hẳn theo quyết định
+    // nghiệp vụ 2026-08-26. Không có kanbanColumnId hợp lệ → LUÔN về cột đầu
+    // tiên, dù 3 dự án có % tiến độ khác nhau.
+    it('should fallback to the FIRST column regardless of progress (no more progress-based guessing)', () => {
       const project1: MockProject = {
         id: 'proj5',
         code: 'PRJ005',
@@ -255,9 +263,9 @@ describe('Kanban Logic Module', () => {
         kanbanColumnId: undefined,
       };
       const columnList = colors.map(id => ({ id, name: '', color: '', iconColor: '' }));
-      expect(getProjectColumnId(project1, columnList)).toBe('col_fix');
-      expect(getProjectColumnId(project2, columnList)).toBe('col_accept');
-      expect(getProjectColumnId(project3, columnList)).toBe('col_active');
+      expect(getProjectColumnId(project1, columnList)).toBe('col_design');
+      expect(getProjectColumnId(project2, columnList)).toBe('col_design');
+      expect(getProjectColumnId(project3, columnList)).toBe('col_design');
     });
   });
 

@@ -201,34 +201,24 @@ export const getColumnStyleDetails = (colorClass: string): ColumnStyleDetails =>
 
 /**
  * Resolve which column a project belongs to.
- * Prefers the project's stored kanbanColumnId (only if it still exists in `columns`),
- * otherwise falls back to a status/progress heuristic.
+ * Vị trí cột của dự án CHỈ do 1 nguồn duy nhất quyết định: `kanbanColumnId` đã
+ * lưu — được gán khi người dùng kéo thả thủ công, hoặc khi quy tắc tự động
+ * "Chuyển cột khi hoàn thành" của 1 cột kích hoạt (xem `updateProjectWithRule`
+ * trong ProjectKanbanBoard.tsx). Đây là quyết định nghiệp vụ của chủ dự án
+ * (2026-08-26): KHÔNG được "đoán" lại vị trí cột theo % tiến độ hay trạng thái
+ * dự án nữa — logic đoán theo progress/status là cơ chế CŨ, gây hiện tượng
+ * "nhảy cột lung tung" (nhiều dự án ở các % tiến độ khác nhau bị dồn nhầm về
+ * cùng 1 cột) mỗi khi kanbanColumnId bị mất hiệu lực (cột gốc bị xóa/đổi tên).
+ * Khi kanbanColumnId không còn hợp lệ, dự án đơn giản rơi về CỘT ĐẦU TIÊN của
+ * board — người phụ trách tự kéo lại đúng cột nếu cần, không tự động đoán.
  */
 export const getProjectColumnId = (project: Project, columns: KanbanColumn[]): string => {
-  const has = (id: string) => columns.some(c => c.id === id);
-  // Tìm cột theo statusSet (quy trình tự động gán trạng thái)
-  const colWithStatus = (status: string) => columns.find(c => c.automation?.statusSet === status)?.id;
-
   const kanbanColumnId = (project as any).kanbanColumnId as string | undefined;
-  if (kanbanColumnId) {
-    if (has(kanbanColumnId)) return kanbanColumnId;
-    // kanbanColumnId cũ không còn tồn tại (cột đã bị xóa/đổi tên) → bỏ qua,
-    // fallback xuống logic bên dưới để tìm cột phù hợp nhất.
+  if (kanbanColumnId && columns.some(c => c.id === kanbanColumnId)) {
+    return kanbanColumnId;
   }
-
-  // ── Fallback theo status / progress ──
-  // Dùng colWithStatus() thay vì ID cứng để tương thích với mọi cấu hình cột.
-  if (project.status === 'completed') return colWithStatus('completed') || (has('col_done') ? 'col_done' : columns[columns.length - 1]?.id || 'col_design');
-  if (project.status === 'new') return has('col_design') ? 'col_design' : columns[0]?.id || 'col_design';
-  if (project.status === 'maintenance') return colWithStatus('maintenance') || (has('col_maintenance') ? 'col_maintenance' : (has('col_fix') ? 'col_fix' : columns[0]?.id || 'col_design'));
-  if (project.status === 'paused') return colWithStatus('paused') || (has('col_waiting') ? 'col_waiting' : columns[0]?.id || 'col_design');
-  if (project.status === 'cancelled') return colWithStatus('cancelled') || (has('col_cancelled') ? 'col_cancelled' : columns[columns.length - 1]?.id || 'col_design');
-
-  // Progress-based: tìm cột có auto_progress param gần nhất
-  if (project.progress >= 90) return colWithStatus('processing') || (has('col_fix') ? 'col_fix' : columns[columns.length - 2]?.id || 'col_design');
-  if (project.progress >= 70) return colWithStatus('processing') || (has('col_accept') ? 'col_accept' : (has('col_fix') ? 'col_fix' : columns[columns.length - 2]?.id || 'col_design'));
-  if (project.progress > 0) return colWithStatus('processing') || (has('col_active') ? 'col_active' : columns[1]?.id || 'col_design');
-  return has('col_design') ? 'col_design' : columns[0]?.id || 'col_design';
+  // kanbanColumnId thiếu hoặc trỏ tới cột đã bị xóa/đổi tên → về cột đầu tiên.
+  return columns[0]?.id || 'col_design';
 };
 
 // ─── Column reducers (pure, return new arrays) ──────────────────────────────

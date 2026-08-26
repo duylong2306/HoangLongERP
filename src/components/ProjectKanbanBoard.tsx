@@ -1628,11 +1628,33 @@ export default function ProjectKanbanBoard({
   };
 
   // deleteColumn(id) → Xóa cột (dùng deleteColumnReducer), lưu và reset state edit
+  //
+  // Quyết định nghiệp vụ (2026-08-26): vị trí cột của dự án CHỈ do kanbanColumnId
+  // quyết định (kéo thả thủ công / quy tắc "Chuyển cột khi hoàn thành") — không
+  // còn cơ chế "đoán lại" theo % tiến độ/trạng thái. Vì vậy nếu xóa 1 cột còn
+  // đang chứa dự án, kanbanColumnId của các dự án đó sẽ treo (trỏ tới cột không
+  // còn tồn tại) và tự động rơi về cột đầu tiên — KHÔNG đúng ý người phụ trách,
+  // đây chính là nguồn gốc "nhảy cột lung tung" trước đây. Nên CHẶN xóa hẳn khi
+  // cột còn dự án, bắt người dùng tự kéo hết dự án sang cột khác trước.
   const deleteColumn = (id: string) => {
     const colName = columns.find(c => c.id === id)?.name || '';
+    // Đếm trên TOÀN BỘ dự án của sector này (không lọc theo ô tìm kiếm/PM đang
+    // chọn trên UI) để không bỏ sót dự án nào đang thực sự nằm trong cột.
+    const projectsInColumn = projects.filter(p => {
+      const typeMatch = p.type === sector || (sector === 'construction' && p.type === 'general');
+      return typeMatch && getProjectColumnId(p, columns) === id;
+    });
+    if (projectsInColumn.length > 0) {
+      addToast({
+        title: '⚠️ Không thể xóa cột',
+        message: `Cột [${colName}] vẫn còn ${projectsInColumn.length} dự án: ${projectsInColumn.map(p => p.name).join(', ')}. Vui lòng kéo hết các dự án này sang cột khác trước khi xóa.`,
+        type: 'error'
+      });
+      return;
+    }
     setConfirmDialog({
       title: 'Xóa cột phân đoạn',
-      message: `Bạn có chắc chắn muốn xóa cột phân đoạn [${colName}] này? Các công trình thuộc cột này sẽ tự động chuyển về cột mặc định đầu tiên.`,
+      message: `Bạn có chắc chắn muốn xóa cột phân đoạn [${colName}] này? Cột này hiện không còn dự án nào.`,
       onConfirm: () => {
         saveColumns(columns.filter(c => c.id !== id));
       },
