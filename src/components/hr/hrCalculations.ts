@@ -557,11 +557,11 @@ export function calculateSingleEmployeePayroll(
   const otherDeductions = inputs.otherDeductions;
   const advances = inputs.advances;
 
-  // Làm tròn Thực lĩnh về hàng đơn vị (VNĐ không có phần lẻ) — trước đây làm
+  // Làm tròn Thực lĩnh về hàng nghìn (VNĐ không lẻ dưới 1.000đ) — trước đây làm
   // tròn tới 4 chữ số thập phân (toFixed(4)) khiến cột "Thực lĩnh" hiện số lẻ
   // rất nhỏ (ví dụ 12.345.678,3333đ) không có ý nghĩa với tiền VNĐ.
   const netSalaryRaw = totalIncome - bhxhAmount - otherDeductions - advances;
-  const netSalary = Math.round(netSalaryRaw);
+  const netSalary = Math.round(netSalaryRaw / 1000) * 1000;
 
   const bluCode = `BLU-${emp.id}-${monthStr.replace('/', '')}`;
 
