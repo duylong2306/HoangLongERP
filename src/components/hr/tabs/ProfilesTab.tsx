@@ -933,13 +933,25 @@ export default function ProfilesTab({
                       <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Trạng thái làm việc:</label>
                       <select
                         value={editingEmpData.status}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, status: e.target.value as any })}
+                        onChange={(e) => {
+                          const newStatus = e.target.value as any;
+                          // Gắn "Nghỉ hẳn" -> xóa rỗng ngay tài khoản + mật khẩu đăng nhập,
+                          // tránh nhân viên đã nghỉ việc vẫn đăng nhập được vào hệ thống.
+                          // Không xóa hồ sơ nhân sự, chỉ khóa đường đăng nhập.
+                          const accountClear = newStatus === 'retired' ? { username: '', password: '', hasSystemAccount: false } : {};
+                          setEditingEmpData({ ...editingEmpData, status: newStatus, ...accountClear } as any);
+                        }}
                         className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
                       >
                         <option value="working">Đang làm</option>
                         <option value="leave">Nghỉ phép</option>
                         <option value="retired">Nghỉ hẳn</option>
                       </select>
+                      {editingEmpData.status === 'retired' && (
+                        <p className="text-[9.5px] text-amber-400 mt-1 leading-relaxed">
+                          ⚠️ Nhân viên "Nghỉ hẳn" sẽ bị xóa tài khoản + mật khẩu đăng nhập khi lưu, không thể đăng nhập hệ thống nữa.
+                        </p>
+                      )}
                     </div>
                   </div>
 

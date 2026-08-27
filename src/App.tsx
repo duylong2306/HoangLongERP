@@ -3978,15 +3978,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const filtered = employees.filter(e => e.id !== emp.id);
-                                    setEmployees(filtered);
-                                    dbService.employees.delete(emp.id);
+                                    // "Xóa tài khoản" ở đây chỉ thu hồi quyền đăng nhập — xóa rỗng
+                                    // username/password (+ hasSystemAccount) — KHÔNG xóa hồ sơ nhân
+                                    // sự. Trước đây bấm Xóa sẽ xóa luôn cả bản ghi Employee (mất toàn
+                                    // bộ dữ liệu HR của nhân viên đó), không đúng ý nghĩa "xóa tài khoản".
+                                    const clearedFields = { username: '', password: '', hasSystemAccount: false };
+                                    setEmployees(employees.map(e => e.id === emp.id ? { ...e, ...clearedFields } : e));
+                                    dbService.employees.save({ id: emp.id, ...clearedFields }).catch(err =>
+                                      console.warn('Xóa tài khoản đăng nhập trên Supabase thất bại:', err));
                                     setConfirmDeleteId(null);
                                     // Notify HR UI to reset hasSystemAccount flag
                                     window.dispatchEvent(new CustomEvent('hl-system-account-deleted', { detail: { empId: emp.id } }));
                                     addToast({
                                       title: 'Đã xóa tài khoản',
-                                      message: `Đã xóa tài khoản của nhân sự "${emp.name}" thành công.`,
+                                      message: `Đã xóa tài khoản đăng nhập của "${emp.name}". Hồ sơ nhân sự vẫn được giữ nguyên.`,
                                       type: 'success'
                                     });
                                   }}
