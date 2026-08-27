@@ -320,6 +320,18 @@ export default function HrDataTab(props: HrDataTabProps) {
   };
 
   // ── 1. Holidays ──
+  // Quy đổi "dd/mm/yyyy" -> timestamp để sắp xếp tăng dần theo ngày (không phải
+  // theo chuỗi ký tự, vì "2/9" sẽ đứng trước "10/2" nếu so sánh chuỗi thô).
+  // Trả về Infinity cho giá trị không đúng định dạng để đẩy xuống cuối danh sách
+  // thay vì làm vỡ thứ tự hoặc crash.
+  const parseHolidayDate = (dateStr: string): number => {
+    const parts = (dateStr || '').split('/');
+    if (parts.length !== 3) return Infinity;
+    const [day, month, year] = parts.map(Number);
+    if (!day || !month || !year) return Infinity;
+    return new Date(year, month - 1, day).getTime();
+  };
+
   const handleExportHolidays = () => {
     const data = holidays.map(h => ({
       'Mã NL': h.id,
@@ -716,6 +728,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                                 const query = holidaySearchQuery.toLowerCase();
                                 return h.name.toLowerCase().includes(query) || h.date.includes(query) || h.id.toLowerCase().includes(query);
                               })
+                              .sort((a, b) => parseHolidayDate(a.date) - parseHolidayDate(b.date))
                               .map((item) => (
                                 <tr key={item.id} className={`hover:bg-slate-800/30 transition-colors ${hrSelectedRows.has(item.id) ? 'bg-amber-500/10' : ''}`}>
                                   <td className="py-3 px-2 text-center">
