@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileSpreadsheet, Trash2, Check, X, Search, ChevronDown } from 'lucide-react';
+import { FileSpreadsheet, Trash2, Check, X, Search, ChevronDown, Pencil } from 'lucide-react';
 import { CTPStatus, ctpStatusLabel } from '../../../lib/travelExpenseStatus';
 
 interface TripItem {
@@ -40,6 +40,7 @@ interface TripsTabProps {
   onApproveTravelExpense?: (rowId: string, decision: 'approved' | 'rejected') => void;
   canApprove?: boolean;
   onDeleteTravelExpenses?: (rowIds: string[]) => void;
+  onEditTravelExpense?: (rowId: string, updates: { content?: string; amount?: number }) => void;
 }
 
 // ─── Bộ lọc tìm kiếm nhanh dạng combobox (gõ gần đúng → chọn) ───────────────
@@ -152,6 +153,7 @@ export default function TripsTab({
   onApproveTravelExpense,
   canApprove = false,
   onDeleteTravelExpenses,
+  onEditTravelExpense,
 }: TripsTabProps) {
   // Phân trang: số dòng/trang + trang hiện tại
   const [pageSize, setPageSize] = useState(10);
@@ -159,6 +161,33 @@ export default function TripsTab({
 
   // Chọn nhiều dòng để xóa hàng loạt
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+
+  // Dòng đang được sửa (Nội dung + Số tiền) qua modal nhỏ
+  const [editingItem, setEditingItem] = useState<TripItem | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editAmount, setEditAmount] = useState(0);
+
+  const openEditModal = (item: TripItem) => {
+    setEditingItem(item);
+    setEditContent(item.content || '');
+    setEditAmount(Number(item.amount) || 0);
+  };
+
+  const closeEditModal = () => setEditingItem(null);
+
+  const handleSaveEdit = () => {
+    if (!editingItem) return;
+    const rowId = editingItem.rowId || editingItem.id;
+    onEditTravelExpense?.(rowId, { content: editContent, amount: editAmount });
+    closeEditModal();
+  };
+
+  const handleDeleteSingle = (item: TripItem) => {
+    const rowId = item.rowId || item.id;
+    if (window.confirm(`Bạn có chắc chắn muốn xóa công tác phí "${item.content || item.code || rowId}" của ${item.employeeName}?`)) {
+      onDeleteTravelExpenses?.([rowId]);
+    }
+  };
 
   // Reset trang về 1 khi bộ lọc thay đổi
   useEffect(() => { setCurrentPage(1); }, [selectedEmpFilter, selectedMonthFilter, selectedYearFilter, selectedProjectFilter, pageSize]);
@@ -352,6 +381,7 @@ export default function TripsTab({
                     <th className="py-2.5 px-3">Trạng Thái</th>
                     <th className="py-2.5 px-3">Xét Duyệt</th>
                     <th className="py-2.5 px-3 text-right">Số Tiền</th>
+                    <th className="py-2.5 px-3 text-center">Thao Tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850/60">
@@ -377,16 +407,17 @@ export default function TripsTab({
                         <td className="py-2.5 px-3 font-semibold text-slate-200">{item.employeeName}</td>
                         <td className="py-2.5 px-3 text-slate-400 max-w-[150px] truncate" title={item.content}>{item.content}</td>
                         <td className="py-2.5 px-3">
+                          {/* Badge nền trắng + viền/chữ theo màu trạng thái — dễ đọc hơn nền tối trước đây */}
                           {item.status === 'approved' || item.status === 'completed' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-white text-emerald-700 border border-emerald-500">
                               {ctpStatusLabel(item.status)}
                             </span>
                           ) : item.status === 'pending' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800/60">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-white text-amber-700 border border-amber-500">
                               {ctpStatusLabel(item.status)}
                             </span>
                           ) : item.status === 'rejected' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-red-950/60 text-red-400 border border-red-800/60">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-white text-red-700 border border-red-500">
                               {ctpStatusLabel(item.status)}
                             </span>
                           ) : (
@@ -399,7 +430,7 @@ export default function TripsTab({
                               <button
                                 type="button"
                                 onClick={() => onApproveTravelExpense(item.rowId || item.id, 'approved')}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900/60 cursor-pointer transition"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] font-bold bg-white text-emerald-700 border border-emerald-500 hover:bg-emerald-50 cursor-pointer transition"
                                 title="Duyệt công tác phí"
                               >
                                 <Check className="w-3 h-3" /> Duyệt
@@ -407,7 +438,7 @@ export default function TripsTab({
                               <button
                                 type="button"
                                 onClick={() => onApproveTravelExpense(item.rowId || item.id, 'rejected')}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] font-bold bg-red-950/60 text-red-400 border border-red-800/60 hover:bg-red-900/60 cursor-pointer transition"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9.5px] font-bold bg-white text-red-700 border border-red-500 hover:bg-red-50 cursor-pointer transition"
                                 title="Từ chối công tác phí"
                               >
                                 <X className="w-3 h-3" /> Từ chối
@@ -417,6 +448,26 @@ export default function TripsTab({
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-extrabold text-amber-500">
                           {Number(item.amount).toLocaleString('vi-VN')} đ
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              className="p-1 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
+                              title="Sửa công tác phí này"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSingle(item)}
+                              className="p-1 text-red-400 hover:text-red-300 rounded transition cursor-pointer"
+                              title="Xóa công tác phí này"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -428,6 +479,7 @@ export default function TripsTab({
                     <td className="py-3 px-3 text-right text-amber-500 font-mono font-extrabold text-xs">
                       {visibleItems.reduce((sum, item) => sum + Number(item.amount || 0), 0).toLocaleString('vi-VN')} đ
                     </td>
+                    <td></td>
                   </tr>
                 </tfoot>
               </table>
@@ -435,6 +487,60 @@ export default function TripsTab({
           </>
         )}
       </div>
+
+      {/* MODAL SỬA CÔNG TÁC PHÍ: chỉ cho sửa Nội dung + Số tiền */}
+      {editingItem && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[120]" onClick={closeEditModal}>
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">Sửa Công Tác Phí</h3>
+              <button type="button" onClick={closeEditModal} className="text-slate-500 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {editingItem.employeeName} • {editingItem.code || editingItem.id}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-slate-400 uppercase">Nội dung</label>
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                rows={2}
+                className="w-full bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1.5 text-[11px] outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-slate-400 uppercase">Số tiền (đ)</label>
+              <input
+                type="number"
+                value={editAmount}
+                onChange={(e) => setEditAmount(Number(e.target.value) || 0)}
+                className="w-full bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1.5 text-[11px] outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={closeEditModal}
+                className="px-3 py-1.5 rounded text-[11px] font-bold text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700 cursor-pointer transition"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="px-3 py-1.5 rounded text-[11px] font-bold bg-amber-500 text-slate-950 hover:bg-amber-400 cursor-pointer transition"
+              >
+                Lưu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

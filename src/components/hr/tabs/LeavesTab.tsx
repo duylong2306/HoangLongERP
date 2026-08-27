@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 
 interface LeaveItem {
@@ -21,17 +21,39 @@ interface LeavesTabProps {
   selectedLeaveId: string | null;
   setSelectedLeaveId: (v: string | null) => void;
   handleApproveLeave: (id: string, decision: 'approved' | 'rejected') => void;
+  onDeleteLeave: (id: string) => void;
   globalPageSize: number | 'all';
   setGlobalPageSize: (v: number | 'all') => void;
   leavePage: number;
   setLeavePage: (v: number | ((prev: number) => number)) => void;
 }
 
+// Khoảng ngày mặc định của bộ lọc: đầu năm nay đến hôm nay.
+const getDefaultFromDate = () => `${new Date().getFullYear()}-01-01`;
+const getDefaultToDate = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// Bỏ dấu tiếng Việt để so khớp tìm kiếm "gần đúng" (không phân biệt hoa/thường, có dấu/không dấu).
+const normalizeSearchText = (s: string): string =>
+  (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+
 export default function LeavesTab({
   leaves,
   selectedLeaveId,
   setSelectedLeaveId,
   handleApproveLeave,
+  onDeleteLeave,
   globalPageSize,
   setGlobalPageSize,
   leavePage,
@@ -41,10 +63,47 @@ export default function LeavesTab({
   const [leaveSelectedRows, setLeaveSelectedRows] = useState<Set<string>>(new Set());
   const [leaveSelectAll, setLeaveSelectAll] = useState(false);
 
+  // ── Bộ lọc: Từ ngày - Đến ngày, tìm theo tên (gần đúng), loại phép, trạng thái ──
+  const [filterFromDate, setFilterFromDate] = useState(getDefaultFromDate);
+  const [filterToDate, setFilterToDate] = useState(getDefaultToDate);
+  const [filterName, setFilterName] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  // Danh sách "Loại phép" lấy trực tiếp từ dữ liệu đang có (không phụ thuộc cấu
+  // hình hệ số nghỉ phép — tránh thiếu loại nếu cấu hình chưa cập nhật đủ).
+  const leaveTypeOptions = useMemo(() => {
+    const set = new Set<string>();
+    leaves.forEach(l => { if (l.type) set.add(l.type); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'));
+  }, [leaves]);
+
+  const filteredLeaves = useMemo(() => {
+    const kw = normalizeSearchText(filterName);
+    return leaves.filter(l => {
+      // Đơn nào chạm vào khoảng lọc (giao nhau với [fromDate, toDate]) đều được giữ.
+      if (filterFromDate && l.toDate < filterFromDate) return false;
+      if (filterToDate && l.fromDate > filterToDate) return false;
+      if (filterType && l.type !== filterType) return false;
+      if (filterStatus && l.status !== filterStatus) return false;
+      if (kw && !normalizeSearchText(l.empName).includes(kw)) return false;
+      return true;
+    });
+  }, [leaves, filterFromDate, filterToDate, filterType, filterStatus, filterName]);
+
+  const resetFilters = () => {
+    setFilterFromDate(getDefaultFromDate());
+    setFilterToDate(getDefaultToDate());
+    setFilterName('');
+    setFilterType('');
+    setFilterStatus('');
+    setLeavePage(1);
+  };
+
   const paginatedLeaves = (() => {
-    const startIndex = (leavePage - 1) * (globalPageSize === 'all' ? leaves.length : (globalPageSize as number));
-    const endIndex = globalPageSize === 'all' ? leaves.length : startIndex + (globalPageSize as number);
-    return leaves.slice(startIndex, endIndex);
+    const startIndex = (leavePage - 1) * (globalPageSize === 'all' ? filteredLeaves.length : (globalPageSize as number));
+    const endIndex = globalPageSize === 'all' ? filteredLeaves.length : startIndex + (globalPageSize as number);
+    return filteredLeaves.slice(startIndex, endIndex);
   })();
 
   const handleLeaveSelectAll = (checked: boolean) => {
@@ -65,13 +124,82 @@ export default function LeavesTab({
   const handleBulkDeleteLeaves = () => {
     if (leaveSelectedRows.size === 0) return;
     if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${leaveSelectedRows.size} đơn nghỉ phép đã chọn không?\nHành động này không thể hoàn tác.`)) return;
-    // Note: need parent to expose setLeaves - this is just UI
+    leaveSelectedRows.forEach(id => onDeleteLeave(id));
     setLeaveSelectedRows(new Set());
     setLeaveSelectAll(false);
   };
 
+  const handleDeleteSelectedLeave = (l: LeaveItem) => {
+    if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa đơn nghỉ phép "${l.id}" của ${l.empName} không?\nHành động này không thể hoàn tác.`)) return;
+    onDeleteLeave(l.id);
+    setSelectedLeaveId(null);
+  };
+
   return (
     <div className="space-y-4">
+      {/* Bộ lọc */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
+          <input
+            type="date"
+            value={filterFromDate}
+            onChange={(e) => { setFilterFromDate(e.target.value); setLeavePage(1); }}
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-amber-500 cursor-pointer"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
+          <input
+            type="date"
+            value={filterToDate}
+            onChange={(e) => { setFilterToDate(e.target.value); setLeavePage(1); }}
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-amber-500 cursor-pointer"
+          />
+        </div>
+        <div className="flex flex-col gap-1 min-w-[160px]">
+          <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Tìm theo tên</label>
+          <input
+            type="text"
+            value={filterName}
+            onChange={(e) => { setFilterName(e.target.value); setLeavePage(1); }}
+            placeholder="Gõ tên nhân viên..."
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-amber-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1 min-w-[150px]">
+          <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Loại phép</label>
+          <select
+            value={filterType}
+            onChange={(e) => { setFilterType(e.target.value); setLeavePage(1); }}
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-amber-500 cursor-pointer"
+          >
+            <option value="">Tất cả</option>
+            {leaveTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1 min-w-[130px]">
+          <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái</label>
+          <select
+            value={filterStatus}
+            onChange={(e) => { setFilterStatus(e.target.value); setLeavePage(1); }}
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-amber-500 cursor-pointer"
+          >
+            <option value="">Tất cả</option>
+            <option value="pending">Chờ duyệt</option>
+            <option value="approved">Được duyệt</option>
+            <option value="rejected">Từ chối</option>
+          </select>
+        </div>
+        <button
+          type="button"
+          onClick={resetFilters}
+          className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer"
+        >
+          Đặt lại
+        </button>
+      </div>
+
       {leaves.length === 0 ? (
         <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-xl space-y-2">
           <div className="text-3xl">📬</div>
@@ -83,7 +211,7 @@ export default function LeavesTab({
           {/* Left side: basic table layout */}
           <div className={`${selectedLeaveId ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
             <div className="flex justify-between items-center bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <div className="text-xs font-bold text-slate-300">📬 Danh sách đơn xin nghỉ phép</div>
+              <div className="text-xs font-bold text-slate-300">📬 Danh sách đơn xin nghỉ phép ({filteredLeaves.length})</div>
               {selectedLeaveId && (
                 <button
                   onClick={() => setSelectedLeaveId(null)}
@@ -94,6 +222,11 @@ export default function LeavesTab({
               )}
             </div>
 
+            {filteredLeaves.length === 0 ? (
+              <div className="p-6 text-center bg-slate-900 border border-slate-800 rounded-xl">
+                <p className="text-xs text-slate-500 font-bold">Không có đơn nào khớp bộ lọc hiện tại.</p>
+              </div>
+            ) : (
             <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl text-[11px] overflow-x-auto">
               <table className="w-full text-left border-collapse whitespace-nowrap">
                 <thead>
@@ -115,55 +248,49 @@ export default function LeavesTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850">
-                  {(() => {
-                    const startIndex = (leavePage - 1) * (globalPageSize === 'all' ? leaves.length : (globalPageSize as number));
-                    const endIndex = globalPageSize === 'all' ? leaves.length : startIndex + (globalPageSize as number);
-                    const paginated = leaves.slice(startIndex, endIndex);
-
-                    return paginated.map(l => (
-                      <tr
-                        key={l.id}
-                        onClick={() => setSelectedLeaveId(l.id)}
-                        className={`hover:bg-slate-950/45 cursor-pointer transition-colors ${selectedLeaveId === l.id ? 'bg-amber-600/10' : ''} ${leaveSelectedRows.has(l.id) ? 'bg-amber-500/10' : ''}`}
-                      >
-                        <td className="py-2.5 text-center">
-                          <input
-                            type="checkbox"
-                            checked={leaveSelectedRows.has(l.id)}
-                            onChange={(e) => { e.stopPropagation(); handleLeaveRowSelect(l.id, e.target.checked); }}
-                            className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                          />
-                        </td>
-                        <td className="py-2.5 font-mono font-bold text-pink-400">{l.id}</td>
-                        <td className="py-2.5 font-bold text-white hover:text-amber-400 transition-colors leading-none">
-                          {l.empName}
-                          <span className="block text-[8.5px] text-slate-400 font-mono mt-0.5">{l.empId}</span>
-                        </td>
-                        <td className="py-2.5 text-slate-300 font-medium">{l.type}</td>
-                        <td className="py-2.5 text-slate-350 text-center font-mono">
-                          {l.fromDate} ➔ {l.toDate}
-                        </td>
-                        <td className="py-2.5 text-slate-300 text-center font-bold font-mono">{l.daysCount} ngày</td>
-                        <td className="py-2.5 text-center">
-                          <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded ${
-                            l.status === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                            l.status === 'rejected' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                            'bg-amber-500/10 text-amber-405 border border-amber-500/25'
-                          }`}>
-                            {l.status === 'approved' && 'Được duyệt'}
-                            {l.status === 'rejected' && 'Từ chối'}
-                            {l.status === 'pending' && 'Chờ duyệt'}
-                          </span>
-                        </td>
-                      </tr>
-                    ));
-                  })()}
+                  {paginatedLeaves.map(l => (
+                    <tr
+                      key={l.id}
+                      onClick={() => setSelectedLeaveId(l.id)}
+                      className={`hover:bg-slate-950/45 cursor-pointer transition-colors ${selectedLeaveId === l.id ? 'bg-amber-600/10' : ''} ${leaveSelectedRows.has(l.id) ? 'bg-amber-500/10' : ''}`}
+                    >
+                      <td className="py-2.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={leaveSelectedRows.has(l.id)}
+                          onChange={(e) => { e.stopPropagation(); handleLeaveRowSelect(l.id, e.target.checked); }}
+                          className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-2.5 font-mono font-bold text-pink-400">{l.id}</td>
+                      <td className="py-2.5 font-bold text-white hover:text-amber-400 transition-colors leading-none">
+                        {l.empName}
+                        <span className="block text-[8.5px] text-slate-400 font-mono mt-0.5">{l.empId}</span>
+                      </td>
+                      <td className="py-2.5 text-slate-300 font-medium">{l.type}</td>
+                      <td className="py-2.5 text-slate-350 text-center font-mono">
+                        {l.fromDate} ➔ {l.toDate}
+                      </td>
+                      <td className="py-2.5 text-slate-300 text-center font-bold font-mono">{l.daysCount} ngày</td>
+                      <td className="py-2.5 text-center">
+                        <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded ${
+                          l.status === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                          l.status === 'rejected' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                          'bg-amber-500/10 text-amber-405 border border-amber-500/25'
+                        }`}>
+                          {l.status === 'approved' && 'Được duyệt'}
+                          {l.status === 'rejected' && 'Từ chối'}
+                          {l.status === 'pending' && 'Chờ duyệt'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
 
               {/* Leave Pagination helper */}
               {(() => {
-                const totalFiltered = leaves.length;
+                const totalFiltered = filteredLeaves.length;
                 if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
                 const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
                 return (
@@ -206,7 +333,7 @@ export default function LeavesTab({
 
               {/* Global Row Selector inside Leaves footer */}
               <div className="flex justify-between items-center mt-3 pt-2 text-[10px] text-slate-500 border-t border-slate-850/50">
-                <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, leaves.length)} / ${leaves.length} đơn phép`} mỗi trang.</div>
+                <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, filteredLeaves.length)} / ${filteredLeaves.length} đơn phép`} mỗi trang.</div>
                 <div className="flex items-center gap-1.5 font-bold text-white">
                   <span>Hiển thị:</span>
                   <select
@@ -229,6 +356,7 @@ export default function LeavesTab({
               </div>
 
             </div>
+            )}
           </div>
 
           {/* Right side: sticky details sidebar panel */}
@@ -244,14 +372,24 @@ export default function LeavesTab({
                     <h4 className="font-extrabold text-sm text-slate-100 mt-0.5">{l.empName}</h4>
                     <p className="text-[10px] text-slate-400">Mã NV: {l.empId}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedLeaveId(null)}
-                    className="p-1 text-slate-400 hover:text-white rounded transition cursor-pointer"
-                    title="Đóng chi tiết"
-                  >
-                    ✕
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSelectedLeave(l)}
+                      className="p-1 text-red-400 hover:text-red-300 rounded transition cursor-pointer"
+                      title="Xóa đơn nghỉ phép này"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLeaveId(null)}
+                      className="p-1 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                      title="Đóng chi tiết"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
