@@ -17,6 +17,7 @@ import {
   Download,
   Upload,
   Clock,
+  Pencil,
 } from 'lucide-react';
 import {
   Holiday,
@@ -37,6 +38,7 @@ interface HrDataTabProps {
   setHolidaySearchQuery: (v: string) => void;
   setShowHolidayModal: (v: boolean) => void;
   handleDeleteHoliday: (id: string) => void;
+  onEditHoliday: (item: Holiday) => void;
 
   leaveCoefficients: LeaveCoefficient[];
   setLeaveCoefficients: React.Dispatch<React.SetStateAction<LeaveCoefficient[]>>;
@@ -111,6 +113,7 @@ export default function HrDataTab(props: HrDataTabProps) {
     setHolidaySearchQuery,
     setShowHolidayModal,
     handleDeleteHoliday,
+    onEditHoliday,
 
     leaveCoefficients,
     setLeaveCoefficients,
@@ -727,14 +730,24 @@ export default function HrDataTab(props: HrDataTabProps) {
                                   <td className="py-3 px-4 text-slate-205 font-mono font-bold">{item.date}</td>
                                   <td className="py-3 px-4 text-white text-[11.5px]">{item.name}</td>
                                   <td className="py-3 px-4 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteHoliday(item.id)}
-                                      className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors cursor-pointer"
-                                      title="Xóa ngày nghỉ"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => onEditHoliday(item)}
+                                        className="text-slate-500 hover:text-amber-400 p-1.5 rounded transition-colors cursor-pointer"
+                                        title="Sửa ngày nghỉ"
+                                      >
+                                        <Pencil className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteHoliday(item.id)}
+                                        className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors cursor-pointer"
+                                        title="Xóa ngày nghỉ"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))}
