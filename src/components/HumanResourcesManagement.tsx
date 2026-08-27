@@ -23,6 +23,7 @@ import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
 import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
 import TripsTab, { QuickSearchFilter } from './hr/tabs/TripsTab';
+import SearchableSelect from './SearchableSelect';
 import LeavesTab from './hr/tabs/LeavesTab';
 import PayrollTab from './hr/tabs/PayrollTab';
 import PerformanceTab from './hr/tabs/PerformanceTab';
@@ -126,7 +127,7 @@ const WorkdayCell = React.memo(function WorkdayCell({
   );
 });
 
-export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], defaultSubTab, hideSidebar = false, systemConfig }: HRMProps) {
+export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], tasks = [], defaultSubTab, hideSidebar = false, systemConfig }: HRMProps) {
   const { addToast } = useNotification();
   // Tab list: "profiles", "attendance", "leaves", "payroll", "trips", "hr_data"
   const [activeSubTab, setActiveSubTab] = useState<string>(() => defaultSubTab || 'profiles');
@@ -1642,6 +1643,110 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
     addToast({ title: '✅ Đã lưu', message: `Đã cập nhật công tác phí của ${target.employeeName || ''}.`, type: 'success' });
   }, [travelExpensesSummary, addToast]);
+
+  // ─── Modal "Thêm công tác phí" (tab Công tác phí): chọn xâu chuỗi
+  // Dự án -> Công việc -> Nhiệm vụ, rồi Nhân viên + Ngày hoàn thành + Nội dung.
+  const [showAddTravelExpenseModal, setShowAddTravelExpenseModal] = useState(false);
+  const [addCtpProjectId, setAddCtpProjectId] = useState('');
+  const [addCtpTaskId, setAddCtpTaskId] = useState('');
+  const [addCtpMissionId, setAddCtpMissionId] = useState('');
+  const [addCtpEmpId, setAddCtpEmpId] = useState('');
+  const [addCtpDate, setAddCtpDate] = useState(() => getLocalYYYYMMDD(new Date()));
+  const [addCtpContent, setAddCtpContent] = useState('');
+
+  const resetAddTravelExpenseForm = () => {
+    setShowAddTravelExpenseModal(false);
+    setAddCtpProjectId('');
+    setAddCtpTaskId('');
+    setAddCtpMissionId('');
+    setAddCtpEmpId('');
+    setAddCtpDate(getLocalYYYYMMDD(new Date()));
+    setAddCtpContent('');
+  };
+
+  // Công việc thuộc đúng dự án đã chọn; nhiệm vụ thuộc đúng công việc đã chọn.
+  const addCtpTaskOptions = tasks.filter((t: any) => t.projectId === addCtpProjectId);
+  const addCtpSelectedTask = addCtpTaskOptions.find((t: any) => t.id === addCtpTaskId);
+  const addCtpMissionOptions = (addCtpSelectedTask?.missions || []) as any[];
+
+  const handleSubmitAddTravelExpense = () => {
+    if (!addCtpProjectId || !addCtpTaskId || !addCtpMissionId || !addCtpEmpId || !addCtpDate || !addCtpContent.trim()) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn đầy đủ Dự án, Công việc, Nhiệm vụ, Nhân viên, Ngày hoàn thành và Nội dung.', type: 'warning' });
+      return;
+    }
+    // Input type="date" trả về yyyy-mm-dd -> đổi sang dd/mm/yyyy để khớp định
+    // dạng completedDate dùng chung trong toàn bộ dữ liệu Công Tác Phí.
+    const [y, m, d] = addCtpDate.split('-');
+    handleCreateTravelExpenseManual({
+      projectId: addCtpProjectId,
+      taskId: addCtpTaskId,
+      missionId: addCtpMissionId,
+      empId: addCtpEmpId,
+      completedDate: `${d}/${m}/${y}`,
+      content: addCtpContent.trim(),
+    });
+    resetAddTravelExpenseForm();
+  };
+
+  // ─── THÊM MỚI 1 DÒNG CÔNG TÁC PHÍ THỦ CÔNG (nút "Thêm công tác phí" trong
+  // TripsTab) ─────────────────────────────────────────────────────────────
+  // Bình thường CTP được tự sinh khi hoàn thành nhiệm vụ trong Task (xem
+  // persistTravelExpense ở TaskDetailModal.tsx). Hàm này cho phép kế toán/
+  // quản lý ghi nhận trực tiếp 1 khoản CTP từ tab Công tác phí mà không cần
+  // mở đúng nhiệm vụ trong Task — vẫn gắn đúng dự án/công việc/nhiệm vụ đã
+  // chọn để đồng bộ dữ liệu (lọc theo dự án, tính vào lương...). Số tiền mặc
+  // định 0đ — dùng nút "Sửa" sẵn có để điền số tiền sau khi tạo.
+  const handleCreateTravelExpenseManual = React.useCallback((payload: {
+    projectId: string; taskId: string; missionId: string; empId: string;
+    completedDate: string; content: string;
+  }) => {
+    const project = projects.find((p: any) => p.id === payload.projectId);
+    const customer = customers.find((c: any) => c.id === project?.customerId);
+    const task = tasks.find((t: any) => t.id === payload.taskId);
+    const mission = (task?.missions || []).find((m: any) => m.id === payload.missionId);
+    const emp = employees.find((e: any) => e.id === payload.empId);
+
+    const rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+
+    // completedDate vào đây dạng dd/mm/yyyy -> rút gọn "MM/YYYY" để khớp kỳ lương.
+    const parts = payload.completedDate.split('/');
+    const month = parts.length === 3 ? `${parts[1]}/${parts[2]}` : '';
+
+    const summaryItem = {
+      id: `THCTP-${Date.now()}`,
+      rowId,
+      code: `THCTP-${Date.now()}`,
+      status: 'pending' as CTPStatus,
+      completedDate: payload.completedDate,
+      period: '',
+      empId: payload.empId,
+      month,
+      projectName: project?.name || 'Chưa rõ',
+      customerName: customer?.name || 'Khách hàng lẻ',
+      taskName: task?.name || '',
+      missionName: mission?.name || '',
+      employeeName: emp?.name || 'Chưa gán',
+      creatorId: currentUser.id,
+      creatorName: currentUser.name,
+      content: payload.content,
+      amount: 0,
+      createdAt: new Date().toISOString(),
+      taskId: payload.taskId,
+      missionId: payload.missionId,
+    };
+
+    setTravelExpensesSummary(prev => [...prev, summaryItem]);
+    dbService.hrmTravelExpenses.save(summaryItem, { rowId })
+      .then(() => window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')))
+      .catch((e: any) => {
+        console.warn('[TravelExpense] ⚠️ Lưu CTP mới thất bại:', e?.message || e);
+        addToast({ title: '⚠️ Lỗi', message: 'Đã thêm trên màn hình, nhưng gặp lỗi khi đồng bộ Supabase.', type: 'error' });
+      });
+
+    addToast({ title: '✅ Đã thêm', message: `Đã tạo công tác phí cho ${emp?.name || ''}. Bấm "Sửa" để điền số tiền.`, type: 'success' });
+  }, [projects, customers, tasks, employees, currentUser, addToast]);
 
   // Người được cấu hình xét duyệt Công Tác Phí (Quyền Phê Duyệt → Công Tác Phí)
   // có quyền thấy nút Duyệt/Từ chối trong TripsTab. Fallback: vai trò Kế toán.
@@ -3902,6 +4007,14 @@ Generated by HL ERP Cloud v2.1 (2026)
                       <FileSpreadsheet className="w-3.5 h-3.5" /> Xuất file Excel
                     </button>
 
+                    <button
+                      onClick={() => setShowAddTravelExpenseModal(true)}
+                      className="bg-amber-600 hover:bg-amber-550 text-white font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Thêm công tác phí mới"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Thêm công tác phí
+                    </button>
+
                   </div>
                 )}
 
@@ -5444,6 +5557,96 @@ Generated by HL ERP Cloud v2.1 (2026)
                 <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded">Trình Giám Đốc 🚀</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* RENDER "THÊM CÔNG TÁC PHÍ" MODAL — chọn xâu chuỗi Dự án -> Công việc -> Nhiệm vụ */}
+      {showAddTravelExpenseModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full text-left space-y-4">
+            <h4 className="font-extrabold text-white text-sm border-b border-slate-805 pb-1 flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-amber-500" /> Thêm Công Tác Phí Mới
+            </h4>
+            <div className="space-y-3 text-[11px] text-slate-300">
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Dự án:</label>
+                <SearchableSelect
+                  options={projects.map((p: any) => ({ id: p.id, label: p.name }))}
+                  value={addCtpProjectId}
+                  onChange={(id) => { setAddCtpProjectId(id); setAddCtpTaskId(''); setAddCtpMissionId(''); }}
+                  placeholder="— Chọn dự án —"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Công việc:</label>
+                <SearchableSelect
+                  options={addCtpTaskOptions.map((t: any) => ({ id: t.id, label: t.name }))}
+                  value={addCtpTaskId}
+                  onChange={(id) => { setAddCtpTaskId(id); setAddCtpMissionId(''); }}
+                  placeholder={addCtpProjectId ? '— Chọn công việc —' : 'Vui lòng chọn dự án trước'}
+                  disabled={!addCtpProjectId}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nhiệm vụ:</label>
+                <SearchableSelect
+                  options={addCtpMissionOptions.map((m: any) => ({ id: m.id, label: m.name }))}
+                  value={addCtpMissionId}
+                  onChange={setAddCtpMissionId}
+                  placeholder={addCtpTaskId ? '— Chọn nhiệm vụ —' : 'Vui lòng chọn công việc trước'}
+                  disabled={!addCtpTaskId}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nhân viên:</label>
+                <SearchableSelect
+                  options={employees.map((e: any) => ({ id: e.id, label: e.name }))}
+                  value={addCtpEmpId}
+                  onChange={setAddCtpEmpId}
+                  placeholder="— Chọn nhân viên —"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Ngày hoàn thành:</label>
+                <input
+                  type="date"
+                  required
+                  value={addCtpDate}
+                  onChange={(e) => setAddCtpDate(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nội dung:</label>
+                <textarea
+                  required
+                  rows={2}
+                  value={addCtpContent}
+                  onChange={(e) => setAddCtpContent(e.target.value)}
+                  placeholder="Ví dụ: Đi Nam Ban - Đà Lạt (xe 1 người)"
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
+                />
+              </div>
+
+              <p className="text-[10px] text-slate-500 italic leading-relaxed">
+                * Số tiền mặc định 0đ — sau khi thêm, dùng nút "Sửa" trong bảng để điền số tiền.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button type="button" onClick={resetAddTravelExpenseForm} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
+                <button type="button" onClick={handleSubmitAddTravelExpense} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

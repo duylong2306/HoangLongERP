@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Calculator, FileSpreadsheet, Download } from 'lucide-react';
 import { PayrollItem } from '../hrTypes';
 
@@ -74,6 +74,23 @@ export default function PayrollTab({
       if (na !== nb) return na - nb;
       return String(a.empId).localeCompare(String(b.empId));
     });
+
+  // Tổng cộng theo bộ lọc hiện tại (kỳ lương + tên nhân viên) — tính trên TOÀN BỘ
+  // danh sách đã lọc (filteredPayroll), không phải chỉ trang đang xem, giống cách
+  // tab "Công nợ Trả" (Tài Chính - Kế Toán) tính tổng ở dòng cuối bảng.
+  const payrollTotals = useMemo(() => {
+    return filteredPayroll.reduce((acc: any, p: any) => {
+      acc.baseSalary += p.baseSalary || 0;
+      acc.dailyWage += Math.round(((p.baseSalary || 0) / standardWorkDays) * (p.workedDays || 0));
+      acc.kpiBonus += p.kpiBonus || 0;
+      acc.otAmount += (p.otWeekendSalary || 0) + (p.totalOtHoursSalary || 0);
+      acc.advances += p.advances || 0;
+      acc.insurance += p.insurance || 0;
+      acc.tax += p.tax || 0;
+      acc.netSalary += p.netSalary || 0;
+      return acc;
+    }, { baseSalary: 0, dailyWage: 0, kpiBonus: 0, otAmount: 0, advances: 0, insurance: 0, tax: 0, netSalary: 0 });
+  }, [filteredPayroll, standardWorkDays]);
 
   // Gợi ý nhân viên (từ danh sách employees) khớp gần đúng với từ khoá đang nhập.
   const nameSuggestions = !payrollNameSearch.trim()
@@ -296,6 +313,26 @@ export default function PayrollTab({
                   ));
                 })()}
               </tbody>
+              {filteredPayroll.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-slate-700 bg-slate-950/60 font-bold">
+                    <td colSpan={2} className="py-3 pr-2 text-right text-slate-400 uppercase tracking-wider text-[10px] font-extrabold">
+                      Tổng cộng ({filteredPayroll.length} nhân viên):
+                    </td>
+                    <td className="py-3 font-mono font-black text-white">{payrollTotals.baseSalary.toLocaleString('vi-VN')} đ</td>
+                    <td></td>
+                    <td className="py-3 font-mono font-black text-slate-100">{payrollTotals.dailyWage.toLocaleString('vi-VN')} đ</td>
+                    <td></td>
+                    <td className="py-3 font-mono font-black text-emerald-400">+{payrollTotals.kpiBonus.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-amber-450">+{payrollTotals.otAmount.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-red-400">-{payrollTotals.advances.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-purple-400">-{payrollTotals.insurance.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-slate-400">-{payrollTotals.tax.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-black text-emerald-400 font-sans text-xs">{payrollTotals.netSalary.toLocaleString('vi-VN')} đ</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           ) : (
             <table className="w-full text-left whitespace-nowrap border-collapse min-w-[2200px]">

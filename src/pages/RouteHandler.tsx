@@ -71,6 +71,6 @@ export default function RouteHandler(p: Props) {
   if (t('material-coordination')) return <MaterialCoordination projects={p.projects} employees={p.employees} onUpdateProject={p.onUpdateProject} onUpdateMultipleProjects={p.onUpdateMultipleProjects} currentUser={p.currentUser} customers={p.customers} />;
   if (t('warehouse-suppliers')) return <WarehouseSuppliers />;
   if (t('warehouse-management')) return <WarehouseManagement />;
-  if (t('employees')) return <HumanResourcesManagement currentUser={p.currentUser!} projects={p.projects} customers={p.customers} defaultSubTab={p.hrSubTab} systemConfig={p.hrmConfig || {}} />;
+  if (t('employees')) return <HumanResourcesManagement currentUser={p.currentUser!} projects={p.projects} customers={p.customers} tasks={p.tasks} defaultSubTab={p.hrSubTab} systemConfig={p.hrmConfig || {}} />;
   return null;
 }

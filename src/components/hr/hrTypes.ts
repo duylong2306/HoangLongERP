@@ -22,6 +22,7 @@ export interface HRMProps {
   currentUser: any;
   projects?: any[];
   customers?: any[];
+  tasks?: any[];
   defaultSubTab?: string;
   hideSidebar?: boolean;
   systemConfig: import('../../types').SystemConfig; // Add SystemConfig here

@@ -3883,10 +3883,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
           {/* TAB 6: NHÂN SỰ */}
           {activeTab === 'employees' && (
-            <HumanResourcesManagement 
-              currentUser={currentUser} 
-              projects={projects} 
-              customers={customers} 
+            <HumanResourcesManagement
+              currentUser={currentUser}
+              projects={projects}
+              customers={customers}
+              tasks={tasks}
               defaultSubTab={hrSubTab}
               systemConfig={hrmConfig}
             />
