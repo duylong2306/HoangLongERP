@@ -305,7 +305,7 @@ export default function TripsTab({
                   <button
                     type="button"
                     onClick={handleBulkDelete}
-                    className="text-rose-400 hover:text-rose-300 text-[10px] font-bold bg-rose-950/30 border border-rose-500/20 px-2 py-1 rounded cursor-pointer transition flex items-center gap-1"
+                    className="text-rose-700 hover:text-rose-800 text-[10px] font-bold bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded cursor-pointer transition flex items-center gap-1"
                   >
                     <Trash2 className="w-3 h-3" /> Xóa {selectedRows.size} dòng đã chọn
                   </button>
@@ -492,7 +492,7 @@ export default function TripsTab({
       {editingItem && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[120]" onClick={closeEditModal}>
           <div
-            className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm space-y-4"
+            className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-sm space-y-4 animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
