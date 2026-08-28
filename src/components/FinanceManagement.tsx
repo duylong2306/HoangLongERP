@@ -5412,21 +5412,6 @@ export default function FinanceManagement({
               const countCashFund = activeProposalList.filter(a => a.type === 'cash_fund_deposit').length;
               const countOther = activeProposalList.filter(a => a.type === 'other_expense_proposal').length;
 
-              const getStatusBadge = (status: SubcontractorAdvanceProposal['status']) => {
-                switch (status) {
-                  case 'pending_approval':
-                    return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold">Chờ Duyệt</span>;
-                  case 'pending_payment':
-                    return <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold">Chờ Lập Phiếu</span>;
-                  case 'rejected':
-                    return <span className="bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold">Từ Chối</span>;
-                  case 'completed':
-                    return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2.5 py-1 rounded-full font-bold font-sans">Hoàn Thành</span>;
-                  default:
-                    return <span className="bg-slate-800 text-slate-400 text-[10px] px-2.5 py-1 rounded-full font-bold">Không rõ</span>;
-                }
-              };
-
               return (
                 <div className="space-y-6">
                   {/* ⚡ Trung tâm Lập chi & Đề xuất — thanh công cụ tạo nhanh (mở thẳng form, bỏ qua launcher chọn loại) */}
@@ -5683,18 +5668,6 @@ export default function FinanceManagement({
                           { key: 'awaiting_voucher_update', title: 'Cập Nhật Chứng Từ', accent: 'border-violet-500/40', bar: 'bg-violet-500' },
                           { key: 'completed', title: 'Hoàn Thành', accent: 'border-emerald-500/40', bar: 'bg-emerald-500' },
                         ];
-
-                        // Màu badge mã theo trạng thái (nền trắng → chữ đậm, đồng bộ Điều phối vật tư)
-                        const statusCardClass = (st: SubcontractorAdvanceProposal['status']): string => {
-                          switch (st) {
-                            case 'pending_approval': return 'text-amber-700 bg-amber-100 border-amber-300';
-                            case 'pending_payment': return 'text-sky-700 bg-sky-100 border-sky-300';
-                            case 'awaiting_voucher_update': return 'text-violet-700 bg-violet-100 border-violet-300';
-                            case 'completed': return 'text-emerald-700 bg-emerald-100 border-emerald-300';
-                            case 'rejected': return 'text-rose-700 bg-rose-100 border-rose-300';
-                            default: return 'text-slate-700 bg-slate-100 border-slate-300';
-                          }
-                        };
 
                         const proposalCard = (adv: SubcontractorAdvanceProposal) => {
                           const eff = effectiveStatus(adv);
@@ -9206,18 +9179,21 @@ export default function FinanceManagement({
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Trạng thái</span>
+                    {/* Badge nền pastel sáng (đồng bộ màu với cột Kanban Đề Xuất Chi bên dưới +
+                        theo ngôn ngữ thiết kế của Điều phối vật tư), thay cho badge nền tối
+                        trong suốt trước đây — tránh 1 trạng thái hiển thị 2 kiểu khác nhau. */}
                     <span>{(() => {
                       switch (viewingProposalDetail.status) {
                         case 'pending_approval':
-                          return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Duyệt</span>;
+                          return <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Duyệt</span>;
                         case 'pending_payment':
-                          return <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold font-sans">Chờ Lập Phiếu</span>;
+                          return <span className="bg-orange-50 text-orange-700 border border-orange-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Lập Phiếu</span>;
                         case 'rejected':
-                          return <span className="bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold font-sans">Từ Chối</span>;
+                          return <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Từ Chối</span>;
                         case 'completed':
-                          return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded-full font-bold font-sans">Hoàn Thành</span>;
+                          return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Hoàn Thành</span>;
                         default:
-                          return <span className="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-bold">Không rõ</span>;
+                          return <span className="bg-slate-50 text-slate-700 border border-slate-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Không rõ</span>;
                       }
                     })()}</span>
                   </div>
