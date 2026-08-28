@@ -1672,12 +1672,27 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     // ─── Handlers cho các bảng phụ (fire custom events để component lắng nghe) ──
     // Bọc qua coalescer: burst N event cùng bảng → component con chỉ refetch 1 lần.
-    const coalescedEvent = (key: string, eventName: string) => () => {
+    // LUÔN invalidateCache(key) trước khi dispatch: trước đây hàm này chỉ bắn sự
+    // kiện DOM, không hề xoá cache dbService._queryCache — nên component nghe sự
+    // kiện rồi gọi lại dbService.X.list() vẫn nhận đúng mảng cache CŨ trong bộ
+    // nhớ (querySupabase trả cache ngay nếu còn, không gọi Supabase). Bug này
+    // giống hệt lỗi "polling Tier 1 vô tác dụng" đã sửa ở tasks/projects/quotes/
+    // customers — ở đây ảnh hưởng tới toàn bộ 21 bảng "ít đổi" (Hồ Sơ Thầu Phụ,
+    // Quản Lý Thầu Phụ, Công Nợ Trả/Thu, Phân Quyền Vai Trò...) lẫn vài bảng vẫn
+    // còn Realtime dùng chung hàm này (inventory/warehouse_logs/catalog).
+    const coalescedEvent = (key: string, eventName: string, extraKeys?: string[]) => () => {
       scheduleCoalesced(`event:${key}`, () => {
+        try {
+          invalidateCache(key);
+          extraKeys?.forEach(k => invalidateCache(k));
+        } catch {}
         try { window.dispatchEvent(new CustomEvent(eventName)); } catch {}
       });
     };
-    const fireSuppliersEvent = coalescedEvent('suppliers', 'hl-suppliers-updated');
+    // 'hl-suppliers-updated' được dùng chung cho CẢ suppliers (Nhà Cung Cấp) VÀ
+    // accounting_subcontractors (Thầu Phụ) — xem dbService.ts accountingSubcontractors
+    // .save()/.delete() cũng bắn đúng event này — nên phải invalidate cả 2 bảng.
+    const fireSuppliersEvent = coalescedEvent('suppliers', 'hl-suppliers-updated', ['accounting_subcontractors']);
     const fireInventoryEvent = coalescedEvent('inventory', 'hl-inventory-updated');
     const fireWarehouseLogsEvent = coalescedEvent('warehouse_logs', 'hl-warehouse-logs-updated');
     const fireWarehouseDataEvent = coalescedEvent('warehouse_data', 'hl-warehouse-data-updated');
