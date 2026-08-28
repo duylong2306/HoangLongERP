@@ -1194,15 +1194,42 @@ export default function FinanceManagement({
     };
   }, []);
 
+  // ─── Quỹ Tiền Mặt: dữ liệu phiếu chi dùng riêng cho tab này ───────────────
+  // Dùng query NHẸ (payments.listCashFundSummary — không kéo theo cột `images`
+  // vốn có thể rất nặng cho MỌI phiếu chi trong toàn hệ thống) thay vì phụ thuộc
+  // vào `payments` (prop đầy đủ, dùng chung cho các tab khác cần xem ảnh đính
+  // kèm) — tránh tình trạng tab Quỹ Tiền Mặt phải chờ tải xong toàn bộ ảnh sao
+  // kê/biên lai của cả công ty mới hiện được vài con số tổng hợp đơn giản.
+  const [cashFundPayments, setCashFundPayments] = useState<Payment[]>([]);
+  const [cashFundLoading, setCashFundLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    const fetchCashFundPayments = async () => {
+      try {
+        const rows = await dbService.payments.listCashFundSummary();
+        if (active) setCashFundPayments(rows as Payment[]);
+      } catch (err) {
+        console.error('Lỗi khi tải phiếu chi phục vụ Quỹ tiền mặt:', err);
+      } finally {
+        if (active) setCashFundLoading(false);
+      }
+    };
+    fetchCashFundPayments();
+    return () => { active = false; };
+    // Tải lại khi số lượng phiếu chi tổng thay đổi (có phiếu mới/duyệt/xóa) —
+    // chỉ dùng `payments.length` làm tín hiệu kích hoạt, không đợi `payments`
+    // (đã kèm ảnh) tải xong mới hiển thị lần đầu.
+  }, [payments.length]);
+
   // Số dư Quỹ tiền mặt = số dư đầu kỳ + tổng phiếu chi NẠP quỹ (category='cash_fund')
   // đã duyệt − tổng phiếu chi RÚT từ quỹ (paymentMethod='cash_fund', mọi hạng mục) đã duyệt.
   // Không lưu số dư trực tiếp — luôn tính lại từ Payment để tránh lệch dữ liệu.
   const cashFundDeposited = useMemo(() =>
-    payments.filter(p => p.category === 'cash_fund' && p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0),
-    [payments]);
+    cashFundPayments.filter(p => p.category === 'cash_fund' && p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0),
+    [cashFundPayments]);
   const cashFundSpent = useMemo(() =>
-    payments.filter(p => p.paymentMethod === 'cash_fund' && p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0),
-    [payments]);
+    cashFundPayments.filter(p => p.paymentMethod === 'cash_fund' && p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0),
+    [cashFundPayments]);
   const cashFundBalance = (cashFundConfig?.openingBalance || 0) + cashFundDeposited - cashFundSpent;
   const [editingOpeningBalance, setEditingOpeningBalance] = useState(false);
   const [openingBalanceInput, setOpeningBalanceInput] = useState('0');
@@ -1829,6 +1856,10 @@ export default function FinanceManagement({
       const tongGiaTri = openingDebt + value;
       // Cập nhật: Còn lại = Tổng giá trị - Đã Trả (bỏ logic căn cứ CĐK/HĐ)
       const remaining = tongGiaTri - totalPaidAmount;
+      // Dự án / Công việc liên kết với hợp đồng thầu phụ (lấy trực tiếp từ hợp đồng,
+      // fallback tra cứu theo projectId/taskId nếu tên chưa được lưu sẵn trên hợp đồng).
+      const projectName = sub.projectName || projects.find(p => p.id === sub.projectId)?.name || '';
+      const taskName = tasksProp.find(t => t.id === (sub as any).taskId)?.name || '';
       return {
         id: sub.id,
         subcontractorId: sub.subcontractorId,
@@ -1842,7 +1873,9 @@ export default function FinanceManagement({
         notes: sub.notes || sub.workName || 'Hợp đồng thầu phụ thi công',
         date: (sub as any).date || '',
         isAuto: true,
-        isOpeningDebt: false
+        isOpeningDebt: false,
+        projectName,
+        taskName
       };
     });
 
@@ -1880,7 +1913,7 @@ export default function FinanceManagement({
     // Sắp xếp cố định theo tên đơn vị: SELECT '*' không có ORDER BY nên mỗi lần
     // realtime refetch thứ tự dòng trả về có thể khác → bảng nhảy vị trí liên tục.
     return [...subs, ...customs].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
-  }, [approvedSubContracts, customLiabilities, payments, purchaseOrders]);
+  }, [approvedSubContracts, customLiabilities, payments, purchaseOrders, projects, tasksProp]);
 
   // Tạo phiếu chi thanh toán công nợ cho 1 đơn hàng (liên kết qua purchaseOrderId).
   // Công nợ đơn hàng & Công nợ Trả được giảm khi phiếu chi được duyệt (xử lý tại App.tsx handleApprovePayment).
@@ -3408,6 +3441,12 @@ export default function FinanceManagement({
       addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng chọn Dự án / Công trình!', type: 'error' });
       return;
     }
+    // Công việc bắt buộc với Tạm ứng Thầu Phụ — quyết định đúng hợp đồng (và giá trị
+    // hợp đồng) được đối chiếu, tránh nhầm hợp đồng của công việc/dự án khác cùng thầu phụ.
+    if (projectRequired && !quickProposalTaskId) {
+      addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng chọn Công việc!', type: 'error' });
+      return;
+    }
     // Tên dự án cấp đề xuất: với Chi phí Công trình, mỗi DÒNG đã tự mang công
     // trình riêng (xem expenseItems) — trường này chỉ để hiển thị tóm tắt: nếu
     // mọi dòng cùng 1 công trình thì lấy đúng tên đó, khác nhau thì ghi số lượng.
@@ -3568,6 +3607,8 @@ export default function FinanceManagement({
     setShowQuickProposalModal(false);
     setQuickProposalSubId('');
     setQuickProposalProjId('');
+    setQuickProposalTaskId('');
+    setQuickProposalTaskName('');
     setQuickProposalAmount('');
     setQuickProposalReason('');
     setQuickProposalSubMode('advance');
@@ -5860,14 +5901,14 @@ export default function FinanceManagement({
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
-                              onClick={() => { setQuickProposalSubMode('advance'); setQuickProposalProjId(projects[0]?.id || ''); setQuickProposalSubId(''); }}
+                              onClick={() => { setQuickProposalSubMode('advance'); setQuickProposalProjId(projects[0]?.id || ''); setQuickProposalSubId(''); setQuickProposalTaskId(''); setQuickProposalTaskName(''); }}
                               className={`text-[11px] font-extrabold px-3 py-2 rounded-lg border transition-all cursor-pointer ${quickProposalSubMode === 'advance' ? 'bg-sky-600 text-white border-sky-500' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-sky-500/50'}`}
                             >
                               💰 Tạm ứng Thầu Phụ
                             </button>
                             <button
                               type="button"
-                              onClick={() => { setQuickProposalSubMode('debt'); setQuickProposalProjId(''); setQuickProposalSubId(''); }}
+                              onClick={() => { setQuickProposalSubMode('debt'); setQuickProposalProjId(''); setQuickProposalSubId(''); setQuickProposalTaskId(''); setQuickProposalTaskName(''); }}
                               className={`text-[11px] font-extrabold px-3 py-2 rounded-lg border transition-all cursor-pointer ${quickProposalSubMode === 'debt' ? 'bg-orange-600 text-white border-orange-500' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-orange-500/50'}`}
                             >
                               🧾 Thanh Toán Công Nợ
@@ -5911,6 +5952,8 @@ export default function FinanceManagement({
                               onChange={(id) => {
                                 setQuickProposalProjId(id);
                                 setQuickProposalSubId(''); // reset thầu phụ khi đổi dự án
+                                setQuickProposalTaskId(''); // reset công việc khi đổi dự án
+                                setQuickProposalTaskName('');
                               }}
                               placeholder="— Chọn dự án / công trình —"
                               searchPlaceholder="🔍 Gõ tên dự án..."
@@ -5930,6 +5973,49 @@ export default function FinanceManagement({
                         )
                       )}
 
+                      {/* Chọn Công việc — chỉ áp dụng cho Tạm ứng Thầu Phụ. Danh sách chỉ hiện các
+                          công việc TRONG dự án đã chọn và ĐÃ LIÊN KẾT thầu phụ (task.subcontractorId),
+                          vì mỗi Hợp Đồng Thầu Phụ (giá trị hợp đồng dùng để hiển thị & đối chiếu công nợ)
+                          được lập gắn với 1 công việc cụ thể — cùng 1 thầu phụ có thể có nhiều hợp đồng
+                          khác nhau ở nhiều công việc/dự án khác nhau, nên phải chọn đúng công việc mới
+                          lấy đúng giá trị hợp đồng & còn lại công nợ (trước đây chỉ khớp theo TÊN thầu
+                          phụ nên bị lấy nhầm hợp đồng của công việc/dự án khác). Chọn công việc cũng tự
+                          động điền sẵn Thầu phụ liên kết, giống cách lập Hợp Đồng Thầu Phụ ở "Hồ Sơ Thầu Phụ". */}
+                      {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && (() => {
+                        const projectTasksWithSub = tasksProp.filter(t => t.projectId === quickProposalProjId && !!t.subcontractorId);
+                        return (
+                          <div>
+                            <label className="block text-slate-400 font-semibold mb-1">
+                              Công việc <span className="text-rose-500">*</span>:
+                            </label>
+                            <select
+                              value={quickProposalTaskId}
+                              disabled={!quickProposalProjId}
+                              onChange={(e) => {
+                                const taskId = e.target.value;
+                                setQuickProposalTaskId(taskId);
+                                const task = projectTasksWithSub.find(t => t.id === taskId);
+                                setQuickProposalTaskName(task?.name || '');
+                                // Tự động điền Thầu phụ liên kết với công việc — mỗi công việc chỉ gắn 1 thầu phụ.
+                                setQuickProposalSubId(task?.subcontractorId || '');
+                              }}
+                              className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold disabled:cursor-not-allowed disabled:text-slate-500"
+                              required
+                            >
+                              <option value="">{quickProposalProjId ? '— Chọn công việc —' : '— Chọn dự án trước —'}</option>
+                              {projectTasksWithSub.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                            {quickProposalProjId && projectTasksWithSub.length === 0 && (
+                              <div className="text-[9px] text-amber-400/90 flex items-center gap-1 mt-1">
+                                <CheckCircle2 className="w-3 h-3" /> Dự án này chưa có công việc nào liên kết thầu phụ — vào "Việc của tôi" / Kanban dự án để gắn thầu phụ cho công việc trước.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       {/* Chọn thầu phụ / nhà cung cấp (nhóm supplier) — ẩn với Đề Xuất Chi Phí */}
                       {quickProposalRecipientKind === 'supplier' && quickProposalType !== 'project_expense_proposal' && (() => {
                         // Thầu Phụ (bảng accounting_subcontractors) là danh mục RIÊNG, khác với
@@ -5938,9 +6024,36 @@ export default function FinanceManagement({
                         // xuất, nếu không thì tìm nhầm bảng sẽ luôn ra "không tìm thấy".
                         const subDataSource = quickProposalType === 'subcontractor_advance' ? allSubcontractors : suppliers;
                         const selSub = subDataSource.find((s: any) => s.id === quickProposalSubId);
-                        const subLiab = selSub ? mergedLiabilities.find(l => l.name === selSub.name) : undefined;
+                        // Tạm ứng Thầu Phụ: PHẢI lấy đúng hợp đồng của DỰ ÁN + CÔNG VIỆC đang chọn —
+                        // cùng 1 thầu phụ có thể ký nhiều hợp đồng ở nhiều công việc/dự án khác nhau
+                        // với giá trị khác nhau, nên không được khớp chỉ theo TÊN thầu phụ (trước đây
+                        // lấy đại hợp đồng đầu tiên trùng tên, sai giá trị hợp đồng hiển thị). Ưu tiên
+                        // hợp đồng khớp đúng taskId; nếu hợp đồng cũ chưa từng gắn công việc (taskId
+                        // rỗng) thì vẫn cho phép dùng tạm hợp đồng đó (không có lựa chọn nào khác).
+                        // Với Thanh Toán Công Nợ (không gắn dự án/công việc) vẫn giữ khớp theo tên như cũ.
+                        const projectSubContracts = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && quickProposalSubId)
+                          ? approvedSubContracts.filter(q => q.projectId === quickProposalProjId && q.subcontractorId === quickProposalSubId)
+                          : [];
+                        const advanceContract = projectSubContracts.find(q => (q as any).taskId && (q as any).taskId === quickProposalTaskId)
+                          || projectSubContracts.find(q => !(q as any).taskId)
+                          || projectSubContracts[0];
+                        const subLiab = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance')
+                          ? (advanceContract ? mergedLiabilities.find(l => l.id === advanceContract.id) : undefined)
+                          : (selSub ? mergedLiabilities.find(l => l.name === selSub.name) : undefined);
+                        // Thanh Toán Công Nợ: hiển thị TỔNG công nợ trả của TẤT CẢ công việc/hợp đồng
+                        // đã liên kết với thầu phụ này (không phải chỉ 1 hợp đồng đầu tiên trùng tên
+                        // như "subLiab" ở trên) — vì thanh toán công nợ không gắn 1 dự án/công việc cụ
+                        // thể, số tiền còn nợ phải là tổng cộng dồn qua mọi công việc thầu phụ đã làm.
+                        const debtSubItems = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' && selSub)
+                          ? mergedLiabilities.filter(l => l.category === 'Thầu Phụ' && (l.subcontractorId ? l.subcontractorId === selSub.id : l.name === selSub.name))
+                          : [];
+                        const debtTotals = debtSubItems.reduce((acc, l) => ({
+                          tongGiaTri: acc.tongGiaTri + (l.tongGiaTri || 0),
+                          remaining: acc.remaining + (l.remaining || 0),
+                        }), { tongGiaTri: 0, remaining: 0 });
                         // Tạm ứng Thầu Phụ: lấy thầu phụ theo Hợp Đồng Thầu Phụ đã ký với DỰ ÁN
-                        // đang chọn (không lọc theo trạng thái duyệt — hợp đồng "Đã Lập" (chờ
+                        // đang chọn (không lọc theo taskId — hợp đồng cũ có thể chưa từng gắn công
+                        // việc cụ thể; không lọc theo trạng thái duyệt — hợp đồng "Đã Lập" (chờ
                         // duyệt) hay "Hoàn thành" (đã duyệt) đều cho chọn, để không chặn nhầm
                         // thầu phụ vừa ký hợp đồng nhưng chưa kịp duyệt). Mỗi thầu phụ giữ lại
                         // hợp đồng MỚI NHẤT của mình trong dự án để hiển thị trạng thái kèm theo.
@@ -6014,11 +6127,11 @@ export default function FinanceManagement({
                                 <div className="text-slate-500 mt-0.5">Còn lại công nợ: <b className="text-sky-700">{(subLiab.remaining ?? 0).toLocaleString('vi-VN')} đ</b></div>
                               </div>
                             )}
-                            {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' && selSub && subLiab && (
+                            {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' && selSub && debtSubItems.length > 0 && (
                               <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 text-[10px]">
                                 <div className="text-orange-700 font-bold uppercase tracking-wide mb-0.5">Còn lại Công Nợ Thầu Phụ (Công nợ Trả)</div>
-                                <div className="text-slate-900 font-mono font-black text-sm">{(subLiab.remaining ?? 0).toLocaleString('vi-VN')} đ</div>
-                                <div className="text-slate-500 mt-0.5">Tổng giá trị hợp đồng: <b className="text-orange-700">{(subLiab.tongGiaTri ?? 0).toLocaleString('vi-VN')} đ</b></div>
+                                <div className="text-slate-900 font-mono font-black text-sm">{debtTotals.remaining.toLocaleString('vi-VN')} đ</div>
+                                <div className="text-slate-500 mt-0.5">Tổng giá trị hợp đồng ({debtSubItems.length} công việc): <b className="text-orange-700">{debtTotals.tongGiaTri.toLocaleString('vi-VN')} đ</b></div>
                               </div>
                             )}
                             {quickProposalType === 'supplier_payment_proposal' && selSub && subLiab && (
@@ -8116,9 +8229,10 @@ export default function FinanceManagement({
             {/* TAB: QUỸ TIỀN MẶT */}
             {activeSubTab === 'quy_tien_mat' && (() => {
               // Các khoản CHI RA từ Quỹ (mọi hạng mục, paymentMethod='cash_fund'), nhóm theo người tạo đề xuất
-              const cashFundPayments = payments.filter(p => p.paymentMethod === 'cash_fund');
+              // (dùng dữ liệu nhẹ `cashFundPayments` đã tải riêng ở trên, không phải `payments` đầy đủ kèm ảnh)
+              const cashFundSpentPayments = cashFundPayments.filter(p => p.paymentMethod === 'cash_fund');
               const spentGroups = new Map<string, { proposer: string; items: Payment[] }>();
-              cashFundPayments.forEach(p => {
+              cashFundSpentPayments.forEach(p => {
                 const key = p.proposerId || p.proposer || '—';
                 if (!spentGroups.has(key)) spentGroups.set(key, { proposer: p.proposer || '—', items: [] });
                 spentGroups.get(key)!.items.push(p);
@@ -8165,6 +8279,12 @@ export default function FinanceManagement({
                       <span className="text-xl font-black text-rose-400 font-mono">-{cashFundSpent.toLocaleString('vi-VN')}đ</span>
                     </div>
                   </div>
+                  {cashFundLoading && (
+                    <div className="text-[10px] text-slate-500 italic flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 border-2 border-slate-600 border-t-teal-400 rounded-full animate-spin" />
+                      Đang tải dữ liệu Quỹ tiền mặt...
+                    </div>
+                  )}
 
                   {/* Đề xuất Nạp Quỹ nay đi qua "Trung tâm Lập chi & Đề xuất" ở tab Đề Xuất
                       Chi (thẻ "Quỹ Tiền Mặt (Nạp Quỹ)" trong QUICK_LAUNCH_ITEMS) — được
@@ -8174,7 +8294,9 @@ export default function FinanceManagement({
                   <div className="space-y-2">
                     <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block border-b border-slate-850 pb-2">Chi tiêu từ Quỹ theo người tạo đề xuất</span>
                     {spentGroupList.length === 0 ? (
-                      <p className="text-[11px] text-slate-500 italic bg-slate-900 border border-dashed border-slate-800 rounded-xl p-4 text-center">Chưa có khoản chi nào lấy từ Quỹ tiền mặt.</p>
+                      <p className="text-[11px] text-slate-500 italic bg-slate-900 border border-dashed border-slate-800 rounded-xl p-4 text-center">
+                        {cashFundLoading ? 'Đang tải...' : 'Chưa có khoản chi nào lấy từ Quỹ tiền mặt.'}
+                      </p>
                     ) : spentGroupList.map((g, gi) => {
                       const groupTotal = g.items.reduce((s, p) => s + (p.amount || 0), 0);
                       return (
@@ -8590,6 +8712,8 @@ export default function FinanceManagement({
                       <tr>
                         <th className="px-3 py-2.5">Tên Đơn Vị</th>
                         <th className="px-3 py-2.5">Phân Loại</th>
+                        <th className="px-3 py-2.5">Dự Án</th>
+                        <th className="px-3 py-2.5">Công Việc</th>
                         <th className="px-3 py-2.5 text-right">Công Nợ Đầu Kỳ</th>
                         <th className="px-3 py-2.5 text-right">Phát Sinh</th>
                         <th className="px-3 py-2.5 text-right">Tổng giá trị</th>
@@ -8602,7 +8726,7 @@ export default function FinanceManagement({
                     <tbody>
                       {filteredLiabilities.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-3 py-8 text-center text-slate-500 italic">
+                          <td colSpan={11} className="px-3 py-8 text-center text-slate-500 italic">
                             {mergedLiabilities.length === 0 ? 'Chưa có dữ liệu công nợ phải trả. Hãy duyệt hợp đồng thầu phụ hoặc thêm mới.' : 'Không tìm thấy công nợ phải trả khớp bộ lọc.'}
                           </td>
                         </tr>
@@ -8644,6 +8768,10 @@ export default function FinanceManagement({
                                     {g.category}
                                   </span>
                                 </td>
+                                {/* Dòng tổng hợp gộp nhiều khoản nợ có thể thuộc nhiều Dự án/Công việc khác
+                                    nhau nên không hiện tên cụ thể ở đây — chỉ hiện ở dòng chi tiết bên dưới. */}
+                                <td className="px-3 py-3 text-slate-500 italic">—</td>
+                                <td className="px-3 py-3 text-slate-500 italic">—</td>
                                 <td className="px-3 py-3 text-right font-mono font-bold text-amber-400">
                                   {g.openingDebt > 0 ? `${g.openingDebt.toLocaleString('vi-VN')} đ` : '—'}
                                 </td>
@@ -8676,6 +8804,8 @@ export default function FinanceManagement({
                                     <div className="font-semibold text-slate-200 text-[11px]">{item.notes || item.name}</div>
                                   </td>
                                   <td className="px-3 py-2.5 text-[10px] text-slate-400 italic">—</td>
+                                  <td className="px-3 py-2.5 text-[10.5px] text-slate-300">{item.projectName || '—'}</td>
+                                  <td className="px-3 py-2.5 text-[10.5px] text-slate-300">{item.taskName || '—'}</td>
                                   <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-400">
                                     {(() => {
                                       const od = (item.openingDebt ?? (item.isOpeningDebt ? item.value : 0)) || 0;
@@ -8714,7 +8844,7 @@ export default function FinanceManagement({
                     </tbody>
                     <tfoot>
                       <tr className="border-t-2 border-slate-700 bg-slate-900/80 font-sans">
-                        <td className="px-3 py-3 font-extrabold text-white text-[11px] uppercase tracking-wider" colSpan={2}>
+                        <td className="px-3 py-3 font-extrabold text-white text-[11px] uppercase tracking-wider" colSpan={4}>
                           Tổng cộng ({liabilityPageInfo.total} đơn vị)
                         </td>
                         <td className="px-3 py-3 text-right font-mono font-black text-amber-400">

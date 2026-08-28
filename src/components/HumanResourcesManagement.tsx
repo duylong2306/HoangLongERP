@@ -2541,14 +2541,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const sumAdvancesForEmp = (emp: any) =>
       (advancePayments || [])
         .filter((p: any) => {
+          // Chỉ tính phiếu chi ĐÃ DUYỆT — đề xuất tạm ứng đang chờ duyệt/bị từ chối
+          // chưa thực chi, không được trừ vào lương.
+          if (p.status !== 'approved') return false;
           if (!p.date || !String(p.date).startsWith(payrollPeriodPrefix)) return false;
+          // Bắt buộc đúng nhóm gốc chi "Ứng Lương" (salary_advance) — không tính nhầm
+          // các phiếu chi khác nhóm (vd. thanh toán NCC/thầu phụ) dù có cùng employeeId.
+          if (p.category !== 'salary_advance') return false;
           // Ưu tiên khớp CHÍNH XÁC theo MÃ NHÂN VIÊN (employeeId) khi có.
-          if (p.employeeId && emp.id && p.employeeId === emp.id) return true;
-          // Dự phòng cho phiếu chi cũ chưa có employeeId: ghép theo tên + nhóm ứng lương.
-          if (!p.employeeId && p.recipient && emp.name &&
-              String(p.recipient).trim().toLowerCase() === String(emp.name).trim().toLowerCase() &&
-              (p.category === 'salary_advance' || p.category === 'subcontractor_advance')) return true;
-          return false;
+          if (p.employeeId && emp.id) return p.employeeId === emp.id;
+          // Dự phòng cho phiếu chi cũ chưa có employeeId: ghép theo tên.
+          return !!(p.recipient && emp.name && String(p.recipient).trim().toLowerCase() === String(emp.name).trim().toLowerCase());
         })
         .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
 

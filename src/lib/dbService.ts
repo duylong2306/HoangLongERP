@@ -1542,6 +1542,33 @@ export const dbService = {
     async list(): Promise<Payment[]> {
       return querySupabase<Payment>('payments', INITIAL_PAYMENTS);
     },
+    /**
+     * Bản tải NHẸ của payments — CHỈ lấy các cột cần cho tổng hợp Quỹ Tiền Mặt
+     * (số dư/tổng nạp/tổng chi), KHÔNG kéo theo cột `images` (mảng base64 sao kê/
+     * biên lai đính kèm, có thể rất nặng — hàng trăm KB/phiếu) và `approvals`.
+     * Toàn bộ payments.list() ở trên luôn tải kèm images cho mọi phiếu chi dù màn
+     * hình không hiển thị ảnh, khiến tab Quỹ Tiền Mặt (chỉ cần cộng số) bị chờ tải
+     * xong cả một mảng ảnh khổng lồ mới hiện được số liệu → cảm giác "không load"
+     * hoặc load rất chậm. Dùng query riêng, nhỏ gọn, không qua cache chung của
+     * payments.list() để luôn có số liệu mới nhất mà vẫn nhanh.
+     */
+    async listCashFundSummary(): Promise<Pick<Payment, 'id' | 'code' | 'date' | 'category' | 'paymentMethod' | 'status' | 'amount' | 'notes' | 'proposer' | 'proposerId'>[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase
+          .from('payments')
+          .select('id, code, date, category, payment_method, status, amount, notes, proposer, proposer_id');
+        if (error) {
+          console.error('[DB] ❌ Supabase payments (cash fund summary) load error:', error.message);
+          throw new Error(`Không thể tải dữ liệu Quỹ tiền mặt: ${error.message}`);
+        }
+        return (data || []).map((r: any) => rowToCamel(r));
+      } catch (err) {
+        console.error('[DB] ❌ Supabase payments cash fund summary fetch exception:', err);
+        throw err;
+      }
+    },
     async save(payment: Payment): Promise<void> {
       await saveSupabase('payments', payment);
     },
