@@ -2383,20 +2383,20 @@ export default function DashboardOverview({
     if (subReport) {
       if (subReport.status === 'pending') {
         return (
-          <span className="inline-flex bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
+          <span className="inline-flex bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
             ⏳ Chờ duyệt
           </span>
         );
       } else if (subReport.status === 'approved') {
         return (
-          <span className="inline-flex bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
+          <span className="inline-flex bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
             ✅ Đã duyệt
           </span>
         );
       } else if (subReport.status === 'rejected') {
         return (
           <div className="flex flex-col sm:flex-row items-center gap-1.5 shrink-0 mt-1">
-            <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
+            <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
               ❌ Bị từ chối
             </span>
             {selectedDayDetail.log.isLocked ? null : (
@@ -2404,7 +2404,7 @@ export default function DashboardOverview({
                 <button
                   type="button"
                   onClick={() => handleTriggerReport(shift, category, statusLabel)}
-                  className="bg-slate-800 hover:bg-slate-755 text-rose-405 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black cursor-pointer ml-1"
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded text-[9px] font-black cursor-pointer ml-1"
                 >
                   🔄 Báo cáo lại
                 </button>
@@ -2523,17 +2523,17 @@ export default function DashboardOverview({
               {
                 key: 'morning', slotIn: 'timeInS', slotOut: 'timeOutS',
                 configIn: 'morningIn', configOut: 'morningOut',
-                icon: Sun, label: 'Ca Sáng (Ca 1)', color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
+                icon: Sun, label: 'Ca Sáng (Ca 1)', color: 'text-sky-700 bg-sky-50 border-sky-200',
               },
               {
                 key: 'afternoon', slotIn: 'timeInC', slotOut: 'timeOutC',
                 configIn: 'afternoonIn', configOut: 'afternoonOut',
-                icon: Compass, label: 'Ca Chiều (Ca 2)', color: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+                icon: Compass, label: 'Ca Chiều (Ca 2)', color: 'text-amber-700 bg-amber-50 border-amber-200',
               },
               {
                 key: 'overtime', slotIn: 'timeInOT', slotOut: 'timeOutOT',
                 configIn: 'overtimeIn', configOut: 'overtimeOut',
-                icon: Moon, label: 'Tăng ca tối (OT)', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+                icon: Moon, label: 'Tăng ca tối (OT)', color: 'text-purple-700 bg-purple-50 border-purple-200',
               },
             ].map((item) => {
               const { key, slotIn, slotOut, configIn, configOut, icon: Icon, label, color } = item;
@@ -2853,16 +2853,16 @@ export default function DashboardOverview({
                     const weekdaysVN = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
                     const weekdayName = weekdaysVN[dObjCell.getDay()];
 
-                    let cellClass = isWeekendDay 
-                      ? "bg-rose-950/20 text-rose-300 border border-dashed border-rose-900/30 hover:bg-rose-950/25" 
+                    let cellClass = isWeekendDay
+                      ? "bg-rose-50 text-rose-600 border border-dashed border-rose-200 hover:bg-rose-100"
                       : "bg-slate-950/50 text-slate-500 hover:bg-slate-850/50";
                     let titleText = isWeekendDay ? `Ngày ${d}/${m}: ${weekdayName} (Ngày nghỉ tuần)` : `Ngày ${d}/${m}: Chưa có dữ liệu`;
                     
                     if (holidayMatch) {
-                      cellClass = "bg-amber-500/15 text-yellow-400 border border-amber-500/35 hover:bg-amber-500/25 font-bold";
+                      cellClass = "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-bold";
                       titleText = `Ngày ${d}/${m}: Nghỉ Lễ (${holidayMatch.name})`;
                       if (log && ((log.timeInOT && log.timeInOT !== '--:--') || (log.otHours && log.otHours > 0))) {
-                        cellClass = "bg-purple-500/20 text-purple-350 border border-purple-550/35 hover:bg-purple-500/30 font-bold";
+                        cellClass = "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 font-bold";
                         titleText = `Ngày ${d}/${m}: Đi làm Lễ OT (${holidayMatch.name}) - ${log.otHours || 0}h`;
                       }
                     } else if (log) {
@@ -2874,18 +2874,18 @@ export default function DashboardOverview({
                       
                       if (isLeaveDay) {
                         cellClass = isWeekendDay
-                          ? "bg-rose-900/25 text-rose-300 border border-rose-500/40 hover:bg-rose-900/30 font-bold"
-                          : "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25";
+                          ? "bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200 font-bold"
+                          : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100";
                         const sSymbol = log.leaveSymbol || (['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS) ? log.timeInS : 'P');
                         titleText = `Ngày ${d}/${m}: Nghỉ phép được duyệt (${sSymbol})`;
                       } else if (hasOT) {
-                        cellClass = "bg-purple-500/15 text-purple-350 border border-purple-550/30 hover:bg-purple-500/25";
+                        cellClass = "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100";
                         titleText = `Ngày ${d}/${m}: Tăng ca OT (${log.otHours} giờ)`;
                       } else if (isLate) {
-                        cellClass = "bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25";
+                        cellClass = "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100";
                         titleText = `Ngày ${d}/${m}: Đi làm muộn`;
                       } else if (hasTimeIn) {
-                        cellClass = "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25";
+                        cellClass = "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100";
                         titleText = `Ngày ${d}/${m}: Đi làm đúng giờ`;
                       }
                     } else {
@@ -2894,22 +2894,22 @@ export default function DashboardOverview({
                       if (dateStr < todayVal) {
                         const isAWeekend = activeWeekends.includes(dayOfWeek);
                         if (!isAWeekend) {
-                          cellClass = "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 font-bold";
+                          cellClass = "bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200 font-bold";
                           titleText = `Ngày ${d}/${m}: Nghỉ không phép / Vắng mặt`;
                         } else {
-                          cellClass = "bg-rose-950/25 text-rose-400/90 border border-rose-800/40 hover:bg-rose-950/35 font-medium";
+                          cellClass = "bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 font-medium";
                           titleText = `Ngày ${d}/${m}: ${weekdayName} (Ngày nghỉ tuần)`;
                         }
                       } else if (dateStr === todayVal) {
                         const isAWeekend = activeWeekends.includes(dayOfWeek);
                         cellClass = isAWeekend
-                          ? "border-2 border-dashed border-rose-500 bg-rose-950/30 text-rose-405 font-black animate-pulse"
-                          : "border-2 border-dashed border-sky-500/50 bg-sky-950/20 text-sky-400 animate-pulse font-extrabold";
+                          ? "border-2 border-dashed border-rose-500 bg-rose-50 text-rose-700 font-black animate-pulse"
+                          : "border-2 border-dashed border-sky-500 bg-sky-50 text-sky-700 animate-pulse font-extrabold";
                         titleText = `Ngày ${d}/${m}: Hôm nay`;
                       } else {
                         const isAWeekend = activeWeekends.includes(dayOfWeek);
                         if (isAWeekend) {
-                          cellClass = "bg-rose-950/15 text-rose-400/60 border border-dashed border-rose-900/25 hover:bg-rose-950/20 font-medium";
+                          cellClass = "bg-rose-50/60 text-rose-400 border border-dashed border-rose-200 hover:bg-rose-50 font-medium";
                           titleText = `Ngày ${d}/${m}: ${weekdayName} (Ngày nghỉ tuần)`;
                         } else {
                           titleText = `Ngày ${d}/${m}: Tương lai`;
@@ -2964,13 +2964,13 @@ export default function DashboardOverview({
                         }}
                         className={`h-12 flex flex-col items-center justify-between py-1 rounded text-[10px] font-mono transition-all relative ${cellClass} ${
                           isClickable
-                            ? 'cursor-pointer hover:bg-emerald-900/35 hover:scale-105 active:scale-95 duration-100 border-2 border-emerald-500/10'
+                            ? 'cursor-pointer hover:bg-emerald-100 hover:scale-105 active:scale-95 duration-100 border-2 border-emerald-200'
                             : 'cursor-help'
                         } ${
                           hasIssue ? 'ring-1 ring-amber-500/60' : ''
                         } ${
                           isToday
-                            ? 'ring-2 ring-emerald-500 ring-offset-1 ring-offset-slate-900 shadow-[0_0_15px_rgba(16,185,129,0.75)] border-emerald-400/80 z-20 scale-102 font-black'
+                            ? 'ring-2 ring-emerald-500 ring-offset-1 ring-offset-white shadow-[0_0_15px_rgba(16,185,129,0.35)] border-emerald-400 z-20 scale-102 font-black'
                             : ''
                         }`}
                         title={isClickable ? `${titleText}\n— Nhấp để xem chi tiết ca 1, ca 2, đi muộn, tăng ca` : titleText}
@@ -3274,7 +3274,7 @@ export default function DashboardOverview({
 
                   if (isMissingS) {
                     return (
-                      <div className="flex flex-col items-center justify-center p-3 bg-red-950/10 border border-dashed border-red-900/20 rounded-xl space-y-2 py-2.5">
+                      <div className="flex flex-col items-center justify-center p-3 bg-red-50 border border-dashed border-red-200 rounded-xl space-y-2 py-2.5">
                         <span className="text-slate-500 italic text-[11px]">Không có lịch sử check-in Ca Sáng</span>
                         {renderReportButtonAndStatus('morning', false, true)}
                       </div>
@@ -3368,7 +3368,7 @@ export default function DashboardOverview({
                           return (
                             <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
                               <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
-                              <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
                             </div>
                           );
                         }
@@ -3446,7 +3446,7 @@ export default function DashboardOverview({
 
                   if (isMissingC) {
                     return (
-                      <div className="flex flex-col items-center justify-center p-3 bg-red-950/10 border border-dashed border-red-900/20 rounded-xl space-y-2 py-2.5">
+                      <div className="flex flex-col items-center justify-center p-3 bg-red-50 border border-dashed border-red-200 rounded-xl space-y-2 py-2.5">
                         <span className="text-slate-505 italic text-[11px]">Không có lịch sử check-in Ca Chiều</span>
                         {renderReportButtonAndStatus('afternoon', false, true)}
                       </div>
@@ -3540,7 +3540,7 @@ export default function DashboardOverview({
                           return (
                             <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
                               <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
-                              <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
                             </div>
                           );
                         }
@@ -3596,18 +3596,18 @@ export default function DashboardOverview({
 
               {/* Tăng ca (OT) */}
               {((selectedDayDetail.log.timeInOT && selectedDayDetail.log.timeInOT !== '--:--') || (selectedDayDetail.log.otHours && selectedDayDetail.log.otHours > 0)) ? (
-                <div className="bg-purple-950/20 p-3.5 rounded-xl border border-purple-500/20 space-y-2 mt-2">
-                  <div className="flex items-center justify-between border-b border-purple-500/10 pb-1.5">
-                    <span className="font-extrabold text-[11px] text-purple-400 tracking-wide">🌌 TĂNG CA (OVERTIME)</span>
-                    <span className="text-[10px] text-purple-300 font-mono font-bold">Tích lũy: {selectedDayDetail.log.otHours || 0} giờ</span>
+                <div className="bg-purple-50 p-3.5 rounded-xl border border-purple-200 space-y-2 mt-2">
+                  <div className="flex items-center justify-between border-b border-purple-200 pb-1.5">
+                    <span className="font-extrabold text-[11px] text-purple-700 tracking-wide">🌌 TĂNG CA (OVERTIME)</span>
+                    <span className="text-[10px] text-purple-600 font-mono font-bold">Tích lũy: {selectedDayDetail.log.otHours || 0} giờ</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-purple-200">
+                  <div className="grid grid-cols-2 gap-2 text-purple-800">
                     <div>
-                      <span className="text-purple-400/60 block text-[10px]">Giờ vào OT:</span>
+                      <span className="text-purple-500 block text-[10px]">Giờ vào OT:</span>
                       <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeInOT) || '--:--'}</strong>
                     </div>
                     <div>
-                      <span className="text-purple-400/60 block text-[10px]">Giờ ra OT:</span>
+                      <span className="text-purple-500 block text-[10px]">Giờ ra OT:</span>
                       <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeOutOT) || '--:--'}</strong>
                     </div>
                   </div>
@@ -3628,7 +3628,7 @@ export default function DashboardOverview({
                   {selectedDayDetail.log.notes || "Không có ghi chú đặc biệt."}
                 </p>
                 {selectedDayDetail.log.isLocked && (
-                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 mt-2 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/20">
+                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 mt-2 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                     🔒 BẢN GHI ĐÃ KHÓA CHỐT CÔNG
                   </span>
                 )}
@@ -3698,7 +3698,7 @@ export default function DashboardOverview({
                       <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInOT) || '--:--'} - {normalizeTime(userTodayLog.timeOutOT) || '--:--'}</td>
                       <td className="p-3 text-slate-400 leading-tight">
                         <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black px-1.5 py-0.2 rounded uppercase tracking-wide">
+                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-black px-1.5 py-0.2 rounded uppercase tracking-wide">
                             Live Session
                           </span>
                           <span>{userTodayLog.notes || `Chưa thực hiện chấm công ca hôm nay.`}</span>
@@ -3725,8 +3725,8 @@ export default function DashboardOverview({
                               const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
                               return (
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase select-none ${
-                                  st.isValid ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                                  'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  st.isValid ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                  'bg-rose-50 text-rose-700 border border-rose-200'
                                 }`}>
                                   {st.text}
                                 </span>
@@ -3808,12 +3808,12 @@ export default function DashboardOverview({
                   </>
                 ) : (
                   // Camera lỗi/không có → cảnh báo rõ ràng (KHÔNG giả lập ảnh AI)
-                  <div className="text-center p-5 space-y-3 w-full h-full flex flex-col justify-center items-center bg-gradient-to-b from-slate-950 to-slate-900 border border-slate-850">
+                  <div className="text-center p-5 space-y-3 w-full h-full flex flex-col justify-center items-center bg-red-50 border border-red-200">
                     <div className="relative">
-                      <AlertCircle className="w-14 h-14 text-rose-400 mx-auto" />
+                      <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
                     </div>
                     <div>
-                      <p className="text-xs text-rose-300 font-black">KHÔNG TRUY CẬP ĐƯỢC CAMERA</p>
+                      <p className="text-xs text-rose-700 font-black">KHÔNG TRUY CẬP ĐƯỢC CAMERA</p>
                       <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
                         Chấm công bắt buộc có ảnh khuôn mặt chụp trực tiếp lúc điểm danh.
                         Vui lòng cấp quyền truy cập camera, mở qua HTTPS và thử lại.
@@ -3982,7 +3982,7 @@ export default function DashboardOverview({
               </div>
 
               {leaveDateWarningMessage && (
-                <div className="bg-amber-550/10 border border-amber-500/20 text-amber-500 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
                   {leaveDateWarningMessage}
                 </div>
               )}
@@ -4009,7 +4009,7 @@ export default function DashboardOverview({
                     return (
                       <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between">
                         <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                        <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
                       </div>
                     );
                   }
@@ -4152,7 +4152,7 @@ export default function DashboardOverview({
                     return (
                       <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between">
                         <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
                       </div>
                     );
                   }

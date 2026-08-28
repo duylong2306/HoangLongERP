@@ -180,7 +180,7 @@ export default function PerformanceTab({
               setErrorFormCritSearch('');
               setShowErrorModal(true);
             }}
-            className="w-full md:w-auto bg-amber-600 hover:bg-amber-550 active:translate-y-0.5 text-white text-xs font-extrabold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-lg transition-all"
+            className="w-full md:w-auto bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:translate-y-0.5 text-white text-xs font-extrabold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-500/20 transition-all"
           >
             <Plus className="w-4 h-4 text-white" />
             Ghi Nhận Lỗi Vi Phạm
@@ -241,7 +241,7 @@ export default function PerformanceTab({
                   </tr>
                   <tr className="hover:bg-slate-850/30">
                     <td className="p-2 border-r border-slate-850 text-slate-200">≥ 6 lần</td>
-                    <td className="p-2 text-center text-red-500 font-extrabold bg-red-950/20">50</td>
+                    <td className="p-2 text-center text-red-700 font-extrabold bg-red-50">50</td>
                   </tr>
                 </tbody>
               </table>
@@ -375,7 +375,7 @@ export default function PerformanceTab({
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-extrabold text-white text-xs">{err.employeeName}</span>
                           <span className="text-[10px] text-slate-500 font-mono">#{err.employeeId}</span>
-                          <span className="text-[10px] text-purple-400 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-900/30">
+                          <span className="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
                             {getCatText(err.category)}
                           </span>
                         </div>
@@ -422,8 +422,8 @@ export default function PerformanceTab({
 
                       <div className="flex justify-end gap-3 mt-3 pt-2.5 border-t border-slate-900/50 items-center">
                         {deletingErrorId === err.id ? (
-                          <div className="flex items-center gap-2 bg-rose-950/40 px-3 py-1.5 rounded-xl border border-rose-900/30 animate-fadeIn">
-                            <span className="text-[10.5px] font-bold text-rose-300">⚠️ Xác nhận xóa lỗi này?</span>
+                          <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 animate-fadeIn">
+                            <span className="text-[10.5px] font-bold text-rose-700">⚠️ Xác nhận xóa lỗi này?</span>
                             <button
                               type="button"
                               onClick={() => {

@@ -610,7 +610,7 @@ export default function MessagesView({
       }
       // @mention highlight
       parts.push(
-        <span key={`m${match.index}`} className="inline-flex items-center bg-indigo-500/20 text-indigo-300 font-semibold rounded px-1 text-[13px] leading-tight cursor-default">
+        <span key={`m${match.index}`} className="inline-flex items-center bg-white/90 text-indigo-700 font-semibold rounded px-1 text-[13px] leading-tight cursor-default">
           @{match[1]}
         </span>
       );
@@ -756,7 +756,7 @@ export default function MessagesView({
             onClick={() => { setActivePaneTab(tab.id); setSearchQuery(''); }}
             className={`flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-all cursor-pointer relative ${
               activePaneTab === tab.id
-                ? 'bg-indigo-500/15 text-indigo-400 font-semibold ring-1 ring-indigo-500/30'
+                ? 'bg-indigo-50 text-indigo-700 font-semibold ring-1 ring-indigo-200'
                 : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
             }`}
           >
@@ -824,7 +824,7 @@ export default function MessagesView({
               <button
                 onClick={() => onToggleBadgeCounts?.(!showBadgeCounts)}
                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                  showBadgeCounts ? 'bg-slate-800 text-slate-300 hover:bg-indigo-500/20 hover:text-indigo-400' : 'bg-slate-850 text-slate-600'
+                  showBadgeCounts ? 'bg-slate-800 text-slate-300 hover:bg-indigo-100 hover:text-indigo-700' : 'bg-slate-850 text-slate-600'
                 }`}
                 title={showBadgeCounts ? 'Ẩn số tin chưa đọc' : 'Hiện số tin chưa đọc'}
               >
@@ -832,7 +832,7 @@ export default function MessagesView({
               </button>
               <button
                 onClick={() => { setActivePaneTab('contacts'); setSearchQuery(''); }}
-                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-indigo-500/20 flex items-center justify-center text-slate-400 hover:text-indigo-400 transition-all cursor-pointer"
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-indigo-100 flex items-center justify-center text-slate-400 hover:text-indigo-700 transition-all cursor-pointer"
                 title="Danh bạ"
               >
                 <Users className="w-4 h-4" />
@@ -876,8 +876,8 @@ export default function MessagesView({
                     onClick={() => convSelectMode ? toggleConvSelect(conv.id) : handleSelectConv(conv)}
                     className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-all border-l-[3px] ${
                       convSelectMode && selectedConvIds.has(conv.id)
-                        ? 'bg-indigo-500/15 border-l-indigo-500'
-                        : isActive ? 'bg-indigo-500/10 border-l-indigo-500' : 'border-l-transparent hover:bg-slate-900'
+                        ? 'bg-indigo-50 border-l-indigo-500'
+                        : isActive ? 'bg-indigo-50 border-l-indigo-500' : 'border-l-transparent hover:bg-slate-900'
                     }`}
                   >
                     {/* Select checkbox */}
@@ -1010,7 +1010,7 @@ export default function MessagesView({
                         <span className="text-[10px] text-slate-500">{emp.role === 'director' ? '💎 Giám Đốc' : emp.department}</span>
                       </div>
                       {existingConv && (
-                        <span className="text-[9px] text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full shrink-0">Đã chat</span>
+                        <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">Đã chat</span>
                       )}
                     </div>
                   );
@@ -1585,7 +1585,7 @@ export default function MessagesView({
                     {(selectedConv.type === 'group' || selectedConv.type === 'task') && (
                       <button
                         onClick={() => setShowAddMember(true)}
-                        className="w-full py-2 mt-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[12px] font-semibold rounded-lg transition-all cursor-pointer border border-dashed border-indigo-500/30 flex items-center justify-center gap-2"
+                        className="w-full py-2 mt-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[12px] font-semibold rounded-lg transition-all cursor-pointer border border-dashed border-indigo-200 flex items-center justify-center gap-2"
                       >
                         <Plus className="w-4 h-4" />
                         Thêm thành viên
@@ -1614,8 +1614,8 @@ export default function MessagesView({
 
       {/* CREATE GROUP MODAL */}
       {showCreateGroup && (
-        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md shadow-2xl">
+        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-white">🆕 Tạo nhóm mới</h3>
               <button onClick={() => setShowCreateGroup(false)} className="text-slate-400 hover:text-white cursor-pointer">
@@ -1634,7 +1634,7 @@ export default function MessagesView({
                 {employees.filter(e => e.id !== currentUser.id && e.hasSystemAccount && !newGroupMembers.includes(e.id)).map(emp => (
                   <div key={emp.id} onClick={() => setNewGroupMembers(prev => [...prev, emp.id])}
                     className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors">
-                    <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[9px] font-bold text-indigo-400 shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-[9px] font-bold text-indigo-700 shrink-0">
                       {emp.name.substring(0, 2).toUpperCase()}
                     </div>
                     <span className="text-[12px] text-white flex-1">{emp.name}</span>
@@ -1680,8 +1680,8 @@ export default function MessagesView({
 
       {/* ADD MEMBER MODAL */}
       {showAddMember && selectedConv && (
-        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md shadow-2xl">
+        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-white">👥 Thêm thành viên vào nhóm</h3>
               <button onClick={() => setShowAddMember(false)} className="text-slate-400 hover:text-white cursor-pointer">
@@ -1701,7 +1701,7 @@ export default function MessagesView({
                     }
                   }}
                     className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors">
-                    <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[9px] font-bold text-indigo-400 shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-[9px] font-bold text-indigo-700 shrink-0">
                       {emp.name.substring(0, 2).toUpperCase()}
                     </div>
                     <span className="text-[12px] text-white flex-1">{emp.name}</span>
@@ -1741,7 +1741,7 @@ export default function MessagesView({
                 }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 text-[12px] transition-colors cursor-pointer ${
                   ctxMsg?.reactions?.some(g => g.emoji === '❤️' && g.users.includes(currentUser.id))
-                    ? 'text-indigo-300 bg-indigo-500/20'
+                    ? 'text-indigo-700 bg-indigo-50'
                     : 'text-slate-200 hover:bg-slate-800'
                 }`}
               >

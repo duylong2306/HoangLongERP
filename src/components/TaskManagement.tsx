@@ -523,9 +523,9 @@ export default function TaskManagement({
   };
 
   const priorityColors: Record<TaskPriority, string> = {
-    high: 'text-red-400 bg-red-950/40 border border-red-900/50',
-    medium: 'text-amber-400 bg-amber-950/40 border border-amber-900/50',
-    low: 'text-blue-400 bg-blue-950/40 border border-blue-900/50'
+    high: 'text-red-700 bg-red-50 border border-red-200',
+    medium: 'text-amber-700 bg-amber-50 border border-amber-200',
+    low: 'text-blue-700 bg-blue-50 border border-blue-200'
   };
 
   const statusColors: Record<TaskStatus, string> = {
@@ -1142,8 +1142,8 @@ export default function TaskManagement({
                         <td className="p-3">
                           <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase border ${
                             isMain
-                              ? 'bg-amber-950/40 text-amber-400 border-amber-500/30'
-                              : 'bg-sky-950/40 text-sky-400 border-sky-500/30'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-sky-50 text-sky-700 border-sky-200'
                           }`}>
                             {isMain ? 'Phụ trách chính' : 'Nhân sự'}
                           </span>
@@ -1154,12 +1154,12 @@ export default function TaskManagement({
                         <td className="p-3">
                           <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase border ${
                             mission.status === 'completed'
-                              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : isMissionOverdue
-                                ? 'bg-rose-950/40 text-rose-400 border-rose-500/30'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
                                 : mission.status === 'doing'
-                                  ? 'bg-sky-950/40 text-sky-400 border-sky-500/30'
-                                  : 'bg-slate-800 text-slate-300 border-slate-700'
+                                  ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
                           }`}>
                             {mission.status === 'completed'
                               ? 'Hoàn thành'
@@ -1226,7 +1226,7 @@ export default function TaskManagement({
                   Phòng Dự án
                 </h3>
               </div>
-              <span className="bg-amber-955 border border-amber-500/20 text-text-amber-400 text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+              <span className="bg-amber-50 border border-amber-200 text-amber-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                 {filteredTasks.length} chờ duyệt
               </span>
             </div>
@@ -1309,7 +1309,7 @@ export default function TaskManagement({
                               });
                             }
                           }}
-                          className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                          className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-2.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                         >
                           Từ chối
                         </button>
@@ -1385,12 +1385,12 @@ export default function TaskManagement({
                     type="button"
                     onClick={onRedirectToHrLeaves}
                     title="Mở danh sách Đơn nghỉ phép trong menu Phòng Nhân Sự"
-                    className="text-pink-400 hover:text-pink-300 text-[10px] bg-pink-950/30 border border-pink-500/20 px-2 py-0.5 rounded hover:bg-pink-950/60 font-bold cursor-pointer transition active:scale-95 flex items-center gap-1"
+                    className="text-pink-700 hover:text-pink-800 text-[10px] bg-pink-50 border border-pink-200 px-2 py-0.5 rounded hover:bg-pink-100 font-bold cursor-pointer transition active:scale-95 flex items-center gap-1"
                   >
                     <Eye className="w-3 h-3" /> Đơn nghỉ phép
                   </button>
                 )}
-                <span className="bg-pink-955 border border-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                <span className="bg-pink-50 border border-pink-200 text-pink-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                   {myPendingLeaves.length} chờ duyệt
                 </span>
               </div>
@@ -1408,7 +1408,7 @@ export default function TaskManagement({
                     className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                   >
                     <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                      <span className="text-[10px] font-mono font-extrabold text-pink-400 tracking-wider bg-pink-950/50 px-1.5 py-0.5 rounded">{l.id}</span>
+                      <span className="text-[10px] font-mono font-extrabold text-pink-700 tracking-wider bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded">{l.id}</span>
                       <span className="text-[9.5px] font-bold text-slate-300">
                         {l.type}
                       </span>
@@ -1431,7 +1431,7 @@ export default function TaskManagement({
                       <button
                         type="button"
                         onClick={() => handleApproveLeave(l.id, 'rejected')}
-                        className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                        className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                       >
                         Từ chối
                       </button>
@@ -1468,13 +1468,13 @@ export default function TaskManagement({
                   <button
                     onClick={handleClearPendingPayments}
                     title="Xóa toàn bộ các đề xuất đang chờ duyệt trong bộ nhớ tạm"
-                    className="text-rose-400 hover:text-rose-300 text-[10px] bg-rose-950/30 border border-rose-500/20 px-2 py-0.5 rounded hover:bg-rose-950/60 font-sans cursor-pointer transition active:scale-95 flex items-center gap-0.5"
+                    className="text-rose-700 hover:text-rose-800 text-[10px] bg-rose-50 border border-rose-200 px-2 py-0.5 rounded hover:bg-rose-100 font-sans cursor-pointer transition active:scale-95 flex items-center gap-0.5"
                   >
                     <Trash2 className="w-3 h-3" /> Xóa bộ nhớ tạm
                   </button>
                 )}
                 {/* Count: payments + subcontractor advances + công tác phí chờ duyệt mà user có quyền duyệt */}
-                <span className="bg-emerald-955 border border-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                   {
                     myPendingPayments.length
                     +
@@ -1525,7 +1525,7 @@ export default function TaskManagement({
                         className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                       >
                         <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                          <span className="text-[10px] font-mono font-extrabold text-amber-400 tracking-wider bg-amber-950/50 px-1.5 py-0.5 rounded">{t.code || t.id}</span>
+                          <span className="text-[10px] font-mono font-extrabold text-amber-700 tracking-wider bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">{t.code || t.id}</span>
                           <span className="text-[11.5px] font-mono font-black text-rose-400">
                             {Number(t.amount || 0).toLocaleString('vi-VN')} đ
                           </span>
@@ -1543,7 +1543,7 @@ export default function TaskManagement({
                           <p>Người khởi tạo: <strong className="text-slate-355">{creatorName}</strong></p>
                           <p className="text-amber-400 font-bold text-[9px] uppercase flex items-center gap-2">
                             <span>Công Tác Phí</span>
-                            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
                           </p>
 
                           <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
@@ -1555,7 +1555,7 @@ export default function TaskManagement({
                           <button
                             type="button"
                             onClick={() => handleApproveTravelExpense(t.rowId || t.id, 'rejected')}
-                            className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                           >
                             Từ chối
                           </button>
@@ -1578,7 +1578,7 @@ export default function TaskManagement({
                         className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                       >
                         <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                          <span className="text-[10px] font-mono font-extrabold text-emerald-400 tracking-wider bg-emerald-950/50 px-1.5 py-0.5 rounded">{p.code}</span>
+                          <span className="text-[10px] font-mono font-extrabold text-emerald-700 tracking-wider bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{p.code}</span>
                           <span className="text-[11.5px] font-mono font-black text-rose-400">
                             -{p.amount.toLocaleString('vi-VN')} đ
                           </span>
@@ -1603,7 +1603,7 @@ export default function TaskManagement({
                           <button
                             type="button"
                             onClick={() => handleApprovePayment(p.id, 'rejected')}
-                            className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                           >
                             Từ chối
                           </button>
@@ -1625,7 +1625,7 @@ export default function TaskManagement({
                         className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                       >
                         <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                          <span className="text-[10px] font-mono font-extrabold text-orange-400 tracking-wider bg-orange-950/50 px-1.5 py-0.5 rounded">{a.id}</span>
+                          <span className="text-[10px] font-mono font-extrabold text-orange-700 tracking-wider bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">{a.id}</span>
                           <span className="text-[11.5px] font-mono font-black text-rose-400">
                             {a.amount.toLocaleString('vi-VN')} đ
                           </span>
@@ -1642,7 +1642,7 @@ export default function TaskManagement({
                           <p>Người lập: <strong className="text-slate-355">{a.creatorName || 'Kế Toán'}</strong></p>
                           <p className="text-sky-400 font-bold text-[9px] uppercase flex items-center gap-2">
                             <span>Đề Xuất Chi / Tạm Ứng</span>
-                            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
                           </p>
 
                           <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
@@ -1654,7 +1654,7 @@ export default function TaskManagement({
                           <button
                             type="button"
                             onClick={() => handleApproveAdvance(a.id, 'rejected')}
-                            className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                           >
                             Từ chối
                           </button>
@@ -1680,7 +1680,7 @@ export default function TaskManagement({
                     <h4 className="font-extrabold text-[11px] text-orange-400 uppercase tracking-wider">
                       Chờ Lập Phiếu (KT)
                     </h4>
-                    <span className="bg-orange-955 border border-orange-500/20 text-orange-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                    <span className="bg-orange-50 border border-orange-200 text-orange-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                       {myPendingVouchers.length}
                     </span>
                   </div>
@@ -1691,7 +1691,7 @@ export default function TaskManagement({
                       className="bg-slate-950/80 border border-orange-500/30 p-3.5 rounded-lg hover:border-orange-400 transition-all duration-150 space-y-3 shadow-sm"
                     >
                       <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                        <span className="text-[10px] font-mono font-extrabold text-orange-400 tracking-wider bg-orange-950/50 px-1.5 py-0.5 rounded">{v.id}</span>
+                        <span className="text-[10px] font-mono font-extrabold text-orange-700 tracking-wider bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">{v.id}</span>
                         <span className="text-[11.5px] font-mono font-black text-rose-400">
                           {v.amount.toLocaleString('vi-VN')} đ
                         </span>
@@ -1708,7 +1708,7 @@ export default function TaskManagement({
                         <p>Người lập phiếu: <strong className="text-slate-300">{v.creatorName || v.creator || 'Kế Toán'}</strong></p>
                         <p className="text-orange-400 font-bold text-[9px] uppercase flex items-center gap-2">
                           <span>Đề Xuất Thu Chi / Tạm Ứng</span>
-                          <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Lập Phiếu (KT)</span>
+                          <span className="bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Lập Phiếu (KT)</span>
                         </p>
 
                         <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
@@ -1957,7 +1957,7 @@ export default function TaskManagement({
                                   );
                                 } else {
                                   return (
-                                    <div className="bg-amber-950/40 text-amber-400 px-2 py-1 rounded border border-amber-900/40 font-bold text-[9px] uppercase tracking-wide flex items-center justify-center animate-pulse flex-1 sm:flex-initial text-center whitespace-nowrap">
+                                    <div className="bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-200 font-bold text-[9px] uppercase tracking-wide flex items-center justify-center animate-pulse flex-1 sm:flex-initial text-center whitespace-nowrap">
                                       Đang chờ duyệt
                                     </div>
                                   );
@@ -1966,7 +1966,7 @@ export default function TaskManagement({
 
                               if (t.status === 'completed') {
                                 return (
-                                  <span className="text-[9px] text-emerald-400 font-extrabold bg-emerald-950/20 px-1.5 py-0.5 rounded border border-emerald-900/30">
+                                  <span className="text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                                     ✓ Hoàn thành
                                   </span>
                                 );
