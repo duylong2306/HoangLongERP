@@ -1813,8 +1813,8 @@ export default function QuotationSystem({
                                       setSubcontractorArchiveSearchQuery('');
                                     }}
                                     className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                      loadedSubcontractorQuote?.id === q.id 
-                                        ? 'bg-blue-950/40 text-blue-400 border border-blue-900 font-bold' 
+                                      loadedSubcontractorQuote?.id === q.id
+                                        ? 'bg-blue-50 text-blue-700 border border-blue-200 font-bold'
                                         : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                     }`}
                                   >
@@ -2986,8 +2986,8 @@ export default function QuotationSystem({
                                     setMechanicalArchiveSearchQuery('');
                                   }}
                                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    loadedMechanicalQuote?.id === q.id 
-                                      ? 'bg-pink-950/40 text-pink-400 border border-pink-900 font-bold' 
+                                    loadedMechanicalQuote?.id === q.id
+                                      ? 'bg-pink-50 text-pink-700 border border-pink-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >

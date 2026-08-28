@@ -3954,7 +3954,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             <div className="font-bold text-slate-100 flex items-center gap-1.5">
                               {emp.name}
                               {emp.id === currentUser.id && (
-                                <span className="px-1 py-0.2 bg-emerald-500/20 text-emerald-400 rounded text-[9px] font-mono">Hiện Tại</span>
+                                <span className="px-1 py-0.2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[9px] font-mono">Hiện Tại</span>
                               )}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono">{emp.phone}</div>
@@ -3966,7 +3966,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             ***
                           </td>
                           <td className="py-2.5 px-3 font-medium">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200">
                               {getEmployeePermissionGroupName(emp)}
                             </span>
                           </td>
@@ -4038,7 +4038,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                     }
                                     setConfirmDeleteId(emp.id);
                                   }}
-                                  className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 p-1 px-2 rounded-md transition-all cursor-pointer font-black font-mono text-[10px]"
+                                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 p-1 px-2 rounded-md transition-all cursor-pointer font-black font-mono text-[10px]"
                                 >
                                   🗑️ XÓA
                                 </button>

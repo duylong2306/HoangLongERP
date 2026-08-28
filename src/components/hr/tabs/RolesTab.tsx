@@ -408,7 +408,7 @@ export default function RolesTab(props: RolesTabProps) {
 
       {/* TOP PANEL: Master - List of Roles (chỉ hiển thị ở tab Phân Quyền Nhóm Vai Trò để tránh nhầm lẫn) */}
       {roleMainTab === 'group' && (
-      <div className="bg-slate-900 border border-slate-805 rounded-2xl p-5 space-y-4 w-full">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 w-full">
         <div className="flex justify-between items-center pb-2 border-b border-slate-800">
           <h4 className="font-extrabold text-xs text-white uppercase tracking-wider flex items-center gap-2">
             <Users className="w-4 h-4 text-amber-500" />
@@ -440,7 +440,7 @@ export default function RolesTab(props: RolesTabProps) {
                 onClick={() => {
                   setSelectedRoleId(r.id);
                 }}
-                className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${isSelected ? 'bg-amber-500/10 border-amber-500/50 shadow-lg' : 'bg-slate-950/40 border-slate-850 hover:bg-slate-850/30'}`}
+                className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${isSelected ? 'bg-amber-50 border-amber-300 shadow-lg' : 'bg-slate-950/40 border-slate-850 hover:bg-slate-850/30'}`}
               >
                 <div className="flex justify-between items-start gap-2">
                   <h5 className="font-bold text-xs text-white flex items-center gap-1.5">
@@ -520,7 +520,7 @@ export default function RolesTab(props: RolesTabProps) {
         const groupedModules = [
           {
             department: 'PHÒNG GIÁM ĐỐC',
-            color: 'border-violet-500/20 text-violet-400 bg-violet-500/5',
+            color: 'border-violet-200 text-violet-700 bg-violet-50',
             modules: [
               { code: 'director_office', name: 'Menu Cha: Phòng Giám Đốc', desc: 'Phòng Giám Đốc - Dashboard Tổng Hợp' },
               { code: 'director_dashboard', name: '↳ Dashboard Tổng Hợp', desc: 'Bảng điều hành tổng hợp các chỉ số doanh nghiệp' }
@@ -528,7 +528,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'PHÒNG DỰ ÁN',
-            color: 'border-emerald-500/20 text-emerald-400 bg-emerald-500/5',
+            color: 'border-emerald-200 text-emerald-700 bg-emerald-50',
             modules: [
               { code: 'project_office', name: 'Menu Cha: Phòng Dự Án', desc: 'Quản lý & giám sát các dự án Xây dựng, Nội thất, Cơ khí' },
               { code: 'projects_construction', name: '↳ Xây dựng', desc: 'Quản lý các công trình xây dựng dân dụng & công nghiệp' },
@@ -538,7 +538,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'PHÒNG NHÂN SỰ',
-            color: 'border-orange-500/20 text-orange-400 bg-orange-500/5',
+            color: 'border-orange-200 text-orange-700 bg-orange-50',
             modules: [
               { code: 'hr_office', name: 'Menu Cha: Phòng Nhân Sự', desc: 'Quản lý nhân sự toàn công ty' },
               { code: 'employees', name: '↳ Hệ thống Nhân sự', desc: 'Hồ sơ nhân viên, chấm công, bảng lương' },
@@ -547,7 +547,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'PHÒNG KẾ TOÁN',
-            color: 'border-sky-500/20 text-sky-400 bg-sky-500/5',
+            color: 'border-sky-200 text-sky-700 bg-sky-50',
             modules: [
               { code: 'accounting_office', name: 'Menu Cha: Phòng Kế Toán', desc: 'Nghiệp vụ tài chính kế toán doanh nghiệp' },
               { code: 'finance', name: '↳ Tài Chính - Kế Toán', desc: 'Đề xuất thu chi, quản lý dòng tiền' },
@@ -556,7 +556,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'KHO & VẬT TƯ',
-            color: 'border-teal-500/20 text-teal-400 bg-teal-500/5',
+            color: 'border-teal-200 text-teal-700 bg-teal-50',
             modules: [
               { code: 'warehouse_office', name: 'Menu Cha: Kho & Vật Tư', desc: 'Quản lý chuỗi cung ứng & vật tư' },
               { code: 'material_coordination', name: '↳ Điều phối vật tư', desc: 'Điều phối & yêu cầu cấp phát vật tư' },
@@ -566,7 +566,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'PHÂN HỆ THẦU PHỤ',
-            color: 'border-amber-500/20 text-amber-400 bg-amber-500/5',
+            color: 'border-amber-200 text-amber-700 bg-amber-50',
             modules: [
               { code: 'subcontractor_office', name: 'Menu Cha: Thầu Phụ', desc: 'Điều hành các tổ thợ & nhà thầu phụ' },
               { code: 'subcontractor_management', name: '↳ Quản Lý Thầu Phụ', desc: 'Hồ sơ thầu phụ, nghiệm thu khối lượng' }
@@ -574,7 +574,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'THƯ VIỆN & BÁO GIÁ',
-            color: 'border-blue-500/20 text-blue-400 bg-blue-500/5',
+            color: 'border-blue-200 text-blue-700 bg-blue-50',
             modules: [
               { code: 'library_office', name: 'Menu Cha: Thư Viện', desc: 'Thư viện báo giá & định mức dự toán' },
               { code: 'quotes_construction', name: '↳ Hồ Sơ Xây Dựng', desc: 'Thư viện báo giá mẫu xây dựng' },
@@ -603,13 +603,13 @@ export default function RolesTab(props: RolesTabProps) {
             {/* Active role header */}
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
               <div>
-                <span className="text-[9px] bg-amber-500/10 text-amber-500 font-extrabold px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider">
+                <span className="text-[9px] bg-amber-50 text-amber-700 font-extrabold px-2 py-0.5 rounded border border-amber-200 uppercase tracking-wider">
                   Đang cấu hình
                 </span>
                 <h4 className="font-extrabold text-sm text-white mt-1 flex items-center gap-2">
                   {activeRole.name}
                 </h4>
-                <p className="text-[10.5px] text-slate-405 mt-1">
+                <p className="text-[10.5px] text-slate-400 mt-1">
                   {activeRole.description || 'Chưa có mô tả cho nhóm vai trò này.'}
                 </p>
               </div>
@@ -825,7 +825,7 @@ export default function RolesTab(props: RolesTabProps) {
                             return (
                               <span
                                 key={empId}
-                                className="bg-amber-500/10 text-amber-500 font-bold px-2 py-0.5 rounded-md border border-amber-500/20 text-[10px] flex items-center gap-1 shrink-0"
+                                className="bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-md border border-amber-200 text-[10px] flex items-center gap-1 shrink-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedTempEmpIds(prev => prev.filter(id => id !== empId));
@@ -910,7 +910,7 @@ export default function RolesTab(props: RolesTabProps) {
                                     }
                                   }}
                                   className={`flex items-start gap-3 p-2 rounded-md cursor-pointer transition-all ${
-                                    isChecked ? 'bg-amber-500/10 border-amber-500/20' : 'hover:bg-slate-800/60'
+                                    isChecked ? 'bg-amber-50 border-amber-200' : 'hover:bg-slate-800/60'
                                   } border border-transparent`}
                                 >
                                   <input
@@ -968,8 +968,8 @@ export default function RolesTab(props: RolesTabProps) {
 
                   {/* Multi-add confirmation bar */}
                   {selectedTempEmpIds.length > 0 && (
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl gap-2 animate-fadeIn">
-                      <div className="text-[10.5px] text-amber-500 font-bold">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-amber-50 border border-amber-200 rounded-xl gap-2 animate-fadeIn">
+                      <div className="text-[10.5px] text-amber-700 font-bold">
                         👉 Sẵn sàng gán <span className="underline">{selectedTempEmpIds.length}</span> nhân sự mới vào nhóm <span className="text-white">"{activeRole.name}"</span>
                       </div>
                       <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
@@ -1174,8 +1174,8 @@ export default function RolesTab(props: RolesTabProps) {
           <div className="space-y-6">
               {/* HỒ SƠ DỰ ÁN */}
               <div className="border border-slate-800 rounded-xl overflow-hidden">
-                <div className="bg-violet-500/10 px-4 py-2.5 border-b border-slate-800">
-                  <h5 className="font-extrabold text-[11px] text-violet-400 uppercase tracking-wider">Hồ Sơ Dự Án</h5>
+                <div className="bg-violet-50 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-violet-700 uppercase tracking-wider">Hồ Sơ Dự Án</h5>
                 </div>
                 <div className="divide-y divide-slate-850">
                   {approvalDocumentTypes.filter(t => t.group === 'Hồ Sơ Dự Án').map(t => {
@@ -1217,8 +1217,8 @@ export default function RolesTab(props: RolesTabProps) {
 
               {/* HỒ SƠ NHÂN SỰ */}
               <div className="border border-slate-800 rounded-xl overflow-hidden">
-                <div className="bg-orange-500/10 px-4 py-2.5 border-b border-slate-800">
-                  <h5 className="font-extrabold text-[11px] text-orange-400 uppercase tracking-wider">Hồ Sơ Nhân Sự</h5>
+                <div className="bg-orange-50 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-orange-700 uppercase tracking-wider">Hồ Sơ Nhân Sự</h5>
                 </div>
                 <div className="divide-y divide-slate-850">
                   {approvalDocumentTypes.filter(t => t.group === 'Hồ Sơ Nhân Sự').map(t => {
@@ -1260,8 +1260,8 @@ export default function RolesTab(props: RolesTabProps) {
 
               {/* TÀI CHÍNH - KẾ TOÁN */}
               <div className="border border-slate-800 rounded-xl overflow-hidden">
-                <div className="bg-emerald-500/10 px-4 py-2.5 border-b border-slate-800">
-                  <h5 className="font-extrabold text-[11px] text-emerald-400 uppercase tracking-wider">Tài Chính - Kế Toán</h5>
+                <div className="bg-emerald-50 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-emerald-700 uppercase tracking-wider">Tài Chính - Kế Toán</h5>
                 </div>
                 <div className="divide-y divide-slate-850">
                   {approvalDocumentTypes.filter(t => t.group === 'Tài Chính - Kế Toán').map(t => {

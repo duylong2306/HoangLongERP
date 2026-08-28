@@ -1327,7 +1327,7 @@ export default function MechanicalEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 border-pink-500/30 cursor-pointer active:scale-95'
+                  : 'bg-pink-50 hover:bg-pink-100 text-pink-700 border-pink-200 cursor-pointer active:scale-95'
               }`}
             >
               ⭐ Đặt làm mặc định
@@ -1339,7 +1339,7 @@ export default function MechanicalEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 cursor-pointer active:scale-95'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 cursor-pointer active:scale-95'
               }`}
             >
               🔄 Khôi phục mặc định
@@ -1403,7 +1403,7 @@ export default function MechanicalEstimator({
                       />
                       <label 
                         htmlFor={isTemplateEditable ? "company-logo-input-mechanical-tmpl" : undefined}
-                        className={`px-4 py-2 bg-pink-600/10 text-pink-400 hover:bg-pink-600/20 border border-pink-500/30 rounded-xl text-xs font-bold cursor-pointer transition-all duration-200 ${
+                        className={`px-4 py-2 bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200 rounded-xl text-xs font-bold cursor-pointer transition-all duration-200 ${
                           !isTemplateEditable ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
                         }`}
                       >
@@ -1414,7 +1414,7 @@ export default function MechanicalEstimator({
                           type="button"
                           disabled={!isTemplateEditable}
                           onClick={() => setCompanyLogoImg('')}
-                          className={`px-4 py-2 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             !isTemplateEditable ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
                           }`}
                         >
@@ -1722,7 +1722,7 @@ export default function MechanicalEstimator({
               className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
                 isTemplateEditable 
                   ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
-                  : 'bg-pink-600/15 text-pink-400 hover:bg-pink-600/25 border border-pink-500/30'
+                  : 'bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200'
               }`}
             >
               {isTemplateEditable ? '🔒 Khóa' : '✍️ Chỉnh sửa'}
@@ -1776,16 +1776,16 @@ export default function MechanicalEstimator({
         </div>
 
         {dbSaveSuccess && (
-          <div className="bg-emerald-950/20 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
             <div>
               <span className="font-bold">Lưu thành công:</span> Cấu hình mẫu báo giá Cơ khí đã được lưu vào hệ thống cơ sở dữ liệu đám mây và đồng bộ hóa thành công trên toàn ứng dụng!
             </div>
           </div>
         )}
         {dbSaveError && (
-          <div className="bg-red-950/20 border border-red-500/30 text-red-400 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
-            <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+          <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
+            <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
             <div>
               <span className="font-bold">Lỗi lưu:</span> {dbSaveError}
             </div>
@@ -1798,10 +1798,10 @@ export default function MechanicalEstimator({
   return (
     <div className="space-y-6" id="mech_estimator_panel">
       {feedback && (
-        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-2xl relative overflow-hidden" id="estimator_mech_feedback">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-2xl relative overflow-hidden" id="estimator_mech_feedback">
           <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500"></div>
           <span className="pl-2">{feedback.message}</span>
-          <button onClick={() => setFeedback(null)} className="text-emerald-400 font-black hover:text-white px-2 cursor-pointer transition-colors">✕</button>
+          <button onClick={() => setFeedback(null)} className="text-emerald-700 font-black hover:text-emerald-900 px-2 cursor-pointer transition-colors">✕</button>
         </div>
       )}
 
@@ -1900,15 +1900,15 @@ export default function MechanicalEstimator({
                                 setSearchQuery('');
                               }}
                               className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                selectedProjectId === p.id 
-                                  ? 'bg-pink-600/20 text-pink-400 border border-pink-500/20 font-bold' 
+                                selectedProjectId === p.id
+                                  ? 'bg-pink-50 text-pink-700 border border-pink-200 font-bold'
                                   : 'text-slate-300 hover:bg-slate-900 hover:text-slate-100'
                               }`}
                             >
                               <div className="font-bold text-slate-100 flex items-center justify-between">
                                 <span>{p.name}</span>
                                 {hasArchive && (
-                                  <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] bg-pink-500/10 text-pink-400 px-1.5 py-0.5 rounded font-black border border-pink-500/25 animate-pulse">
+                                  <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] bg-pink-50 text-pink-700 px-1.5 py-0.5 rounded font-black border border-pink-200 animate-pulse">
                                     📁 ĐÃ CÓ HS
                                   </span>
                                 )}
@@ -1948,7 +1948,7 @@ export default function MechanicalEstimator({
                   type="button"
                   onClick={() => !isLockedVal && setIsCustDropdownOpen(!isCustDropdownOpen)}
                   disabled={isLockedVal}
-                  className={`w-full bg-slate-900 text-slate-100 border border-slate-805 rounded-lg p-2.5 outline-none font-semibold text-xs text-left hover:border-slate-700 focus:border-pink-500 transition-all flex items-center justify-between shadow-sm cursor-pointer ${isLockedVal ? 'opacity-65 cursor-not-allowed bg-slate-950/40 border-dashed' : ''}`}
+                  className={`w-full bg-slate-900 text-slate-100 border border-slate-800 rounded-lg p-2.5 outline-none font-semibold text-xs text-left hover:border-slate-700 focus:border-pink-500 transition-all flex items-center justify-between shadow-sm cursor-pointer ${isLockedVal ? 'opacity-65 cursor-not-allowed bg-slate-950/40 border-dashed' : ''}`}
                 >
                   <span className="truncate">
                     {customerName || <span className="text-slate-500 font-normal">Chọn khách hàng từ danh sách *</span>}
@@ -1965,7 +1965,7 @@ export default function MechanicalEstimator({
                         value={custSearchQuery}
                         onChange={(e) => setCustSearchQuery(e.target.value)}
                         onClick={(e) => e.stopPropagation()} // stop close dropdown
-                        className="w-full bg-slate-900 text-slate-200 border border-slate-805 rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none focus:border-pink-500 font-medium placeholder-slate-500 transition-all"
+                        className="w-full bg-slate-900 text-slate-200 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none focus:border-pink-500 font-medium placeholder-slate-500 transition-all"
                         placeholder="Tìm khách hàng theo tên hoặc SĐT..."
                       />
                       <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2.5" />
@@ -1992,8 +1992,8 @@ export default function MechanicalEstimator({
                             type="button"
                             onClick={() => handleSelectCustomer(c)}
                             className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                              selectedCustomerId === c.id 
-                                ? 'bg-pink-600/20 text-pink-400 border border-pink-500/20 font-bold' 
+                              selectedCustomerId === c.id
+                                ? 'bg-pink-50 text-pink-700 border border-pink-200 font-bold'
                                 : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100'
                             }`}
                           >
@@ -2495,7 +2495,7 @@ export default function MechanicalEstimator({
                   const areaVal = estimatorMode === 'door' ? round3(parseNum(ngang) * parseNum(cao)) : 0;
 
                   return (
-                    <div className="bg-white border border-pink-500/30 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 animate-scale-up text-left shadow-lg">
+                    <div className="bg-white border border-pink-200 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in zoom-in-95 duration-200 text-left shadow-lg">
                       <div className="space-y-1 text-center md:text-left min-w-0">
                         <div className="text-[10px] uppercase font-black tracking-widest text-slate-400">
                           BÁO CÁO TỔNG HỢP KIỂM SOÁT NHANH
@@ -2585,7 +2585,7 @@ export default function MechanicalEstimator({
                       return (
                         <tr
                           key={item.id}
-                          className={`border-b border-slate-850 transition-colors ${editingItemId === item.id ? 'bg-pink-950/30 hover:bg-pink-950/40' : 'hover:bg-slate-950/40'}`}
+                          className={`border-b border-slate-850 transition-colors ${editingItemId === item.id ? 'bg-pink-50 hover:bg-pink-100' : 'hover:bg-slate-950/40'}`}
                         >
                           <td className="px-3 py-2.5 text-center font-mono text-slate-400">
                             {editingItemId === item.id && <span className="text-amber-400">✏️</span>} {isDoor ? (item.sign || `C${idx + 1}`) : `STT ${idx + 1}`}
@@ -2790,7 +2790,7 @@ export default function MechanicalEstimator({
                     setSavedQuoteForPreview(archivedRecord as any);
                   }}
                   disabled={!isMechSavedVal || !isLockedVal}
-                  className="bg-indigo-600 hover:bg-indigo-555 text-white disabled:opacity-30 disabled:cursor-not-allowed font-semibold px-4 py-2.5 rounded text-xs flex items-center gap-1.5 cursor-pointer transition-all duration-200 shadow-md"
+                  className="bg-indigo-600 hover:bg-indigo-550 text-white disabled:opacity-30 disabled:cursor-not-allowed font-semibold px-4 py-2.5 rounded text-xs flex items-center gap-1.5 cursor-pointer transition-all duration-200 shadow-md"
                   title={!isMechSavedVal ? "Vui lòng lưu hồ sơ trước khi Xem & In" : !isLockedVal ? "Vui lòng hoàn tất chỉnh sửa và lưu trước khi Xem & In" : "Xem chi tiết & In ấn"}
                 >
                   <Printer className="w-4 h-4" />
@@ -2803,7 +2803,7 @@ export default function MechanicalEstimator({
         {/* Dynamic Preview Modal */}
         {savedQuoteForPreview && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text text-left font-sans">
-            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden">
+            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
               <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-[#fff0f6] flex items-center justify-center border border-[#ffd8e8]">
@@ -2851,7 +2851,7 @@ export default function MechanicalEstimator({
 
       {showQuickCreateCust && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[220] p-4 text-left">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <h4 className="font-extrabold text-base uppercase text-emerald-400 tracking-wide mb-4">
               Tạo Khách Hàng Nhanh
             </h4>
@@ -2920,10 +2920,10 @@ export default function MechanicalEstimator({
       )}
 
       {showExistsAlert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 select-none animate-scaleIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 select-none">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
               <h4 className="font-extrabold text-base uppercase text-white tracking-wide">

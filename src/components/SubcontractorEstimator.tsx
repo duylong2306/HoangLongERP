@@ -1448,7 +1448,7 @@ export default function SubcontractorEstimator({
     return (
       <div className="space-y-6 text-left animate-fadeIn" id="subcontractor_template_panel">
         {feedback && (
-          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold animate-pulse" id="template_feedback">
+          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold animate-pulse" id="template_feedback">
             {feedback.message}
           </div>
         )}
@@ -1498,7 +1498,7 @@ export default function SubcontractorEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 border-pink-500/30 cursor-pointer active:scale-95'
+                  : 'bg-pink-50 hover:bg-pink-100 text-pink-700 border-pink-200 cursor-pointer active:scale-95'
               }`}
             >
               ⭐ Đặt làm mặc định
@@ -1510,7 +1510,7 @@ export default function SubcontractorEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 cursor-pointer active:scale-95'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 cursor-pointer active:scale-95'
               }`}
             >
               🔄 Khôi phục mặc định
@@ -1698,7 +1698,7 @@ export default function SubcontractorEstimator({
                 className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
                   isTemplateEditable 
                     ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
-                    : 'bg-amber-600/15 text-amber-400 hover:bg-amber-600/25 border border-amber-500/30'
+                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
                 }`}
               >
                 {isTemplateEditable ? '🔒 Khóa' : '✍️ Chỉnh sửa'}
@@ -1823,14 +1823,14 @@ export default function SubcontractorEstimator({
                             }}
                             className={`w-full text-left px-2.5 py-2 rounded-lg text-xs cursor-pointer block transition-all ${
                               selectedProjectId === p.id 
-                                ? 'bg-blue-950/50 text-blue-400 border border-blue-900 font-bold' 
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200 font-bold' 
                                 : 'text-slate-400 hover:bg-slate-900 hover:text-slate-250'
                             }`}
                           >
                             <div className="font-bold text-slate-200 text-left flex items-center justify-between">
                               <span className="truncate">{p.name}</span>
                               {hasArchive && (
-                                <span className="ml-1.5 shrink-0 inline-flex items-center gap-0.5 text-[8px] bg-blue-950 text-blue-400 px-1.5 py-0.5 rounded font-black border border-blue-900">
+                                <span className="ml-1.5 shrink-0 inline-flex items-center gap-0.5 text-[8px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-black border border-blue-200">
                                   📁 CÓ HĐ
                                 </span>
                               )}
@@ -1886,13 +1886,13 @@ export default function SubcontractorEstimator({
                 if (currentTask && currentTask.subcontractorId) {
                   const linkedSub = suppliers.find(s => s.id === currentTask.subcontractorId);
                   return (
-                    <div className="absolute left-0 right-0 mt-1 z-10 text-[9px] text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/90 border border-emerald-900/30 p-1.5 rounded-lg shadow-lg">
+                    <div className="absolute left-0 right-0 mt-1 z-10 text-[9px] text-emerald-700 font-bold flex items-center gap-1 bg-emerald-50 border border-emerald-200 p-1.5 rounded-lg shadow-lg">
                       <span>✅ Thầu phụ: {linkedSub?.name || currentTask.subcontractorName}</span>
                     </div>
                   );
                 } else if (currentTask) {
                   return (
-                    <div className="absolute left-0 right-0 mt-1 z-10 text-[9px] text-amber-400 font-semibold flex items-center gap-1 bg-amber-950/90 border border-amber-900/30 p-1.5 rounded-lg shadow-lg">
+                    <div className="absolute left-0 right-0 mt-1 z-10 text-[9px] text-amber-700 font-semibold flex items-center gap-1 bg-amber-50 border border-amber-200 p-1.5 rounded-lg shadow-lg">
                       <span>⚠️ Chưa liên kết thầu phụ.</span>
                     </div>
                   );
@@ -1955,7 +1955,7 @@ export default function SubcontractorEstimator({
                           onClick={() => handleSelectCustomer(c)}
                           className={`w-full text-left px-2.5 py-2 rounded-lg text-xs cursor-pointer block transition-all ${
                             selectedCustomerId === c.id 
-                              ? 'bg-blue-950/50 text-blue-400 border border-blue-900 font-bold' 
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200 font-bold' 
                               : 'text-slate-400 hover:bg-slate-900 hover:text-slate-250'
                           }`}
                         >
@@ -2019,7 +2019,7 @@ export default function SubcontractorEstimator({
               </h3>
             </div>
             {isLocked && (
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 border border-amber-500/25 text-amber-400 animate-pulse">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 border border-amber-200 text-amber-700 animate-pulse">
                 🔒 CHẾ ĐỘ XEM (ĐÃ LƯU)
               </span>
             )}
@@ -2104,9 +2104,9 @@ export default function SubcontractorEstimator({
                                 setSupSearchQuery('');
                               }}
                               className={`w-full text-left px-2.5 py-2 rounded-lg text-xs cursor-pointer block transition-all ${
-                                selectedSupplierId === s.id 
-                                  ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-900 font-bold' 
-                                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-250'
+                                selectedSupplierId === s.id
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold'
+                                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                               }`}
                             >
                               <div className="font-bold text-slate-200 text-left">{s.name}</div>
@@ -2686,7 +2686,7 @@ export default function SubcontractorEstimator({
       {/* QUICK CREATE CUSTOMER MODAL */}
       {showQuickCreateCust && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[110] p-4 text-left">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h4 className="text-sm font-extrabold uppercase text-blue-400 border-b border-slate-800 pb-2 flex items-center gap-1.5">
               <User className="w-4 h-4" />
               Tạo Khách Hàng Chủ Đầu Tư Nhanh
@@ -2746,7 +2746,7 @@ export default function SubcontractorEstimator({
       {/* PRINT PREVIEW MODAL — giao diện giống hệt Lưu trữ hồ sơ thầu phụ (hợp đồng sửa trực tiếp + Duyệt/Lưu/In) */}
       {showPrintPreview && tempPreviewQuote && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4 select-text text-left">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">

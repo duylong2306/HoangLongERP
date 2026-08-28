@@ -419,7 +419,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
     <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-6 space-y-6 text-left" id="mechanical_archive_workspace">
       <div>
         <h3 className="font-black text-lg text-slate-100 uppercase tracking-wider flex items-center gap-2">
-          <span className="p-1 px-2.5 bg-pink-500/10 text-pink-400 rounded-lg border border-pink-500/20 text-xs">⚙️ MECHANICAL ARCHIVE</span>
+          <span className="p-1 px-2.5 bg-pink-50 text-pink-700 rounded-lg border border-pink-200 text-xs">⚙️ MECHANICAL ARCHIVE</span>
           Hồ Sơ Lưu Trữ Báo Giá Cơ Khí Hàn
         </h3>
       </div>
@@ -481,7 +481,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                           <div className="flex items-center gap-2">
                             <span>📁 Dự án:</span>
                             <span className="text-slate-100">{proj ? (proj as any).name : 'Vãng lai - Chưa liên kết'}</span>
-                            {proj && <span className="px-1.5 py-0.5 text-[9px] bg-indigo-950 text-indigo-300 rounded border border-indigo-900/40 font-mono font-bold">{(proj as any).code}</span>}
+                            {proj && <span className="px-1.5 py-0.5 text-[9px] bg-indigo-50 text-indigo-700 rounded border border-indigo-200 font-mono font-bold">{(proj as any).code}</span>}
                           </div>
                         </td>
                       </tr>
@@ -503,7 +503,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                             type: 'quote' as const,
                             label: 'Báo Giá',
                             code: item.code || 'BÁO GIÁ LẺ',
-                            color: 'text-indigo-400 bg-indigo-950/40 border-indigo-900/30',
+                            color: 'text-indigo-600 bg-indigo-50 border-indigo-200',
                             statusLabel: item.isApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
                             statusColor: item.isApproved 
                               ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' 
@@ -513,7 +513,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                             type: 'contract' as const,
                             label: 'Hợp Đồng',
                             code: item.code ? 'HĐ-' + item.code.replace('BGCK-', '') : 'HỒ SƠ HỢP ĐỒNG',
-                            color: 'text-sky-400 bg-sky-950/40 border-sky-900/30',
+                            color: 'text-sky-600 bg-sky-50 border-sky-200',
                             statusLabel: !item.isApproved
                               ? 'Chờ Duyệt'
                               : (!item.contractHtml ? 'Chờ Duyệt' : ((item as any).contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
@@ -527,7 +527,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                             type: 'acceptance' as const,
                             label: 'Nghiệm Thu',
                             code: item.code ? 'NT-' + item.code.replace('BGCK-', '') : 'BIÊN BẢN NGHIỆM THU',
-                            color: 'text-amber-400 bg-amber-950/40 border-amber-900/30',
+                            color: 'text-amber-600 bg-amber-50 border-amber-200',
                             statusLabel: !item.isApproved
                               ? 'Chờ Duyệt'
                               : (!item.acceptanceHtml ? 'Chờ Duyệt' : ((item as any).acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
@@ -541,7 +541,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                             type: 'liquidation' as const,
                             label: 'Thanh Lý',
                             code: item.code ? 'TL-' + item.code.replace('BGCK-', '') : 'BIÊN BẢN THANH LÝ',
-                            color: 'text-purple-400 bg-purple-950/40 border-purple-900/30',
+                            color: 'text-purple-600 bg-purple-50 border-purple-200',
                             statusLabel: !item.isApproved
                               ? 'Chờ Duyệt'
                               : (!item.liquidationHtml ? 'Chờ Duyệt' : ((item as any).liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
@@ -622,7 +622,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                                         }
                                         onEditQuote(item);
                                       }}
-                                      className="p-1.5 bg-amber-950/20 text-amber-400 hover:text-amber-300 rounded border border-amber-950/30 hover:bg-amber-950/40 transition shadow cursor-pointer"
+                                      className="p-1.5 bg-amber-50 text-amber-700 hover:text-amber-800 rounded border border-amber-200 hover:bg-amber-100 transition shadow cursor-pointer"
                                       title="Sửa Báo Giá"
                                     >
                                       <Pencil className="w-3.5 h-3.5" />
@@ -631,7 +631,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                                   <button
                                     type="button"
                                     onClick={(e) => handleDeleteClick(item, e)}
-                                    className="p-1.5 bg-rose-950/20 text-rose-400 hover:text-rose-300 rounded border border-rose-950/30 hover:bg-rose-950/40 transition shadow cursor-pointer"
+                                    className="p-1.5 bg-rose-50 text-rose-600 hover:text-rose-700 rounded border border-rose-200 hover:bg-rose-100 transition shadow cursor-pointer"
                                     title="Xóa Lưu Trữ"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -654,7 +654,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
       {/* Delete confirmation dialog */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[120] p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h4 className="text-sm font-extrabold uppercase text-rose-500">Xác Nhận Xóa Hồ Sơ</h4>
             <p className="text-xs text-slate-300 leading-relaxed">
               Bạn có chắc chắn muốn xóa hồ sơ báo giá <strong className="text-white">{deleteTarget.code}</strong> khỏi hệ thống lưu trữ báo giá Cơ Khí? Thao tác này không thể hoàn tác.
@@ -682,10 +682,10 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
       {/* Detail & Print Popup */}
       {selectedQuote && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fadeIn select-text text-left">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-scaleIn">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-pink-50 flex items-center justify-center border border-pink-250">
+                <div className="w-8 h-8 rounded-xl bg-pink-50 flex items-center justify-center border border-pink-200">
                   <FileText className="w-4 h-4 text-pink-600" />
                 </div>
                 <div>
@@ -779,7 +779,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
       {/* Quick Create Project Drawer/Modal */}
       {showQuickCreateProj && selectedQuote && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center z-[130] p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full text-left space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full text-left space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h4 className="text-sm font-extrabold uppercase text-indigo-400">Khởi Tạo Dự Án Nhanh</h4>
               <button 
