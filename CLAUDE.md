@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Giao tiếp:** Luôn trả lời, giải thích, trao đổi bằng tiếng Việt.
 - **Comment code:** Code phải có comment giải thích rõ ràng (đặc biệt là logic nghiệp vụ, chỗ phức tạp/dễ gây nhầm lẫn) — không để code trơ trụi không lời giải thích.
 - **Phạm vi sửa đổi:** Chỉ sửa đúng phần được yêu cầu. Không tự ý sửa/refactor các phần khác không liên quan. Nếu phát hiện bắt buộc phải sửa thêm phần khác (VD: để fix bug mới sửa xong không lỗi), phải hỏi và được đồng ý trước khi làm.
-- **Đồng bộ thiết kế form/UI:** Khi tạo hoặc sửa form, phải theo đúng thiết kế/pattern UI đã có trong dự án (màu sắc, bố cục, component dùng lại) — tránh tình trạng mỗi task một kiểu thiết kế khác nhau gây rối mắt. Trước khi làm UI mới, tham khảo form/màn hình tương tự đã có trong `src/components/` để giữ nhất quán.
+- **Đồng bộ thiết kế form/UI:** Khi tạo hoặc sửa form, phải theo đúng thiết kế/pattern UI đã có trong dự án (màu sắc, bố cục, component dùng lại) — tránh tình trạng mỗi task một kiểu thiết kế khác nhau gây rối mắt. Trước khi làm UI mới, tham khảo form/màn hình tương tự đã có trong `src/components/` để giữ nhất quán. Tài liệu `docs/design-system-dieu-phoi-vat-tu.md` tổng hợp sẵn màu nền/nút/input/badge/bảng/PDF chuẩn (rút ra từ menu Điều phối vật tư — được đánh giá là mẫu thiết kế tốt nhất) — ưu tiên tra cứu và copy trực tiếp từ đó trước khi tự nghĩ ra style mới.
 - **Phong cách thiết kế:** Thuần Việt, rõ ràng, đơn giản — nội dung dễ hiểu, không dùng màu mè/hiệu ứng rườm rà không cần thiết.
 
 ## Commands
