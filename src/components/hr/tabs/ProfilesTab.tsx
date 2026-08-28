@@ -65,7 +65,7 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
           </button>
           <button
             onClick={() => { onConfirm(assignments); onClose(); }}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-550 text-slate-950 font-bold rounded-lg transition-colors"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-colors"
           >
             Tạo tài khoản
           </button>
@@ -441,13 +441,15 @@ export default function ProfilesTab({
                     <td className="py-2.5 text-slate-300 font-bold">{emp.position}</td>
                     <td className="py-2.5 text-center font-mono font-bold text-sky-400">{emp.phepNam !== undefined ? emp.phepNam : 12} ngày</td>
                     <td className="py-2.5 text-center">
+                      {/* Badge nền pastel sáng (theo chuẩn Điều phối vật tư) thay cho nền
+                          màu trong suốt trước đây — xem docs/design-system-dieu-phoi-vat-tu.md */}
                       {emp.hasSystemAccount ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                           Đã tạo
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-50 text-slate-600 border border-slate-200">
                           <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                           Chưa tạo
                         </span>
@@ -455,11 +457,11 @@ export default function ProfilesTab({
                     </td>
                     <td className="py-2.5 text-center">
                       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                        emp.status === 'working' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        emp.status === 'leave' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                        'bg-red-500/10 text-red-400 border border-red-500/20'
+                        emp.status === 'working' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                        emp.status === 'leave' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                        'bg-rose-50 text-rose-700 border border-rose-200'
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-400' : emp.status === 'leave' ? 'bg-amber-400' : 'bg-red-400'}`}></span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-500' : emp.status === 'leave' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
                         {emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm'}
                       </span>
                     </td>
@@ -518,13 +520,13 @@ export default function ProfilesTab({
                   </button>
                   <button
                     onClick={handleBulkResetPhepNam}
-                    className="bg-amber-600 hover:bg-amber-550 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
+                    className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
                   >
                     <RotateCcw className="w-3 h-3 inline-block align-middle mr-1" /> Reset phép năm
                   </button>
                   <button
                     onClick={handleBulkCreateSystemAccounts}
-                    className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
                   >
                     <UserPlus className="w-3 h-3 inline-block align-middle mr-1" /> Tạo tài khoản nhanh
                   </button>
@@ -633,14 +635,14 @@ export default function ProfilesTab({
                         setEditingEmpData({ ...emp });
                         setIsEditingEmp(true);
                       }}
-                      className="bg-amber-600 hover:bg-amber-550 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+                      className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
                     >
                       Sửa
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSingleCreateSystemAccount(emp)}
-                      className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
                     >
                       <UserPlus className="w-3 h-3" /> Tạo tài khoản nhanh
                     </button>
@@ -1024,7 +1026,7 @@ export default function ProfilesTab({
                     </button>
                     <button
                       type="submit"
-                      className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold px-4 py-1.5 rounded-lg cursor-pointer"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded-lg cursor-pointer"
                     >
                       Lưu lại ✅
                     </button>
