@@ -1612,8 +1612,8 @@ export default function QuotationSystem({
                                     setCabinetArchiveSearchQuery('');
                                   }}
                                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    loadedCabinetQuote?.id === q.id 
-                                      ? 'bg-amber-950/40 text-amber-400 border border-amber-900 font-bold' 
+                                    loadedCabinetQuote?.id === q.id
+                                      ? 'bg-amber-50 text-amber-700 border border-amber-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -2000,8 +2000,8 @@ export default function QuotationSystem({
                                     setArchiveSearchQuery('');
                                   }}
                                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    loadedQuote?.id === q.id 
-                                      ? 'bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-bold' 
+                                    loadedQuote?.id === q.id
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -2094,7 +2094,7 @@ export default function QuotationSystem({
                                 setIsProjDropdownOpen(false);
                                 setSearchQuery('');
                               }}
-                              className="w-full text-left px-2.5 py-2 hover:bg-rose-950/40 text-rose-400 font-bold border border-rose-900 rounded-lg text-xs mb-2 transition-colors block"
+                              className="w-full text-left px-2.5 py-2 hover:bg-rose-50 text-rose-600 font-bold border border-rose-200 rounded-lg text-xs mb-2 transition-colors block"
                             >
                               ❌ Báo giá Độc lập (Nhập tay tên dự án)
                             </button>
@@ -2130,15 +2130,15 @@ export default function QuotationSystem({
                                       setSearchQuery('');
                                     }}
                                     className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                      selectedProjectId === p.id 
-                                        ? 'bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-bold' 
+                                      selectedProjectId === p.id
+                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold'
                                         : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                     }`}
                                   >
                                     <div className="font-bold text-slate-300 text-left flex items-center justify-between">
                                         <span>{p.name}</span>
                                         {hasArchive && (
-                                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] bg-indigo-950 text-indigo-400 px-1.5 py-0.5 rounded font-black border border-indigo-900">
+                                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-black border border-indigo-200">
                                             📁 ĐÃ CÓ HS
                                           </span>
                                         )}
@@ -2222,8 +2222,8 @@ export default function QuotationSystem({
                                   type="button"
                                   onClick={() => handleSelectCustomer(c)}
                                   className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    selectedCustomerId === c.id 
-                                      ? 'bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-bold' 
+                                    selectedCustomerId === c.id
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -2281,7 +2281,7 @@ export default function QuotationSystem({
                 {/* QUICK CREATE CUSTOMER MODAL (DARK REGION-SPECIFIC) */}
                 {showQuickCreateCust && (
                   <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-none">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
                       <h3 className="text-sm font-black text-slate-100 uppercase tracking-widest border-b border-slate-800 pb-3 mb-4 flex items-center gap-2">
                         <User className="w-4 h-4 text-indigo-400" />
                         Thêm Nhanh Chủ Đầu Tư
@@ -2582,7 +2582,7 @@ export default function QuotationSystem({
                                 <td className="px-4 py-3.5 font-bold text-slate-100">
                                   {p.type}
                                 </td>
-                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-500/5">
+                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-50">
                                   {p.avgPrice.toLocaleString('vi-VN')}
                                 </td>
                                 <td className="px-4 py-3.5 font-bold text-emerald-400 text-right font-mono">
@@ -2601,7 +2601,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => setEditingItem({ tab: 'price', action: 'edit', data: p })}
-                                          className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                           title="Sửa"
                                         >
                                           <Edit className="w-3.5 h-3.5" />
@@ -2611,7 +2611,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => handleDeletePrice(p.stt)}
-                                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
                                           title="Xóa"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2685,13 +2685,13 @@ export default function QuotationSystem({
                                 <td className="px-3 py-3 text-center font-mono font-bold text-sky-400">
                                   {n.brick !== null ? n.brick : '—'}
                                 </td>
-                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-400 bg-sky-500/5">
+                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-600 bg-sky-50">
                                   {n.cement !== null ? n.cement : '—'}
                                 </td>
                                 <td className="px-3 py-3 text-center font-mono font-bold text-sky-400">
                                   {n.sand != null ? n.sand.toFixed(4) : '—'}
                                 </td>
-                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-400 bg-sky-500/5">
+                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-600 bg-sky-50">
                                   {n.stone != null ? n.stone.toFixed(4) : '—'}
                                 </td>
                                 <td className="px-3 py-3 text-center font-mono font-bold text-sky-400">
@@ -2710,7 +2710,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => setEditingItem({ tab: 'composition', action: 'edit', data: n })}
-                                          className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                           title="Sửa"
                                         >
                                           <Edit className="w-3.5 h-3.5" />
@@ -2720,7 +2720,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteNorm(n.id)}
-                                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
                                           title="Xóa"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2778,17 +2778,17 @@ export default function QuotationSystem({
                             );
                           }).map((p, idx) => {
                             // Determine badge styling based on group
-                            let groupClass = "bg-slate-850 text-slate-400 border border-slate-800";
+                            let groupClass = "bg-slate-100 text-slate-600 border border-slate-200";
                             if (p.group === "VẬT LIỆU CHÍNH") {
-                              groupClass = "bg-blue-500/10 text-blue-400 border border-blue-500/20";
+                              groupClass = "bg-blue-50 text-blue-700 border border-blue-200";
                             } else if (p.group === "HOÀN THIỆN") {
-                              groupClass = "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                              groupClass = "bg-emerald-50 text-emerald-700 border border-emerald-200";
                             } else if (p.group === "CỬA & KẾT CẤU") {
-                              groupClass = "bg-purple-500/10 text-purple-400 border border-purple-500/20";
+                              groupClass = "bg-purple-50 text-purple-700 border border-purple-200";
                             } else if (p.group === "NHÂN CÔNG") {
-                              groupClass = "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                              groupClass = "bg-amber-50 text-amber-700 border border-amber-200";
                             } else if (p.group === "MÁY & THIẾT BỊ") {
-                              groupClass = "bg-rose-500/10 text-rose-400 border border-rose-500/20";
+                              groupClass = "bg-rose-50 text-rose-700 border border-rose-200";
                             }
 
                             return (
@@ -2804,7 +2804,7 @@ export default function QuotationSystem({
                                 <td className="px-3 py-3.5 text-center font-semibold text-slate-300 font-mono">
                                   {p.unit}
                                 </td>
-                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-500/5">
+                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-50">
                                   {p.avgPrice.toLocaleString('vi-VN')}
                                 </td>
                                 <td className="px-4 py-3.5 font-bold text-emerald-400 text-right font-mono">
@@ -2823,7 +2823,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => setEditingItem({ tab: 'material_labor', action: 'edit', data: p })}
-                                          className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                           title="Sửa"
                                         >
                                           <Edit className="w-3.5 h-3.5" />
@@ -2833,7 +2833,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteMaterialLabor(p.name)}
-                                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
                                           title="Xóa"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -3257,7 +3257,7 @@ function ConstructionNormsModal({
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl text-slate-100 text-left">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl text-slate-100 text-left animate-in fade-in zoom-in-95 duration-200">
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <h2 className="text-sm font-black uppercase text-indigo-400 tracking-wider">
             {action === 'add' ? '➕ Thêm' : '📝 Sửa'} {
@@ -3273,7 +3273,7 @@ function ConstructionNormsModal({
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {error && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-bold">
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold">
               ⚠️ {error}
             </div>
           )}

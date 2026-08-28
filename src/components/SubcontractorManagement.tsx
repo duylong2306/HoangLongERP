@@ -139,7 +139,7 @@ export default function SubcontractorManagement({
       {/* 4-bento grid KPI metric card layout */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="subcontractor_kpi_cards">
         <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/15">
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl border border-blue-200">
             <Layers className="w-5 h-5" />
           </div>
           <div>
@@ -151,7 +151,7 @@ export default function SubcontractorManagement({
         </div>
 
         <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/15">
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-200">
             <DollarSign className="w-5 h-5" />
           </div>
           <div>
@@ -163,7 +163,7 @@ export default function SubcontractorManagement({
         </div>
 
         <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/15">
+          <div className="p-3 bg-sky-50 text-sky-600 rounded-xl border border-sky-200">
             <CheckCircle2 className="w-5 h-5" />
           </div>
           <div>
@@ -175,7 +175,7 @@ export default function SubcontractorManagement({
         </div>
 
         <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/15">
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-200">
             <FileText className="w-5 h-5" />
           </div>
           <div>
@@ -186,8 +186,8 @@ export default function SubcontractorManagement({
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-rose-500/30 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/15">
+        <div className="bg-slate-900 border border-rose-200 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
+          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-200">
             <Wallet className="w-5 h-5" />
           </div>
           <div>
@@ -232,7 +232,7 @@ export default function SubcontractorManagement({
               Công nợ Trả theo Thầu phụ
             </h3>
           </div>
-          <span className="bg-rose-955 border border-rose-500/20 text-rose-400 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold">
+          <span className="bg-rose-50 border border-rose-200 text-rose-700 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold">
             {subcontractorLiabilities.length} thầu phụ
           </span>
         </div>
@@ -246,7 +246,7 @@ export default function SubcontractorManagement({
             <span className="block text-[9px] text-slate-450 uppercase tracking-wider font-bold">Đã thanh toán</span>
             <span className="block text-base font-black text-emerald-400 mt-1 font-mono">-{totalLiabilityPaid.toLocaleString('vi-VN')} đ</span>
           </div>
-          <div className="bg-slate-950/60 border border-rose-500/20 rounded-xl p-3">
+          <div className="bg-slate-950/60 border border-rose-200 rounded-xl p-3">
             <span className="block text-[9px] text-slate-450 uppercase tracking-wider font-bold">Còn lại</span>
             <span className="block text-base font-black text-rose-400 mt-1 font-mono">{totalLiabilityRemaining.toLocaleString('vi-VN')} đ</span>
           </div>

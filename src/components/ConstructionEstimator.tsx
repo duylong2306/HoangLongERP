@@ -1951,7 +1951,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   return (
     <div className="space-y-6 text-left" id="const_quote_estimator_panel">
       {feedback && (
-        <div className="bg-emerald-50 border border-emerald-250 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="const_estimator_feedback">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="const_estimator_feedback">
           <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500"></div>
           <span className="pl-2">{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="text-emerald-600 font-black hover:text-emerald-950 px-2 cursor-pointer transition-colors">✕</button>
@@ -2145,7 +2145,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                               onClick={() => handleSelectCustomer(c)}
                               className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
                                 selectedCustomerId === c.id 
-                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-250 font-bold' 
+                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold' 
                                   : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                               }`}
                             >
@@ -2203,7 +2203,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40">
               
               {/* Header của form */}
-              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-205 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-200">
                     <Calculator className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
@@ -2317,7 +2317,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                                 placeholder="Gõ tìm nhanh loại nhà..."
                                 className="w-full bg-slate-50 text-slate-800 border border-slate-200 rounded-md pl-7 pr-2.5 py-1 text-[11px] outline-none focus:border-indigo-500 font-medium placeholder-slate-400"
                               />
-                              <Search className="w-3 h-3 text-slate-405 absolute left-2 top-2" />
+                              <Search className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                             </div>
                             <div className="space-y-0.5">
                               {houseEstimatePrices
@@ -2353,7 +2353,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                     {/* Diện tích thi công mỗi tầng & Tổng diện tích sàn */}
                     <div className="grid grid-cols-2 gap-3.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                       <div>
-                        <span className="block text-[9px] uppercase tracking-wider text-slate-505 font-extrabold text-left">Diện tích sàn mỗi tầng</span>
+                        <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-extrabold text-left">Diện tích sàn mỗi tầng</span>
                         <div className="text-sm font-extrabold text-emerald-600 font-mono mt-0.5">
                           {(chieuDai * chieuRong).toFixed(2)} <span className="text-[10px] font-normal text-slate-500">m²</span>
                         </div>
@@ -2526,7 +2526,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                           setSearchProductQuery('');
                         }}
                         className={`w-full bg-white text-slate-800 border rounded-xl p-3 text-xs text-left transition-all flex items-center justify-between cursor-pointer focus:ring-1 focus:ring-indigo-500/20 ${
-                          selectedCategory ? 'border-slate-200 hover:border-slate-355' : 'border-slate-150 opacity-50 cursor-not-allowed'
+                          selectedCategory ? 'border-slate-200 hover:border-slate-350' : 'border-slate-200 opacity-50 cursor-not-allowed'
                         }`}
                         disabled={!selectedCategory}
                       >
@@ -2976,7 +2976,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
               <div className="col-span-2 border-t border-slate-100 my-1.5"></div>
 
-              <span className="text-sm font-bold text-slate-805">TỔNG GIÁ TRỊ TOÀN BỘ:</span>
+              <span className="text-sm font-bold text-slate-800">TỔNG GIÁ TRỊ TOÀN BỘ:</span>
               <span className="text-right text-base font-extrabold text-indigo-600 font-mono">{totalWithVat.toLocaleString('vi-VN')} đ</span>
             </div>
 
@@ -3083,10 +3083,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         {/* Dynamic Preview Modal */}
         {savedQuoteForPreview && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text">
-            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden">
+            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
               <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-250">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-200">
                     <FileText className="w-4 h-4 text-[#4f46e5]" />
                   </div>
                   <div>
@@ -3130,10 +3130,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         )}
 
       {showExistsAlert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 animate-none">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
               <h4 className="font-extrabold text-base uppercase text-white tracking-wide">
@@ -3156,7 +3156,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
       {showQuickCreateCust && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[220] p-4 text-left font-sans">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden p-6 animate-in fade-in zoom-in-95 duration-200">
             <h4 className="font-extrabold text-sm uppercase text-slate-900 tracking-wider mb-4 flex items-center gap-1">
               <span>➕ Tạo Khách Hàng Thầu Nhanh</span>
             </h4>
@@ -3167,7 +3167,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   type="text"
                   value={quickCustName}
                   onChange={(e) => setQuickCustName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-505 font-medium text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 font-medium text-slate-900"
                   placeholder="Nhập tên khách hàng..."
                 />
               </div>
@@ -3177,7 +3177,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   type="text"
                   value={quickCustPhone}
                   onChange={(e) => setQuickCustPhone(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-505 font-medium text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 font-medium text-slate-900"
                   placeholder="Nhập số điện thoại..."
                 />
               </div>
@@ -3187,7 +3187,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   type="text"
                   value={quickCustAddress}
                   onChange={(e) => setQuickCustAddress(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-505 font-medium text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 font-medium text-slate-900"
                   placeholder="Nhập địa chỉ..."
                 />
               </div>

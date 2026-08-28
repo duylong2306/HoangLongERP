@@ -1242,7 +1242,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       {/* Styled Add/Edit Modal (Hộp thoại Popup) */}
       {showFormModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[11.5px] animate-scale-up">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[11.5px] animate-in fade-in zoom-in-95 duration-200">
             
             {/* Modal Header */}
             <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1374,7 +1374,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       {/* Price Management Modal */}
       {showPriceModal && priceModalProduct && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden text-[11.5px] animate-scale-up">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden text-[11.5px] animate-in fade-in zoom-in-95 duration-200">
             
             {/* Header */}
             <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1393,7 +1393,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
             </div>
 
             {/* Product description header */}
-            <div className="bg-slate-900 text-slate-150 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
+            <div className="bg-slate-900 text-slate-100 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
               <div>
                 <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Sản phẩm áp dụng</div>
                 <div className="text-xs font-black text-white mt-0.5">{priceModalProduct.id} - {priceModalProduct.tenSanPham}</div>
@@ -1588,7 +1588,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       {/* Material Management Modal */}
       {showMaterialModal && materialModalProduct && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in text-[11.5px]">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden leading-relaxed animate-scale-up">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden leading-relaxed animate-in fade-in zoom-in-95 duration-200">
             
             {/* Header */}
             <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1607,7 +1607,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
             </div>
 
             {/* Product description header */}
-            <div className="bg-slate-900 text-slate-150 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
+            <div className="bg-slate-900 text-slate-100 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
               <div>
                 <div className="text-[10px] uppercase font-bold tracking-wider text-slate-450">Sản phẩm áp dụng</div>
                 <div className="text-xs font-black text-white mt-0.5">{materialModalProduct.id} - {materialModalProduct.tenSanPham}</div>

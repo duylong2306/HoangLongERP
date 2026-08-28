@@ -1462,7 +1462,7 @@ export default function CabinetEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30 cursor-pointer active:scale-95'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 cursor-pointer active:scale-95'
               }`}
             >
               ⭐ Đặt làm mặc định
@@ -1474,7 +1474,7 @@ export default function CabinetEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 cursor-pointer active:scale-95'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 cursor-pointer active:scale-95'
               }`}
             >
               🔄 Khôi phục mặc định
@@ -1527,7 +1527,7 @@ export default function CabinetEstimator({
                       />
                       <label 
                         htmlFor={isTemplateEditable ? "company-logo-input-cabinet-tmpl" : undefined}
-                        className={`px-4 py-2 bg-amber-600/10 text-amber-400 hover:bg-amber-600/20 border border-amber-500/30 rounded-xl text-xs font-bold cursor-pointer transition-all duration-200 ${
+                        className={`px-4 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-xl text-xs font-bold cursor-pointer transition-all duration-200 ${
                           !isTemplateEditable ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
                         }`}
                       >
@@ -1538,7 +1538,7 @@ export default function CabinetEstimator({
                           type="button"
                           disabled={!isTemplateEditable}
                           onClick={() => setCompanyLogoImg('')}
-                          className={`px-4 py-2 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             !isTemplateEditable ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
                           }`}
                         >
@@ -1854,7 +1854,7 @@ export default function CabinetEstimator({
               className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
                 isTemplateEditable 
                   ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
-                  : 'bg-amber-600/15 text-amber-400 hover:bg-amber-600/25 border border-amber-500/30'
+                  : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
               }`}
             >
               {isTemplateEditable ? '🔒 Khóa' : '✍️ Chỉnh sửa'}
@@ -1896,8 +1896,8 @@ export default function CabinetEstimator({
         </div>
 
         {dbSaveSuccess && (
-          <div className="bg-emerald-950/20 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
             <div>
               <span className="font-bold">Lưu thành công:</span> Cấu hình mẫu hồ sơ và báo giá Nội thất đã được lưu vào hệ thống cơ sở dữ liệu đám mây và đồng bộ hóa thành công trên toàn ứng dụng!
             </div>
@@ -1910,7 +1910,7 @@ export default function CabinetEstimator({
   return (
     <div className="space-y-6 text-left" id="quote_estimator_panel">
       {feedback && (
-        <div className="bg-emerald-50 border border-emerald-250 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="estimator_feedback">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="estimator_feedback">
           <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500"></div>
           <span className="pl-2">{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="text-emerald-600 font-black hover:text-emerald-950 px-2 cursor-pointer transition-colors">✕</button>
@@ -1956,7 +1956,7 @@ export default function CabinetEstimator({
 
                 {/* Dropdown Popup Panel */}
                 {isProjDropdownOpen && (
-                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-scaleIn">
+                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
                     {/* Search Field inside */}
                     <div className="relative mb-2">
                       <input
@@ -2076,7 +2076,7 @@ export default function CabinetEstimator({
 
                 {/* Dropdown list of customers */}
                 {isCustDropdownOpen && (
-                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-scaleIn">
+                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
                     <div className="relative mb-2">
                       <input
                         type="text"
@@ -2111,7 +2111,7 @@ export default function CabinetEstimator({
                             onClick={() => handleSelectCustomer(c)}
                             className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
                               selectedCustomerId === c.id 
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-250 font-bold' 
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold' 
                                 : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                             }`}
                           >
@@ -2170,7 +2170,7 @@ export default function CabinetEstimator({
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40" id="cabinet-product-add-form">
 
               {/* Header của form */}
-              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-205 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-lg bg-orange-50 flex items-center justify-center border border-orange-200">
                     <Calculator className="w-3.5 h-3.5 text-orange-600 animate-pulse" />
@@ -2310,7 +2310,7 @@ export default function CabinetEstimator({
                           setSearchProductQuery('');
                         }}
                         className={`w-full bg-white text-slate-800 border rounded-xl p-3 text-xs text-left transition-all flex items-center justify-between cursor-pointer focus:ring-1 focus:ring-orange-500/20 ${
-                          selectedCategory ? 'border-slate-200 hover:border-slate-350' : 'border-slate-150 opacity-50 cursor-not-allowed'
+                          selectedCategory ? 'border-slate-200 hover:border-slate-350' : 'border-slate-200 opacity-50 cursor-not-allowed'
                         }`}
                         disabled={!selectedCategory}
                       >
@@ -2386,7 +2386,7 @@ export default function CabinetEstimator({
                           const num = parseFloat(raw);
                           setProductQty(isNaN(num) ? raw : Math.round(num * 1000) / 1000);
                         }}
-                        className="w-full bg-white text-slate-905 border border-slate-200 rounded-xl p-3 text-xs font-bold font-mono outline-none focus:border-orange-500 text-center"
+                        className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl p-3 text-xs font-bold font-mono outline-none focus:border-orange-500 text-center"
                         placeholder="VD: 3,555"
                       />
                     </div>
@@ -2664,7 +2664,7 @@ export default function CabinetEstimator({
               </div>
               ) : (
                 /* NHẬP SẢN PHẨM KHÁC FORM BODY */
-                <div className="p-5 space-y-5 animate-scaleIn text-left">
+                <div className="p-5 space-y-5 animate-in fade-in zoom-in-95 duration-200 text-left">
                   <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
                     BẢNG ĐĂNG KÝ HẠNG MỤC PHỤ TRỢ NGOÀI DANH MỤC
                   </span>
@@ -3034,10 +3034,10 @@ export default function CabinetEstimator({
         {/* Dynamic Preview Modal */}
         {savedQuoteForPreview && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text">
-            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden">
+            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
               <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-250">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-200">
                     <FileText className="w-4 h-4 text-[#00a651]" />
                   </div>
                   <div>
@@ -3081,10 +3081,10 @@ export default function CabinetEstimator({
         )}
 
       {showExistsAlert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 animate-scaleIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
               <h4 className="font-extrabold text-base uppercase text-white tracking-wide">
@@ -3107,7 +3107,7 @@ export default function CabinetEstimator({
 
       {showQuickCreateCust && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[220] p-4 text-left font-sans">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden animate-scaleIn p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6">
             <h4 className="font-extrabold text-sm uppercase text-slate-900 tracking-wider mb-4 flex items-center gap-1">
               <span>➕ Tạo Khách Hàng Nhanh</span>
             </h4>

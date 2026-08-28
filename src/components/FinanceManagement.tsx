@@ -6465,9 +6465,9 @@ export default function FinanceManagement({
                                   key={c.id}
                                   onClick={() => setSelectedCustDetail(c)}
                                   className={`hover:bg-slate-800/40 cursor-pointer transition-colors ${
-                                    custSelectedRows.has(c.id) ? 'bg-amber-500/10' : ''
+                                    custSelectedRows.has(c.id) ? 'bg-amber-50' : ''
                                   } ${
-                                    selectedCustDetail?.id === c.id ? 'bg-orange-600/10 border-l-2 border-orange-500' : ''
+                                    selectedCustDetail?.id === c.id ? 'bg-orange-50 border-l-2 border-orange-500' : ''
                                   }`}
                                 >
                                   {/* Select */}
@@ -6587,7 +6587,7 @@ export default function FinanceManagement({
                       const linkedProjs = projects.filter(p => p.customerId === selectedCustDetail.id);
                       const totalVal = linkedProjs.reduce((s, p) => s + p.contractValue, 0);
                       return (
-                        <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-scaleIn space-y-4">
+                        <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4">
                           <div className="flex justify-between items-start border-b border-slate-800 pb-3">
                             <div>
                               <span className="font-mono text-[9px] text-orange-400 font-black uppercase tracking-wider">
@@ -6634,7 +6634,7 @@ export default function FinanceManagement({
                               </div>
                             </div>
 
-                            <div className="p-3.5 bg-orange-600/5 border border-orange-500/10 rounded-xl space-y-2">
+                            <div className="p-3.5 bg-orange-50 border border-orange-200 rounded-xl space-y-2">
                               <div className="flex justify-between text-[11px]">
                                 <span className="text-slate-400">Số dự án thầu phí:</span>
                                 <span className="font-mono font-extrabold text-white">{linkedProjs.length} dự án</span>
@@ -6993,7 +6993,7 @@ export default function FinanceManagement({
                                   {accProdDeleteId === p.id ? (
                                     <div className="flex items-center gap-1">
                                       <button onClick={() => handleAccProdDelete(p.id)} title="Xác nhận xóa"
-                                        className="p-1.5 text-red-400 hover:text-red-300 bg-red-950 rounded-lg transition-colors cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
+                                        className="p-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
                                       <button onClick={() => setAccProdDeleteId(null)} title="Hủy"
                                         className="p-1.5 text-slate-400 hover:text-slate-300 rounded-lg transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                                     </div>

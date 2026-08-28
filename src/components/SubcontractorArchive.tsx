@@ -130,9 +130,9 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
   const getStatusBadge = (status: string, isApproved?: boolean) => {
     const statusNormalized = (status || '').trim().toLowerCase();
     if (isApproved || statusNormalized === 'hoàn thành') {
-      return 'bg-emerald-950/45 text-emerald-400 border border-emerald-900/30';
+      return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
     }
-    return 'bg-amber-950/45 text-amber-400 border border-amber-900/30';
+    return 'bg-amber-50 text-amber-700 border border-amber-200';
   };
 
   const selectedSupplier = suppliers.find(s => s.id === selectedQuote?.subcontractorId);
@@ -141,7 +141,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-6 space-y-6 text-left" id="subcontractor_archive_workspace">
       <div>
         <h3 className="font-black text-lg text-slate-100 uppercase tracking-wider flex items-center gap-2">
-          <span className="p-1 px-2.5 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20 text-xs">📝 CONTRACT ARCHIVE</span>
+          <span className="p-1 px-2.5 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-200 text-xs">📝 CONTRACT ARCHIVE</span>
           Hồ Sơ Lưu Trữ Hợp Đồng Thầu Phụ
         </h3>
       </div>
@@ -256,7 +256,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                         <button
                           type="button"
                           onClick={(e) => handleDeleteClick(item, e)}
-                          className="p-1.5 bg-rose-950/20 text-rose-400 hover:text-rose-300 rounded-lg border border-rose-950/30 hover:bg-rose-950/40 transition shadow cursor-pointer"
+                          className="p-1.5 bg-rose-50 text-rose-600 hover:text-rose-700 rounded-lg border border-rose-200 hover:bg-rose-100 transition shadow cursor-pointer"
                           title="Xóa Hợp Đồng"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -274,7 +274,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
       {/* Delete confirmation dialog */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[120] p-4 text-left">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h4 className="text-sm font-extrabold uppercase text-rose-500">Xác Nhận Xóa Hợp Đồng</h4>
             <p className="text-xs text-slate-300 leading-relaxed">
               Bạn có chắc chắn muốn xóa hợp đồng thầu phụ <strong className="text-white">{deleteTarget.code}</strong> khỏi hệ thống lưu trữ? Thao tác này không thể hoàn tác.
@@ -302,7 +302,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
       {/* PRINT PREVIEW MODAL */}
       {showPrintPreview && selectedQuote && tempQuote && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4 select-text text-left">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">

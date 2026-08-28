@@ -459,7 +459,7 @@ export default function SubcontractorDirectory({
       <div id="subcontractor_form_anchor" />
 
       {showSupplierForm && (
-        <form onSubmit={handleAddSupplierSubmit} className="bg-slate-950/80 border border-slate-800 p-4.5 rounded-xl space-y-3 animate-scaleIn">
+        <form onSubmit={handleAddSupplierSubmit} className="bg-slate-950/80 border border-slate-800 p-4.5 rounded-xl space-y-3 animate-in fade-in zoom-in-95 duration-200">
           <h4 className="text-white font-bold text-xs uppercase tracking-wide border-b border-slate-800 pb-1 text-left">
             {editingSupId ? `✏️ Cập nhật thông tin Thầu phụ: ${editingSupId}` : '🤝 Đăng ký Thầu phụ mới'}
           </h4>
@@ -706,8 +706,8 @@ export default function SubcontractorDirectory({
                       key={s.id}
                       onClick={() => setSelectedSupDetail(s)}
                       className={`hover:bg-slate-800/40 cursor-pointer transition-colors ${
-                        selectedSupDetail?.id === s.id ? 'bg-orange-600/10 border-l-2 border-orange-500' : ''
-                      } ${selectedRows.has(s.id) ? 'bg-amber-500/10' : ''}`}
+                        selectedSupDetail?.id === s.id ? 'bg-orange-50 border-l-2 border-orange-500' : ''
+                      } ${selectedRows.has(s.id) ? 'bg-amber-50' : ''}`}
                     >
                       {/* Checkbox */}
                       <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -822,14 +822,14 @@ export default function SubcontractorDirectory({
         {selectedSupDetail && (() => {
           const linkedSubs = archivedQuotes.filter(sub => sub.subcontractorId === selectedSupDetail.id);
           return (
-            <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-scaleIn space-y-4 text-left text-xs">
+            <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4 text-left text-xs">
               <div className="flex justify-between items-start border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
-                  <span className="p-2 rounded bg-yellow-500/10 text-yellow-500">
+                  <span className="p-2 rounded bg-amber-50 border border-amber-200 text-amber-600">
                     <Briefcase className="w-4 h-4" />
                   </span>
                   <div>
-                    <span className="font-mono text-[9px] text-yellow-500 font-extrabold uppercase tracking-wider">
+                    <span className="font-mono text-[9px] text-amber-600 font-extrabold uppercase tracking-wider">
                       {selectedSupDetail.id.toUpperCase()}
                     </span>
                     <h3 className="font-extrabold text-white text-sm mt-0.5">
@@ -872,7 +872,7 @@ export default function SubcontractorDirectory({
                     </div>
                     <div>
                       <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số điện thoại</span>
-                      <span className="text-slate-205 mt-1 block font-mono font-bold text-[11px]">{selectedSupDetail.phone || 'Chưa cập nhật'}</span>
+                      <span className="text-slate-200 mt-1 block font-mono font-bold text-[11px]">{selectedSupDetail.phone || 'Chưa cập nhật'}</span>
                     </div>
                   </div>
 
@@ -911,7 +911,7 @@ export default function SubcontractorDirectory({
                     </div>
                     <div>
                       <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Lĩnh vực</span>
-                      <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-500">
+                      <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700">
                         {selectedSupDetail.field || 'Chưa phân loại'}
                       </span>
                     </div>
@@ -961,8 +961,8 @@ export default function SubcontractorDirectory({
                               <span>{sub.code || sub.id}</span>
                               <span className={`text-[8.5px] px-1.5 rounded uppercase ${
                                 (sub.status as string) === 'Hoàn thành'
-                                  ? 'bg-emerald-500/10 text-emerald-400'
-                                  : 'bg-sky-500/10 text-sky-400'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-sky-50 text-sky-700 border border-sky-200'
                               }`}>
                                 {sub.status || 'Chạy'}
                               </span>
@@ -1041,7 +1041,7 @@ export default function SubcontractorDirectory({
                       addToast({ title: '✅ Thành công', message: `✅ Đã xóa thầu phụ "${selectedSupDetail.name}" thành công.`, type: 'success' });
                     }
                   }}
-                  className="bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/30 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Xóa thầu phụ
                 </button>

@@ -541,7 +541,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
         if (!sup) return null;
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in text-left">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
               <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                 <h3 className="font-extrabold text-white text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <DollarSign className="w-4 h-4 text-amber-500" />
@@ -689,7 +689,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
                     <tr
                       key={s.id}
                       onClick={() => setSelectedSupDetail(s)}
-                      className={`hover:bg-slate-800/40 cursor-pointer transition-colors text-slate-300 ${selectedRows.has(s.id) ? 'bg-amber-500/10' : ''} ${selectedSupDetail?.id === s.id ? 'bg-teal-600/10 border-l-2 border-teal-500' : ''}`}
+                      className={`hover:bg-slate-800/40 cursor-pointer transition-colors text-slate-300 ${selectedRows.has(s.id) ? 'bg-amber-50' : ''} ${selectedSupDetail?.id === s.id ? 'bg-teal-50 border-l-2 border-teal-500' : ''}`}
                     >
                       <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
@@ -707,7 +707,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
                       <td className="p-3 text-slate-300">{s.address || '—'}</td>
                       <td className="p-3 whitespace-nowrap font-mono text-slate-300">{s.phone || '—'}</td>
                       <td className="p-3">
-                        <span className="bg-teal-500/10 text-teal-400 border border-teal-500/20 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                        <span className="bg-teal-50 text-teal-700 border border-teal-200 text-[10px] px-2 py-0.5 rounded-full font-semibold">
                           {s.field || 'Đại lý vật tư'}
                         </span>
                       </td>
@@ -745,7 +745,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
         const cur = selectedSupDetail.debt || 0;
         const opn = selectedSupDetail.openingDebt || 0;
         return (
-          <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-scaleIn space-y-4 text-left text-xs">
+          <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4 text-left text-xs">
             <div className="flex justify-between items-start border-b border-slate-800 pb-3">
               <div>
                 <span className="font-mono text-[9px] text-teal-400 font-black uppercase tracking-wider">
@@ -797,7 +797,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
                 <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
                   <div>
                     <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Lĩnh vực</span>
-                    <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/10 border border-teal-500/20 text-teal-400">
+                    <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-teal-700">
                       {selectedSupDetail.field || 'Chưa phân loại'}
                     </span>
                   </div>
@@ -847,7 +847,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
                   setAdjustAmount(0);
                   setAdjustType('decrease');
                 }}
-                className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
               >
                 <DollarSign className="w-3.5 h-3.5" /> Công nợ
               </button>
@@ -860,7 +860,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
                   handleDelete(selectedSupDetail.id, selectedSupDetail.name);
                   setSelectedSupDetail(null);
                 }}
-                className="bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/30 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors w-full"
+                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors w-full"
               >
                 <Trash2 className="w-3.5 h-3.5" /> Xóa nhà cung cấp
               </button>
@@ -870,7 +870,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
               <button
                 type="button"
                 onClick={() => setSelectedSupDetail(null)}
-                className="bg-slate-800 hover:bg-slate-755 text-slate-205 font-bold px-4 py-1.5 rounded-xl transition-colors cursor-pointer w-full text-center"
+                className="bg-slate-800 hover:bg-slate-755 text-slate-200 font-bold px-4 py-1.5 rounded-xl transition-colors cursor-pointer w-full text-center"
               >
                 Đóng chi tiết
               </button>
