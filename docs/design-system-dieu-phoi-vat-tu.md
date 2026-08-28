@@ -10,11 +10,18 @@
 > tự nghĩ ra màu/kiểu mới — tránh tình trạng "mỗi task một kiểu thiết kế khác nhau"
 > (đúng quy tắc trong `CLAUDE.md`).
 >
-> **Lưu ý quan trọng**: hầu hết các menu khác (Nhân sự, Tài chính, Kanban dự án)
-> hiện đang xây trên **nền tối** (`bg-slate-950/900/800`), còn Điều phối vật tư là
-> **nền sáng**. Nếu áp style bên dưới vào 1 màn hình đang nền tối, cần đổi cả khung
-> nền của màn hình đó sang sáng để đồng bộ — không nên trộn nửa sáng nửa tối trong
-> cùng 1 màn hình (xem mục "Vấn đề cần tránh" cuối file).
+> **Đính chính (28/08/2026)**: nhận định ban đầu "các menu khác nền tối, Điều phối
+> vật tư nền sáng" là **sai** — đã kiểm tra trực tiếp trên trình duyệt. `src/index.css`
+> (dòng ~238-296) có 1 khối CSS override toàn cục ép mọi class `bg-slate-800/900/950`
+> trong TOÀN BỘ app thành `background-color: #ffffff` (hoặc xám rất nhạt) bằng
+> `!important`. Vì vậy Nhân sự/Tài chính/Kanban dù code dùng `bg-slate-950` vẫn hiển
+> thị nền trắng/xám nhạt giống hệt Điều phối vật tư trong thực tế — **không cần đổi
+> nền** khi áp tài liệu này sang menu khác.
+>
+> Khác biệt **thật sự còn tồn tại** (không nằm trong danh sách override, nên vẫn hiển
+> thị khác) chỉ còn: kiểu badge trạng thái (mục 3), shade hover tùy biến (mục 4),
+> nút CTA gradient (mục 2 & 4), animation modal (mục 8), và bố cục input/bảng/PDF
+> (mục 5-7, 11) — đây mới là các mục cần đối chiếu/copy khi sửa menu khác.
 
 ---
 
@@ -249,7 +256,7 @@ table.signatures td { text-align: center; width: 33.33%; }
 
 ## 12. Vấn đề cần tránh khi áp dụng sang menu khác
 
-1. **Không trộn nửa sáng nửa tối trong cùng 1 màn hình.** Nếu 1 màn hình đang nền tối (`bg-slate-950`) và bạn thêm 1 khối theo style Điều phối vật tư (nền trắng), phải cân nhắc đổi luôn cả khung màn hình đó sang sáng — tránh kiểu Tài chính/Kanban hiện tại đang bị 2 hệ màu chen nhau cho cùng 1 ý nghĩa.
-2. **Không dùng shade Tailwind tùy biến** (`-350`, `-550`, `-650`, `-850`...) — chỉ dùng thang chuẩn (`-50/100/200/.../900`) như Điều phối vật tư đang làm, để không phụ thuộc vào cấu hình Tailwind mở rộng.
-3. **1 trạng thái = 1 kiểu badge duy nhất trong toàn bộ file** — không định nghĩa 2 hàm màu khác nhau cho cùng 1 enum trạng thái (đã xảy ra ở Tài chính, mục 3 phía trên).
+1. **Không cần đổi màu nền** (`bg-slate-800/900/950` đã tự động hiển thị trắng/xám nhạt nhờ override trong `src/index.css` — xem đính chính đầu file). Đừng mất công đổi hàng loạt class nền slate sang `bg-white` — không tạo ra khác biệt thị giác nào, chỉ tốn công và tăng rủi ro sửa nhầm.
+2. **Không dùng shade Tailwind tùy biến** (`-350`, `-550`, `-650`, `-850`...) khi viết code MỚI — chỉ dùng thang chuẩn (`-50/100/200/.../900`) như Điều phối vật tư đang làm. (Code cũ đang dùng shade tùy biến thì không bắt buộc phải sửa lại nếu không ảnh hưởng thị giác — chỉ tránh dùng tiếp khi viết mới.)
+3. **1 trạng thái = 1 kiểu badge duy nhất trong toàn bộ file** — không định nghĩa 2 hàm màu khác nhau cho cùng 1 enum trạng thái (đã xảy ra ở Tài chính, mục 3 phía trên). Đây là khác biệt thật, ưu tiên sửa trước.
 4. Khi viết CSS in ấn mới, **luôn dùng `<table>` cho phần header 2 cột**, không dùng `flex` — flex render sai khi chụp bằng `html2canvas`.
