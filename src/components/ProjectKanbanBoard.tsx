@@ -2094,8 +2094,8 @@ export default function ProjectKanbanBoard({
   }) => {
     const compact = columnWidth < 240;
     const pageText = total > 0 ? `${page}/${totalPages}` : '0';
-    const navBtn = `flex items-center justify-center shrink-0 rounded border border-slate-800 bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
-    const addBtn = `flex items-center justify-center shrink-0 rounded border border-slate-800 bg-slate-950 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/60 hover:bg-slate-800 cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
+    const navBtn = `flex items-center justify-center shrink-0 rounded border border-slate-200 bg-white text-slate-500 hover:text-slate-900 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
+    const addBtn = `flex items-center justify-center shrink-0 rounded border border-slate-200 bg-white text-slate-500 hover:text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
     const navGroup = (
       <div className={`flex items-center min-w-0 gap-1 ${compact ? 'justify-center' : ''}`}>
         <button
@@ -2106,7 +2106,7 @@ export default function ProjectKanbanBoard({
         >
           <ChevronLeft className="w-3 h-3" />
         </button>
-        <span className="text-[9px] font-mono font-bold text-slate-400 whitespace-nowrap shrink-0" title={total > 0 ? `Trang ${page}/${totalPages}` : '0 dự án'}>
+        <span className="text-[9px] font-mono font-bold text-slate-500 whitespace-nowrap shrink-0" title={total > 0 ? `Trang ${page}/${totalPages}` : '0 dự án'}>
           {pageText}
         </span>
         <button
@@ -2120,16 +2120,16 @@ export default function ProjectKanbanBoard({
       </div>
     );
     return (
-      <div className={`border-t border-slate-850/70 shrink-0 w-full min-w-0 pt-1.5 ${compact ? 'space-y-1 px-0.5' : 'px-1'}`}>
+      <div className={`border-t border-slate-200/80 bg-white/60 shrink-0 w-full min-w-0 pt-1.5 pb-2 ${compact ? 'space-y-1 px-2' : 'px-2.5'}`}>
         {/* Hàng 1: Số dòng (trái) + Nút thêm "+" (phải, cùng hàng với Số dòng) */}
         <div className="flex items-center justify-between gap-1 min-w-0 w-full">
           <div className="flex items-center gap-1 min-w-0">
-            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wide shrink-0">Số dòng: </span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wide shrink-0">Số dòng: </span>
             <select
               value={pageSize}
               onChange={(e) => onPageSize(Number(e.target.value))}
               title="Số dòng hiển thị trên 1 trang"
-              className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[9px] font-bold text-slate-300 outline-none cursor-pointer shrink-0"
+              className="bg-white border border-slate-200 rounded px-1 py-0.5 text-[9px] font-bold text-slate-600 outline-none cursor-pointer shrink-0"
             >
               {KANBAN_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -2487,12 +2487,12 @@ export default function ProjectKanbanBoard({
               setColumnAssignableId('');
               setShowAddProjectModal(false);
             }} 
-            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 text-xs shadow-2xl animate-scaleIn text-slate-200"
+            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 text-xs shadow-2xl animate-in fade-in zoom-in-95 duration-200 text-slate-200"
           >
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-                  <Plus className="w-4 h-4 text-emerald-400" />
+                <div className="p-1.5 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <Plus className="w-4 h-4 text-emerald-600" />
                 </div>
                 <div>
                   <h3 className="font-extrabold text-white text-sm">Khởi tạo Hồ sơ Dự án mới</h3>
@@ -2544,7 +2544,7 @@ export default function ProjectKanbanBoard({
                     <button
                       type="button"
                       onClick={() => setShowQuickCustModal(true)}
-                      className="text-emerald-400 hover:text-emerald-350 font-bold text-[10px] flex items-center gap-0.5 transition-colors cursor-pointer"
+                      className="text-emerald-400 hover:text-emerald-300 font-bold text-[10px] flex items-center gap-0.5 transition-colors cursor-pointer"
                     >
                       <span>➕ Thêm nhanh</span>
                     </button>
@@ -2606,8 +2606,8 @@ export default function ProjectKanbanBoard({
                     console.log('[ProjectKanban] Render PM field:', { columnAssignableId, newProjPm, pmName: employees.find(e => e.id === newProjPm)?.name });
                     if (columnAssignableId) {
                       return (
-                        <div className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2.5 text-amber-400 outline-none text-[11px] font-semibold flex items-center gap-2">
-                          <div className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center flex-shrink-0">
+                        <div className="w-full bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-amber-700 outline-none text-[11px] font-semibold flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center flex-shrink-0">
                             <span className="text-[8px]">✓</span>
                           </div>
                           <span>{employees.find(e => e.id === newProjPm)?.name || 'Không xác định'}</span>
@@ -2723,7 +2723,7 @@ export default function ProjectKanbanBoard({
       {/* QUICK ADD CUSTOMER MODAL OVERLAY */}
       {showQuickCustModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-[60] p-4 font-sans text-slate-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-xs text-left animate-scaleIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-xs text-left animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-orange-500" />
@@ -2809,7 +2809,7 @@ export default function ProjectKanbanBoard({
                   placeholder="Địa chỉ liên hệ nhà thô..."
                   value={quickCustAddress}
                   onChange={(e) => setQuickCustAddress(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-855 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500"
+                  className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500"
                 />
               </div>
 
@@ -2903,30 +2903,30 @@ export default function ProjectKanbanBoard({
                 key={col.id}
                 onDrop={(e) => handleDrop(e, col.id)}
                 onDragOver={handleDragOver}
-                className={`kanban-column flex-1 bg-slate-900/45 border-t-4 ${styles.borderTop} border-x border-b ${styles.borderCol} rounded-2xl p-3.5 flex flex-col justify-between min-h-[75vh] h-auto space-y-3 shrink-0 transition-all duration-300 hover:bg-slate-900/60`}
+                className={`kanban-column flex-1 bg-white/50 border ${styles.borderCol} rounded-2xl sm:rounded-3xl overflow-hidden shadow-lg sm:shadow-2xl flex flex-col justify-between min-h-[75vh] h-auto shrink-0 relative transition-all duration-300 hover:shadow-xl hover:shadow-slate-100`}
                 style={{ minWidth: `${columnWidth}px`, maxWidth: `${columnWidth}px` }}
               >
                 {/* Column Header */}
-                <div className="flex items-center justify-between border-b border-slate-850/60 pb-3 shrink-0">
+                <div className={`p-3 sm:p-4 border-b border-slate-200/80 flex items-center justify-between shrink-0 ${styles.bg}`}>
                   <div className="flex items-center gap-2 overflow-hidden">
                     {hasActiveAutomation && (
                       <span title="Đã kích hoạt quy trình tự động">
                         <Zap className="w-3.5 h-3.5 text-emerald-500 hover:text-emerald-400 animate-pulse shrink-0 select-none" />
                       </span>
                     )}
-                    <h4 className={`font-black text-[11.5px] ${styles.text} tracking-wider truncate uppercase flex items-center gap-1.5`}>
+                    <h4 className={`font-extrabold text-[11.5px] sm:text-[12.5px] ${styles.text} tracking-wider truncate uppercase`}>
                       {col.name}
-                      <span className={`px-1.5 py-0.5 text-[9px] rounded-md font-extrabold ml-1 leading-none ${styles.badge}`}>
-                        {colProjects.length}
-                      </span>
                     </h4>
+                    <span className={`text-[11px] font-mono font-black px-2.5 py-0.5 rounded-full ${styles.text} bg-white/80 border border-slate-200/80 shrink-0`}>
+                      {colProjects.length}
+                    </span>
                   </div>
 
                   {/* Column actions: gom 3 thao tác vào nút menu "..." */}
                   <div className="relative shrink-0">
                     <button
                       onClick={() => setOpenColMenuId(openColMenuId === col.id ? null : col.id)}
-                      className={`p-1 rounded transition-colors ${openColMenuId === col.id ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer'}`}
+                      className={`p-1 rounded transition-colors ${openColMenuId === col.id ? 'bg-slate-200 text-slate-900' : 'hover:bg-slate-200 text-slate-500 hover:text-slate-900 cursor-pointer'}`}
                       title="Thao tác cột phân đoạn"
                     >
                       <MoreVertical className="w-4 h-4" />
@@ -2987,11 +2987,11 @@ export default function ProjectKanbanBoard({
                 </div>
 
                 {/* Cards Container without scroll */}
-                <div className="flex-1 space-y-3 pr-1 pt-1" id={`cards_scroller_${col.id}`}>
+                <div className="flex-1 p-3.5 space-y-3.5" id={`cards_scroller_${col.id}`}>
                   {colProjects.length === 0 ? (
-                    <div className="h-28 border border-dashed border-slate-850 rounded-xl flex flex-col items-center justify-center text-slate-600 gap-1 select-none">
+                    <div className="h-28 border border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 gap-1 select-none">
                       <Briefcase className="w-5 h-5 opacity-40" />
-                      <span className="text-[10px]">Kéo công trình thả vào đây</span>
+                      <span className="text-[10px] text-slate-500">Kéo công trình thả vào đây</span>
                     </div>
                   ) : (
                     pagedColProjects.map((p) => {
@@ -3001,6 +3001,7 @@ export default function ProjectKanbanBoard({
                       // Count tasks (completion)
                       const projTasks = tasks.filter(t => t.projectId === p.id);
                       const doneTasks = projTasks.filter(t => t.status === 'completed');
+                      const isSelected = selectedProjectId === p.id;
 
                       return (
                         <div
@@ -3008,7 +3009,9 @@ export default function ProjectKanbanBoard({
                           draggable
                           onDragStart={(e) => handleDragStart(e, p.id)}
                           onClick={() => setSelectedProjectId(p.id)}
-                          className="bg-slate-950 border border-slate-850 hover:border-emerald-500/50 rounded-xl p-2.5 cursor-pointer shadow-md transition-all hover:shadow-lg relative group overflow-hidden active:scale-95"
+                          className={`border rounded-xl p-2.5 cursor-pointer transition-all duration-200 relative group overflow-hidden ${
+                            isSelected ? 'bg-white border-amber-500/60 shadow-md ring-1 ring-amber-500/20' : 'bg-white border-slate-200 hover:border-amber-300 hover:bg-amber-50/40 hover:shadow-md'
+                          }`}
                         >
                           {/* Accent left border based on stats or custom selected color */}
                           <div className={`absolute left-0 top-0 bottom-0 w-1 ${
@@ -3019,41 +3022,46 @@ export default function ProjectKanbanBoard({
                             )
                           }`}></div>
 
-                          {/* Giá trị số nhỏ góc trên bên phải của thẻ công việc */}
-                          <div className="absolute top-2 right-2 flex items-center gap-1 bg-slate-900/80 border border-slate-800/60 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold select-none">
-                            <CheckSquare className={`w-2.5 h-2.5 ${doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-500' : 'text-slate-500'}`} />
-                            <span className={doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-400' : 'text-slate-300'}>
-                              {doneTasks.length}/{projTasks.length}
+                          {/* Mã dự án (trái) + Giá trị số công việc đã xong (phải) */}
+                          <div className="flex items-center justify-between text-[9px] mb-1.5">
+                            <span className={`font-mono font-extrabold px-1.5 py-0.5 rounded truncate max-w-[100px] ${styles.badge}`} title={p.code || p.name}>
+                              {p.code || '—'}
                             </span>
+                            <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold select-none shrink-0">
+                              <CheckSquare className={`w-2.5 h-2.5 ${doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-600' : 'text-slate-400'}`} />
+                              <span className={doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-700' : 'text-slate-500'}>
+                                {doneTasks.length}/{projTasks.length}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="space-y-1.5">
                             {/* Tên Dự Án */}
-                            <h5 
-                              className={`text-[11px] line-clamp-2 leading-tight group-hover:text-emerald-350 transition-colors pr-8 ${
-                                p.styleBold !== false ? 'font-bold' : 'font-normal'
+                            <h5
+                              className={`text-[11.5px] line-clamp-2 leading-snug transition-colors ${
+                                p.styleBold !== false ? 'font-extrabold' : 'font-normal'
                               } ${
                                 p.styleItalic ? 'italic' : ''
                               } ${
                                 p.styleStrike ? 'line-through' : ''
                               }   ${
-                                p.styleColor || 'text-white'
+                                p.styleColor || (isSelected ? 'text-amber-600' : 'text-slate-800 group-hover:text-amber-600')
                               }`}
                             >
                               {p.name}
                             </h5>
 
-                            {/* Tên khách hàng tô màu xanh lá, không đề mục */}
-                            <div className="text-emerald-400 font-bold text-[9.5px] truncate uppercase tracking-wider pr-8">
+                            {/* Tên khách hàng — badge pastel */}
+                            <span className="inline-block text-emerald-700 bg-emerald-50 border border-emerald-200 font-bold text-[9px] truncate uppercase tracking-wider px-1.5 py-0.5 rounded-full max-w-full">
                               {custName}
-                            </div>
+                            </span>
 
                             {/* Thông tin dự án */}
-                            <div className="space-y-1 text-[9.5px] text-slate-400 border-t border-slate-900/80 pt-1.5">
+                            <div className="space-y-1 text-[9.5px] text-slate-500 border-t border-slate-100 pt-1.5">
                               {/* Người chịu trách nhiệm (TRƯỞNG DỰ ÁN) */}
                               <div className="flex items-center gap-1 min-w-0">
-                                <User className="w-3 h-3 text-slate-500 shrink-0 select-none" />
-                                <span className="text-slate-300 font-semibold truncate flex-1">PM: {pmName}</span>
+                                <User className="w-3 h-3 text-slate-400 shrink-0 select-none" />
+                                <span className="text-slate-600 font-semibold truncate flex-1">PM: {pmName}</span>
                               </div>
                             </div>
                           </div>
@@ -3098,7 +3106,7 @@ export default function ProjectKanbanBoard({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-[10px] text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900/30">
+                    <span className="font-mono font-bold text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                       {selectedProject.code}
                     </span>
                     <span className="font-bold text-[9.5px] uppercase tracking-wider text-slate-400">
@@ -3188,9 +3196,9 @@ export default function ProjectKanbanBoard({
                       addToast({ title: '❌ Lỗi', message: 'Đã xảy ra lỗi khi đóng gói dữ liệu công trình.', type: 'error' });
                     }
                   }}
-                  className="p-1 px-3 bg-teal-950/40 hover:bg-teal-900/50 text-teal-400 hover:text-teal-300 rounded-lg border border-teal-900/40 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  className="p-1 px-3 bg-teal-50 hover:bg-teal-100 text-teal-700 hover:text-teal-800 rounded-lg border border-teal-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
                 >
-                  <Save className="w-4 h-4 text-teal-400" />
+                  <Save className="w-4 h-4 text-teal-700" />
                   Tải Dự Án
                 </button>
 
@@ -3198,9 +3206,9 @@ export default function ProjectKanbanBoard({
                   <>
                     <button
                       onClick={() => setIsConfirmingDelete(true)}
-                      className="p-1 px-3 bg-red-950/40 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg border border-red-900/40 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      className="p-1 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 rounded-lg border border-rose-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
                     >
-                      <Trash2 className="w-4 h-4 text-red-400" />
+                      <Trash2 className="w-4 h-4 text-rose-700" />
                       Xóa dự án
                     </button>
 
@@ -3215,10 +3223,10 @@ export default function ProjectKanbanBoard({
                           onClick={() => setIsConfirmingDelete(false)}
                         >
                           <div
-                            className="bg-slate-900 border border-red-800 p-4 rounded-xl shadow-2xl w-80 max-w-[90vw] animate-scaleIn text-left"
+                            className="bg-slate-900 border border-rose-300 p-4 rounded-xl shadow-2xl w-80 max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 text-left"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <p className="text-red-400 font-bold text-[10.5px] leading-relaxed font-sans">
+                            <p className="text-rose-700 font-bold text-[10.5px] leading-relaxed font-sans">
                               ⚠️ Cảnh báo: Bạn có chắc chắn muốn xóa dự án "{selectedProject.name}"?
                               {projectTaskCount > 0 && (
                                 <> Kèm theo <strong>{projectTaskCount}</strong> công việc trực thuộc (cả công việc đã hoàn thành).</>
@@ -3756,7 +3764,7 @@ export default function ProjectKanbanBoard({
                     <div className="flex justify-between items-center border-b border-slate-800 pb-2.5 shrink-0">
                       <div className="flex items-center gap-1.5">
                         <CheckSquare className="w-5 h-5 text-emerald-400" />
-                        <span className="font-extrabold text-[11px] uppercase tracking-wider text-slate-150">
+                        <span className="font-extrabold text-[11px] uppercase tracking-wider text-slate-100">
                           DANH SÁCH CÔNG VIỆC
                         </span>
                       </div>
@@ -3779,7 +3787,7 @@ export default function ProjectKanbanBoard({
                     {/* Form to add subtask — hiển thị dạng hộp thoại (modal) nằm trên cùng */}
                     {showSubtaskForm && (
                       <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-[300] p-4 animate-fade-in" onClick={() => setShowSubtaskForm(false)}>
-                        <div className="bg-slate-950 rounded-xl border border-emerald-500/30 shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden text-left" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-slate-950 rounded-xl border border-emerald-200 shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden text-left animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                         <div className="font-bold text-[10.5px] text-white uppercase flex items-center gap-1 text-emerald-400 shrink-0 p-4 pb-3 border-b border-slate-800">
                           <Zap className="w-3.5 h-3.5" />
                           Tạo thẻ việc con chi tiết
@@ -4487,77 +4495,77 @@ export default function ProjectKanbanBoard({
 
                                             // Tính trạng thái hồ sơ (luôn tính, kể cả khi chưa có báo giá)
                                               let quoteStatusText = "Chưa Lập";
-                                              let quoteStatusColor = "text-slate-500 bg-white/5";
+                                              let quoteStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (latestArchivedQuote.isApproved) {
                                                   quoteStatusText = "Đã Duyệt";
-                                                  quoteStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                  quoteStatusColor = "text-emerald-700 bg-emerald-50";
                                                 } else {
                                                   quoteStatusText = "Chờ Duyệt";
-                                                  quoteStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  quoteStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
                                               let contractStatusText = "Chưa Lập";
-                                              let contractStatusColor = "text-slate-500 bg-white/5";
+                                              let contractStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (!latestArchivedQuote.isApproved) {
                                                   contractStatusText = "Chờ Duyệt";
-                                                  contractStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  contractStatusColor = "text-amber-700 bg-amber-50";
                                                 } else if (latestArchivedQuote.contractHtml) {
                                                   if (latestArchivedQuote.contractApproved) {
                                                     contractStatusText = "Đã Duyệt";
-                                                    contractStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                    contractStatusColor = "text-emerald-700 bg-emerald-50";
                                                   } else {
                                                     contractStatusText = "Chờ Duyệt";
-                                                    contractStatusColor = "text-amber-400 bg-amber-950/20";
+                                                    contractStatusColor = "text-amber-700 bg-amber-50";
                                                   }
                                                 } else {
                                                   // BG đã duyệt nhưng HĐ chưa lưu/tạo → vẫn "Chờ Duyệt", không phải "Chưa Lập"
                                                   contractStatusText = "Chờ Duyệt";
-                                                  contractStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  contractStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
                                               let acceptanceStatusText = "Chưa Lập";
-                                              let acceptanceStatusColor = "text-slate-500 bg-white/5";
+                                              let acceptanceStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (!latestArchivedQuote.isApproved) {
                                                   acceptanceStatusText = "Chờ Duyệt";
-                                                  acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  acceptanceStatusColor = "text-amber-700 bg-amber-50";
                                                 } else if (latestArchivedQuote.acceptanceHtml) {
                                                   if (latestArchivedQuote.acceptanceApproved) {
                                                     acceptanceStatusText = "Đã Duyệt";
-                                                    acceptanceStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                    acceptanceStatusColor = "text-emerald-700 bg-emerald-50";
                                                   } else {
                                                     acceptanceStatusText = "Chờ Duyệt";
-                                                    acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
+                                                    acceptanceStatusColor = "text-amber-700 bg-amber-50";
                                                   }
                                                 } else {
                                                   // BG đã duyệt nhưng NT chưa lưu/tạo → vẫn "Chờ Duyệt"
                                                   acceptanceStatusText = "Chờ Duyệt";
-                                                  acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  acceptanceStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
                                               let liquidationStatusText = "Chưa Lập";
-                                              let liquidationStatusColor = "text-slate-500 bg-white/5";
+                                              let liquidationStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (!latestArchivedQuote.isApproved) {
                                                   liquidationStatusText = "Chờ Duyệt";
-                                                  liquidationStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  liquidationStatusColor = "text-amber-700 bg-amber-50";
                                                 } else if (latestArchivedQuote.liquidationHtml) {
                                                   if (latestArchivedQuote.liquidationApproved) {
                                                     liquidationStatusText = "Đã Duyệt";
-                                                    liquidationStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                    liquidationStatusColor = "text-emerald-700 bg-emerald-50";
                                                   } else {
                                                     liquidationStatusText = "Chờ Duyệt";
-                                                    liquidationStatusColor = "text-amber-400 bg-amber-950/20";
+                                                    liquidationStatusColor = "text-amber-700 bg-amber-50";
                                                   }
                                                 } else {
                                                   // BG đã duyệt nhưng TL chưa lưu/tạo → vẫn "Chờ Duyệt"
                                                   liquidationStatusText = "Chờ Duyệt";
-                                                  liquidationStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  liquidationStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
@@ -4585,7 +4593,7 @@ export default function ProjectKanbanBoard({
                                                       <FileText className="w-3.5 h-3.5 text-indigo-400" />
                                                       <span>Báo Giá</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${quoteStatusColor}`}>{quoteStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${quoteStatusColor}`}>{quoteStatusText}</span>
                                                   </button>
 
                                                   <button
@@ -4598,7 +4606,7 @@ export default function ProjectKanbanBoard({
                                                       <Briefcase className="w-3.5 h-3.5 text-rose-400" />
                                                       <span>Hợp Đồng</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${contractStatusColor}`}>{contractStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${contractStatusColor}`}>{contractStatusText}</span>
                                                   </button>
 
                                                   <button
@@ -4611,7 +4619,7 @@ export default function ProjectKanbanBoard({
                                                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                                                       <span>Nghiệm Thu</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${acceptanceStatusColor}`}>{acceptanceStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${acceptanceStatusColor}`}>{acceptanceStatusText}</span>
                                                   </button>
 
                                                   <button
@@ -4624,7 +4632,7 @@ export default function ProjectKanbanBoard({
                                                       <Award className="w-3.5 h-3.5 text-amber-400" />
                                                       <span>Thanh Lý</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${liquidationStatusColor}`}>{liquidationStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${liquidationStatusColor}`}>{liquidationStatusText}</span>
                                                   </button>
                                                 </>
                                               );
@@ -4684,15 +4692,15 @@ export default function ProjectKanbanBoard({
                                               );
 
                                               let contractStateText = "Chưa Lập";
-                                              let contractStateColor = "text-rose-400 bg-rose-950/20";
+                                              let contractStateColor = "text-rose-700 bg-rose-50";
 
                                               if (matchedContract) {
                                                 if (isApproved) {
                                                   contractStateText = "Đã Duyệt";
-                                                  contractStateColor = "text-emerald-400 bg-emerald-950/20";
+                                                  contractStateColor = "text-emerald-700 bg-emerald-50";
                                                 } else {
                                                   contractStateText = "Chưa Duyệt";
-                                                  contractStateColor = "text-amber-400 bg-amber-950/20";
+                                                  contractStateColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
@@ -4722,7 +4730,7 @@ export default function ProjectKanbanBoard({
                                                       <Briefcase className="w-3.5 h-3.5 text-orange-400" />
                                                       <span>HĐ Giao Khoán</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${contractStateColor}`}>{contractStateText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${contractStateColor}`}>{contractStateText}</span>
                                                   </button>
 
                                                   {isApproved && (
@@ -4913,7 +4921,7 @@ export default function ProjectKanbanBoard({
             helpText: 'Dự án sẽ tự động thay đổi kiểu chữ (in đậm, in nghiêng, gạch giữa) và màu sắc của thẻ khi di chuyển vào phân đoạn này. Quy trình này LUÔN kích hoạt trên mọi cột — mặc định In đậm và không thay đổi màu chữ; bạn chỉ việc điều chỉnh thêm định dạng cho từng cột.',
             icon: Type,
             iconBg: 'bg-violet-500/10 border border-violet-500/30',
-            iconColor: 'text-violet-450 text-violet-400',
+            iconColor: 'text-violet-400',
             isActive: (auto: any) => auto?.textStyleStyleItalic !== undefined || auto?.textStyleStyleBold !== undefined || auto?.textStyleStyleStrike !== undefined || auto?.textStyleStyleColor !== undefined,
           },
           approval: {
@@ -5156,7 +5164,7 @@ export default function ProjectKanbanBoard({
 
               return (
                 <div className="space-y-3 text-left">
-                  <div className="flex justify-between items-center bg-slate-950/40 p-2 rounded-lg border border-slate-805">
+                  <div className="flex justify-between items-center bg-slate-950/40 p-2 rounded-lg border border-slate-800">
                     <span className="text-slate-350 font-bold text-xs uppercase tracking-wider">
                       Danh sách công việc con ({subtasks.length} công việc)
                     </span>
@@ -5228,37 +5236,37 @@ export default function ProjectKanbanBoard({
                             return (
                               <div className="flex flex-wrap gap-1.5 items-center px-7 text-[9.5px] text-slate-400 select-none pb-1">
                                 {hasAssignee && (
-                                  <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     👤 Thợ: {employees.find(e => e.id === subtaskAuto.assignId)?.name || 'Mặc định'}
                                   </span>
                                 )}
                                 {hasApproval && (
-                                  <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 animate-pulse">
+                                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 animate-pulse">
                                     🛡️ {subtaskAuto.isApprovalRequired === true ? 'Phê duyệt bắt buộc' : 'Có phê duyệt'}
                                   </span>
                                 )}
                                 {hasCost && (
-                                  <span className="bg-indigo-950/40 text-teal-400 border border-teal-905/30 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     💵 Nhận chi phí
                                   </span>
                                 )}
                                 {hasMaterial && (
-                                  <span className="bg-amber-955/35 text-amber-400 border border-amber-900/30 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     ⚡ Nhận vật tư
                                   </span>
                                 )}
                                 {hasDocs && (
-                                  <span className="bg-rose-950/40 text-rose-455 border border-rose-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 font-mono">
+                                  <span className="text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 font-mono">
                                     📄 Có hồ sơ
                                   </span>
                                 )}
                                 {hasSubcontractor && (
-                                  <span className="bg-orange-950/40 text-orange-400 border border-orange-900/45 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     🔗 Thầu phụ
                                   </span>
                                 )}
                                 {hasCheck && (
-                                  <span className="bg-slate-800 text-slate-350 px-2 py-0.5 rounded font-extrabold">
+                                  <span className="text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded font-extrabold">
                                     ✓ {subtaskAuto.checklistTexts.length} bước đo kiểm
                                   </span>
                                 )}
@@ -5282,7 +5290,7 @@ export default function ProjectKanbanBoard({
                         onClick={() => setActiveSubtaskRuleIndex(null)}
                       >
                         <div 
-                          className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden transform transition-all duration-300 scale-100"
+                          className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {/* Modal Header */}
@@ -5314,7 +5322,7 @@ export default function ProjectKanbanBoard({
                             {/* Layout 2 cột giống Nhân sự công triển */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                               {/* 1. Giao cho người thực hiện (Sử dụng cấu trúc avatar & select đè lên giống PM chính) */}
-                              <div className="bg-slate-900 border border-slate-805/60 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-700 transition-colors">
+                              <div className="bg-slate-900 border border-slate-800/60 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-700 transition-colors">
                                 {(() => {
                                   const assignedEmp = employees.find(e => e.id === subtaskAuto.assignId);
                                   return (
@@ -5322,7 +5330,7 @@ export default function ProjectKanbanBoard({
                                       {/* Avatar tròn tương tác */}
                                       <div className="relative shrink-0 w-11 h-11">
                                         <UserAvatar employee={assignedEmp || null} size="lg" className={`shadow-md ${assignedEmp ? '' : 'opacity-50'}`} />
-                                        <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-indigo-450 border border-slate-805 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
+                                        <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-indigo-450 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
                                           ⚙️
                                         </span>
                                         {/* Select ẩn đè lên avatar */}
@@ -5809,7 +5817,7 @@ export default function ProjectKanbanBoard({
         return (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => setShowAutoWorkflowModal(false)}>
             <div 
-              className="w-full max-w-[1536px] bg-slate-900 border-l border-slate-805 h-full flex flex-col text-slate-300 shadow-2xl overflow-hidden animate-slideLeft" 
+              className="w-full max-w-[1536px] bg-slate-900 border-l border-slate-800 h-full flex flex-col text-slate-300 shadow-2xl overflow-hidden animate-slideLeft" 
               onClick={(e) => e.stopPropagation()}
             >
               
@@ -5837,7 +5845,7 @@ export default function ProjectKanbanBoard({
               </div>
 
               {/* Column horizontal selector bar */}
-              <div className="bg-slate-900 px-4 py-2 border-b border-slate-805 flex flex-wrap gap-1.5 shrink-0 select-none">
+              <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 flex flex-wrap gap-1.5 shrink-0 select-none">
                 {columns.map(col => {
                   const isActive = col.id === activeWorkflowColId;
                   const count = [
@@ -5995,7 +6003,7 @@ export default function ProjectKanbanBoard({
 
                       {/* Config Area */}
                       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-4 shadow-sm">
-                        <div className="flex items-center justify-between border-b border-slate-801 pb-3 border-slate-800">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                           <div>
                             <span className="font-extrabold text-slate-200 block text-[11px]">
                               {alwaysOnAutomation ? 'Quy trình luôn kích hoạt' : 'Trạng thái tự động hóa'}
@@ -6077,7 +6085,7 @@ export default function ProjectKanbanBoard({
               </div>
 
               {/* Modal Footer */}
-              <div className="bg-slate-950 p-4 border-t border-slate-805 flex justify-between items-center shrink-0">
+              <div className="bg-slate-950 p-4 border-t border-slate-800 flex justify-between items-center shrink-0">
                 <p className="text-[10px] text-slate-500 max-w-lg leading-relaxed">
                   * Quy trình tự trị Hoàng Long được lưu cục bộ và an toàn. Khi di chuyển thẻ, hệ thống sẽ tự sinh bản vẽ con, đổi quản lý, cập nhật trạng thái liên hợp ngay lập tức.
                 </p>
@@ -6264,9 +6272,9 @@ export default function ProjectKanbanBoard({
       {/* Custom Confirmation Modal */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[300] p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 text-slate-200 shadow-2xl overflow-hidden animate-scaleIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 text-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-start gap-4">
-              <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 shrink-0 mt-0.5">
+              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-full text-rose-600 shrink-0 mt-0.5">
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div className="space-y-1">
@@ -6307,7 +6315,7 @@ export default function ProjectKanbanBoard({
       {/* Sub-task Edit Modal */}
       {editingSubTask && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[200] p-4 animate-fadeIn overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-5 md:p-6 text-slate-200 shadow-2xl space-y-4 animate-scaleIn my-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-5 md:p-6 text-slate-200 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 my-8">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <CheckSquare className="w-5 h-5 text-emerald-400" />
@@ -6358,7 +6366,7 @@ export default function ProjectKanbanBoard({
                     value={editSubAssignerId}
                     required
                     onChange={(e) => setEditSubAssignerId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-250 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
                   >
                     <option value="">-- Chọn --</option>
                     {employees.map(emp => (
@@ -6372,7 +6380,7 @@ export default function ProjectKanbanBoard({
                     value={editSubAssigneeId}
                     required
                     onChange={(e) => setEditSubAssigneeId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-250 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
                   >
                     <option value="">-- Chọn thợ mộc/cơ khí --</option>
                     {employees.map(emp => (
@@ -6754,7 +6762,7 @@ export default function ProjectKanbanBoard({
       {/* Tải Báo giá PDF Modal */}
       {downloadedQuoteModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[220] p-4 animate-fadeIn select-text">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-scaleIn text-left">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-left">
             
             {/* Header of Popup */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
