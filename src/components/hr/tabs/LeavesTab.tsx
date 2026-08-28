@@ -274,9 +274,9 @@ export default function LeavesTab({
                       <td className="py-2.5 text-slate-300 text-center font-bold font-mono">{l.daysCount} ngày</td>
                       <td className="py-2.5 text-center">
                         <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded ${
-                          l.status === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                          l.status === 'rejected' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                          'bg-amber-500/10 text-amber-405 border border-amber-500/25'
+                          l.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                          l.status === 'rejected' ? 'bg-red-50 text-red-700 border border-red-200' :
+                          'bg-amber-50 text-amber-700 border border-amber-200'
                         }`}>
                           {l.status === 'approved' && 'Được duyệt'}
                           {l.status === 'rejected' && 'Từ chối'}
@@ -320,11 +320,11 @@ export default function LeavesTab({
 
               {/* Bulk Actions */}
               {leaveSelectedRows.size > 0 && (
-                <div className="bg-red-950/20 border border-red-500/30 rounded-lg p-3 mb-4 flex justify-between items-center">
-                  <span className="text-red-400 font-bold">Đã chọn: {leaveSelectedRows.size} đơn</span>
+                <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 mb-4 flex justify-between items-center">
+                  <span className="text-rose-700 font-bold">Đã chọn: {leaveSelectedRows.size} đơn</span>
                   <button
                     onClick={handleBulkDeleteLeaves}
-                    className="bg-red-650 hover:bg-red-600 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1"
+                    className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Xóa hàng loạt
                   </button>
@@ -428,14 +428,14 @@ export default function LeavesTab({
                       <button
                         type="button"
                         onClick={() => handleApproveLeave(l.id, 'rejected')}
-                        className="flex-1 bg-red-955 hover:bg-red-900 border border-red-500/20 text-red-450 text-[10.5px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
+                        className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-[10.5px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
                       >
                         Từ chối đơn xin
                       </button>
                       <button
                         type="button"
                         onClick={() => handleApproveLeave(l.id, 'approved')}
-                        className="flex-1 bg-emerald-955 hover:bg-emerald-900 border border-emerald-500/20 text-emerald-405 text-[10.5px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10.5px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
                       >
                         Duyệt phép ✅
                       </button>
