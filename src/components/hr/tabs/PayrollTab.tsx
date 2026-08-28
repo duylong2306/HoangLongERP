@@ -116,13 +116,13 @@ export default function PayrollTab({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleCalculatePayroll}
-              className="bg-amber-600 hover:bg-amber-550 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-all duration-150 active:translate-y-0.5"
+              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/20 transition-all duration-150 active:translate-y-0.5"
             >
               ⚡ Tính lương tự động
             </button>
             <button
               onClick={handleExportPayrollExcel}
-              className="bg-blue-600 hover:bg-blue-550 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-all duration-150 active:translate-y-0.5"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-all duration-150 active:translate-y-0.5"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" /> Xuất Excel bảng lương
             </button>
