@@ -1497,6 +1497,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Khi client ĐƯỢC tạo MỚI (initializeSupabase chạy lại), channel cũ gắn với instance cũ
   // sẽ chết → phải resubscribe. Dep [realtimeRetry] đảm bảo cleanup channel cũ trước.
   const [realtimeRetry, setRealtimeRetry] = useState(0);
+  // Đếm số lần reconnect liên tiếp do lỗi (KHÔNG phải state — nằm ngoài effect
+  // để backoff tăng dần qua nhiều lần resubscribe; reset về 0 khi 1 lần
+  // SUBSCRIBED thành công. Dùng để giãn cách các lần tự động kết nối lại khi
+  // kênh Realtime lỗi liên tục, tránh dội tin nhắn (đã từng vượt hạn mức
+  // Realtime message của Supabase — xem ghi chú POLLED_LOW_CHURN_MS bên dưới).
+  const realtimeReconnectAttempts = useRef(0);
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) {
@@ -1783,6 +1789,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     });
 
     console.log('[Realtime] Creating channel...');
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // Đóng kênh CHỦ ĐỘNG (cleanup effect khi unmount/resubscribe theo ý mình,
+    // React StrictMode double-invoke effect lúc dev...) cũng bắn callback
+    // status 'CLOSED' giống hệt lúc kênh chết bất thường — PHẢI phân biệt 2
+    // trường hợp này, nếu không mọi lần cleanup bình thường sẽ bị hiểu nhầm
+    // thành "mất kết nối" và tự resubscribe, tạo vòng lặp đóng/mở vô tận.
+    let intentionalClose = false;
     const channel = sb
       .channel('app-realtime-sync-v2')
       // ── Core tables (state setters) ──
@@ -1842,10 +1855,29 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Realtime] ✅ Channel ready. Listening for ~14 tables (21 bảng ít đổi chuyển sang polling 5 phút)');
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error('[Realtime] ❌ Connection issue:', status, err);
-        } else if (status === 'CLOSED') {
-          if (err) console.log('[Realtime] Channel closed:', err.message);
+          realtimeReconnectAttempts.current = 0;
+          // Hủy lịch reconnect còn treo (nếu có CLOSED/lỗi thoáng qua trước đó
+          // rồi tự phục hồi thành SUBSCRIBED) — tránh resubscribe thừa sau 3s.
+          if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          if (status === 'CLOSED' && intentionalClose) {
+            // Đóng do chính cleanup effect gọi (unmount/resubscribe chủ động) — không phải sự cố.
+            console.log('[Realtime] Channel closed (chủ động, không cần reconnect).');
+            return;
+          }
+          // Trước đây chỉ log — kênh chết (tab để lâu/máy ngủ/đổi mạng) sẽ KHÔNG
+          // BAO GIỜ tự kết nối lại, khiến tab kẹt vĩnh viễn ở dữ liệu cũ (cache
+          // dbService.ts không còn ai invalidate vì không còn event nào tới).
+          // Tự resubscribe với backoff tăng dần (3s/6s/12s/24s, tối đa 30s) để
+          // không dội tin nhắn nếu Supabase đang gặp sự cố kéo dài.
+          if (err) console.error('[Realtime] ❌ Connection issue:', status, err);
+          else console.log('[Realtime] Channel closed unexpectedly:', status);
+          if (reconnectTimer) clearTimeout(reconnectTimer); // tránh chồng timer nếu lỗi bắn liên tiếp
+          const attempt = realtimeReconnectAttempts.current + 1;
+          realtimeReconnectAttempts.current = attempt;
+          const delay = Math.min(3000 * 2 ** (attempt - 1), 30000);
+          console.log(`[Realtime] 🔄 Sẽ tự kết nối lại sau ${delay / 1000}s (lần ${attempt})...`);
+          reconnectTimer = setTimeout(() => setRealtimeRetry(n => n + 1), delay);
         }
       });
 
@@ -1884,10 +1916,32 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
     const lowChurnInterval = setInterval(pollLowChurnTables, POLLED_LOW_CHURN_MS);
 
+    // ─── Tab quay lại foreground: kênh WebSocket có thể đã "chết êm" trong lúc
+    // tab bị ẩn/máy ngủ (không bắn CHANNEL_ERROR/CLOSED, chỉ lặng lẽ ngừng nhận
+    // sự kiện) — biểu hiện đúng như báo cáo: 1 tab để lâu hiển thị Kanban thiếu
+    // công việc mới nhất mà tab khác/bản deploy khác đã thấy. Khi tab active
+    // trở lại: nếu kênh KHÔNG ở trạng thái 'joined' thì resubscribe; đồng thời
+    // luôn ép tải lại các bảng hay bị ảnh hưởng nhất (tasks/projects) để tự vá
+    // ngay cả khi không phát hiện được trạng thái kênh.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if ((channel as any).state && (channel as any).state !== 'joined') {
+        console.log('[Realtime] 👁️ Tab active trở lại, kênh không ở trạng thái joined — resubscribe.');
+        setRealtimeRetry(n => n + 1);
+        return;
+      }
+      fetchTasks();
+      fetchProjects();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       console.log('[Realtime] Cleaning up channel...');
+      intentionalClose = true;
       flushPendingJobs();
       clearInterval(lowChurnInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       sb.removeChannel(channel);
     };
   }, [realtimeRetry]);
@@ -1963,14 +2017,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // ─── Polling Tier 1 (300s): dữ liệu thay đổi vừa phải, fallback cho Realtime ──
   useEffect(() => {
     const poll = async () => {
-      // Không invalidateCache ở đây — cache sẽ tự expire khi realtime event invalidate
-      try { setQuotes(await dbService.quotes.list()); } catch {}
-      try { setCustomers(await dbService.customers.list()); } catch {}
+      // ÉP tải mới (invalidate trước khi list()) — đây là lưới an toàn CUỐI CÙNG
+      // khi kênh Realtime đã chết êm (tab để lâu/máy ngủ/đổi mạng, không có sự
+      // kiện nào tới nữa để tự invalidate cache). Trước đây poll() chỉ gọi
+      // list() suông, nên nếu cache trong dbService.ts chưa được ai invalidate,
+      // nó trả lại đúng mảng cũ trong bộ nhớ — poll() thành vô tác dụng, khiến
+      // tab kẹt vĩnh viễn ở dữ liệu cũ (vd Kanban thiếu công việc mới nhất).
+      try { invalidateCache('quotes'); setQuotes(await dbService.quotes.list()); } catch {}
+      try { invalidateCache('customers'); setCustomers(await dbService.customers.list()); } catch {}
       try {
+        invalidateCache('projects');
         const projs = await dbService.projects.list();
         setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
       } catch {}
-      try { setTasks(await dbService.tasks.list()); } catch {}
+      try { invalidateCache('tasks'); setTasks(await dbService.tasks.list()); } catch {}
       try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
       try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
       try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
