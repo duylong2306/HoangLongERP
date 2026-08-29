@@ -638,9 +638,19 @@ export default function FinanceManagement({
       }
     };
     loadApprovedSubs();
+    // 2 tên event khác nhau, cả 2 đều cần lắng nghe:
+    // - 'hl-archived-subcontractor-quotes-updated': SubcontractorEstimator.tsx tự bắn
+    //   NGAY khi CHÍNH tab đó lưu 1 hợp đồng (phản hồi tức thời trong cùng tab).
+    // - 'hl-archived-quotes-updated': App.tsx bắn định kỳ mỗi 5 phút (bảng archived_quotes
+    //   nằm trong nhóm "ít đổi" chuyển sang polling) — đây là tên event ĐÚNG để nhận biết
+    //   thay đổi từ TAB/NGƯỜI KHÁC. Trước đây chỉ nghe tên đầu tiên (sai hoàn toàn với tên
+    //   App.tsx thực sự bắn) nên hợp đồng thầu phụ do người khác lập/duyệt sẽ không bao giờ
+    //   tự hiện ra ở Công Nợ Trả cho tới khi F5 lại trang.
     window.addEventListener('hl-archived-subcontractor-quotes-updated', loadApprovedSubs);
+    window.addEventListener('hl-archived-quotes-updated', loadApprovedSubs);
     return () => {
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', loadApprovedSubs);
+      window.removeEventListener('hl-archived-quotes-updated', loadApprovedSubs);
     };
   }, []);
 
@@ -1202,6 +1212,18 @@ export default function FinanceManagement({
   // kê/biên lai của cả công ty mới hiện được vài con số tổng hợp đơn giản.
   const [cashFundPayments, setCashFundPayments] = useState<Payment[]>([]);
   const [cashFundLoading, setCashFundLoading] = useState(true);
+  // Tín hiệu kích hoạt tải lại: trước đây chỉ theo dõi payments.length — nên khi
+  // ai đó DUYỆT/TỪ CHỐI 1 phiếu chi liên quan Quỹ tiền mặt ở tab khác (chỉ đổi
+  // field `status`, không đổi số lượng phần tử) thì hiệu ứng này KHÔNG chạy lại,
+  // khiến Số dư/Tổng đã nạp/Tổng đã chi hiện sai cho tới khi F5. Chỉ tính lại
+  // fingerprint từ các phiếu chi THỰC SỰ liên quan (category/paymentMethod =
+  // cash_fund) để rẻ và chính xác — không quét toàn bộ payments không liên quan.
+  const cashFundRelevantSignal = useMemo(() => {
+    return payments
+      .filter(p => p.category === 'cash_fund' || p.paymentMethod === 'cash_fund')
+      .map(p => `${p.id}:${p.status}:${p.amount}`)
+      .join(',');
+  }, [payments]);
   useEffect(() => {
     let active = true;
     const fetchCashFundPayments = async () => {
@@ -1216,10 +1238,7 @@ export default function FinanceManagement({
     };
     fetchCashFundPayments();
     return () => { active = false; };
-    // Tải lại khi số lượng phiếu chi tổng thay đổi (có phiếu mới/duyệt/xóa) —
-    // chỉ dùng `payments.length` làm tín hiệu kích hoạt, không đợi `payments`
-    // (đã kèm ảnh) tải xong mới hiển thị lần đầu.
-  }, [payments.length]);
+  }, [cashFundRelevantSignal]);
 
   // Số dư Quỹ tiền mặt = số dư đầu kỳ + tổng phiếu chi NẠP quỹ (category='cash_fund')
   // đã duyệt − tổng phiếu chi RÚT từ quỹ (paymentMethod='cash_fund', mọi hạng mục) đã duyệt.
@@ -1601,6 +1620,13 @@ export default function FinanceManagement({
       }
     };
     loadSubs();
+    // Trước đây chỉ load 1 lần lúc mount, không nghe sự kiện nào — thầu phụ mới
+    // do người khác thêm (hoặc dữ liệu cũ đổi) không bao giờ hiện ra ở dropdown
+    // "Chi Thầu Phụ" cho tới khi F5. accounting_subcontractors được invalidate
+    // cùng lúc với 'suppliers' qua event 'hl-suppliers-updated' (xem App.tsx
+    // fireSuppliersEvent — dùng chung 1 event cho cả 2 bảng).
+    window.addEventListener('hl-suppliers-updated', loadSubs);
+    return () => window.removeEventListener('hl-suppliers-updated', loadSubs);
   }, []);
 
   // Công nợ Thu: đẩy Công Nợ đầu kỳ > 0 của Khách Hàng vào cột Giá Trị (và lưu lên Supabase để không bị mất khi reload).
@@ -2531,13 +2557,20 @@ export default function FinanceManagement({
   // giống hệt cách accounting_liabilities/accounting_receivables đã sửa.
   const prevAccProductsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
-    dbService.accountingProductCatalog.list().then((cloudData) => {
-      if (cloudData && cloudData.length > 0) {
-        setAccProducts(cloudData);
-        prevAccProductsRef.current = new Map(cloudData.map((p: any) => [p.id, liabRowSig(p)]));
-      }
-      setAccProdLoaded(true);
-    }).catch(() => setAccProdLoaded(true));
+    const loadAccProducts = () => {
+      dbService.accountingProductCatalog.list().then((cloudData) => {
+        if (cloudData && cloudData.length > 0) {
+          setAccProducts(cloudData);
+          prevAccProductsRef.current = new Map(cloudData.map((p: any) => [p.id, liabRowSig(p)]));
+        }
+        setAccProdLoaded(true);
+      }).catch(() => setAccProdLoaded(true));
+    };
+    loadAccProducts();
+    // Trước đây chỉ load 1 lần lúc mount, không nghe sự kiện nào — danh mục do
+    // người khác thêm/sửa không bao giờ hiện ra cho tới khi F5.
+    window.addEventListener('hl-accounting-product-catalog-updated', loadAccProducts);
+    return () => window.removeEventListener('hl-accounting-product-catalog-updated', loadAccProducts);
   }, []);
 
   // ── Danh mục sản phẩm kế toán: Sync to Supabase on change (chỉ dòng thật sự đổi) ──

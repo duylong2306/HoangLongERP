@@ -1757,6 +1757,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireAccountingReceivablesEvent = coalescedEvent('accounting_receivables', 'hl-accounting-receivables-updated');
     const fireAccountingSubContractsEvent = coalescedEvent('accounting_sub_contracts', 'hl-accounting-sub-contracts-updated');
     const fireHrmLeaveCoefficientsEvent = coalescedEvent('hrm_leave_coefficients', 'hl-hrm-leave-coefficients-updated');
+    // Số dư đầu kỳ Quỹ Tiền Mặt (bảng đơn/singleton) — trước đây không nằm trong
+    // Realtime lẫn danh sách polling nào, chỉ tự cập nhật khi CHÍNH tab đó tự lưu.
+    const fireCashFundConfigEvent = coalescedEvent('cash_fund_config', 'hl-cash-fund-config-updated');
+    // Danh mục sản phẩm kế toán (Tài Chính - Kế Toán) — cũng không nằm trong
+    // Realtime lẫn danh sách polling nào trước đây.
+    const fireAccountingProductCatalogEvent = coalescedEvent('accounting_product_catalog', 'hl-accounting-product-catalog-updated');
 
     // ─── Bọc handler realtime: patch tại chỗ trước, refetch coalesced sau ────
     // Chiến lược 2 lớp cho bảng có state ở App:
@@ -1928,6 +1934,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       fireAccountingSubContractsEvent();
       fireArchivedQuotesEvent();
       fireSuppliersEvent();
+      fireCashFundConfigEvent();
+      fireAccountingProductCatalogEvent();
     };
     const lowChurnInterval = setInterval(pollLowChurnTables, POLLED_LOW_CHURN_MS);
 
