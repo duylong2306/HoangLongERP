@@ -1845,10 +1845,20 @@ export default function FinanceManagement({
   // Combined liabilities list
   const mergedLiabilities = useMemo(() => {
     const subs = approvedSubContracts.map(sub => {
-      const paymentsMade = payments.filter(p =>
-        (p.subcontractorId && sub.subcontractorId && p.subcontractorId === sub.subcontractorId) ||
-        (p.recipient && sub.subcontractorName && p.recipient === sub.subcontractorName)
-      );
+      const paymentsMade = payments.filter(p => {
+        const matchesSubcontractor =
+          (p.subcontractorId && sub.subcontractorId && p.subcontractorId === sub.subcontractorId) ||
+          (p.recipient && sub.subcontractorName && p.recipient === sub.subcontractorName);
+        if (!matchesSubcontractor) return false;
+        // 1 thầu phụ có thể có NHIỀU hợp đồng ở NHIỀU dự án khác nhau (xem taskId/
+        // projectId ở mergedLiabilities bên dưới) — nếu phiếu chi có gắn rõ dự án cụ
+        // thể (vd Chi phí Công trình cho 1 công trình), CHỈ được tính vào đúng hợp
+        // đồng của dự án đó, không cộng dồn vào hợp đồng khác cùng thầu phụ ở dự án
+        // khác. Phiếu chi Thanh Toán Công Nợ (không gắn dự án cụ thể) vẫn tính chung
+        // như trước — không có project để phân biệt.
+        if (p.projectId && sub.projectId && p.projectId !== sub.projectId) return false;
+        return true;
+      });
       const totalPaidAmount = paymentsMade.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
       const value = sub.contractValue || 0;
       const openingDebt = (sub as any).openingDebt ?? 0;
