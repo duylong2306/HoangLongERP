@@ -909,12 +909,25 @@ export default function QuotationSystem({
         .then(list => setArchivedSubcontractorQuotesList(list))
         .catch(err => console.error("Lỗi khi tải hồ sơ lưu trữ thầu phụ:", err));
     };
-    window.addEventListener('hl-archived-quotes-updated', handleUpdate);
+    // 'hl-archived-quotes-updated' là event App.tsx THẬT SỰ bắn định kỳ 5 phút
+    // cho TOÀN BỘ bảng archived_quotes (không phân biệt sector) — trước đây chỉ
+    // gắn cho construction (handleUpdate), còn nội thất/cơ khí/thầu phụ chỉ nghe
+    // event nội bộ tab (hl-archived-cabinet/mechanical/subcontractor-quotes-updated,
+    // chỉ tự bắn khi CHÍNH tab này lưu) nên danh sách "Tìm nhanh hợp đồng" của 3
+    // sector đó không tự cập nhật khi người khác lập/duyệt hồ sơ ở tab/máy khác.
+    // Gọi lại cả 4 khi có sự kiện polling này (rẻ, không phân biệt sector nào đổi).
+    const handleAnyUpdate = () => {
+      handleUpdate();
+      handleCabinetUpdate();
+      handleMechanicalUpdate();
+      handleSubcontractorUpdate();
+    };
+    window.addEventListener('hl-archived-quotes-updated', handleAnyUpdate);
     window.addEventListener('hl-archived-cabinet-quotes-updated', handleCabinetUpdate);
     window.addEventListener('hl-archived-mechanical-quotes-updated', handleMechanicalUpdate);
     window.addEventListener('hl-archived-subcontractor-quotes-updated', handleSubcontractorUpdate);
     return () => {
-      window.removeEventListener('hl-archived-quotes-updated', handleUpdate);
+      window.removeEventListener('hl-archived-quotes-updated', handleAnyUpdate);
       window.removeEventListener('hl-archived-cabinet-quotes-updated', handleCabinetUpdate);
       window.removeEventListener('hl-archived-mechanical-quotes-updated', handleMechanicalUpdate);
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', handleSubcontractorUpdate);

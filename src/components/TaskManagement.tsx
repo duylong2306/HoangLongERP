@@ -187,9 +187,26 @@ export default function TaskManagement({
   // Tải leaves & payments từ Supabase ngay khi mount (để badge "Công việc phải duyệt"
   // hiển thị đúng số ngay từ đầu, không phải chờ mở tab), và tải lại khi chuyển tab.
   React.useEffect(() => {
-    dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
-    dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
-    dbService.hrmTravelExpenses.list().then(data => setTravelExpenses(data || [])).catch(console.error);
+    const loadLeaves = () => dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
+    const loadPayments = () => dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
+    const loadTravelExpenses = () => dbService.hrmTravelExpenses.list().then(data => setTravelExpenses(data || [])).catch(console.error);
+    loadLeaves();
+    loadPayments();
+    loadTravelExpenses();
+    // Trước đây chỉ tải lại khi chuyển tab (đổi taskScope) hoặc remount — nếu ai
+    // đó duyệt/tạo đơn nghỉ phép, phiếu chi, công tác phí ở tab khác trong lúc
+    // người dùng đang xem "Việc của tôi", badge "Công việc phải duyệt" sẽ hiện
+    // sai số cho tới khi họ tự chuyển tab. Nghe đúng 3 event tương ứng (payments
+    // vừa được App.tsx bắn thêm khi Realtime cập nhật; hrm_leaves core Realtime;
+    // hrm_travel_expenses polling 5 phút) để tự làm mới theo thời gian thực.
+    window.addEventListener('hl-payments-updated', loadPayments);
+    window.addEventListener('hl-hrm-leaves-updated', loadLeaves);
+    window.addEventListener('hl-hrm-travel-expenses-updated', loadTravelExpenses);
+    return () => {
+      window.removeEventListener('hl-payments-updated', loadPayments);
+      window.removeEventListener('hl-hrm-leaves-updated', loadLeaves);
+      window.removeEventListener('hl-hrm-travel-expenses-updated', loadTravelExpenses);
+    };
   }, [taskScope]);
 
   const handleApproveLeave = async (id: string, status: 'approved' | 'rejected') => {

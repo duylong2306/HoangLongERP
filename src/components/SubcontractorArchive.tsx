@@ -57,10 +57,15 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
 
   useEffect(() => {
     fetchArchives();
-    // Listening to custom event from the estimator when saved
+    // 'hl-archived-subcontractor-quotes-updated': tự bắn khi CHÍNH tab này lưu
+    // (từ SubcontractorEstimator hoặc chính component này). 'hl-archived-quotes-updated':
+    // App.tsx bắn định kỳ 5 phút cho bảng archived_quotes (nhóm "ít đổi") — tên
+    // ĐÚNG để nhận biết hợp đồng do tab/người khác lập/duyệt, trước đây bị bỏ sót.
     window.addEventListener('hl-archived-subcontractor-quotes-updated', fetchArchives);
+    window.addEventListener('hl-archived-quotes-updated', fetchArchives);
     return () => {
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', fetchArchives);
+      window.removeEventListener('hl-archived-quotes-updated', fetchArchives);
     };
   }, []);
 

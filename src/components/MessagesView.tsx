@@ -124,7 +124,19 @@ export default function MessagesView({
       if (mounted) setConversations(getConversations());
     });
 
-    return () => { mounted = false; unsub(); };
+    // Lưới an toàn: tab để lâu/máy ngủ có thể làm kênh Realtime chết êm trước
+    // khi kịp tự phục hồi (xem chatStore.ts) — khi tab active trở lại, luôn ép
+    // tải lại danh sách hội thoại mới nhất để không bỏ lỡ tin nhắn/hội thoại
+    // đến trong lúc tab bị ẩn.
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadConversationsFromCloud(currentUser.id).then(() => {
+        if (mounted) setConversations(getConversations());
+      });
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+
+    return () => { mounted = false; unsub(); document.removeEventListener('visibilitychange', handleVisible); };
   }, [currentUser.id]);
 
   // ─── Effects ────────────────────────────────────────────────────────────
@@ -174,7 +186,19 @@ export default function MessagesView({
           markMessagesReadByUser(convId, currentUser.id);
         }
       });
-      return () => { mounted = false; unsub(); };
+      // Lưới an toàn: tab active trở lại sau khi bị ẩn → ép tải lại tin nhắn
+      // của hội thoại đang mở, phòng khi kênh Realtime đã chết êm trong lúc ẩn.
+      const handleVisible = () => {
+        if (document.visibilityState !== 'visible') return;
+        loadMessagesFromCloud(convId, { fromIso: initialStart }).then(msgs => {
+          if (mounted) {
+            setConvMessages(applyWindow(msgs));
+            markMessagesReadByUser(convId, currentUser.id);
+          }
+        });
+      };
+      document.addEventListener('visibilitychange', handleVisible);
+      return () => { mounted = false; unsub(); document.removeEventListener('visibilitychange', handleVisible); };
     } else {
       setConvMessages([]);
     }

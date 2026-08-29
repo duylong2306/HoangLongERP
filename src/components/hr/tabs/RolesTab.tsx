@@ -95,28 +95,56 @@ export default function RolesTab(props: RolesTabProps) {
     setDraftRoles([...roles]);
   }, [roles]);
 
+  // Cờ hiển thị chưa lưu (để hiện badge)
+  const groupChanged = React.useMemo(() => JSON.stringify(draftRoles) !== JSON.stringify(roles), [draftRoles, roles]);
+  const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(savedMatrix), [draftMatrix, savedMatrix]);
+  const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
+
+  // Ref theo dõi cờ "chưa lưu" để đọc được giá trị MỚI NHẤT bên trong listener
+  // sự kiện (đăng ký 1 lần lúc mount, dep []) mà không phải re-subscribe mỗi
+  // lần draft đổi.
+  const approvalChangedRef = React.useRef(approvalChanged);
+  React.useEffect(() => { approvalChangedRef.current = approvalChanged; }, [approvalChanged]);
+  const projectChangedRef = React.useRef(projectChanged);
+  React.useEffect(() => { projectChangedRef.current = projectChanged; }, [projectChanged]);
+
   // Sync Quyền Phê Duyệt từ Supabase khi mount (localStorage có thể trống trên browser mới)
   React.useEffect(() => {
-    syncApprovalConfigFromDb().then((dbConfigs) => {
+    const loadApproval = () => syncApprovalConfigFromDb().then((dbConfigs) => {
       if (dbConfigs.length > 0) {
         setDraftApprovalConfig(dbConfigs);
         setSavedApprovalConfig(JSON.parse(JSON.stringify(dbConfigs)));
       }
     });
+    loadApproval();
+    // Trước đây chỉ tải 1 lần lúc mount, không nghe sự kiện nào — cấu hình
+    // Quyền Phê Duyệt do người khác sửa ở tab/máy khác không tự cập nhật ở
+    // đây. CHỈ tự tải lại khi form KHÔNG có thay đổi chưa lưu (approvalChangedRef)
+    // — tránh ghi đè mất chỉnh sửa đang dang dở của người đang thao tác.
+    const handleApprovalUpdated = () => {
+      if (approvalChangedRef.current) return;
+      loadApproval();
+    };
+    window.addEventListener('hl-hrm-approval-config-updated', handleApprovalUpdated);
+    return () => window.removeEventListener('hl-hrm-approval-config-updated', handleApprovalUpdated);
   }, []);
 
   // Sync Quyền Dự Án từ Supabase khi mount
   React.useEffect(() => {
-    syncProjectPermissionsFromDb().then((cloudMatrix) => {
+    const loadProject = () => syncProjectPermissionsFromDb().then((cloudMatrix) => {
       setDraftMatrix(cloudMatrix);
       setSavedMatrix(JSON.parse(JSON.stringify(cloudMatrix)));
     });
+    loadProject();
+    // Cùng lý do như Quyền Phê Duyệt ở trên — chỉ tự tải lại khi KHÔNG có thay
+    // đổi chưa lưu (projectChangedRef).
+    const handleProjectUpdated = () => {
+      if (projectChangedRef.current) return;
+      loadProject();
+    };
+    window.addEventListener('hl-project-permissions-updated', handleProjectUpdated);
+    return () => window.removeEventListener('hl-project-permissions-updated', handleProjectUpdated);
   }, []);
-
-  // Cờ hiển thị chưa lưu (để hiện badge)
-  const groupChanged = React.useMemo(() => JSON.stringify(draftRoles) !== JSON.stringify(roles), [draftRoles, roles]);
-  const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(savedMatrix), [draftMatrix, savedMatrix]);
-  const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
 
   // Save handlers
   const { addToast } = useNotification();

@@ -119,20 +119,31 @@ export default function DirectorDashboard({
       const r = String(d.getDate()).padStart(2, '0');
       return `${y}-${m}-${r}`;
     };
-    const todayStr = getLocalYYYYMMDD(new Date());
-    // Chỉ tải NGÀY HÔM NAY (thay vì toàn bộ lịch sử) để đếm số người điểm danh.
-    dbService.attendance.listForRange(todayStr, todayStr)
-      .then(logs => {
-        if (!active) return;
-        const uniqueUsers = new Set(
-          (logs || [])
-            .filter((log: any) => log.date === todayStr && log.status !== 'missing' && log.status !== 'unexcused')
-            .map((log: any) => log.empId)
-        );
-        setTodayAttendanceCount(uniqueUsers.size);
-      })
-      .catch(err => console.warn('Lỗi tải chấm công cho Dashboard:', err));
-    return () => { active = false; };
+    const loadTodayAttendance = () => {
+      const todayStr = getLocalYYYYMMDD(new Date());
+      // Chỉ tải NGÀY HÔM NAY (thay vì toàn bộ lịch sử) để đếm số người điểm danh.
+      dbService.attendance.listForRange(todayStr, todayStr)
+        .then(logs => {
+          if (!active) return;
+          const uniqueUsers = new Set(
+            (logs || [])
+              .filter((log: any) => log.date === todayStr && log.status !== 'missing' && log.status !== 'unexcused')
+              .map((log: any) => log.empId)
+          );
+          setTodayAttendanceCount(uniqueUsers.size);
+        })
+        .catch(err => console.warn('Lỗi tải chấm công cho Dashboard:', err));
+    };
+    loadTodayAttendance();
+    // Trước đây chỉ tải 1 lần lúc mount, không nghe sự kiện nào — nhân viên
+    // khác chấm công (check-in/check-out) sau đó sẽ không cập nhật số này cho
+    // tới khi F5. attendance_records là bảng core Realtime, bắn 'hl-attendance-realtime'
+    // (mỗi lần có thay đổi) — nghe sự kiện này để tải lại đúng số hôm nay.
+    window.addEventListener('hl-attendance-realtime', loadTodayAttendance);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-attendance-realtime', loadTodayAttendance);
+    };
   }, []);
 
   // ----------------------------------------------------

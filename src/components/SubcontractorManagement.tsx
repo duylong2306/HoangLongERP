@@ -92,11 +92,20 @@ export default function SubcontractorManagement({
 
   useEffect(() => {
     loadStats();
-    // Re-load stats whenever subcontractor quotes are updated
+    // Re-load stats whenever subcontractor quotes are updated.
+    // 2 tên event khác nhau, cả 2 đều cần nghe:
+    // - 'hl-archived-subcontractor-quotes-updated': tự bắn khi CHÍNH tab đó lưu
+    //   (SubcontractorEstimator.tsx/SubcontractorArchive.tsx) — phản hồi tức thời.
+    // - 'hl-archived-quotes-updated': App.tsx bắn định kỳ mỗi 5 phút (bảng
+    //   archived_quotes thuộc nhóm "ít đổi" chuyển sang polling) — đây mới là
+    //   tên ĐÚNG để nhận biết hợp đồng do tab/người khác lập/duyệt. Trước đây
+    //   chỉ nghe tên đầu (sai hoàn toàn với tên App.tsx thực bắn).
     const onUpdate = () => loadStats();
     window.addEventListener('hl-archived-subcontractor-quotes-updated', onUpdate);
+    window.addEventListener('hl-archived-quotes-updated', onUpdate);
     return () => {
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', onUpdate);
+      window.removeEventListener('hl-archived-quotes-updated', onUpdate);
     };
   }, [currentUser]);
 

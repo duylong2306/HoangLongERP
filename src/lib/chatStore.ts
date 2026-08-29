@@ -937,6 +937,47 @@ export async function loadMessagesFromCloud(
 let _convChannel: any = null;
 let _convCallbacks: Set<() => void> = new Set();
 let _convUserId: string | null = null;
+// ── Tự phục hồi khi kênh "chết êm" (tab để lâu/máy ngủ/đổi mạng) ───────────
+// Trước đây .subscribe() không có callback trạng thái — nếu WebSocket chết
+// êm, tab đó VĨNH VIỄN không nhận thêm hội thoại/tin nhắn mới, không log,
+// không tự phục hồi (giống lỗi đã sửa ở kênh Realtime chính trong App.tsx,
+// nhưng module chat này tách biệt hoàn toàn nên chưa được sửa). Thêm cùng
+// pattern: backoff tăng dần, phân biệt đóng chủ động (cleanup) vs bất thường.
+let _convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let _convReconnectAttempts = 0;
+let _convIntentionalClose = false;
+
+function createConvChannel(userId: string): any {
+  const sb = getSupabase();
+  if (!sb) return null;
+  _convIntentionalClose = false;
+  return sb
+    .channel(`conversations_${userId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
+      async () => {
+        await loadConversationsFromCloud(userId);
+        _convCallbacks.forEach(cb => cb());
+      })
+    .subscribe((status: string, err: any) => {
+      if (status === 'SUBSCRIBED') {
+        _convReconnectAttempts = 0;
+        if (_convReconnectTimer) { clearTimeout(_convReconnectTimer); _convReconnectTimer = null; }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (status === 'CLOSED' && _convIntentionalClose) return; // cleanup chủ động — không phải sự cố
+        if (err) console.error('[Chat] Kênh conversations lỗi:', status, err);
+        if (_convReconnectTimer) clearTimeout(_convReconnectTimer);
+        const attempt = _convReconnectAttempts + 1;
+        _convReconnectAttempts = attempt;
+        const delay = Math.min(3000 * 2 ** (attempt - 1), 30000);
+        _convReconnectTimer = setTimeout(() => {
+          if (_convCallbacks.size === 0 || !_convUserId) return; // không còn ai lắng nghe
+          const sbNow = getSupabase();
+          if (sbNow && _convChannel) sbNow.removeChannel(_convChannel);
+          _convChannel = createConvChannel(_convUserId);
+        }, delay);
+      }
+    });
+}
 
 export function subscribeConversations(userId: string, onChange: () => void): () => void {
   const sb = getSupabase();
@@ -944,10 +985,13 @@ export function subscribeConversations(userId: string, onChange: () => void): ()
 
   // Nếu userId khác với channel đang active → cleanup channel cũ
   if (_convChannel && _convUserId !== userId) {
+    _convIntentionalClose = true;
+    if (_convReconnectTimer) { clearTimeout(_convReconnectTimer); _convReconnectTimer = null; }
     sb.removeChannel(_convChannel);
     _convChannel = null;
     _convCallbacks = new Set();
     _convUserId = null;
+    _convReconnectAttempts = 0;
   }
 
   _convCallbacks.add(onChange);
@@ -955,24 +999,20 @@ export function subscribeConversations(userId: string, onChange: () => void): ()
   // Chỉ subscribe channel 1 lần
   if (!_convChannel) {
     _convUserId = userId;
-    _convChannel = sb
-      .channel(`conversations_${userId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
-        async () => {
-          await loadConversationsFromCloud(userId);
-          _convCallbacks.forEach(cb => cb());
-        })
-      .subscribe();
+    _convChannel = createConvChannel(userId);
   }
 
   // Trả về hàm unsubscribe: xóa callback, cleanup channel nếu không còn callback nào
   return () => {
     _convCallbacks.delete(onChange);
     if (_convCallbacks.size === 0 && _convChannel) {
+      _convIntentionalClose = true;
+      if (_convReconnectTimer) { clearTimeout(_convReconnectTimer); _convReconnectTimer = null; }
       const sb2 = getSupabase();
       if (sb2) sb2.removeChannel(_convChannel);
       _convChannel = null;
       _convUserId = null;
+      _convReconnectAttempts = 0;
     }
   };
 }
@@ -989,17 +1029,53 @@ export function subscribeMessages(
   const sb = getSupabase();
   if (!sb) return () => {};
 
-  const channel = sb
-    .channel(`messages_${conversationId}`)
-    .on('postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
-      async () => {
-        // Chỉ reload cửa sổ đã load (từ _loadedFromIso) thay vì toàn bộ lịch sử
-        const from = _loadedFromIso.get(conversationId);
-        const msgs = await loadMessagesFromCloud(conversationId, from ? { fromIso: from } : undefined);
-        onChange(msgs);
-      })
-    .subscribe();
+  // Cùng cơ chế tự phục hồi như subscribeConversations() — kênh này gắn với 1
+  // lần gọi cụ thể (1 hội thoại đang mở) nên biến trạng thái để cục bộ trong
+  // closure, không cần biến cấp module.
+  let channel: any = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+  let intentionalClose = false;
 
-  return () => { sb.removeChannel(channel); };
+  const handleInsert = async () => {
+    // Chỉ reload cửa sổ đã load (từ _loadedFromIso) thay vì toàn bộ lịch sử
+    const from = _loadedFromIso.get(conversationId);
+    const msgs = await loadMessagesFromCloud(conversationId, from ? { fromIso: from } : undefined);
+    onChange(msgs);
+  };
+
+  const createChannel = (): any => {
+    intentionalClose = false;
+    return sb
+      .channel(`messages_${conversationId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
+        handleInsert)
+      .subscribe((status: string, err: any) => {
+        if (status === 'SUBSCRIBED') {
+          reconnectAttempts = 0;
+          if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          if (status === 'CLOSED' && intentionalClose) return;
+          if (err) console.error('[Chat] Kênh messages lỗi:', status, err);
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          const attempt = reconnectAttempts + 1;
+          reconnectAttempts = attempt;
+          const delay = Math.min(3000 * 2 ** (attempt - 1), 30000);
+          reconnectTimer = setTimeout(() => {
+            const sbNow = getSupabase();
+            if (sbNow && channel) sbNow.removeChannel(channel);
+            channel = createChannel();
+          }, delay);
+        }
+      });
+  };
+
+  channel = createChannel();
+
+  return () => {
+    intentionalClose = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    sb.removeChannel(channel);
+  };
 }

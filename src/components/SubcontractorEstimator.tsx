@@ -352,9 +352,15 @@ export default function SubcontractorEstimator({
   useEffect(() => {
     fetchArchives();
     const handleSubcontractorQuotesUpdated = () => fetchArchives();
+    // 'hl-archived-subcontractor-quotes-updated': tự bắn khi CHÍNH tab này lưu.
+    // 'hl-archived-quotes-updated': App.tsx bắn định kỳ 5 phút (bảng archived_quotes,
+    // nhóm "ít đổi") — tên ĐÚNG để nhận biết hợp đồng do tab/người khác lập,
+    // trước đây bị bỏ sót nên "Tìm nhanh hợp đồng đã lập" không tự cập nhật.
     window.addEventListener('hl-archived-subcontractor-quotes-updated', handleSubcontractorQuotesUpdated);
+    window.addEventListener('hl-archived-quotes-updated', handleSubcontractorQuotesUpdated);
     return () => {
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', handleSubcontractorQuotesUpdated);
+      window.removeEventListener('hl-archived-quotes-updated', handleSubcontractorQuotesUpdated);
     };
   }, [projects]);
 

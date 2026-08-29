@@ -1697,6 +1697,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireWarehouseLogsEvent = coalescedEvent('warehouse_logs', 'hl-warehouse-logs-updated');
     const fireWarehouseDataEvent = coalescedEvent('warehouse_data', 'hl-warehouse-data-updated');
     const fireArchivedQuotesEvent = coalescedEvent('archived_quotes', 'hl-archived-quotes-updated');
+    const firePaymentsUpdatedEvent = coalescedEvent('payments', 'hl-payments-updated');
     const fireTaskPermissionsEvent = coalescedEvent('hrm_task_permissions', 'hl-task-permissions-updated');
     const fireHrmRoleGroupsEvent = coalescedEvent('hrm_role_groups', 'hl-hrm-role-groups-updated');
     const fireEmployeesEvent = () => {
@@ -1721,7 +1722,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         if (config) {
           setHrmConfig(prev => {
             const next = { ...DEFAULT_SYSTEM_CONFIG, ...config };
-            return stableStr(prev) === stableStr(next) ? prev : next;
+            if (stableStr(prev) === stableStr(next)) return prev;
+            // Trước đây chỉ setState nội bộ của App.tsx — các component tự tải
+            // 1 bản shiftConfig RIÊNG (ví dụ DashboardOverview.tsx, không nhận
+            // qua props) sẽ không bao giờ biết cấu hình đổi từ tab khác. Bắn
+            // đúng event mà nơi tự lưu cấu hình (cùng tab) cũng đang bắn, để
+            // dùng chung 1 con đường cập nhật.
+            try { window.dispatchEvent(new CustomEvent('hl_system_settings_updated')); } catch {}
+            return next;
           });
         }
       } catch {}
@@ -1757,6 +1765,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireAccountingReceivablesEvent = coalescedEvent('accounting_receivables', 'hl-accounting-receivables-updated');
     const fireAccountingSubContractsEvent = coalescedEvent('accounting_sub_contracts', 'hl-accounting-sub-contracts-updated');
     const fireHrmLeaveCoefficientsEvent = coalescedEvent('hrm_leave_coefficients', 'hl-hrm-leave-coefficients-updated');
+    // Định mức công tác phí (Nhân sự) — trước đây không nằm trong Realtime lẫn
+    // danh sách polling nào, hoàn toàn "mồ côi".
+    const fireTravelNormsEvent = coalescedEvent('travel_norms', 'hl-travel-norms-updated');
     // Số dư đầu kỳ Quỹ Tiền Mặt (bảng đơn/singleton) — trước đây không nằm trong
     // Realtime lẫn danh sách polling nào, chỉ tự cập nhật khi CHÍNH tab đó tự lưu.
     const fireCashFundConfigEvent = coalescedEvent('cash_fund_config', 'hl-cash-fund-config-updated');
@@ -1833,8 +1844,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           return rest;
         }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_missions' }, fireTaskMissionsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' },
-        withPatchAndCoalesce('payments', 'payments', setPayments as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload) => {
+        withPatchAndCoalesce('payments', 'payments', setPayments as any, rowToCamel)(payload);
+        // Trước đây bảng payments chỉ patch state RIÊNG của App.tsx, không bắn
+        // event DOM nào — các component tự tải 1 bản `payments` RIÊNG (không
+        // nhận qua props, ví dụ TaskManagement.tsx tính badge "Công việc phải
+        // duyệt") sẽ không bao giờ biết có phiếu chi mới/đổi trạng thái từ tab
+        // khác. Bắn thêm 'hl-payments-updated' (đã coalesce sẵn) để các nơi đó
+        // nghe được, giống cách purchase_orders đã làm.
+        firePaymentsUpdatedEvent();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' },
         withPatchAndCoalesce('receipts', 'receipts', setReceipts as any, rowToCamel))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' },
@@ -1923,6 +1942,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       fireKanbanColumnsEvent();
       fireProjectPermissionsEvent();
       fireHrmLeaveCoefficientsEvent();
+      fireTravelNormsEvent();
       // Đợt 2 (công nợ/hợp đồng/danh mục — không cần tức thời)
       fireHrmApprovalConfigEvent();
       fireHrmEmployeeErrorsEvent();

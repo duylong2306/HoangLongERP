@@ -974,11 +974,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [weekendDays, setWeekendDays] = useState<number[]>([0]);
 
   useEffect(() => {
-    dbService.shiftConfig.get().then(config => {
+    const loadWeekendDays = () => dbService.shiftConfig.get().then(config => {
       if (config && Array.isArray(config.weekendDays)) {
         setWeekendDays(config.weekendDays);
       }
     }).catch(() => {});
+    loadWeekendDays();
+    // Trước đây chỉ tải 1 lần lúc mount — cấu hình ngày nghỉ cuối tuần đổi từ
+    // tab/máy khác (App.tsx polling shift_config mỗi 5 phút, bắn 'hl_system_settings_updated')
+    // sẽ không cập nhật tới khi F5, làm sai cách tính công cuối tuần/tăng ca.
+    window.addEventListener('hl_system_settings_updated', loadWeekendDays);
+    return () => window.removeEventListener('hl_system_settings_updated', loadWeekendDays);
   }, []);
 
   const [travelExpensesSummary, setTravelExpensesSummary] = useState<{ id: string; rowId?: string; employeeId?: string; empId?: string; employeeName: string; amount: number; period: string; completedDate?: string; projectName?: string; customerName?: string; taskName?: string; missionName?: string; content?: string; month?: string; fuelFee?: number; mealFee?: number; lodgeFee?: number; otherFee?: number; status?: CTPStatus }[]>([]);
@@ -1269,6 +1275,26 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     });
   }, []);
 
+  // ─── REALTIME LISTENER: Re-fetch travel_norms khi có thay đổi từ user khác ───
+  // Bảng travel_norms trước đây không nằm trong bất kỳ nhóm Realtime/polling
+  // nào ở App.tsx — chỉ tải 1 lần lúc mount, hoàn toàn "mồ côi". Đã thêm bảng
+  // này vào nhóm polling 5 phút (App.tsx, event 'hl-travel-norms-updated').
+  useEffect(() => {
+    const handleTravelNormsChanged = async () => {
+      try {
+        isSyncingTravelNormsFromCloud.current = true;
+        const cloudNorms = await dbService.travelNorms.list();
+        if (cloudNorms && cloudNorms.length > 0) setTravelNorms(cloudNorms);
+      } catch (e) {
+        console.error('Realtime travel-norms sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingTravelNormsFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-travel-norms-updated', handleTravelNormsChanged);
+    return () => window.removeEventListener('hl-travel-norms-updated', handleTravelNormsChanged);
+  }, []);
+
   // ─── REALTIME LISTENER: Re-fetch roles từ Supabase khi có thay đổi từ user khác ───
   useEffect(() => {
     const handleRolesChanged = async () => {
@@ -1288,8 +1314,34 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
       }
     };
-    window.addEventListener('hl-task-permissions-updated', handleRolesChanged);
-    return () => window.removeEventListener('hl-task-permissions-updated', handleRolesChanged);
+    // Trước đây nghe NHẦM 'hl-task-permissions-updated' (event của bảng
+    // hrm_task_permissions khác) thay vì 'hl-hrm-role-groups-updated' (đúng
+    // event App.tsx bắn cho bảng hrm_role_groups) — nên đổi Phân Quyền & Vai
+    // Trò ở tab/máy khác không bao giờ tự cập nhật ở đây.
+    window.addEventListener('hl-hrm-role-groups-updated', handleRolesChanged);
+    return () => window.removeEventListener('hl-hrm-role-groups-updated', handleRolesChanged);
+  }, []);
+
+  // ─── REALTIME LISTENER: Re-fetch employees khi có thay đổi từ user khác ───
+  // Trước đây `employees` chỉ tải 1 lần lúc mount, không nghe sự kiện nào —
+  // hồ sơ nhân viên do người khác sửa/thêm ở tab khác không bao giờ tự cập
+  // nhật ở đây tới khi F5. Dùng chung cờ isSyncingRolesFromCloud (effect "SYNC
+  // TO SUPABASE" cho employees ở dưới đã check đúng cờ này) để tránh vòng lặp
+  // tự lưu lại toàn bộ nhân viên ngay sau khi vừa fetch từ cloud.
+  useEffect(() => {
+    const handleEmployeesChanged = async () => {
+      try {
+        isSyncingRolesFromCloud.current = true;
+        const cloudEmps: any[] = await dbService.employees.list();
+        if (cloudEmps && cloudEmps.length > 0) setEmployees(cloudEmps);
+      } catch (e) {
+        console.error('Realtime employees sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-employees-updated', handleEmployeesChanged);
+    return () => window.removeEventListener('hl-employees-updated', handleEmployeesChanged);
   }, []);
 
   // ─── LISTENER: Vi phạm gửi từ Công việc (TaskDetailModal) → refresh Nhật ký lỗi ───
@@ -1858,7 +1910,27 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       }
     };
     loadRange();
-    return () => { mounted = false; };
+    // Trước đây chỉ tải lại khi NGƯỜI DÙNG tự đổi bộ lọc Tháng/Năm — nhân viên
+    // khác chấm công (Realtime bắn 'hl-attendance-realtime' mỗi lần có thay
+    // đổi, hoặc 'hl-attendance-updated' khi refetch cả tháng) không làm bảng
+    // Chấm công ngày tự cập nhật, phải F5 mới thấy. Debounce 1.5s để 25 người
+    // cùng chấm công không dội hàng chục request tải lại cả tháng liên tiếp
+    // (bảng này xem NHIỀU nhân viên cùng lúc nên không patch từng dòng như
+    // Dashboard — refetch cả tháng debounce là đủ, vẫn được `isSyncingAttendanceFromCloud`
+    // bảo vệ khỏi vòng lặp tự ghi ngược lên Supabase).
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedLoadRange = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadRange, 1500);
+    };
+    window.addEventListener('hl-attendance-realtime', debouncedLoadRange);
+    window.addEventListener('hl-attendance-updated', debouncedLoadRange);
+    return () => {
+      mounted = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('hl-attendance-realtime', debouncedLoadRange);
+      window.removeEventListener('hl-attendance-updated', debouncedLoadRange);
+    };
   }, [attendanceFilterMonth, attendanceFilterYear]);
 
   const [showBulkLockModal, setShowBulkLockModal] = useState(false);

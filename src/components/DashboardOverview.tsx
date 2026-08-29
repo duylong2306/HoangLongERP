@@ -991,12 +991,24 @@ export default function DashboardOverview({
   const [dashHolidays, setDashHolidays] = useState<any[]>([]);
 
   useEffect(() => {
-    dbService.hrmLeaveCoefficients.list()
+    const loadCoefficients = () => dbService.hrmLeaveCoefficients.list()
       .then(list => { if (Array.isArray(list)) setDashCoefficients(list); })
       .catch(err => console.warn('Lỗi tải hệ số nghỉ phép từ Supabase:', err));
-    dbService.hrmHolidays.list()
+    const loadHolidays = () => dbService.hrmHolidays.list()
       .then(list => { if (Array.isArray(list)) setDashHolidays(list); })
       .catch(err => console.warn('Lỗi tải ngày lễ từ Supabase:', err));
+    loadCoefficients();
+    loadHolidays();
+    // Trước đây chỉ tải 1 lần lúc mount, không nghe sự kiện nào — 2 bảng này
+    // thuộc nhóm polling 5 phút ở App.tsx (đã bắn đúng 2 event dưới đây) nhưng
+    // Dashboard chưa từng lắng nghe, nên hệ số nghỉ phép/ngày lễ dùng để tính
+    // loại nghỉ phép trong modal xin nghỉ có thể cũ tới khi F5.
+    window.addEventListener('hl-hrm-leave-coefficients-updated', loadCoefficients);
+    window.addEventListener('hl-hrm-holidays-updated', loadHolidays);
+    return () => {
+      window.removeEventListener('hl-hrm-leave-coefficients-updated', loadCoefficients);
+      window.removeEventListener('hl-hrm-holidays-updated', loadHolidays);
+    };
   }, []);
 
   useEffect(() => {
