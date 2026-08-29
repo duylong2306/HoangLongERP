@@ -210,7 +210,13 @@ interface FinanceProps {
   employees?: Employee[];
   salesOrders?: SalesOrder[];
   onAddReceipt: (newRec: Receipt) => void;
-  onAddPayment: (newPay: Payment) => void;
+  // Promise<void> (không phải void) — hàm submit lập phiếu chi cần AWAIT hàm
+  // này để nút "Nộp đề xuất" chỉ mở khóa lại SAU KHI đã ghi thật lên Supabase
+  // (xem handleAddPaymentSubmitInner). Trước đây khai void nên dù App.tsx
+  // truyền vào 1 hàm async thật, TypeScript không "ép" phải chờ, khiến nút
+  // mở khóa gần như ngay lập tức dù phiếu chưa lưu xong — gốc rễ gây trùng
+  // phiếu chi khi người dùng bấm lại (xem sự cố PC-2026-274/927, PC-2026-111/811).
+  onAddPayment: (newPay: Payment) => Promise<void>;
   onApprovePayment: (id: string, status: 'approved' | 'rejected') => void;
   onAddCustomer?: (newCust: Customer) => void;
   onDeleteCustomer?: (id: string) => void;
@@ -3671,6 +3677,27 @@ export default function FinanceManagement({
   };
 
   const handleAddPaymentSubmitInner = async () => {
+    // Chặn CỨNG: 1 Đề Xuất chỉ được lập ĐÚNG 1 phiếu chi (relatedAdvanceId).
+    // Trước đây không có chốt này — cờ isSubmittingPayment chỉ chặn bấm nhanh 2
+    // lần trong CÙNG 1 lần mở modal, không chặn được: mở lại modal cho đề xuất
+    // đã lập phiếu rồi (dữ liệu payments tại tab đó chưa kịp đồng bộ — xem loạt
+    // fix "kẹt cache" trước đó) và bấm Nộp lần nữa, hoặc 2 người cùng bấm "Lập
+    // Phiếu" gần như đồng thời cho cùng 1 đề xuất → sinh 2 phiếu chi trùng số
+    // tiền (đã xảy ra thật, xem PC-2026-274/PC-2026-927 và PC-2026-111/PC-2026-811).
+    if (activeProposalForPayment) {
+      const existingPayment = payments.find(p => p.relatedAdvanceId === activeProposalForPayment.id);
+      if (existingPayment) {
+        addToast({
+          title: '⛔ Đề xuất đã có phiếu chi',
+          message: `Đề xuất ${activeProposalForPayment.id} đã được lập phiếu chi ${existingPayment.code} trước đó — không thể lập thêm.`,
+          type: 'error'
+        });
+        setActiveProposalForPayment(null);
+        setShowPayForm(false);
+        return;
+      }
+    }
+
     // Chặn CỨNG: không cho lập phiếu chi nếu số tiền vượt số dư Quỹ tiền mặt hiện có
     // (trước đây chỉ cảnh báo mềm — quỹ thực tế không thể chi âm nên phải chặn hẳn).
     if (payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance) {
@@ -3766,7 +3793,11 @@ export default function FinanceManagement({
       relatedAdvanceId: activeProposalForPayment?.id,
       source: activeProposalForPayment ? 'auto' : 'manual'
     };
-    onAddPayment(newPay);
+    // Đợi ghi THẬT lên Supabase xong mới tiếp tục — nút "Nộp đề xuất" (khóa qua
+    // isSubmittingPayment ở handleAddPaymentSubmit) nhờ vậy chỉ mở khóa lại sau
+    // khi phiếu chi đã lưu thành công, không còn khoảng hở vài mili-giây khiến
+    // người dùng tưởng chưa bấm được rồi bấm lại (nguyên nhân gây trùng phiếu).
+    await onAddPayment(newPay);
 
     // Check if we are finalizing a subcontractor advance proposal
     if (activeProposalForPayment) {

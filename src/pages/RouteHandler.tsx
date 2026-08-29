@@ -29,7 +29,7 @@ interface Props {
   onDeleteMultipleTasks: (ids: string[]) => void;
   onUpdateTask: (id: string, u: Partial<Task>) => void;
   onAddQuote: (q: Quote) => void; onUpdateQuoteStatus: (id: string, s: any) => void;
-  onAddReceipt: (r: Receipt) => void; onAddPayment: (p: Payment) => void;
+  onAddReceipt: (r: Receipt) => void; onAddPayment: (p: Payment) => Promise<void>;
   onApprovePayment: (id: string, s: 'approved' | 'rejected') => void;
   onAddCustomer: (c: Customer) => void; onDeleteCustomer: (id: string) => void;
   onNavigateTab: (tab: string) => void;
