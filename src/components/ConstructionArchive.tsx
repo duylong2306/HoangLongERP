@@ -499,7 +499,33 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
               </button>
             </div>
 
-            <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
+            <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto" id="print-area-archive">
+              {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ trang (nền mờ, header, nút bấm...)
+                  và chỉ hiện đúng vùng nội dung báo giá này, kéo full khổ giấy — tránh in ra
+                  giống ảnh chụp cả cửa sổ modal. */}
+              <style>{`
+                @media print {
+                  body * {
+                    visibility: hidden;
+                  }
+                  #print-area-archive, #print-area-archive * {
+                    visibility: visible;
+                  }
+                  #print-area-archive {
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    width: 100%;
+                    max-height: none !important;
+                    overflow: visible !important;
+                    padding: 0;
+                    margin: 0;
+                  }
+                  .print-hide {
+                    display: none !important;
+                  }
+                }
+              `}</style>
               <QuotationTableSheet
                 quoteData={selectedQuote}
                 initialTab={activeDetailTab}
@@ -510,7 +536,7 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
               />
             </div>
 
-            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center gap-4">
+            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center gap-4 print-hide">
               <div>
                 {!projectsList.some(p => p.id === selectedQuote.projectId) ? (
                   <button

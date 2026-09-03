@@ -734,8 +734,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     const fetchDbConfig = async () => {
       setDbLoading(true);
       try {
-        // Load from 'construction_default' (matches the save key in handleSetAsDefault)
-        const dbConfig = await dbService.quotationConfigs.get('construction_default');
+        // Load từ key 'construction' — phải khớp với key mà nút "Lưu" chính dùng để ghi
+        // (trước đây đọc nhầm 'construction_default' — là key riêng chỉ dùng cho 2 nút
+        // "Đặt làm mặc định"/"Khôi phục mặc định" — khiến thay đổi lưu xong bị "biến mất" khi mở lại)
+        const dbConfig = await dbService.quotationConfigs.get('construction');
         if (dbConfig) {
           if (dbConfig.companyLogoImg !== undefined) setCompanyLogoImg(dbConfig.companyLogoImg);
           if (dbConfig.companyLogoText !== undefined) setCompanyLogoText(dbConfig.companyLogoText);
@@ -3103,10 +3105,36 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   ✕
                 </button>
               </div>
-              <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
+              <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto" id="print-area-archive">
+                {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ trang (nền mờ, header, nút bấm...)
+                    và chỉ hiện đúng vùng nội dung dự toán này, kéo full khổ giấy — tránh in ra
+                    giống ảnh chụp cả cửa sổ modal. */}
+                <style>{`
+                  @media print {
+                    body * {
+                      visibility: hidden;
+                    }
+                    #print-area-archive, #print-area-archive * {
+                      visibility: visible;
+                    }
+                    #print-area-archive {
+                      position: absolute;
+                      left: 0;
+                      top: 0;
+                      width: 100%;
+                      max-height: none !important;
+                      overflow: visible !important;
+                      padding: 0;
+                      margin: 0;
+                    }
+                    .print-hide {
+                      display: none !important;
+                    }
+                  }
+                `}</style>
                 <QuotationTableSheet quoteData={savedQuoteForPreview} />
               </div>
-              <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5">
+              <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5 print-hide">
                 <button
                   type="button"
                   onClick={() => setSavedQuoteForPreview(null)}
