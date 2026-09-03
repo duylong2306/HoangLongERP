@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, Customer, Quote, LeaveRequest, Payment, SubcontractorAdvanceProposal } from '../types';
+import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, Customer, Quote, LeaveRequest, Payment, SubcontractorAdvanceProposal } from '../types';
 import {
   Plus, Check, Clock, Filter, CheckSquare, Eye, Users, ShieldCheck,
   MessageSquare, UserPlus, Trash2, Shield, DollarSign, Zap, FileText,
@@ -18,7 +18,7 @@ interface TaskManagementProps {
   employees: Employee[];
   currentUser: Employee;
   onAddTask: (newTask: Task) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<boolean> | void;
+  onUpdateTask: (id: string, updates: TaskUpdatePayload) => Promise<boolean> | void;
   onUpdateProject?: (id: string, updates: Partial<Project>) => void;
   onDeleteTask?: (id: string) => void;
   onDeleteMultipleTasks?: (ids: string[]) => void;

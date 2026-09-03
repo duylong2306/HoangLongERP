@@ -2718,17 +2718,22 @@ export const dbService = {
     }
 
     const BUCKET = 'mission-report-images';
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    // Trước đây ép về 1 trong 5 đuôi ảnh (mất đuôi thật nếu là file khác ảnh) — nay
+    // giữ ĐÚNG đuôi gốc để hỗ trợ "Đính kèm báo cáo" bằng mọi định dạng file (PDF,
+    // Word, video...), chỉ lọc ký tự lạ để an toàn cho đường dẫn Storage.
+    const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
     const safeTask = String(taskId || 'task').replace(/[^a-zA-Z0-9_-]/g, '_');
     const safeMission = String(missionId || 'mission').replace(/[^a-zA-Z0-9_-]/g, '_');
+    // Giữ lại tên gốc (đã lược ký tự lạ) trong đường dẫn để tên file khi "Tải về"
+    // gần với tên người dùng đã chọn, thay vì chỉ có mã mission + timestamp.
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_\-\.]/g, '_').slice(0, 60) || 'baocao';
     const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
-    const path = `${safeTask}/${safeMission}_${ts}.${safeExt}`;
+    const path = `${safeTask}/${safeMission}_${ts}_${baseName}.${ext}`;
 
     const doUpload = async (): Promise<string> => {
       const { error } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true });
       if (error) throw error;
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;
@@ -2750,10 +2755,11 @@ export const dbService = {
       // Bucket chưa tồn tại → thử tự tạo (nếu role được phép) rồi upload lại 1 lần
       if (/bucket not found|not found/i.test(msg)) {
         try {
+          // Không giới hạn allowedMimeTypes — bucket này nhận mọi định dạng file
+          // đính kèm báo cáo (ảnh, PDF, Word, video...), không chỉ ảnh như trước.
           await supabase.storage.createBucket(BUCKET, {
             public: true,
-            fileSizeLimit: 10485760,
-            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+            fileSizeLimit: 26214400,
           });
           return { url: await doUpload(), stored: 'supabase' };
         } catch (createErr: any) {

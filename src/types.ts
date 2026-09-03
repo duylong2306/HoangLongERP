@@ -304,6 +304,14 @@ export interface Task {
   missions?: SubTaskMission[];
 }
 
+// Payload cho onUpdateTask khi cập nhật có liên quan tới missions. `missions` (nếu có)
+// chỉ cần chứa các mission THAY ĐỔI/THÊM MỚI — không cần đủ toàn bộ mảng — vì
+// syncMissionsDiff() ở App.tsx chỉ UPSERT những gì có mặt trong đây, KHÔNG còn suy luận
+// "vắng mặt = đã xóa" (lỗi cũ: mảng UI cầm bị cũ hơn server do Realtime rớt ngầm một lúc
+// sẽ xóa nhầm mission người khác vừa hoàn thành — xem sự cố "Thi công sắt tại công trình"
+// 2026-08-31). Muốn xóa hẳn 1 mission phải khai báo rõ id trong deletedMissionIds.
+export type TaskUpdatePayload = Partial<Task> & { deletedMissionIds?: string[] };
+
 /**
  * Bản mẫu (template) của một NHIỆM VỤ CHI TIẾT — dùng để cấu hình trước các
  * nhiệm vụ trong 3 cửa sổ (Tạo thẻ việc con, Sửa công việc con, Cấu hình Quy
@@ -332,6 +340,11 @@ export interface SubTaskMission {
   completedAt?: string;
   createdAt?: string;
   deadline?: string;
+  // Đầu mục kiểm soát kỹ thuật (Checklist) — chuyển từ cấp Công Việc (Task.checklistTexts/
+  // completedChecklistTexts, vốn không có nơi nào cho người dùng tự thêm) xuống cấp Nhiệm Vụ,
+  // cho phép thêm ngay khi khởi tạo nhiệm vụ (xem form "Tạo nhiệm vụ", TaskDetailModal.tsx).
+  checklistTexts?: string[];
+  completedChecklistTexts?: string[];
   travelAllowances?: {
     id: string;
     memberId: string;

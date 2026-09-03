@@ -9,6 +9,7 @@ import {
   Project,
   ProjectDoc,
   Task,
+  TaskUpdatePayload,
   Receipt,
   Payment,
   Quote,
@@ -2465,7 +2466,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // sau luôn đọc bản đã-được-lệnh-trước cập nhật.
   const taskUpdateQueues = useRef(new Map<string, Promise<boolean>>());
 
-  const handleUpdateTask = (id: string, updates: Partial<Task>): Promise<boolean> => {
+  const handleUpdateTask = (id: string, updates: TaskUpdatePayload): Promise<boolean> => {
     const prevInQueue = taskUpdateQueues.current.get(id) || Promise.resolve(true);
     const queued = prevInQueue.then(() => performUpdateTask(id, updates));
     taskUpdateQueues.current.set(id, queued);
@@ -2478,29 +2479,45 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return queued;
   };
 
-  // So sánh missions CŨ (mà client này biết) với missions MỚI trong `updates`,
-  // rồi chỉ upsert/xóa đúng những mission THỰC SỰ thay đổi ở bảng task_missions
-  // riêng — không ghi lại nguyên mảng. Đây là điểm mấu chốt chống mất dữ liệu
-  // khi nhiều người sửa các mission khác nhau của cùng 1 task gần như đồng
-  // thời: mission nào không đổi so với bản mà client này biết thì KHÔNG bao
-  // giờ bị ghi đè, dù client đó không hay biết mission khác đã bị người khác
-  // sửa ở giữa chừng.
-  const syncMissionsDiff = (taskId: string, oldMissions: any[] | undefined, newMissions: any[] | undefined): Promise<any> => {
-    if (newMissions === undefined) return Promise.resolve();
+  // Chỉ UPSERT những mission có mặt trong `newMissions` (thêm mới/thay đổi so với
+  // bản client này biết) vào bảng task_missions riêng — KHÔNG còn suy luận "mission
+  // vắng mặt trong mảng mới = đã bị xóa" như trước. Lý do đổi (sự cố thực tế
+  // 2026-08-31): TaskDetailModal ở khoảng 15 chỗ đều tự dựng `missions` bằng cách đọc
+  // `selectedTask.missions` (prop, lấy từ `tasks` state) rồi gửi lại NGUYÊN MẢNG — nếu
+  // Realtime của client đó bị rớt ngầm một lúc (đã có sự cố tương tự, xem
+  // "tự phục hồi kênh Realtime"), mảng này có thể THIẾU 1 mission mà người khác vừa
+  // hoàn thành ở nơi khác. Với cách suy luận cũ, mission đó bị hiểu nhầm là "đã xóa"
+  // và bị xóa THẬT khỏi task_missions — dù chỉ do dữ liệu cục bộ bị cũ, không ai chủ
+  // động xóa. Nay muốn xóa hẳn 1 mission phải khai báo TƯỜNG MINH qua deletedMissionIds
+  // (xem 2 nút "Xóa Nhiệm Vụ" trong TaskDetailModal.tsx) — an toàn cả khi `newMissions`
+  // là bản cũ/thiếu sót, vì phần thiếu chỉ đơn giản không bị đụng tới.
+  const syncMissionsDiff = (
+    taskId: string,
+    oldMissions: any[] | undefined,
+    newMissions: any[] | undefined,
+    deletedMissionIds?: string[],
+  ): Promise<any> => {
+    if (newMissions === undefined && (!deletedMissionIds || deletedMissionIds.length === 0)) {
+      return Promise.resolve();
+    }
     const oldById = new Map((oldMissions || []).map((m: any) => [m.id, m]));
-    const newIds = new Set((newMissions || []).map((m: any) => m.id));
     const toSave = (newMissions || []).filter((m: any) => {
       const old = oldById.get(m.id);
       return !old || stableStr(old) !== stableStr(m);
     });
-    const toDelete = (oldMissions || []).filter((m: any) => !newIds.has(m.id)).map((m: any) => m.id);
+    // Chỉ xóa đúng những id được yêu cầu tường minh, và chỉ khi mission đó thực sự
+    // đang tồn tại trong bản CŨ mà client này biết (tránh xóa nhầm id không hợp lệ).
+    const toDelete = (deletedMissionIds || []).filter(mid => oldById.has(mid));
     return Promise.all([
       ...toSave.map((m: any) => dbService.taskMissions.save(taskId, m)),
       ...toDelete.map((mid: string) => dbService.taskMissions.delete(taskId, mid))
     ]);
   };
 
-  const performUpdateTask = (id: string, updates: Partial<Task>): Promise<boolean> => {
+  const performUpdateTask = (id: string, rawUpdates: TaskUpdatePayload): Promise<boolean> => {
+    // `deletedMissionIds` chỉ là tín hiệu điều khiển syncMissionsDiff — KHÔNG phải cột
+    // thật của bảng tasks, phải tách ra trước khi ghép vào Task/gửi cho dbService.tasks.save().
+    const { deletedMissionIds, ...updates } = rawUpdates;
     // Tìm task từ state hiện tại (ref) — không chạy side-effect bên trong updater.
     const oldTask = tasksRef.current.find(t => t.id === id);
     const baseTask = oldTask;
@@ -2544,7 +2561,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (baseTask) {
       return Promise.all([
         dbService.tasks.save(changedTask),
-        syncMissionsDiff(id, baseTask.missions, updates.missions)
+        syncMissionsDiff(id, baseTask.missions, updates.missions, deletedMissionIds)
       ]).then(() => {
         runTaskNotifications(baseTask, changedTask);
         window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
@@ -2565,7 +2582,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       const target = serverTask ? { ...serverTask, ...updates } : changedTask;
       return Promise.all([
         dbService.tasks.save(target),
-        syncMissionsDiff(id, serverTask?.missions, updates.missions)
+        syncMissionsDiff(id, serverTask?.missions, updates.missions, deletedMissionIds)
       ]).then(() => {
         runTaskNotifications(serverTask, target);
         window.dispatchEvent(new CustomEvent('hl-tasks-updated'));

@@ -12,7 +12,7 @@ import {
 } from '../types';
 import { dbService } from '../lib/dbService';
 import { createMaterialProposalsFromItems } from '../lib/materialProposals';
-import { ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
+import { ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import {
   Boxes,
   Search,
@@ -339,7 +339,13 @@ export default function MaterialCoordination({
     if (prop.projectId === WAREHOUSE_PROJECT_ID) return;
     try {
       const project = projects.find(pr => pr.id === prop.projectId);
-      await ensureProjectChatGroup(project || { id: prop.projectId, name: prop.projectName });
+      const conv = await ensureProjectChatGroup(project || { id: prop.projectId, name: prop.projectName });
+      // 👥 Thêm người tạo đề xuất (currentUser lúc gửi tin + prop.createdBy — có thể
+      // khác nhau nếu ai đó thao tác tiếp đề xuất của người khác) vào nhóm chat dự
+      // án — nếu không, người lần đầu tạo đề xuất vật tư sẽ không thấy nhóm chat.
+      if (conv) {
+        [currentUser?.id, prop.createdBy].filter(Boolean).forEach((mid: string) => addMemberToConversation(conv.id, mid));
+      }
       await sendGroupChatMessage({
         conversationId: `conv_project_${prop.projectId}`,
         senderId: currentUser?.id || 'system',
@@ -573,7 +579,10 @@ export default function MaterialCoordination({
       // Gửi chat nhóm dự án — "Đề Xuất Kho" không có dự án thật (FK conversations.project_id sẽ lỗi) nên bỏ qua
       if (!quickPropIsWarehouse) {
         try {
-          await ensureProjectChatGroup(proj);
+          const conv = await ensureProjectChatGroup(proj);
+          // 👥 Thêm người tạo đề xuất nhanh vào nhóm chat dự án — nếu chưa từng
+          // tham gia dự án này, họ sẽ không thấy nhóm chat dù được nhắc trong tin.
+          if (conv && creatorId) addMemberToConversation(conv.id, creatorId);
           await sendGroupChatMessage({
             conversationId: `conv_project_${proj.id}`,
             senderId: creatorId,

@@ -169,13 +169,16 @@ describe('Travel Expense persistence', () => {
     fireEvent.change(report, { target: { value: 'Đã hoàn thành nhiệm vụ thi công đạt chất lượng.' } });
 
     // trigger image upload via file input
+    // Input "File báo cáo" (đính kèm báo cáo nhiệm vụ) không còn giới hạn accept="image/*"
+    // (nay nhận mọi định dạng file) — nhận diện qua `multiple` thay vì `accept`, để không
+    // nhầm với input Import Excel (accept=".xlsx,.xls", không có multiple) trong cùng modal.
     const fileInputs = Array.from(document.querySelectorAll('input[type=file]')) as HTMLInputElement[];
-    const fileInput = fileInputs.find(f => (f.getAttribute('accept') || '').includes('image')) || fileInputs[0];
+    const fileInput = fileInputs.find(f => f.multiple) || fileInputs[0];
     expect(fileInput).toBeTruthy();
     const file = new File([new Uint8Array([1])], 'r.jpg', { type: 'image/jpeg' });
     fireEvent.change(fileInput, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/Đã có 1 ảnh/)).toBeTruthy(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText(/Đã có 1 tệp/)).toBeTruthy(), { timeout: 3000 });
 
     // Click complete
     const completeBtn = screen.getByText('Xác Nhận Hoàn Thành');
@@ -223,9 +226,9 @@ describe('Travel Expense persistence', () => {
       fireEvent.change(report, { target: { value: 'Đã hoàn thành nhiệm vụ thi công đạt chất lượng.' } });
 
       const fileInputs = Array.from(document.querySelectorAll('input[type=file]')) as HTMLInputElement[];
-      const fileInput = fileInputs.find(f => (f.getAttribute('accept') || '').includes('image')) || fileInputs[0];
+      const fileInput = fileInputs.find(f => f.multiple) || fileInputs[0];
       fireEvent.change(fileInput, { target: { files: [new File([new Uint8Array([1])], 'r.jpg', { type: 'image/jpeg' })] } });
-      await waitFor(() => expect(screen.getByText(/Đã có 1 ảnh/)).toBeTruthy(), { timeout: 3000 });
+      await waitFor(() => expect(screen.getByText(/Đã có 1 tệp/)).toBeTruthy(), { timeout: 3000 });
 
       // Click complete — save fails → mission NOT completed, no group chat
       fireEvent.click(screen.getByText('Xác Nhận Hoàn Thành'));

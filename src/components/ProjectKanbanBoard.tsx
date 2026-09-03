@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Project, ProjectStatus, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
+import { Project, ProjectStatus, Customer, Employee, Task, TaskUpdatePayload, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, ensureColumnsHaveAutomationDefaults, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
 import {
@@ -78,7 +78,7 @@ interface ProjectKanbanBoardProps {
   onUpdateProject: (id: string, updates: Partial<Project>) => void;
   onDeleteProject?: (id: string) => void;
   onAddTask: (newTask: Task) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<boolean> | void;
+  onUpdateTask: (id: string, updates: TaskUpdatePayload) => Promise<boolean> | void;
   onDeleteTask?: (id: string) => void;
   onDeleteMultipleTasks?: (ids: string[]) => void;
   onAddCustomer?: (newCust: Customer) => void;
@@ -123,7 +123,7 @@ export default function ProjectKanbanBoard({
   // nhân sự"), conversation không được nạp vào cache → sendGroupChatMessage trả
   // về null → tin nhắn bị bỏ qua SILENT. Gửi BÊN TRONG .then(ensureProjectChatGroup)
   // để conversation đã upsert lên Supabase trước khi push message (tránh vi phạm FK).
-  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity']) => {
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], extraMemberIds?: string[]) => {
     const pid = selectedProject?.id;
     if (!pid || !currentUser) return;
     const convId = `conv_project_${pid}`;
@@ -133,9 +133,13 @@ export default function ProjectKanbanBoard({
       pmId: selectedProject?.pmId,
     }).then(conv => {
       if (!conv) return;
+      // extraMemberIds: cho phép caller truyền thêm ID (VD: PM MỚI vừa đổi) khi
+      // `selectedProject` (state cục bộ) có thể chưa phản ánh giá trị mới nhất
+      // tại thời điểm hàm này chạy — tránh gap "PM mới không được add ngay".
       const memberIds = Array.from(new Set([
         currentUser?.id,
         selectedProject?.pmId,
+        ...(extraMemberIds || []),
       ].filter(Boolean) as string[]));
       memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
       sendGroupChatMessage({
@@ -154,12 +158,13 @@ export default function ProjectKanbanBoard({
   const notifyProjectChatAfterSave = async (
     savePromise: void | Promise<void>,
     content: string,
-    relatedEntity?: ChatMessage['relatedEntity']
+    relatedEntity?: ChatMessage['relatedEntity'],
+    extraMemberIds?: string[]
   ): Promise<void> => {
     try {
       await savePromise;
       if (selectedProject?.id) {
-        notifyProjectChat(content, relatedEntity);
+        notifyProjectChat(content, relatedEntity, extraMemberIds);
       }
     } catch (err) {
       console.error('Save failed, not sending chat message:', err);
@@ -1114,7 +1119,12 @@ export default function ProjectKanbanBoard({
       const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mớí';
       await notifyProjectChatAfterSave(
         onUpdateProject(projectId, { ...updates, pmId: updates.pmId }),
-        `👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`
+        `👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`,
+        undefined,
+        // ⚠️ FIX: notifyProjectChat mặc định lấy pmId từ `selectedProject` (state cục
+        // bộ) — biến này CHƯA chắc đã re-render với PM mới ngay trong lần gọi này,
+        // nên truyền thẳng `updates.pmId` để PM mới được add vào nhóm ngay lập tức.
+        [updates.pmId]
       );
       // Return early since we've already called onUpdateProject with the PM change
       return;
@@ -1378,6 +1388,31 @@ export default function ProjectKanbanBoard({
     }
     await onUpdateProject(projectId, updates);
 
+    // 📣 Automation cột (rule.assignId / auto_pm) có thể đã đổi PM (updates.pmId)
+    // ngay trong khối automation phía trên — khác nhánh đổi PM THỦ CÔNG ở đầu hàm
+    // (đã return sớm và tự thông báo), nhánh automation này rơi thẳng xuống đây
+    // nên trước đây KHÔNG gửi thông báo/không add PM mới vào nhóm chat dự án.
+    // Dùng trực tiếp `proj` (không phải notifyProjectChat/selectedProject) vì rule
+    // này có thể chạy trên bất kỳ project nào đang kéo-thả trên Kanban, không chỉ
+    // project đang mở chi tiết.
+    if (updates.pmId && updates.pmId !== proj.pmId) {
+      const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mới';
+      const newPmId = updates.pmId;
+      ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: newPmId })
+        .then(conv => {
+          if (!conv) return;
+          addMemberToConversation(conv.id, newPmId);
+          sendGroupChatMessage({
+            conversationId: conv.id,
+            senderId: currentUser?.id || 'system',
+            senderName: currentUser?.name || 'Hệ thống',
+            senderRole: currentUser?.role,
+            content: `👤 Hệ thống (quy trình Kanban) đã tự động chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`,
+          });
+        })
+        .catch(() => {});
+    }
+
     // ── Chain auto-move: Sau khi project di chuyển thành công sang cột mới,
     // clear marker autoMovedDoneRef để lần complete tiếp theo tại cột MỚI
     // có thể trigger auto-move tiếp (chain multi-step: A → B → C).
@@ -1497,7 +1532,7 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   // localUpdateTask() → Cập nhật Task qua callback onUpdateTask rồi đồng bộ local state tasks
   // ===========================================================================
-  const localUpdateTask = (taskId: string, taskUpdates: Partial<Task>) => {
+  const localUpdateTask = (taskId: string, taskUpdates: TaskUpdatePayload) => {
     // Call original prop - automation is now handled centrally in App.tsx
     // Trả về promise (nếu có) để TaskDetailModal biết kết quả lưu thành công hay không.
     return onUpdateTask(taskId, taskUpdates);
@@ -1878,6 +1913,28 @@ export default function ProjectKanbanBoard({
     }
 
     onUpdateTask(editingSubTask.id, updates);
+
+    // 👥 Thêm người giao/người thi hành chính (có thể vừa bị ĐỔI) và Phụ trách
+    // chính + Nhân sự tham gia của các Nhiệm vụ (có thể vừa được gán) vào nhóm
+    // chat dự án — nếu không, người mới lần đầu được gán qua form "Sửa công
+    // việc con" sẽ không thấy nhóm chat dự án dù được nhắc tên trong tin nhắn.
+    if (selectedProject) {
+      const missionMemberIds = (updates.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]);
+      const memberIds = Array.from(new Set([
+        editSubAssignerId,
+        editSubAssigneeId,
+        currentUser?.id,
+        ...missionMemberIds,
+      ].filter(Boolean) as string[]));
+      ensureProjectChatGroup({ id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId })
+        .then(conv => {
+          if (!conv) return;
+          memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
+        })
+        .catch(() => {});
+      notifyProjectChat(`✏️ ${currentUser?.name || 'Người dùng'} đã cập nhật công việc con "${editSubName}".`, { type: 'task', id: editingSubTask.id });
+    }
+
     setEditingSubTask(null);
   };
 

@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
-import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, getConfiguredSettler } from '../context';
 import SearchableSelect from './SearchableSelect';
@@ -1002,8 +1002,26 @@ export default function FinanceManagement({
     if (!proposal.projectId) return;
     const convId = `conv_project_${proposal.projectId}`;
     try {
-      const conv = await ensureProjectChatGroup({ id: proposal.projectId, name: proposal.projectName || '', pmId: undefined });
+      // ⚠️ FIX: trước đây truyền pmId: undefined (hard-code) nên PM thật của dự án
+      // không được thêm vào nhóm. Tra đúng project để lấy pmId, đồng thời thêm
+      // người tạo/người duyệt đề xuất (proposal.creator/approver chỉ lưu TÊN, cần
+      // findEmployeeByName để ánh xạ sang ID) — nếu không, họ sẽ không thấy nhóm
+      // chat dự án dù được nhắc tên trong tin nhắn vừa gửi.
+      const proj = projects.find((p: any) => p.id === proposal.projectId);
+      const conv = await ensureProjectChatGroup({ id: proposal.projectId, name: proposal.projectName || proj?.name || '', pmId: proj?.pmId });
       if (!conv) return;
+      // proposal.creator/approver có thể là ID thật (được gán trực tiếp) hoặc chỉ là
+      // TÊN hiển thị (VD: "Kế Toán" mặc định) — theo đúng quy ước đã dùng ở handleApprove
+      // (dòng ~1059): thử tìm theo ID trước, nếu không khớp mới fallback tìm theo tên.
+      const creatorEmp = (employeesProp || []).find(e => e.id === proposal.creator) || findEmployeeByName(employeesProp || [], proposal.creatorName || proposal.creator);
+      const approverEmp = (employeesProp || []).find(e => e.id === proposal.approver) || findEmployeeByName(employeesProp || [], proposal.approverName || proposal.approver);
+      const memberIds = Array.from(new Set([
+        currentUser?.id,
+        proj?.pmId,
+        creatorEmp?.id,
+        approverEmp?.id,
+      ].filter(Boolean) as string[]));
+      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
       await sendGroupChatMessage({
         conversationId: convId,
         senderId: currentUser?.id || '',

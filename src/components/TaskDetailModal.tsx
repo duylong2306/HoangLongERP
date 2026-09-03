@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage, ChatAttachment } from '../types';
+import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage, ChatAttachment } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
+import SearchableSelect from './SearchableSelect';
 import { canDoTaskAction, loadTaskPermissionMatrix, getTaskRoleScope } from './hr/hrTaskPermissions';
 import * as XLSX from 'xlsx';
 
@@ -32,6 +33,17 @@ const sectorArchiveTab = (type?: string): string =>
   : type === 'mechanical' ? 'quotes-mechanical'
   : 'quotes'; // furniture / general / mặc định → Hồ Sơ Nội Thất
 
+// Lấy chữ cái viết tắt cho avatar tròn — dùng ĐÚNG công thức đã áp dụng ở khu vực
+// "PHỤ TRÁCH CHÍNH:" / "NHÂN SỰ:" của danh sách nhiệm vụ (lấy chữ đầu của 2 từ cuối
+// trong họ tên), để avatar ở form Tạo nhiệm vụ hiển thị nhất quán với danh sách.
+const getEmployeeInitials = (name: string): string => {
+  const parts = (name || '').trim().split(' ').filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??';
+};
+
 interface TaskDetailModalProps {
   taskId: string;
   onClose: () => void;
@@ -39,7 +51,7 @@ interface TaskDetailModalProps {
   projects: Project[];
   employees: Employee[];
   currentUser: Employee;
-  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<boolean> | void;
+  onUpdateTask: (id: string, updates: TaskUpdatePayload) => Promise<boolean> | void;
   onUpdateProject?: (projectId: string, updates: Partial<Project>) => void;
   isReadOnly?: boolean;
   onOpenConnectedTool?: (tool: 'approval' | 'cost' | 'material' | 'quotation' | 'contract' | 'acceptance' | 'liquidation') => void;
@@ -151,7 +163,7 @@ export default function TaskDetailModal({
   // về null → tin nhắn bị bỏ qua SILENT (không lỗi). Gửi tin nhắn BÊN TRONG .then
   // của ensureProjectChatGroup để đảm bảo conversation đã được upsert lên Supabase
   // (tránh vi phạm FK conversation_id khi push message song song).
-  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[]) => {
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[], extraMemberIds?: string[]) => {
     const pid = selectedTask.projectId;
     if (!pid) return;
     const convId = `conv_project_${pid}`;
@@ -162,11 +174,15 @@ export default function TaskDetailModal({
     }).then(conv => {
       if (!conv) return;
       // Thêm các nhân sự liên quan vào nhóm (idempotent) để họ mở được nhóm.
+      // extraMemberIds: cho phép caller truyền thêm mainAssigneeId/memberIds của
+      // Nhiệm vụ vừa gán — nếu không truyền, người được gán ở cấp Nhiệm vụ sẽ
+      // không lọt vào nhóm chat dự án cho tới khi có ai đó bấm "Đồng bộ nhân sự".
       const memberIds = Array.from(new Set([
         currentUser?.id,
         selectedTask.assigneeId,
         selectedTask.assignerId,
         project?.pmId,
+        ...(extraMemberIds || []),
       ].filter(Boolean) as string[]));
       memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
       sendGroupChatMessage({
@@ -187,11 +203,12 @@ export default function TaskDetailModal({
   const notifyProjectChatAfterSave = async (
     savePromise: void | Promise<boolean>,
     content: string,
-    relatedEntity?: ChatMessage['relatedEntity']
+    relatedEntity?: ChatMessage['relatedEntity'],
+    extraMemberIds?: string[]
   ): Promise<boolean> => {
     const ok = await savePromise;
     if (ok === true && selectedTask.projectId) {
-      notifyProjectChat(content, relatedEntity);
+      notifyProjectChat(content, relatedEntity, undefined, extraMemberIds);
     }
     return ok === true;
   };
@@ -581,7 +598,10 @@ export default function TaskDetailModal({
           return;
         }
 
-        // Gộp với missions hiện tại (giữ nguyên các nhiệm vụ cũ, thêm mới từ Excel)
+        // Gộp với missions hiện tại (giữ nguyên các nhiệm vụ cũ, thêm mới từ Excel).
+        // Chỉ THÊM, không loại bỏ mission nào — an toàn ngay cả khi `currentMissions`
+        // (đọc từ prop) đang cũ hơn server, vì syncMissionsDiff (App.tsx) chỉ upsert
+        // mission có mặt trong mảng gửi lên, không còn xóa mission vắng mặt.
         const currentMissions = selectedTask.missions || [];
         onUpdateTask(selectedTask.id, {
           missions: [...currentMissions, ...processedRows]
@@ -596,7 +616,16 @@ export default function TaskDetailModal({
   };
 
   const [newMissionName, setNewMissionName] = useState('');
+  // Nhân sự tham gia được CHỌN NGAY LÚC KHỞI TẠO nhiệm vụ (state này trước đây đã có
+  // sẵn — được reset sau khi tạo — nhưng chưa có UI nào set giá trị/dùng để tạo mission,
+  // nay bổ sung ô chọn thực sự trong form "Tạo nhiệm vụ" bên dưới).
   const [selectedMissionMemberIds, setSelectedMissionMemberIds] = useState<string[]>([]);
+  // Người phụ trách chính chọn ngay lúc khởi tạo nhiệm vụ (tùy chọn — có thể gán sau).
+  const [newMissionMainAssigneeId, setNewMissionMainAssigneeId] = useState('');
+  // Checklist (Đầu mục kiểm soát kỹ thuật) nhập ngay lúc khởi tạo nhiệm vụ — chuyển từ
+  // cấp Công Việc xuống cấp Nhiệm Vụ (xem SubTaskMission.checklistTexts, types.ts).
+  const [newMissionChecklist, setNewMissionChecklist] = useState<string[]>([]);
+  const [newMissionChecklistInput, setNewMissionChecklistInput] = useState('');
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [newMissionDeadline, setNewMissionDeadline] = useState(() => getDefaultMissionDeadline());
 
@@ -685,20 +714,21 @@ export default function TaskDetailModal({
     let done = 0;
     let successCount = 0;
     let warningShown = false;
-    // Tải nhiều ảnh song song; dồn kết quả vào missionReportImages theo thứ tự chọn.
+    // Tải nhiều tệp (mọi định dạng) song song; dồn kết quả vào missionReportImages
+    // theo thứ tự chọn.
     files.forEach((file, idx) => {
       dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file)
         .then(({ url, stored }) => {
           setMissionReportImages(prev => [...prev, url]);
           if (stored === 'supabase') successCount++;
-          else if (!warningShown) { warningShown = true; addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Ảnh lưu tạm dưới dạng base64.', type: 'warning' }); }
+          else if (!warningShown) { warningShown = true; addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Tệp lưu tạm dưới dạng base64.', type: 'warning' }); }
         })
-        .catch(() => addToast({ title: '⛔ Lỗi', message: `Không thể xử lý ảnh "${file.name}".`, type: 'error' }))
+        .catch(() => addToast({ title: '⛔ Lỗi', message: `Không thể xử lý tệp "${file.name}".`, type: 'error' }))
         .finally(() => {
           done++;
           if (done === files.length) {
             if (successCount === files.length) {
-              addToast({ title: '✅ Đã tải ảnh lên', message: `${files.length} hình ảnh báo cáo đã được gửi lên Supabase.`, type: 'success' });
+              addToast({ title: '✅ Đã tải tệp lên', message: `${files.length} tệp đính kèm báo cáo đã được gửi lên Supabase.`, type: 'success' });
             }
           }
         });
@@ -714,6 +744,21 @@ export default function TaskDetailModal({
     setMissionReportImages([]);
     stopMissionReportCamera();
   };
+
+  // ─── TIỆN ÍCH "ĐÍNH KÈM BÁO CÁO" ───────────────────────────────────────────
+  // missionReportImages chỉ lưu URL (không kèm tên/mimeType gốc) — vì giờ cho
+  // phép đính kèm MỌI định dạng file (không chỉ ảnh), phải tự đoán tên hiển thị
+  // và có phải ảnh hay không từ chính URL để hiện đúng giao diện (thumbnail ảnh
+  // hay dòng file + nút Tải về) cho cả ảnh lẫn file khác.
+  const getAttachedFileName = (url: string): string => {
+    try {
+      const path = decodeURIComponent(url.split('?')[0].split('/').pop() || '');
+      return path || 'tep-dinh-kem';
+    } catch {
+      return 'tep-dinh-kem';
+    }
+  };
+  const isImageAttachment = (url: string): boolean => /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(url);
 
   // ─── SỬA NHIỆM VỤ (tên + hạn hoàn thành) — nhiệm vụ chưa Hoàn thành ───────
   // Khởi động chế độ sửa: nạp giá trị hiện tại vào form, báo lỗi nếu Công việc cha
@@ -1830,7 +1875,11 @@ export default function TaskDetailModal({
                   </div>
                 </div>
 
-              {/* Thẻ Hạn bàn giao & Đầu mục kiểm soát kĩ thuật (Checklist) chung 1 thẻ */}
+              {/* Thẻ Hạn bàn giao. Checklist (Đầu mục kiểm soát kỹ thuật) trước đây hiện ở
+                  đây đã CHUYỂN xuống cấp Nhiệm Vụ (SubTaskMission.checklistTexts) — ở cấp
+                  Công Việc không có nơi nào cho người dùng tự thêm đầu mục nên gần như
+                  không dùng tới; nay thêm được ngay lúc khởi tạo từng nhiệm vụ và hiện
+                  trong khối chi tiết nhiệm vụ (xem "Checklist kiểm soát kỹ thuật" bên dưới). */}
               <div className="bg-slate-900/30 p-4 rounded-xl border border-slate-850/50 space-y-4">
                 <div className="flex justify-between items-start">
                   <div className="space-y-1">
@@ -1852,62 +1901,6 @@ export default function TaskDetailModal({
                     </span>
                   )}
                 </div>
-
-                {selectedTask.checklistTexts && selectedTask.checklistTexts.length > 0 && (
-                  <div className="space-y-2.5 pt-3.5 border-t border-slate-800/40">
-                    <span className="block text-slate-450 font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 select-none">
-                      <ListTodo className="w-3.5 h-3.5 text-emerald-400" />
-                      ĐẦU MỤC KIỂM SOÁT KỸ THUẬT (CHECKLIST):
-                    </span>
-                    <div className="space-y-2">
-                      {selectedTask.checklistTexts.map((chk, idx) => {
-                        const isCompleted = selectedTask.completedChecklistTexts?.includes(chk) || false;
-                        return (
-                          <div 
-                            key={idx} 
-                            onClick={() => {
-                              if (selectedTask.status === 'completed') return;
-                              const currentCompleted = selectedTask.completedChecklistTexts || [];
-                              let updatedCompleted: string[];
-                              if (currentCompleted.includes(chk)) {
-                                updatedCompleted = currentCompleted.filter(t => t !== chk);
-                              } else {
-                                updatedCompleted = [...currentCompleted, chk];
-                              }
-
-                              onUpdateTask(selectedTask.id, {
-                                completedChecklistTexts: updatedCompleted
-                              });
-                            }}
-                            className={`flex items-center gap-2.5 text-[11px] group transition-all duration-200 select-none ${
-                              selectedTask.status === 'completed' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                            }`}
-                          >
-                            <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-all duration-200 ${
-                              isCompleted 
-                                ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.35)]' 
-                                : 'bg-slate-950 border-slate-800 text-slate-500 group-hover:border-slate-700'
-                            }`}>
-                              {isCompleted ? (
-                                <Check className="w-3 h-3 stroke-[3]" />
-                              ) : (
-                                <span className="text-[9px] font-mono font-bold">{idx + 1}</span>
-                              )}
-                            </div>
-                            
-                            <div className={`flex-1 px-3 py-2 border rounded-lg font-mono transition-all duration-200 ${
-                              isCompleted
-                                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold'
-                                : 'bg-slate-950/40 border-slate-850/50 text-slate-300'
-                            }`}>
-                              {chk}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Hệ thống Avatar Nhân Sự Công Trình */}
@@ -2145,12 +2138,154 @@ export default function TaskDetailModal({
                           </span>
                         )}
                       </label>
-                      <input 
+                      <input
                         type="datetime-local"
                         value={newMissionDeadline}
                         onChange={(e) => setNewMissionDeadline(e.target.value)}
                         className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-xl px-3 py-2.5 text-[11.5px] font-mono outline-none mt-1 shadow-inner cursor-pointer"
                       />
+                    </div>
+
+                    {/* Phụ trách chính — tùy chọn, có thể gán sau khi tạo qua nút "+ Gán".
+                        Dùng SearchableSelect để gõ-tìm nhanh trong danh sách nhân sự, và hiển
+                        thị người đã chọn dạng avatar tròn (giống cách hiện ở danh sách nhiệm vụ). */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Người phụ trách chính (tùy chọn):</label>
+                      <SearchableSelect
+                        value={newMissionMainAssigneeId}
+                        onChange={(val) => {
+                          setNewMissionMainAssigneeId(val);
+                          // Phụ trách chính cũng luôn được tính là Nhân sự tham gia thực hiện.
+                          if (val) setSelectedMissionMemberIds(prev => Array.from(new Set([...prev, val])));
+                        }}
+                        options={employees.map(emp => ({ id: emp.id, label: `${emp.name} (${emp.department || emp.role})` }))}
+                        placeholder="Chưa gán — có thể gán sau"
+                        searchPlaceholder="🔍 Gõ tên để tìm nhân sự..."
+                      />
+                      {newMissionMainAssigneeId && (() => {
+                        const emp = employees.find(e => e.id === newMissionMainAssigneeId);
+                        if (!emp) return null;
+                        const initials = getEmployeeInitials(emp.name);
+                        return (
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <div className="w-6.5 h-6.5 rounded-full bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-550 flex items-center justify-center font-black text-slate-950 text-[8px] shadow-sm border border-slate-905 shrink-0">
+                              {initials}
+                            </div>
+                            <span className="text-[10px] text-amber-200 font-extrabold">{emp.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewMissionMainAssigneeId('');
+                                setSelectedMissionMemberIds(prev => prev.filter(id => id !== newMissionMainAssigneeId));
+                              }}
+                              className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                              title="Bỏ chọn"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Nhân sự tham gia — có thể chọn nhiều, gán thêm sau cũng được. SearchableSelect
+                        dùng làm ô "chọn 1 → thêm vào danh sách" (tự reset sau mỗi lần chọn), hiển thị
+                        kết quả dạng dãy avatar tròn giống danh sách nhiệm vụ. */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Nhân sự tham gia (tùy chọn):</label>
+                      <SearchableSelect
+                        value=""
+                        onChange={(val) => {
+                          if (!val) return;
+                          setSelectedMissionMemberIds(prev => Array.from(new Set([...prev, val])));
+                        }}
+                        options={employees
+                          .filter(emp => !selectedMissionMemberIds.includes(emp.id))
+                          .map(emp => ({ id: emp.id, label: `${emp.name} (${emp.department || emp.role})` }))}
+                        placeholder="+ Thêm nhân sự..."
+                        searchPlaceholder="🔍 Gõ tên để tìm nhân sự..."
+                      />
+                      {selectedMissionMemberIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1.5">
+                          {selectedMissionMemberIds.map(memId => {
+                            const emp = employees.find(e => e.id === memId);
+                            if (!emp) return null;
+                            const initials = getEmployeeInitials(emp.name);
+                            return (
+                              <div key={memId} className="flex items-center gap-1.5 bg-slate-900 pl-1 pr-2 py-1 rounded-full border border-slate-800">
+                                <div className="w-6 h-6 rounded-full bg-slate-850 border border-slate-900 flex items-center justify-center font-bold text-slate-300 text-[8px] shrink-0">
+                                  {initials}
+                                </div>
+                                <span className="text-[10px] text-slate-300 font-bold">{emp.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    // Phụ trách chính luôn phải là Nhân sự tham gia — nếu gỡ đúng
+                                    // người đang được chọn làm phụ trách chính, bỏ luôn lựa chọn đó.
+                                    if (memId === newMissionMainAssigneeId) setNewMissionMainAssigneeId('');
+                                    setSelectedMissionMemberIds(prev => prev.filter(id => id !== memId));
+                                  }}
+                                  className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Checklist — Đầu mục kiểm soát kỹ thuật, thêm ngay lúc khởi tạo nhiệm vụ */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Checklist kiểm soát kỹ thuật (tùy chọn):</label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={newMissionChecklistInput}
+                          onChange={(e) => setNewMissionChecklistInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            const text = newMissionChecklistInput.trim();
+                            if (!text) return;
+                            setNewMissionChecklist(prev => [...prev, text]);
+                            setNewMissionChecklistInput('');
+                          }}
+                          placeholder="VD: Kiểm tra độ phẳng mặt bàn, siết chặt bulong..."
+                          className="flex-1 bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-xl px-3 py-2.5 text-[11.5px] font-mono outline-none shadow-inner placeholder:text-slate-650"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = newMissionChecklistInput.trim();
+                            if (!text) return;
+                            setNewMissionChecklist(prev => [...prev, text]);
+                            setNewMissionChecklistInput('');
+                          }}
+                          disabled={!newMissionChecklistInput.trim()}
+                          className="px-3 rounded-xl bg-slate-900 hover:bg-slate-850 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-800 text-slate-300 cursor-pointer transition"
+                          title="Thêm đầu mục"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {newMissionChecklist.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {newMissionChecklist.map((chk, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-2 bg-slate-950/60 border border-slate-850/50 rounded-lg px-2.5 py-1.5">
+                              <span className="text-[10.5px] text-slate-300 font-mono">{idx + 1}. {chk}</span>
+                              <button
+                                type="button"
+                                onClick={() => setNewMissionChecklist(prev => prev.filter((_, i) => i !== idx))}
+                                className="text-slate-500 hover:text-rose-400 cursor-pointer shrink-0"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2183,13 +2318,20 @@ export default function TaskDetailModal({
                       const newMission: SubTaskMission = {
                         id: `mission_${Date.now()}`,
                         name: newMissionName.trim(),
-                        memberIds: [],
+                        memberIds: selectedMissionMemberIds,
+                        mainAssigneeId: newMissionMainAssigneeId || undefined,
                         status: 'todo',
                         workReports: '',
                         evidence: '',
                         createdAt: new Date().toISOString(),
-                        deadline: finalDeadline
+                        deadline: finalDeadline,
+                        checklistTexts: newMissionChecklist.length > 0 ? newMissionChecklist : undefined,
                       };
+                      // Chỉ THÊM 1 mission mới, không loại bỏ mission nào khác — an toàn
+                      // ngay cả khi `currentMissions` đang cũ hơn server (VD: sự cố thực tế
+                      // 2026-08-31 "Thi công sắt tại công trình" — kênh Realtime của client
+                      // này bị rớt ngầm một lúc), vì syncMissionsDiff (App.tsx) chỉ upsert
+                      // mission có mặt trong mảng gửi lên, không còn xóa mission vắng mặt.
                       const currentMissions = selectedTask.missions || [];
 
                       const ok = await notifyProjectChatAfterSave(
@@ -2197,7 +2339,11 @@ export default function TaskDetailModal({
                           missions: [...currentMissions, newMission]
                         }),
                         `📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`,
-                        { type: 'task', id: selectedTask.id }
+                        { type: 'task', id: selectedTask.id },
+                        // Thêm Phụ trách chính + Nhân sự tham gia của Nhiệm vụ vừa tạo vào
+                        // nhóm chat dự án — nếu không, người mới được gán ở cấp Nhiệm vụ sẽ
+                        // không thấy nhóm chat cho tới khi ai đó bấm "Đồng bộ nhân sự".
+                        [newMission.mainAssigneeId, ...(newMission.memberIds || [])].filter(Boolean) as string[]
                       );
                       if (ok === false) {
                         addToast({ title: '❌ Lưu thất bại', message: 'Không thể tạo nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
@@ -2235,6 +2381,9 @@ export default function TaskDetailModal({
                       // trực tiếp = ngày của nhiệm vụ vừa tạo + 1 ngày, giờ 18:00.
                       setNewMissionName('');
                       setSelectedMissionMemberIds([]);
+                      setNewMissionMainAssigneeId('');
+                      setNewMissionChecklist([]);
+                      setNewMissionChecklistInput('');
                       setNewMissionDeadline(dateAt18(new Date(finalDeadline), 1));
                     }}
                     disabled={!newMissionName.trim()}
@@ -2584,7 +2733,10 @@ export default function TaskDetailModal({
                                           const ok = await notifyProjectChatAfterSave(
                                             onUpdateTask(selectedTask.id, { missions: updatedMissions }),
                                             `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
-                                            { type: 'mission', id: mission.id }
+                                            { type: 'mission', id: mission.id },
+                                            // Thêm người vừa được gán vào nhóm chat dự án — nếu không, người
+                                            // mới lần đầu tham gia Nhiệm vụ sẽ không thấy nhóm chat này.
+                                            [val]
                                           );
                                           if (ok === false) {
                                             addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
@@ -2694,7 +2846,9 @@ export default function TaskDetailModal({
                                       const ok = await notifyProjectChatAfterSave(
                                         onUpdateTask(selectedTask.id, { missions: updatedMissions }),
                                         `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
-                                        { type: 'mission', id: mission.id }
+                                        { type: 'mission', id: mission.id },
+                                        // Thêm nhân sự vừa được gán vào nhóm chat dự án.
+                                        [val]
                                       );
                                       if (ok === false) {
                                         addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
@@ -2733,10 +2887,17 @@ export default function TaskDetailModal({
                                     onClick={async (e) => {
                                       e.stopPropagation();
                                       if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
+                                        // `missions` (đã lược mission này ra) chỉ để cập nhật UI optimistic
+                                        // ngay lập tức — việc XÓA THẬT ở task_missions do `deletedMissionIds`
+                                        // khai báo TƯỜNG MINH quyết định (xem syncMissionsDiff, App.tsx).
+                                        // Không còn suy luận "vắng mặt trong mảng = đã xóa" như trước, vì
+                                        // mảng `missions` cục bộ có thể đang cũ hơn server (mất mission của
+                                        // người khác một cách vô tình nếu chỉ dựa vào việc lược ra).
                                         const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
                                         const ok = await notifyProjectChatAfterSave(
                                           onUpdateTask(selectedTask.id, {
-                                            missions: updatedMissions
+                                            missions: updatedMissions,
+                                            deletedMissionIds: [mission.id]
                                           }),
                                           `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
                                           { type: 'mission', id: mission.id }
@@ -3952,7 +4113,9 @@ export default function TaskDetailModal({
                             const ok = await notifyProjectChatAfterSave(
                               onUpdateTask(selectedTask.id, { missions: updatedMissions }),
                               `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
-                              { type: 'mission', id: mission.id }
+                              { type: 'mission', id: mission.id },
+                              // Thêm người vừa được gán vào nhóm chat dự án.
+                              [val]
                             );
                             if (ok === false) {
                               addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
@@ -4017,7 +4180,9 @@ export default function TaskDetailModal({
                             const ok = await notifyProjectChatAfterSave(
                               onUpdateTask(selectedTask.id, { missions: updatedMissions }),
                               `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
-                              { type: 'mission', id: mission.id }
+                              { type: 'mission', id: mission.id },
+                              // Thêm nhân sự vừa được gán vào nhóm chat dự án.
+                              [val]
                             );
                             if (ok === false) {
                               addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
@@ -4086,6 +4251,47 @@ export default function TaskDetailModal({
                     )}
                   </div>
                 </div>
+
+                {/* Checklist kiểm soát kỹ thuật của nhiệm vụ — chuyển từ cấp Công Việc xuống
+                    đây (xem SubTaskMission.checklistTexts, types.ts). Chỉ hiện khi mission có
+                    sẵn đầu mục (thêm lúc khởi tạo ở form "Tạo nhiệm vụ"). */}
+                {mission.checklistTexts && mission.checklistTexts.length > 0 && (
+                  <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
+                    <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider flex items-center gap-1.5">
+                      <ListTodo className="w-3 h-3 text-emerald-400" /> Checklist kiểm soát kỹ thuật:
+                    </span>
+                    <div className="space-y-1.5 pt-1">
+                      {mission.checklistTexts.map((chk, idx) => {
+                        const isChecked = mission.completedChecklistTexts?.includes(chk) || false;
+                        const canToggle = hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed';
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (!canToggle) return;
+                              const currentCompleted = mission.completedChecklistTexts || [];
+                              const updatedCompleted = currentCompleted.includes(chk)
+                                ? currentCompleted.filter(t => t !== chk)
+                                : [...currentCompleted, chk];
+                              const updatedMissions = (selectedTask.missions || []).map(m =>
+                                m.id === mission.id ? { ...m, completedChecklistTexts: updatedCompleted } : m
+                              );
+                              onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                            }}
+                            className={`flex items-center gap-2 text-[10.5px] select-none ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+                          >
+                            <div className={`w-4.5 h-4.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                              isChecked ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'
+                            }`}>
+                              {isChecked ? <Check className="w-3 h-3 stroke-[3]" /> : <span className="text-[8.5px] font-mono font-bold">{idx + 1}</span>}
+                            </div>
+                            <span className={`flex-1 font-mono ${isChecked ? 'text-emerald-700 font-bold line-through' : 'text-slate-300'}`}>{chk}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* 🚗 BIÊN BẢN CÔNG TÁC PHÍ CHUYẾN ĐI (NẾU CÓ) */}
                 <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
@@ -4355,14 +4561,14 @@ export default function TaskDetailModal({
                   </div>
                 </div>
 
-                {/* 2. Hình ảnh báo cáo (bắt buộc) */}
+                {/* 2. Đính kèm báo cáo (bắt buộc) — mọi định dạng file, không chỉ ảnh */}
                 <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-200 font-extrabold text-[10px] uppercase tracking-wider flex items-center gap-1">
-                      <Camera className="w-3.5 h-3.5 text-emerald-400" /> HÌNH ẢNH BÁO CÁO (BẮT BUỘC):
+                      <Paperclip className="w-3.5 h-3.5 text-emerald-400" /> ĐÍNH KÈM BÁO CÁO (BẮT BUỘC):
                     </span>
                     <span className={`text-[8.5px] px-1.5 py-0.5 rounded border ${missionReportImages.length > 0 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-rose-700 bg-rose-50 border-rose-200'}`}>
-                      {missionReportImages.length > 0 ? `Đã có ${missionReportImages.length} ảnh` : 'Cần ít nhất 1 ảnh'}
+                      {missionReportImages.length > 0 ? `Đã có ${missionReportImages.length} tệp` : 'Cần ít nhất 1 tệp'}
                     </span>
                   </div>
 
@@ -4370,28 +4576,57 @@ export default function TaskDetailModal({
                     mission.reportImages && mission.reportImages.length > 0 ? (
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                         {mission.reportImages.map((src, i) => (
-                          <a key={i} href={src} target="_blank" rel="noreferrer" className="block">
-                            <img src={src} alt={`Hình báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800 hover:border-emerald-500/40 transition cursor-pointer" />
-                          </a>
+                          isImageAttachment(src) ? (
+                            <a key={i} href={src} download={getAttachedFileName(src)} target="_blank" rel="noreferrer" className="block relative group" title="Tải về">
+                              <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800 hover:border-emerald-500/40 transition cursor-pointer" />
+                              <span className="absolute bottom-1 right-1 bg-black/60 group-hover:bg-emerald-600 text-white p-1 rounded transition-colors">
+                                <Download className="w-3 h-3" />
+                              </span>
+                            </a>
+                          ) : (
+                            <a key={i} href={src} download={getAttachedFileName(src)} target="_blank" rel="noreferrer"
+                              className="flex flex-col items-center justify-center gap-1 h-24 rounded-lg border border-slate-800 hover:border-emerald-500/40 bg-slate-950 transition text-center p-1.5">
+                              <FileText className="w-6 h-6 text-indigo-400" />
+                              <span className="text-[9px] text-slate-400 truncate max-w-full">{getAttachedFileName(src)}</span>
+                              <span className="text-[8.5px] text-emerald-500 flex items-center gap-0.5"><Download className="w-2.5 h-2.5" /> Tải về</span>
+                            </a>
+                          )
                         ))}
                       </div>
                     ) : (
-                      <span className="block text-[10px] text-slate-500 italic">Nhiệm vụ này chưa có hình ảnh báo cáo.</span>
+                      <span className="block text-[10px] text-slate-500 italic">Nhiệm vụ này chưa có tệp đính kèm báo cáo.</span>
                     )
                   ) : (
                     <>
-                      {/* Preview danh sách ảnh đã chụp / upload */}
+                      {/* Preview danh sách tệp đã chụp / tải lên */}
                       {missionReportImages.length > 0 && (
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                           {missionReportImages.map((src, i) => (
                             <div key={i} className="relative group">
-                              <img src={src} alt={`Hình báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800" />
+                              {isImageAttachment(src) ? (
+                                <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800" />
+                              ) : (
+                                <div className="flex flex-col items-center justify-center gap-1 h-24 rounded-lg border border-slate-800 bg-slate-950 text-center p-1.5">
+                                  <FileText className="w-6 h-6 text-indigo-400" />
+                                  <span className="text-[9px] text-slate-400 truncate max-w-full">{getAttachedFileName(src)}</span>
+                                </div>
+                              )}
+                              <a
+                                href={src}
+                                download={getAttachedFileName(src)}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Tải về"
+                                className="absolute bottom-1 left-1 bg-black/60 hover:bg-emerald-600 text-white p-1 rounded border border-slate-850 cursor-pointer"
+                              >
+                                <Download className="w-3 h-3" />
+                              </a>
                               {hasMissionPermission && (
                                 <button
                                   type="button"
                                   onClick={() => removeMissionReportImage(i)}
                                   className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white text-[9px] p-1 px-1.5 rounded border border-slate-850 cursor-pointer font-bold"
-                                  title="Xóa ảnh này"
+                                  title="Xóa tệp này"
                                 >
                                   <X className="w-3 h-3" />
                                 </button>
@@ -4401,7 +4636,7 @@ export default function TaskDetailModal({
                         </div>
                       )}
 
-                      {/* Nút chụp / tải ảnh */}
+                      {/* Nút chụp / tải file báo cáo */}
                       {hasMissionPermission && (
                         <div className="flex gap-2 pt-1">
                           <button
@@ -4418,13 +4653,14 @@ export default function TaskDetailModal({
                             onClick={() => missionReportImageInputRef.current?.click()}
                             className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                           >
-                            <ImageIcon className="w-3.5 h-3.5 text-indigo-400" />
-                            Tải ảnh lên
+                            <FileUp className="w-3.5 h-3.5 text-indigo-400" />
+                            File báo cáo
                           </button>
+                          {/* Không giới hạn `accept` — cho phép đính kèm mọi định dạng file
+                              (ảnh, PDF, Word, video...), không chỉ ảnh như trước. */}
                           <input
                             ref={missionReportImageInputRef}
                             type="file"
-                            accept="image/*"
                             multiple
                             onChange={handleMissionReportImageUpload}
                             className="hidden"
@@ -4642,23 +4878,29 @@ export default function TaskDetailModal({
                         return nxt;
                       });
                       // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage).
-                      // Kèm BÁO CÁO CÔNG VIỆC + HÌNH ẢNH báo cáo để cả nhóm xem được tiến độ.
+                      // Kèm BÁO CÁO CÔNG VIỆC + TỆP ĐÍNH KÈM để cả nhóm xem/tải về được.
+                      // Đính kèm giờ có thể là mọi định dạng file (không chỉ ảnh) — phải tự
+                      // nhận diện ảnh hay file thường để tin nhắn hiện đúng (thumbnail ảnh
+                      // hay dòng file kèm nút Tải về, xem MessagesView.tsx).
                       const _reportText = missionReportText.trim();
                       const _reportImgs = [...missionReportImages];
                       const _missionReportMsg = `✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`
                         + (_reportText ? `\n\n📋 Báo cáo: ${_reportText}` : '')
-                        + (_reportImgs.length > 0 ? `\n📷 ${_reportImgs.length} hình ảnh báo cáo.` : '');
+                        + (_reportImgs.length > 0 ? `\n📎 ${_reportImgs.length} tệp đính kèm báo cáo.` : '');
                       notifyProjectChat(
                         _missionReportMsg,
                         { type: 'mission', id: mission?.id || selectedMissionId || '' },
                         _reportImgs.length > 0
-                          ? _reportImgs.map((url, i) => ({
-                              id: `att_${Date.now()}_${i}`,
-                              type: 'image' as const,
-                              name: `Bao-cao-${(mission?.name || 'nhiem-vu').slice(0, 20)}-${i + 1}.jpg`,
-                              url,
-                              mimeType: 'image/jpeg',
-                            }))
+                          ? _reportImgs.map((url, i) => {
+                              const isImg = isImageAttachment(url);
+                              return {
+                                id: `att_${Date.now()}_${i}`,
+                                type: isImg ? ('image' as const) : ('file' as const),
+                                name: getAttachedFileName(url),
+                                url,
+                                mimeType: isImg ? 'image/jpeg' : undefined,
+                              };
+                            })
                           : undefined
                       );
 
@@ -4687,10 +4929,14 @@ export default function TaskDetailModal({
                     type="button"
                     onClick={async () => {
                       if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
+                        // `missions` chỉ để cập nhật UI optimistic ngay — việc XÓA THẬT ở
+                        // task_missions do `deletedMissionIds` khai báo tường minh quyết định
+                        // (xem syncMissionsDiff, App.tsx — không còn suy luận theo vắng mặt).
                         const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== selectedMissionId);
                         const ok = await notifyProjectChatAfterSave(
                           onUpdateTask(selectedTask.id, {
-                            missions: updatedMissions
+                            missions: updatedMissions,
+                            deletedMissionIds: selectedMissionId ? [selectedMissionId] : []
                           }),
                           `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
                           { type: 'mission', id: mission.id }

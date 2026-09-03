@@ -7,7 +7,7 @@ import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProp
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
 import { createMaterialProposalsFromItems } from '../lib/materialProposals';
-import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
@@ -2423,7 +2423,10 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
 
                   // Gửi tin nhắn nhóm chat Dự án
                   try {
-                    await ensureProjectChatGroup(selectedProject);
+                    const conv = await ensureProjectChatGroup(selectedProject);
+                    // 👥 Thêm người tạo đề xuất vào nhóm chat dự án — nếu chưa từng
+                    // tham gia dự án này, họ sẽ không thấy nhóm chat dù được nhắc trong tin.
+                    if (conv && creatorId) addMemberToConversation(conv.id, creatorId);
                     await sendGroupChatMessage({
                       conversationId: `conv_project_${selectedProject.id}`,
                       senderId: creatorId,
