@@ -63,6 +63,8 @@ const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   fontFamily: 'Inter',
 };
 
+// Dùng làm giá trị hiện tạm thời (trước khi tải xong từ Supabase) cho bản sao
+// CHỈ ĐỌC của businessInfo trong context này (xem ghi chú tại nơi khai báo state).
 const DEFAULT_BUSINESS_INFO: BusinessInfo = {
   companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
   taxCode: '5801456789',
@@ -188,8 +190,11 @@ export function getAccentClasses(accent: string) {
 interface SettingsContextValue {
   displaySettings: DisplaySettings;
   updateDisplaySettings: (updates: Partial<DisplaySettings>) => void;
+  /** CHỈ ĐỌC — dùng để in phiếu/hoá đơn (FinanceManagement, MaterialCoordination).
+   * Nguồn chỉnh sửa duy nhất là form "1. Hồ Sơ Thông Tin Doanh Nghiệp" trong
+   * App.tsx (tự lưu thẳng qua dbService.businessProfile). Xem ghi chú tại nơi
+   * khai báo bên dưới để biết lý do KHÔNG có updateBusinessInfo ở context này. */
   businessInfo: BusinessInfo;
-  updateBusinessInfo: (updates: Partial<BusinessInfo>) => void;
   hrmConfig: HrmConfig;
   updateHrmConfig: (updates: Partial<HrmConfig>) => void;
   /** Computed accent classes (reactive) */
@@ -221,7 +226,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setDisplaySettings(prev => ({ ...prev, ...updates }));
   }, []);
 
-  // ── Business Info ──
+  // ── Business Info (CHỈ ĐỌC, không tự lưu) ──
+  // Trước đây có state ghi/lưu riêng ở đây, khởi tạo mặc định cứng rồi LƯU ĐÈ
+  // lên Supabase ngay mỗi khi Provider mount (kể cả không ai sửa gì) — xóa mất
+  // dữ liệu thật vừa được cập nhật từ form "Hồ Sơ Thông Tin Doanh Nghiệp" ở
+  // App.tsx mỗi lần tải lại trang. Nay chỉ ĐỌC 1 lần từ cache local (hiện ngay,
+  // tránh nháy UI khi in phiếu) rồi tải bản mới nhất từ Supabase để cập nhật —
+  // không còn ghi ngược lại bảng business_profile từ đây nữa.
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo>(() => {
     try {
       const saved = localStorage.getItem('hl_business_info');
@@ -230,19 +241,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return DEFAULT_BUSINESS_INFO;
   });
 
-  // Chặn vòng lặp realtime: chỉ save khi NỘI DUNG thật sự khác lần lưu trước
-  // (setState từ realtime tạo object mới cùng nội dung → không save).
-  const lastSavedBizRef = React.useRef<string | null>(null);
   useEffect(() => {
-    localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
-    const next = stableStr(businessInfo);
-    if (lastSavedBizRef.current !== null && next === lastSavedBizRef.current) return;
-    lastSavedBizRef.current = next;
-    dbService.businessProfile.save(businessInfo).catch(err => console.warn('SettingsContext: save businessProfile failed:', err));
-  }, [businessInfo]);
-
-  const updateBusinessInfo = useCallback((updates: Partial<BusinessInfo>) => {
-    setBusinessInfo(prev => ({ ...prev, ...updates }));
+    dbService.businessProfile.get().then(profile => {
+      if (!profile) return;
+      setBusinessInfo(profile);
+      try { localStorage.setItem('hl_business_info', JSON.stringify(profile)); } catch {} /* eslint-disable-line no-empty */
+    }).catch(() => {});
   }, []);
 
   // ── HRM Config ──
@@ -316,7 +320,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     displaySettings,
     updateDisplaySettings,
     businessInfo,
-    updateBusinessInfo,
     hrmConfig,
     updateHrmConfig,
     accentTextClass: accentClasses.accentTextClass,
@@ -325,7 +328,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     sidebarActiveTabClass: accentClasses.sidebarActiveTabClass,
   }), [
     displaySettings, updateDisplaySettings,
-    businessInfo, updateBusinessInfo,
+    businessInfo,
     hrmConfig, updateHrmConfig,
     accentClasses,
   ]);

@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
 import { Employee, ArchivedQuote, Supplier } from '../types';
 import { FileText, Search, Printer, Trash2, Eye, Calendar, User, Briefcase, ChevronRight, ShieldCheck, Info, CheckCircle2, FileCheck, Save } from 'lucide-react';
@@ -304,12 +305,13 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
         </div>
       )}
 
-      {/* PRINT PREVIEW MODAL */}
-      {showPrintPreview && selectedQuote && tempQuote && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4 select-text text-left">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+      {/* PRINT PREVIEW MODAL — dùng React Portal render thẳng vào document.body, tách hoàn
+          toàn khỏi cây component của ứng dụng để tránh lỗi in đè chữ ở các trang sau. */}
+      {showPrintPreview && selectedQuote && tempQuote && createPortal(
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4 select-text text-left print-portal-backdrop">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200 print-portal-card">
             {/* Header */}
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0 print-hide">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-600" />
                 <div>
@@ -341,26 +343,27 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
             <div className="p-8 bg-white overflow-y-auto flex-1 font-sans text-xs leading-relaxed text-slate-900 print-agreement relative" id="print-area-archive">
               <style>{`
                 @media print {
-                  /* Bỏ mọi giới hạn overflow:hidden của các thẻ cha (modal, khung bo góc...)
-                     — nếu không, nội dung nhiều trang sẽ bị khung cha cắt/chèn ép làm chữ
-                     đè lên nhau khi in tài liệu dài hơn 1 trang. */
-                  * {
+                  #root {
+                    display: none !important;
+                  }
+                  .print-portal-backdrop {
+                    position: static !important;
+                    display: block !important;
+                    background: none !important;
+                    padding: 0 !important;
+                  }
+                  .print-portal-card {
+                    max-width: 100% !important;
+                    max-height: none !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    border-radius: 0 !important;
                     overflow: visible !important;
                   }
-                  body * {
-                    visibility: hidden;
-                  }
-                  #print-area-archive, #print-area-archive * {
-                    visibility: visible;
-                  }
                   #print-area-archive {
-                    position: absolute;
-                    left: 0;
-                    top: 0;
-                    width: 100%;
                     max-height: none !important;
-                    padding: 0;
-                    margin: 0;
+                    overflow: visible !important;
+                    padding: 0 !important;
                   }
                   .print-hide {
                     display: none !important;
@@ -377,8 +380,8 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
 
               {/* Approval Watermark Stamp */}
               {tempQuote.isApproved && (
-                <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500 animate-pulse" />
+                <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500/50 animate-pulse" />
                   ĐÃ PHÊ DUYỆT
                 </div>
               )}
@@ -722,7 +725,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
             </div>
 
             {/* Print Footer */}
-            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center shrink-0">
+            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 print-hide">
               <span className="text-[10px] text-slate-500 italic">
                 💡 Tip: Click directly on fields with dashed lines to edit the contract directly on printout.
               </span>
@@ -749,7 +752,8 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

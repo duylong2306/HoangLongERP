@@ -3531,7 +3531,14 @@ export default function FinanceManagement({
       subId = (currentUser as any)?.id || '';
       subName = (currentUser as any)?.name || 'Nhân sự lập đề xuất';
     } else if (effectiveRecipientKind === 'supplier') {
-      const selSub = suppliers.find(s => s.id === quickProposalSubId);
+      // Thầu Phụ (bảng accounting_subcontractors, id dạng "TP_IMP_...") là danh mục
+      // RIÊNG với Nhà Cung Cấp (bảng suppliers) — ID 2 bảng không trùng nhau. UI chọn
+      // đúng danh sách theo quickProposalType (xem subDataSource ở phần render form),
+      // nhưng validation này trước đây LUÔN tìm trong `suppliers` bất kể loại đề xuất
+      // → Chi Thầu Phụ chọn đúng thầu phụ vẫn báo "Vui lòng chọn..." vì không khớp ID
+      // trong bảng suppliers. Phải tra đúng bảng như phần hiển thị.
+      const subSourceList = quickProposalType === 'subcontractor_advance' ? allSubcontractors : suppliers;
+      const selSub = subSourceList.find((s: any) => s.id === quickProposalSubId);
       if (!selSub) {
         addToast({ title: '⚠️ Lỗi nhập liệu', message: 'Vui lòng chọn Thầu phụ / Nhà thầu!', type: 'error' });
         return;

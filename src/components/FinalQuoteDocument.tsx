@@ -476,16 +476,16 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
 
           {/* Materials and services table */}
           <div className="w-full overflow-x-auto my-4 border border-slate-200 rounded-xl bg-white shadow-sm font-sans">
-            <table className="w-full text-left border-collapse border border-slate-200 font-sans text-slate-800" style={{ fontSize: '11px', lineHeight: '1.3' }}>
+            <table className="w-full text-left border-collapse border border-black font-sans text-slate-800" style={{ fontSize: '11px', lineHeight: '1.3' }}>
               <thead>
-                <tr className="bg-[#1e40af] text-white font-extrabold border-b border-slate-300 uppercase tracking-wider text-center text-[10px]">
-                  <th className="px-2 py-2.5 border border-slate-300 w-[40px]">STT</th>
-                  <th className="px-3 py-2.5 border border-slate-300 text-left min-w-[220px]">Tên vật tư / nhân công / dịch vụ</th>
-                  <th className="px-2 py-2.5 border border-slate-300 w-[55px] text-center">ĐVT</th>
-                  <th className="px-2 py-2.5 border border-slate-300 w-[95px] text-center">Tổng KL</th>
-                  <th className="px-2 py-2.5 border border-slate-300 w-[110px] text-right">Đơn giá (đ)</th>
-                  <th className="px-2 py-2.5 border border-slate-300 w-[120px] text-right">Thành tiền (đ)</th>
-                  <th className="px-3 py-2.5 border border-slate-300 text-left min-w-[130px]">Ghi chú / Nguồn</th>
+                <tr className="bg-[#1e40af] text-white font-extrabold border-b border-black uppercase tracking-wider text-center text-[10px]">
+                  <th className="px-2 py-2.5 border border-black w-[40px]">STT</th>
+                  <th className="px-3 py-2.5 border border-black text-left min-w-[220px]">Tên vật tư / nhân công / dịch vụ</th>
+                  <th className="px-2 py-2.5 border border-black w-[55px] text-center">ĐVT</th>
+                  <th className="px-2 py-2.5 border border-black w-[95px] text-center">Tổng KL</th>
+                  <th className="px-2 py-2.5 border border-black w-[110px] text-right">Đơn giá (đ)</th>
+                  <th className="px-2 py-2.5 border border-black w-[120px] text-right">Thành tiền (đ)</th>
+                  <th className="px-3 py-2.5 border border-black text-left min-w-[130px]">Ghi chú / Nguồn</th>
                 </tr>
               </thead>
               <tbody>
@@ -498,7 +498,7 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
                     return (
                       <React.Fragment key={cat}>
                         {/* Section header row */}
-                        <tr className="bg-blue-50/60 font-black text-[#1e40af] text-[10.5px] uppercase border-y border-slate-200">
+                        <tr className="bg-blue-50/60 font-black text-[#1e40af] text-[10.5px] uppercase border-y border-black">
                           <td colSpan={7} className="px-3 py-2 text-left tracking-wide">
                             {cat}
                           </td>
@@ -508,33 +508,33 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
                         {itemsInCat.map(item => {
                           const amount = item.qty * item.price;
                           return (
-                            <tr key={item.id} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100 text-slate-700 text-center">
-                              <td className="px-2 py-2.5 border border-slate-200 font-medium text-slate-500">{sttCounter++}</td>
-                              <td className="px-3 py-2.5 border border-slate-200 text-left font-bold text-slate-900 leading-tight">
+                            <tr key={item.id} className="hover:bg-slate-50/80 transition-colors border-b border-black text-slate-700 text-center">
+                              <td className="px-2 py-2.5 border border-black font-medium text-slate-500">{sttCounter++}</td>
+                              <td className="px-3 py-2.5 border border-black text-left font-bold text-slate-900 leading-tight">
                                 {item.name}
                               </td>
-                              <td className="px-2 py-2.5 border border-slate-200 font-medium text-slate-600 text-center">
+                              <td className="px-2 py-2.5 border border-black font-medium text-slate-600 text-center">
                                 {item.unit}
                               </td>
-                              
+
                               {/* Quantity column */}
-                              <td className="px-2 py-2.5 border border-slate-200 font-mono text-center">
+                              <td className="px-2 py-2.5 border border-black font-mono text-center">
                                 <span className="inline-block px-1.5 py-0.5 bg-slate-50 text-slate-800 font-bold border border-slate-200 rounded">
                                   {item.qty.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </td>
 
                               {/* Price column */}
-                              <td className="px-2 py-2.5 border border-slate-200 font-mono text-right text-slate-700">
+                              <td className="px-2 py-2.5 border border-black font-mono text-right text-slate-700">
                                 {item.price.toLocaleString('vi-VN')}
                               </td>
 
                               {/* Total cost column */}
-                              <td className="px-2 py-2.5 border border-slate-200 font-mono text-right font-black text-slate-900 bg-slate-50/30">
+                              <td className="px-2 py-2.5 border border-black font-mono text-right font-black text-slate-900 bg-slate-50/30">
                                 {amount.toLocaleString('vi-VN')}
                               </td>
 
-                              <td className="px-3 py-2.5 border border-slate-200 text-left text-[10.5px] italic text-slate-500 leading-normal">
+                              <td className="px-3 py-2.5 border border-black text-left text-[10.5px] italic text-slate-500 leading-normal">
                                 {item.note}
                               </td>
                             </tr>

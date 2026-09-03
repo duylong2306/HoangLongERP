@@ -428,8 +428,8 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
 
       {/* Approved Stamp on the printed document */}
       {acceptanceApproved && (
-        <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-          <CheckCircle2 className="w-5 h-5 text-emerald-500 animate-pulse" />
+        <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+          <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
           ĐÃ PHÊ DUYỆT
         </div>
       )}

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, Save, RotateCcw, Check, FileText, Edit } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
@@ -507,16 +508,16 @@ export default function ConstructionFinalQuote({
         
         {/* Dynamic Table */}
         <div className="w-full overflow-x-auto my-4 border border-slate-200 rounded-xl bg-white shadow-sm">
-          <table className="w-full text-left border-collapse border border-slate-200 font-sans text-slate-800" style={{ fontSize: '11px', lineHeight: '1.3' }}>
+          <table className="w-full text-left border-collapse border border-black font-sans text-slate-800" style={{ fontSize: '11px', lineHeight: '1.3' }}>
             <thead>
-              <tr className="bg-[#1e40af] text-white font-extrabold border-b border-slate-300 uppercase tracking-wider text-center text-[10.5px]">
-                <th className="px-3 py-3 border border-slate-300 w-[45px]">STT</th>
-                <th className="px-4 py-3 border border-slate-300 text-left min-w-[240px]">Tên vật tư / nhân công / dịch vụ</th>
-                <th className="px-3 py-3 border border-slate-300 w-[65px] text-center">Đơn vị</th>
-                <th className="px-3 py-3 border border-slate-300 w-[110px] text-center">Tổng KL</th>
-                <th className="px-3 py-3 border border-slate-300 w-[120px] text-right">Đơn giá (đ)</th>
-                <th className="px-3 py-3 border border-slate-300 w-[130px] text-right">Thành tiền (đ)</th>
-                <th className="px-4 py-3 border border-slate-300 text-left min-w-[150px]">Ghi chú / Nguồn</th>
+              <tr className="bg-[#1e40af] text-white font-extrabold border-b border-black uppercase tracking-wider text-center text-[10.5px]">
+                <th className="px-3 py-3 border border-black w-[45px]">STT</th>
+                <th className="px-4 py-3 border border-black text-left min-w-[240px]">Tên vật tư / nhân công / dịch vụ</th>
+                <th className="px-3 py-3 border border-black w-[65px] text-center">Đơn vị</th>
+                <th className="px-3 py-3 border border-black w-[110px] text-center">Tổng KL</th>
+                <th className="px-3 py-3 border border-black w-[120px] text-right">Đơn giá (đ)</th>
+                <th className="px-3 py-3 border border-black w-[130px] text-right">Thành tiền (đ)</th>
+                <th className="px-4 py-3 border border-black text-left min-w-[150px]">Ghi chú / Nguồn</th>
               </tr>
             </thead>
             <tbody>
@@ -529,7 +530,7 @@ export default function ConstructionFinalQuote({
                   return (
                     <React.Fragment key={cat}>
                       {/* Section header row */}
-                      <tr className="bg-[#3b82f6]/10 font-black text-[#1e40af] text-[11px] uppercase border-y border-slate-200">
+                      <tr className="bg-[#3b82f6]/10 font-black text-[#1e40af] text-[11px] uppercase border-y border-black">
                         <td colSpan={7} className="px-3 py-2 text-left tracking-wide">
                           {cat}
                         </td>
@@ -539,17 +540,17 @@ export default function ConstructionFinalQuote({
                       {itemsInCat.map(item => {
                         const amount = item.qty * item.price;
                         return (
-                          <tr key={item.id} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100 text-slate-700 text-center">
-                            <td className="px-3 py-2.5 border border-slate-200 font-medium text-slate-500">{sttCounter++}</td>
-                            <td className="px-4 py-2.5 border border-slate-200 text-left font-bold text-slate-900 leading-tight">
+                          <tr key={item.id} className="hover:bg-slate-50/80 transition-colors border-b border-black text-slate-700 text-center">
+                            <td className="px-3 py-2.5 border border-black font-medium text-slate-500">{sttCounter++}</td>
+                            <td className="px-4 py-2.5 border border-black text-left font-bold text-slate-900 leading-tight">
                               {item.name}
                             </td>
-                            <td className="px-3 py-2.5 border border-slate-200 font-medium text-slate-600 text-center">
+                            <td className="px-3 py-2.5 border border-black font-medium text-slate-600 text-center">
                               {item.unit}
                             </td>
-                            
+
                             {/* Quantity column */}
-                            <td className="px-3 py-2.5 border border-slate-200 font-mono text-center">
+                            <td className="px-3 py-2.5 border border-black font-mono text-center">
                               {item.isAuto ? (
                                 <div className="inline-block px-2.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 font-extrabold rounded-md text-[11px]">
                                   {item.qty.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -567,7 +568,7 @@ export default function ConstructionFinalQuote({
                             </td>
 
                             {/* Price column with creamy yellow background */}
-                            <td className="px-3 py-2.5 border border-slate-200 font-mono text-right bg-amber-50/30">
+                            <td className="px-3 py-2.5 border border-black font-mono text-right bg-amber-50/30">
                               <input
                                 type="number"
                                 value={prices[item.id] !== undefined ? prices[item.id] : item.price}
@@ -578,11 +579,11 @@ export default function ConstructionFinalQuote({
                             </td>
 
                             {/* Total cost column */}
-                            <td className="px-3 py-2.5 border border-slate-200 font-mono text-right font-bold text-slate-900">
+                            <td className="px-3 py-2.5 border border-black font-mono text-right font-bold text-slate-900">
                               {amount.toLocaleString('vi-VN')}
                             </td>
 
-                            <td className="px-4 py-2.5 border border-slate-200 text-left text-[11px] italic text-slate-500 leading-normal">
+                            <td className="px-4 py-2.5 border border-black text-left text-[11px] italic text-slate-500 leading-normal">
                               {item.note}
                             </td>
                           </tr>
@@ -594,7 +595,7 @@ export default function ConstructionFinalQuote({
               })()}
 
               {/* Green Grand Total Banner */}
-              <tr className="bg-[#047857] text-white text-xs font-black uppercase tracking-wider text-center border-t-2 border-slate-300">
+              <tr className="bg-[#047857] text-white text-xs font-black uppercase tracking-wider text-center border-t-2 border-black">
                 <td colSpan={2} className="px-4 py-3.5 text-left border border-emerald-800 font-extrabold">
                   TỔNG CHI PHÍ VẬT TƯ & NHÂN CÔNG (từ bóc tách)
                 </td>
@@ -782,11 +783,15 @@ export default function ConstructionFinalQuote({
         </button>
       </div>
 
-      {/* Dynamic Print Preview Modal */}
-      {savedQuoteForPreview && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in fade-in zoom-in-95 duration-200">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+      {/* Dynamic Print Preview Modal — tách ra document.body bằng createPortal (giống
+          ConstructionArchive/CabinetArchive/MechanicalArchive) vì modal này nằm sâu trong
+          #root có overflow:hidden + height:100% (app-shell cố định). Nếu không tách portal,
+          khi in (window.print) trình duyệt chỉ chụp được đúng phần đang hiển thị trong viewport
+          của #root rồi cắt cụt/trống các trang sau — đây chính là lỗi "cửa sổ in bị lỗi". */}
+      {savedQuoteForPreview && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text text-slate-800 print-portal-backdrop">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in fade-in zoom-in-95 duration-200 print-portal-card">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0 print-hide">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-200">
                   <FileText className="w-4 h-4 text-indigo-600" />
@@ -798,19 +803,50 @@ export default function ConstructionFinalQuote({
                   <p className="text-[10px] text-slate-500 font-medium">Báo giá cuối cùng tạo lập tự động - HOANG LONG ERP</p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setSavedQuoteForPreview(null)}
                 className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs"
               >
                 ✕
               </button>
             </div>
-            
-            <div className="p-4 md:p-6 bg-slate-100 overflow-y-auto grow">
+
+            <div className="p-4 md:p-6 bg-slate-100 overflow-y-auto grow" id="print-area-archive">
+              <style>{`
+                @media print {
+                  #root {
+                    display: none !important;
+                  }
+                  .print-portal-backdrop {
+                    position: static !important;
+                    display: block !important;
+                    background: none !important;
+                    padding: 0 !important;
+                  }
+                  .print-portal-card {
+                    max-width: 100% !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    border-radius: 0 !important;
+                    overflow: visible !important;
+                  }
+                  #print-area-archive {
+                    max-height: none !important;
+                    overflow: visible !important;
+                    padding: 0 !important;
+                  }
+                  .print-hide {
+                    display: none !important;
+                  }
+                  #print-area-archive .grid {
+                    display: block !important;
+                  }
+                }
+              `}</style>
               <QuotationTableSheet quoteData={savedQuoteForPreview} initialTab="final_quote" />
             </div>
 
-            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5 shrink-0">
+            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5 shrink-0 print-hide">
               <button
                 type="button"
                 onClick={() => setSavedQuoteForPreview(null)}
@@ -830,7 +866,8 @@ export default function ConstructionFinalQuote({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

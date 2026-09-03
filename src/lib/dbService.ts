@@ -1074,29 +1074,29 @@ export const dbService = {
       }
     },
     async save(profile: any): Promise<void> {
+      // Trước đây hàm này nuốt mọi lỗi (chỉ console.warn rồi return bình thường),
+      // khiến các nơi gọi có await/try-catch không thể biết lưu thất bại — nút
+      // "Cập nhật hồ sơ doanh nghiệp" luôn báo thành công dù dữ liệu không hề lên
+      // Supabase. Nay ném lỗi thật để caller xử lý/hiển thị đúng cho người dùng;
+      // 2 nơi gọi kiểu "fire-and-forget" khác đã có sẵn .catch() nên không ảnh hưởng.
       const supabase = getSupabase();
       if (!supabase) {
-        console.warn('Supabase chưa cấu hình — không lưu được business_profile');
-        return;
+        throw new Error('Supabase chưa cấu hình — không lưu được business_profile');
       }
-      try {
-        const { error } = await supabase.from('business_profile').upsert({
-          id: 'current',
-          company_name: profile.companyName,
-          tax_code: profile.taxCode,
-          representative: profile.representative,
-          phone: profile.phone,
-          email: profile.email,
-          address: profile.address,
-          founding_year: profile.foundingYear,
-          business_sector: profile.businessSector,
-          bank_info: profile.bankInfo,
-          scale: profile.scale
-        });
-        if (error) console.warn('Supabase business_profile save error:', error.message);
-      } catch (e) {
-        console.warn('Supabase business_profile save exception:', e);
-      }
+      const { error } = await supabase.from('business_profile').upsert({
+        id: 'current',
+        company_name: profile.companyName,
+        tax_code: profile.taxCode,
+        representative: profile.representative,
+        phone: profile.phone,
+        email: profile.email,
+        address: profile.address,
+        founding_year: profile.foundingYear,
+        business_sector: profile.businessSector,
+        bank_info: profile.bankInfo,
+        scale: profile.scale
+      });
+      if (error) throw new Error(error.message);
     },
     // Trả về mảng [profile] (hoặc []) để tương thích với RPC load_all_core_data
     // (vốn jsonb_agg → mảng). Dùng chung get() đã map sang camelCase.

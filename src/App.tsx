@@ -567,7 +567,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       return; // chỉ đổi tham chiếu, KHÔNG đổi nội dung → không save, không sinh event
     }
     lastSavedBizRef.current = next;
-    dbService.businessProfile.save(businessInfo);
+    dbService.businessProfile.save(businessInfo).catch(err => console.warn('Lưu business_profile thất bại:', err));
   }, [businessInfo]);
 
   // Bootstrap và đồng bộ hoá dữ liệu từ Cloud trên nền tảng Supabase
@@ -4292,16 +4292,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="block text-[10px] text-slate-400 font-bold mb-1">CÁC CHI NHÁNH / VP ĐẠI DIỆN KHÁC (ĐÀ LẠT V.V)</label>
-                      <input
-                        type="text"
-                        value="45 Hùng Vương, Phường 9, TP. Đà Lạt & Đường tránh Quốc Lộ 20, Xã Lộc Châu, TP. Bảo Lộc"
-                        disabled
-                        className="w-full bg-slate-955 border border-slate-800 opacity-60 rounded p-1.5 px-3 text-xs text-slate-400 outline-none"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
                       <label className="block text-[10px] text-slate-400 font-bold mb-1">THÔNG TIN KHAI THÁC & TÀI KHOẢN NGÂN HÀNG CHÍNH</label>
                       <input
                         type="text"
@@ -4336,7 +4326,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                   <div className="flex justify-end pt-4 border-t border-slate-800">
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         const updated = {
                           companyName: editCorpName.trim() || 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
                           taxCode: editCorpTax.trim() || '5801456789',
@@ -4350,7 +4340,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                           scale: editCorpScale.trim() || 'Hơn 150 kỹ sư & thợ lành nghề'
                         };
                         setBusinessInfo(updated);
-                        alert('🏢 Đã lưu hồ sơ cập nhật thông tin doanh nghiệp thành công! Dữ liệu này sẽ làm căn mẫu thông tin cho mọi kết xuất văn bản của hệ thống.');
+                        // Trước đây bấm nút này luôn hiện alert "thành công" ngay lập tức dù
+                        // dbService.businessProfile.save() (chạy ngầm qua useEffect theo dõi
+                        // businessInfo) thất bại (VD: Supabase chưa cấu hình, lỗi RLS...) —
+                        // người dùng tưởng đã lưu nhưng dữ liệu không hề lên server, rồi bị
+                        // ghi đè lại giá trị cũ ở lần poll đồng bộ 600s kế tiếp. Gọi trực tiếp
+                        // và chờ kết quả thật ở đây để báo đúng thành công/thất bại.
+                        try {
+                          await dbService.businessProfile.save(updated);
+                          addToast({ title: '🏢 Đã lưu', message: 'Đã cập nhật hồ sơ doanh nghiệp thành công! Dữ liệu này sẽ làm căn mẫu thông tin cho mọi kết xuất văn bản của hệ thống.', type: 'success' });
+                        } catch (e) {
+                          addToast({ title: '⛔ Lưu thất bại', message: 'Không thể lưu hồ sơ doanh nghiệp lên hệ thống. Vui lòng kiểm tra kết nối Supabase và thử lại.', type: 'error' });
+                        }
                       }}
                       className={`px-6 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer shadow-md ${accentBgClass}`}
                     >

@@ -445,8 +445,8 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 </div>
 
                 {isApproved && (
-                  <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500 animate-pulse" />
+                  <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
                     ĐÃ PHÊ DUYỆT
                   </div>
                 )}
@@ -682,8 +682,8 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 </div>
 
                 {isApproved && (
-                  <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500 animate-pulse" />
+                  <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
                     ĐÃ PHÊ DUYỆT
                   </div>
                 )}
@@ -889,36 +889,36 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
           <thead>
             {quoteData.selectedHouseType ? (
               <tr className="bg-[#00a651] text-white text-[11px] font-bold uppercase tracking-wider text-center">
-                <th className="py-3 px-2 border border-slate-200 text-center w-10">STT</th>
-                <th className="py-3 px-3 border border-slate-200 text-left w-1/3">Dòng công tác xây thô & hoàn thiện</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-24">Tỷ lệ (%)</th>
-                <th className="py-3 px-3 border border-slate-200 text-left">Định lượng vật liệu & Ghi chú</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-24">Khối lượng</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-20">Đơn vị</th>
-                <th className="py-3 px-3 border border-slate-250 text-right w-28">Đơn giá</th>
-                <th className="py-3 px-3 border border-slate-250 text-right w-36">Thành tiền (đồng)</th>
+                <th className="py-3 px-2 border border-black text-center w-10">STT</th>
+                <th className="py-3 px-3 border border-black text-left w-1/3">Dòng công tác xây thô & hoàn thiện</th>
+                <th className="py-3 px-2 border border-black text-center w-24">Tỷ lệ (%)</th>
+                <th className="py-3 px-3 border border-black text-left">Định lượng vật liệu & Ghi chú</th>
+                <th className="py-3 px-2 border border-black text-center w-24">Khối lượng</th>
+                <th className="py-3 px-2 border border-black text-center w-20">Đơn vị</th>
+                <th className="py-3 px-3 border border-black text-right w-28">Đơn giá</th>
+                <th className="py-3 px-3 border border-black text-right w-36">Thành tiền (đồng)</th>
               </tr>
             ) : quoteData.sector === 'mechanical' ? (
               <tr className="bg-[#00a651] text-white text-[11px] font-bold uppercase tracking-wider text-center">
-                <th className="py-3 px-2 border border-slate-200 text-center w-10">STT</th>
-                <th className="py-3 px-3 border border-slate-200 text-left w-1/4">Chi tiết sản phẩm & thông số kỹ thuật</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-28">Kích thước (Ngang x Cao)</th>
-                <th className="py-3 px-3 border border-slate-200 text-left">Hệ nhôm / Màu sắc / Loại kính / Phụ kiện đi kèm</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">Đvt</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">SL</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-24">Đơn giá định mức</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-28">Thành tiền thực tế</th>
+                <th className="py-3 px-2 border border-black text-center w-10">STT</th>
+                <th className="py-3 px-3 border border-black text-left w-1/4">Chi tiết sản phẩm & thông số kỹ thuật</th>
+                <th className="py-3 px-2 border border-black text-center w-28">Kích thước (Ngang x Cao)</th>
+                <th className="py-3 px-3 border border-black text-left">Hệ nhôm / Màu sắc / Loại kính / Phụ kiện đi kèm</th>
+                <th className="py-3 px-2 border border-black text-center w-12">Đvt</th>
+                <th className="py-3 px-2 border border-black text-center w-12">SL</th>
+                <th className="py-3 px-3 border border-black text-right w-24">Đơn giá định mức</th>
+                <th className="py-3 px-3 border border-black text-right w-28">Thành tiền thực tế</th>
               </tr>
             ) : (
               <tr className="bg-[#00a651] text-white text-[11px] font-bold uppercase tracking-wider text-center">
-                <th className="py-3 px-2 border border-slate-200 text-center w-10">STT</th>
-                <th className="py-3 px-3 border border-slate-200 text-center w-1/4">Tên sản phẩm</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-18">Hình ảnh</th>
-                <th className="py-3 px-3 border border-slate-200 text-center">Thông số kỹ thuật / Vật liệu cấu tạo</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">Đvt</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">SL</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-24">Đơn giá</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-28">Thành tiền</th>
+                <th className="py-3 px-2 border border-black text-center w-10">STT</th>
+                <th className="py-3 px-3 border border-black text-center w-1/4">Tên sản phẩm</th>
+                <th className="py-3 px-2 border border-black text-center w-18">Hình ảnh</th>
+                <th className="py-3 px-3 border border-black text-center">Thông số kỹ thuật / Vật liệu cấu tạo</th>
+                <th className="py-3 px-2 border border-black text-center w-12">Đvt</th>
+                <th className="py-3 px-2 border border-black text-center w-12">SL</th>
+                <th className="py-3 px-3 border border-black text-right w-24">Đơn giá</th>
+                <th className="py-3 px-3 border border-black text-right w-28">Thành tiền</th>
               </tr>
             )}
           </thead>
@@ -935,64 +935,64 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                   {quoteData.selectedHouseType ? (
                     <>
                       {/* STT */}
-                      <td className="p-3 border border-slate-200 text-center font-bold text-slate-500">
+                      <td className="p-3 border border-black text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
-                      
+
                       {/* Dòng công tác */}
-                      <td className="p-3 border border-slate-200 font-bold text-slate-900 leading-normal text-left">
+                      <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
                         {item.productName}
                       </td>
-                      
+
                       {/* Tỷ lệ % */}
-                      <td className="p-3 border border-slate-200 text-center font-extrabold text-[#1e3a8a] bg-slate-50/50 font-mono">
+                      <td className="p-3 border border-black text-center font-extrabold text-[#1e3a8a] bg-slate-50/50 font-mono">
                         {item.ratioPercent || 'định mức'}
                       </td>
-                      
+
                       {/* Định lượng vật liệu & Ghi chú */}
-                      <td className="p-3 border border-slate-200 text-slate-700 leading-relaxed text-left text-[11px]">
+                      <td className="p-3 border border-black text-slate-700 leading-relaxed text-left text-[11px]">
                         <div>{item.notes || item.material || 'Xây cát đá mác xi măng liên quan'}</div>
                       </td>
-                      
+
                       {/* Khối lượng */}
-                      <td className="p-3 border border-slate-200 text-center font-black text-slate-900 font-mono">
+                      <td className="p-3 border border-black text-center font-black text-slate-900 font-mono">
                         {item.qty}
                       </td>
-                      
+
                       {/* Đơn vị */}
-                      <td className="p-3 border border-slate-200 text-center text-slate-650 font-medium font-sans">
+                      <td className="p-3 border border-black text-center text-slate-650 font-medium font-sans">
                         {item.unit || 'Gói'}
                       </td>
-                      
+
                       {/* Đơn giá */}
-                      <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
+                      <td className="p-3 border border-black text-right font-semibold text-slate-700 font-mono">
                         {unitPriceVal.toLocaleString('vi-VN')}
                       </td>
-                      
+
                       {/* Thành tiền (đồng) */}
-                      <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
+                      <td className="p-3 border border-black text-right font-black text-[#00a651] font-mono">
                         {totalPriceVal.toLocaleString('vi-VN')}
                       </td>
                     </>
                   ) : quoteData.sector === 'mechanical' ? (
                     <>
                       {/* STT */}
-                      <td className="p-3 border border-slate-200 text-center font-bold text-slate-500">
+                      <td className="p-3 border border-black text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
-                      
+
                       {/* Chi tiết sản phẩm */}
-                      <td className="p-3 border border-slate-200 font-bold text-slate-900 leading-normal text-left">
+                      <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
                         {item.productName || item.name}
                       </td>
-                      
+
                       {/* Kích thước */}
-                      <td className="p-3 border border-slate-200 text-center font-mono text-slate-700 font-semibold">
+                      <td className="p-3 border border-black text-center font-mono text-slate-700 font-semibold">
                         {item.ngang || item.width ? `${item.ngang || item.width}m x ${item.cao || item.height}m` : 'Theo thực tế'}
                       </td>
-                      
+
                       {/* Thông số kỹ thuật / Phụ kiện */}
-                      <td className="p-3 border border-slate-200 text-slate-700 leading-relaxed text-left text-[11px]">
+                      <td className="p-3 border border-black text-slate-700 leading-relaxed text-left text-[11px]">
                         {item.pricingMethod === 'custom' ? (
                           <div className="space-y-1">
                             <span className="font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px] uppercase">Dự toán phôi</span>
@@ -1015,39 +1015,39 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                       </td>
 
                       {/* Đvt */}
-                      <td className="p-3 border border-slate-200 text-center text-slate-650">
+                      <td className="p-3 border border-black text-center text-slate-650">
                         {item.unit || 'm²'}
                       </td>
 
                       {/* SL */}
-                      <td className="p-3 border border-slate-200 text-center font-black text-slate-900">
+                      <td className="p-3 border border-black text-center font-black text-slate-900">
                         {Number(item.qty) % 1 === 0 ? item.qty : Number(item.qty).toFixed(3)}
                       </td>
 
                       {/* Đơn giá */}
-                      <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
+                      <td className="p-3 border border-black text-right font-semibold text-slate-700 font-mono">
                         {Number(unitPriceVal) % 1 === 0 ? unitPriceVal.toLocaleString('vi-VN') : Number(unitPriceVal).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                       </td>
 
                       {/* Thành tiền */}
-                      <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
+                      <td className="p-3 border border-black text-right font-black text-[#00a651] font-mono">
                         {Number(totalPriceVal) % 1 === 0 ? totalPriceVal.toLocaleString('vi-VN') : Number(totalPriceVal).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                       </td>
                     </>
                   ) : (
                     <>
                       {/* STT */}
-                      <td className="p-3 border border-slate-200 text-center font-bold text-slate-500">
+                      <td className="p-3 border border-black text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
-                      
+
                       {/* Tên sản phẩm */}
-                      <td className="p-3 border border-slate-200 font-bold text-slate-900 leading-normal text-left">
+                      <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
                         {item.productName}
                       </td>
-                      
+
                       {/* Hình ảnh */}
-                      <td className="p-2 border border-slate-200 text-center text-[10px] text-slate-400 italic">
+                      <td className="p-2 border border-black text-center text-[10px] text-slate-400 italic">
                         {item.images && item.images.length > 0 ? (
                           <img
                             src={item.images[0]}
@@ -1060,9 +1060,9 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                           </span>
                         )}
                       </td>
-                      
+
                       {/* Thông số kỹ thuật */}
-                      <td className="p-3 border border-slate-200 text-slate-700 leading-relaxed text-left text-[11px] whitespace-pre-line space-y-1">
+                      <td className="p-3 border border-black text-slate-700 leading-relaxed text-left text-[11px] whitespace-pre-line space-y-1">
                         <div className="font-semibold text-slate-800">
                           {item.material || item.lowerCabinetMaterial || item.upperCabinetMaterial || 'Gỗ công nghiệp MDF chống ẩm nhập khẩu chuẩn hãng'}
                         </div>
@@ -1082,22 +1082,22 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                       </td>
                       
                       {/* Đvt */}
-                      <td className="p-3 border border-slate-200 text-center text-slate-600 font-medium">
+                      <td className="p-3 border border-black text-center text-slate-600 font-medium">
                         {unitVal}
                       </td>
-                      
+
                       {/* Số lượng */}
-                      <td className="p-3 border border-slate-200 text-center font-black text-slate-900">
+                      <td className="p-3 border border-black text-center font-black text-slate-900">
                         {item.qty}
                       </td>
-                      
+
                       {/* Đơn giá */}
-                      <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
+                      <td className="p-3 border border-black text-right font-semibold text-slate-700 font-mono">
                         {unitPriceVal.toLocaleString('vi-VN')}
                       </td>
-                      
+
                       {/* Thành tiền */}
-                      <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
+                      <td className="p-3 border border-black text-right font-black text-[#00a651] font-mono">
                         {totalPriceVal.toLocaleString('vi-VN')}
                       </td>
                     </>
@@ -1109,10 +1109,10 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
             {/* FINANCIAL SUMMARY TOTALS */}
             {/* TỔNG CỘNG THANH TOÁN (đã loại bỏ chiết khấu thầu & thuế VAT) */}
             <tr className="bg-[#00a651] text-white font-black uppercase text-[12px] tracking-widest text-center">
-              <td colSpan={7} className="py-3 px-4 border border-slate-200 text-right">
+              <td colSpan={7} className="py-3 px-4 border border-black text-right">
                 TỔNG CỘNG GIÁ TRỊ QUYẾT TOÁN THANH TOÁN:
               </td>
-              <td className="py-3 px-3 border border-slate-200 text-right font-extrabold font-mono text-white text-sm">
+              <td className="py-3 px-3 border border-black text-right font-extrabold font-mono text-white text-sm">
                 {grandTotal.toLocaleString('vi-VN')} đ
               </td>
             </tr>

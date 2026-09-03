@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { useNotification } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
 import { INITIAL_PRODUCTS } from './ProductCatalogTable';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle, Download, Share2 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -906,6 +907,158 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [searchCategoryQuery, setSearchCategoryQuery] = useState<string>('');
   const [searchProductQuery, setSearchProductQuery] = useState<string>('');
   const { addToast } = useNotification();
+
+  // Tải động html2canvas/jsPDF — dùng lại đúng cách export PDF đã ổn định của
+  // Đơn Mua Hàng (MaterialCoordination.tsx): gọi html2canvas trực tiếp rồi tự
+  // ghép ảnh vào jsPDF (tự chia trang nếu nội dung dài hơn 1 trang A4), KHÔNG
+  // dùng html2pdf.js (thư viện đó gán nhầm property `container.height` thay vì
+  // `.style.height` khiến ảnh chụp ra trắng hoàn toàn — đã xác minh ở đó).
+  const loadHtml2Canvas = async () => {
+    const mod = await import('html2canvas-pro');
+    return (mod as any).default || mod;
+  };
+  const loadJsPdf = async () => {
+    const mod = await import('jspdf');
+    return (mod as any).jsPDF || (mod as any).default;
+  };
+
+  // html2canvas-pro chụp ở chế độ "màn hình" bình thường, KHÔNG kích hoạt
+  // được @media print — nên các lớp Tailwind "print:border-none /
+  // print:shadow-none / print:p-0" đã có sẵn trong QuotationTableSheet/
+  // ContractDocument/AcceptanceDocument/LiquidationDocument (dùng để bỏ
+  // khung viền xám + đổ bóng + đệm của khung card khi in thật qua trình
+  // duyệt) không có tác dụng khi xuất PDF qua html2canvas. Áp lại thủ công
+  // đúng hiệu ứng đó lên bản sao trước khi chụp.
+  const applyPrintVariantOverrides = (root: HTMLElement) => {
+    const all: HTMLElement[] = [root, ...Array.from(root.querySelectorAll('*'))] as HTMLElement[];
+    all.forEach((el) => {
+      const cls = el.className;
+      if (typeof cls !== 'string') return; // bỏ qua SVG (className là SVGAnimatedString)
+      if (cls.includes('print:border-none')) el.style.border = 'none';
+      if (cls.includes('print:shadow-none')) el.style.boxShadow = 'none';
+      if (cls.includes('print:p-0')) el.style.padding = '0';
+    });
+  };
+
+  // Dựng PDF từ đúng vùng nội dung đang hiển thị trong modal xem/in
+  // (#print-area-archive) — nhân bản (clone) ra 1 khung ẩn khổ A4 cố định
+  // trước khi chụp, vì vùng gốc trên màn hình bị giới hạn max-h-[70vh]
+  // overflow-y-auto (chỉ chụp được phần đang cuộn tới nếu chụp thẳng).
+  const generateArchivePdfBlob = async (): Promise<Blob> => {
+    const source = document.getElementById('print-area-archive');
+    if (!source) throw new Error('Không tìm thấy nội dung để xuất PDF.');
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.background = '#ffffff';
+    container.innerHTML = source.innerHTML;
+    // Bỏ các nút hành động/badge chỉ dành cho màn hình (không nằm trong bản in)
+    container.querySelectorAll('.print-hide, .no-print, [class*="print\\:hidden"]').forEach(el => el.remove());
+    applyPrintVariantOverrides(container);
+    document.body.appendChild(container);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 15, marginSide = 18;
+      const pageWidthMm = 210, pageHeightMm = 297;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      // Danh sách các điểm "cắt an toàn" — ngay dưới đáy mỗi dòng bảng (<tr>) —
+      // quy đổi sang toạ độ pixel của canvas (nhân với scale:2 lúc chụp phía
+      // trên). Trước đây cắt trang theo đúng bội số pageHeightPx một cách mù
+      // quáng, có thể cắt ngang giữa 1 dòng đang chứa ghi chú nhiều dòng, làm
+      // nửa trên/dưới của dòng đó tách rời sang 2 trang khác nhau.
+      const containerRect = container.getBoundingClientRect();
+      const safeBreaksPx = Array.from(container.querySelectorAll('tr'))
+        .map((el) => Math.round((el.getBoundingClientRect().bottom - containerRect.top) * 2))
+        .filter((v) => v > 0 && v < canvas.height)
+        .sort((a, b) => a - b);
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const idealEnd = Math.min(renderedPx + pageHeightPx, canvas.height);
+        // Nếu chưa phải trang cuối, dò lùi tới điểm cắt an toàn gần nhất
+        // (đáy 1 dòng bảng hoàn chỉnh) thay vì cắt cứng theo pixel.
+        let sliceEnd = idealEnd;
+        if (idealEnd < canvas.height) {
+          const minAdvance = renderedPx + Math.min(60, pageHeightPx * 0.15);
+          const candidate = safeBreaksPx.filter((b) => b > minAdvance && b <= idealEnd).pop();
+          if (candidate) sliceEnd = candidate;
+        }
+        const sliceHeightPx = sliceEnd - renderedPx;
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Tải PDF hồ sơ về máy — không qua hộp thoại Share của hệ điều hành (Windows
+  // Share không có lựa chọn "Lưu về máy" trực tiếp).
+  const downloadArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `HoSo_${quote.code || quote.id}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: '✅ Đã tải PDF', message: `Đã tải "HoSo_${quote.code || quote.id}.pdf" về thư mục Tải xuống.`, type: 'success' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF.', type: 'error' });
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF hồ sơ (thay vì chỉ chia sẻ link)
+  const shareArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const file = new File([blob], `HoSo_${quote.code || quote.id}.pdf`, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Hồ sơ ${quote.code || quote.id}`, text: `Hồ sơ ${quote.code || quote.id}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: 'ℹ️ Đã tải PDF', message: 'Đã tải file PDF hồ sơ về máy để gửi thủ công.', type: 'info' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF để chia sẻ.', type: 'warning' });
+    }
+  };
+
   const [customMaterial, setCustomMaterial] = useState<string>('');
   
   const [isCatDropdownOpen, setIsCatDropdownOpen] = useState(false);
@@ -3082,11 +3235,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
         </div>
 
-        {/* Dynamic Preview Modal */}
-        {savedQuoteForPreview && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text">
-            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-              <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between">
+        {/* Dynamic Preview Modal — dùng React Portal render thẳng vào document.body, tách
+            hoàn toàn khỏi cây component của ứng dụng. Nếu để lồng sâu như cũ, khi nội dung
+            dài nhiều trang, các thẻ cha (fixed, flex, overflow...) sẽ khiến Chrome tính sai
+            vị trí và in đè chữ lên nhau ở các trang sau. */}
+        {savedQuoteForPreview && createPortal(
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text print-portal-backdrop">
+            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 print-portal-card">
+              <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between print-hide">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-200">
                     <FileText className="w-4 h-4 text-[#4f46e5]" />
@@ -3098,7 +3254,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                     <p className="text-[10px] text-slate-500 font-medium">Biên bản dự toán tạo lập tự động - HOANG LONG ERP</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => setSavedQuoteForPreview(null)}
                   className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs"
                 >
@@ -3106,31 +3262,31 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                 </button>
               </div>
               <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto" id="print-area-archive">
-                {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ trang (nền mờ, header, nút bấm...)
-                    và chỉ hiện đúng vùng nội dung dự toán này, kéo full khổ giấy — tránh in ra
-                    giống ảnh chụp cả cửa sổ modal. */}
+                {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ ứng dụng (#root), chỉ chừa lại
+                    đúng modal đã tách portal này để nội dung chảy tự nhiên qua nhiều trang
+                    mà không bị lỗi in đè chữ. */}
                 <style>{`
                   @media print {
-                    /* Bỏ mọi giới hạn overflow:hidden của các thẻ cha (modal, khung bo góc...)
-                       — nếu không, nội dung nhiều trang sẽ bị khung cha cắt/chèn ép làm chữ
-                       đè lên nhau khi in tài liệu dài hơn 1 trang. */
-                    * {
+                    #root {
+                      display: none !important;
+                    }
+                    .print-portal-backdrop {
+                      position: static !important;
+                      display: block !important;
+                      background: none !important;
+                      padding: 0 !important;
+                    }
+                    .print-portal-card {
+                      max-width: 100% !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                      border-radius: 0 !important;
                       overflow: visible !important;
                     }
-                    body * {
-                      visibility: hidden;
-                    }
-                    #print-area-archive, #print-area-archive * {
-                      visibility: visible;
-                    }
                     #print-area-archive {
-                      position: absolute;
-                      left: 0;
-                      top: 0;
-                      width: 100%;
                       max-height: none !important;
-                      padding: 0;
-                      margin: 0;
+                      overflow: visible !important;
+                      padding: 0 !important;
                     }
                     .print-hide {
                       display: none !important;
@@ -3156,6 +3312,23 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                 </button>
                 <button
                   type="button"
+                  onClick={() => downloadArchivePdf(savedQuoteForPreview)}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                  title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Tải PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shareArchivePdf(savedQuoteForPreview)}
+                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  Chia Sẻ
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     window.print();
                   }}
@@ -3166,7 +3339,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
       {showExistsAlert && (

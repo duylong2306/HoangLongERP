@@ -833,14 +833,22 @@ export default function MaterialCoordination({
     const proj = projects.find((pr: any) => pr.id === (prop?.projectId))
       || orderDetailModal.project;
     const proposerEmp = employees.find((e: any) => e.id === prop?.createdBy);
-    const coordinatorEmp = employees.find((e: any) => e.id === prop?.coordinatorId);
+    // Đề xuất (proposal) KHÔNG có sẵn trường coordinatorId/coordinatorName (chưa từng được
+    // set ở bất kỳ đâu khi tạo đề xuất) — "Người điều phối" thực chất là người được CHỈ ĐỊNH
+    // trong Quyền Phê Duyệt (loại 'material_coordinator'), lấy qua getMaterialCoordinator().
+    const materialCoordinator = getMaterialCoordinator();
+    const coordinatorEmp = employees.find((e: any) => e.id === (prop?.coordinatorId || materialCoordinator?.id));
+    // Người lập phiếu: order chỉ lưu createdBy (ID nhân viên), không lưu createdByName
+    // → phải tra cứu tên thật từ danh sách nhân viên, không hiển thị thẳng mã NV.
+    const creatorEmp = employees.find((e: any) => e.id === order.createdBy);
     return {
       companyProfile: businessInfo || {},
       projectName: proj?.name || prop?.projectName || '',
       receiverName: prop?.createdByName || '—',
       receiverPhone: proposerEmp?.phone || '—',
       deliveryAddress: proj?.address || '—',
-      coordinatorName: prop?.coordinatorName || '—',
+      creatorName: creatorEmp?.name || order.createdByName || '—',
+      coordinatorName: prop?.coordinatorName || materialCoordinator?.name || '—',
       coordinatorPhone: coordinatorEmp?.phone || '—',
     };
   };
@@ -861,49 +869,56 @@ export default function MaterialCoordination({
     const total = order.tongTien || (order.items || []).reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
     return `<!doctype html><html><head><meta charset="utf-8"><title>Đơn Mua Hàng ${esc(order.id)}</title>
       <style>
-        @page { size: A4; margin: 15mm 18mm; }
+        /* Khổ A5 (148 x 210mm) — nhỏ hơn A4 nên toàn bộ cỡ chữ/khoảng cách bên
+           dưới được thu gọn theo tỉ lệ so với template gốc A4, không chỉ đổi
+           mỗi @page (nếu không nội dung sẽ tràn/vỡ dòng trên khổ giấy nhỏ hơn). */
+        @page { size: A5; margin: 10mm 12mm; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         /* .pdf-export-root: khi xuất PDF (html2canvas), nội dung được nhúng
            trực tiếp vào 1 div của trang chính thay vì thẻ <body> thật (xem
            generateOrderPdfBlob) — nhân đôi selector để font/màu gốc vẫn áp
            dụng đúng trong cả 2 trường hợp (in trực tiếp qua <body> và xuất PDF). */
-        body, .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }
+        body, .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 10px; line-height: 1.45; }
         .page { padding: 0; }
         /* Header dùng table thay vì flex: flex render không ổn định trong
            html2canvas (PDF chia sẻ) khiến 2 cột lệch/đè nhau — table thì luôn
            khớp giữa bản in trình duyệt và PDF xuất ra. */
-        table.header { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+        table.header { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
         table.header td { vertical-align: top; padding: 0; }
         .company-info { width: 58%; }
-        .company-info .name { font-size: 14px; font-weight: bold; margin-bottom: 2px; }
-        .company-info .detail { font-size: 10.5px; color: #333; margin: 1px 0; }
+        .company-info .name { font-size: 12px; font-weight: bold; margin-bottom: 2px; }
+        .company-info .detail { font-size: 9px; color: #333; margin: 1px 0; }
         .center-title { text-align: center; width: 42%; }
-        .center-title .country { font-size: 12px; font-weight: bold; letter-spacing: 0.5px; }
-        .center-title .motto { font-size: 10px; font-style: italic; color: #444; }
-        .center-title .divider { width: 60px; height: 1px; background: #111; margin: 4px auto; }
-        .center-title .doc-title { font-size: 18px; font-weight: bold; letter-spacing: 1px; margin-top: 8px; text-transform: uppercase; }
-        .center-title .doc-code { font-size: 11px; font-weight: bold; margin-top: 3px; }
-        .center-title .doc-date { font-size: 10px; color: #555; margin-top: 2px; }
-        hr { border: none; border-top: 1.5px solid #222; margin: 10px 0; }
+        .center-title .country { font-size: 10.5px; font-weight: bold; letter-spacing: 0.3px; }
+        .center-title .motto { font-size: 8.5px; font-style: italic; color: #444; }
+        .center-title .divider { width: 45px; height: 1px; background: #111; margin: 3px auto; }
+        .center-title .doc-title { font-size: 15px; font-weight: bold; letter-spacing: 0.5px; margin-top: 6px; text-transform: uppercase; }
+        .center-title .doc-code { font-size: 9.5px; font-weight: bold; margin-top: 2px; }
+        .center-title .doc-date { font-size: 8.5px; color: #555; margin-top: 1px; }
+        hr { border: none; border-top: 1.5px solid #222; margin: 7px 0; }
+        /* Khối "BÊN MUA" / "BÊN BÁN" tách riêng, có viền + thanh tiêu đề nền
+           xám — thay cho 2 bảng info gộp chung khó phân biệt trước đây. */
+        .party-box { margin: 5px 0; }
+        .party-title { background: #e8e8e8; font-weight: bold; font-size: 9.5px; letter-spacing: 0.3px; padding: 2.5px 6px; }
         /* table-layout: fixed để trình duyệt chốt độ rộng cột theo dòng đầu
            tiên, không tính lại theo nội dung — tránh html2canvas (PDF chia
            sẻ) tính sai độ rộng cột khi có dòng dùng colspan (VD: "Dự án"),
            gây đè chữ lên bảng vật tư bên dưới. */
-        table.info { width: 100%; border-collapse: collapse; margin: 6px 0; table-layout: fixed; }
-        table.info td { vertical-align: top; padding: 3px 8px; font-size: 11px; overflow-wrap: break-word; }
-        table.info .lbl { font-weight: bold; white-space: nowrap; width: 130px; color: #222; }
+        table.info { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        table.info td { vertical-align: top; padding: 2.5px 6px; font-size: 9px; overflow-wrap: break-word; }
+        table.info .lbl { font-weight: bold; white-space: nowrap; width: 76px; color: #222; }
         table.info .val { color: #1a1a1a; }
-        table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        table.items th, table.items td { border: 1px solid #222; padding: 5px 7px; font-size: 11px; }
+        table.items { width: 100%; border-collapse: collapse; margin-top: 6px; }
+        table.items th, table.items td { border: 0.5px solid #000; padding: 3px 4px; font-size: 8.5px; }
         table.items th { background: #e8e8e8; font-weight: bold; text-align: center; }
         table.items td { vertical-align: middle; }
-        .total-row { text-align: right; font-weight: bold; font-size: 13px; margin-top: 8px; padding: 6px 0; }
-        .total-words { font-size: 11px; color: #333; margin: 4px 0 16px; }
-        table.signatures { width: 100%; border-collapse: collapse; margin-top: 40px; text-align: center; font-size: 11px; }
+        .total-row { text-align: right; font-weight: bold; font-size: 11px; margin-top: 6px; padding: 4px 0; }
+        .total-words { font-size: 9px; color: #333; margin: 3px 0 12px; }
+        table.signatures { width: 100%; border-collapse: collapse; margin-top: 26px; text-align: center; font-size: 9px; }
         table.signatures td { vertical-align: top; width: 33.33%; padding: 0; }
-        .signatures .sig-title { font-weight: bold; font-size: 11px; }
-        .signatures .sig-note { font-size: 9.5px; color: #666; font-style: italic; margin-top: 4px; }
-        .signatures .sig-name { font-weight: bold; margin-top: 40px; font-size: 11px; }
+        .signatures .sig-title { font-weight: bold; font-size: 9px; }
+        .signatures .sig-note { font-size: 8px; color: #666; font-style: italic; margin-top: 3px; }
+        .signatures .sig-name { font-weight: bold; margin-top: 26px; font-size: 9px; }
       </style></head><body>
       <div class="page pdf-export-root">
         <table class="header"><tr>
@@ -912,8 +927,6 @@ export default function MaterialCoordination({
             ${cp.taxCode ? `<div class="detail">MST: ${esc(cp.taxCode)}</div>` : ''}
             ${cp.address ? `<div class="detail">Địa chỉ: ${esc(cp.address)}</div>` : ''}
             ${cp.phone ? `<div class="detail">Điện thoại: ${esc(cp.phone)}</div>` : ''}
-            ${cp.email ? `<div class="detail">Email: ${esc(cp.email)}</div>` : ''}
-            ${cp.representative ? `<div class="detail">Người đại diện: ${esc(cp.representative)}</div>` : ''}
           </td>
           <td class="center-title">
             <div class="country">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
@@ -925,21 +938,26 @@ export default function MaterialCoordination({
           </td>
         </tr></table>
         <hr/>
-        <table class="info">
-          <tr>
-            <td class="lbl">Bên bán:</td><td class="val">${esc(order.supplierName || '—')}</td>
-          </tr>
-          ${order.supplierPhone ? `<tr><td class="lbl">Điện thoại NCC:</td><td class="val">${esc(order.supplierPhone)}</td></tr>` : ''}
-          ${order.supplierAddress ? `<tr><td class="lbl">Địa chỉ NCC:</td><td class="val">${esc(order.supplierAddress)}</td></tr>` : ''}
-        </table>
-        <table class="info">
-          <tr><td class="lbl">Người nhận hàng:</td><td class="val">${esc(ctx.receiverName)}</td>
-              <td class="lbl">SĐT người đặt:</td><td class="val">${esc(ctx.receiverPhone)}</td></tr>
-          <tr><td class="lbl">Địa chỉ nhận hàng:</td><td class="val" colspan="3">${esc(ctx.deliveryAddress)}</td></tr>
-          <tr><td class="lbl">Người điều phối:</td><td class="val">${esc(ctx.coordinatorName)}</td>
-              <td class="lbl">SĐT điều phối:</td><td class="val">${esc(ctx.coordinatorPhone)}</td></tr>
-          <tr><td class="lbl">Dự án:</td><td class="val" colspan="3">${esc(ctx.projectName)}</td></tr>
-        </table>
+        <div class="party-box">
+          <div class="party-title">BÊN MUA (BÊN A)</div>
+          <table class="info">
+            <tr><td class="lbl">Đơn vị:</td><td class="val" colspan="3">${esc(cp.companyName || '—')}</td></tr>
+            <tr><td class="lbl">Người nhận:</td><td class="val">${esc(ctx.receiverName)}</td>
+                <td class="lbl">SĐT:</td><td class="val">${esc(ctx.receiverPhone)}</td></tr>
+            <tr><td class="lbl">Điều phối:</td><td class="val">${esc(ctx.coordinatorName)}</td>
+                <td class="lbl">SĐT:</td><td class="val">${esc(ctx.coordinatorPhone)}</td></tr>
+            <tr><td class="lbl">Địa chỉ nhận:</td><td class="val" colspan="3">${esc(ctx.deliveryAddress)}</td></tr>
+            <tr><td class="lbl">Dự án:</td><td class="val" colspan="3">${esc(ctx.projectName)}</td></tr>
+          </table>
+        </div>
+        <div class="party-box">
+          <div class="party-title">BÊN BÁN (BÊN B)</div>
+          <table class="info">
+            <tr><td class="lbl">Đơn vị:</td><td class="val" colspan="3">${esc(order.supplierName || '—')}</td></tr>
+            ${order.supplierPhone ? `<tr><td class="lbl">Điện thoại:</td><td class="val" colspan="3">${esc(order.supplierPhone)}</td></tr>` : ''}
+            ${order.supplierAddress ? `<tr><td class="lbl">Địa chỉ:</td><td class="val" colspan="3">${esc(order.supplierAddress)}</td></tr>` : ''}
+          </table>
+        </div>
         <table class="items">
           <thead><tr>
             <th style="width:32px">STT</th>
@@ -958,7 +976,7 @@ export default function MaterialCoordination({
           <td>
             <div class="sig-title">NGƯỜI LẬP PHIẾU</div>
             <div class="sig-note">(Ký, ghi rõ họ tên)</div>
-            <div class="sig-name">${esc(order.createdByName || order.createdBy || '')}</div>
+            <div class="sig-name">${esc(ctx.creatorName)}</div>
           </td>
           <td>
             <div class="sig-title">NGƯỜI ĐIỀU PHỐI</div>
@@ -968,7 +986,6 @@ export default function MaterialCoordination({
           <td>
             <div class="sig-title">ĐẠI DIỆN BÊN BÁN</div>
             <div class="sig-note">(Ký, đóng dấu)</div>
-            <div class="sig-name">${esc(order.supplierName || '')}</div>
           </td>
         </tr></table>
       </div>
@@ -1051,7 +1068,7 @@ export default function MaterialCoordination({
     container.style.position = 'fixed';
     container.style.left = '-99999px';
     container.style.top = '0';
-    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.width = '559px'; // ~ khổ A5 148mm ở 96dpi
     container.style.background = '#ffffff';
     const styleEl = document.createElement('style');
     styleEl.textContent = styleText;
@@ -1076,18 +1093,18 @@ export default function MaterialCoordination({
         height: fullHeight, windowHeight: fullHeight,
       });
 
-      // Khớp đúng lề với @page trong buildPurchaseOrderHtml (15mm trên/dưới,
-      // 18mm trái/phải) để PDF giống hệt bản in, không lệch lề.
-      const marginTop = 15, marginSide = 18;
-      const pageWidthMm = 210, pageHeightMm = 297;
+      // Khớp đúng lề với @page trong buildPurchaseOrderHtml (10mm trên/dưới,
+      // 12mm trái/phải, khổ A5) để PDF giống hệt bản in, không lệch lề.
+      const marginTop = 10, marginSide = 12;
+      const pageWidthMm = 148, pageHeightMm = 210;
       const contentWidthMm = pageWidthMm - marginSide * 2;
       const contentHeightMm = pageHeightMm - marginTop * 2;
       // Chiều cao 1 trang, quy đổi ra px của canvas theo đúng tỉ lệ chiều rộng
       // (canvas.width px ứng với contentWidthMm) — dùng để cắt canvas thành
-      // nhiều lát, mỗi lát 1 trang PDF khi nội dung dài hơn 1 trang A4.
+      // nhiều lát, mỗi lát 1 trang PDF khi nội dung dài hơn 1 trang A5.
       const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
 
-      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pdf = new JsPdf({ unit: 'mm', format: 'a5', orientation: 'portrait' });
       let renderedPx = 0;
       let isFirstPage = true;
       while (renderedPx < canvas.height) {

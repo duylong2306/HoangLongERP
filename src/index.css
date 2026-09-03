@@ -296,10 +296,18 @@ body {
 }
 
 /* For task detail, PM tables and cards */
-td, 
+td,
 th,
 tr {
   border-color: #e2e8f0 !important;
+}
+
+/* Bảng báo giá cần viền đen: rule trên ép border-color !important cho mọi td/th/tr,
+   nên phải chỉ định riêng .border-black với độ ưu tiên cao hơn để hiển thị đúng màu đen.
+   Giảm border-width xuống 0.5px vì viền 1px mặc định của Tailwind trông hơi dày trên bảng. */
+.border-black {
+  border-color: #000000 !important;
+  border-width: 0.5px !important;
 }
 
 /* Fix table headers */
