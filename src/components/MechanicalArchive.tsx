@@ -733,6 +733,13 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                   .print-hide {
                     display: none !important;
                   }
+                  /* Chrome có lỗi phân trang với CSS Grid/Flex: khi 1 khối grid (VD: khối
+                     ký tên 2 cột cuối văn bản) rơi đúng ranh giới giữa 2 trang, nội dung
+                     bị vẽ đè/lặp lên trang sau. Ép về dạng khối xếp dọc (block) khi in để
+                     tránh lỗi này — chấp nhận đánh đổi 2 cột xếp chồng thành 1 cột khi in. */
+                  #print-area-archive .grid {
+                    display: block !important;
+                  }
                 }
               `}</style>
               <QuotationTableSheet
