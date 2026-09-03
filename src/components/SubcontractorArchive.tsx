@@ -341,6 +341,12 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
             <div className="p-8 bg-white overflow-y-auto flex-1 font-sans text-xs leading-relaxed text-slate-900 print-agreement relative" id="print-area-archive">
               <style>{`
                 @media print {
+                  /* Bỏ mọi giới hạn overflow:hidden của các thẻ cha (modal, khung bo góc...)
+                     — nếu không, nội dung nhiều trang sẽ bị khung cha cắt/chèn ép làm chữ
+                     đè lên nhau khi in tài liệu dài hơn 1 trang. */
+                  * {
+                    overflow: visible !important;
+                  }
                   body * {
                     visibility: hidden;
                   }
@@ -352,6 +358,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                     left: 0;
                     top: 0;
                     width: 100%;
+                    max-height: none !important;
                     padding: 0;
                     margin: 0;
                   }
