@@ -1089,6 +1089,22 @@ export default function ProjectKanbanBoard({
     return typeMatch && textMatch && pmMatch;
   });
 
+  // Index hóa tasks/customers/employees TRƯỚC khi render thẻ dự án — tránh
+  // tasks.filter()/customers.find()/employees.find() quét lại TOÀN BỘ mảng (có
+  // thể hàng nghìn công việc/khách hàng/nhân sự toàn công ty) cho MỖI thẻ dự án
+  // hiển thị trong MỖI cột (O(dự án × công việc)). File này không dùng useMemo
+  // nào nên phần render chạy lại trên MỌI re-render (gõ tìm kiếm, mở menu "...",
+  // kéo thả...) — dùng Map tra cứu O(1) để phép tính chỉ còn O(N) mỗi render.
+  const tasksByProjectId = new Map<string, Task[]>();
+  tasks.forEach(t => {
+    if (!t.projectId) return;
+    const arr = tasksByProjectId.get(t.projectId);
+    if (arr) arr.push(t); else tasksByProjectId.set(t.projectId, [t]);
+  });
+  const customersById = new Map(customers.map(c => [c.id, c]));
+  const employeesById = new Map(employees.map(e => [e.id, e]));
+  const directorEmp = employees.find(e => e.role === 'director');
+
   // Get project columns configuration (Default mapping if columnId is absent in project object)
 
   // Tìm cột "Hoàn thành" / "Done" theo cấu hình hiện tại — KHÔNG dùng ID cứng.
@@ -3052,11 +3068,11 @@ export default function ProjectKanbanBoard({
                     </div>
                   ) : (
                     pagedColProjects.map((p) => {
-                      const custName = customers.find(c => c.id === p.customerId)?.name || 'Vãng lai';
-                      const pmName = employees.find(e => e.id === p.pmId)?.name || 'Chưa gán';
-                      const directorName = employees.find(e => e.role === 'director')?.name || 'Trương Hữu Long';
+                      const custName = customersById.get(p.customerId)?.name || 'Vãng lai';
+                      const pmName = employeesById.get(p.pmId)?.name || 'Chưa gán';
+                      const directorName = directorEmp?.name || 'Trương Hữu Long';
                       // Count tasks (completion)
-                      const projTasks = tasks.filter(t => t.projectId === p.id);
+                      const projTasks = tasksByProjectId.get(p.id) || [];
                       const doneTasks = projTasks.filter(t => t.status === 'completed');
                       const isSelected = selectedProjectId === p.id;
 
