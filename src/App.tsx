@@ -895,6 +895,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (activeTab === 'finance') setHasVisitedFinance(true);
   }, [activeTab]);
 
+  // Tương tự Tài Chính: giữ mounted Quản Lý Thầu Phụ và Danh Mục NCC Vật Tư
+  // sau lần đầu vào tab, tránh unmount/remount tốn network mỗi lần chuyển qua lại.
+  const [hasVisitedSubcontractorManagement, setHasVisitedSubcontractorManagement] = useState(() => activeTab === 'subcontractor-management');
+  useEffect(() => {
+    if (activeTab === 'subcontractor-management') setHasVisitedSubcontractorManagement(true);
+  }, [activeTab]);
+  const [hasVisitedWarehouseSuppliers, setHasVisitedWarehouseSuppliers] = useState(() => activeTab === 'warehouse-suppliers');
+  useEffect(() => {
+    if (activeTab === 'warehouse-suppliers') setHasVisitedWarehouseSuppliers(true);
+  }, [activeTab]);
+
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
   const [financeInitialProposalId, setFinanceInitialProposalId] = useState<string | null>(null);
   // Mở Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng.
@@ -3938,14 +3949,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             />
           )}
 
-          {/* TAB: QUẢN LÝ THẦU PHỤ (RIÊNG BIỆT) */}
-          {activeTab === 'subcontractor-management' && (
+          {/* TAB: QUẢN LÝ THẦU PHỤ (RIÊNG BIỆT) — giữ mounted sau lần đầu vào tab
+              (ẩn qua CSS thay vì unmount) để không mất cache useMemo/fetch phụ
+              (subcontractorLiabilities, archived quotes...) mỗi lần quay lại. */}
+          {hasVisitedSubcontractorManagement && (
+            <div style={{ display: activeTab === 'subcontractor-management' ? undefined : 'none' }}>
             <SubcontractorManagement
               currentUser={currentUser}
               canEdit={isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical')}
               canDelete={isUserInRoleGroup(currentUser?.id, 'role_admin')}
               viewContractId={localStorage.getItem('hl_view_contract_id') || undefined}
             />
+            </div>
           )}
 
           {/* TAB 5: TÀI CHÍNH — giữ mounted sau lần đầu vào tab (ẩn qua CSS thay
@@ -4002,9 +4017,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             />
           )}
 
-          {/* TAB 5.6: DANH MỤC NHÀ CUNG CẤP KHO */}
-          {activeTab === 'warehouse-suppliers' && (
+          {/* TAB 5.6: DANH MỤC NHÀ CUNG CẤP KHO — giữ mounted sau lần đầu vào tab
+              (ẩn qua CSS thay vì unmount) để không phải fetch/tính lại mỗi lần quay lại. */}
+          {hasVisitedWarehouseSuppliers && (
+            <div style={{ display: activeTab === 'warehouse-suppliers' ? undefined : 'none' }}>
             <WarehouseSuppliers />
+            </div>
           )}
 
           {/* TAB 5.7: QUẢN LÝ KHO */}
