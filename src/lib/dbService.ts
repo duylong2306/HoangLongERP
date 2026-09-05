@@ -276,8 +276,11 @@ function enqueueUpload<T>(task: () => Promise<T>): Promise<T> {
   });
 }
 
-// Query helper for Supabase (cached per table)
-async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh = false): Promise<T[]> {
+// Query helper for Supabase (cached per table). `selectClause` cho phép 1 bảng
+// dùng select() gọn hơn mặc định '*' (vd loại cột nặng như payments.images) —
+// LƯU Ý cache key chỉ theo `tableName`, nên KHÔNG gọi hàm này với 2 selectClause
+// khác nhau cho CÙNG 1 bảng ở 2 nơi (sẽ đụng cache, trả nhầm shape dữ liệu).
+async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh = false, selectClause = '*'): Promise<T[]> {
   // Trả cache nếu có (trừ khi forceFresh — dùng cho purchase_orders sau khi lưu
   // đơn giá / gán dự án, để realtime refetch KHÔNG trả dữ liệu cũ ghi đè state)
   if (!forceFresh && _queryCache.has(tableName)) {
@@ -297,7 +300,7 @@ async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh
   const promise = (async () => {
     try {
       console.log(`[DB] Querying ${tableName}...`);
-      const { data, error } = await supabase.from(tableName).select('*');
+      const { data, error } = await supabase.from(tableName).select(selectClause);
       if (error) {
         console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
         throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
@@ -1539,18 +1542,67 @@ export const dbService = {
 
   // 6. PAYMENTS
   payments: {
+    /**
+     * Bản LEAN mặc định — loại cột `images` (mảng base64 sao kê/biên lai, có
+     * thể tới hàng trăm KB/phiếu) khỏi payload, thay bằng `imageCount` (chỉ 1
+     * số nguyên, tính server-side qua computed column payments_image_count()
+     * — xem migration 20260905_payments_lean_list_exclude_images.sql) để UI
+     * vẫn hiển thị đúng badge/số lượng/trạng thái "Hoàn Thành" mà không phải
+     * tải ảnh đầy đủ cho MỌI phiếu chi ngay lúc khởi động app. Ảnh đầy đủ chỉ
+     * tải khi cần qua getImages()/getFull() bên dưới (FinanceManagement.tsx
+     * dùng khi mở lightbox / merge ảnh mới vào phiếu đã có).
+     */
     async list(): Promise<Payment[]> {
-      return querySupabase<Payment>('payments', INITIAL_PAYMENTS);
+      return querySupabase<Payment>(
+        'payments',
+        INITIAL_PAYMENTS,
+        false,
+        'id, code, date, payment_at, recipient, project_id, category, amount, payment_method, notes, proposer, approver, status, attachment_name, approvals, purchase_order_id, subcontractor_id, related_advance_id, employee_id, supplier_id, proposer_id, approver_id, source, image_count:payments_image_count'
+      );
+    },
+    /** Tải ĐẦY ĐỦ ảnh sao kê/biên lai của 1 phiếu chi — dùng khi mở lightbox xem ảnh. */
+    async getImages(id: string): Promise<string[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase.from('payments').select('images').eq('id', id).maybeSingle();
+        if (error) {
+          console.error('[DB] ❌ Supabase payments.getImages error:', error.message);
+          return [];
+        }
+        return (data as any)?.images || [];
+      } catch (err) {
+        console.error('[DB] ❌ Supabase payments.getImages exception:', err);
+        return [];
+      }
+    },
+    /**
+     * Tải ĐẦY ĐỦ 1 phiếu chi (kèm images thật) trực tiếp từ Supabase — dùng
+     * TRƯỚC KHI merge thêm ảnh mới vào phiếu (xem handleSaveVoucherImages,
+     * FinanceManagement.tsx). KHÔNG được lấy `images` từ state `payments`
+     * trong bộ nhớ (giờ chỉ có imageCount, không có mảng ảnh thật) để merge,
+     * nếu không ảnh cũ sẽ bị GHI ĐÈ MẤT khi lưu ảnh mới.
+     */
+    async getFull(id: string): Promise<Payment | null> {
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      try {
+        const { data, error } = await supabase.from('payments').select('*').eq('id', id).maybeSingle();
+        if (error) {
+          console.error('[DB] ❌ Supabase payments.getFull error:', error.message);
+          return null;
+        }
+        return data ? rowToCamel(data) : null;
+      } catch (err) {
+        console.error('[DB] ❌ Supabase payments.getFull exception:', err);
+        return null;
+      }
     },
     /**
      * Bản tải NHẸ của payments — CHỈ lấy các cột cần cho tổng hợp Quỹ Tiền Mặt
-     * (số dư/tổng nạp/tổng chi), KHÔNG kéo theo cột `images` (mảng base64 sao kê/
-     * biên lai đính kèm, có thể rất nặng — hàng trăm KB/phiếu) và `approvals`.
-     * Toàn bộ payments.list() ở trên luôn tải kèm images cho mọi phiếu chi dù màn
-     * hình không hiển thị ảnh, khiến tab Quỹ Tiền Mặt (chỉ cần cộng số) bị chờ tải
-     * xong cả một mảng ảnh khổng lồ mới hiện được số liệu → cảm giác "không load"
-     * hoặc load rất chậm. Dùng query riêng, nhỏ gọn, không qua cache chung của
-     * payments.list() để luôn có số liệu mới nhất mà vẫn nhanh.
+     * (số dư/tổng nạp/tổng chi), không kéo `approvals`. (payments.list() ở trên
+     * nay đã tự loại `images` mặc định — xem comment tại đó — nhưng hàm này vẫn
+     * giữ riêng vì không qua cache chung, luôn lấy số liệu mới nhất tức thời.)
      */
     async listCashFundSummary(): Promise<Pick<Payment, 'id' | 'code' | 'date' | 'category' | 'paymentMethod' | 'status' | 'amount' | 'notes' | 'proposer' | 'proposerId'>[]> {
       const supabase = getSupabase();
@@ -1570,7 +1622,14 @@ export const dbService = {
       }
     },
     async save(payment: Payment): Promise<void> {
-      await saveSupabase('payments', payment);
+      // `imageCount` là field ẢO — chỉ tính server-side qua computed column
+      // payments_image_count() khi ĐỌC (list()), KHÔNG phải cột thật trong bảng
+      // payments. Object `payment` truyền vào đây thường lấy từ state (spread
+      // từ 1 item của payments.list(), vốn có sẵn field này) — nếu upsert
+      // nguyên vẹn, PostgREST sẽ báo lỗi "column image_count does not exist"
+      // vì cố ghi vào 1 cột không tồn tại. Luôn loại field này trước khi lưu.
+      const { imageCount, ...toSave } = payment as Payment & { imageCount?: number };
+      await saveSupabase('payments', toSave);
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('payments', id);

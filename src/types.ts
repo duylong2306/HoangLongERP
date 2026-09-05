@@ -394,7 +394,14 @@ export interface Payment {
   approver: string;
   status: 'pending' | 'approved' | 'rejected';
   attachmentName?: string;
-  images?: string[]; // Base64 data URLs của sao kê / biên lai đính kèm phiếu chi
+  // Base64 data URLs của sao kê / biên lai đính kèm phiếu chi — dbService.payments.list()
+  // (đường tải chính, kể cả RPC load_all_core_data) KHÔNG còn trả field này mặc định
+  // (quá nặng — hàng trăm KB/phiếu × hàng nghìn phiếu). Chỉ có giá trị thật khi tải qua
+  // dbService.payments.getFull(id)/getImages(id), hoặc khi 1 record được Realtime patch
+  // (postgres_changes gửi nguyên row, không qua select() nên vẫn có images). Ở mọi nơi
+  // khác, dùng `imageCount` để biết SỐ LƯỢNG ảnh mà không cần tải ảnh thật.
+  images?: string[];
+  imageCount?: number; // Số lượng ảnh đính kèm — luôn có giá trị đúng từ payments.list(), kể cả khi `images` chưa tải.
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
   purchaseOrderId?: string;  // FK → PurchaseOrder (liên kết phiếu chi thanh toán đơn hàng)
   subcontractorId?: string;  // FK → Thầu Phụ (liên kết thanh toán với Công nợ Trả thầu phụ)

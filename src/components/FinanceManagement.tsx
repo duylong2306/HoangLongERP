@@ -67,11 +67,19 @@ import {
 //  - rejected        → Bác thầu (giữ nguyên ý nghĩa từ chối)
 //  - có images       → Hoàn Thành (đã đẩy đủ chứng từ)
 //  - chưa có images  → Thiếu chứng từ
+// Số lượng ảnh sao kê/chứng từ của 1 phiếu chi — payments.list() mặc định chỉ
+// trả `imageCount` (không có mảng `images` thật, xem dbService.ts), nhưng 1 số
+// nguồn khác (Realtime patch nguyên row, hoặc sau khi lazy-fetch qua
+// getImages()/getFull()) vẫn có thể đã có `images` đầy đủ — ưu tiên đếm theo
+// `images` nếu có (nguồn chính xác nhất), fallback `imageCount`, để luôn ra
+// đúng kết quả bất kể payment đến từ nguồn nào.
+export const getPaymentImageCount = (p: Payment): number =>
+  Array.isArray(p.images) ? p.images.length : (p.imageCount ?? 0);
+
 export type PaymentDocStatus = 'rejected' | 'completed' | 'missing_docs';
 export const getPaymentDocStatus = (p: Payment): PaymentDocStatus => {
   if (p.status === 'rejected') return 'rejected';
-  const hasImages = Array.isArray(p.images) && p.images.length > 0;
-  return hasImages ? 'completed' : 'missing_docs';
+  return getPaymentImageCount(p) > 0 ? 'completed' : 'missing_docs';
 };
 
 // Nhãn & badge "Nhóm gốc chi" (category của phiếu chi) — Việt hóa, nền trắng, chữ màu viền.
@@ -245,6 +253,17 @@ interface FinanceProps {
   systemConfig?: any;
   /** Deep-link: mở chi tiết Đề Xuất Vật Tư tương ứng từ tab Đơn Hàng. */
   onOpenMaterialProposal?: (proposalId: string) => void;
+  /**
+   * Danh sách Đề Xuất Tạm Ứng/Chi — App.tsx đã load và giữ đồng bộ (realtime +
+   * event 'hl-subcontractor-advances-updated') ở cấp cao hơn, giống receipts/
+   * payments. Truyền cả setter xuống để FinanceManagement cập nhật optimistic
+   * ngay tại chỗ (giữ nguyên các lời gọi setSubcontractorAdvances hiện có) mà
+   * KHÔNG cần tự fetch lại từ Supabase mỗi lần component này mount — trước đây
+   * mỗi lần rời rồi quay lại menu Tài Chính đều tốn thêm 1 network round-trip
+   * dù dữ liệu đã có sẵn ở App.tsx.
+   */
+  subcontractorAdvances?: SubcontractorAdvanceProposal[];
+  setSubcontractorAdvances?: React.Dispatch<React.SetStateAction<SubcontractorAdvanceProposal[]>>;
 }
 
 // Subcontractor Contract interface for accounting
@@ -435,6 +454,35 @@ const PoPriceEditInput = React.memo(({ value, onCommit }: { value: number; onCom
   );
 });
 
+// Thumbnail sao kê/biên lai của 1 phiếu chi — tách component riêng (thay vì gọi
+// trong hàm proposalCard bên dưới) để dùng useState/useEffect ĐÚNG Rules of
+// Hooks (proposalCard là hàm thường được gọi lặp lại trong .map(), không phải
+// component). payments.list() nay chỉ trả `imageCount`, KHÔNG có ảnh thật (xem
+// dbService.ts) — component này lazy-fetch ảnh đầy đủ CHỈ cho phiếu có
+// imageCount > 0 và ĐANG thực sự hiển thị làm thẻ, thay vì tải ảnh của toàn bộ
+// phiếu chi trong hệ thống ngay lúc khởi động app.
+const VoucherThumbnails = React.memo(({ paymentId, imageCount }: { paymentId: string; imageCount: number }) => {
+  const [images, setImages] = useState<string[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (imageCount > 0) {
+      dbService.payments.getImages(paymentId).then(imgs => { if (active) setImages(imgs); });
+    } else {
+      setImages(null);
+    }
+    return () => { active = false; };
+  }, [paymentId, imageCount]);
+  if (!images || images.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {images.slice(0, 4).map((img, idx) => (
+        <img key={idx} src={img} alt="sao ke" className="w-8 h-8 rounded object-cover border border-slate-300" />
+      ))}
+      {images.length > 4 ? <span className="text-[9px] text-slate-500 self-center">+{images.length - 4}</span> : null}
+    </div>
+  );
+});
+
 export default function FinanceManagement({
   receipts,
   payments,
@@ -466,6 +514,8 @@ export default function FinanceManagement({
   tasks: tasksProp = [],
   systemConfig,
   onOpenMaterialProposal,
+  subcontractorAdvances: subcontractorAdvancesProp,
+  setSubcontractorAdvances: setSubcontractorAdvancesProp,
 }: FinanceProps) {
   const companyProfile = systemConfig?.companyProfile || {};
   const { addToast } = useNotification();
@@ -661,7 +711,13 @@ export default function FinanceManagement({
   }, []);
 
   // Subcontractor Advance Proposals (Đề Xuất Thu Chi) states and load effect
-  const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
+  // Ưu tiên dùng subcontractorAdvances/setSubcontractorAdvances App.tsx truyền
+  // xuống (đã load & giữ đồng bộ realtime ở cấp cao hơn) — chỉ fallback về state
+  // cục bộ + tự fetch (bên dưới) khi component được dùng độc lập không qua App.tsx
+  // (vd RouteHandler.tsx cũ chưa truyền prop này).
+  const [subcontractorAdvancesLocal, setSubcontractorAdvancesLocal] = useState<SubcontractorAdvanceProposal[]>([]);
+  const subcontractorAdvances = subcontractorAdvancesProp ?? subcontractorAdvancesLocal;
+  const setSubcontractorAdvances = setSubcontractorAdvancesProp ?? setSubcontractorAdvancesLocal;
   const [activeProposalForPayment, setActiveProposalForPayment] = useState<SubcontractorAdvanceProposal | null>(null);
   // Modal upload sao kê (bước "Cập nhật chứng từ")
   const [voucherUploadProposal, setVoucherUploadProposal] = useState<SubcontractorAdvanceProposal | null>(null);
@@ -700,6 +756,23 @@ export default function FinanceManagement({
       setApproveAmountInput(String(viewingProposalDetail.approvedAmount ?? viewingProposalDetail.amount ?? ''));
     }
   }, [viewingProposalDetail]);
+
+  // Ảnh sao kê/chứng từ của phiếu chi liên kết — payments.list() nay chỉ trả
+  // imageCount, KHÔNG có mảng ảnh thật (xem dbService.ts) để tránh tải ảnh của
+  // TOÀN BỘ phiếu chi ngay lúc khởi động app. Chỉ lazy-fetch ảnh đầy đủ CHO ĐÚNG
+  // 1 phiếu khi cửa sổ chi tiết đề xuất này thực sự mở ra.
+  const [linkedVoucherImages, setLinkedVoucherImages] = useState<{ paymentId: string; images: string[] } | null>(null);
+  useEffect(() => {
+    if (!viewingProposalDetail) { setLinkedVoucherImages(null); return; }
+    const voucher = payments.find(p => p.id === viewingProposalDetail.paymentId)
+      || payments.find(p => p.relatedAdvanceId === viewingProposalDetail.id);
+    if (!voucher || getPaymentImageCount(voucher) === 0) { setLinkedVoucherImages(null); return; }
+    let active = true;
+    dbService.payments.getImages(voucher.id).then(images => {
+      if (active) setLinkedVoucherImages({ paymentId: voucher.id, images });
+    });
+    return () => { active = false; };
+  }, [viewingProposalDetail, payments]);
 
   // ── Thùng rác: Đề Xuất bị Từ Chối (tự xóa sau 30 ngày + khôi phục) — giống Đề xuất vật tư ──
   const DAYS_TO_AUTO_DELETE = 30;
@@ -918,6 +991,12 @@ export default function FinanceManagement({
   }, []);
 
   useEffect(() => {
+    // App.tsx đã tự fetch + lắng nghe 'hl-subcontractor-advances-updated' cho
+    // subcontractorAdvances (giống receipts/payments) khi truyền prop xuống —
+    // fetch lại ở đây nữa sẽ tốn thêm 1 round-trip Supabase MỖI LẦN component
+    // này mount (vd rời rồi quay lại menu Tài Chính) dù dữ liệu đã có sẵn.
+    // Chỉ tự fetch khi dùng độc lập không qua App.tsx (không có prop này).
+    if (subcontractorAdvancesProp !== undefined) return;
     let active = true;
     const fetchAdvances = async () => {
       try {
@@ -939,7 +1018,7 @@ export default function FinanceManagement({
       active = false;
       window.removeEventListener('hl-subcontractor-advances-updated', handleUpdate);
     };
-  }, []);
+  }, [subcontractorAdvancesProp]);
 
   // Deep link từ Công việc: tự động mở form lập phiếu cho đề xuất có id tương ứng
   // (chỉ mở 1 lần, kể cả khi danh sách đề xuất được làm mới lại).
@@ -1894,12 +1973,38 @@ export default function FinanceManagement({
 
   // Combined liabilities list
   const mergedLiabilities = useMemo(() => {
+    // Index hóa payments theo subcontractorId / recipient / relatedAdvanceId TRƯỚC,
+    // để tra cứu O(1) thay vì payments.filter() toàn bộ mảng cho MỖI hợp đồng thầu
+    // phụ/công nợ tuỳ chỉnh bên dưới (trước đây là O(N×M): N = số hợp đồng + công
+    // nợ, M = tổng số phiếu chi — càng nhiều dữ liệu càng chậm, và bất kỳ 1 phiếu
+    // chi nào đổi qua Realtime cũng khiến toàn bộ phép tính O(N×M) này chạy lại).
+    const paymentsBySubcontractorId = new Map<string, Payment[]>();
+    const paymentsByRecipient = new Map<string, Payment[]>();
+    const paymentsByAdvanceId = new Map<string, Payment[]>();
+    payments.forEach(p => {
+      if (p.subcontractorId) {
+        const arr = paymentsBySubcontractorId.get(p.subcontractorId);
+        if (arr) arr.push(p); else paymentsBySubcontractorId.set(p.subcontractorId, [p]);
+      }
+      if (p.recipient) {
+        const arr = paymentsByRecipient.get(p.recipient);
+        if (arr) arr.push(p); else paymentsByRecipient.set(p.recipient, [p]);
+      }
+      if (p.relatedAdvanceId) {
+        const arr = paymentsByAdvanceId.get(p.relatedAdvanceId);
+        if (arr) arr.push(p); else paymentsByAdvanceId.set(p.relatedAdvanceId, [p]);
+      }
+    });
+
     const subs = approvedSubContracts.map(sub => {
-      const paymentsMade = payments.filter(p => {
-        const matchesSubcontractor =
-          (p.subcontractorId && sub.subcontractorId && p.subcontractorId === sub.subcontractorId) ||
-          (p.recipient && sub.subcontractorName && p.recipient === sub.subcontractorName);
-        if (!matchesSubcontractor) return false;
+      // Ứng viên = phiếu chi khớp subcontractorId HOẶC recipient===tên thầu phụ
+      // (giữ đúng logic OR gốc), gộp + khử trùng theo id trước khi lọc projectId.
+      const bySub = sub.subcontractorId ? (paymentsBySubcontractorId.get(sub.subcontractorId) || []) : [];
+      const byName = sub.subcontractorName ? (paymentsByRecipient.get(sub.subcontractorName) || []) : [];
+      const candidateById = new Map<string, Payment>();
+      bySub.forEach(p => candidateById.set(p.id, p));
+      byName.forEach(p => candidateById.set(p.id, p));
+      const paymentsMade = Array.from(candidateById.values()).filter(p => {
         // 1 thầu phụ có thể có NHIỀU hợp đồng ở NHIỀU dự án khác nhau (xem taskId/
         // projectId ở mergedLiabilities bên dưới) — nếu phiếu chi có gắn rõ dự án cụ
         // thể (vd Chi phí Công trình cho 1 công trình), CHỈ được tính vào đúng hợp
@@ -1944,10 +2049,10 @@ export default function FinanceManagement({
       // Nợ tạm ứng: khớp theo relatedAdvanceId.
       // Nợ thủ công NCC / khác: khớp theo tên người nhận (recipient).
       const paymentsMade = liab.subcontractorId
-        ? payments.filter(p => p.subcontractorId === liab.subcontractorId && p.status === 'approved')
+        ? (paymentsBySubcontractorId.get(liab.subcontractorId) || []).filter(p => p.status === 'approved')
         : liab.relatedAdvanceId
-          ? payments.filter(p => p.relatedAdvanceId === liab.relatedAdvanceId && p.status === 'approved')
-          : payments.filter(p => p.recipient === liab.name && p.status === 'approved');
+          ? (paymentsByAdvanceId.get(liab.relatedAdvanceId) || []).filter(p => p.status === 'approved')
+          : (paymentsByRecipient.get(liab.name) || []).filter(p => p.status === 'approved');
       const totalPaidAmount = paymentsMade.length > 0
         ? paymentsMade.reduce((sum, p) => sum + p.amount, 0)
         : (liab.relatedAdvanceId ? 0 : (liab.paid || 0));
@@ -3422,10 +3527,22 @@ export default function FinanceManagement({
     });
   }, [travelNorms]);
 
-  // Overall statistics computation
-  const activeProjectsCount = projects.filter(p => p.status === 'processing' || p.status === 'new').length;
-  const totalRevenueSum = receipts.reduce((sum, r) => sum + r.amount, 0);
-  const totalExpenseSum = payments.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
+  // Overall statistics computation — memo hóa để không lặp lại phép tính trên
+  // toàn bộ mảng projects/receipts/payments ở MỌI lần re-render (component này
+  // re-render rất thường xuyên do state cục bộ như tìm kiếm/mở modal), chỉ tính
+  // lại khi dữ liệu nguồn thực sự đổi.
+  const activeProjectsCount = useMemo(
+    () => projects.filter(p => p.status === 'processing' || p.status === 'new').length,
+    [projects]
+  );
+  const totalRevenueSum = useMemo(
+    () => receipts.reduce((sum, r) => sum + r.amount, 0),
+    [receipts]
+  );
+  const totalExpenseSum = useMemo(
+    () => payments.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0),
+    [payments]
+  );
   
   // Custom project categories
   const ctCategoriesList = [];
@@ -4238,8 +4355,14 @@ export default function FinanceManagement({
       return;
     }
     try {
-      const merged = [...(voucher.images || []), ...voucherUploadImages];
-      const updatedPay: Payment = { ...voucher, images: merged };
+      // ⚠️ QUAN TRỌNG: `voucher.images` trong state `payments` (bộ nhớ) giờ
+      // không còn ảnh thật (payments.list() chỉ trả imageCount — xem
+      // dbService.ts) — nếu merge trực tiếp từ đây sẽ MẤT toàn bộ ảnh cũ đã
+      // lưu khi ghi ảnh mới. Luôn lấy lại bản ĐẦY ĐỦ (ảnh thật) từ Supabase
+      // ngay trước khi merge để đảm bảo không ghi đè mất chứng từ đã có.
+      const fullVoucher = await dbService.payments.getFull(voucher.id);
+      const merged = [...(fullVoucher?.images || []), ...voucherUploadImages];
+      const updatedPay: Payment = { ...voucher, ...(fullVoucher || {}), images: merged };
       await dbService.payments.save(updatedPay);
       onUpdatePayment?.(updatedPay);
 
@@ -5849,21 +5972,18 @@ export default function FinanceManagement({
                                 {adv.taskName ? <span className="text-slate-500"> · {adv.taskName}</span> : null}
                               </div>
 
-                              {/* Sao kê đã upload lên phiếu chi */}
-                              {voucher && voucher.images && voucher.images.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {voucher.images.slice(0, 4).map((img, idx) => (
-                                    <img key={idx} src={img} alt="sao ke" className="w-8 h-8 rounded object-cover border border-slate-300" />
-                                  ))}
-                                  {voucher.images.length > 4 ? <span className="text-[9px] text-slate-500 self-center">+{voucher.images.length - 4}</span> : null}
-                                </div>
+                              {/* Sao kê đã upload lên phiếu chi — thumbnail lazy-load qua
+                                  VoucherThumbnails, đếm số lượng dùng imageCount (có sẵn
+                                  từ payments.list(), không cần chờ tải ảnh). */}
+                              {voucher && getPaymentImageCount(voucher) > 0 ? (
+                                <VoucherThumbnails paymentId={voucher.id} imageCount={getPaymentImageCount(voucher)} />
                               ) : null}
 
                               {/* Chân: ngày + số sao kê */}
                               <div className="flex items-center justify-between text-[9px] text-slate-500 pt-0.5">
                                 <span className="font-mono text-slate-500">{adv.date || adv.proposalDate || ''}</span>
-                                {voucher && voucher.images && voucher.images.length > 0 ? (
-                                  <span className="text-violet-600 font-semibold">📎 {voucher.images.length} sao kê</span>
+                                {voucher && getPaymentImageCount(voucher) > 0 ? (
+                                  <span className="text-violet-600 font-semibold">📎 {getPaymentImageCount(voucher)} sao kê</span>
                                 ) : null}
                               </div>
 
@@ -8166,7 +8286,7 @@ export default function FinanceManagement({
                               <td className="px-3 py-3">
                                 {(() => {
                                   const total = g.payments.length;
-                                  const withDocs = g.payments.filter(p => Array.isArray(p.images) && p.images.length > 0).length;
+                                  const withDocs = g.payments.filter(p => getPaymentImageCount(p) > 0).length;
                                   const all = total > 0 && withDocs === total;
                                   return (
                                     <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${all ? 'bg-white text-emerald-700 border-emerald-600' : 'bg-white text-orange-600 border-orange-500'}`}>
@@ -8270,14 +8390,18 @@ export default function FinanceManagement({
                                     )}
                                   </td>
                                   <td className="px-3 py-2.5 text-center">
-                                    {Array.isArray(p.images) && p.images.length > 0 ? (
+                                    {getPaymentImageCount(p) > 0 ? (
                                       <button
                                         type="button"
-                                        onClick={() => setLightboxImages(p.images!)}
-                                        title={`Xem ${p.images.length} ảnh chứng từ`}
+                                        // Ảnh thật có thể CHƯA có sẵn (payments.list() chỉ trả imageCount)
+                                        // — dùng luôn nếu đã có (vd Realtime patch), không thì tải lazy
+                                        // đúng lúc bấm xem, tránh phải tải ảnh của MỌI phiếu chi đang
+                                        // hiển thị trong bảng ngay từ đầu.
+                                        onClick={() => Array.isArray(p.images) ? setLightboxImages(p.images) : dbService.payments.getImages(p.id).then(setLightboxImages)}
+                                        title={`Xem ${getPaymentImageCount(p)} ảnh chứng từ`}
                                         className="bg-slate-700 hover:bg-slate-600 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
                                       >
-                                        <ImageIcon className="w-3 h-3" /> {p.images.length}
+                                        <ImageIcon className="w-3 h-3" /> {getPaymentImageCount(p)}
                                       </button>
                                     ) : (
                                       <span className="text-slate-600 text-[9px] italic">Chưa có</span>
@@ -9549,11 +9673,14 @@ export default function FinanceManagement({
                   </div>
                 )}
 
-                {/* Sao kê / chứng từ đính kèm phiếu chi */}
+                {/* Sao kê / chứng từ đính kèm phiếu chi — ảnh thật lazy-load qua
+                    linkedVoucherImages (effect ở trên), voucher.imageCount dùng
+                    để biết có ảnh hay chưa mà không cần tải ảnh trước. */}
                 {(() => {
                   const linkedVoucher = payments.find(p => p.id === viewingProposalDetail.paymentId)
                     || payments.find(p => p.relatedAdvanceId === viewingProposalDetail.id);
-                  if (!linkedVoucher || !linkedVoucher.images || linkedVoucher.images.length === 0) {
+                  const hasDocs = !!linkedVoucher && getPaymentImageCount(linkedVoucher) > 0;
+                  if (!hasDocs) {
                     return viewingProposalDetail.status === 'awaiting_voucher_update' ? (
                       <div className="pt-3 border-t border-slate-800/60">
                         <span className="text-violet-400 block text-[10px] uppercase font-black tracking-wider mb-2">Sao kê / Chứng từ</span>
@@ -9567,14 +9694,19 @@ export default function FinanceManagement({
                       </div>
                     ) : null;
                   }
+                  const images = linkedVoucherImages?.paymentId === linkedVoucher!.id ? linkedVoucherImages.images : null;
                   return (
                     <div className="pt-3 border-t border-slate-800/60">
-                      <span className="text-violet-400 block text-[10px] uppercase font-black tracking-wider mb-2">Sao kê / Chứng từ ({linkedVoucher.images.length})</span>
-                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                        {linkedVoucher.images.map((img, idx) => (
-                          <img key={idx} src={img} alt={`sao ke ${idx + 1}`} onClick={() => setLightboxImages(linkedVoucher.images ?? [])} className="w-full h-24 object-cover rounded-lg border border-slate-700 cursor-pointer hover:opacity-80 transition-opacity" title="Click để phóng to" />
-                        ))}
-                      </div>
+                      <span className="text-violet-400 block text-[10px] uppercase font-black tracking-wider mb-2">Sao kê / Chứng từ ({getPaymentImageCount(linkedVoucher!)})</span>
+                      {images ? (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                          {images.map((img, idx) => (
+                            <img key={idx} src={img} alt={`sao ke ${idx + 1}`} onClick={() => setLightboxImages(images)} className="w-full h-24 object-cover rounded-lg border border-slate-700 cursor-pointer hover:opacity-80 transition-opacity" title="Click để phóng to" />
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 italic">Đang tải ảnh...</span>
+                      )}
                     </div>
                   );
                 })()}

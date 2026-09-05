@@ -884,6 +884,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setMobileMenuOpen(false);
   }, [activeTab]);
 
+  // Giữ FinanceManagement MOUNTED sau lần đầu vào tab (ẩn bằng CSS display:none
+  // khi rời tab thay vì unmount hoàn toàn) — trước đây mỗi lần rời rồi quay lại
+  // menu Tài Chính, component 10.000+ dòng này bị unmount/mount lại từ đầu, làm
+  // mất cache của toàn bộ useMemo (mergedLiabilities, filteredReceipts/Payments,
+  // receiptGroups/paymentGroups...) và chạy lại các fetch phụ, gây cảm giác
+  // "load lại" dù dữ liệu nguồn không hề đổi.
+  const [hasVisitedFinance, setHasVisitedFinance] = useState(() => activeTab === 'finance');
+  useEffect(() => {
+    if (activeTab === 'finance') setHasVisitedFinance(true);
+  }, [activeTab]);
+
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
   const [financeInitialProposalId, setFinanceInitialProposalId] = useState<string | null>(null);
   // Mở Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng.
@@ -3937,8 +3948,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             />
           )}
 
-          {/* TAB 5: TÀI CHÍNH */}
-          {activeTab === 'finance' && (
+          {/* TAB 5: TÀI CHÍNH — giữ mounted sau lần đầu vào tab (ẩn qua CSS thay
+              vì unmount) để không mất cache useMemo/fetch phụ mỗi lần quay lại. */}
+          {hasVisitedFinance && (
+            <div style={{ display: activeTab === 'finance' ? undefined : 'none' }}>
             <FinanceManagement
               receipts={receipts}
               payments={payments}
@@ -3969,7 +3982,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onInitialProposalConsumed={() => setFinanceInitialProposalId(null)}
               onOpenMaterialProposal={openMaterialProposal}
               systemConfig={hrmConfig}
+              subcontractorAdvances={subcontractorAdvances}
+              setSubcontractorAdvances={setSubcontractorAdvances}
             />
+            </div>
           )}
 
           {/* TAB 5.5: ĐIỀU PHỐI VẬT TƯ */}
