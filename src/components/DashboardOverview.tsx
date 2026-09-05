@@ -1093,6 +1093,10 @@ export default function DashboardOverview({
 
   // Listen for real-time leave updates (HRM + Supabase realtime)
   useEffect(() => {
+    // Trước đây thiếu bước tải lúc mount — dashLeaves rỗng cho tới khi có sự
+    // kiện thay đổi hrm_leaves xảy ra trong phiên, khiến tính công/hiển thị
+    // trạng thái nghỉ trong lịch chấm công sai (coi ngày nghỉ đã duyệt là vắng).
+    refreshDashLeaves();
     const handleSyncLeaves = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
