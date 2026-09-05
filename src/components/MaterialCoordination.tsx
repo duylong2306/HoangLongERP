@@ -383,7 +383,15 @@ export default function MaterialCoordination({
     return result;
   }, [proposals, projects]);
 
-  const filteredDocs = boardItems.filter(item => {
+  // Map tra cứu O(1) theo id đơn mua hàng — dùng trong vòng lặp render thẻ Kanban
+  // bên dưới để tránh purchaseOrders.filter() quét lại TOÀN BỘ đơn mua cho MỖI
+  // thẻ đề xuất hiển thị, trên MỌI re-render.
+  const purchaseOrdersById = React.useMemo(() => new Map(purchaseOrders.map((o: any) => [o.id, o])), [purchaseOrders]);
+
+  // Bọc useMemo vì boardItems có thể vài trăm thẻ và trước đây filteredDocs/stats
+  // tính lại (gồm gọi resolveStatus() lặp 7 lần/thẻ) ở MỌI re-render, kể cả khi
+  // chỉ gõ tìm kiếm hay mở 1 thẻ chi tiết không liên quan.
+  const filteredDocs = React.useMemo(() => boardItems.filter(item => {
     const docName = item.doc.name?.toLowerCase() || '';
     const docCode = item.doc.code?.toLowerCase() || '';
     const projName = item.project.name?.toLowerCase() || '';
@@ -393,17 +401,19 @@ export default function MaterialCoordination({
     const st = resolveStatus(item);
     const matchesStatus = statusFilter === 'all' || st === statusFilter;
     return matchesSearch && matchesStatus;
-  });
+  }), [boardItems, searchTerm, statusFilter]);
 
-  const stats = {
-    total: boardItems.length,
-    find_supplier: boardItems.filter(i => resolveStatus(i) === 'find_supplier').length,
-    waiting_approval: boardItems.filter(i => resolveStatus(i) === 'waiting_approval').length,
-    waiting_order: boardItems.filter(i => resolveStatus(i) === 'waiting_order').length,
-    ordered: boardItems.filter(i => resolveStatus(i) === 'ordered').length,
-    received: boardItems.filter(i => resolveStatus(i) === 'received').length,
-    cancelled: boardItems.filter(i => resolveStatus(i) === 'cancelled').length,
-  };
+  const stats = React.useMemo(() => {
+    // Chỉ gọi resolveStatus() 1 lần/thẻ thay vì 6 lần filter riêng biệt.
+    const counts: Record<ProposalStatus, number> = {
+      find_supplier: 0, waiting_approval: 0, waiting_order: 0, ordered: 0, received: 0, cancelled: 0,
+    } as Record<ProposalStatus, number>;
+    boardItems.forEach(i => {
+      const st = resolveStatus(i);
+      if (st in counts) counts[st]++;
+    });
+    return { total: boardItems.length, ...counts };
+  }, [boardItems]);
 
   // ─── Proposal persistence ────────────────────────────────────────────────
   const saveProposal = React.useCallback(async (p: any) => {
@@ -1760,7 +1770,7 @@ export default function MaterialCoordination({
                                 </p>
                               )}
                               {isProposal && (() => {
-                                const relatedPOs = purchaseOrders.filter((o: any) => (item.doc.purchaseOrderIds || []).includes(o.id));
+                                const relatedPOs = (item.doc.purchaseOrderIds || []).map((id: string) => purchaseOrdersById.get(id)).filter(Boolean);
                                 const hasShortage = relatedPOs.some((o: any) => (o.items || []).some((it: any) => (it.receivedQty || 0) > 0 && (it.receivedQty || 0) < (it.qty || 0)));
                                 if (!hasShortage) return null;
                                 return (

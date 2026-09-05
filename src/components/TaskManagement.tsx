@@ -667,10 +667,11 @@ export default function TaskManagement({
     setShowForm(false);
   };
 
-  // Lọc dữ liệu hiển thị
-  const filteredTasks = tasks.filter(task => {
+  // Lọc dữ liệu hiển thị — bọc useMemo vì file này chạy re-render rất thường
+  // xuyên (gõ tìm kiếm, mở/đóng modal...), không nên quét lại toàn bộ `tasks`
+  // mỗi lần như vậy.
+  const filteredTasks = React.useMemo(() => tasks.filter(task => {
     const hasMainAssigneeMission = task.missions?.some(m => m.mainAssigneeId === currentUser?.id);
-    const hasMemberMission = task.missions?.some(m => m.memberIds?.includes(currentUser?.id));
 
     if (taskScope === 'assigned') {
       // Công việc được giao: Chỉ hiển thị các công việc mà người nhận việc được giao (hoặc có nhiệm vụ phụ mà user là phụ trách chính)
@@ -680,7 +681,7 @@ export default function TaskManagement({
       }
     } else if (taskScope === 'toreview') {
       // Công việc phải duyệt: Có trạng thái chờ duyệt mà người giao việc phụ trách (Kiểm tra linh hoạt theo cả ID, tên, hoặc nếu có quy trình duyệt cho user)
-      const isMyAssignedTask = task.assignerId === currentUser?.id || 
+      const isMyAssignedTask = task.assignerId === currentUser?.id ||
                                task.assignerId === currentUser?.name ||
                                task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
       if (task.status !== 'reviewing' || !isMyAssignedTask) {
@@ -696,52 +697,57 @@ export default function TaskManagement({
     const matchEmp = filterEmployee === 'all' || task.assigneeId === filterEmployee;
     const matchStatus = taskScope === 'toreview' ? true : (filterStatus === 'all' || task.status === filterStatus);
     return matchProj && matchEmp && matchStatus;
-  });
+  }), [tasks, currentUser, taskScope, filterProject, filterEmployee, filterStatus]);
+
+  // Map tra cứu O(1) cho project/customer — dùng trong relatedMissions bên dưới
+  // để tránh .find() lồng bên trong .flatMap()/.map() (O(N×M) cũ).
+  const projectsById = React.useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
+  const customersById = React.useMemo(() => new Map((customers || []).map(c => [c.id, c])), [customers]);
 
   // NHIỆM VỤ LIÊN QUAN: liệt kê các Nhiệm vụ (mission trong Công việc) mà user được gán
   // với vai trò Phụ trách chính (mainAssigneeId) hoặc Nhân sự tham gia (memberIds)
-  const relatedMissions = tasks.flatMap(task =>
+  const relatedMissions = React.useMemo(() => tasks.flatMap(task =>
     (task.missions || [])
       .filter(m => m.mainAssigneeId === currentUser?.id || (m.memberIds || []).includes(currentUser?.id))
       .map(m => {
-        const project = projects.find(p => p.id === task.projectId);
-        const customer = project && customers ? customers.find(c => c.id === project.customerId) : null;
+        const project = projectsById.get(task.projectId);
+        const customer = project ? customersById.get(project.customerId) : null;
         return { task, mission: m, project, customer };
       })
-  ).filter(x => filterProject === 'all' || x.task.projectId === filterProject);
+  ).filter(x => filterProject === 'all' || x.task.projectId === filterProject), [tasks, currentUser, projectsById, customersById, filterProject]);
 
   // Đếm số lượng công việc phải duyệt của tôi
-  const toReviewTasksCount = tasks.filter(t => 
-    t.status === 'reviewing' && 
-    (t.assignerId === currentUser?.id || 
+  const toReviewTasksCount = React.useMemo(() => tasks.filter(t =>
+    t.status === 'reviewing' &&
+    (t.assignerId === currentUser?.id ||
      t.assignerId === currentUser?.name ||
      t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  ).length;
+  ).length, [tasks, currentUser]);
 
   // --- TÍNH TOÁN CÁC CÔNG VIỆC CHƯA HOÀN THÀNH ĐỂ HIỂN THỊ BADGE ĐỎ ---
   // 1. Công việc được giao chưa hoàn thành (status !== 'completed')
-  const assignedUncompletedCount = tasks.filter(t => {
+  const assignedUncompletedCount = React.useMemo(() => tasks.filter(t => {
     const hasMainAssigneeMission = t.missions?.some(m => m.mainAssigneeId === currentUser?.id);
     const isAssignee = t.assigneeId === currentUser?.id || t.assigneeId === currentUser?.name || hasMainAssigneeMission;
     return isAssignee && t.status !== 'completed';
-  }).length;
+  }).length, [tasks, currentUser]);
 
   // 2. Công việc phải duyệt chưa hoàn thành (mặc định đã là trạng thái 'reviewing' nên tương đương toReviewTasksCount)
   // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt (lọc theo ID lẫn tên,
   // tương tự logic công việc phải duyệt ở trên — vì một số đơn fallback chỉ lưu tên người duyệt)
-  const myPendingLeaves = leaves.filter(l =>
+  const myPendingLeaves = React.useMemo(() => leaves.filter(l =>
     l.status === 'pending' &&
     (l.approverId === currentUser?.id ||
      l.approverName === currentUser?.name ||
      l.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  );
+  ), [leaves, currentUser]);
 
   // Đề xuất TÀI CHÍNH chờ duyệt mà user hiện tại có quyền xét duyệt:
   // (a) được CHỈ ĐỊNH làm người duyệt (approver theo ID/tên, kể cả chuỗi duyệt approvals), HOẶC
   // (b) thuộc nhóm Kế toán (role_accounting) / Giám đốc (role_admin) → xem & duyệt toàn bộ.
   // Đồng nhất với canApproveProposal trong FinanceManagement.
   const isFinanceApprover = isUserInRoleGroup(currentUser?.id, 'role_accounting') || isUserInRoleGroup(currentUser?.id, 'role_admin');
-  const myPendingPayments = payments.filter(p =>
+  const myPendingPayments = React.useMemo(() => payments.filter(p =>
     p.status === 'pending' &&
     (isFinanceApprover ||
      p.proposer === currentUser?.name ||
@@ -749,14 +755,14 @@ export default function TaskManagement({
      p.approver === currentUser?.name ||
      (p.approver && currentUser?.name && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
      p.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  );
-  const myPendingAdvances = subcontractorAdvances.filter(a =>
+  ), [payments, currentUser, isFinanceApprover]);
+  const myPendingAdvances = React.useMemo(() => subcontractorAdvances.filter(a =>
     a.status === 'pending_approval' &&
     (isFinanceApprover ||
      a.approver === currentUser?.id ||
      (a.approverName && currentUser?.name && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
      a.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  );
+  ), [subcontractorAdvances, currentUser, isFinanceApprover]);
   // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê
   // Duyệt → Công Tác Phí) hoặc thuộc nhóm Kế toán → thấy & duyệt toàn bộ.
   const canApproveTravelExpense = React.useMemo(() => {
@@ -765,19 +771,19 @@ export default function TaskManagement({
     if (configured?.id === currentUser.id) return true;
     return isUserInRoleGroup(currentUser.id, 'role_accounting');
   }, [currentUser]);
-  const myPendingTravelExpenses = travelExpenses.filter((t: any) =>
+  const myPendingTravelExpenses = React.useMemo(() => travelExpenses.filter((t: any) =>
     t.status === 'pending' && canApproveTravelExpense
-  );
+  ), [travelExpenses, canApproveTravelExpense]);
   // ĐỀ XUẤT THU CHI chờ LẬP PHIẾU (KT) — status 'pending_payment' = "Chờ Lập Phiếu (KT)".
   // Hiển thị những đề xuất mà user hiện tại được CHỈ ĐỊNH lập phiếu (creator = "Người Lập Phiếu"),
   // hoặc thuộc phòng Kế toán (vì mặc định người lập phiếu là "Kế Toán").
-  const myPendingVouchers = subcontractorAdvances.filter(a =>
+  const myPendingVouchers = React.useMemo(() => subcontractorAdvances.filter(a =>
     a.status === 'pending_payment' &&
     (isFinanceApprover ||
      a.creator === currentUser?.id ||
      (a.creatorName && currentUser?.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase()) ||
      (a.creator && currentUser?.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))
-  );
+  ), [subcontractorAdvances, currentUser, isFinanceApprover]);
   const toReviewUncompletedCount = toReviewTasksCount
     + myPendingLeaves.length
     + myPendingPayments.length
@@ -785,22 +791,25 @@ export default function TaskManagement({
     + myPendingTravelExpenses.length;
 
   // 3. Nhiệm vụ liên quan chưa hoàn thành (mission.status !== 'completed')
-  const relatedUncompletedCount = tasks.reduce((count, task) =>
+  const relatedUncompletedCount = React.useMemo(() => tasks.reduce((count, task) =>
     count + (task.missions || []).filter(m =>
       m.status !== 'completed' &&
       (m.mainAssigneeId === currentUser?.id || (m.memberIds || []).includes(currentUser?.id))
     ).length
-  , 0);
+  , 0), [tasks, currentUser]);
 
   // Nhóm công việc theo từng Dự Án
-  const groupedTasks: Record<string, Task[]> = {};
-  filteredTasks.forEach(task => {
-    const pId = task.projectId || 'unassigned';
-    if (!groupedTasks[pId]) {
-      groupedTasks[pId] = [];
-    }
-    groupedTasks[pId].push(task);
-  });
+  const groupedTasks: Record<string, Task[]> = React.useMemo(() => {
+    const grouped: Record<string, Task[]> = {};
+    filteredTasks.forEach(task => {
+      const pId = task.projectId || 'unassigned';
+      if (!grouped[pId]) {
+        grouped[pId] = [];
+      }
+      grouped[pId].push(task);
+    });
+    return grouped;
+  }, [filteredTasks]);
 
   return (
     <div className="space-y-4 text-slate-100">

@@ -906,6 +906,23 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (activeTab === 'warehouse-suppliers') setHasVisitedWarehouseSuppliers(true);
   }, [activeTab]);
 
+  // Tương tự: giữ mounted Việc Của Tôi, Điều Phối Vật Tư, Hồ Sơ (Báo Giá) sau
+  // lần đầu vào tab, tránh unmount/remount tốn network/tính toán lại mỗi lần
+  // chuyển qua tab khác rồi quay lại.
+  const [hasVisitedTasks, setHasVisitedTasks] = useState(() => activeTab === 'tasks');
+  useEffect(() => {
+    if (activeTab === 'tasks') setHasVisitedTasks(true);
+  }, [activeTab]);
+  const [hasVisitedMaterialCoordination, setHasVisitedMaterialCoordination] = useState(() => activeTab === 'material-coordination');
+  useEffect(() => {
+    if (activeTab === 'material-coordination') setHasVisitedMaterialCoordination(true);
+  }, [activeTab]);
+  const QUOTES_TABS = ['quotes', 'quotes-construction', 'quotes-mechanical', 'quotes-subcontractor'];
+  const [hasVisitedQuotes, setHasVisitedQuotes] = useState(() => QUOTES_TABS.includes(activeTab));
+  useEffect(() => {
+    if (QUOTES_TABS.includes(activeTab)) setHasVisitedQuotes(true);
+  }, [activeTab]);
+
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
   const [financeInitialProposalId, setFinanceInitialProposalId] = useState<string | null>(null);
   // Mở Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng.
@@ -1782,7 +1799,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const fireHrmSalarySalesEvent = coalescedEvent('hrm_salary_scales', 'hl-hrm-salary-scales-updated');
     const fireKanbanColumnsEvent = coalescedEvent('kanban_columns', 'hl-kanban-columns-updated');
     const fireMaterialProposalsEvent = coalescedEvent('material_proposals', 'hl-material-proposals-updated');
-    const firePurchaseOrdersEvent = coalescedEvent('purchase_orders_event', 'hl-purchase-orders-updated');
+    // Sửa key cache đúng tên bảng 'purchase_orders' (trước đây sai thành
+    // 'purchase_orders_event') — hiện chưa gây bug vì purchaseOrders.list()
+    // luôn forceFresh:true cứng, nhưng nếu sau này bỏ forceFresh thì key sai
+    // sẽ khiến invalidateCache không có tác dụng, gây stale data.
+    const firePurchaseOrdersEvent = coalescedEvent('purchase_orders', 'hl-purchase-orders-updated');
     const fireProjectPermissionsEvent = coalescedEvent('project_permissions', 'hl-project-permissions-updated');
     const fireAccountingLiabilitiesEvent = coalescedEvent('accounting_liabilities', 'hl-accounting-liabilities-updated');
     const fireAccountingReceivablesEvent = coalescedEvent('accounting_receivables', 'hl-accounting-receivables-updated');
@@ -3898,9 +3919,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             />
           )}
 
-          {/* TAB 3: CÔNG VIỆC */}
-          {activeTab === 'tasks' && (
-            <TaskManagement 
+          {/* TAB 3: CÔNG VIỆC — giữ mounted sau lần đầu vào tab (ẩn qua CSS
+              thay vì unmount) để không mất state/tính toán lại mỗi lần quay lại. */}
+          {hasVisitedTasks && (
+            <div style={{ display: activeTab === 'tasks' ? undefined : 'none' }}>
+            <TaskManagement
               tasks={tasks}
               projects={projects}
               employees={employees}
@@ -3922,11 +3945,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               initialTaskScope={approvalDeepLink ? 'toreview' : undefined}
               onInitialTaskScopeOpened={() => setApprovalDeepLink(null)}
             />
+            </div>
           )}
 
-          {/* TAB 4: HỆ THỐNG BÁO GIÁ ĐA LĨNH VỰC TÍCH HỢP */}
-          {['quotes', 'quotes-construction', 'quotes-mechanical', 'quotes-subcontractor'].includes(activeTab) && (
-            <QuotationSystem 
+          {/* TAB 4: HỆ THỐNG BÁO GIÁ ĐA LĨNH VỰC TÍCH HỢP — giữ mounted sau lần
+              đầu vào bất kỳ tab con nào (ẩn qua CSS thay vì unmount). */}
+          {hasVisitedQuotes && (
+            <div style={{ display: QUOTES_TABS.includes(activeTab) ? undefined : 'none' }}>
+            <QuotationSystem
               quotes={quotes}
               customers={customers}
               projects={projects}
@@ -3938,15 +3964,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               preselectedDocType={preselectedDocType || undefined}
               currentUser={currentUser}
               initialTab={
-                activeTab === 'quotes-construction' 
-                  ? 'construction' 
-                  : activeTab === 'quotes-mechanical' 
-                  ? 'mechanical' 
+                activeTab === 'quotes-construction'
+                  ? 'construction'
+                  : activeTab === 'quotes-mechanical'
+                  ? 'mechanical'
                   : activeTab === 'quotes-subcontractor'
                   ? 'subcontractor'
                   : 'furniture'
               }
             />
+            </div>
           )}
 
           {/* TAB: QUẢN LÝ THẦU PHỤ (RIÊNG BIỆT) — giữ mounted sau lần đầu vào tab
@@ -4003,8 +4030,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             </div>
           )}
 
-          {/* TAB 5.5: ĐIỀU PHỐI VẬT TƯ */}
-          {activeTab === 'material-coordination' && (
+          {/* TAB 5.5: ĐIỀU PHỐI VẬT TƯ — giữ mounted sau lần đầu vào tab (ẩn qua
+              CSS thay vì unmount) để không mất state/tính toán lại mỗi lần quay lại. */}
+          {hasVisitedMaterialCoordination && (
+            <div style={{ display: activeTab === 'material-coordination' ? undefined : 'none' }}>
             <MaterialCoordination
               projects={projects}
               employees={employees}
@@ -4015,6 +4044,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               initialProposalId={materialInitialProposalId}
               onInitialProposalConsumed={() => setMaterialInitialProposalId(null)}
             />
+            </div>
           )}
 
           {/* TAB 5.6: DANH MỤC NHÀ CUNG CẤP KHO — giữ mounted sau lần đầu vào tab
