@@ -21,7 +21,14 @@ const messagesCache = new Map<string, ChatMessage[]>();
 
 // ─── Mappers: DB (snake_case) ↔ App (camelCase) ─────────────────────────────
 
-function convFromRow(r: any): Conversation {
+// currentUserId: dùng để "resolve" unreadCount (số chưa đọc CỦA RIÊNG người
+// này) từ map unread_counts (theo từng userId) lưu trên Supabase — thay cho
+// cột unread_count cũ dùng chung cho cả hội thoại (1 người đọc xóa badge của
+// tất cả). unreadCounts (map đầy đủ) vẫn được giữ lại trên object để các hàm
+// ghi (addMessage, markConversationRead...) có dữ liệu gốc mà cập nhật.
+function convFromRow(r: any, currentUserId?: string): Conversation {
+  const rawCounts: Record<string, number> =
+    r.unread_counts && typeof r.unread_counts === 'object' ? r.unread_counts : {};
   return {
     id: r.id,
     type: r.type,
@@ -32,7 +39,9 @@ function convFromRow(r: any): Conversation {
     createdBy: r.created_by,
     createdAt: r.created_at,
     lastMessageAt: r.last_message_at ?? undefined,
-    unreadCount: r.unread_count ?? 0,
+    unreadCount: currentUserId ? (rawCounts[currentUserId] || 0) : 0,
+    unreadCounts: rawCounts,
+    lastMessage: r.last_message ?? undefined,
     taskId: r.task_id ?? undefined,
     projectId: r.project_id ?? undefined,
     pinned: r.pinned ?? false,
@@ -50,7 +59,8 @@ function convToRow(c: Conversation): any {
     created_by: c.createdBy,
     created_at: c.createdAt,
     last_message_at: c.lastMessageAt ?? null,
-    unread_count: c.unreadCount ?? 0,
+    unread_counts: c.unreadCounts ?? {},
+    last_message: c.lastMessage ?? null,
     task_id: c.taskId ?? null,
     project_id: c.projectId ?? null,
     pinned: c.pinned ?? false,
@@ -534,13 +544,30 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
   }
   if (pushErr) console.error('pushMessage failed (tin nhắn có thể không được lưu):', pushErr.message);
 
-  // Push conversation LÊN SUPABASE với unreadCount +1 (dành cho người nhận)
+  // Push conversation LÊN SUPABASE: +1 vào unread_counts CHO TỪNG THÀNH VIÊN
+  // NHẬN (trừ người gửi) — thay vì +1 vào 1 số dùng chung cho cả hội thoại
+  // (bug cũ: người này đọc thì badge của người khác cũng bị xóa theo). Đồng
+  // thời denormalize lastMessage để danh sách hội thoại hiển thị đúng tin
+  // nhắn cuối mà không cần tải lịch sử tin nhắn (messagesCache) của hội
+  // thoại đó trong phiên hiện tại.
   let convForPush = conv;
   if (conv) {
+    const nextCounts: Record<string, number> = { ...(conv.unreadCounts || {}) };
+    (conv.participantIds || []).forEach(uid => {
+      if (uid !== msg.senderId) nextCounts[uid] = (nextCounts[uid] || 0) + 1;
+    });
     convForPush = {
       ...conv,
       lastMessageAt: newMsg.createdAt,
-      unreadCount: (conv.unreadCount || 0) + 1,
+      unreadCounts: nextCounts,
+      unreadCount: nextCounts[msg.senderId] || 0, // luôn 0 cho chính người gửi
+      lastMessage: {
+        content: newMsg.content,
+        senderId: newMsg.senderId,
+        senderName: newMsg.senderName,
+        createdAt: newMsg.createdAt,
+        deleted: false,
+      },
     };
     conversationsCache.set(msg.conversationId, convForPush);
     await pushConversation(convForPush);
@@ -607,23 +634,28 @@ async function notifyChatPush(msg: ChatMessage, conv?: Conversation): Promise<vo
 let _lastMarkReadTime: Record<string, number> = {};
 const MARK_READ_DEBOUNCE_MS = 1000; // Tối thiểu 1 giây giữa 2 lần gọi liên tiếp cho cùng 1 hội thoại
 
-export async function markConversationRead(convId: string): Promise<void> {
+// Đánh dấu đã đọc CHO RIÊNG userId (chỉ set unread_counts[userId] = 0) — không
+// đụng đến key của các thành viên khác trong cùng hội thoại (bug cũ: dùng 1
+// cột unread_count chung, 1 người đọc xóa badge của tất cả).
+export async function markConversationRead(convId: string, userId: string): Promise<void> {
   const sb = getSupabase();
   if (!sb) return;
 
-  // Guard: nếu unreadCount đã = 0 trong cache thì bỏ qua
+  // Guard: nếu unreadCount của CHÍNH userId này đã = 0 trong cache thì bỏ qua
   const conv = conversationsCache.get(convId);
-  if (conv && (conv.unreadCount || 0) === 0) return;
+  if (conv && (conv.unreadCounts?.[userId] || 0) === 0) return;
 
-  // Guard debounce: không gọi lại trong vòng 1 giây
+  // Guard debounce: không gọi lại trong vòng 1 giây (theo từng cặp hội thoại+user)
+  const debounceKey = `${convId}_${userId}`;
   const now = Date.now();
-  if (_lastMarkReadTime[convId] && now - _lastMarkReadTime[convId] < MARK_READ_DEBOUNCE_MS) return;
-  _lastMarkReadTime[convId] = now;
+  if (_lastMarkReadTime[debounceKey] && now - _lastMarkReadTime[debounceKey] < MARK_READ_DEBOUNCE_MS) return;
+  _lastMarkReadTime[debounceKey] = now;
 
   // Update cache trước để tránh race condition
-  if (conv) conversationsCache.set(convId, { ...conv, unreadCount: 0 });
+  const nextCounts = { ...(conv?.unreadCounts || {}), [userId]: 0 };
+  if (conv) conversationsCache.set(convId, { ...conv, unreadCounts: nextCounts, unreadCount: 0 });
 
-  const { error: convErr } = await sb.from('conversations').update({ unread_count: 0 }).eq('id', convId);
+  const { error: convErr } = await sb.from('conversations').update({ unread_counts: nextCounts }).eq('id', convId);
   if (convErr) console.error('markConversationRead error:', convErr.message);
   const { error: msgErr } = await sb.from('chat_messages').update({ read: true }).eq('conversation_id', convId);
   if (msgErr) console.error('mark messages read error:', msgErr.message);
@@ -852,21 +884,11 @@ export async function loadConversationsFromCloud(userId?: string): Promise<Conve
       console.error('loadConversationsFromCloud error:', error.message);
       return [];
     }
-    const convs = (data || []).map(convFromRow);
-
-    // 🔧 FIX: Nếu userId được truyền vào, zero out unreadCount cho các conversation
-    // mà tin nhắn cuối do chính userId gửi → tránh đếm tin nhắn của chính mình.
-    if (userId) {
-      convs.forEach(c => {
-        if ((c.unreadCount || 0) > 0) {
-          const msgs = messagesCache.get(c.id) || [];
-          const lastMsg = msgs[msgs.length - 1];
-          if (lastMsg && lastMsg.senderId === userId) {
-            c.unreadCount = 0;
-          }
-        }
-      });
-    }
+    // unreadCount được resolve THEO userId ngay từ unread_counts (map theo
+    // từng người) — người gửi tin nhắn của chính mình không bao giờ được +1
+    // vào key của họ (xem addMessage), nên không cần zero-out thủ công như
+    // cách cũ (dò tin nhắn cuối trong cache để đoán "có phải mình gửi không").
+    const convs = (data || []).map(r => convFromRow(r, userId));
 
     saveConversations(convs);
     return convs;

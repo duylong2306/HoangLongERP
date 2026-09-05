@@ -976,7 +976,9 @@ export interface Conversation {
   createdBy: string;
   createdAt: string;
   lastMessageAt?: string;
-  unreadCount: number;
+  unreadCount: number; // Số tin chưa đọc của NGƯỜI DÙNG HIỆN TẠI (đã resolve từ unreadCounts theo currentUser)
+  unreadCounts?: Record<string, number>; // Map đầy đủ theo TỪNG userId — dùng nội bộ (chatStore.ts) khi ghi lên Supabase
+  lastMessage?: { content: string; senderId: string; senderName: string; createdAt: string; deleted?: boolean } | null;
   taskId?: string;
   projectId?: string;
   pinned?: boolean;

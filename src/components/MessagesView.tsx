@@ -160,7 +160,7 @@ export default function MessagesView({
 
       // Hiển thị ngay từ cache (chỉ trong cửa sổ 2 ngày)
       setConvMessages(applyWindow(getMessages(selectedConv.id)));
-      markConversationRead(selectedConv.id);
+      markConversationRead(selectedConv.id, currentUser.id);
       // Ghi "đã xem" (read_by) cho tin của người khác → hiển thị người đã xem
       markMessagesReadByUser(selectedConv.id, currentUser.id);
       setConversations(getConversations());
@@ -171,19 +171,23 @@ export default function MessagesView({
       loadMessagesFromCloud(convId, { fromIso: initialStart }).then(msgs => {
         if (mounted) {
           setConvMessages(applyWindow(msgs));
-          markConversationRead(convId);
+          markConversationRead(convId, currentUser.id);
           markMessagesReadByUser(convId, currentUser.id);
           setConversations(getConversations());
           setHasMoreOlder(msgs.length > 0);
         }
       });
-      // Chỉ cập nhật UI khi có tin nhắn MỚI (insert), KHÔNG gọi markConversationRead
-      // để tránh loop: realtime fire → markRead → update → realtime fire lại
+      // Chỉ cập nhật UI khi có tin nhắn MỚI (insert). markConversationRead giờ
+      // chỉ reset unread_counts[userId] CỦA RIÊNG mình (không đụng key người
+      // khác) và chỉ update chat_messages.read (không phải INSERT) nên KHÔNG
+      // gây loop với subscribeMessages (chỉ lắng nghe INSERT) — an toàn để gọi
+      // ở đây, sửa đúng bug "đang xem trực tiếp mà badge chưa đọc không tự reset".
       const unsub = subscribeMessages(convId, (msgs) => {
         if (mounted) {
           setConvMessages(applyWindow(msgs));
-          // Hội thoại đang mở → đánh dấu tin mới đã xem ngay (idempotent, không loop)
+          markConversationRead(convId, currentUser.id);
           markMessagesReadByUser(convId, currentUser.id);
+          setConversations(getConversations());
         }
       });
       // Lưới an toàn: tab active trở lại sau khi bị ẩn → ép tải lại tin nhắn
@@ -759,8 +763,14 @@ export default function MessagesView({
   };
 
   const getConvLastMessage = (conv: Conversation): string => {
+    // Ưu tiên cache tin nhắn (messagesCache) nếu hội thoại này ĐÃ được mở
+    // trong phiên — phản ánh đúng các thay đổi live (xóa/sửa) đang có trong
+    // session. Chỉ khi chưa từng mở (cache rỗng) mới fallback về lastMessage
+    // denormalize trên conversation — trước đây không có fallback này nên
+    // hội thoại chưa mở hiển thị rỗng dù server đã có tin nhắn.
     const msgs = getMessages(conv.id);
-    return msgs.length > 0 ? msgs[msgs.length - 1]?.content : '';
+    if (msgs.length > 0) return msgs[msgs.length - 1]?.content;
+    return conv.lastMessage?.content || '';
   };
 
   const getMemberNames = (conv: Conversation) => {
