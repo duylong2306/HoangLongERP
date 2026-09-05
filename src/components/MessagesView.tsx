@@ -770,6 +770,184 @@ export default function MessagesView({
       .join(', ');
   };
 
+  // Bọc useMemo vì mỗi lần gõ tin nhắn (setInputText) làm cả MessagesView
+  // re-render — nếu không nhớ lại, toàn bộ danh sách tin nhắn (có thể hàng
+  // trăm tin) bị tính/dựng JSX lại trên MỌI phím gõ. Chỉ tính lại khi các
+  // dữ liệu mà vòng lặp này thực sự phụ thuộc thay đổi.
+  const messageListItems = React.useMemo(() => convMessages.map((msg, idx) => {
+    const isSelf = msg.senderId === currentUser.id;
+    const prevMsg = idx > 0 ? convMessages[idx - 1] : null;
+    const sameSender = prevMsg && prevMsg.senderId === msg.senderId;
+    const showDateSep = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
+    const senderEmp = employees.find(e => e.id === msg.senderId);
+    const isGroup = selectedConv?.type === 'group' || selectedConv?.type === 'task';
+
+    return (
+      <React.Fragment key={msg.id}>
+        {showDateSep && (
+          <div className="flex justify-center my-2 shrink-0">
+            <span className="text-[10px] bg-slate-900 text-slate-400 border border-slate-800 px-3 py-1 rounded-full font-medium">
+              {formatFullDate(msg.createdAt)}
+            </span>
+          </div>
+        )}
+
+        <div
+          className={`group flex gap-2 max-w-[88%] items-end ${isSelf ? 'ml-auto flex-row-reverse' : ''}`}
+          style={{ touchAction: 'pan-y' }}
+          onContextMenu={e => { if (!msg.deleted) handleContextMenu(e, msg.id); }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={e => { if (!msg.deleted) handleTouchEnd(e, msg.id); }}
+        >
+          {/* Avatar */}
+          {!isSelf && isGroup && (
+            <div className={`shrink-0 ${sameSender ? 'invisible' : ''}`}>
+              <UserAvatar employee={senderEmp || null} size="sm" noRing />
+            </div>
+          )}
+
+          {/* Bubble */}
+          <div className={`space-y-0.5 ${sameSender && !isSelf && isGroup ? 'ml-9' : ''}`}>
+            {/* Sender name */}
+            {!isSelf && isGroup && !sameSender && (
+              <span className="text-[10px] font-bold ml-1 text-indigo-400">
+                {msg.senderName || senderEmp?.name || 'Unknown'}
+              </span>
+            )}
+
+            {/* Reply preview (clickable to scroll) */}
+            {msg.replyTo && (
+              <div
+                data-no-gesture
+                onClick={() => {
+                  const el = document.getElementById(`msg_${msg.replyTo!.id}`);
+                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                className={`mb-1 px-2 py-1 rounded-lg border-l-2 cursor-pointer transition-opacity hover:opacity-80 ${isSelf ? 'bg-indigo-900/40 border-l-indigo-400' : 'bg-slate-800 border-l-indigo-500'}`}
+              >
+                <span className="text-[10px] font-semibold text-indigo-300 block truncate">{msg.replyTo.senderName}</span>
+                <span className="text-[11px] text-slate-400 block truncate">{msg.replyTo.content}</span>
+              </div>
+            )}
+
+            {/* Message bubble + footer: thời gian dưới phải, ❤️+avatar dưới trái */}
+            <div className="flex flex-col">
+            <div id={`msg_${msg.id}`} className={`p-2.5 text-[14px] leading-relaxed ${isSelf ? 'bg-indigo-700 text-white rounded-2xl rounded-br-md' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md'} ${msg.deleted ? 'opacity-60 italic' : ''}`}>
+              <p className="whitespace-pre-wrap">{renderContentWithMentions(msg.content)}</p>
+              {/* Attachments */}
+              {msg.attachments && msg.attachments.length > 0 && !msg.deleted && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5" data-no-gesture>
+                  {msg.attachments.map((att: any) => (
+                    <div key={att.id} className="relative group">
+                      {att.type === 'image' || att.type === 'camera' ? (
+                        <img src={att.url} alt={att.name} onClick={() => setExpandedImage(att.url)}
+                          className="max-w-[200px] max-h-[150px] rounded-lg object-cover cursor-pointer border border-white/10 hover:opacity-90 transition-opacity" />
+                      ) : (
+                        <div onClick={() => window.open(att.url, '_blank')}
+                          className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] cursor-pointer transition-colors">
+                          <File className="w-3.5 h-3.5 text-indigo-400" />
+                          <span className="truncate max-w-[120px]">{att.name}</span>
+                          <Download className="w-3 h-3 text-slate-400 shrink-0" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              </div>
+              {/* Footer nằm DƯỚI bubble: ❤️+avatar (trái) | thời gian+đã xem (phải) */}
+              <div className="flex items-center gap-2 mt-0.5 px-0.5">
+                {/* Trái: ❤️ + avatar người đã thả tim */}
+                {(() => {
+                  const heartGrp = msg.reactions?.find(g => g.emoji === '❤️');
+                  if (!heartGrp || heartGrp.users.length === 0) return null;
+                  return (
+                    <div className="flex items-center gap-0.5 flex-shrink-0"
+                      title={heartGrp.users.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}>
+                      <span className="text-[11px] leading-none">❤️</span>
+                      <div className="flex -space-x-1.5">
+                        {heartGrp.users.slice(0, 4).map(uid => {
+                          const emp = employees.find(e => e.id === uid);
+                          return (
+                            <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-slate-900/70" />
+                          );
+                        })}
+                      </div>
+                      {heartGrp.users.length > 4 && (
+                        <span className="text-[8px] text-slate-400">+{heartGrp.users.length - 4}</span>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Phải: time + readBy + check — luôn sát phải (ml-auto) */}
+                <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                  <span className={`text-[10px] ${isSelf ? 'text-indigo-300' : 'text-slate-500'}`}>{formatTime(msg.createdAt)}</span>
+                  {msg.edited && <span className="text-[9px] text-slate-500">(đã sửa)</span>}
+                  {isSelf && !msg.deleted && msg.readBy && msg.readBy.length > 0 && (
+                    <div className="flex items-center gap-0.5"
+                      title={`Đã xem: ${msg.readBy.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}`}>
+                      <div className="flex -space-x-1">
+                        {msg.readBy.slice(0, 3).map(uid => {
+                          const emp = employees.find(e => e.id === uid);
+                          return <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-white/20" />;
+                        })}
+                      </div>
+                      {msg.readBy.length > 3 && <span className="text-[8px] text-slate-400">+{msg.readBy.length - 3}</span>}
+                    </div>
+                  )}
+                  {isSelf && !msg.deleted && <CheckCheck className="w-3 h-3 text-indigo-300" />}
+                </div>
+              </div>
+            </div>
+
+            {/* Action menu (reply / delete) */}
+            {!msg.deleted && (
+              <div className={`flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity ${isSelf ? 'justify-end' : ''}`}>
+                <button
+                  onClick={() => setReplyToMsg({ id: msg.id, senderName: msg.senderName, content: msg.content })}
+                  className="text-slate-400 hover:text-indigo-400 text-[10px] cursor-pointer"
+                  title="Trả lời"
+                >
+                  ↩ Trả lời
+                </button>
+                {msg.relatedEntity && (
+                  <>
+                    <button
+                      onClick={() => openRelatedEntity(msg)}
+                      className="text-indigo-400 hover:text-indigo-300 text-[10px] cursor-pointer font-medium"
+                      title="Xem chi tiết"
+                    >
+                      👁 Xem chi tiết
+                    </button>
+                    {(msg.relatedEntity?.type === 'task' || msg.relatedEntity?.type === 'mission' || msg.relatedEntity?.type === 'project') && (
+                      <button
+                        onClick={() => openProjectChatForEntity(msg.relatedEntity)}
+                        className="text-emerald-400 hover:text-emerald-300 text-[10px] cursor-pointer font-medium"
+                        title="Mở nhóm chat dự án của công việc này"
+                      >
+                        💬 Nhóm dự án
+                      </button>
+                    )}
+                  </>
+                )}
+                {isSelf && (
+                  <button
+                    onClick={() => handleDeleteMessage(msg.id)}
+                    className="text-slate-400 hover:text-rose-400 text-[10px] cursor-pointer"
+                    title="Xóa"
+                  >
+                    🗑️ Xóa
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </React.Fragment>
+    );
+  }), [convMessages, selectedConv, currentUser, employees, tasks]);
+
   return (
     <div className="flex h-[calc(100vh-140px)] min-h-[500px] bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden font-sans shadow-2xl relative" id="messenger_container">
 
@@ -1224,179 +1402,7 @@ export default function MessagesView({
                     </div>
                   ) : (
                     <div className="flex flex-col space-y-1">
-                      {convMessages.map((msg, idx) => {
-                        const isSelf = msg.senderId === currentUser.id;
-                        const prevMsg = idx > 0 ? convMessages[idx - 1] : null;
-                        const sameSender = prevMsg && prevMsg.senderId === msg.senderId;
-                        const showDateSep = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
-                        const senderEmp = employees.find(e => e.id === msg.senderId);
-                        const isGroup = selectedConv?.type === 'group' || selectedConv?.type === 'task';
-
-                        return (
-                          <React.Fragment key={msg.id}>
-                            {showDateSep && (
-                              <div className="flex justify-center my-2 shrink-0">
-                                <span className="text-[10px] bg-slate-900 text-slate-400 border border-slate-800 px-3 py-1 rounded-full font-medium">
-                                  {formatFullDate(msg.createdAt)}
-                                </span>
-                              </div>
-                            )}
-
-                            <div
-                              className={`group flex gap-2 max-w-[88%] items-end ${isSelf ? 'ml-auto flex-row-reverse' : ''}`}
-                              style={{ touchAction: 'pan-y' }}
-                              onContextMenu={e => { if (!msg.deleted) handleContextMenu(e, msg.id); }}
-                              onTouchStart={handleTouchStart}
-                              onTouchEnd={e => { if (!msg.deleted) handleTouchEnd(e, msg.id); }}
-                            >
-                              {/* Avatar */}
-                              {!isSelf && isGroup && (
-                                <div className={`shrink-0 ${sameSender ? 'invisible' : ''}`}>
-                                  <UserAvatar employee={senderEmp || null} size="sm" noRing />
-                                </div>
-                              )}
-
-                              {/* Bubble */}
-                              <div className={`space-y-0.5 ${sameSender && !isSelf && isGroup ? 'ml-9' : ''}`}>
-                                {/* Sender name */}
-                                {!isSelf && isGroup && !sameSender && (
-                                  <span className="text-[10px] font-bold ml-1 text-indigo-400">
-                                    {msg.senderName || senderEmp?.name || 'Unknown'}
-                                  </span>
-                                )}
-
-                                {/* Reply preview (clickable to scroll) */}
-                                {msg.replyTo && (
-                                  <div
-                                    data-no-gesture
-                                    onClick={() => {
-                                      const el = document.getElementById(`msg_${msg.replyTo!.id}`);
-                                      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }}
-                                    className={`mb-1 px-2 py-1 rounded-lg border-l-2 cursor-pointer transition-opacity hover:opacity-80 ${isSelf ? 'bg-indigo-900/40 border-l-indigo-400' : 'bg-slate-800 border-l-indigo-500'}`}
-                                  >
-                                    <span className="text-[10px] font-semibold text-indigo-300 block truncate">{msg.replyTo.senderName}</span>
-                                    <span className="text-[11px] text-slate-400 block truncate">{msg.replyTo.content}</span>
-                                  </div>
-                                )}
-
-                                {/* Message bubble + footer: thời gian dưới phải, ❤️+avatar dưới trái */}
-                                <div className="flex flex-col">
-                                <div id={`msg_${msg.id}`} className={`p-2.5 text-[14px] leading-relaxed ${isSelf ? 'bg-indigo-700 text-white rounded-2xl rounded-br-md' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md'} ${msg.deleted ? 'opacity-60 italic' : ''}`}>
-                                  <p className="whitespace-pre-wrap">{renderContentWithMentions(msg.content)}</p>
-                                  {/* Attachments */}
-                                  {msg.attachments && msg.attachments.length > 0 && !msg.deleted && (
-                                    <div className="flex flex-wrap gap-1.5 mt-1.5" data-no-gesture>
-                                      {msg.attachments.map((att: any) => (
-                                        <div key={att.id} className="relative group">
-                                          {att.type === 'image' || att.type === 'camera' ? (
-                                            <img src={att.url} alt={att.name} onClick={() => setExpandedImage(att.url)}
-                                              className="max-w-[200px] max-h-[150px] rounded-lg object-cover cursor-pointer border border-white/10 hover:opacity-90 transition-opacity" />
-                                          ) : (
-                                            <div onClick={() => window.open(att.url, '_blank')}
-                                              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] cursor-pointer transition-colors">
-                                              <File className="w-3.5 h-3.5 text-indigo-400" />
-                                              <span className="truncate max-w-[120px]">{att.name}</span>
-                                              <Download className="w-3 h-3 text-slate-400 shrink-0" />
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                  </div>
-                                  {/* Footer nằm DƯỚI bubble: ❤️+avatar (trái) | thời gian+đã xem (phải) */}
-                                  <div className="flex items-center gap-2 mt-0.5 px-0.5">
-                                    {/* Trái: ❤️ + avatar người đã thả tim */}
-                                    {(() => {
-                                      const heartGrp = msg.reactions?.find(g => g.emoji === '❤️');
-                                      if (!heartGrp || heartGrp.users.length === 0) return null;
-                                      return (
-                                        <div className="flex items-center gap-0.5 flex-shrink-0"
-                                          title={heartGrp.users.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}>
-                                          <span className="text-[11px] leading-none">❤️</span>
-                                          <div className="flex -space-x-1.5">
-                                            {heartGrp.users.slice(0, 4).map(uid => {
-                                              const emp = employees.find(e => e.id === uid);
-                                              return (
-                                                <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-slate-900/70" />
-                                              );
-                                            })}
-                                          </div>
-                                          {heartGrp.users.length > 4 && (
-                                            <span className="text-[8px] text-slate-400">+{heartGrp.users.length - 4}</span>
-                                          )}
-                                        </div>
-                                      );
-                                    })()}
-
-                                    {/* Phải: time + readBy + check — luôn sát phải (ml-auto) */}
-                                    <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                                      <span className={`text-[10px] ${isSelf ? 'text-indigo-300' : 'text-slate-500'}`}>{formatTime(msg.createdAt)}</span>
-                                      {msg.edited && <span className="text-[9px] text-slate-500">(đã sửa)</span>}
-                                      {isSelf && !msg.deleted && msg.readBy && msg.readBy.length > 0 && (
-                                        <div className="flex items-center gap-0.5"
-                                          title={`Đã xem: ${msg.readBy.map(uid => employees.find(e => e.id === uid)?.name || uid).join(', ')}`}>
-                                          <div className="flex -space-x-1">
-                                            {msg.readBy.slice(0, 3).map(uid => {
-                                              const emp = employees.find(e => e.id === uid);
-                                              return <UserAvatar key={uid} employee={emp || null} size="xs" noRing className="ring-white/20" />;
-                                            })}
-                                          </div>
-                                          {msg.readBy.length > 3 && <span className="text-[8px] text-slate-400">+{msg.readBy.length - 3}</span>}
-                                        </div>
-                                      )}
-                                      {isSelf && !msg.deleted && <CheckCheck className="w-3 h-3 text-indigo-300" />}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Action menu (reply / delete) */}
-                                {!msg.deleted && (
-                                  <div className={`flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity ${isSelf ? 'justify-end' : ''}`}>
-                                    <button
-                                      onClick={() => setReplyToMsg({ id: msg.id, senderName: msg.senderName, content: msg.content })}
-                                      className="text-slate-400 hover:text-indigo-400 text-[10px] cursor-pointer"
-                                      title="Trả lời"
-                                    >
-                                      ↩ Trả lời
-                                    </button>
-                                    {msg.relatedEntity && (
-                                      <>
-                                        <button
-                                          onClick={() => openRelatedEntity(msg)}
-                                          className="text-indigo-400 hover:text-indigo-300 text-[10px] cursor-pointer font-medium"
-                                          title="Xem chi tiết"
-                                        >
-                                          👁 Xem chi tiết
-                                        </button>
-                                        {(msg.relatedEntity?.type === 'task' || msg.relatedEntity?.type === 'mission' || msg.relatedEntity?.type === 'project') && (
-                                          <button
-                                            onClick={() => openProjectChatForEntity(msg.relatedEntity)}
-                                            className="text-emerald-400 hover:text-emerald-300 text-[10px] cursor-pointer font-medium"
-                                            title="Mở nhóm chat dự án của công việc này"
-                                          >
-                                            💬 Nhóm dự án
-                                          </button>
-                                        )}
-                                      </>
-                                    )}
-                                    {isSelf && (
-                                      <button
-                                        onClick={() => handleDeleteMessage(msg.id)}
-                                        className="text-slate-400 hover:text-rose-400 text-[10px] cursor-pointer"
-                                        title="Xóa"
-                                      >
-                                        🗑️ Xóa
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </React.Fragment>
-                        );
-                      })}
+                      {messageListItems}
                     </div>
                   )}
                   <div ref={messagesEndRef} />

@@ -922,6 +922,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   useEffect(() => {
     if (QUOTES_TABS.includes(activeTab)) setHasVisitedQuotes(true);
   }, [activeTab]);
+  const [hasVisitedMessages, setHasVisitedMessages] = useState(() => activeTab === 'messages');
+  useEffect(() => {
+    if (activeTab === 'messages') setHasVisitedMessages(true);
+  }, [activeTab]);
 
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
   const [financeInitialProposalId, setFinanceInitialProposalId] = useState<string | null>(null);
@@ -5130,7 +5134,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             />
           )}
 
-          {activeTab === 'messages' && (
+          {/* TAB: TIN NHẮN — giữ mounted sau lần đầu vào tab (ẩn qua CSS thay
+              vì unmount) để không mất state cục bộ (hội thoại đang chọn, vị trí
+              cuộn, ô tìm kiếm...) và không phải tạo lại channel realtime mỗi
+              lần quay lại tab. */}
+          {hasVisitedMessages && (
+            <div style={{ display: activeTab === 'messages' ? undefined : 'none' }}>
             <MessagesView
               currentUser={currentUser!}
               employees={employees}
@@ -5143,6 +5152,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                 localStorage.setItem('hl_show_badge_counts', next ? 'true' : 'false');
               }}
             />
+            </div>
           )}
 
           </>
