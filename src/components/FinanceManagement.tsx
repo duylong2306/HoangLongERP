@@ -2744,9 +2744,16 @@ export default function FinanceManagement({
   }, [poItems]);
 
   const poSupplierData = useMemo(() => {
-    const allSuppliers = (suppliersExternalProp && suppliersExternalProp.length > 0)
-      ? suppliersExternalProp
-      : (suppliers && suppliers.length > 0) ? suppliers : [];
+    // Ưu tiên `suppliers` (state cục bộ, tự fetch + lắng nghe 'hl-suppliers-updated'
+    // nên luôn mới) TRƯỚC `suppliersExternalProp` (App.tsx chỉ set 1 lần lúc khởi
+    // động, KHÔNG bao giờ cập nhật lại — xem App.tsx, chỉ có đúng 1 lời gọi
+    // setSuppliers() ở bước load ban đầu). Trước đây ưu tiên ngược lại khiến NCC
+    // mới thêm sau khi mở app không bao giờ hiện trong dropdown chọn NCC cho tới
+    // khi F5 lại toàn trang. `suppliersExternalProp` chỉ còn dùng làm fallback
+    // cho lần render đầu tiên, trước khi `suppliers` cục bộ kịp tải xong.
+    const allSuppliers = (suppliers && suppliers.length > 0)
+      ? suppliers
+      : (suppliersExternalProp && suppliersExternalProp.length > 0) ? suppliersExternalProp : [];
     const selSup = allSuppliers.find(s => s.id === poSupplierId);
     return { allSuppliers, selSup };
   }, [suppliersExternalProp, suppliers, poSupplierId]);

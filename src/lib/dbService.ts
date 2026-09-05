@@ -1841,7 +1841,13 @@ export const dbService = {
   // 8.0. SUBCONTRACTOR ADVANCES (Đề xuất thu chi thầu phụ)
   subcontractorAdvances: {
     async list(): Promise<SubcontractorAdvanceProposal[]> {
-      return querySupabase<SubcontractorAdvanceProposal>('subcontractor_advances', []);
+      // forceFresh: bỏ qua _queryCache — App.tsx gọi list() này mỗi khi nhận
+      // event 'hl-subcontractor-advances-updated' (từ Realtime postgres_changes)
+      // để refetch. Không forceFresh thì list() trả về CACHE cũ (chỉ được
+      // invalidate khi CHÍNH session này tự save()), khiến thay đổi từ
+      // tab/người khác không bao giờ hiện ra cho tới khi F5 lại trang — cùng
+      // lỗi gốc đã từng xảy ra và được vá cho purchase_orders (xem bên dưới).
+      return querySupabase<SubcontractorAdvanceProposal>('subcontractor_advances', [], true);
     },
     async save(proposal: SubcontractorAdvanceProposal): Promise<void> {
       await saveSupabase('subcontractor_advances', proposal);
