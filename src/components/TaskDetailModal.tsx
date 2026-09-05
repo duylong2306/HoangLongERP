@@ -21,6 +21,41 @@ interface TravelAllowanceNorm {
   unitPrice: number;
   notes: string;
 }
+
+// Dùng làm giá trị khởi tạo trong lúc chờ dbService.travelNorms.list() trả về
+// (tránh dropdown trống trong tích tắc đầu) — sẽ được thay bằng dữ liệu thật
+// từ Supabase (bảng travel_norms) ngay khi load xong, xem effect load bên dưới.
+const TRAVEL_NORMS_FALLBACK: TravelAllowanceNorm[] = [
+  { id: 'ctp_1', code: 'CTP_001', content: 'Đi Đà Lạt - Nam Ban (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_2', code: 'CTP_002', content: 'Đi Đà Lạt - Nam Ban (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_3', code: 'CTP_003', content: 'Đi Đà Lạt - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
+  { id: 'ctp_4', code: 'CTP_004', content: 'Đi Đà Lạt - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
+  { id: 'ctp_5', code: 'CTP_005', content: 'Đi Đà Lạt - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
+  { id: 'ctp_6', code: 'CTP_006', content: 'Đi Đà Lạt - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
+  { id: 'ctp_7', code: 'CTP_007', content: 'Đi Đà Lạt - Di Linh (xe 1 người)', quantity: 1, unitPrice: 200000, notes: '' },
+  { id: 'ctp_8', code: 'CTP_008', content: 'Đi Đà Lạt - Di Linh (xe 2 người)', quantity: 2, unitPrice: 240000, notes: '' },
+  { id: 'ctp_9', code: 'CTP_009', content: 'Đi Đà Lạt - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 240000, notes: '' },
+  { id: 'ctp_10', code: 'CTP_010', content: 'Đi Đà Lạt - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 280000, notes: '' },
+  { id: 'ctp_11', code: 'CTP_011', content: 'Đi Đà Lạt - Đơn Dương (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
+  { id: 'ctp_12', code: 'CTP_012', content: 'Đi Đà Lạt - Đơn Dương (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
+  { id: 'ctp_13', code: 'CTP_013', content: 'Đi Nam Ban - Đà Lạt (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_14', code: 'CTP_014', content: 'Đi Nam Ban - Đà Lạt (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_15', code: 'CTP_015', content: 'Đi Nam Ban - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_16', code: 'CTP_016', content: 'Đi Nam Ban - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_17', code: 'CTP_017', content: 'Đi Nam Ban - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 140000, notes: '' },
+  { id: 'ctp_18', code: 'CTP_018', content: 'Đi Nam Ban - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 180000, notes: '' },
+  { id: 'ctp_19', code: 'CTP_019', content: 'Đi Nam Ban - Di Linh (xe 1 người)', quantity: 1, unitPrice: 150000, notes: '' },
+  { id: 'ctp_20', code: 'CTP_020', content: 'Đi Nam Ban - Di Linh (xe 2 người)', quantity: 2, unitPrice: 190000, notes: '' },
+  { id: 'ctp_21', code: 'CTP_021', content: 'Đi Nam Ban - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
+  { id: 'ctp_22', code: 'CTP_022', content: 'Đi Nam Ban - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
+  { id: 'ctp_23', code: 'CTP_023', content: 'Đi Nam Ban - Đan Phượng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_24', code: 'CTP_024', content: 'Đi Nam Ban - Đan Phượng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_25', code: 'CTP_025', content: 'Đi Nam Ban - Phi Liêng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
+  { id: 'ctp_26', code: 'CTP_026', content: 'Đi Nam Ban - Phi Liêng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
+  { id: 'ctp_27', code: 'CTP_027', content: 'Đi Nam Ban - Tân Hà (xe 1 người)', quantity: 1, unitPrice: 80000, notes: '' },
+  { id: 'ctp_28', code: 'CTP_028', content: 'Đi Nam Ban - Tân Hà (xe 2 người)', quantity: 2, unitPrice: 120000, notes: '' },
+  { id: 'ctp_29', code: 'CTP_029', content: 'Nghỉ qua đêm', quantity: 1, unitPrice: 180000, notes: '' },
+];
 import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
 import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
@@ -98,53 +133,21 @@ export default function TaskDetailModal({
     return () => window.removeEventListener('hl-suppliers-updated', handleSync);
   }, []);
 
-  // Load Travel Allowance Norms from localStorage
-  const travelNorms = React.useMemo<TravelAllowanceNorm[]>(() => {
-    const saved = localStorage.getItem('hl_acc_travel_norms');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.length > 0 && 'content' in parsed[0]) {
-          const needsMigration = parsed.some((item: any) => item.content !== 'Nghỉ qua đêm' && !item.content.startsWith('Đi '));
-          if (!needsMigration) {
-            return parsed as TravelAllowanceNorm[];
-          }
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return [
-      { id: 'ctp_1', code: 'CTP_001', content: 'Đi Đà Lạt - Nam Ban (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_2', code: 'CTP_002', content: 'Đi Đà Lạt - Nam Ban (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_3', code: 'CTP_003', content: 'Đi Đà Lạt - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
-      { id: 'ctp_4', code: 'CTP_004', content: 'Đi Đà Lạt - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
-      { id: 'ctp_5', code: 'CTP_005', content: 'Đi Đà Lạt - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
-      { id: 'ctp_6', code: 'CTP_006', content: 'Đi Đà Lạt - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
-      { id: 'ctp_7', code: 'CTP_007', content: 'Đi Đà Lạt - Di Linh (xe 1 người)', quantity: 1, unitPrice: 200000, notes: '' },
-      { id: 'ctp_8', code: 'CTP_008', content: 'Đi Đà Lạt - Di Linh (xe 2 người)', quantity: 2, unitPrice: 240000, notes: '' },
-      { id: 'ctp_9', code: 'CTP_009', content: 'Đi Đà Lạt - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 240000, notes: '' },
-      { id: 'ctp_10', code: 'CTP_010', content: 'Đi Đà Lạt - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 280000, notes: '' },
-      { id: 'ctp_11', code: 'CTP_011', content: 'Đi Đà Lạt - Đơn Dương (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
-      { id: 'ctp_12', code: 'CTP_012', content: 'Đi Đà Lạt - Đơn Dương (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
-      { id: 'ctp_13', code: 'CTP_013', content: 'Đi Nam Ban - Đà Lạt (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_14', code: 'CTP_014', content: 'Đi Nam Ban - Đà Lạt (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_15', code: 'CTP_015', content: 'Đi Nam Ban - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_16', code: 'CTP_016', content: 'Đi Nam Ban - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_17', code: 'CTP_017', content: 'Đi Nam Ban - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 140000, notes: '' },
-      { id: 'ctp_18', code: 'CTP_018', content: 'Đi Nam Ban - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 180000, notes: '' },
-      { id: 'ctp_19', code: 'CTP_019', content: 'Đi Nam Ban - Di Linh (xe 1 người)', quantity: 1, unitPrice: 150000, notes: '' },
-      { id: 'ctp_20', code: 'CTP_020', content: 'Đi Nam Ban - Di Linh (xe 2 người)', quantity: 2, unitPrice: 190000, notes: '' },
-      { id: 'ctp_21', code: 'CTP_021', content: 'Đi Nam Ban - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
-      { id: 'ctp_22', code: 'CTP_022', content: 'Đi Nam Ban - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
-      { id: 'ctp_23', code: 'CTP_023', content: 'Đi Nam Ban - Đan Phượng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_24', code: 'CTP_024', content: 'Đi Nam Ban - Đan Phượng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_25', code: 'CTP_025', content: 'Đi Nam Ban - Phi Liêng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
-      { id: 'ctp_26', code: 'CTP_026', content: 'Đi Nam Ban - Phi Liêng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
-      { id: 'ctp_27', code: 'CTP_027', content: 'Đi Nam Ban - Tân Hà (xe 1 người)', quantity: 1, unitPrice: 80000, notes: '' },
-      { id: 'ctp_28', code: 'CTP_028', content: 'Đi Nam Ban - Tân Hà (xe 2 người)', quantity: 2, unitPrice: 120000, notes: '' },
-      { id: 'ctp_29', code: 'CTP_029', content: 'Nghỉ qua đêm', quantity: 1, unitPrice: 180000, notes: '' }
-    ];
+  // Định mức công tác phí — đọc từ Supabase (bảng travel_norms) qua dbService,
+  // ĐÚNG NGUỒN với màn hình cấu hình "Định mức công tác phí" trong Dữ Liệu
+  // Nhân Sự (HumanResourcesManagement.tsx). Trước đây đọc từ localStorage
+  // key 'hl_acc_travel_norms' — key này KHÔNG BAO GIỜ được ghi bởi bất kỳ màn
+  // hình nào trong ứng dụng thật (chỉ dùng trong test), nên luôn rơi vào mảng
+  // hardcode mặc định bên dưới, khiến sửa định mức trên Dữ Liệu Nhân Sự không
+  // bao giờ có tác dụng ở đây.
+  const [travelNorms, setTravelNorms] = useState<TravelAllowanceNorm[]>(TRAVEL_NORMS_FALLBACK);
+  useEffect(() => {
+    const loadTravelNorms = () => dbService.travelNorms.list()
+      .then((d: any[]) => { if (d?.length) setTravelNorms(d as TravelAllowanceNorm[]); })
+      .catch((e) => console.error('Lỗi tải định mức công tác phí:', e));
+    loadTravelNorms();
+    window.addEventListener('hl-travel-norms-updated', loadTravelNorms);
+    return () => window.removeEventListener('hl-travel-norms-updated', loadTravelNorms);
   }, []);
 
   const project = projects.find(p => p.id === selectedTask.projectId);

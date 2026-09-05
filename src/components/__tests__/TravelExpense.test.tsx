@@ -52,6 +52,11 @@ vi.mock('../../lib/dbService', () => {
       deleteMultiple: vi.fn().mockResolvedValue(undefined),
     },
     hrmTravelExpenses: { ...makeTable(), save: (...a: any[]) => hrmTravelExpensesSave(...a) },
+    // Định mức công tác phí giờ đọc từ dbService.travelNorms.list() (bảng
+    // Supabase travel_norms) thay vì localStorage 'hl_acc_travel_norms'.
+    travelNorms: { ...makeTable(), list: vi.fn().mockResolvedValue([
+      { id: 'norm1', code: 'CTP01', content: 'Đi công tác Hà Nội', quantity: 1, unitPrice: 200000, notes: '' },
+    ]) },
     uploadMissionReportImage: vi.fn().mockResolvedValue({ url: 'http://img', stored: 'local' }),
   };
   return {
@@ -133,9 +138,6 @@ function makeTask() {
 beforeEach(() => {
   hrmTravelExpensesSave.mockClear();
   tasksSave.mockClear();
-  localStorage.setItem('hl_acc_travel_norms', JSON.stringify([
-    { id: 'norm1', code: 'CTP01', content: 'Đi công tác Hà Nội', quantity: 1, unitPrice: 200000, notes: '' },
-  ]));
 });
 
 describe('Travel Expense persistence', () => {
@@ -147,10 +149,13 @@ describe('Travel Expense persistence', () => {
     // Open mission detail popup
     fireEvent.click(screen.getByText('Nhiệm vụ thi công A'));
 
-    // Select a travel norm
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-    const normCombo = selects.find(s => Array.from(s.options).some(o => o.value === 'norm1'));
-    expect(normCombo).toBeTruthy();
+    // Select a travel norm (đợi travelNorms load xong từ dbService.travelNorms.list() — async)
+    let normCombo: HTMLSelectElement | undefined;
+    await waitFor(() => {
+      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+      normCombo = selects.find(s => Array.from(s.options).some(o => o.value === 'norm1'));
+      expect(normCombo).toBeTruthy();
+    });
     fireEvent.change(normCombo!, { target: { value: 'norm1' } });
 
     // Click add CTP
