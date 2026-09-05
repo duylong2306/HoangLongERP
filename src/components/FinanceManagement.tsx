@@ -1922,18 +1922,8 @@ export default function FinanceManagement({
 
   // ── Đơn mua hàng (Purchase Orders) ──
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(purchaseOrdersProp);
-  const [showPurchaseForm, setShowPurchaseForm] = useState(false);
-  const [poSupplierId, setPoSupplierId] = useState('');
-  const [poItems, setPoItems] = useState<PurchaseOrderItem[]>([]);
-  const [poItemSearch, setPoItemSearch] = useState<string[]>([]);
-  const [poItemDropdown, setPoItemDropdown] = useState<boolean[]>([]);
-  const poItemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const [poItemDropdownIdx, setPoItemDropdownIdx] = useState<number | null>(null);
-  const [poThanhToan, setPoThanhToan] = useState<string>('0');
-  const [poReceiptAt, setPoReceiptAt] = useState<string>(() => new Date().toISOString().slice(0, 16));
-  const [poNotes, setPoNotes] = useState('');
+  // ID đơn mua đang chờ xác nhận xóa (dùng bởi handleDeletePoUnrecorded)
   const [poDeleteId, setPoDeleteId] = useState<string | null>(null);
-  const [poViewOrder, setPoViewOrder] = useState<PurchaseOrder | null>(null);
   // Modal chi tiết & tạo phiếu chi cho tab "Đơn hàng" (đề xuất vật tư)
   const [poDetailModal, setPoDetailModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
   // Xác nhận trước khi "Ghi nhận công nợ" — cảnh báo nếu đơn chưa hoạt động.
@@ -2115,11 +2105,6 @@ export default function FinanceManagement({
     setPoPaymentNote('');
     addToast({ title: '✅ Đã lập phiếu chi', message: `Phiếu chi ${newPayment.code} cho đơn ${order.id} đã tạo. Chờ duyệt để ghi nhận thanh toán.`, type: 'success' });
   };
-  const [pagePO, setPagePO] = useState(1);
-  const [pageSizePO, setPageSizePO] = useState(10);
-  const poFileInputRef = useRef<HTMLInputElement>(null);
-  const [isSavingPO, setIsSavingPO] = useState(false);
-
   // ── Tab Đơn Hàng: gom theo NCC, ghi nhận công nợ per-order, sửa đơn giá ──
   const [poExpandedSuppliers, setPoExpandedSuppliers] = useState<Set<string>>(new Set());
   const [poPage, setPoPage] = useState(1);
@@ -2129,10 +2114,33 @@ export default function FinanceManagement({
   const [poNotesEditing, setPoNotesEditing] = useState(false);
   const [poNotesEdit, setPoNotesEdit] = useState('');
 
-  // Tổng đã thanh toán thực tế của 1 NCC (từ phiếu chi đã duyệt, category supplier_payment)
-  const getSupplierPaid = (supplierName: string): number =>
-    payments.filter(p => p.category === 'supplier_payment' && p.recipient === supplierName && p.status === 'approved')
+  // Tổng đã thanh toán thực tế của 1 NCC, CHỈ trong phạm vi các đơn hàng đang
+  // hiển thị (orderIds, đã qua bộ lọc ngày/dự án/trạng thái ở dưới) — trước đây
+  // cộng TOÀN BỘ lịch sử phiếu chi của NCC bất kể bộ lọc, trong khi `total` (tổng
+  // tiền đơn hàng) CHỈ cộng các đơn đã qua lọc → 1 NCC có đơn cũ đã trả đủ (vd
+  // 2024) nhưng đơn mới trong kỳ đang lọc (vd 2026) chưa trả vẫn bị tính hụt
+  // thành "Đã khóa" (remaining = max(0, tổng mới - cả 2 khoản trả) = 0), khiến
+  // kế toán bỏ sót công nợ thật. Đối chiếu theo 2 nhóm phiếu chi:
+  //  - Có purchaseOrderId: chỉ tính nếu purchaseOrderId nằm trong đúng các đơn
+  //    NCC này đang hiển thị (orderIds) — không phụ thuộc ngày lập phiếu.
+  //  - Không gắn purchaseOrderId (thanh toán công nợ chung, không theo đơn cụ
+  //    thể): vẫn tính theo tên NCC, nhưng giới hạn trong đúng khoảng ngày bộ lọc
+  //    đang áp dụng (poFilters.fromDate/toDate) để nhất quán với cách lọc đơn
+  //    hàng theo createdAt.
+  const getSupplierPaid = (supplierName: string, orderIds: string[]): number => {
+    const orderIdSet = new Set(orderIds);
+    return payments
+      .filter(p => p.category === 'supplier_payment' && p.status === 'approved')
+      .filter(p => {
+        if (p.purchaseOrderId) return orderIdSet.has(p.purchaseOrderId);
+        if (p.recipient !== supplierName) return false;
+        const pd = (p.date || '').slice(0, 10);
+        if (poFilters.fromDate && pd && pd < poFilters.fromDate) return false;
+        if (poFilters.toDate && pd && pd > poFilters.toDate) return false;
+        return true;
+      })
       .reduce((s, p) => s + (p.amount || 0), 0);
+  };
 
   // Đơn hàng đã ghi nhận vào Công nợ Trả?
   const isPoRecorded = (poId: string): boolean =>
@@ -2735,29 +2743,6 @@ export default function FinanceManagement({
     setPurchaseOrders(purchaseOrdersProp);
   }, [purchaseOrdersProp]);
 
-  // ── Mặc định Thanh toán thực tế = Tổng tiền khi items thay đổi (Mua hàng) ──
-  useEffect(() => {
-    const tong = calcPOTongTien(poItems);
-    if (tong > 0 && (Number(poThanhToan) === 0 || poThanhToan === '0')) {
-      setPoThanhToan(String(tong));
-    }
-  }, [poItems]);
-
-  const poSupplierData = useMemo(() => {
-    // Ưu tiên `suppliers` (state cục bộ, tự fetch + lắng nghe 'hl-suppliers-updated'
-    // nên luôn mới) TRƯỚC `suppliersExternalProp` (App.tsx chỉ set 1 lần lúc khởi
-    // động, KHÔNG bao giờ cập nhật lại — xem App.tsx, chỉ có đúng 1 lời gọi
-    // setSuppliers() ở bước load ban đầu). Trước đây ưu tiên ngược lại khiến NCC
-    // mới thêm sau khi mở app không bao giờ hiện trong dropdown chọn NCC cho tới
-    // khi F5 lại toàn trang. `suppliersExternalProp` chỉ còn dùng làm fallback
-    // cho lần render đầu tiên, trước khi `suppliers` cục bộ kịp tải xong.
-    const allSuppliers = (suppliers && suppliers.length > 0)
-      ? suppliers
-      : (suppliersExternalProp && suppliersExternalProp.length > 0) ? suppliersExternalProp : [];
-    const selSup = allSuppliers.find(s => s.id === poSupplierId);
-    return { allSuppliers, selSup };
-  }, [suppliersExternalProp, suppliers, poSupplierId]);
-
   // ── Đơn hàng bán: Handlers ──
   const generateSOCode = (): string => {
     return generateOrderCode('DH', salesOrders.map(o => o.id));
@@ -3017,211 +3002,6 @@ export default function FinanceManagement({
     } catch {
       addToast({ title: '❌ Lỗi', message: 'Không thể đọc file Excel.', type: 'error' });
     }
-  };
-
-  // ── Đơn mua hàng: Handlers ──
-  const generatePOCode = (): string => {
-    return generateOrderCode('PO', purchaseOrders.map(o => o.id));
-  };
-
-  const calcPOTongTien = (items: PurchaseOrderItem[]): number => {
-    return items.reduce((sum, i) => sum + i.thanhTien, 0);
-  };
-
-  const handlePOAddItem = () => {
-    setPoItems(prev => [...prev, {
-      stt: prev.length + 1,
-      productId: '',
-      tenSanPham: '',
-      donViTinh: '',
-      soLuong: 1,
-      donGia: 0,
-      thanhTien: 0,
-    }]);
-    setPoItemSearch(prev => [...prev, '']);
-    setPoItemDropdown(prev => [...prev, false]);
-  };
-
-  const handlePORemoveItem = (index: number) => {
-    setPoItems(prev => {
-      const filtered = prev.filter((_, i) => i !== index);
-      return filtered.map((item, i) => ({ ...item, stt: i + 1 }));
-    });
-    setPoItemSearch(prev => prev.filter((_, i) => i !== index));
-    setPoItemDropdown(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handlePOItemSearchChange = (idx: number, value: string) => {
-    setPoItemSearch(prev => { const u = [...prev]; u[idx] = value; return u; });
-    setPoItemDropdown(prev => { const u = [...prev]; u[idx] = true; return u; }); // Always show dropdown when user interacts
-    const matchedProduct = accProducts.find(
-      p => `${p.id} - ${p.tenSanPham}`.toLowerCase() === value.toLowerCase()
-    );
-    if (matchedProduct) {
-      setPoItems(prev => {
-        const updated = [...prev];
-        updated[idx] = {
-          ...updated[idx],
-          productId: matchedProduct.id,
-          tenSanPham: matchedProduct.tenSanPham,
-          donGia: matchedProduct.donGia || 0,
-          donViTinh: matchedProduct.donViTinh || 'Cái',
-          thanhTien: (updated[idx].soLuong || 1) * (matchedProduct.donGia || 0),
-        };
-        return updated;
-      });
-      setPoItemDropdown(prev => { const u = [...prev]; u[idx] = false; return u; });
-    } else {
-      setPoItems(prev => {
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], productId: '', tenSanPham: value };
-        return updated;
-      });
-    }
-  };
-
-  const handlePOItemChange = (index: number, field: keyof PurchaseOrderItem, value: any) => {
-    setPoItems(prev => {
-      const updated = [...prev];
-      const item = { ...updated[index] };
-      if (field === 'productId') {
-        const product = accProducts.find(p => p.id === value);
-        if (product) {
-          item.productId = product.id;
-          item.tenSanPham = product.tenSanPham;
-          item.donGia = product.donGia;
-          item.donViTinh = product.donViTinh || 'Cái';
-          item.thanhTien = item.soLuong * product.donGia;
-        }
-      } else if (field === 'soLuong' || field === 'donGia') {
-        (item as any)[field] = Number(value) || 0;
-        item.thanhTien = item.soLuong * item.donGia;
-      } else {
-        (item as any)[field] = value;
-      }
-      updated[index] = item;
-      return updated;
-    });
-  };
-
-  const resetPOForm = () => {
-    setPoSupplierId('');
-    setPoItems([{ stt: 1, productId: '', tenSanPham: '', donViTinh: '', soLuong: 1, donGia: 0, thanhTien: 0 }]);
-    setPoItemSearch(['']);
-    setPoItemDropdown([false]);
-    setPoThanhToan('0');
-    setPoReceiptAt(new Date().toISOString().slice(0, 16));
-    setPoNotes('');
-    setShowPurchaseForm(false);
-  };
-
-  const handlePOCreate = async () => {
-    if (isSavingPO) return;   // chặn double-click tạo 2 đơn trùng
-    const { selSup } = poSupplierData;
-    if (!selSup) {
-      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn nhà cung cấp.', type: 'warning' });
-      return;
-    }
-    if (poItems.length === 0 || poItems.every(i => !i.tenSanPham)) {
-      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng thêm ít nhất một sản phẩm.', type: 'warning' });
-      return;
-    }
-    const tongTien = calcPOTongTien(poItems);
-    const thanhToan = Number(poThanhToan) || 0;
-    const congNo = tongTien - thanhToan;
-    const newOrder: PurchaseOrder = {
-      id: generatePOCode(),
-      supplierId: selSup.id,
-      supplierName: selSup.name,
-      supplierPhone: selSup.phone || '',
-      supplierAddress: selSup.address || '',
-      items: poItems.filter(i => i.tenSanPham),
-      tongTien,
-      thanhToanThucTe: thanhToan,
-      congNo,
-      status: 'confirmed',
-      notes: poNotes || undefined,
-      createdAt: new Date().toISOString(),
-      createdBy: currentUser?.name || 'Kế toán',
-    };
-
-    const paymentId = thanhToan > 0 ? `pay_${Date.now()}` : undefined;
-    if (paymentId) newOrder.paymentId = paymentId;
-
-    // Lưu đơn TRƯỚC để biết mã cuối cùng: nếu mã bị trùng, tầng DB sẽ cấp lại
-    // mã mới → phiếu chi & công nợ phải trỏ theo mã đó, không phải mã dự kiến.
-    setIsSavingPO(true);
-    let savedOrder: PurchaseOrder;
-    try {
-      const result = await onAddPurchaseOrder?.(newOrder);
-      if (result === null) {
-        // Lưu thất bại — không tạo phiếu chi/công nợ mồ côi
-        addToast({ title: '❌ Lỗi lưu', message: 'Không thể lưu đơn mua lên server. Chưa tạo phiếu chi.', type: 'error' });
-        return;
-      }
-      // Prop có thể là handler đồng bộ (trả void) → fallback về đơn dự kiến
-      savedOrder = (result as PurchaseOrder | null | undefined) ?? newOrder;
-    } finally {
-      setIsSavingPO(false);
-    }
-
-    // Tạo phiếu chi tự động nếu thanh toán > 0
-    if (paymentId) {
-      const paymentAtISO = poReceiptAt ? new Date(poReceiptAt).toISOString() : new Date().toISOString();
-      const newPayment: Payment = {
-        id: paymentId,
-        code: `PC-MH-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${String(Math.floor(Math.random() * 900 + 100))}`,
-        date: new Date().toISOString().split('T')[0],
-        paymentAt: paymentAtISO,
-        recipient: selSup.name,
-        amount: thanhToan,
-        paymentMethod: 'transfer',
-        category: 'supplier_payment',
-        notes: `Thanh toán đơn mua ${savedOrder.id} - ${selSup.name}`,
-        proposer: currentUser?.name || 'Kế toán',
-        approver: 'Trương Hữu Long (Giám đốc)',
-        status: (currentUser && isUserInRoleGroup(currentUser.id, 'role_admin')) ? 'approved' : 'pending',
-      };
-      onAddPayment(newPayment);
-    }
-
-    // Cập nhật công nợ nhà cung cấp
-    const paidAtISO = poReceiptAt ? new Date(poReceiptAt).toISOString() : new Date().toISOString();
-    const existingLiab = customLiabilities.find(l => l.name === selSup.name && l.category === 'Nhà Cung Cấp');
-    if (existingLiab) {
-      const updatedLiab: Liability = {
-        ...existingLiab,
-        value: existingLiab.value + tongTien,
-        paid: existingLiab.paid,
-        paidAt: paidAtISO,
-        remaining: (existingLiab.value + tongTien) - existingLiab.paid,
-        notes: existingLiab.notes ? `${existingLiab.notes}; Đơn mua ${savedOrder.id}` : `Từ đơn mua ${savedOrder.id}`,
-      };
-      setCustomLiabilities(prev => prev.map(l => l.id === existingLiab.id ? updatedLiab : l));
-    } else {
-      const newLiab: Liability = {
-        id: crypto.randomUUID(),
-        name: selSup.name,
-        category: 'Nhà Cung Cấp',
-        value: tongTien,
-        paid: 0,
-        paidAt: paidAtISO,
-        remaining: tongTien,
-        notes: `Từ đơn mua ${savedOrder.id}`,
-        salesOrderId: undefined,
-      };
-      setCustomLiabilities(prev => [...prev, newLiab]);
-    }
-
-    resetPOForm();
-    addToast({ title: '✅ Thành công', message: `Đã tạo đơn mua ${savedOrder.id}${thanhToan > 0 ? ` và phiếu chi ${paymentId}` : ''}.`, type: 'success' });
-  };
-
-  const handlePODelete = (id: string) => {
-    setPurchaseOrders(prev => prev.filter(o => o.id !== id));
-    setPoDeleteId(null);
-    onDeletePurchaseOrder?.(id);  // App.tsx xử lý dbService.purchaseOrders.delete
-    addToast({ title: '🗑️ Đã xóa', message: `Đã xóa đơn mua ${id}.`, type: 'info' });
   };
 
   // Export Excel đơn mua hàng
@@ -5351,7 +5131,7 @@ export default function FinanceManagement({
               });
               const supplierGroups = Array.from(groupsMap.entries()).map(([supplierName, orders]) => {
                 const total = orders.reduce((s, o) => s + (o.tongTien || 0), 0);
-                const paid = getSupplierPaid(supplierName);
+                const paid = getSupplierPaid(supplierName, orders.map(o => o.id));
                 const remaining = Math.max(0, total - paid);
                 const settled = remaining <= 0;
                 return { supplierName, orders, total, paid, remaining, settled };
