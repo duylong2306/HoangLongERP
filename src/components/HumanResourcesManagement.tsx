@@ -3560,46 +3560,62 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
     return `
       <style>
-        /* Khổ A5 (148 x 210mm) — thu gọn cỡ chữ/khoảng cách so với khổ A4 cũ. */
+        /* Khổ A5 (148 x 210mm) — thu gọn cỡ chữ/khoảng cách so với khổ A4 cũ.
+           QUAN TRỌNG: MỌI selector bên dưới đều được scope trong ".pdf-export-root"
+           (class gắn trên chính div gốc của fragment này) — KHÔNG được dùng selector
+           trần (*, body, hr, table...) vì fragment này render trực tiếp vào document
+           CHÍNH của app qua dangerouslySetInnerHTML (bản xem trước) và qua
+           document.body.appendChild (lúc xuất PDF ở generatePayslipPdfBlob), KHÔNG
+           phải trong 1 document/iframe cô lập riêng. Từng có sự cố thật: rule
+           "* { padding: 0 }" không scope đã rò rỉ ra TOÀN BỘ trang, xóa mất padding
+           của mọi nút bấm dùng class py-2.5 trong cả app khi đang mở modal phiếu
+           lương — chỉ buildPayslipHtml() (mở cửa sổ in riêng, document độc lập) mới
+           thực sự an toàn với selector trần, còn 2 chỗ dùng chung fragment này thì không. */
         @page { size: A5; margin: 8mm 10mm; }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body, .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 9.5px; line-height: 1.4; }
-        .page { padding: 0; }
-        table.header { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
-        table.header td { vertical-align: top; padding: 0; }
-        .company-info { width: 55%; }
-        .company-info .name { font-size: 11px; font-weight: bold; margin-bottom: 2px; }
-        .company-info .detail { font-size: 8.5px; color: #333; margin: 1px 0; }
-        .doc-title-block { width: 45%; text-align: right; }
-        .doc-title-block .doc-title { font-size: 14px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; }
-        .doc-title-block .doc-period { font-size: 10px; font-weight: bold; margin-top: 2px; }
-        hr { border: none; border-top: 1.5px solid #222; margin: 5px 0; }
-        table.info { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
-        table.info td { padding: 1.5px 0; font-size: 9.5px; }
-        table.info .lbl { font-weight: bold; width: 70px; }
-        table.salary { width: 100%; border-collapse: collapse; margin-top: 4px; }
-        table.salary td { border: 0.5px solid #999; padding: 3px 5px; font-size: 9px; }
-        table.salary td.lbl { background: #f2f2f2; font-weight: bold; width: 62%; }
-        table.salary td.val { text-align: right; font-family: 'Courier New', monospace; width: 38%; }
-        table.salary td.bold { font-weight: bold; background: #fafafa; }
-        .line-note { font-weight: normal; font-style: italic; font-size: 7.5px; color: #666; margin-top: 1px; }
+        .pdf-export-root, .pdf-export-root * { box-sizing: border-box; margin: 0; padding: 0; }
+        .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 9.5px; line-height: 1.4; }
+        .pdf-export-root.page { padding: 0; }
+        .pdf-export-root table.header { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+        .pdf-export-root table.header td { vertical-align: top; padding: 0; }
+        .pdf-export-root .company-info { width: 55%; }
+        .pdf-export-root .company-info .name { font-size: 11px; font-weight: bold; margin-bottom: 2px; }
+        .pdf-export-root .company-info .detail { font-size: 8.5px; color: #333; margin: 1px 0; }
+        .pdf-export-root .doc-title-block { width: 45%; text-align: right; }
+        .pdf-export-root .doc-title-block .doc-title { font-size: 14px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; }
+        .pdf-export-root .doc-title-block .doc-period { font-size: 10px; font-weight: bold; margin-top: 2px; }
+        .pdf-export-root hr { border: none; border-top: 1.5px solid #222; margin: 5px 0; }
+        .pdf-export-root table.info { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+        .pdf-export-root table.info td { padding: 1.5px 0; font-size: 9.5px; }
+        .pdf-export-root table.info .lbl { font-weight: bold; width: 70px; }
+        .pdf-export-root table.salary { width: 100%; border-collapse: collapse; margin-top: 4px; background: #fff; }
+        /* !important bắt buộc: src/index.css có rule toàn cục "td, th, tr { border-color:
+           #e2e8f0 !important }" (ép viền xám nhạt cho MỌI bảng trong app) — do bản xem
+           trước phiếu lương render trực tiếp trong document chính (dangerouslySetInnerHTML,
+           không phải cửa sổ in riêng), rule đó vẫn áp dụng và đè mất viền đen nếu không
+           dùng !important tương tự cách bảng báo giá đã xử lý (xem .border-black trong
+           index.css). */
+        .pdf-export-root table.salary td { border: 0.5px solid #000 !important; background: #fff; padding: 3px 5px; font-size: 9px; font-family: 'Times New Roman', serif; }
+        .pdf-export-root table.salary td.lbl { font-weight: bold; width: 62%; }
+        .pdf-export-root table.salary td.val { text-align: right; width: 38%; }
+        .pdf-export-root table.salary td.bold { font-weight: bold; }
+        .pdf-export-root .line-note { font-weight: normal; font-style: italic; font-size: 7.5px; color: #666; margin-top: 1px; }
         /* Chỉ áp dụng cho bản xem trước editable=true — viền nét đứt/placeholder
            chỉ hiện trên màn hình, KHÔNG lộ ra khi in/xuất PDF (editable=false
            không gắn class này nên không có CSS này áp dụng). */
         /* Vùng bấm được nới rộng hơn khung chữ thật (padding + min-height) để dễ
            bấm trúng trên preview thu nhỏ — chữ vẫn nhỏ (7.5px) nhưng vùng nhận
            click/chạm cao hơn nhiều so với chỉ 1 dòng chữ (đủ cho ngón tay/chuột). */
-        .line-note-editable { display: block; outline: none; cursor: text; border-bottom: 1px dashed transparent; min-height: 14px; padding: 2px 3px; margin: 1px -3px 0; border-radius: 2px; }
-        .line-note-editable:hover, .line-note-editable:focus { border-bottom-color: #f59e0b; background: #fffbeb; }
-        .line-note-editable:empty::before { content: attr(data-placeholder); color: #bbb; font-style: italic; }
-        .net-row td { background: #FAD7A0 !important; font-weight: bold; font-size: 10.5px; }
-        .words-row td { font-style: italic; font-size: 8.5px; }
-        .sign-date { text-align: right; font-size: 9px; font-style: italic; margin: 6px 0 4px; }
-        table.signatures { width: 100%; border-collapse: collapse; text-align: center; font-size: 8.5px; margin-top: 4px; }
-        table.signatures td { vertical-align: top; width: 33.33%; }
-        .signatures .sig-title { font-weight: bold; }
-        .signatures .sig-note { font-size: 7.5px; color: #666; font-style: italic; margin-top: 2px; }
-        .signatures .sig-name { font-weight: bold; margin-top: 24px; }
+        .pdf-export-root .line-note-editable { display: block; outline: none; cursor: text; border-bottom: 1px dashed transparent; min-height: 14px; padding: 2px 3px; margin: 1px -3px 0; border-radius: 2px; }
+        .pdf-export-root .line-note-editable:hover, .pdf-export-root .line-note-editable:focus { border-bottom-color: #f59e0b; background: #fffbeb; }
+        .pdf-export-root .line-note-editable:empty::before { content: attr(data-placeholder); color: #bbb; font-style: italic; }
+        .pdf-export-root .net-row td { background: #fff; font-weight: bold; font-size: 10.5px; }
+        .pdf-export-root .words-row td { font-style: italic; font-size: 8.5px; }
+        .pdf-export-root .sign-date { text-align: right; font-size: 9px; font-style: italic; margin: 6px 0 4px; }
+        .pdf-export-root table.signatures { width: 100%; border-collapse: collapse; text-align: center; font-size: 8.5px; margin-top: 4px; }
+        .pdf-export-root table.signatures td { vertical-align: top; width: 33.33%; }
+        .pdf-export-root .signatures .sig-title { font-weight: bold; }
+        .pdf-export-root .signatures .sig-note { font-size: 7.5px; color: #666; font-style: italic; margin-top: 2px; }
+        .pdf-export-root .signatures .sig-name { font-weight: bold; margin-top: 24px; }
       </style>
       <div class="page pdf-export-root">
         <table class="header"><tr>
@@ -3733,6 +3749,33 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       setTimeout(() => URL.revokeObjectURL(url), 4000);
     } catch (e) {
       addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file PDF phiếu lương.', type: 'warning' });
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF phiếu lương — dùng chung cơ chế Web Share API
+  // với sharePayslip/shareOrder của Đơn Mua Hàng (MaterialCoordination.tsx):
+  // ưu tiên hộp thoại Chia sẻ của hệ điều hành (gửi thẳng file qua Zalo/Messenger...),
+  // rơi về tải file PDF nếu thiết bị/trình duyệt không hỗ trợ chia sẻ file.
+  const sharePayslip = async (item: PayrollItem) => {
+    try {
+      const blob = await generatePayslipPdfBlob(item);
+      const fileName = `${payslipFileBaseName(item)}.pdf`;
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Phiếu lương ${item.empName}`, text: `Phiếu lương ${item.empName} - tháng ${item.month}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: 'ℹ️ Đã tải PDF', message: 'Thiết bị không hỗ trợ chia sẻ file trực tiếp — đã tải PDF về máy để gửi thủ công.', type: 'info' });
+    } catch (e) {
+      addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file PDF để chia sẻ.', type: 'warning' });
     }
   };
 
@@ -4721,115 +4764,132 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
       {showPrintPayslipModal && printingPayrollItem && (() => {
         const pay = printingPayrollItem;
-        const nguoiPhat = getConfiguredApprover('payroll');
-        const keToan = getConfiguredSettler('payroll');
 
         return (
-          <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 backdrop-blur-xs font-sans overflow-y-auto" id="payslip_print_modal">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-5xl w-full text-left space-y-5 shadow-2xl my-8">
+          // Drawer trượt từ phải — đồng bộ NGUYÊN VĂN class Tailwind với chi tiết
+          // Điều Phối Vật Tư (MaterialCoordination.tsx:1922-2021, 2584-2589 — xem
+          // docs/design-system-dieu-phoi-vat-tu.md mục 8): overlay + panel trắng,
+          // header dạng "icon badge + mã/badge trạng thái + tiêu đề", body chia
+          // trái=nội dung chính / phải=sidebar công cụ card trắng bo góc.
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}>
+            <div className="w-full max-w-[1024px] bg-white border-l border-slate-200 h-full flex flex-col text-xs text-slate-800 overflow-hidden" onClick={(e) => e.stopPropagation()}>
 
-              {/* Header */}
-              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
-                  <Calculator className="w-5 h-5 text-orange-400" />
-                  <span>Xử Lý In Phiếu Lương Nhanh Nhân Viên: <strong className="text-orange-400 font-mono">{pay.empId}</strong></span>
-                </h4>
+              {/* Drawer Header */}
+              <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-orange-500 rounded-lg flex items-center justify-center shadow-md shrink-0">
+                    <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                      <span className="font-mono font-extrabold text-[10px] text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                        {pay.empId}
+                      </span>
+                      <span className="font-bold text-[9px] sm:text-[9.5px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded bg-teal-100 text-teal-700 border border-teal-200">
+                        Phiếu lương {pay.month}
+                      </span>
+                    </div>
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base mt-0.5 truncate">{pay.empName}</h4>
+                    <div className="text-slate-500 text-[10px] hidden sm:block">
+                      Thực lĩnh: <strong className="text-slate-700">{Math.round(pay.netSalary || 0).toLocaleString('vi-VN')} đ</strong>
+                    </div>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
-                  className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  className="p-1.5 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
+                  <span className="hidden sm:inline">Đóng</span>
                 </button>
               </div>
 
-              {/* Grid content */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Body: trái = xem trước phiếu lương (nội dung chính), phải = sidebar công cụ.
+                  lg:justify-center gộp 2 khối lại SÁT nhau (thay vì trái flex-1 chiếm hết
+                  phần dư ra), tránh khoảng trắng thừa nằm giữa 2 cột. */}
+              <div className="flex-1 overflow-y-auto flex flex-col lg:flex-row lg:justify-center bg-slate-50" id="payslip_drawer_scrollable_body">
 
-                {/* Sidebar: Người phát lương/Kế toán (chỉ đọc, cấu hình 1 lần ở Quyền
-                    Phê Duyệt) + Ghi chú theo TỪNG DÒNG hạng mục lương */}
-                <div className="lg:col-span-4 bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4 h-fit">
-                  <div className="border-b border-slate-850 pb-2">
-                    <h5 className="font-black text-xs text-amber-500 uppercase tracking-widest">👤 Người Ký Phiếu</h5>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Cấu hình 1 lần tại <strong className="text-slate-300">Phân Quyền &amp; Vai Trò → Quyền Phê Duyệt → Phiếu Lương</strong>.
-                    </p>
-                  </div>
-                  <div className="space-y-1.5 text-xs">
-                    <div className="flex justify-between bg-slate-900 border border-slate-800 rounded-lg p-2">
-                      <span className="text-slate-400">Người phát lương:</span>
-                      <span className="font-bold text-white">{nguoiPhat?.name || '— Chưa cấu hình —'}</span>
-                    </div>
-                    <div className="flex justify-between bg-slate-900 border border-slate-800 rounded-lg p-2">
-                      <span className="text-slate-400">Kế toán:</span>
-                      <span className="font-bold text-white">{keToan?.name || '— Chưa cấu hình —'}</span>
-                    </div>
-                    <div className="flex justify-between bg-slate-900 border border-slate-800 rounded-lg p-2">
-                      <span className="text-slate-400">Địa điểm &amp; ngày lập:</span>
-                      <span className="font-bold text-amber-400">{getPayslipDatePlace(pay)}</span>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-slate-850 pt-3">
-                    <p className="text-[10px] text-slate-500 leading-relaxed">
-                      ✍️ <strong className="text-amber-500">Ghi chú theo dòng:</strong> bấm trực tiếp vào dòng "<em>+ Bấm để ghi chú...</em>" bên dưới mỗi hạng mục lương trên bản xem trước bên phải để gõ, rồi bấm ra ngoài để lưu.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-850">
-                    <button
-                      type="button"
-                      onClick={() => handlePrintPayslip(pay)}
-                      className="w-full py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      🖨️ In Phiếu Lương Nhanh
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => downloadPDFPayslip(pay)}
-                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      📥 Tải Phiếu Lương (PDF)
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
-                      className="w-full py-2 text-slate-450 hover:text-white text-xs font-bold transition-all text-center cursor-pointer"
-                    >
-                      Hủy &amp; Đóng lại
-                    </button>
-                  </div>
-                </div>
-
-                {/* Xem trước — dựng từ ĐÚNG buildPayslipFragment dùng cho in/PDF (chỉ
+                {/* Trái: Xem trước — dựng từ ĐÚNG buildPayslipFragment dùng cho in/PDF (chỉ
                     khác tham số editable=true), tránh 3 bản viết tay lệch nhau như
                     thiết kế cũ (JSX riêng + print window riêng + html2pdf.js trên
                     JSX riêng). Ghi chú theo dòng được gõ TRỰC TIẾP vào ô contenteditable
                     ngay trên bản xem trước này (khỏi cần ô nhập riêng ở sidebar) — lưu
-                    khi rời khỏi ô (blur), qua handleSavePayslipLineNote. */}
-                <div className="lg:col-span-8 bg-slate-950 p-3 rounded-xl border border-slate-850 overflow-x-auto">
-                  <div className="text-[10px] text-slate-500 uppercase tracking-widest font-black text-center py-1 mb-2 border-b border-slate-900">
-                    🖼️ Xem Trước Phiếu Lương (Khổ A5) — Bấm vào dòng ghi chú để sửa trực tiếp
+                    khi rời khỏi ô (blur), qua handleSavePayslipLineNote. Bỏ flex-1: khối
+                    này chỉ rộng vừa đủ khung phiếu lương (420px + padding), không chiếm
+                    hết phần trống còn lại. */}
+                <div className="p-3 sm:p-5 overflow-y-auto border-b lg:border-b-0 lg:border-r border-slate-200" id="payslip_drawer_left_pane">
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-3 sm:p-4 mx-auto" style={{ maxWidth: 480 }}>
+                    <div
+                      className="bg-white text-black rounded-lg border border-slate-200 mx-auto overflow-hidden"
+                      style={{ width: '420px' }}
+                      dangerouslySetInnerHTML={{ __html: payslipPreviewFragment }}
+                      onBlur={(e) => {
+                        const target = e.target as HTMLElement;
+                        const key = target.dataset?.noteKey;
+                        if (!key) return;
+                        handleSavePayslipLineNote(pay, key, target.textContent || '');
+                      }}
+                      onKeyDown={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (!target.dataset?.noteKey) return;
+                        // Ghi chú theo dòng chỉ 1 dòng — Enter để lưu & rời ô thay vì xuống dòng.
+                        if (e.key === 'Enter') { e.preventDefault(); target.blur(); }
+                      }}
+                    />
                   </div>
-                  <div
-                    className="bg-white text-black rounded-lg shadow-2xl mx-auto overflow-hidden"
-                    style={{ width: '420px' }}
-                    dangerouslySetInnerHTML={{ __html: payslipPreviewFragment }}
-                    onBlur={(e) => {
-                      const target = e.target as HTMLElement;
-                      const key = target.dataset?.noteKey;
-                      if (!key) return;
-                      handleSavePayslipLineNote(pay, key, target.textContent || '');
-                    }}
-                    onKeyDown={(e) => {
-                      const target = e.target as HTMLElement;
-                      if (!target.dataset?.noteKey) return;
-                      // Ghi chú theo dòng chỉ 1 dòng — Enter để lưu & rời ô thay vì xuống dòng.
-                      if (e.key === 'Enter') { e.preventDefault(); target.blur(); }
-                    }}
-                  />
+                </div>
+
+                {/* Phải: sidebar công cụ — chỉ còn các nút thao tác (In / Tải PDF / Chia
+                    sẻ / Đóng — đúng cơ chế In-Tải-Chia sẻ của chi tiết Đơn Mua Hàng ở
+                    MaterialCoordination.tsx), cỡ nút NGUYÊN VĂN theo chuẩn "CÔNG CỤ ĐIỀU
+                    PHỐI" (docs/design-system-dieu-phoi-vat-tu.md mục 4): py-2.5, text-[11px],
+                    icon w-4 — gọn gàng, không lồng thêm card phụ. Đã bỏ khối "Người ký
+                    phiếu"/gợi ý ghi chú theo yêu cầu (thông tin cấu hình 1 lần, không cần
+                    lặp lại mỗi lần in phiếu — vẫn áp dụng đúng khi in/PDF qua
+                    buildPayslipFragment). lg:self-start (thay vì h-full) để tránh khoảng
+                    trắng thừa bên dưới khi nội dung sidebar ngắn hơn khung xem trước phiếu
+                    lương bên trái. */}
+                <div className="lg:w-[280px] shrink-0 lg:self-start">
+                  <div className="p-4 sm:p-5 bg-white lg:bg-slate-50 border-t lg:border-t-0 lg:border-l border-slate-200 space-y-4" id="payslip_drawer_right_pane">
+                    <span className="font-extrabold text-[10px] text-slate-600 block uppercase tracking-wider">
+                      Công cụ phiếu lương
+                    </span>
+
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintPayslip(pay)}
+                        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <Printer className="w-4 h-4" /> In
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadPDFPayslip(pay)}
+                        className="w-full bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <Download className="w-4 h-4" /> Tải
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => sharePayslip(pay)}
+                        className="w-full bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <Share2 className="w-4 h-4" /> Chia sẻ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
+                        className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                      >
+                        Hủy &amp; Đóng lại
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
               </div>
