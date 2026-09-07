@@ -2597,7 +2597,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       });
     }
 
-    const workingEmps = employees.filter((emp: any) => emp.status === 'working');
+    // Ban giám đốc KHÔNG cần chấm công (loại khỏi Bảng chấm công ngày như cũ)
+    // nhưng VẪN được tính lương tự động — luôn tính đủ công chuẩn ngày thường
+    // (xem `empAttendance` ép rỗng bên dưới), các cột khác (KPI, công tác phí,
+    // tạm ứng, bảo hiểm, thuế...) tính giống hệt nhân viên `working`.
+    const workingEmps = employees.filter((emp: any) => emp.status === 'working' || emp.status === 'director_board');
     // Loại bỏ bản ghi trùng (cùng empId) để không nhân bản dòng lương trong bảng lương.
     // (Bảng employees trên Supabase đôi khi có dòng trùng do import/lưu trước đó.)
     const seenEmpIds = new Set<string>();
@@ -2652,7 +2656,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         expenses: 0
       };
 
-      const empAttendance = (monthAttendance || []).filter((a: any) => {
+      // Ban giám đốc không chấm công → ép rỗng để nhánh "else" bên dưới tự áp
+      // dụng đủ công chuẩn (standardWorkDays), không tăng ca CN/Lễ — KHÔNG tra
+      // cứu log chấm công thật (nếu có sót log cũ cũng không dùng để tính).
+      const empAttendance = emp.status === 'director_board' ? [] : (monthAttendance || []).filter((a: any) => {
         if (!a.date) return false;
         const [aYear, aMonth] = a.date.split('-');
         // BỎ filter `a.status === 'valid'`: ngày bị đánh dấu invalid (vd. báo cáo
