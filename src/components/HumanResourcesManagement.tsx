@@ -3534,7 +3534,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Dựng phần NỘI DUNG (style + .page) của phiếu lương — dùng chung cho cả xem
   // trước trên màn hình (dangerouslySetInnerHTML), in (window.print) và xuất
   // PDF (html2canvas), tránh 3 bản viết tay lệch nhau như trước đây.
-  const buildPayslipFragment = (item: PayrollItem): string => {
+  // editable=true CHỈ dùng cho bản xem trước trên màn hình (cho phép bấm thẳng
+  // vào dòng ghi chú để gõ, khỏi cần ô nhập riêng) — bản in/PDF/zip luôn dựng
+  // với editable=false (contenteditable không có ý nghĩa khi in/xuất ảnh tĩnh,
+  // và tránh viền nét đứt hiện tác dụng phụ trên phiếu in thật).
+  const buildPayslipFragment = (item: PayrollItem, editable: boolean = false): string => {
     const emp = employees.find((e: any) => e.id === item.empId);
     const position = emp?.position || 'Nhân viên';
     const cp: any = businessInfo || {};
@@ -3542,11 +3546,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const nguoiPhat = getConfiguredApprover('payroll');
     const keToan = getConfiguredSettler('payroll');
     const lineNotes = item.lineNotes || {};
-    const rows = getPayslipLineItems(item).map(li => `
+    const rows = getPayslipLineItems(item).map(li => {
+      const noteText = lineNotes[li.key] || '';
+      const noteHtml = editable
+        ? `<div class="line-note line-note-editable" contenteditable="true" data-note-key="${escHtml(li.key)}" data-placeholder="+ Bấm để ghi chú...">${escHtml(noteText)}</div>`
+        : (noteText ? `<div class="line-note">${escHtml(noteText)}</div>` : '');
+      return `
       <tr>
-        <td class="lbl">${escHtml(li.label)}${lineNotes[li.key] ? `<div class="line-note">${escHtml(lineNotes[li.key])}</div>` : ''}</td>
+        <td class="lbl">${escHtml(li.label)}${noteHtml}</td>
         <td class="val${li.bold ? ' bold' : ''}">${li.value}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     return `
       <style>
@@ -3573,6 +3583,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         table.salary td.val { text-align: right; font-family: 'Courier New', monospace; width: 38%; }
         table.salary td.bold { font-weight: bold; background: #fafafa; }
         .line-note { font-weight: normal; font-style: italic; font-size: 7.5px; color: #666; margin-top: 1px; }
+        /* Chỉ áp dụng cho bản xem trước editable=true — viền nét đứt/placeholder
+           chỉ hiện trên màn hình, KHÔNG lộ ra khi in/xuất PDF (editable=false
+           không gắn class này nên không có CSS này áp dụng). */
+        /* Vùng bấm được nới rộng hơn khung chữ thật (padding + min-height) để dễ
+           bấm trúng trên preview thu nhỏ — chữ vẫn nhỏ (7.5px) nhưng vùng nhận
+           click/chạm cao hơn nhiều so với chỉ 1 dòng chữ (đủ cho ngón tay/chuột). */
+        .line-note-editable { display: block; outline: none; cursor: text; border-bottom: 1px dashed transparent; min-height: 14px; padding: 2px 3px; margin: 1px -3px 0; border-radius: 2px; }
+        .line-note-editable:hover, .line-note-editable:focus { border-bottom-color: #f59e0b; background: #fffbeb; }
+        .line-note-editable:empty::before { content: attr(data-placeholder); color: #bbb; font-style: italic; }
         .net-row td { background: #FAD7A0 !important; font-weight: bold; font-size: 10.5px; }
         .words-row td { font-style: italic; font-size: 8.5px; }
         .sign-date { text-align: right; font-size: 9px; font-style: italic; margin: 6px 0 4px; }
@@ -3630,6 +3649,19 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   const buildPayslipHtml = (item: PayrollItem): string =>
     `<!doctype html><html><head><meta charset="utf-8"><title>Phieu_Luong_${item.empId}_${item.month.replace('/', '_')}</title></head><body>${buildPayslipFragment(item)}</body></html>`;
+
+  // Bọc useMemo: bản xem trước chỉnh sửa được (editable=true, dangerouslySetInnerHTML)
+  // chỉ nên dựng lại DOM khi `printingPayrollItem` THỰC SỰ đổi (chọn phiếu khác /
+  // vừa lưu ghi chú). Nếu gọi buildPayslipFragment() trực tiếp trong JSX, MỌI
+  // re-render khác của component (kể cả không liên quan gì tới phiếu lương) đều
+  // tạo ra 1 chuỗi HTML mới → React reset lại toàn bộ nội dung contenteditable,
+  // XÓA MẤT chữ người dùng đang gõ dở trước khi kịp blur để lưu. useMemo giữ
+  // nguyên chuỗi (React so sánh giá trị __html, không phải reference) nên DOM
+  // không bị reset ngoài ý muốn giữa lúc đang gõ.
+  const payslipPreviewFragment = React.useMemo(
+    () => (printingPayrollItem ? buildPayslipFragment(printingPayrollItem, true) : ''),
+    [printingPayrollItem]
+  );
 
   // Dựng PDF phiếu lương thành Blob — dùng chung cho "Tải PDF" (1 người) và
   // "Tải toàn bộ phiếu lương" (nén .zip toàn bộ nhân viên trong kỳ), cùng cơ
@@ -4739,22 +4771,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   </div>
 
                   <div className="border-t border-slate-850 pt-3">
-                    <h5 className="font-black text-xs text-amber-500 uppercase tracking-widest mb-1">✍️ Ghi Chú Theo Dòng</h5>
-                    <p className="text-[10px] text-slate-500 mb-2">Ghi chú riêng cho từng hạng mục lương — lưu lại và hiển thị ngay dưới dòng tương ứng trên phiếu.</p>
-                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-                      {getPayslipLineItems(pay).map(li => (
-                        <div key={li.key}>
-                          <label className="block text-[9.5px] text-slate-400 mb-0.5">{li.label}</label>
-                          <input
-                            type="text"
-                            defaultValue={pay.lineNotes?.[li.key] || ''}
-                            onBlur={(e) => handleSavePayslipLineNote(pay, li.key, e.target.value)}
-                            placeholder="Ghi chú (tùy chọn)..."
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-[11px] text-white focus:border-amber-500 focus:outline-none"
-                          />
-                        </div>
-                      ))}
-                    </div>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      ✍️ <strong className="text-amber-500">Ghi chú theo dòng:</strong> bấm trực tiếp vào dòng "<em>+ Bấm để ghi chú...</em>" bên dưới mỗi hạng mục lương trên bản xem trước bên phải để gõ, rồi bấm ra ngoài để lưu.
+                    </p>
                   </div>
 
                   <div className="flex flex-col gap-2 pt-2 border-t border-slate-850">
@@ -4784,17 +4803,32 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   </div>
                 </div>
 
-                {/* Xem trước — dựng từ ĐÚNG buildPayslipFragment dùng cho in/PDF, tránh
-                    3 bản viết tay lệch nhau như thiết kế cũ (JSX riêng + print window
-                    riêng + html2pdf.js trên JSX riêng). */}
+                {/* Xem trước — dựng từ ĐÚNG buildPayslipFragment dùng cho in/PDF (chỉ
+                    khác tham số editable=true), tránh 3 bản viết tay lệch nhau như
+                    thiết kế cũ (JSX riêng + print window riêng + html2pdf.js trên
+                    JSX riêng). Ghi chú theo dòng được gõ TRỰC TIẾP vào ô contenteditable
+                    ngay trên bản xem trước này (khỏi cần ô nhập riêng ở sidebar) — lưu
+                    khi rời khỏi ô (blur), qua handleSavePayslipLineNote. */}
                 <div className="lg:col-span-8 bg-slate-950 p-3 rounded-xl border border-slate-850 overflow-x-auto">
                   <div className="text-[10px] text-slate-500 uppercase tracking-widest font-black text-center py-1 mb-2 border-b border-slate-900">
-                    🖼️ Xem Trước Phiếu Lương (Khổ A5)
+                    🖼️ Xem Trước Phiếu Lương (Khổ A5) — Bấm vào dòng ghi chú để sửa trực tiếp
                   </div>
                   <div
-                    className="bg-white text-black rounded-lg shadow-2xl mx-auto pointer-events-none select-none overflow-hidden"
+                    className="bg-white text-black rounded-lg shadow-2xl mx-auto overflow-hidden"
                     style={{ width: '420px' }}
-                    dangerouslySetInnerHTML={{ __html: buildPayslipFragment(pay) }}
+                    dangerouslySetInnerHTML={{ __html: payslipPreviewFragment }}
+                    onBlur={(e) => {
+                      const target = e.target as HTMLElement;
+                      const key = target.dataset?.noteKey;
+                      if (!key) return;
+                      handleSavePayslipLineNote(pay, key, target.textContent || '');
+                    }}
+                    onKeyDown={(e) => {
+                      const target = e.target as HTMLElement;
+                      if (!target.dataset?.noteKey) return;
+                      // Ghi chú theo dòng chỉ 1 dòng — Enter để lưu & rời ô thay vì xuống dòng.
+                      if (e.key === 'Enter') { e.preventDefault(); target.blur(); }
+                    }}
                   />
                 </div>
 
