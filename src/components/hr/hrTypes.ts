@@ -55,7 +55,7 @@ export interface EmployeeProfile {
   startDate: string;
   contractType: string;
   contractDurationMonths?: number; // Thời hạn HĐ (tháng) - chỉ dùng khi HĐ Có thời hạn
-  status: 'working' | 'leave' | 'retired';
+  status: 'working' | 'leave' | 'retired' | 'director_board';
   phepNam?: number;
   bankAccount: string;
   bankName: string;

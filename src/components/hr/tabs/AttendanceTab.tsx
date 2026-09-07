@@ -247,7 +247,10 @@ export default function AttendanceTab({
     const absentByStatus = logs.filter(l => l.status === 'unexcused' || l.status === 'missing' || l.status === 'invalid').length;
     const locked = logs.filter(l => l.isLocked).length;
 
-    const totalEmployees = employees.length;
+    // Chỉ tính nhân viên "Đang làm" — trước đây dùng employees.length nguyên xi,
+    // tính cả nhân viên nghỉ phép/nghỉ hẳn/Ban giám đốc vào "Tổng nhân viên", khiến
+    // số "Vắng" bị thổi phồng sai (nhân viên nghỉ hẳn không đi làm nhưng vẫn bị tính vắng).
+    const totalEmployees = employees.filter(e => e.status === 'working').length;
     const totalPresent = new Set(logs.map(l => l.empId)).size;
     const absent = totalEmployees - totalPresent;
 

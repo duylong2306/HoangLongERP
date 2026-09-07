@@ -70,7 +70,7 @@ export interface Employee {
   startDate?: string;
   contractType?: string;
   contractDurationMonths?: number;
-  status?: 'working' | 'leave' | 'retired';
+  status?: 'working' | 'leave' | 'retired' | 'director_board';
   phepNam?: number;
   docsCount?: number;
   education?: string;

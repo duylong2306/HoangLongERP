@@ -459,10 +459,11 @@ export default function ProfilesTab({
                       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${
                         emp.status === 'working' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                         emp.status === 'leave' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                        emp.status === 'director_board' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
                         'bg-rose-50 text-rose-700 border border-rose-200'
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-500' : emp.status === 'leave' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
-                        {emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm'}
+                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-500' : emp.status === 'leave' ? 'bg-amber-500' : emp.status === 'director_board' ? 'bg-indigo-500' : 'bg-rose-500'}`}></span>
+                        {emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm'}
                       </span>
                     </td>
                   </tr>
@@ -608,7 +609,7 @@ export default function ProfilesTab({
                     <div>Loại hợp đồng: <strong className="text-slate-200 block mt-0.5">{emp.contractType}</strong></div>
                     <div>Thời hạn HĐ (tháng): <strong className="text-slate-200 block mt-0.5">{emp.contractType === 'Có thời hạn' ? (emp.contractDurationMonths || '—') : '—'}</strong></div>
                     <div>Công Nhật Vào: <strong className="text-slate-200 block mt-0.5">{emp.startDate}</strong></div>
-                    <div>Trạng thái: <strong className="text-slate-200 block mt-0.5 capitalize">{emp.status === 'working' ? 'Đang làm' : 'Nghỉ làm'}</strong></div>
+                    <div>Trạng thái: <strong className="text-slate-200 block mt-0.5 capitalize">{emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm'}</strong></div>
                   </div>
                 </div>
 
@@ -947,6 +948,7 @@ export default function ProfilesTab({
                       >
                         <option value="working">Đang làm</option>
                         <option value="leave">Nghỉ phép</option>
+                        <option value="director_board">Ban giám đốc</option>
                         <option value="retired">Nghỉ hẳn</option>
                       </select>
                       {editingEmpData.status === 'retired' && (

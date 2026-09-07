@@ -389,7 +389,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Phép năm': emp.phepNam !== undefined ? emp.phepNam : 12,
       'Ngân hàng': emp.bankName,
       'Số tài khoản': emp.bankAccount,
-      'Trạng thái': emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm',
+      'Trạng thái': emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm',
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -432,7 +432,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           phepNam: Number(r['Phép năm'] || 12),
           bankName: String(r['Ngân hàng'] || ''),
           bankAccount: String(r['Số tài khoản'] || ''),
-          status: (String(r['Trạng thái'] || 'working').includes('Nghỉ làm') ? 'retired' : String(r['Trạng thái'] || 'working').includes('Nghỉ phép') ? 'leave' : 'working') as any,
+          status: (() => {
+            const s = String(r['Trạng thái'] || 'working');
+            if (s.includes('Ban giám đốc')) return 'director_board';
+            if (s.includes('Nghỉ làm')) return 'retired';
+            if (s.includes('Nghỉ phép')) return 'leave';
+            return 'working';
+          })() as any,
           docsCount: 0,
         })).filter(r => r.id && r.name);
         if (imported.length === 0) {
@@ -2855,7 +2861,23 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           <tbody>
     `;
 
-    payroll.forEach((pay, index) => {
+    // BUG CŨ: forEach thẳng qua `payroll` (state chứa TOÀN BỘ lịch sử mọi kỳ đã
+    // từng tính, nạp 1 lần lúc mount từ hrm_payroll_records) mà không lọc theo kỳ
+    // đang chọn — 1 nhân viên đã từng được tính lương ở nhiều tháng sẽ bị xuất
+    // lặp lại nhiều dòng trong file Excel. Lọc đúng kỳ (giống filteredPayroll ở
+    // PayrollTab.tsx) trước khi xuất, đồng thời dedupe theo empId (giữ bản ghi
+    // cuối cùng) phòng trường hợp có dữ liệu trùng id sót lại.
+    const periodPayroll = (payroll || []).filter((p: any) => p.month === `${payrollMonth}/${payrollYear}`);
+    const seenExportEmpIds = new Set<string>();
+    const dedupedPayroll: any[] = [];
+    for (let i = periodPayroll.length - 1; i >= 0; i--) {
+      const p = periodPayroll[i];
+      if (p.empId && seenExportEmpIds.has(p.empId)) continue;
+      if (p.empId) seenExportEmpIds.add(p.empId);
+      dedupedPayroll.unshift(p);
+    }
+
+    dedupedPayroll.forEach((pay, index) => {
       const emp = employees.find(e => e.id === pay.empId);
       const roleName = emp ? emp.position : 'Nhân viên';
       
@@ -2888,16 +2910,16 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       `;
     });
 
-    const totalBase = payroll.reduce((sum, p) => sum + (p.baseSalary || 0), 0);
-    const totalMonthly = payroll.reduce((sum, p) => sum + (p.monthlySalary || 0), 0);
-    const totalOtW = payroll.reduce((sum, p) => sum + (p.otWeekendSalary || 0), 0);
-    const totalOtH = payroll.reduce((sum, p) => sum + (p.totalOtHoursSalary || 0), 0);
-    const totalExp = payroll.reduce((sum, p) => sum + (p.expenses || 0), 0);
-    const totalInc = payroll.reduce((sum, p) => sum + (p.totalIncome || 0), 0);
-    const totalIns = payroll.reduce((sum, p) => sum + (p.insurance || 0), 0);
-    const totalDed = payroll.reduce((sum, p) => sum + (p.otherDeductions || 0), 0);
-    const totalAdv = payroll.reduce((sum, p) => sum + (p.advances || 0), 0);
-    const totalNet = payroll.reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    const totalBase = dedupedPayroll.reduce((sum, p) => sum + (p.baseSalary || 0), 0);
+    const totalMonthly = dedupedPayroll.reduce((sum, p) => sum + (p.monthlySalary || 0), 0);
+    const totalOtW = dedupedPayroll.reduce((sum, p) => sum + (p.otWeekendSalary || 0), 0);
+    const totalOtH = dedupedPayroll.reduce((sum, p) => sum + (p.totalOtHoursSalary || 0), 0);
+    const totalExp = dedupedPayroll.reduce((sum, p) => sum + (p.expenses || 0), 0);
+    const totalInc = dedupedPayroll.reduce((sum, p) => sum + (p.totalIncome || 0), 0);
+    const totalIns = dedupedPayroll.reduce((sum, p) => sum + (p.insurance || 0), 0);
+    const totalDed = dedupedPayroll.reduce((sum, p) => sum + (p.otherDeductions || 0), 0);
+    const totalAdv = dedupedPayroll.reduce((sum, p) => sum + (p.advances || 0), 0);
+    const totalNet = dedupedPayroll.reduce((sum, p) => sum + (p.netSalary || 0), 0);
 
     htmlContent += `
           <tr style="font-weight: bold; background-color: #f2f2f2;">
