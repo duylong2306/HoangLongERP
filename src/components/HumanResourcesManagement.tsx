@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNotification, getConfiguredApprover } from '../context';
+import { useNotification, getConfiguredApprover, getConfiguredSettler } from '../context';
 import { isUserInRoleGroup } from '../context';
+import { useSettings } from '../context/SettingsContext';
 import {
   Users, Clock, DollarSign, Calendar, Award,
   Briefcase, FileText, MapPin, ChevronRight,
@@ -78,12 +79,27 @@ import RolesTab from './hr/tabs/RolesTab';
  *     phải `working`.
  * ========================================================================== */
 
-// html2pdf.js has no TypeScript declarations and depends on browser globals (self, document)
-// Use dynamic import to only load it in browser environment when actually needed
-const loadHtml2Pdf = async () => {
-  const mod = await import('html2pdf.js');
-  return mod.default || mod;
+// Dynamic import — chỉ tải các thư viện nặng này khi thực sự cần (in/xuất PDF,
+// nén zip phiếu lương), không đưa vào bundle chính. Cùng cơ chế html2canvas +
+// jsPDF thủ công (không dùng html2pdf.js) như generateOrderPdfBlob ở
+// MaterialCoordination.tsx — lý do: html2pdf.js gán `container.height = ...`
+// (property, không tồn tại trên <div>) nên có trường hợp chụp ra ảnh cao 0px.
+const loadHtml2Canvas = async () => {
+  const mod = await import('html2canvas');
+  return (mod as any).default || mod;
 };
+const loadJsPdf = async () => {
+  const mod = await import('jspdf');
+  return (mod as any).jsPDF || (mod as any).default;
+};
+const loadJsZip = async () => {
+  const mod = await import('jszip');
+  return (mod as any).default || mod;
+};
+
+// Escape HTML để tránh lỗi khi tên/vị trí chứa ký tự đặc biệt (dùng khi dựng
+// HTML phiếu lương cho in/xuất PDF).
+const escHtml = (s: any): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const WorkdayCell = React.memo(function WorkdayCell({
   log,
@@ -129,6 +145,8 @@ const WorkdayCell = React.memo(function WorkdayCell({
 
 export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], tasks = [], defaultSubTab, hideSidebar = false, systemConfig }: HRMProps) {
   const { addToast } = useNotification();
+  // Thông tin doanh nghiệp (Cài Đặt Hệ Thống) — dùng làm header phiếu lương.
+  const { businessInfo } = useSettings();
   // Tab list: "profiles", "attendance", "leaves", "payroll", "trips", "hr_data"
   const [activeSubTab, setActiveSubTab] = useState<string>(() => defaultSubTab || 'profiles');
 
@@ -2527,30 +2545,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [showEditPayrollModal, setShowEditPayrollModal] = useState(false);
   const [editingPayrollItem, setEditingPayrollItem] = useState<PayrollItem | null>(null);
 
-  // States for printing custom payslip
+  // States for printing custom payslip — "Người phát lương"/"Kế toán" nay đọc
+  // trực tiếp từ Quyền Phê Duyệt (getConfiguredApprover/getConfiguredSettler,
+  // loại 'payroll') và địa điểm/ngày lập lấy "Lâm Đồng" + ngày khóa kỳ
+  // (xem getPayslipDatePlace) — không còn phải nhập lại thủ công mỗi lần in
+  // qua thẻ "Tùy Biến Thông Tin In" (đã bỏ theo yêu cầu). Ghi chú nay lưu
+  // THEO TỪNG DÒNG hạng mục lương trực tiếp trên PayrollItem.lineNotes (persist
+  // lên Supabase), không còn 1 ô ghi chú chung cho cả phiếu.
   const [showPrintPayslipModal, setShowPrintPayslipModal] = useState(false);
   const [printingPayrollItem, setPrintingPayrollItem] = useState<PayrollItem | null>(null);
-  const [printNotes, setPrintNotes] = useState<string>('');
-  const [printNguoiPhat, setPrintNguoiPhat] = useState<string>('');
-  const [printKeToanTruong, setPrintKeToanTruong] = useState<string>('');
-  const [printDatePlace, setPrintDatePlace] = useState<string>('');
-
-  // Automatically update printing defaults when selected item changes
-  useEffect(() => {
-    if (printingPayrollItem) {
-      setPrintNotes('');
-
-      // Calculate 15th of the following month for Vietnamese default payment date
-      let m = parseInt(payrollMonth) + 1;
-      let y = parseInt(payrollYear);
-      if (m > 12) {
-        m = 1;
-        y += 1;
-      }
-      const mStr = m.toString().padStart(2, '0');
-      setPrintDatePlace(`Lâm Đồng, ngày 15 tháng ${mStr} năm ${y}`);
-    }
-  }, [printingPayrollItem, payrollMonth, payrollYear]);
 
   // Form states for editing a single payroll item
   const [editWorkedDays, setEditWorkedDays] = useState(0);
@@ -3496,332 +3499,287 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     setShowPrintPayslipModal(true);
   };
 
-  const downloadPDFPayslip = async (item: PayrollItem) => {
-    const element = document.getElementById('printable-payslip-canvas-content');
-    if (!element) {
-      addToast({ title: 'ℹ️ Thông báo', message: 'Không tìm thấy nội dung phiếu lương để tải PDF!', type: 'warning' });
-      return;
-    }
-
-    const opt = {
-      margin:       10, // 10mm margins for a crisp fit
-      filename:     `PhieuLuong_${item.empId}_Thang${item.month.replace('/', '_')}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-
-    const html2pdf = (await loadHtml2Pdf()) as any;
-    html2pdf().from(element).set(opt).save();
+  // Địa điểm cố định "Lâm Đồng"; ngày lập lấy theo ngày "Khóa kỳ & Phát phiếu
+  // lương" (item.lockedAt) nếu kỳ đã khóa — chưa khóa thì tạm dùng ngày hiện tại.
+  const getPayslipDatePlace = (item: PayrollItem): string => {
+    const d = item.lockedAt ? new Date(item.lockedAt) : new Date();
+    return `Lâm Đồng, ngày ${d.getDate()} tháng ${d.getMonth() + 1} năm ${d.getFullYear()}`;
   };
 
-  const downloadRawTextSlip = (item: PayrollItem) => {
-    const slipText = `
-========================================
-    PHIẾU LƯƠNG NHÂN VIÊN CHI TIẾT
-         CÔNG TY HOÀNG LONG (LÂM ĐỒNG)
-========================================
-Mã nhân viên   : ${item.empId}
-Tên nhân viên  : ${item.empName}
-Thời điểm kỳ   : Tháng ${item.month}
-----------------------------------------
-Thu nhập chính thức:
- + Lương theo công : ${item.baseSalary.toLocaleString('vi-VN')} đ
- + Ngày công đạt   : ${item.workedDays} ngày công
- + Lương tăng ca   : ${(item.otSundaySalary + item.otHolidaySalary).toLocaleString('vi-VN')} đ
- + Lương tăng ca ngoài giờ: ${(item.otHoursSalary || 0).toLocaleString('vi-VN')} đ (${item.otHours} giờ)
- + Thưởng KPI      : ${item.kpiBonus.toLocaleString('vi-VN')} đ
-----------------------------------------
-Các khoản khấu trừ:
- - Tạm ứng kỳ trước: ${item.advances.toLocaleString('vi-VN')} đ
- - Đóng Bảo hiểm   : ${item.insurance.toLocaleString('vi-VN')} đ
- - Thuế TNCN tạm tính: ${(item.tax || 0).toLocaleString('vi-VN')} đ
- - Khấu trừ khác   : ${item.otherDeductions.toLocaleString('vi-VN')} đ
-----------------------------------------
-THỰC NHẬN CHUYỂN KHOẢN:
- >>> ${item.netSalary.toLocaleString('vi-VN')} đ <<<
-----------------------------------------
-Kế Toán: ${printKeToanTruong}
-Người lập/phát phiếu: ${printNguoiPhat}
-========================================
-Generated by HL ERP Cloud v2.1 (2026)
-`;
-    const textBlob = new Blob([slipText], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(textBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `PhieuLuong_${item.empId}_Thang${item.month.replace('/', '_')}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handlePrintPayslip = (
-    item: PayrollItem,
-    notes: string,
-    nguoiPhat: string,
-    keToan: string
-  ) => {
-    const targetEmp = employees.find((e: any) => e.id === item.empId);
-    const position = targetEmp?.position || 'Nhân viên';
-    
+  // Danh sách dòng hạng mục lương hiển thị trên phiếu — dùng chung cho cả bảng
+  // xem trước, HTML xuất PDF/in, và danh sách ô nhập "ghi chú theo dòng".
+  const getPayslipLineItems = (item: PayrollItem) => {
     const dayAndPerformanceSalary = item.daySalary || 0;
     const otWeekendAndHoliday = (item.otSundaySalary || 0) + (item.otHolidaySalary || 0);
-    const perfSalary = item.performanceSalary || 0;
-    const kpiBonus = item.kpiBonus || 0;
-    const docTien = docSoTiengViet(item.netSalary);
+    return [
+      { key: 'baseSalary', label: 'Lương cơ bản', value: (item.baseSalary || 0).toLocaleString('vi-VN') },
+      { key: 'workedDays', label: 'Ngày công đi làm', value: String(item.workedDays || 0) },
+      { key: 'performanceSalary', label: 'Thưởng hiệu suất 100%', value: (item.performanceSalary || 0).toLocaleString('vi-VN') },
+      { key: 'kpiScore', label: 'Điểm KPI', value: String(item.kpiScore || 100) },
+      { key: 'kpiBonus', label: 'Mức hưởng KPI', value: (item.kpiBonus || 0).toLocaleString('vi-VN') },
+      { key: 'dayAndPerformanceSalary', label: 'Lương ngày công + Hiệu suất', value: dayAndPerformanceSalary.toLocaleString('vi-VN'), bold: true },
+      { key: 'otWeekendAndHoliday', label: 'Lương tăng ca lễ, CN', value: otWeekendAndHoliday.toLocaleString('vi-VN') },
+      { key: 'otHoursSalary', label: 'Lương tăng ca ngoài giờ', value: (item.otHoursSalary || 0).toLocaleString('vi-VN') },
+      { key: 'bonusHoliday', label: 'Thưởng lễ', value: (item.bonusHoliday || 0).toLocaleString('vi-VN') },
+      { key: 'bonusCreative', label: 'Thưởng sáng kiến', value: (item.bonusCreative || 0).toLocaleString('vi-VN') },
+      { key: 'expenses', label: 'Công tác phí', value: (item.expenses || 0).toLocaleString('vi-VN') },
+      { key: 'totalIncome', label: 'Tổng thu nhập & công tác phí', value: (item.totalIncome || 0).toLocaleString('vi-VN'), bold: true },
+      { key: 'otherDeductions', label: 'Khoản giảm trừ khác', value: (item.otherDeductions || 0).toLocaleString('vi-VN') },
+      { key: 'tax', label: 'Thuế TNCN', value: (item.tax || 0).toLocaleString('vi-VN') },
+      { key: 'insurance', label: 'Khấu trừ BHXH 10,5%', value: (item.insurance || 0).toLocaleString('vi-VN') },
+      { key: 'advances', label: 'Tạm ứng hoặc lĩnh trước', value: (item.advances || 0).toLocaleString('vi-VN') },
+    ];
+  };
 
+  // Dựng phần NỘI DUNG (style + .page) của phiếu lương — dùng chung cho cả xem
+  // trước trên màn hình (dangerouslySetInnerHTML), in (window.print) và xuất
+  // PDF (html2canvas), tránh 3 bản viết tay lệch nhau như trước đây.
+  const buildPayslipFragment = (item: PayrollItem): string => {
+    const emp = employees.find((e: any) => e.id === item.empId);
+    const position = emp?.position || 'Nhân viên';
+    const cp: any = businessInfo || {};
+    const docTien = docSoTiengViet(item.netSalary);
+    const nguoiPhat = getConfiguredApprover('payroll');
+    const keToan = getConfiguredSettler('payroll');
+    const lineNotes = item.lineNotes || {};
+    const rows = getPayslipLineItems(item).map(li => `
+      <tr>
+        <td class="lbl">${escHtml(li.label)}${lineNotes[li.key] ? `<div class="line-note">${escHtml(lineNotes[li.key])}</div>` : ''}</td>
+        <td class="val${li.bold ? ' bold' : ''}">${li.value}</td>
+      </tr>`).join('');
+
+    return `
+      <style>
+        /* Khổ A5 (148 x 210mm) — thu gọn cỡ chữ/khoảng cách so với khổ A4 cũ. */
+        @page { size: A5; margin: 8mm 10mm; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 9.5px; line-height: 1.4; }
+        .page { padding: 0; }
+        table.header { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+        table.header td { vertical-align: top; padding: 0; }
+        .company-info { width: 55%; }
+        .company-info .name { font-size: 11px; font-weight: bold; margin-bottom: 2px; }
+        .company-info .detail { font-size: 8.5px; color: #333; margin: 1px 0; }
+        .doc-title-block { width: 45%; text-align: right; }
+        .doc-title-block .doc-title { font-size: 14px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; }
+        .doc-title-block .doc-period { font-size: 10px; font-weight: bold; margin-top: 2px; }
+        hr { border: none; border-top: 1.5px solid #222; margin: 5px 0; }
+        table.info { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+        table.info td { padding: 1.5px 0; font-size: 9.5px; }
+        table.info .lbl { font-weight: bold; width: 70px; }
+        table.salary { width: 100%; border-collapse: collapse; margin-top: 4px; }
+        table.salary td { border: 0.5px solid #999; padding: 3px 5px; font-size: 9px; }
+        table.salary td.lbl { background: #f2f2f2; font-weight: bold; width: 62%; }
+        table.salary td.val { text-align: right; font-family: 'Courier New', monospace; width: 38%; }
+        table.salary td.bold { font-weight: bold; background: #fafafa; }
+        .line-note { font-weight: normal; font-style: italic; font-size: 7.5px; color: #666; margin-top: 1px; }
+        .net-row td { background: #FAD7A0 !important; font-weight: bold; font-size: 10.5px; }
+        .words-row td { font-style: italic; font-size: 8.5px; }
+        .sign-date { text-align: right; font-size: 9px; font-style: italic; margin: 6px 0 4px; }
+        table.signatures { width: 100%; border-collapse: collapse; text-align: center; font-size: 8.5px; margin-top: 4px; }
+        table.signatures td { vertical-align: top; width: 33.33%; }
+        .signatures .sig-title { font-weight: bold; }
+        .signatures .sig-note { font-size: 7.5px; color: #666; font-style: italic; margin-top: 2px; }
+        .signatures .sig-name { font-weight: bold; margin-top: 24px; }
+      </style>
+      <div class="page pdf-export-root">
+        <table class="header"><tr>
+          <td class="company-info">
+            <div class="name">${escHtml(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
+            ${cp.address ? `<div class="detail">Địa chỉ: ${escHtml(cp.address)}</div>` : ''}
+            ${cp.phone ? `<div class="detail">Điện thoại: ${escHtml(cp.phone)}</div>` : ''}
+            ${cp.taxCode ? `<div class="detail">MST: ${escHtml(cp.taxCode)}</div>` : ''}
+          </td>
+          <td class="doc-title-block">
+            <div class="doc-title">Phiếu Lương</div>
+            <div class="doc-period">Tháng ${escHtml(item.month)}</div>
+          </td>
+        </tr></table>
+        <hr/>
+        <table class="info">
+          <tr><td class="lbl">Họ và tên:</td><td><strong>${escHtml(item.empName)}</strong></td></tr>
+          <tr><td class="lbl">Mã NV:</td><td>${escHtml(item.empId)}</td></tr>
+          <tr><td class="lbl">Chức vụ:</td><td>${escHtml(position)}</td></tr>
+        </table>
+        <table class="salary">
+          ${rows}
+          <tr class="net-row"><td class="lbl">Thực lĩnh tháng này</td><td class="val">${(item.netSalary || 0).toLocaleString('vi-VN')}</td></tr>
+          <tr class="words-row"><td class="lbl">Số tiền bằng chữ</td><td>${escHtml(docTien)}</td></tr>
+        </table>
+        <div class="sign-date">${getPayslipDatePlace(item)}</div>
+        <table class="signatures"><tr>
+          <td>
+            <div class="sig-title">Người nhận</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${escHtml(item.empName)}</div>
+          </td>
+          <td>
+            <div class="sig-title">Người phát lương</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${escHtml(nguoiPhat?.name || '')}</div>
+          </td>
+          <td>
+            <div class="sig-title">Kế toán</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${escHtml(keToan?.name || '')}</div>
+          </td>
+        </tr></table>
+      </div>
+    `;
+  };
+
+  const buildPayslipHtml = (item: PayrollItem): string =>
+    `<!doctype html><html><head><meta charset="utf-8"><title>Phieu_Luong_${item.empId}_${item.month.replace('/', '_')}</title></head><body>${buildPayslipFragment(item)}</body></html>`;
+
+  // Dựng PDF phiếu lương thành Blob — dùng chung cho "Tải PDF" (1 người) và
+  // "Tải toàn bộ phiếu lương" (nén .zip toàn bộ nhân viên trong kỳ), cùng cơ
+  // chế html2canvas + jsPDF thủ công như generateOrderPdfBlob (Đơn Mua Hàng)
+  // ở MaterialCoordination.tsx — KHÔNG dùng html2pdf.js (từng gây ảnh cao 0px).
+  const generatePayslipPdfBlob = async (item: PayrollItem): Promise<Blob> => {
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '559px'; // ~ khổ A5 148mm ở 96dpi
+    container.style.background = '#ffffff';
+    container.innerHTML = buildPayslipFragment(item);
+    document.body.appendChild(container);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 8, marginSide = 10;
+      const pageWidthMm = 148, pageHeightMm = 210;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a5', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Tên file không dấu, viết liền, theo đúng format yêu cầu (TenNhanVien_ThangMM_NamYYYY)
+  const payslipFileBaseName = (item: PayrollItem): string => {
+    const nameNoDiacritics = removeVietnameseTones(item.empName || item.empId).replace(/\s+/g, '');
+    return `${nameNoDiacritics}_Thang${item.month.replace('/', '_Nam')}`;
+  };
+
+  const downloadPDFPayslip = async (item: PayrollItem) => {
+    try {
+      const blob = await generatePayslipPdfBlob(item);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${payslipFileBaseName(item)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file PDF phiếu lương.', type: 'warning' });
+    }
+  };
+
+  // Ghi chú theo TỪNG DÒNG hạng mục lương — lưu trực tiếp vào PayrollItem.lineNotes
+  // (persist lên Supabase qua bulk-save effect của `payroll`), phản ánh ngay trên
+  // bản xem trước + PDF/in.
+  const handleSavePayslipLineNote = (item: PayrollItem, key: string, note: string) => {
+    const updated: PayrollItem = { ...item, lineNotes: { ...(item.lineNotes || {}), [key]: note } };
+    setPrintingPayrollItem(updated);
+    setPayroll(payroll.map(p => p.id === updated.id ? updated : p));
+  };
+
+  // In phiếu lương — dùng chung buildPayslipHtml với PDF/xem trước (xem comment
+  // ở generatePayslipPdfBlob), giống cách printOrder dùng buildPurchaseOrderHtml
+  // ở MaterialCoordination.tsx, thay vì tự dựng riêng 1 bản HTML khác như trước.
+  const handlePrintPayslip = (item: PayrollItem) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng cho phép mở popup trên trình duyệt của bạn để thực hiện in phiếu lương!', type: 'warning' });
       return;
     }
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Phieu_Luong_${item.empId}</title>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
-            body {
-              font-family: 'Roboto', 'Times New Roman', Times, serif;
-              color: #000;
-              background: #fff;
-              margin: 30px;
-              font-size: 13.5px;
-              line-height: 1.4;
-            }
-            .title-container {
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              margin-bottom: 12px;
-              border-bottom: 2px solid #000;
-              padding-bottom: 6px;
-            }
-            .title-main {
-              font-size: 21px;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            .title-subtitle {
-              font-size: 18px;
-              font-weight: bold;
-              text-transform: uppercase;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 15px;
-            }
-            th, td {
-              border: 1px solid #000;
-              padding: 6.5px 10px;
-              text-align: left;
-              vertical-align: middle;
-            }
-            .col-name {
-              width: 38%;
-              font-weight: bold;
-              background-color: #f7f7f7;
-            }
-            .col-val {
-              width: 32%;
-              text-align: right;
-            }
-            .col-notes {
-              width: 30%;
-              vertical-align: top;
-            }
-            .align-left {
-              text-align: left !important;
-            }
-            .align-right {
-              text-align: right !important;
-            }
-            .align-center {
-              text-align: center !important;
-            }
-            .bg-highlight {
-              background-color: #FAD7A0 !important;
-              font-weight: bold;
-            }
-            .text-highlight {
-              color: #784212 !important;
-            }
-            .footer-section {
-              margin-top: 15px;
-              text-align: right;
-              font-style: italic;
-              font-size: 13px;
-              margin-bottom: 12px;
-            }
-            .sign-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              text-align: center;
-              margin-top: 20px;
-              font-size: 13.5px;
-            }
-            .sign-title {
-              font-weight: bold;
-              margin-bottom: 65px;
-            }
-            .sign-name {
-              font-weight: bold;
-            }
-            .no-print-btn {
-              text-align: center;
-              margin-top: 35px;
-            }
-            .btn {
-              background-color: #e67e22;
-              color: #fff;
-              border: none;
-              padding: 10px 20px;
-              font-size: 14px;
-              font-weight: bold;
-              border-radius: 5px;
-              cursor: pointer;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-            }
-            @media print {
-              body { margin: 15px; }
-              .no-print-btn { display: none !important; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="title-container">
-            <div class="title-main">PHIẾU LƯƠNG</div>
-            <div class="title-subtitle">THÁNG ${item.month}</div>
-          </div>
-          
-          <table>
-            <tbody>
-              <tr>
-                <td class="col-name">Họ và tên</td>
-                <td class="col-val align-left bg-highlight" style="font-size: 14.5px;">${item.empName}</td>
-                <td class="col-notes" rowspan="2" style="font-weight: bold; text-align: center; background-color: #f2f2f2; width: 30%;">
-                  Ghi chú
-                  <div style="font-weight: normal; font-style: italic; text-align: left; margin-top: 6px; font-size: 12px; font-family: sans-serif; white-space: pre-wrap; line-height: 1.4;">${notes || ''}</div>
-                </td>
-              </tr>
-              <tr>
-                <td class="col-name">Chức vụ</td>
-                <td class="col-val align-left">${position}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Lương cơ bản</td>
-                <td class="col-val">${(item.baseSalary || 0).toLocaleString('vi-VN')}</td>
-                <td rowspan="17" style="background-color: #fafafa;"></td>
-              </tr>
-              <tr>
-                <td class="col-name">Ngày công đi làm</td>
-                <td class="col-val">${item.workedDays || 0}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thưởng hiệu suất 100 %</td>
-                <td class="col-val">${(perfSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Điểm KPI</td>
-                <td class="col-val">${item.kpiScore || 100}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Mức hưởng KPI</td>
-                <td class="col-val">${(kpiBonus || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr style="font-weight: bold;">
-                <td class="col-name">Lương ngày công + Hiệu suất</td>
-                <td class="col-val">${(dayAndPerformanceSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Lương tăng ca lễ, CN</td>
-                <td class="col-val">${(otWeekendAndHoliday || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Lương tăng ca ngoài giờ</td>
-                <td class="col-val">${(item.otHoursSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thưởng lễ</td>
-                <td class="col-val">${(item.bonusHoliday || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thưởng sáng kiến</td>
-                <td class="col-val">${(item.bonusCreative || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Công tác phí</td>
-                <td class="col-val">${(item.expenses || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr style="font-weight: bold;">
-                <td class="col-name">Tổng thu nhập & công tác phí</td>
-                <td class="col-val">${(item.totalIncome || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Khoản giảm trừ khác</td>
-                <td class="col-val">${(item.otherDeductions || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thuế TNCN</td>
-                <td class="col-val">${(item.tax || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Khấu trừ BHXH 10,5%</td>
-                <td class="col-val">${(item.insurance || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Tạm ứng hoặc lĩnh trước</td>
-                <td class="col-val">${(item.advances || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr class="bg-highlight">
-                <td class="col-name">Thực lĩnh tháng này</td>
-                <td class="col-val align-center scale-105" style="font-size: 15.5px; background-color: #FAD7A0;">${(item.netSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name" style="font-family: serif; font-style: italic;">Số tiền bằng chữ</td>
-                <td colspan="2" class="align-left" style="font-family: serif; font-style: italic; font-size: 13px; line-height: 1.5; font-weight: bold;">${docTien}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="footer-section">
-            ${printDatePlace}
-          </div>
-
-          <div class="sign-grid">
-            <div>
-              <div class="sign-title">Người nhận</div>
-              <div class="sign-name">${item.empName}</div>
-            </div>
-            <div>
-              <div class="sign-title">Người phát</div>
-              <div class="sign-name">${nguoiPhat}</div>
-            </div>
-            <div>
-              <div class="sign-title">Kế Toán</div>
-              <div class="sign-name">${keToan}</div>
-            </div>
-          </div>
-
-          <div class="no-print-btn">
-            <button class="btn" onclick="window.print();">🖨️ In Phiếu Lương Này</button>
-          </div>
-        </body>
-      </html>
-    `);
+    printWindow.document.write(buildPayslipHtml(item));
     printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
-    }, 450);
+    printWindow.focus();
+    setTimeout(() => { try { printWindow.print(); } catch (e) { /* ignore */ } }, 400);
+  };
+
+  // "Khóa kỳ & Phát phiếu lương" — đánh dấu TOÀN BỘ payroll của kỳ đang chọn là
+  // đã khóa (locked + lockedAt = hôm nay), dùng làm ngày lập mặc định in trên
+  // phiếu lương (xem getPayslipDatePlace). Cho phép tải toàn bộ phiếu lương
+  // (.zip) ngay sau khi khóa.
+  const handleLockPayrollPeriod = async () => {
+    const period = `${payrollMonth}/${payrollYear}`;
+    const periodItems = payroll.filter(p => p.month === period);
+    if (periodItems.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Chưa có dữ liệu lương của kỳ này để khóa. Vui lòng "Tính lương tự động" trước.', type: 'warning' });
+      return;
+    }
+    const lockedAt = new Date().toISOString();
+    const lockedItems = periodItems.map(p => ({ ...p, locked: true, lockedAt }));
+    setPayroll(payroll.map(p => {
+      const found = lockedItems.find(l => l.id === p.id);
+      return found || p;
+    }));
+    await Promise.all(lockedItems.map(p => dbService.hrmPayrollRecords.save(p).catch(() => {})));
+    addToast({ title: '🔒 Đã khóa kỳ lương', message: `Đã khóa kỳ ${period} và chốt phiếu lương cho ${lockedItems.length} nhân viên.`, type: 'success' });
+  };
+
+  // Tải toàn bộ phiếu lương của kỳ đang chọn, nén chung 1 file .zip — chỉ dùng
+  // sau khi đã "Khóa kỳ & Phát phiếu lương". Tên từng file: TenNhanVienKhongDau_
+  // ThangMM_NamYYYY.pdf (viết liền không dấu theo đúng yêu cầu).
+  const handleDownloadAllPayslips = async () => {
+    const period = `${payrollMonth}/${payrollYear}`;
+    const periodItems = payroll.filter(p => p.month === period);
+    if (periodItems.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Chưa có dữ liệu lương của kỳ này.', type: 'warning' });
+      return;
+    }
+    if (!periodItems.every(p => p.locked)) {
+      addToast({ title: '⚠️ Chưa khóa kỳ', message: 'Vui lòng "Khóa kỳ & Phát phiếu lương" trước khi tải toàn bộ phiếu lương.', type: 'warning' });
+      return;
+    }
+    try {
+      const JSZip = await loadJsZip();
+      const zip = new JSZip();
+      for (const item of periodItems) {
+        const blob = await generatePayslipPdfBlob(item);
+        zip.file(`${payslipFileBaseName(item)}.pdf`, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `PhieuLuong_Thang${payrollMonth}_Nam${payrollYear}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: '✅ Đã tải xuống', message: `Đã nén ${periodItems.length} phiếu lương vào 1 file .zip.`, type: 'success' });
+    } catch (e) {
+      addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file .zip phiếu lương.', type: 'warning' });
+    }
   };
 
   return (
@@ -4235,6 +4193,8 @@ Generated by HL ERP Cloud v2.1 (2026)
                 handleExportPayrollExcel={handleExportPayrollExcel}
                 handleOpenEditPayroll={handleOpenEditPayroll}
                 triggerDownloadPayslip={triggerDownloadPayslip}
+                handleLockPayrollPeriod={handleLockPayrollPeriod}
+                handleDownloadAllPayslips={handleDownloadAllPayslips}
                 addToast={addToast}
               />
             )}
@@ -4729,19 +4689,13 @@ Generated by HL ERP Cloud v2.1 (2026)
 
       {showPrintPayslipModal && printingPayrollItem && (() => {
         const pay = printingPayrollItem;
-        const targetEmp = employees.find((e: any) => e.id === pay.empId);
-        const position = targetEmp?.position || 'Phụ Trách Nhiệm Vụ';
-        
-        const dayAndPerformanceSalary = pay.daySalary || 0;
-        const otWeekendAndHoliday = (pay.otSundaySalary || 0) + (pay.otHolidaySalary || 0);
-        const perfSalary = pay.performanceSalary || 0;
-        const kpiBonus = pay.kpiBonus || 0;
-        const docTien = docSoTiengViet(pay.netSalary);
+        const nguoiPhat = getConfiguredApprover('payroll');
+        const keToan = getConfiguredSettler('payroll');
 
         return (
           <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 backdrop-blur-xs font-sans overflow-y-auto" id="payslip_print_modal">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-5xl w-full text-left space-y-5 shadow-2xl my-8">
-              
+
               {/* Header */}
               <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                 <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
@@ -4759,66 +4713,59 @@ Generated by HL ERP Cloud v2.1 (2026)
 
               {/* Grid content */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Configuration Sidebar */}
+
+                {/* Sidebar: Người phát lương/Kế toán (chỉ đọc, cấu hình 1 lần ở Quyền
+                    Phê Duyệt) + Ghi chú theo TỪNG DÒNG hạng mục lương */}
                 <div className="lg:col-span-4 bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4 h-fit">
                   <div className="border-b border-slate-850 pb-2">
-                    <h5 className="font-black text-xs text-amber-500 uppercase tracking-widest">📝 Tùy Biến Thông Tin In</h5>
-                    <p className="text-[10px] text-slate-500 mt-1">Các thông tin dưới đây sẽ hiển thị trực tiếp trên phôi in phiếu lương.</p>
+                    <h5 className="font-black text-xs text-amber-500 uppercase tracking-widest">👤 Người Ký Phiếu</h5>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Cấu hình 1 lần tại <strong className="text-slate-300">Phân Quyền &amp; Vai Trò → Quyền Phê Duyệt → Phiếu Lương</strong>.
+                    </p>
                   </div>
-                  
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">✍️ Ghi chú của phiếu (Bên phải)</label>
-                      <textarea
-                        value={printNotes}
-                        onChange={(e) => setPrintNotes(e.target.value)}
-                        placeholder="Có thể thêm ghi chú phụ cấp, giải thích tăng ca..."
-                        rows={3}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all"
-                      />
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400">Người phát lương:</span>
+                      <span className="font-bold text-white">{nguoiPhat?.name || '— Chưa cấu hình —'}</span>
                     </div>
-
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">👤 Người phát lương</label>
-                      <input
-                        type="text"
-                        value={printNguoiPhat}
-                        onChange={(e) => setPrintNguoiPhat(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none font-medium"
-                      />
+                    <div className="flex justify-between bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400">Kế toán:</span>
+                      <span className="font-bold text-white">{keToan?.name || '— Chưa cấu hình —'}</span>
                     </div>
-
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">💼 Kế Toán</label>
-                      <input
-                        type="text"
-                        value={printKeToanTruong}
-                        onChange={(e) => setPrintKeToanTruong(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none font-medium"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">📍 Địa điểm & Ngày lập</label>
-                      <input
-                        type="text"
-                        value={printDatePlace}
-                        onChange={(e) => setPrintDatePlace(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none font-medium text-amber-400"
-                      />
+                    <div className="flex justify-between bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400">Địa điểm &amp; ngày lập:</span>
+                      <span className="font-bold text-amber-400">{getPayslipDatePlace(pay)}</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2 pt-2">
+                  <div className="border-t border-slate-850 pt-3">
+                    <h5 className="font-black text-xs text-amber-500 uppercase tracking-widest mb-1">✍️ Ghi Chú Theo Dòng</h5>
+                    <p className="text-[10px] text-slate-500 mb-2">Ghi chú riêng cho từng hạng mục lương — lưu lại và hiển thị ngay dưới dòng tương ứng trên phiếu.</p>
+                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                      {getPayslipLineItems(pay).map(li => (
+                        <div key={li.key}>
+                          <label className="block text-[9.5px] text-slate-400 mb-0.5">{li.label}</label>
+                          <input
+                            type="text"
+                            defaultValue={pay.lineNotes?.[li.key] || ''}
+                            onBlur={(e) => handleSavePayslipLineNote(pay, li.key, e.target.value)}
+                            placeholder="Ghi chú (tùy chọn)..."
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-[11px] text-white focus:border-amber-500 focus:outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-850">
                     <button
                       type="button"
-                      onClick={() => handlePrintPayslip(pay, printNotes, printNguoiPhat, printKeToanTruong)}
+                      onClick={() => handlePrintPayslip(pay)}
                       className="w-full py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
                     >
                       🖨️ In Phiếu Lương Nhanh
                     </button>
-                    
+
                     <button
                       type="button"
                       onClick={() => downloadPDFPayslip(pay)}
@@ -4826,150 +4773,29 @@ Generated by HL ERP Cloud v2.1 (2026)
                     >
                       📥 Tải Phiếu Lương (PDF)
                     </button>
-                    
+
                     <button
                       type="button"
                       onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
                       className="w-full py-2 text-slate-450 hover:text-white text-xs font-bold transition-all text-center cursor-pointer"
                     >
-                      Hủy & Đóng lại
+                      Hủy &amp; Đóng lại
                     </button>
                   </div>
                 </div>
 
-                {/* Printable Excel View Frame */}
+                {/* Xem trước — dựng từ ĐÚNG buildPayslipFragment dùng cho in/PDF, tránh
+                    3 bản viết tay lệch nhau như thiết kế cũ (JSX riêng + print window
+                    riêng + html2pdf.js trên JSX riêng). */}
                 <div className="lg:col-span-8 bg-slate-950 p-3 rounded-xl border border-slate-850 overflow-x-auto">
                   <div className="text-[10px] text-slate-500 uppercase tracking-widest font-black text-center py-1 mb-2 border-b border-slate-900">
-                    🖼️ Giao Diện Bản In Thực Tế (Bám Sát Mẫu Ảnh)
+                    🖼️ Xem Trước Phiếu Lương (Khổ A5)
                   </div>
-
-                  <div id="printable-payslip-canvas-content" className="bg-white text-black p-5 rounded-lg shadow-2xl mx-auto min-w-[500px] max-w-[580px] border border-slate-300 pointer-events-none select-none">
-                    
-                    {/* Header */}
-                    <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-3">
-                      <div className="text-lg font-black tracking-tight text-slate-900 font-serif">PHIẾU LƯƠNG</div>
-                      <div className="text-sm font-black text-slate-800 font-serif">THÁNG {pay.month}</div>
-                    </div>
-
-                    {/* Table block */}
-                    <table className="w-full border-collapse border border-slate-400 text-[10.5px] text-left mb-3 font-serif">
-                      <tbody>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold w-[38%]">Họ và tên</td>
-                          <td className="border border-slate-400 p-1.5 font-bold bg-[#FAD7A0] text-slate-950 text-left w-[32%] text-[11.5px] uppercase">{pay.empName}</td>
-                          <td className="border border-slate-400 p-1.5 font-extrabold bg-slate-100 text-slate-900 text-center w-[30%]" rowSpan={2}>
-                            Ghi chú
-                            <div className="font-normal text-[9.5px] text-left pt-1.5 text-slate-700 italic block leading-snug whitespace-pre-wrap font-sans max-h-[42px] overflow-hidden">
-                              {printNotes || ''}
-                            </div>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Chức vụ</td>
-                          <td className="border border-slate-400 p-1.5 text-left text-slate-800">{position}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Lương cơ bản</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800 font-bold">{(pay.baseSalary || 0).toLocaleString('vi-VN')}</td>
-                          <td className="border border-slate-400 p-1.5 text-center bg-slate-50/40" rowSpan={17}></td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Ngày công đi làm</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-805 font-bold">{pay.workedDays || 0}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thưởng hiệu suất 100 %</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(perfSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Điểm KPI</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{pay.kpiScore || 100}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Mức hưởng KPI</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(kpiBonus || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr className="font-extrabold text-slate-950">
-                          <td className="border border-slate-400 bg-slate-100 p-1.5">Lương ngày công + Hiệu suất</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-900 bg-slate-50">{(dayAndPerformanceSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Lương tăng ca lễ, CN</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(otWeekendAndHoliday || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Lương tăng ca ngoài giờ</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.otHoursSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thưởng lễ</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.bonusHoliday || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thưởng sáng kiến</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800 font-medium">{(pay.bonusCreative || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Công tác phí</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.expenses || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr className="font-bold text-slate-950">
-                          <td className="border border-slate-400 bg-slate-100 p-1.5">Tổng thu nhập & công tác phí</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono">{(pay.totalIncome || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Khoản giảm trừ khác</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.otherDeductions || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thuế TNCN</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.tax || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Khấu trừ BHXH 10,5%</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.insurance || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Tạm ứng hoặc lĩnh trước</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-850">{(pay.advances || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr className="bg-[#FAD7A0] font-bold text-amber-950">
-                          <td className="border border-slate-400 p-1.5 text-[11.5px]">Thực lĩnh tháng này</td>
-                          <td className="border border-slate-400 p-1.5 text-center text-[12.5px] bg-[#FAD7A0]">{(pay.netSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold italic text-slate-800">Số tiền bằng chữ</td>
-                          <td className="border border-slate-400 p-1.5 text-slate-800 italic text-[10.5px] text-left leading-normal" colSpan={2}>
-                            {docTien}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    {/* Footer sign */}
-                    <div className="text-right text-[10.5px] text-slate-800 italic font-serif mb-2">
-                      {printDatePlace}
-                    </div>
-
-                    <div className="grid grid-cols-3 text-center text-[10px] text-slate-900 font-serif gap-2">
-                      <div>
-                        <div className="font-extrabold text-slate-900">Người nhận</div>
-                        <div className="text-[8.5px] text-slate-400 italic mb-10">(Ký ghi rõ họ tên)</div>
-                        <div className="font-bold text-slate-950 text-[10.5px]">{pay.empName}</div>
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-slate-900">Người phát</div>
-                        <div className="text-[8.5px] text-slate-400 italic mb-10">(Ký ghi rõ họ tên)</div>
-                        <div className="font-bold text-slate-950 text-[10.5px]">{printNguoiPhat}</div>
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-slate-900">Kế Toán</div>
-                        <div className="text-[8.5px] text-slate-400 italic mb-10">(Ký ghi rõ họ tên)</div>
-                        <div className="font-bold text-slate-950 text-[10.5px]">{printKeToanTruong}</div>
-                      </div>
-                    </div>
-
-                  </div>
+                  <div
+                    className="bg-white text-black rounded-lg shadow-2xl mx-auto pointer-events-none select-none overflow-hidden"
+                    style={{ width: '420px' }}
+                    dangerouslySetInnerHTML={{ __html: buildPayslipFragment(pay) }}
+                  />
                 </div>
 
               </div>

@@ -186,6 +186,14 @@ export interface PayrollItem {
   totalOtHoursSalary?: number;
   taxableIncome?: number;
   taxableNetIncome?: number;
+  // Ghi chú theo TỪNG DÒNG hạng mục lương trên phiếu lương (key = tên hạng mục,
+  // vd "baseSalary", "otWeekend"...), hiển thị cạnh dòng tương ứng khi in phiếu.
+  lineNotes?: Record<string, string>;
+  // Đã "Khóa kỳ & Phát phiếu lương" chưa — khi true, cho phép tải toàn bộ phiếu
+  // lương (.zip) của kỳ này. lockedAt dùng làm ngày lập mặc định in trên phiếu
+  // lương (thay vì ngày cố định "15 tháng sau" trước đây).
+  locked?: boolean;
+  lockedAt?: string;
 }
 
 export interface KpiMetric {

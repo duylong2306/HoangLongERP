@@ -21,6 +21,8 @@ interface PayrollTabProps {
   handleExportPayrollExcel: () => void;
   handleOpenEditPayroll: (pay: PayrollItem) => void;
   triggerDownloadPayslip: (pay: PayrollItem) => void;
+  handleLockPayrollPeriod: () => void;
+  handleDownloadAllPayslips: () => void;
   addToast: (msg: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
 }
 
@@ -43,6 +45,8 @@ export default function PayrollTab({
   handleExportPayrollExcel,
   handleOpenEditPayroll,
   triggerDownloadPayslip,
+  handleLockPayrollPeriod,
+  handleDownloadAllPayslips,
   addToast,
 }: PayrollTabProps) {
   const [payrollNameSearch, setPayrollNameSearch] = useState('');
@@ -74,6 +78,11 @@ export default function PayrollTab({
       if (na !== nb) return na - nb;
       return String(a.empId).localeCompare(String(b.empId));
     });
+
+  // Toàn bộ payroll của kỳ đang chọn (KHÔNG lọc theo tên tìm kiếm) — dùng để
+  // xác định kỳ này đã "Khóa kỳ & Phát phiếu lương" hay chưa.
+  const periodPayrollAll = (payroll || []).filter((p: any) => p.month === `${payrollMonth}/${payrollYear}`);
+  const periodLocked = periodPayrollAll.length > 0 && periodPayrollAll.every((p: any) => p.locked);
 
   // Tổng cộng theo bộ lọc hiện tại (kỳ lương + tên nhân viên) — tính trên TOÀN BỘ
   // danh sách đã lọc (filteredPayroll), không phải chỉ trang đang xem, giống cách
@@ -490,15 +499,31 @@ export default function PayrollTab({
       </div>
 
       <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-2">
-        <span className="text-[10px] text-slate-400 uppercase tracking-wide font-mono font-medium">Khóa kỳ sổ & Đẩy thông tin liên hệ sỹ thợ mộc qua webhook Ngân hàng</span>
-        <button
-          onClick={() => {
-            addToast({ title: 'Thông báo', message: 'Đang phát hành yêu cầu phê duyệt chuyển khoản Vietcombank tự động sang liên thông Tài chính Kế toán.', type: 'warning' });
-          }}
-          className="bg-emerald-650 hover:bg-emerald-600 text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer animate-pulse"
-        >
-          Khóa kỳ & Phát phiếu lương VNĐ
-        </button>
+        <span className="text-[10px] text-slate-400 uppercase tracking-wide font-mono font-medium">
+          {periodLocked
+            ? `✅ Đã khóa kỳ ${payrollMonth}/${payrollYear} — phiếu lương đã chốt, có thể tải toàn bộ`
+            : `Khóa kỳ ${payrollMonth}/${payrollYear} để chốt phiếu lương & cho phép tải toàn bộ`}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              if (!confirm(`Khóa kỳ lương ${payrollMonth}/${payrollYear}? Sau khi khóa, ngày lập trên phiếu lương sẽ chốt theo ngày hôm nay.`)) return;
+              handleLockPayrollPeriod();
+            }}
+            disabled={periodLocked}
+            className="bg-emerald-650 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer"
+          >
+            {periodLocked ? '🔒 Đã khóa kỳ' : 'Khóa kỳ & Phát phiếu lương'}
+          </button>
+          <button
+            onClick={handleDownloadAllPayslips}
+            disabled={!periodLocked}
+            title={periodLocked ? 'Tải toàn bộ phiếu lương của kỳ này (.zip)' : 'Cần khóa kỳ trước khi tải toàn bộ'}
+            className="bg-indigo-600 hover:bg-indigo-550 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" /> Tải toàn bộ phiếu lương
+          </button>
+        </div>
       </div>
     </div>
   );

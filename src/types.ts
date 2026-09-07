@@ -208,7 +208,7 @@ export interface HrmRoleGroup {
 
 export interface HrmApprovalConfig {
   id: string;
-  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal';
+  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal' | 'payroll';
   documentTypeLabel: string;
   approverId: string;
   approverName: string;

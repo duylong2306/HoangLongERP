@@ -79,6 +79,7 @@ export default function RolesTab(props: RolesTabProps) {
     { type: 'leave', label: 'Đơn Xin Nghỉ Phép', group: 'Hồ Sơ Nhân Sự' },
     { type: 'salary_advance', label: 'Tạm Ứng Lương Nhanh', group: 'Hồ Sơ Nhân Sự' },
     { type: 'travel_expense', label: 'Công Tác Phí', group: 'Hồ Sơ Nhân Sự' },
+    { type: 'payroll', label: 'Phiếu Lương', group: 'Hồ Sơ Nhân Sự' },
     { type: 'finance_expense_proposal', label: 'Đề Xuất Chi Phí', group: 'Tài Chính - Kế Toán' },
     { type: 'finance_advance_proposal', label: 'Tạm Ứng Thầu Phụ', group: 'Tài Chính - Kế Toán' },
   ]), []);
@@ -1264,20 +1265,43 @@ export default function RolesTab(props: RolesTabProps) {
                           <span className="font-bold text-xs text-white">{t.label}</span>
                         </div>
                         {enabled && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-400">Người xét duyệt:</span>
-                            <select
-                              value={perm?.approverId || ''}
-                              onChange={(e) => {
-                                const emp = employees.find(em => em.id === e.target.value);
-                                handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                              }}
-                              className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
-                            >
-                              {employees.filter(emp => emp.hasSystemAccount).map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                              ))}
-                            </select>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              {/* "Phiếu Lương" cấu hình 2 người (giống nhóm Tài Chính - Kế Toán):
+                                  approver = "Người phát lương", settler = "Kế toán" — thay cho
+                                  việc phải nhập lại 2 trường này mỗi lần in phiếu lương. */}
+                              <span className="text-[10px] text-slate-400">{t.type === 'payroll' ? 'Người phát lương:' : 'Người xét duyệt:'}</span>
+                              <select
+                                value={perm?.approverId || ''}
+                                onChange={(e) => {
+                                  const emp = employees.find(em => em.id === e.target.value);
+                                  handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                }}
+                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
+                              >
+                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                ))}
+                              </select>
+                            </div>
+                            {t.type === 'payroll' && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-400">Kế toán:</span>
+                                <select
+                                  value={perm?.settlerId || ''}
+                                  onChange={(e) => {
+                                    const emp = employees.find(em => em.id === e.target.value);
+                                    handleChangeSettler(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                  }}
+                                  className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
+                                >
+                                  <option value="">— Chọn —</option>
+                                  {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
