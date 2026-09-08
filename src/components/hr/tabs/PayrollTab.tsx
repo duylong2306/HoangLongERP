@@ -92,7 +92,11 @@ export default function PayrollTab({
       acc.baseSalary += p.baseSalary || 0;
       acc.dailyWage += Math.round(((p.baseSalary || 0) / standardWorkDays) * (p.workedDays || 0));
       acc.kpiBonus += p.kpiBonus || 0;
-      acc.otAmount += (p.otWeekendSalary || 0) + (p.totalOtHoursSalary || 0);
+      // Trước đây đọc otWeekendSalary/totalOtHoursSalary — 2 field KHÔNG tồn tại
+      // trong dữ liệu tính lương thực tế (calculateSingleEmployeePayroll trả về
+      // otSundaySalary/otHolidaySalary/otHoursSalary) nên cột "Tăng ca (H)" luôn
+      // hiện 0đ dù nhân viên có tăng ca thật.
+      acc.otAmount += (p.otSundaySalary || 0) + (p.otHolidaySalary || 0) + (p.otHoursSalary || 0);
       acc.advances += p.advances || 0;
       acc.insurance += p.insurance || 0;
       acc.tax += p.tax || 0;
@@ -199,7 +203,7 @@ export default function PayrollTab({
                     : 'bg-slate-955 text-slate-400 border-slate-800 hover:text-white'
                 }`}
               >
-                Worksheet (Chi tiết mộc)
+                Worksheet chi tiết
               </button>
             </div>
           </div>
@@ -238,7 +242,7 @@ export default function PayrollTab({
       <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3 font-sans text-left text-white">
         <div className="flex justify-between items-center border-b border-slate-850 pb-2">
           <span className="font-bold text-[11px] text-amber-500 uppercase tracking-widest flex items-center gap-1">
-            {payrollViewMode === 'summary' ? 'Bảng tóm tắt tiền lương' : 'Bảng tính toán mộc chi tiết đầy đủ 100%'}
+            {payrollViewMode === 'summary' ? 'Bảng tóm tắt tiền lương' : 'Worksheet chi tiết'}
             <span className="text-[10px] text-slate-400 normal-case font-normal ml-1">({payrollMonth}/{payrollYear} - Công chuẩn: {standardWorkDays} ngày)</span>
           </span>
           <span className="text-[9.5px] text-slate-400 italic font-medium hidden sm:inline">Click để ghi đè công, điểm KPI, thưởng tăng ca & các khoản trừ liên thông</span>
@@ -251,6 +255,7 @@ export default function PayrollTab({
                 <tr className="border-b border-slate-800 text-slate-400 text-[10.5px]">
                   <th className="pb-2 text-center w-10">STT</th>
                   <th className="pb-2">Nhân viên</th>
+                  <th className="pb-2">Chức vụ</th>
                   <th className="pb-2">Lương gốc</th>
                   <th className="pb-2">Công đạt</th>
                   <th className="pb-2">Lương công nhật</th>
@@ -272,7 +277,7 @@ export default function PayrollTab({
                   if (paginated.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={13} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kỳ lương {payrollMonth}/{payrollYear}. Vui lòng chọn đúng kỳ lương hoặc click "Tính lương tự động" phía trên.</td>
+                        <td colSpan={14} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kỳ lương {payrollMonth}/{payrollYear}. Vui lòng chọn đúng kỳ lương hoặc click "Tính lương tự động" phía trên.</td>
                       </tr>
                     );
                   }
@@ -283,6 +288,7 @@ export default function PayrollTab({
                         {pay.empName}
                         <span className="block text-[8.5px] text-slate-400 font-mono mt-0.5">{pay.empId}</span>
                       </td>
+                      <td className="py-2.5 text-slate-300">{(employees || []).find((e: any) => e.id === pay.empId)?.position || '—'}</td>
                       <td className="py-2.5 font-mono">{(pay.baseSalary || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 font-mono text-slate-300">{pay.workedDays || 0} ngày</td>
                       <td className="py-2.5 font-mono text-slate-100">
@@ -291,7 +297,7 @@ export default function PayrollTab({
                       <td className="py-2.5 font-mono">{(pay.allowance || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 font-mono text-emerald-400">+{(pay.kpiBonus || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 font-mono text-amber-450">
-                        +{((pay.otWeekendSalary || 0) + (pay.totalOtHoursSalary || 0)).toLocaleString('vi-VN')} đ
+                        +{((pay.otSundaySalary || 0) + (pay.otHolidaySalary || 0) + (pay.otHoursSalary || 0)).toLocaleString('vi-VN')} đ
                         <span className="block text-[8.5px] text-slate-500 font-mono mt-0.5">({pay.otHours || 0}h)</span>
                       </td>
                       <td className="py-2.5 font-mono text-red-400">-{(pay.advances || 0).toLocaleString('vi-VN')} đ</td>
@@ -325,7 +331,7 @@ export default function PayrollTab({
               {filteredPayroll.length > 0 && (
                 <tfoot>
                   <tr className="border-t-2 border-slate-700 bg-slate-950/60 font-bold">
-                    <td colSpan={2} className="py-3 pr-2 text-right text-slate-400 uppercase tracking-wider text-[10px] font-extrabold">
+                    <td colSpan={3} className="py-3 pr-2 text-right text-slate-400 uppercase tracking-wider text-[10px] font-extrabold">
                       Tổng cộng ({filteredPayroll.length} nhân viên):
                     </td>
                     <td className="py-3 font-mono font-black text-white">{payrollTotals.baseSalary.toLocaleString('vi-VN')} đ</td>
@@ -344,12 +350,16 @@ export default function PayrollTab({
               )}
             </table>
           ) : (
-            <table className="w-full text-left whitespace-nowrap border-collapse min-w-[2200px]">
+            /* Border kẻ ô + màu xen kẽ dòng kiểu Excel cho dễ nhìn với bảng nhiều
+               cột — [&_th]:border/[&_td]:border áp border cho MỌI ô mà không phải
+               sửa tay từng thẻ th/td, tránh sai sót khi bảng có tới 33 cột. */
+            <table className="w-full text-left whitespace-nowrap border-collapse min-w-[2200px] border border-slate-300 [&_th]:border [&_th]:border-slate-300 [&_td]:border [&_td]:border-slate-200 [&_th]:px-2 [&_td]:px-2">
               <thead>
-                <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+                <tr className="bg-slate-100 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
                   <th className="pb-2 text-center w-10">STT</th>
                   <th className="pb-2">Mã BLU</th>
                   <th className="pb-2">Nhân viên</th>
+                  <th className="pb-2">Chức vụ</th>
                   <th className="pb-2">Công nhật</th>
                   <th className="pb-2">Lương cơ bản</th>
                   <th className="pb-2">Lương hiệu suất</th>
@@ -371,11 +381,18 @@ export default function PayrollTab({
                   <th className="pb-2">BHXH (10.5%)</th>
                   <th className="pb-2">Khoản giảm trừ khác</th>
                   <th className="pb-2">Tạm ứng</th>
+                  <th className="pb-2">Thu nhập miễn thuế</th>
+                  <th className="pb-2">Thu nhập chịu thuế</th>
+                  <th className="pb-2">Giảm trừ bản thân</th>
+                  <th className="pb-2">Số người phụ thuộc</th>
+                  <th className="pb-2">Giảm trừ người phụ thuộc</th>
+                  <th className="pb-2">Thu nhập tính thuế</th>
+                  <th className="pb-2">Thuế TNCN</th>
                   <th className="pb-2 text-emerald-400">Thu nhập thực lĩnh tháng</th>
                   <th className="pb-2 text-center">Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-850/65">
+              <tbody>
                 {(() => {
                   const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? filteredPayroll.length : (globalPageSize as number));
                   const endIndex = globalPageSize === 'all' ? filteredPayroll.length : startIndex + (globalPageSize as number);
@@ -383,18 +400,23 @@ export default function PayrollTab({
                   if (paginated.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={26} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương mộc.</td>
+                        <td colSpan={34} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương mộc.</td>
                       </tr>
                     );
                   }
                   return paginated.map((pay, idx) => (
-                    <tr key={pay.id} className="hover:bg-slate-950/40 text-[10.5px] font-mono transition-all">
+                    // Màu nhẹ xen kẽ dòng (zebra) kiểu Excel để dễ dò theo hàng dài
+                    // 33 cột — bg-slate-50/bg-white thay vì bg-slate-9xx vì các class
+                    // bg-slate-800/900/950 bị index.css ép về trắng/xám nhạt toàn cục
+                    // (xem docs/design-system-dieu-phoi-vat-tu.md mục "Đính chính").
+                    <tr key={pay.id} className={`${idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-amber-50 text-[10.5px] font-mono transition-all`}>
                       <td className="py-2.5 text-center text-slate-400 font-mono">{startIndex + idx + 1}</td>
                       <td className="py-2.5 text-slate-400 font-mono text-[9.5px]">{pay.bluCode}</td>
                       <td className="py-2.5 font-sans">
                         <b className="text-white block">{pay.empName}</b>
                         <span className="text-[9px] text-slate-400 font-mono">{pay.empId}</span>
                       </td>
+                      <td className="py-2.5 text-slate-300 font-sans">{(employees || []).find((e: any) => e.id === pay.empId)?.position || '—'}</td>
                       <td className="py-2.5 text-slate-300">{pay.workedDays || 0} ngày</td>
                       <td className="py-2.5">{(pay.baseSalary || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5">{(pay.performanceSalary || 0).toLocaleString('vi-VN')} đ</td>
@@ -416,6 +438,13 @@ export default function PayrollTab({
                       <td className="py-2.5 text-rose-350">{(pay.insurance || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-rose-450">{(pay.otherDeductions || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-rose-500">{(pay.advances || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-teal-400">{(pay.taxExemptIncome || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-slate-300">{(pay.taxableIncome || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-slate-400">{(pay.personalDeduction || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-center text-slate-400">{pay.dependentCount || 0}</td>
+                      <td className="py-2.5 text-slate-400">{(pay.dependentDeduction || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-slate-200 font-bold">{(pay.taxableNetIncome || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-rose-400 font-bold">{(pay.tax || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-emerald-400 font-extrabold bg-emerald-950/10 px-1 font-sans text-xs">{(pay.netSalary || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-center font-sans">
                         <div className="flex items-center justify-center gap-1">

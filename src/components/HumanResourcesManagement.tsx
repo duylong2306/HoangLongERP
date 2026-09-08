@@ -2854,6 +2854,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <th rowspan="2">Trừ BHXH (10.5%)</th>
               <th rowspan="2">Khoản giảm trừ khác</th>
               <th rowspan="2">Tạm ứng</th>
+              <th rowspan="2">Thu nhập miễn thuế</th>
+              <th rowspan="2">Thu nhập chịu thuế</th>
+              <th colspan="3">Giảm trừ gia cảnh</th>
+              <th rowspan="2">Thu nhập tính thuế</th>
+              <th rowspan="2">Thuế TNCN</th>
               <th rowspan="2">Thực lĩnh</th>
             </tr>
             <tr>
@@ -2866,6 +2871,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <th>Giờ TC</th>
               <th>Số lần TC</th>
               <th>Tiền TC ngoài giờ</th>
+              <th>Giảm trừ bản thân</th>
+              <th>Số người phụ thuộc</th>
+              <th>Giảm trừ người phụ thuộc</th>
             </tr>
           </thead>
           <tbody>
@@ -2904,10 +2912,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           <td class="number bold" style="background-color: #f7f9fa;">${(pay.monthlySalary || 0).toLocaleString()}</td>
           <td class="number">${pay.otSunday || 0}</td>
           <td class="number">${pay.otHoliday || 0}</td>
-          <td class="number">${(pay.otWeekendSalary || 0).toLocaleString()}</td>
+          <td class="number">${((pay.otSundaySalary || 0) + (pay.otHolidaySalary || 0)).toLocaleString()}</td>
           <td class="number">${pay.otHours || 0}</td>
           <td class="number">${pay.otCount || 0}</td>
-          <td class="number">${(pay.totalOtHoursSalary || 0).toLocaleString()}</td>
+          <td class="number">${(pay.otHoursSalary || 0).toLocaleString()}</td>
           <td class="number">${(pay.expenses || 0).toLocaleString()}</td>
           <td class="number">${(pay.bonusHoliday || 0).toLocaleString()}</td>
           <td class="number">${(pay.bonusCreative || 0).toLocaleString()}</td>
@@ -2915,6 +2923,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           <td class="number" style="color: #c00000;">${(pay.insurance || 0).toLocaleString()}</td>
           <td class="number">${(pay.otherDeductions || 0).toLocaleString()}</td>
           <td class="number">${(pay.advances || 0).toLocaleString()}</td>
+          <td class="number">${(pay.taxExemptIncome || 0).toLocaleString()}</td>
+          <td class="number">${(pay.taxableIncome || 0).toLocaleString()}</td>
+          <td class="number">${(pay.personalDeduction || 0).toLocaleString()}</td>
+          <td class="number">${pay.dependentCount || 0}</td>
+          <td class="number">${(pay.dependentDeduction || 0).toLocaleString()}</td>
+          <td class="number">${(pay.taxableNetIncome || 0).toLocaleString()}</td>
+          <td class="number" style="color: #c00000;">${(pay.tax || 0).toLocaleString()}</td>
           <td class="number bold" style="background-color: #fff2cc; color: maroon; font-size: 11px;">${(pay.netSalary || 0).toLocaleString()}</td>
         </tr>
       `;
@@ -2922,14 +2937,21 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
     const totalBase = dedupedPayroll.reduce((sum, p) => sum + (p.baseSalary || 0), 0);
     const totalMonthly = dedupedPayroll.reduce((sum, p) => sum + (p.monthlySalary || 0), 0);
-    const totalOtW = dedupedPayroll.reduce((sum, p) => sum + (p.otWeekendSalary || 0), 0);
-    const totalOtH = dedupedPayroll.reduce((sum, p) => sum + (p.totalOtHoursSalary || 0), 0);
+    const totalOtW = dedupedPayroll.reduce((sum, p) => sum + (p.otSundaySalary || 0) + (p.otHolidaySalary || 0), 0);
+    const totalOtH = dedupedPayroll.reduce((sum, p) => sum + (p.otHoursSalary || 0), 0);
     const totalExp = dedupedPayroll.reduce((sum, p) => sum + (p.expenses || 0), 0);
     const totalInc = dedupedPayroll.reduce((sum, p) => sum + (p.totalIncome || 0), 0);
     const totalIns = dedupedPayroll.reduce((sum, p) => sum + (p.insurance || 0), 0);
     const totalDed = dedupedPayroll.reduce((sum, p) => sum + (p.otherDeductions || 0), 0);
     const totalAdv = dedupedPayroll.reduce((sum, p) => sum + (p.advances || 0), 0);
     const totalNet = dedupedPayroll.reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    const totalExempt = dedupedPayroll.reduce((sum, p) => sum + (p.taxExemptIncome || 0), 0);
+    const totalTaxableIncome = dedupedPayroll.reduce((sum, p) => sum + (p.taxableIncome || 0), 0);
+    const totalPersonalDed = dedupedPayroll.reduce((sum, p) => sum + (p.personalDeduction || 0), 0);
+    const totalDependents = dedupedPayroll.reduce((sum, p) => sum + (p.dependentCount || 0), 0);
+    const totalDependentDed = dedupedPayroll.reduce((sum, p) => sum + (p.dependentDeduction || 0), 0);
+    const totalTaxableNet = dedupedPayroll.reduce((sum, p) => sum + (p.taxableNetIncome || 0), 0);
+    const totalTax = dedupedPayroll.reduce((sum, p) => sum + (p.tax || 0), 0);
 
     htmlContent += `
           <tr style="font-weight: bold; background-color: #f2f2f2;">
@@ -2953,6 +2975,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             <td class="number" style="color: #c00000;">${totalIns.toLocaleString()}</td>
             <td class="number">${totalDed.toLocaleString()}</td>
             <td class="number">${totalAdv.toLocaleString()}</td>
+            <td class="number">${totalExempt.toLocaleString()}</td>
+            <td class="number">${totalTaxableIncome.toLocaleString()}</td>
+            <td class="number">${totalPersonalDed.toLocaleString()}</td>
+            <td class="number">${totalDependents.toLocaleString()}</td>
+            <td class="number">${totalDependentDed.toLocaleString()}</td>
+            <td class="number">${totalTaxableNet.toLocaleString()}</td>
+            <td class="number" style="color: #c00000;">${totalTax.toLocaleString()}</td>
             <td class="number" style="background-color: #ffe699; color: maroon;">${totalNet.toLocaleString()}</td>
           </tr>
         </tbody>
@@ -4531,7 +4560,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       onChange={(e) => setInsDependentCount(Number(e.target.value) || 0)}
                       className="w-full bg-slate-955 border border-slate-800 focus:border-amber-555 focus:outline-none rounded-xl px-3 py-2 text-white font-bold font-mono"
                     />
-                    <span className="text-[9px] text-slate-500 block">4.400.000đ / người / tháng</span>
+                    {/* Đồng bộ đúng mức 6.200.000đ/người/tháng theo công thức sheet
+                        "LƯƠNG OK" (Quyết định 05/2026/QĐ-HLLĐ) — trước đây ghi nhầm
+                        4.400.000đ (mức giảm trừ cũ theo luật, không phải mức công ty
+                        đang áp dụng thực tế trong Tính lương tự động). */}
+                    <span className="text-[9px] text-slate-500 block">6.200.000đ / người / tháng</span>
                   </div>
                 </div>
 

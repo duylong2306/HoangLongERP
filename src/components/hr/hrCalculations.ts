@@ -537,15 +537,22 @@ export function calculateSingleEmployeePayroll(
   const salaryPerDay = (baseSalary + kpiBonus) / standardWorkDays;
   const daySalary = salaryPerDay * inputs.workedDays;
 
+  // Đơn giá RIÊNG dùng cho tăng ca (CN/Lễ + ngoài giờ) — ĐÚNG theo sheet "LƯƠNG OK":
+  // dùng "Định mức" (performanceSalary, CHƯA nhân điểm KPI) thay vì "Thưởng HS
+  // thực tế" (kpiBonus, đã nhân điểm KPI) như đơn giá ngày công thường ở trên.
+  // Ví dụ Excel: N10=(H10+F10)/D5×L10×2, Q10=(F10+H10)/D5/8×O10×150%+P10×40000
+  // — cả 2 đều dùng (F+H) = Lương cơ bản + Định mức, không phải (F+J).
+  const otSalaryPerDay = (baseSalary + performanceSalary) / standardWorkDays;
+
   const otSundayCount = inputs.otSunday;
-  const otSundaySalary = salaryPerDay * otSundayCount;
+  const otSundaySalary = otSalaryPerDay * otSundayCount;
 
   const otHolidayCount = inputs.otHoliday;
-  const otHolidaySalary = salaryPerDay * otHolidayCount;
+  const otHolidaySalary = otSalaryPerDay * otHolidayCount;
 
   const otHours = inputs.otHours;
   const otCount = inputs.otCount;
-  const otHoursSalary = ((salaryPerDay / 8) * otHours * 1.5) + (otCount * 40000);
+  const otHoursSalary = ((otSalaryPerDay / 8) * otHours * 1.5) + (otCount * 40000);
 
   const expenses = inputs.expenses;
   const bonusHoliday = inputs.bonusHoliday;
@@ -557,11 +564,26 @@ export function calculateSingleEmployeePayroll(
   const otherDeductions = inputs.otherDeductions;
   const advances = inputs.advances;
 
-  // Làm tròn Thực lĩnh về hàng nghìn (VNĐ không lẻ dưới 1.000đ) — trước đây làm
-  // tròn tới 4 chữ số thập phân (toFixed(4)) khiến cột "Thực lĩnh" hiện số lẻ
-  // rất nhỏ (ví dụ 12.345.678,3333đ) không có ý nghĩa với tiền VNĐ.
-  const netSalaryRaw = totalIncome - bhxhAmount - otherDeductions - advances;
-  const netSalary = Math.round(netSalaryRaw / 1000) * 1000;
+  // ─── Thuế TNCN & Giảm trừ gia cảnh — ĐÚNG công thức sheet "LƯƠNG OK" của file
+  // BẢNG LƯƠNG, NHÂN SỰ (cột Y→AF), không tự suy diễn theo lý thuyết luật thuế:
+  //   Thu nhập miễn thuế (Y) = toàn bộ tiền tăng ca CN/Lễ + tăng ca ngoài giờ
+  //   Thu nhập chịu thuế (Z) = Tổng thu nhập − Thu nhập miễn thuế
+  //   Giảm trừ bản thân (AA) = employee.taxPersonalRelief, mặc định 15.500.000đ
+  //   Giảm trừ người phụ thuộc (AC) = Số người phụ thuộc × 6.200.000đ
+  //   Thu nhập tính thuế (AD) = Z − BHXH − AA − AC, chặn dưới 0
+  //   Thuế TNCN (AE) = biểu rút gọn 5 bậc (giống hệt công thức IF lồng trong file gốc)
+  const taxExemptIncome = otSundaySalary + otHolidaySalary + otHoursSalary;
+  const taxableIncome = totalIncome - taxExemptIncome;
+  const personalDeduction = Number(emp.taxPersonalRelief) || 15500000;
+  const dependentCount = Number(emp.dependentCount) || 0;
+  const dependentDeduction = dependentCount * 6200000;
+  const taxableNetIncome = Math.max(0, taxableIncome - bhxhAmount - personalDeduction - dependentDeduction);
+  const tax = calculatePersonalIncomeTax(taxableNetIncome);
+
+  // Làm tròn Thực lĩnh về hàng chục nghìn — đúng ROUND(...,-4) trong file gốc
+  // (trước đây làm tròn hàng nghìn, nay đồng bộ lại theo đúng file tham chiếu).
+  const netSalaryRaw = totalIncome - bhxhAmount - otherDeductions - advances - tax;
+  const netSalary = Math.round(netSalaryRaw / 10000) * 10000;
 
   const bluCode = `BLU-${emp.id}-${monthStr.replace('/', '')}`;
 
@@ -588,6 +610,30 @@ export function calculateSingleEmployeePayroll(
     insurance: bhxhAmount,
     otherDeductions,
     advances,
+    taxExemptIncome,
+    taxableIncome,
+    personalDeduction,
+    dependentCount,
+    dependentDeduction,
+    taxableNetIncome,
+    tax,
     netSalary
   };
+}
+
+/**
+ * Tính Thuế TNCN theo biểu rút gọn 5 bậc — ĐÚNG NGUYÊN VĂN công thức IF lồng
+ * trong sheet "LƯƠNG OK" (file BẢNG LƯƠNG, NHÂN SỰ), áp dụng trên "Thu nhập
+ * tính thuế" (đã trừ BHXH + giảm trừ gia cảnh). Không dùng biểu 7 bậc lý
+ * thuyết của luật thuế — công ty đang áp dụng đúng biểu rút gọn 5 bậc này.
+ */
+export function calculatePersonalIncomeTax(taxableNetIncome: number): number {
+  if (taxableNetIncome <= 0) return 0;
+  let result: number;
+  if (taxableNetIncome <= 10000000) result = taxableNetIncome * 0.05;
+  else if (taxableNetIncome <= 30000000) result = taxableNetIncome * 0.10 - 500000;
+  else if (taxableNetIncome <= 60000000) result = taxableNetIncome * 0.20 - 3500000;
+  else if (taxableNetIncome <= 100000000) result = taxableNetIncome * 0.30 - 9500000;
+  else result = taxableNetIncome * 0.35 - 14500000;
+  return Math.max(0, result);
 }

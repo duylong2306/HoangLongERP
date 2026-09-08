@@ -180,12 +180,21 @@ export interface PayrollItem {
   tax?: number;
   kpiMaxAllowed?: number;
   monthlySalary?: number;
-  otWeekendSalary?: number;
   otHourlySalary?: number;
   otAllowance?: number;
-  totalOtHoursSalary?: number;
   taxableIncome?: number;
   taxableNetIncome?: number;
+  // ─── Thuế TNCN & Giảm trừ gia cảnh (theo đúng công thức sheet "LƯƠNG OK" của
+  // file BẢNG LƯƠNG, NHÂN SỰ) ─────────────────────────────────────────────
+  // Thu nhập miễn thuế = toàn bộ tiền tăng ca (CN/Lễ + ngoài giờ) — theo đúng
+  // công thức gốc, không tách riêng phần chênh lệch.
+  taxExemptIncome?: number;
+  // Giảm trừ bản thân — snapshot từ employee.taxPersonalRelief tại thời điểm tính.
+  personalDeduction?: number;
+  // Số người phụ thuộc — snapshot từ employee.dependentCount tại thời điểm tính.
+  dependentCount?: number;
+  // Giảm trừ người phụ thuộc = dependentCount × 6.200.000đ (đúng theo sheet gốc).
+  dependentDeduction?: number;
   // Ghi chú theo TỪNG DÒNG hạng mục lương trên phiếu lương (key = tên hạng mục,
   // vd "baseSalary", "otWeekend"...), hiển thị cạnh dòng tương ứng khi in phiếu.
   lineNotes?: Record<string, string>;
