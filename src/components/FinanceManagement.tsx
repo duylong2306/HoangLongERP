@@ -4265,6 +4265,41 @@ export default function FinanceManagement({
     setShowAddCustomerModal(false);
   };
 
+  // Đồng bộ dòng "Công nợ đầu kỳ" tương ứng của Khách Hàng này trong Công Nợ Thu
+  // (bảng accounting_receivables, id "opbal_cust_<mã KH>") mỗi khi sửa/xóa KH.
+  // TRƯỚC ĐÂY: nút "Cập nhật Công Nợ Đầu Kỳ" ở tab Tài Chính chỉ COPY 1 LẦN giá
+  // trị openingDebt sang 1 dòng riêng — sau đó sửa/xóa Công nợ đầu kỳ trên hồ sơ
+  // KH (hoặc xóa hẳn KH) KHÔNG cập nhật/xóa dòng đã copy, vẫn cộng dồn số cũ vào
+  // Công Nợ Thu mãi mãi. Sự cố thật đã xảy ra: 3 khách hàng bị trùng dòng (cộng
+  // đôi công nợ đầu kỳ), 1 khách đã xóa nhưng dòng vẫn "mồ côi", 1 khách đã sửa
+  // Công nợ đầu kỳ về 0 nhưng dòng cũ vẫn giữ số cũ — tổng cộng ghi khống
+  // 231.290.503đ. Cùng cơ chế fix đã áp dụng cho NCC (WarehouseSuppliers.tsx).
+  const syncOpeningDebtReceivable = async (customerId: string, name: string, openingDebt: number) => {
+    const recId = `opbal_cust_${customerId}`;
+    try {
+      if (openingDebt > 0) {
+        await dbService.accountingReceivables.save({
+          id: recId,
+          customerId,
+          projectName: `Số dư đầu kỳ - ${name}`,
+          investor: name,
+          field: 'Công nợ đầu kỳ',
+          contractValue: openingDebt,
+          openingDebt,
+          collected: 0,
+          remaining: openingDebt,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (Khách Hàng)',
+          isOpeningDebt: true,
+        });
+      } else {
+        // Công nợ đầu kỳ = 0 (đã xóa/sửa về 0) → xóa luôn dòng snapshot tương ứng.
+        await dbService.accountingReceivables.delete(recId);
+      }
+    } catch (err) {
+      console.warn('Đồng bộ Công nợ đầu kỳ (Công Nợ Thu) thất bại:', err);
+    }
+  };
+
   const handleCreateCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!custName) return;
@@ -4302,6 +4337,7 @@ export default function FinanceManagement({
         customers.push(newCust);
       }
     }
+    void syncOpeningDebtReceivable(newCust.id, newCust.name, newCust.openingDebt || 0);
 
     if (selectedCustDetail?.id === targetId) {
       setSelectedCustDetail(newCust);
@@ -4376,6 +4412,7 @@ export default function FinanceManagement({
           customers.length = 0;
           customers.push(...merged);
         }
+        deduped.forEach(c => { void syncOpeningDebtReceivable(c.id, c.name, c.openingDebt || 0); });
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${deduped.length} khách hàng`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
@@ -6638,7 +6675,12 @@ export default function FinanceManagement({
                           <button
                             onClick={() => {
                               if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${custSelectedRows.size} khách hàng đã chọn không?\nHành động này không thể hoàn tác.`)) return;
-                              custSelectedRows.forEach(id => { if (onDeleteCustomer) onDeleteCustomer(id); });
+                              custSelectedRows.forEach(id => {
+                                if (onDeleteCustomer) onDeleteCustomer(id);
+                                // Xóa luôn dòng Công nợ đầu kỳ snapshot của KH này (nếu có) —
+                                // tránh để lại dòng "mồ côi" vẫn cộng vào Công Nợ Thu.
+                                dbService.accountingReceivables.delete(`opbal_cust_${id}`).catch(() => {});
+                              });
                               addToast({ title: '✅ Đã xóa', message: `Đã xóa ${custSelectedRows.size} khách hàng.`, type: 'success' });
                               setCustSelectedRows(new Set());
                             }}
@@ -6822,6 +6864,8 @@ export default function FinanceManagement({
                                   if (confirmDelete) {
                                     if (onDeleteCustomer) {
                                       onDeleteCustomer(selectedCustDetail.id);
+                                      // Xóa luôn dòng Công nợ đầu kỳ snapshot của KH này (nếu có).
+                                      dbService.accountingReceivables.delete(`opbal_cust_${selectedCustDetail.id}`).catch(() => {});
                                       setSelectedCustDetail(null);
                                       addToast({ title: '✅ Thành công', message: `🗑️ Đã xóa thành công khách hàng.`, type: 'success' });
                                     } else {

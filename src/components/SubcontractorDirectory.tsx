@@ -91,7 +91,12 @@ export default function SubcontractorDirectory({
     setSuppliers(suppliers.filter(s => !selectedRows.has(s.id)));
     setSelectedRows(new Set());
     setSelectAll(false);
-    idsToDelete.forEach(id => dbService.accountingSubcontractors.delete(id).catch(() => {}));
+    idsToDelete.forEach(id => {
+      dbService.accountingSubcontractors.delete(id).catch(() => {});
+      // Xóa luôn dòng Công nợ đầu kỳ snapshot của Thầu Phụ này (nếu có) — tránh
+      // để lại dòng "mồ côi" vẫn cộng vào Công Nợ Trả.
+      dbService.accountingLiabilities.delete(`opbal_sub_${id}`).catch(() => {});
+    });
     addToast({ title: '✅ Đã xóa', message: `Đã xóa ${selectedRows.size} thầu phụ.`, type: 'success' });
   };
 
@@ -154,6 +159,36 @@ export default function SubcontractorDirectory({
       .toUpperCase();
   };
 
+  // Đồng bộ dòng "Công nợ đầu kỳ" tương ứng của Thầu Phụ này trong Công Nợ Trả
+  // (bảng accounting_liabilities, id "opbal_sub_<mã Thầu Phụ>") mỗi khi sửa/xóa
+  // Thầu Phụ — cùng cơ chế fix đã áp dụng cho NCC (WarehouseSuppliers.tsx) và
+  // Khách Hàng (FinanceManagement.tsx): trước đây nút "Cập nhật Công Nợ Đầu Kỳ"
+  // chỉ COPY 1 LẦN giá trị openingDebt sang 1 dòng riêng, không tự cập nhật/xóa
+  // theo khi sửa/xóa Công nợ đầu kỳ trên hồ sơ Thầu Phụ sau đó.
+  const syncOpeningDebtLiability = async (subcontractorId: string, name: string, openingDebt: number) => {
+    const liabId = `opbal_sub_${subcontractorId}`;
+    try {
+      if (openingDebt > 0) {
+        await dbService.accountingLiabilities.save({
+          id: liabId,
+          subcontractorId,
+          name,
+          category: 'Thầu Phụ',
+          value: 0,
+          openingDebt,
+          paid: 0,
+          remaining: openingDebt,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (Thầu Phụ)',
+          isOpeningDebt: true,
+        });
+      } else {
+        await dbService.accountingLiabilities.delete(liabId);
+      }
+    } catch (err) {
+      console.warn('Đồng bộ Công nợ đầu kỳ (Công Nợ Trả) thất bại:', err);
+    }
+  };
+
   const handleAddSupplierSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formSupName || !formSupPhone || !formSupAddress || !formSupRep) {
@@ -190,7 +225,10 @@ export default function SubcontractorDirectory({
       });
       setSuppliers(updated);
       const editedSup = updated.find(s => s.id === editingSupId);
-      if (editedSup) dbService.accountingSubcontractors.save(editedSup).catch(() => {});
+      if (editedSup) {
+        dbService.accountingSubcontractors.save(editedSup).catch(() => {});
+        void syncOpeningDebtLiability(editedSup.id, editedSup.name, editedSup.openingDebt || 0);
+      }
 
       if (selectedSupDetail && selectedSupDetail.id === editingSupId) {
         setSelectedSupDetail({
@@ -249,6 +287,7 @@ export default function SubcontractorDirectory({
 
       setSuppliers([...suppliers, newSup]);
       dbService.accountingSubcontractors.save(newSup).catch(() => {});
+      void syncOpeningDebtLiability(newSup.id, newSup.name, newSup.openingDebt || 0);
       setShowSupplierForm(false);
       resetSupForm();
       addToast({ title: '✅ Thành công', message: `🤝 Đã thêm thầu phụ mới ${newSup.name} với Mã: ${newSup.id} thành công.`, type: 'success' });
@@ -373,7 +412,10 @@ export default function SubcontractorDirectory({
         });
         setSuppliers(merged);
         // Đồng bộ lên Supabase (upsert theo id)
-        toSave.forEach(item => dbService.accountingSubcontractors.save(item).catch(err => console.warn('Lưu import thầu phụ lên Supabase thất bại:', err)));
+        toSave.forEach(item => {
+          dbService.accountingSubcontractors.save(item).catch(err => console.warn('Lưu import thầu phụ lên Supabase thất bại:', err));
+          void syncOpeningDebtLiability(item.id, item.name, item.openingDebt || 0);
+        });
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} thầu phụ (thêm mới / cập nhật theo Mã)`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
@@ -1037,6 +1079,8 @@ export default function SubcontractorDirectory({
 
                       setSuppliers(suppliers.filter(s => s.id !== selectedSupDetail.id));
                       dbService.accountingSubcontractors.delete(selectedSupDetail.id).catch(() => {});
+                      // Xóa luôn dòng Công nợ đầu kỳ snapshot của Thầu Phụ này (nếu có).
+                      dbService.accountingLiabilities.delete(`opbal_sub_${selectedSupDetail.id}`).catch(() => {});
                       setSelectedSupDetail(null);
                       addToast({ title: '✅ Thành công', message: `✅ Đã xóa thầu phụ "${selectedSupDetail.name}" thành công.`, type: 'success' });
                     }

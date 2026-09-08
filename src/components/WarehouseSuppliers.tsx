@@ -49,10 +49,14 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
     setSelectedRows(new Set());
     setSelectAll(false);
     addToast({ title: '✅ Đã xóa', message: `Đã xóa ${idsToDelete.length} nhà cung cấp.`, type: 'success' });
-    // Persist deletions to Supabase
+    // Persist deletions to Supabase — xóa kèm dòng Công nợ đầu kỳ snapshot của
+    // từng NCC (nếu có) để tránh để lại dòng "mồ côi" cộng dư vào Công Nợ Trả.
     try {
       await Promise.allSettled(
-        idsToDelete.map(id => dbService.suppliers.delete(id).catch(err => console.error("Lỗi xóa nhà cung cấp:", err)))
+        idsToDelete.flatMap(id => [
+          dbService.suppliers.delete(id).catch(err => console.error("Lỗi xóa nhà cung cấp:", err)),
+          dbService.accountingLiabilities.delete(`opbal_sup_${id}`).catch(() => {})
+        ])
       );
     } catch (err) {
       console.error("Lỗi xóa hàng loạt nhà cung cấp:", err);
@@ -101,6 +105,39 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
     return () => window.removeEventListener('hl-suppliers-updated', syncSuppliers);
   }, []);
 
+  // Đồng bộ dòng "Công nợ đầu kỳ" tương ứng của NCC này trong Công Nợ Trả
+  // (bảng accounting_liabilities, id "opbal_sup_<mã NCC>") mỗi khi sửa/xóa NCC.
+  // TRƯỚC ĐÂY: nút "Cập nhật Công Nợ Đầu Kỳ" ở tab Tài Chính chỉ COPY 1 LẦN giá
+  // trị openingDebt sang 1 dòng riêng — sau đó nếu sửa hoặc xóa Công nợ đầu kỳ
+  // trên hồ sơ NCC (hoặc xóa hẳn NCC), dòng đã copy KHÔNG tự cập nhật/xóa theo,
+  // vẫn cộng dồn số cũ vào Công Nợ Trả mãi mãi. Sự cố thật: "CÔNG TY TNHH THIÊN
+  // TỰ PHƯỚC" bị cộng dư 922.440.000đ từ 2 dòng snapshot cũ + mồ côi (1 dòng của
+  // NCC đã xóa, 1 dòng chưa cập nhật theo khi NCC còn lại đổi Công nợ đầu kỳ về 0).
+  const syncOpeningDebtLiability = async (supplierId: string, name: string, openingDebt: number) => {
+    const liabId = `opbal_sup_${supplierId}`;
+    try {
+      if (openingDebt > 0) {
+        await dbService.accountingLiabilities.save({
+          id: liabId,
+          name,
+          category: 'Nhà Cung Cấp',
+          value: 0,
+          openingDebt,
+          paid: 0,
+          remaining: openingDebt,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (NCC Vật tư)',
+          isOpeningDebt: true,
+        });
+      } else {
+        // Công nợ đầu kỳ = 0 (đã xóa/sửa về 0) → xóa luôn dòng snapshot tương ứng
+        // thay vì để lại số cũ.
+        await dbService.accountingLiabilities.delete(liabId);
+      }
+    } catch (err) {
+      console.warn('Đồng bộ Công nợ đầu kỳ (Công Nợ Trả) thất bại:', err);
+    }
+  };
+
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) return addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên nhà cung cấp!', type: 'warning' });
@@ -126,6 +163,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
       } as any;
       try {
         await dbService.suppliers.save(updated);
+        await syncOpeningDebtLiability(updated.id, updated.name, updated.openingDebt || 0);
         setSuppliers(prev => prev.map(s => s.id === editingId ? updated : s));
         setIsAdding(false);
         resetForm();
@@ -162,6 +200,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
 
     try {
       await dbService.suppliers.save(newSup);
+      await syncOpeningDebtLiability(newSup.id, newSup.name, newSup.openingDebt || 0);
       setSuppliers(prev => [...prev, newSup]);
       setIsAdding(false);
       resetForm();
@@ -192,6 +231,9 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
     if (window.confirm(`⚠️ Bạn có chắc chắn muốn XÓA nhà cung cấp "${name}"? Thao tác này sẽ dọn sạch thông tin đối tác khỏi hệ thống.`)) {
       try {
         await dbService.suppliers.delete(id);
+        // Xóa luôn dòng Công nợ đầu kỳ snapshot của NCC này (nếu có) — tránh để
+        // lại dòng "mồ côi" vẫn cộng vào Công Nợ Trả dù NCC đã bị xóa hẳn.
+        await dbService.accountingLiabilities.delete(`opbal_sup_${id}`).catch(() => {});
         setSuppliers(prev => prev.filter(s => s.id !== id));
         addToast({ title: '🗑️ Đã xóa', message: 'Đã xóa nhà cung cấp.', type: 'info' });
       } catch (err) {
@@ -313,6 +355,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
             debt: existing?.debt || 0,
           };
           await dbService.suppliers.save(toSave);
+          await syncOpeningDebtLiability(toSave.id, toSave.name, toSave.openingDebt || 0);
         }
         await loadSuppliers();
         addToast({ title: '✅ Nhập thành công', message: `Đã cập nhật ${deduped.size} nhà cung cấp (thêm mới/mã đã có)`, type: 'success' });
