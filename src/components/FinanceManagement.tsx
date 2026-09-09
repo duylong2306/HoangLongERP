@@ -3991,6 +3991,32 @@ export default function FinanceManagement({
     setVoucherUploadImages([]);
   };
 
+  // Xóa 1 phiếu chi ở tab "Nhập Chi". Nếu phiếu chi này được sinh ra từ 1 Đề Xuất
+  // Chi đã duyệt (relatedAdvanceId), phải trả đề xuất đó về lại trạng thái
+  // "Chờ Lập Phiếu" (pending_payment) — nếu không, đề xuất sẽ bị coi như đã hoàn
+  // thành trong khi phiếu chi thực tế đã biến mất (đúng sự cố từng phải fix tay
+  // qua scripts/fix_move_proposals_delete_payments.cjs, xem PC-2026-267/427/525).
+  const handleDeletePaymentRow = async (p: Payment) => {
+    const linkedProposal = p.relatedAdvanceId ? (subcontractorAdvances || []).find(a => a.id === p.relatedAdvanceId) : undefined;
+    const warnExtra = linkedProposal
+      ? `\nĐề xuất liên kết ${linkedProposal.id} sẽ được trả về trạng thái "Chờ Lập Phiếu".`
+      : '';
+    if (!window.confirm(`⚠️ Xóa phiếu chi ${p.code}?\nHành động không thể hoàn tác.${warnExtra}`)) return;
+
+    if (linkedProposal && linkedProposal.status !== 'pending_payment') {
+      const revertedProposal: SubcontractorAdvanceProposal = { ...linkedProposal, status: 'pending_payment' };
+      try {
+        await dbService.subcontractorAdvances.save(revertedProposal);
+        setSubcontractorAdvances?.(prev => prev.map(a => a.id === revertedProposal.id ? revertedProposal : a));
+      } catch (err) {
+        console.error('[FinanceManagement] Lỗi trả đề xuất về Chờ Lập Phiếu:', err);
+      }
+    }
+
+    if (onDeletePayment) onDeletePayment(p.id);
+    addToast({ title: '✅ Đã xóa', message: `Đã xóa phiếu chi ${p.code}.`, type: 'success' });
+  };
+
   // Xuất PDF phiếu đề xuất (header "Hồ Sơ Thông Tin Doanh Nghiệp" từ Cài đặt hệ thống)
   const exportProposalPdf = async (adv: SubcontractorAdvanceProposal) => {
     const cp: any = companyProfile || {};
@@ -8186,6 +8212,13 @@ export default function FinanceManagement({
                                         className="p-1.5 text-violet-400 hover:text-violet-300 hover:bg-violet-950 rounded-lg transition-colors cursor-pointer"
                                       >
                                         <Upload className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeletePaymentRow(p)}
+                                        title="Xóa phiếu chi"
+                                        className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950 rounded-lg transition-colors cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
                                       </button>
                                     </div>
                                   </td>

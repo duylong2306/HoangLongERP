@@ -1930,8 +1930,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       // hrm_travel_expenses/hrm_leave_coefficients/hrm_holidays/hrm_performance_criteria/
       // hrm_salary_scales/kanban_columns/project_permissions: đã bỏ khỏi realtime
       // — xem POLLED_LOW_CHURN_MS bên dưới.
-      // ── Accounting: accounting_liabilities/accounting_receivables/accounting_sub_contracts
-      // đã bỏ khỏi realtime — xem POLLED_LOW_CHURN_MS bên dưới.
+      // ── Accounting (Tài Chính - Kế Toán: tab Công Nợ Thu/Trả, Quỹ Tiền Mặt) ──
+      // BẬT LẠI realtime cho 4 bảng này theo yêu cầu — trước đây đã gỡ khỏi
+      // realtime (kèm gỡ khỏi publication supabase_realtime phía server, xem
+      // migration 20260826d) vì tài khoản Supabase vượt hạn mức "Tin nhắn thời
+      // gian thực" (117%/tháng). Bật lại CÓ RỦI RO lặp lại sự cố đó — chỉ bật
+      // đúng 4 bảng cốt lõi của Công Nợ Thu/Trả/Quỹ Tiền Mặt (không bật lại cả
+      // 21 bảng đã gỡ) để giảm rủi ro. Cần chạy kèm migration
+      // 20260909_reenable_realtime_finance_tables.sql (thêm lại vào publication
+      // phía server) — KHÔNG có tác dụng nếu chỉ sửa code mà không chạy SQL đó.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts' }, fireAccountingSubContractsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_fund_config' }, fireCashFundConfigEvent)
       // ── Material Proposals (Đề xuất vật tư) ──
       .on('postgres_changes', { event: '*', schema: 'public', table: 'material_proposals' }, fireMaterialProposalsEvent)
       // ── Purchase Orders (đơn hàng mua — dispatch event cho MaterialCoordination sync cross-tab) ──
@@ -1942,7 +1953,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       })
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Channel ready. Listening for ~14 tables (21 bảng ít đổi chuyển sang polling 5 phút)');
+          console.log('[Realtime] ✅ Channel ready. Listening for ~18 tables (17 bảng ít đổi còn lại vẫn polling 5 phút)');
           realtimeReconnectAttempts.current = 0;
           // Hủy lịch reconnect còn treo (nếu có CLOSED/lỗi thoáng qua trước đó
           // rồi tự phục hồi thành SUBSCRIBED) — tránh resubscribe thừa sau 3s.
@@ -1997,12 +2008,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       fireHrmTripsEvent();
       fireHrmTravelExpensesEvent();
       fireHrmPayrollRecordsEvent();
-      fireAccountingLiabilitiesEvent();
-      fireAccountingReceivablesEvent();
-      fireAccountingSubContractsEvent();
+      // accounting_liabilities/accounting_receivables/accounting_sub_contracts/
+      // cash_fund_config: đã CHUYỂN LẠI sang Realtime (channel ở trên) theo yêu
+      // cầu Công Nợ Thu/Trả/Quỹ Tiền Mặt cập nhật tức thời — không poll trùng
+      // ở đây nữa (xem ghi chú tại nơi .on('postgres_changes', ...) đăng ký).
       fireArchivedQuotesEvent();
       fireSuppliersEvent();
-      fireCashFundConfigEvent();
       fireAccountingProductCatalogEvent();
     };
     const lowChurnInterval = setInterval(pollLowChurnTables, POLLED_LOW_CHURN_MS);
@@ -2795,12 +2806,56 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   const handleDeletePayment = async (id: string) => {
+    // Tìm phiếu TRƯỚC khi filter khỏi state — cần amount/purchaseOrderId/status
+    // để revert công nợ đối xứng với phần CỘNG ở handleApprovePayment bên dưới.
+    const targetPayment = payments.find(p => p.id === id);
     setPayments(prev => prev.filter(p => p.id !== id));
     try {
       await dbService.payments.delete(id);
     } catch (err) {
       console.error('[App] Lỗi xóa phiếu chi trên Supabase:', err);
     }
+
+    // 💳 Trả lại công nợ đơn hàng & Công nợ Trả nếu phiếu chi bị xóa ĐÃ DUYỆT và có
+    // thanh toán 1 đơn hàng — nếu không, đơn hàng/công nợ NCC vẫn hiện như đã được
+    // trả dù phiếu chứng minh việc đó đã bị xóa (xem handleApprovePayment ở dưới,
+    // nơi 2 số liệu này được CỘNG khi duyệt — ở đây làm ngược lại: TRỪ khi xóa).
+    if (targetPayment && targetPayment.status === 'approved' && targetPayment.purchaseOrderId) {
+      const order = purchaseOrders.find(o => o.id === targetPayment.purchaseOrderId);
+      if (order) {
+        const newPaid = Math.max(0, (order.thanhToanThucTe || 0) - (targetPayment.amount || 0));
+        const newCongNo = Math.max(0, (order.tongTien || 0) - newPaid);
+        const updatedOrder: any = {
+          ...order,
+          thanhToanThucTe: newPaid,
+          congNo: newCongNo,
+          // Chỉ hạ trạng thái 'completed' do chính khoản thanh toán này gây ra;
+          // không đụng tới các trạng thái khác đơn hàng đang có.
+          status: (newCongNo > 0 && order.status === 'completed') ? 'confirmed' : order.status,
+        };
+        setPurchaseOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        try {
+          await dbService.purchaseOrders.save(updatedOrder);
+        } catch (err) {
+          console.error('[App] Lỗi trả lại công nợ đơn hàng:', err);
+        }
+        // Trả lại Công nợ Trả (accounting_liabilities) theo nhà cung cấp
+        try {
+          const liabs: any[] = await dbService.accountingLiabilities.list();
+          const liab = liabs.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === order.supplierName);
+          if (liab) {
+            const newPaidL = Math.max(0, (liab.paid || 0) - (targetPayment.amount || 0));
+            const updatedLiab = { ...liab, paid: newPaidL, remaining: (liab.value || 0) - newPaidL };
+            await dbService.accountingLiabilities.save(updatedLiab);
+            window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
+          }
+        } catch (err) {
+          console.error('[App] Lỗi trả lại công nợ phải trả:', err);
+        }
+      }
+    }
+    // Đồng bộ Công nợ Trả thầu phụ (menu Quản Lý Thầu Phụ) khi phiếu chi bị xóa
+    window.dispatchEvent(new CustomEvent('hl-payments-updated'));
   };
 
   const handleUpdateReceipt = async (updated: Receipt) => {
