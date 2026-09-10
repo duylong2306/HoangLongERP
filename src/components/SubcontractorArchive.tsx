@@ -2,8 +2,77 @@
 import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
 import { Employee, ArchivedQuote, Supplier } from '../types';
-import { FileText, Search, Printer, Trash2, Eye, Calendar, User, Briefcase, ChevronRight, ShieldCheck, Info, CheckCircle2, FileCheck, Save } from 'lucide-react';
+import { FileText, Search, Printer, Trash2, Eye, Calendar, User, Briefcase, ChevronRight, ShieldCheck, Info, CheckCircle2, FileCheck, Save, XCircle, FileDown } from 'lucide-react';
 import { useNotification, isUserInRoleGroup } from '../context';
+import RichTextEditor from './RichTextEditor';
+import { exportHtmlToWord } from '../lib/wordExport';
+
+// Bản in Hợp Đồng Thầu Phụ — trước đây là các ô <input> cố định bind trực tiếp
+// vào tempQuote.<field>, nay chuyển sang 1 vùng văn bản tự do (contentEditable)
+// giống ContractDocument/AcceptanceDocument/LiquidationDocument, để dùng chung
+// toolbar căn chỉnh kiểu Word + xuất Word. Các placeholder {{...}} được thay
+// bằng giá trị thật LÚC TẢI hồ sơ (xem generateSubcontractorContractHtml) —
+// sau đó người dùng tự gõ/định dạng tự do trong vùng văn bản.
+const DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE = `
+<div style="text-align:center;">
+  <h2 style="margin:0;font-weight:800;text-transform:uppercase;">Hợp Đồng Thầu Phụ Thi Công</h2>
+  <p style="margin:2px 0;font-size:11px;color:#64748b;">Số hiệu: {{MA_HOP_DONG}}</p>
+</div>
+
+<p style="font-style:italic;color:#64748b;">- Căn cứ Bộ luật Dân sự số 91/2015/QH13 ban hành ngày 24/11/2015;</p>
+<p style="font-style:italic;color:#64748b;">- Căn cứ Luật Thương mại số 36/2005/QH11 ban hành ngày 14/06/2005;</p>
+<p style="font-style:italic;color:#64748b;">- Căn cứ nhu cầu thi công thực tế và năng lực của các bên;</p>
+
+<p><strong>Hôm nay, ngày {{NGAY}} tháng {{THANG}} năm {{NAM}}, tại trụ sở Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm:</strong></p>
+
+<p><strong>Bên A (Bên giao thầu): <span style="color:#2563eb;">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span></strong></p>
+<ul>
+  <li>Địa chỉ: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</li>
+  <li>MST: 5801452655</li>
+  <li>Đại diện: Ông Nguyễn Văn Hoàng - Chức vụ: Giám đốc</li>
+  <li>Hotline liên hệ: 0966 545 959</li>
+</ul>
+
+<p><strong>Bên B (Bên nhận thầu phụ): <span style="color:#059669;">{{TEN_THAU_PHU}}</span></strong></p>
+<ul>
+  <li>Mã Thầu Phụ: {{MA_THAU_PHU}}</li>
+  <li>Người đại diện: {{DAI_DIEN_THAU_PHU}}</li>
+  <li>Điện thoại: {{DIEN_THOAI_THAU_PHU}}</li>
+  <li>Địa chỉ: {{DIA_CHI_THAU_PHU}}</li>
+  <li>MST/CCCD: {{MST_THAU_PHU}}</li>
+</ul>
+
+<p><strong>ĐIỀU 1. PHẠM VI LIÊN KẾT DỰ ÁN &amp; CÔNG VIỆC BÀN GIAO</strong></p>
+<p>1.1. Công trình liên kết: {{CONG_TRINH}}</p>
+<p>1.2. Chủ đầu tư dự án: {{CHU_DAU_TU}} - SĐT: {{SDT_CHU_DAU_TU}}</p>
+<p>1.3. Địa chỉ lắp đặt thi công: {{DIA_CHI_THI_CONG}}</p>
+<p>1.4. Nội dung công việc giao thầu: {{NOI_DUNG_CONG_VIEC}}</p>
+
+<p><strong>ĐIỀU 2. THỜI GIAN THỰC HIỆN</strong></p>
+<p>- Ngày bắt đầu triển khai: {{NGAY_BAT_DAU}}</p>
+<p>- Ngày hoàn thiện bàn giao nghiệm thu: {{NGAY_HOAN_THIEN}}</p>
+
+<p><strong>ĐIỀU 3. GIÁ TRỊ HỢP ĐỒNG &amp; PHƯƠNG THỨC THANH TOÁN</strong></p>
+<p>- Giá trị hợp đồng khoán: <strong>{{GIA_TRI_HOP_DONG}}</strong></p>
+<p>- Trạng thái ký hợp đồng: {{TRANG_THAI_KY}}</p>
+<p>- Trạng thái thanh toán &amp; thi công: {{TRANG_THAI_THANH_TOAN}}</p>
+
+<p><strong>ĐIỀU 4. THỎA ƯỚC PHỤ TRỢ &amp; GHI CHÚ KỸ THUẬT</strong></p>
+<p>{{GHI_CHU}}</p>
+
+<table style="width:100%;margin-top:40px;border:none;">
+  <tr>
+    <td style="width:50%;text-align:center;border:none;padding:0;">
+      <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN A (GIAO THẦU)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký, đóng dấu và ghi rõ họ tên</span></p>
+      <p style="font-weight:bold;">Nguyễn Văn Hoàng<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Giám đốc Hoàng Long Lâm Đồng</span></p>
+    </td>
+    <td style="width:50%;text-align:center;border:none;padding:0;">
+      <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN B (NHẬN THẦU PHỤ)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký và ghi rõ họ tên</span></p>
+      <p style="font-weight:bold;">{{DAI_DIEN_B_KY}}<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">{{TEN_THAU_PHU_KY}}</span></p>
+    </td>
+  </tr>
+</table>
+`;
 
 interface SubcontractorArchiveProps {
   currentUser: Employee;
@@ -24,6 +93,12 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
   const [tempQuote, setTempQuote] = useState<ArchivedQuote | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
   const [showPrintPreview, setShowPrintPreview] = useState<boolean>(false);
+  // Nội dung bản in tự do (contentEditable) — thay cho các ô input cố định trước
+  // đây. isEditing: hồ sơ đã duyệt (tempQuote.isApproved) thì khóa, phải "Hủy
+  // phê duyệt" mới sửa lại được (xem effect load bên dưới + toolbar Duyệt/Sửa).
+  const [docHtml, setDocHtml] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [savingDoc, setSavingDoc] = useState(false);
 
   // Load suppliers list from Supabase (bảng thầu phụ riêng)
   useEffect(() => {
@@ -142,6 +217,97 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
   };
 
   const selectedSupplier = suppliers.find(s => s.id === selectedQuote?.subcontractorId);
+
+  // Thay {{PLACEHOLDER}} bằng giá trị thật từ hồ sơ — gọi 1 LẦN lúc mở/khôi phục
+  // bản in (không gọi lại lúc gõ, khác các hàm generateProcessedHtml của 3 hồ sơ
+  // kia vì file này không có sẵn "quoteData" tách biệt khỏi state đang sửa).
+  const generateSubcontractorContractHtml = (q: ArchivedQuote, supplier?: Supplier): string => {
+    let html = DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE;
+    const day = q.day || (q.createdAt ? q.createdAt.split('/')[0] : '01');
+    const month = q.month || (q.createdAt ? q.createdAt.split('/')[1] : '07');
+    const year = q.year || (q.createdAt ? q.createdAt.split('/')[2] : '2026');
+    const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString('vi-VN') : 'Đang cập nhật';
+    const signedLabel = q.signedLabel || (q.signedDate ? `Đã ký ngày ${fmtDate(q.signedDate)}` : 'Chưa ký (Sẽ bổ sung ngày ký sau)');
+    const replacements: Record<string, string> = {
+      '{{MA_HOP_DONG}}': q.code || 'Chưa cập nhật',
+      '{{NGAY}}': String(day), '{{THANG}}': String(month), '{{NAM}}': String(year),
+      '{{TEN_THAU_PHU}}': q.subcontractorName || 'Chưa cập nhật',
+      '{{MA_THAU_PHU}}': q.subcontractorId || 'N/A',
+      '{{DAI_DIEN_THAU_PHU}}': q.representative !== undefined ? q.representative : (supplier?.representative || 'Chưa cập nhật'),
+      '{{DIEN_THOAI_THAU_PHU}}': q.phone !== undefined ? q.phone : (supplier?.phone || 'Chưa cập nhật'),
+      '{{DIA_CHI_THAU_PHU}}': q.address !== undefined ? q.address : (supplier?.address || 'Chưa cập nhật'),
+      '{{MST_THAU_PHU}}': q.taxCode !== undefined ? q.taxCode : (supplier?.taxCode || 'Chưa cập nhật'),
+      '{{CONG_TRINH}}': q.projectName || 'Chưa cập nhật',
+      '{{CHU_DAU_TU}}': q.customerName || 'Chưa cập nhật',
+      '{{SDT_CHU_DAU_TU}}': q.customerPhone || 'Chưa cập nhật',
+      '{{DIA_CHI_THI_CONG}}': q.customerAddress || 'Chưa cập nhật',
+      '{{NOI_DUNG_CONG_VIEC}}': q.workName || 'Chưa cập nhật',
+      '{{NGAY_BAT_DAU}}': fmtDate(q.startDate),
+      '{{NGAY_HOAN_THIEN}}': fmtDate(q.endDate),
+      '{{GIA_TRI_HOP_DONG}}': `${(q.contractValue || 0).toLocaleString('vi-VN')} VND`,
+      '{{TRANG_THAI_KY}}': signedLabel,
+      '{{TRANG_THAI_THANH_TOAN}}': q.status || 'Đã Lập',
+      '{{GHI_CHU}}': q.notes || 'Không có',
+      '{{DAI_DIEN_B_KY}}': q.representative || supplier?.representative || 'Chưa ký',
+      '{{TEN_THAU_PHU_KY}}': q.subcontractorName || 'Tổ thợ thầu phụ',
+    };
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+      html = html.split(placeholder).join(value);
+    });
+    return html;
+  };
+
+  // Nạp lại bản in mỗi khi mở 1 hồ sơ khác — ưu tiên contractHtml đã lưu tùy
+  // chỉnh trước đó, nếu chưa có thì generate mới từ dữ liệu cấu trúc sẵn có
+  // (áp dụng đúng cho cả hồ sơ CŨ trước khi có tính năng này — không mất dữ liệu).
+  useEffect(() => {
+    if (!showPrintPreview || !tempQuote) return;
+    setDocHtml(tempQuote.contractHtml || generateSubcontractorContractHtml(tempQuote, selectedSupplier));
+    setIsEditing(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPrintPreview, tempQuote?.id]);
+
+  const handleUnapproveSubcontractorContract = async () => {
+    if (!tempQuote) return;
+    if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Hợp Đồng Thầu Phụ?\nSau khi sửa xong cần Duyệt Hợp Đồng lại từ đầu.\nLưu ý: hợp đồng này sẽ tạm thời không còn tính vào Công Nợ Trả cho tới khi được duyệt lại.')) return;
+    try {
+      const updated = { ...tempQuote, isApproved: false } as ArchivedQuote;
+      setTempQuote(updated);
+      await dbService.archivedQuotes.save({ ...updated, sector: 'subcontractor' });
+      setSelectedQuote(updated);
+      setArchivedList(prev => prev.map(q => q.id === updated.id ? updated : q));
+      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Hợp đồng đã được mở khóa để chỉnh sửa.', type: 'info' });
+      window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
+    } catch (err) {
+      console.error('Lỗi khi hủy phê duyệt hợp đồng thầu phụ:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi hủy phê duyệt.', type: 'error' });
+    }
+  };
+
+  const handleSaveSubcontractorDoc = async () => {
+    if (!tempQuote) return;
+    setSavingDoc(true);
+    try {
+      const updated = { ...tempQuote, contractHtml: docHtml };
+      await dbService.archivedQuotes.save({ ...updated, sector: 'subcontractor' });
+      setTempQuote(updated);
+      setSelectedQuote(updated);
+      setArchivedList(prev => prev.map(q => q.id === updated.id ? updated : q));
+      setIsEditing(false);
+      addToast({ title: '💾 Đã lưu', message: 'Đã lưu bản in hợp đồng thầu phụ thành công!', type: 'success' });
+      window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
+    } catch (err) {
+      console.error('Lỗi khi lưu bản in hợp đồng thầu phụ:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi lưu.', type: 'error' });
+    } finally {
+      setSavingDoc(false);
+    }
+  };
+
+  const handleExportSubcontractorWord = () => {
+    if (!docHtml || !tempQuote) return;
+    exportHtmlToWord(docHtml, `HopDongThauPhu_${tempQuote.code || tempQuote.id}`);
+  };
 
   return (
     <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-6 space-y-6 text-left" id="subcontractor_archive_workspace">
@@ -378,9 +544,9 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                 }
               `}</style>
 
-              {/* Approval Watermark Stamp */}
+              {/* Approval Watermark Stamp — chỉ hiện trên màn hình, KHÔNG in ra bản in/PDF */}
               {tempQuote.isApproved && (
-                <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+                <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden print-hide">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500/50 animate-pulse" />
                   ĐÃ PHÊ DUYỆT
                 </div>
@@ -389,10 +555,20 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
               {/* Inline Action Buttons at Top (Hidden on Print) */}
               <div className="absolute top-6 right-6 flex items-center gap-2 print-hide no-print z-45">
                 {tempQuote.isApproved ? (
-                  <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-[10px] font-bold font-sans flex items-center gap-1 shadow-sm">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    Hợp Đồng Đã Duyệt
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-[10px] font-bold font-sans flex items-center gap-1 shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Hợp Đồng Đã Duyệt
+                    </span>
+                    <button
+                      onClick={handleUnapproveSubcontractorContract}
+                      title="Hủy phê duyệt để mở khóa chỉnh sửa"
+                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Hủy phê duyệt
+                    </button>
+                  </div>
                 ) : (
                   <button
                     onClick={async () => {
@@ -422,29 +598,66 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                     Duyệt Hợp Đồng
                   </button>
                 )}
-                
+
+                {/* Hồ sơ đã duyệt: khóa nút "Chỉnh sửa" — phải Hủy phê duyệt ở trên mới sửa lại được. */}
+                {tempQuote.isApproved ? (
+                  <span className="px-2 text-[9px] text-slate-400 font-sans italic">🔒 Đã duyệt — hủy phê duyệt để sửa</span>
+                ) : !isEditing ? (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Chỉnh sửa bản in
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shadow-sm">
+                    <span className="text-[9px] font-bold font-sans text-amber-400 px-1.5">🔓 ĐANG SỬA</span>
+                    <button
+                      onClick={handleSaveSubcontractorDoc}
+                      disabled={savingDoc}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all rounded-lg text-[10px] font-bold font-sans flex items-center gap-1 cursor-pointer"
+                    >
+                      {savingDoc ? 'Đang lưu...' : 'Lưu'}
+                    </button>
+                    <button
+                      onClick={() => { setIsEditing(false); setDocHtml(tempQuote.contractHtml || generateSubcontractorContractHtml(tempQuote, selectedSupplier)); }}
+                      disabled={savingDoc}
+                      className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-slate-200 transition-all rounded-lg text-[10px] font-bold font-sans flex items-center gap-1 cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                )}
+
                 <button
-                  onClick={async () => {
-                    try {
-                      await dbService.archivedQuotes.save({ ...tempQuote, sector: 'subcontractor' });
-                      setSelectedQuote(tempQuote);
-                      setArchivedList(prev => prev.map(q => q.id === tempQuote.id ? tempQuote : q));
-                      addToast({ title: '✅ Thành công', message: '💾 Đã lưu thay đổi nội dung hợp đồng thành công!', type: 'success' });
-                      window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
-                    } catch (err) {
-                      console.error("Lỗi khi lưu hợp đồng:", err);
-                      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi lưu thay đổi.', type: 'error' });
-                    }
-                  }}
-                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-750 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  title="Lưu Nội Dung Chỉnh Sửa"
+                  onClick={handleExportSubcontractorWord}
+                  title="Xuất file Word"
+                  className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  Lưu Hợp Đồng
+                  <FileDown className="w-3.5 h-3.5 text-blue-600" />
+                  Xuất Word
                 </button>
               </div>
 
               <div className="max-w-3xl mx-auto space-y-6 pt-4">
+                {/* Giá trị hợp đồng — GIỮ dạng ô nhập số RIÊNG (không nằm trong vùng
+                    văn bản tự do), vì Công Nợ Trả (Tài Chính) tính trực tiếp từ
+                    field contractValue này (mergedLiabilities → sub.contractValue).
+                    Nếu gộp vào bên trong bản in tự do, sửa số ở đó sẽ KHÔNG cập nhật
+                    đúng Công Nợ Trả — xem ghi chú tương tự ở FinanceManagement.tsx. */}
+                <div className="flex items-center gap-2 print-hide no-print bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <span className="text-xs font-bold text-slate-600">Giá trị hợp đồng khoán:</span>
+                  <input
+                    type="number"
+                    disabled={tempQuote.isApproved || !isEditing}
+                    value={tempQuote.contractValue || 0}
+                    onChange={(e) => setTempQuote({ ...tempQuote, contractValue: Number(e.target.value) })}
+                    className="bg-white border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-bold text-emerald-600 disabled:opacity-60 disabled:bg-slate-100 w-40"
+                  />
+                  <span className="text-[10px] text-slate-400 italic">Đồng bộ trực tiếp với Công Nợ Trả</span>
+                </div>
+
                 {/* Header Title */}
                 <div className="text-center space-y-1">
                   <h2 className="font-extrabold text-sm uppercase tracking-wide">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</h2>
@@ -453,281 +666,25 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                   <div className="border-b border-slate-300 w-36 mx-auto pt-1"></div>
                 </div>
 
-                <div className="text-center pt-2">
-                  <h1 className="font-black text-lg uppercase tracking-wider text-slate-900">HỢP ĐỒNG THẦU PHỤ THI CÔNG</h1>
-                  <p className="font-mono text-slate-500 text-[10px] mt-0.5">Số hiệu: {tempQuote.code}</p>
-                </div>
-
-                {/* Base reference info */}
-                <div className="space-y-1 text-slate-600 italic">
-                  <p>- Căn cứ Bộ luật Dân sự số 91/2015/QH13 ban hành ngày 24/11/2015;</p>
-                  <p>- Căn cứ Luật Thương mại số 36/2005/QH11 ban hành ngày 14/06/2005;</p>
-                  <p>- Căn cứ nhu cầu thi công thực tế và năng lực của các bên;</p>
-                </div>
-
-                {/* Contract Entities */}
-                <div className="space-y-4">
-                  <p className="font-bold text-slate-900 flex flex-wrap items-center gap-1">
-                    <span>Hôm nay, ngày</span>
-                    <input
-                      type="text"
-                      value={tempQuote.day || tempQuote.createdAt?.split('/')[0] || '01'}
-                      onChange={(e) => setTempQuote({ ...tempQuote, day: e.target.value })}
-                      className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-8 text-center print:border-none"
-                    />
-                    <span>tháng</span>
-                    <input
-                      type="text"
-                      value={tempQuote.month || tempQuote.createdAt?.split('/')[1] || '07'}
-                      onChange={(e) => setTempQuote({ ...tempQuote, month: e.target.value })}
-                      className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-8 text-center print:border-none"
-                    />
-                    <span>năm</span>
-                    <input
-                      type="text"
-                      value={tempQuote.year || tempQuote.createdAt?.split('/')[2] || '2026'}
-                      onChange={(e) => setTempQuote({ ...tempQuote, year: e.target.value })}
-                      className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-12 text-center print:border-none"
-                    />
-                    <span>, tại trụ sở Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm:</span>
-                  </p>
-                  
-                  {/* BÊN GIAO THẦU */}
-                  <div className="space-y-1">
-                    <h4 className="font-bold uppercase text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-1">
-                      <span>Bên A (Bên giao thầu):</span>
-                      <span className="font-extrabold text-blue-600">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span>
-                    </h4>
-                    <p>• Địa chỉ: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
-                    <p>• MST: 5801452655</p>
-                    <p>• Đại diện: Ông Nguyễn Văn Hoàng - Chức vụ: Giám đốc</p>
-                    <p>• Hotline liên hệ: 0966 545 959</p>
-                  </div>
-
-                  {/* BÊN NHẬN THẦU PHỤ */}
-                  <div className="space-y-1 pt-1">
-                    <h4 className="font-bold uppercase text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-1">
-                      <span>Bên B (Bên nhận thầu phụ):</span>
-                      <input
-                        type="text"
-                        value={tempQuote.subcontractorName || ''}
-                        onChange={(e) => setTempQuote({ ...tempQuote, subcontractorName: e.target.value })}
-                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-emerald-500 outline-none font-extrabold text-emerald-600 transition-colors print:border-none print:p-0 print:bg-transparent flex-1 max-w-sm"
-                        placeholder="Tên thầu phụ..."
-                      />
-                    </h4>
-                    <p>• Mã Thầu Phụ: <span className="font-mono font-bold text-emerald-600">{tempQuote.subcontractorId || 'N/A'}</span></p>
-                    
-                    <p className="flex items-center gap-1">
-                      <span>• Người đại diện:</span>
-                      <input
-                        type="text"
-                        value={tempQuote.representative !== undefined ? tempQuote.representative : (selectedSupplier?.representative || '')}
-                        onChange={(e) => setTempQuote({ ...tempQuote, representative: e.target.value })}
-                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-xs"
-                        placeholder="Họ tên người đại diện..."
-                      />
-                    </p>
-
-                    <p className="flex items-center gap-1">
-                      <span>• Điện thoại:</span>
-                      <input
-                        type="text"
-                        value={tempQuote.phone !== undefined ? tempQuote.phone : (selectedSupplier?.phone || '')}
-                        onChange={(e) => setTempQuote({ ...tempQuote, phone: e.target.value })}
-                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-xs"
-                        placeholder="Số điện thoại liên hệ..."
-                      />
-                    </p>
-
-                    <p className="flex items-center gap-1">
-                      <span>• Địa chỉ:</span>
-                      <input
-                        type="text"
-                        value={tempQuote.address !== undefined ? tempQuote.address : (selectedSupplier?.address || '')}
-                        onChange={(e) => setTempQuote({ ...tempQuote, address: e.target.value })}
-                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-md"
-                        placeholder="Địa chỉ thầu phụ..."
-                      />
-                    </p>
-
-                    <p className="flex items-center gap-1">
-                      <span>• MST/CCCD:</span>
-                      <input
-                        type="text"
-                        value={tempQuote.taxCode !== undefined ? tempQuote.taxCode : (selectedSupplier?.taxCode || '')}
-                        onChange={(e) => setTempQuote({ ...tempQuote, taxCode: e.target.value })}
-                        className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent w-full max-w-xs"
-                        placeholder="Mã số thuế hoặc CCCD..."
-                      />
-                    </p>
-                  </div>
-                </div>
-
-                {/* Contract Content clauses */}
-                <div className="space-y-4 pt-1">
-                  <div>
-                    <h4 className="font-bold text-slate-900 uppercase">Điều 1. Phạm vi liên kết dự án &amp; công việc bàn giao</h4>
-                    <div className="pl-4 space-y-2 mt-1">
-                      <div className="flex items-center gap-1">
-                        <strong>1.1. Công trình liên kết:</strong>
-                        <input
-                          type="text"
-                          value={tempQuote.projectName || ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, projectName: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent flex-1 max-w-md"
-                        />
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <strong>1.2. Chủ đầu tư dự án:</strong>
-                        <input
-                          type="text"
-                          value={tempQuote.customerName || ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, customerName: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent max-w-xs"
-                        />
-                        <span>- SĐT:</span>
-                        <input
-                          type="text"
-                          value={tempQuote.customerPhone || ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, customerPhone: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent max-w-xs"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <strong>1.3. Địa chỉ lắp đặt thi công:</strong>
-                        <input
-                          type="text"
-                          value={tempQuote.customerAddress || ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, customerAddress: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:border-none print:p-0 print:bg-transparent flex-1 max-w-md"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <strong>1.4. Nội dung công việc giao thầu:</strong>
-                        <input
-                          type="text"
-                          value={tempQuote.workName || ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, workName: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-blue-600 transition-all print:border-none print:p-0 print:bg-transparent flex-1 max-w-lg"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="font-bold text-slate-900 uppercase">Điều 2. Thời gian thực hiện</h4>
-                    <div className="pl-4 space-y-2 mt-1">
-                      <div className="flex items-center gap-2">
-                        <span>• Ngày bắt đầu triển khai:</span>
-                        <input
-                          type="date"
-                          value={tempQuote.startDate ? new Date(tempQuote.startDate).toISOString().split('T')[0] : ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, startDate: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:hidden"
-                        />
-                        <span className="hidden print:inline font-bold">
-                          {tempQuote.startDate ? new Date(tempQuote.startDate).toLocaleDateString('vi-VN') : 'Đang cập nhật'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span>• Ngày hoàn thiện bàn giao nghiệm thu:</span>
-                        <input
-                          type="date"
-                          value={tempQuote.endDate ? new Date(tempQuote.endDate).toISOString().split('T')[0] : ''}
-                          onChange={(e) => setTempQuote({ ...tempQuote, endDate: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-semibold text-slate-800 transition-all print:hidden"
-                        />
-                        <span className="hidden print:inline font-bold">
-                          {tempQuote.endDate ? new Date(tempQuote.endDate).toLocaleDateString('vi-VN') : 'Đang cập nhật'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="font-bold text-slate-900 uppercase">Điều 3. Giá trị hợp đồng &amp; Phương thức thanh toán</h4>
-                    <div className="pl-4 space-y-2 mt-1">
-                      <div className="flex items-center gap-1">
-                        <span>• Giá trị hợp đồng khoán:</span>
-                        <input
-                          type="number"
-                          value={tempQuote.contractValue || 0}
-                          onChange={(e) => setTempQuote({ ...tempQuote, contractValue: Number(e.target.value) })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-emerald-600 transition-all w-28 print:hidden"
-                        />
-                        <span className="hidden print:inline font-black text-emerald-600">
-                          {(tempQuote.contractValue || 0).toLocaleString('vi-VN')} VND
-                        </span>
-                        <span className="print:hidden text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded ml-2">
-                          👉 {(tempQuote.contractValue || 0).toLocaleString('vi-VN')} đ
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span>• Trạng thái ký hợp đồng:</span>
-                        <input
-                          type="text"
-                          value={tempQuote.signedLabel || (tempQuote.signedDate ? `Đã ký ngày ${new Date(tempQuote.signedDate).toLocaleDateString('vi-VN')}` : 'Chưa ký (Sẽ bổ sung ngày ký sau)')}
-                          onChange={(e) => setTempQuote({ ...tempQuote, signedLabel: e.target.value })}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-slate-800 transition-colors print:border-none print:p-0 print:bg-transparent flex-1 max-w-sm"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span>• Trạng thái thanh toán &amp; thi công:</span>
-                        <input
-                          type="text"
-                          value={tempQuote.status || 'Đã Lập'}
-                          onChange={(e) => setTempQuote({ ...tempQuote, status: e.target.value } as ArchivedQuote)}
-                          className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 px-1 py-0.5 outline-none font-bold text-blue-600 transition-colors print:border-none print:p-0 print:bg-transparent max-w-xs"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="font-bold text-slate-900 uppercase">Điều 4. Thỏa ước phụ trợ &amp; Ghi chú kỹ thuật</h4>
-                    <div className="pl-4 mt-1 bg-slate-50 p-3 rounded-lg border border-slate-200 text-[11px] text-slate-600 font-semibold print:border-none print:p-0 print:bg-transparent">
-                      <textarea
-                        value={tempQuote.notes || ''}
-                        onChange={(e) => setTempQuote({ ...tempQuote, notes: e.target.value })}
-                        rows={3}
-                        className="w-full bg-transparent outline-none border border-slate-300 focus:border-blue-500 rounded p-1 text-slate-800 font-medium transition-all print:border-none print:p-0 print:resize-none print:outline-none"
-                        placeholder="Nội dung thỏa ước phụ trợ hoặc ghi chú kỹ thuật bàn giao thầu..."
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer signatures */}
-                <div className="grid grid-cols-2 text-center pt-8 gap-6 font-bold text-xs">
-                  <div className="space-y-16">
-                    <div>
-                      <p className="uppercase text-slate-500">ĐẠI DIỆN BÊN A (GIAO THẦU)</p>
-                      <p className="text-[10px] text-slate-400 font-medium">Ký, đóng dấu và ghi rõ họ tên</p>
-                    </div>
-                    <div className="text-slate-800">
-                      <p>Nguyễn Văn Hoàng</p>
-                      <p className="text-[10px] text-slate-400 font-normal">Giám đốc Hoàng Long Lâm Đồng</p>
-                    </div>
-                  </div>
-                  <div className="space-y-16">
-                    <div>
-                      <p className="uppercase text-slate-500">ĐẠI DIỆN BÊN B (NHẬN THẦU PHỤ)</p>
-                      <p className="text-[10px] text-slate-400 font-medium">Ký và ghi rõ họ tên</p>
-                    </div>
-                    <div className="text-slate-800">
-                      <p>{tempQuote.representative || selectedSupplier?.representative || 'Chưa ký'}</p>
-                      <p className="text-[10px] text-slate-400 font-normal">{tempQuote.subcontractorName || 'Tổ thợ thầu phụ'}</p>
-                    </div>
-                  </div>
-                </div>
+                {/* Nội dung hợp đồng — vùng văn bản tự do (contentEditable), thay cho
+                    toàn bộ các ô input cố định phía trên trước đây. Toolbar căn
+                    chỉnh kiểu Word chỉ hiện khi isEditing=true; khi chỉ xem/in,
+                    toolbar tự ẩn (hideToolbarWhenDisabled) và nội dung không sửa
+                    được (disabled) — khớp đúng khóa "đã duyệt thì không sửa được". */}
+                <RichTextEditor
+                  value={docHtml}
+                  onChange={setDocHtml}
+                  disabled={tempQuote.isApproved || !isEditing}
+                  hideToolbarWhenDisabled
+                  editorHeightClassName="min-h-[300px] max-h-none prose max-w-none text-left text-sm leading-relaxed"
+                />
               </div>
             </div>
 
             {/* Print Footer */}
             <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 print-hide">
               <span className="text-[10px] text-slate-500 italic">
-                💡 Tip: Click directly on fields with dashed lines to edit the contract directly on printout.
+                💡 Bấm "Chỉnh sửa bản in" ở trên để soạn thảo tự do (căn chỉnh, giãn dòng, danh sách...).
               </span>
               <div className="flex gap-3">
                 <button

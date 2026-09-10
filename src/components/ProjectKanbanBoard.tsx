@@ -805,18 +805,11 @@ export default function ProjectKanbanBoard({
     const projectReceipts = receipts.filter(r => r.projectId === selectedProject.id);
     const totalReceived = projectReceipts.reduce((sum, r) => sum + (r.amount || 0), 0);
     
-    let grandTotal = 0;
-    if (latestArchivedQuote) {
-      const rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-      const discountPercent = latestArchivedQuote.discountPercent || 0;
-      const discountValue = rawTotal * (discountPercent / 100);
-      const subtotalAfterDiscount = rawTotal - discountValue;
-      const vatAmount = Math.round(subtotalAfterDiscount * 0.08);
-      grandTotal = subtotalAfterDiscount + vatAmount;
-    } else {
-      grandTotal = selectedProject.contractValue || editContractValue || 0;
-    }
-    
+    // Giá trị hợp đồng dùng để tính tiền tạm ứng/quyết toán: ƯU TIÊN tổng các Hợp
+    // Đồng đã duyệt (totalApprovedContractValue) — nguồn chính thức mới, thay cho
+    // báo giá (latestArchivedQuote) trước đây. Rơi về báo giá/nhập tay chỉ khi dự
+    // án CHƯA có hợp đồng nào được duyệt.
+    const grandTotal = totalApprovedContractValue || selectedProject.contractValue || editContractValue || 0;
     const remainingValue = Math.max(0, grandTotal - totalReceived);
     const amountToCollect = isFinal ? remainingValue : Math.round(remainingValue * 0.5);
     
@@ -869,13 +862,10 @@ export default function ProjectKanbanBoard({
           }
         }
       }
-      let finalVal = selectedProject.contractValue || 0;
-      if (latestArchivedQuote) {
-        const rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-        const discountPercent = latestArchivedQuote.discountPercent || 0;
-        const discountValue = rawTotal * (discountPercent / 100);
-        finalVal = rawTotal - discountValue;
-      }
+      // Ưu tiên tổng Hợp Đồng đã duyệt (totalApprovedContractValue) — xem ghi chú
+      // ở handleCreateReceipt phía trên. Chỉ rơi về contractValue nhập tay khi
+      // chưa có hợp đồng nào được duyệt.
+      const finalVal = totalApprovedContractValue || selectedProject.contractValue || 0;
       setEditContractValue(finalVal);
       setEditCustomerId(selectedProject.customerId || '');
     }
@@ -1078,6 +1068,35 @@ export default function ProjectKanbanBoard({
         (q._sectorType === selectedProject.type || (!q._sectorType && selectedProject.type === 'general'))
       ) || null)
     : null;
+
+  // Giá trị Hợp Đồng của dự án — TÍNH ĐỘNG từ TẤT CẢ Hợp Đồng đã duyệt
+  // (contractApproved===true) cùng projectId, thay cho "lấy 1 báo giá bất kỳ"
+  // như latestArchivedQuote ở trên. 1 dự án có thể có NHIỀU hợp đồng theo từng
+  // giai đoạn — cộng dồn tất cả, không chỉ lấy 1. Duyệt/hủy phê duyệt Hợp Đồng ở
+  // ContractDocument.tsx bắn event 'hl-archived-quotes-updated' khiến
+  // archivedQuotesList tự tải lại, nên danh sách này tự cập nhật theo, không cần
+  // code cộng/trừ thủ công riêng.
+  // Lọc theo `sector` THẬT trên bản ghi (không dùng `_sectorType`): archivedQuotesList
+  // gộp 1 mảng KHÔNG lọc sector (generalList) + các mảng lọc riêng rồi dedupe theo id,
+  // giữ bản ghi xuất hiện TRƯỚC — luôn là bản từ generalList (tag "_sectorType: 'general'"),
+  // nên MỌI hồ sơ construction/furniture/mechanical đều bị gắn nhãn sai thành "general"
+  // ở đây (bug có sẵn, không phải do thay đổi này). Field `sector` gốc trên chính bản ghi
+  // thì luôn đúng bất kể bị dedupe từ list nào, nên dùng nó thay cho `_sectorType`.
+  const projectContractsAll = selectedProject
+    ? archivedQuotesList.filter((q: any) =>
+        q.projectId === selectedProject.id &&
+        q.sector !== 'subcontractor' &&
+        (q.sector === selectedProject.type || selectedProject.type === 'general')
+      )
+    : [];
+  const approvedProjectContracts = projectContractsAll.filter((q: any) => q.contractApproved === true);
+  // Giá trị 1 hợp đồng: totalAmount là field chính thức, nhưng nhiều hồ sơ CŨ (lập
+  // trước khi field này được ghi đều đặn) có totalAmount = null trong DB — rơi về
+  // contractValue rồi tổng items.totalPrice (đúng cách bảng "Lưu Trữ Hồ Sơ" tự
+  // tính cột "Tổng" cho các hồ sơ này) để không hiện sai thành 0đ.
+  const getContractFinalValue = (q: any): number =>
+    q.totalAmount || q.contractValue || (q.items || []).reduce((s: number, it: any) => s + (it.totalPrice || 0), 0) || 0;
+  const totalApprovedContractValue = approvedProjectContracts.reduce((s: number, q: any) => s + getContractFinalValue(q), 0);
 
   // Filter projects by this sector (construction, furniture, mechanical) and search state
   const sectorProjects = projects.filter(p => {
@@ -3462,50 +3481,36 @@ export default function ProjectKanbanBoard({
                         const projectReceipts = receipts.filter(r => r.projectId === selectedProject.id);
                         const totalReceived = projectReceipts.reduce((sum, r) => sum + (r.amount || 0), 0);
 
-                        let grandTotal = 0;
-                        let rawTotal = 0;
-                        let discountPercent = 0;
-                        let discountValue = 0;
-
-                        if (latestArchivedQuote) {
-                          rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-                          discountPercent = latestArchivedQuote.discountPercent || 0;
-                          discountValue = rawTotal * (discountPercent / 100);
-                          grandTotal = rawTotal - discountValue;
-                        } else {
-                          grandTotal = selectedProject.contractValue || editContractValue || 0;
-                        }
+                        // Giá trị hợp đồng: TỔNG các Hợp Đồng ĐÃ DUYỆT của dự án (có thể nhiều
+                        // hợp đồng theo từng giai đoạn) — nguồn chính thức mới thay cho báo giá.
+                        const grandTotal = approvedProjectContracts.length > 0
+                          ? totalApprovedContractValue
+                          : (selectedProject.contractValue || editContractValue || 0);
 
                         const remainingValue = Math.max(0, grandTotal - totalReceived);
 
                         return (
                           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-center text-slate-800">
-                            {latestArchivedQuote ? (
+                            {approvedProjectContracts.length > 0 ? (
                               <>
                                 <div className="flex items-center justify-between mb-1.5">
                                   <span className="text-[9.5px] text-emerald-700 bg-emerald-50 border border-emerald-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded">
-                                    Đồng bộ từ báo giá
+                                    {approvedProjectContracts.length} hợp đồng đã duyệt
                                   </span>
-                                  {latestArchivedQuote.isApproved && (
-                                    <span className="text-[9.5px] text-sky-700 bg-sky-50 border border-sky-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded">
-                                      Đã phê duyệt
-                                    </span>
-                                  )}
                                 </div>
                                 <div className="text-emerald-700 font-mono text-2xl font-black tracking-tight mt-1">
-                                  {grandTotal.toLocaleString('vi-VN')} VNĐ
+                                  {totalApprovedContractValue.toLocaleString('vi-VN')} VNĐ
                                 </div>
-                                <div className="text-[10px] text-slate-500 mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2">
-                                  <div className="flex justify-between">
-                                    <span>Giá gốc thầu:</span>
-                                    <span className="font-mono text-slate-700 font-semibold">{rawTotal.toLocaleString('vi-VN')} đ</span>
-                                  </div>
-                                  {discountPercent > 0 && (
-                                    <div className="flex justify-between text-amber-650 font-medium">
-                                      <span>Chiết khấu ({discountPercent}%):</span>
-                                      <span className="font-mono">-{discountValue.toLocaleString('vi-VN')} đ</span>
+                                {/* Chi tiết từng Hợp Đồng đã duyệt — 1 dự án có thể nhiều giai đoạn */}
+                                <div className="space-y-1.5 mt-2 border-t border-slate-100 pt-2">
+                                  {approvedProjectContracts.map((q: any) => (
+                                    <div key={q.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                      <span className="text-[10px] text-slate-600 font-mono font-bold truncate">{q.code || q.id}</span>
+                                      <span className="text-[10px] font-mono font-black text-emerald-700 shrink-0 ml-2">
+                                        {getContractFinalValue(q).toLocaleString('vi-VN')} đ
+                                      </span>
                                     </div>
-                                  )}
+                                  ))}
                                 </div>
                               </>
                             ) : (
@@ -3528,7 +3533,7 @@ export default function ProjectKanbanBoard({
                                 ) : (
                                   <div className="flex flex-col justify-center">
                                     <div className="text-[9.5px] text-slate-400 uppercase font-black tracking-wider mb-1">
-                                      Giá trị tạm tính (Chưa có báo giá)
+                                      Giá trị tạm tính (Chưa có Hợp Đồng nào được duyệt)
                                     </div>
                                     <div className="text-slate-800 font-mono text-lg font-black tracking-tight">
                                       {grandTotal.toLocaleString('vi-VN')} VNĐ

@@ -682,6 +682,28 @@ export default function FinanceManagement({
   // hợp đồng nhưng CHƯA được duyệt (isApproved=false) vẫn cần hiện ra để chọn.
   const [allSubcontractorQuotes, setAllSubcontractorQuotes] = useState<ArchivedQuote[]>([]);
 
+  // Hợp Đồng (Xây Dựng/Nội Thất/Cơ Khí) ĐÃ DUYỆT — dùng để tính động giá trị hợp
+  // đồng trong Công Nợ Thu (mergedReceivables bên dưới), thay vì đọc field
+  // contractValue lưu cứng lúc "Duyệt Báo Giá" như trước đây. 1 dự án có thể có
+  // NHIỀU hợp đồng (theo giai đoạn) — cộng tất cả hợp đồng đã duyệt của cùng
+  // projectId. contractApproved chỉ tồn tại ở sector construction/furniture/
+  // mechanical (không phải subcontractor, đã có approvedSubContracts riêng ở trên).
+  const [approvedProjectContracts, setApprovedProjectContracts] = useState<ArchivedQuote[]>([]);
+  useEffect(() => {
+    const loadApprovedProjectContracts = async () => {
+      try {
+        const list = await dbService.archivedQuotes.list(); // không truyền sector = lấy tất cả
+        setApprovedProjectContracts(list.filter((q: any) => q.sector !== 'subcontractor' && q.contractApproved === true));
+      } catch (err) {
+        console.error('Lỗi khi tải Hợp Đồng đã duyệt cho Công Nợ Thu:', err);
+      }
+    };
+    loadApprovedProjectContracts();
+    // ContractDocument.tsx bắn đúng tên event này khi Duyệt/Hủy phê duyệt Hợp Đồng.
+    window.addEventListener('hl-archived-quotes-updated', loadApprovedProjectContracts);
+    return () => window.removeEventListener('hl-archived-quotes-updated', loadApprovedProjectContracts);
+  }, []);
+
   // Load approved subcontractor contracts from Firebase
   useEffect(() => {
     const loadApprovedSubs = async () => {
@@ -1598,9 +1620,23 @@ export default function FinanceManagement({
       const projRecs = receipts.filter(rec => rec.projectId === r.projectId);
       const collected = projRecs.reduce((s, rec) => s + rec.amount, 0);
       const openingDebt = r.openingDebt ?? (r.isOpeningDebt ? (r.contractValue || 0) : 0);
-      const contractValue = r.contractValue || 0;
+      // Giá trị hợp đồng: TÍNH ĐỘNG từ tổng các Hợp Đồng (Xây Dựng/Nội Thất/Cơ Khí)
+      // ĐÃ DUYỆT của cùng dự án — thay cho field contractValue lưu cứng lúc "Duyệt
+      // Báo Giá" trước đây. Duyệt/hủy phê duyệt Hợp Đồng tự động cộng/trừ đúng vì
+      // số này tính lại mỗi lần render, không có state trung gian nào có thể lệch.
+      // Dòng Công Nợ Đầu Kỳ (isOpeningDebt) không phải 1 dự án cụ thể — giữ nguyên
+      // field lưu cứng cho trường hợp đó, không áp dụng phép tính động này.
+      const contractValue = r.isOpeningDebt
+        ? (r.contractValue || 0)
+        : approvedProjectContracts.filter(q => q.projectId === r.projectId).reduce((s, q: any) => {
+            // totalAmount là field chính thức, nhưng hồ sơ CŨ có thể chưa được ghi
+            // (null) — rơi về contractValue rồi tổng items.totalPrice, giống cách
+            // bảng "Lưu Trữ Hồ Sơ" tự tính cột "Tổng" cho các hồ sơ này.
+            const val = q.totalAmount || q.contractValue || (q.items || []).reduce((s2: number, it: any) => s2 + (it.totalPrice || 0), 0) || 0;
+            return s + val;
+          }, 0);
       const remaining = (openingDebt + contractValue) - collected;
-      return { ...r, collected, remaining, openingDebt };
+      return { ...r, collected, remaining, openingDebt, contractValue };
     });
 
     // Manual items: re-compute collected theo customerId hoặc salesOrderId
@@ -1631,7 +1667,7 @@ export default function FinanceManagement({
     return [...auto, ...customs].sort((a, b) =>
       (a.investor || '').localeCompare(b.investor || '', 'vi') ||
       (a.projectName || '').localeCompare(b.projectName || '', 'vi'));
-  }, [customReceivables, receipts, customers]);
+  }, [customReceivables, receipts, customers, approvedProjectContracts]);
 
   // Gom nhóm Công nợ Thu theo Chủ đầu tư (Khách Hàng): mỗi khách = 1 dòng tổng hợp,
   // mở rộng để xem chi tiết từng công trình. CĐK chỉ ở mức Chủ đầu tư.

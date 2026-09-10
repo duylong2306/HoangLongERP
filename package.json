@@ -21,6 +21,7 @@
     "dompurify": "^3.4.11",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "html-docx-js-typescript": "^0.1.5",
     "html2canvas-pro": "^2.4.1",
     "html2pdf.js": "^0.14.0",
     "jszip": "^3.10.1",

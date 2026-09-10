@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, CheckCircle2, FileCheck } from 'lucide-react';
+import { Printer, CheckCircle2, FileCheck, XCircle, FileDown } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
+import RichTextEditor from './RichTextEditor';
+import { exportHtmlToWord } from '../lib/wordExport';
 
 const DEFAULT_MECH_ACCEPTANCE_TEMPLATE = `<h3 style="text-align: center;"><strong>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</strong></h3>
 <p style="text-align: center;"><strong>Độc lập - Tự do - Hạnh phúc</strong></p>
@@ -171,6 +173,28 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
     }
   };
 
+  // Hủy phê duyệt để mở khóa chỉnh sửa lại — xem cùng pattern ở ContractDocument.tsx.
+  const handleUnapproveAcceptance = async () => {
+    if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Biên Bản Nghiệm Thu?\nSau khi sửa xong cần Duyệt Nghiệm Thu lại từ đầu.')) return;
+    try {
+      setSaving(true);
+      await dbService.updateQuoteDocHtml(quoteData.id, { acceptanceApproved: false });
+      quoteData.acceptanceApproved = false;
+      setAcceptanceApproved(false);
+      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Nghiệm Thu đã được mở khóa để chỉnh sửa.', type: 'info' });
+    } catch (err) {
+      console.error('Lỗi khi hủy phê duyệt nghiệm thu:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi hủy phê duyệt. Vui lòng thử lại!', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExportWord = () => {
+    if (!docHtml) return;
+    exportHtmlToWord(docHtml, `NghiemThu_${quoteData.code || quoteData.id}`);
+  };
+
   const editorRef = React.useRef<HTMLDivElement>(null);
 
   const today = new Date();
@@ -279,10 +303,10 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
   };
 
   const handleSave = async () => {
-    if (!editorRef.current) return;
+    // docHtml luôn đồng bộ với nội dung đang soạn qua RichTextEditor.onChange.
     setSaving(true);
     try {
-      const newHtml = editorRef.current.innerHTML;
+      const newHtml = docHtml;
       await dbService.updateQuoteDocHtml(quoteData.id, { acceptanceHtml: newHtml });
       quoteData.acceptanceHtml = newHtml;
       setDocHtml(newHtml);
@@ -372,10 +396,21 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
       {/* Edit/Save Actions Toolbar */}
       <div className="absolute left-6 top-6 flex items-center gap-2 print:hidden no-print z-10" contentEditable={false}>
         {acceptanceApproved ? (
-          <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            Đã Duyệt
-          </span>
+          <div className="flex items-center gap-1">
+            <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Đã Duyệt
+            </span>
+            <button
+              onClick={handleUnapproveAcceptance}
+              disabled={saving}
+              title="Hủy phê duyệt để mở khóa chỉnh sửa"
+              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Hủy phê duyệt
+            </button>
+          </div>
         ) : (
           <button
             onClick={handleApproveAcceptance}
@@ -387,7 +422,11 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
           </button>
         )}
 
-        {!isEditing ? (
+        {acceptanceApproved ? (
+          <span className="px-3 py-1.5 text-[10px] text-slate-500 font-sans italic flex items-center gap-1">
+            🔒 Đã duyệt — hủy phê duyệt để chỉnh sửa
+          </span>
+        ) : !isEditing ? (
           <button
             onClick={() => setIsEditing(true)}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white transition-all rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
@@ -416,7 +455,7 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
             </button>
           </div>
         )}
-        {quoteData.acceptanceHtml && !isEditing && (
+        {quoteData.acceptanceHtml && !isEditing && !acceptanceApproved && (
           <button
             onClick={handleRestoreDefault}
             className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 transition-all rounded-xl text-xs font-bold font-sans flex items-center gap-1 cursor-pointer shadow-sm active:scale-95"
@@ -426,9 +465,9 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
         )}
       </div>
 
-      {/* Approved Stamp on the printed document */}
+      {/* Approved Stamp — chỉ hiện trên màn hình, KHÔNG in ra bản in/PDF */}
       {acceptanceApproved && (
-        <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+        <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden">
           <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
           ĐÃ PHÊ DUYỆT
         </div>
@@ -436,6 +475,13 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
 
       {/* Print Button floating */}
       <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print" contentEditable={false}>
+        <button
+          onClick={handleExportWord}
+          className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
+        >
+          <FileDown className="w-4 h-4 text-blue-600" />
+          Xuất Word
+        </button>
         <button
           onClick={handlePrint}
           className="px-4 py-2 bg-[#00a651] text-white hover:bg-[#008f45] transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
@@ -446,13 +492,15 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
       </div>
 
       {/* Freeform editor */}
-      <div 
-        ref={editorRef}
-        className="times-roman-print prose max-w-none text-left text-base space-y-4 print:prose-sm leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: docHtml }}
-        contentEditable={isEditing}
-        suppressContentEditableWarning={true}
-      />
+      <div ref={editorRef} className="times-roman-print">
+        <RichTextEditor
+          value={docHtml}
+          onChange={setDocHtml}
+          disabled={!isEditing}
+          hideToolbarWhenDisabled
+          editorHeightClassName="min-h-[200px] max-h-none prose max-w-none text-left text-base space-y-4 print:prose-sm leading-relaxed"
+        />
+      </div>
       
       <div className="times-roman-print mt-12 border-t border-dashed border-slate-300 pt-8 grid grid-cols-2 text-center text-sm" contentEditable={false}>
         <div>
