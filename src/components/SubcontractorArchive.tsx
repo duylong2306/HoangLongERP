@@ -546,7 +546,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
 
               {/* Approval Watermark Stamp — chỉ hiện trên màn hình, KHÔNG in ra bản in/PDF */}
               {tempQuote.isApproved && (
-                <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden print-hide">
+                <div className="absolute top-20 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-xs tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden print-hide">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500/50 animate-pulse" />
                   ĐÃ PHÊ DUYỆT
                 </div>

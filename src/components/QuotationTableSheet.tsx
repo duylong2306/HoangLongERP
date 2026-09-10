@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { sanitizeHTML } from '../lib/sanitize';
-import { FileText, Printer, Download, ClipboardList, FileSignature, FileCheck, Coins, CheckCircle2 } from 'lucide-react';
+import { FileText, Printer, Download, ClipboardList, FileSignature, FileCheck, Coins, CheckCircle2, XCircle } from 'lucide-react';
 import ContractDocument from './ContractDocument';
 import AcceptanceDocument from './AcceptanceDocument';
 import LiquidationDocument from './LiquidationDocument';
 import FinalQuoteDocument from './FinalQuoteDocument';
 import { dbService, invalidateCache } from '../lib/dbService';
+import { useNotification } from '../context';
 
 // Helper function to read Vietnamese numbers aloud in text format
 export function docSoTiengViet(number: number): string {
@@ -111,6 +112,7 @@ interface QuotationTableSheetProps {
 }
 
 export default function QuotationTableSheet({ quoteData, initialTab, onApproved }: QuotationTableSheetProps) {
+  const { addToast } = useNotification();
   // If items list is missing, we try to create an item list from fallback or text content parsed
   let items = quoteData.items || [];
   
@@ -178,6 +180,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
   const [isApproved, setIsApproved] = useState<boolean>(() => {
     return !!(quoteData as any).isApproved;
   });
+  const [unapproving, setUnapproving] = useState(false);
 
   const handleApproveQuote = async () => {
     try {
@@ -316,6 +319,31 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
     }
   };
 
+  // Hủy phê duyệt: mở khóa lại để sửa Báo Giá khi cần điều chỉnh số liệu/hạng mục.
+  // Chỉ đổi cờ isApproved — không đụng tới items/nội dung đã lưu. Không cần trừ lại
+  // Công Nợ Thu ở đây vì Công Nợ Thu hiện được tính động theo Hợp Đồng đã duyệt
+  // (contractApproved), không còn phụ thuộc trạng thái duyệt của Báo Giá.
+  const handleUnapproveQuote = async () => {
+    if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Báo Giá?\nSau khi sửa xong cần Duyệt Báo Giá lại từ đầu.')) return;
+    try {
+      setUnapproving(true);
+      if ((quoteData as any).id) {
+        await dbService.updateQuoteDocHtml((quoteData as any).id, { isApproved: false });
+      }
+      (quoteData as any).isApproved = false;
+      setIsApproved(false);
+      if (onApproved) {
+        onApproved({ ...quoteData, isApproved: false });
+      }
+      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Báo Giá đã được mở khóa để chỉnh sửa.', type: 'info' });
+    } catch (e) {
+      console.error('Lỗi khi hủy phê duyệt báo giá:', e);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi hủy phê duyệt. Vui lòng thử lại!', type: 'error' });
+    } finally {
+      setUnapproving(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -422,10 +450,21 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 {/* Print Trigger Button */}
                 <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print">
                   {isApproved ? (
-                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Đã Duyệt
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Đã Duyệt
+                      </span>
+                      <button
+                        onClick={handleUnapproveQuote}
+                        disabled={unapproving}
+                        title="Hủy phê duyệt để mở khóa chỉnh sửa"
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Hủy phê duyệt
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={handleApproveQuote}
@@ -445,7 +484,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 </div>
 
                 {isApproved && (
-                  <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+                  <div className="absolute top-20 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
                     <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
                     ĐÃ PHÊ DUYỆT
                   </div>
@@ -659,10 +698,21 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 {/* Print Trigger & Approval Buttons (Visible only on UI screen, hidden during printing) */}
                 <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print">
                   {isApproved ? (
-                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Đã Duyệt
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Đã Duyệt
+                      </span>
+                      <button
+                        onClick={handleUnapproveQuote}
+                        disabled={unapproving}
+                        title="Hủy phê duyệt để mở khóa chỉnh sửa"
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Hủy phê duyệt
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={handleApproveQuote}
@@ -682,7 +732,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 </div>
 
                 {isApproved && (
-                  <div className="absolute top-6 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
+                  <div className="absolute top-20 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50">
                     <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
                     ĐÃ PHÊ DUYỆT
                   </div>

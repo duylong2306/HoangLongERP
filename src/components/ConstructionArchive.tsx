@@ -14,7 +14,8 @@ import {
   Plus,
   Pencil,
   Download,
-  Share2
+  Share2,
+  Lock
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 
@@ -567,21 +568,30 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
                                   {doc.type === 'quote' && onEditQuote && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (!canEdit) {
-                                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
-                                          return;
-                                        }
-                                        onEditQuote(item);
-                                      }}
-                                      className="p-1.5 bg-amber-50 text-amber-700 hover:text-amber-800 rounded border border-amber-200 hover:bg-amber-100 transition shadow cursor-pointer"
-                                      title="Sửa Báo Giá"
-                                    >
-                                      <Pencil className="w-3.5 h-3.5" />
-                                    </button>
+                                    item.isApproved ? (
+                                      <span
+                                        className="p-1.5 text-slate-400 rounded border border-slate-200 shadow cursor-not-allowed"
+                                        title="Đã duyệt — hủy phê duyệt để chỉnh sửa"
+                                      >
+                                        <Lock className="w-3.5 h-3.5" />
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (!canEdit) {
+                                            addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                                            return;
+                                          }
+                                          onEditQuote(item);
+                                        }}
+                                        className="p-1.5 bg-amber-50 text-amber-700 hover:text-amber-800 rounded border border-amber-200 hover:bg-amber-100 transition shadow cursor-pointer"
+                                        title="Sửa Báo Giá"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                    )
                                   )}
                                   <button
                                     type="button"
@@ -744,20 +754,27 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                   Đóng
                 </button>
                 {onEditQuote && activeDetailTab === 'quote' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!canEdit) {
-                        addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
-                        return;
-                      }
-                      onEditQuote(selectedQuote);
-                    }}
-                    className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    Sửa Báo Giá
-                  </button>
+                  (selectedQuote as any).isApproved ? (
+                    <span className="px-5 py-2.5 text-[11px] text-slate-500 font-sans italic flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      Đã duyệt — hủy phê duyệt để chỉnh sửa
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!canEdit) {
+                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                          return;
+                        }
+                        onEditQuote(selectedQuote);
+                      }}
+                      className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Sửa Báo Giá
+                    </button>
+                  )
                 )}
                 <button
                   type="button"
