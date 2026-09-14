@@ -466,42 +466,37 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
                             label: 'Hợp Đồng',
                             code: item.code ? 'HĐ-' + item.code.replace('BGN-', '') : 'HỒ SƠ HỢP ĐỒNG',
                             color: 'text-sky-600 bg-sky-50 border-sky-200',
-                            statusLabel: !item.isApproved
-                              ? 'Chờ Duyệt'
-                              : (!item.contractHtml ? 'Chờ Duyệt' : ((item as any).contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
-                            statusColor: !item.isApproved
-                              ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                              : (!item.contractHtml
-                                ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                                : ((item as any).contractApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
+                            // Nguồn xác định "Đã Duyệt" DUY NHẤT là contractApproved — KHÔNG
+                            // được điều kiện thêm theo contractHtml có tồn tại hay không,
+                            // vì hồ sơ có thể đã duyệt (contractApproved=true) mà contractHtml
+                            // vẫn rỗng (bản in được sinh động từ template lúc mở xem, không
+                            // bắt buộc phải lưu HTML mới coi là đã duyệt) — trước đây điều
+                            // kiện !item.contractHtml khiến các hồ sơ dạng này bị hiện sai
+                            // thành "Chờ Duyệt" dù đã duyệt thật.
+                            statusLabel: (item as any).contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).contractApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           },
                           {
                             type: 'acceptance' as const,
                             label: 'Nghiệm Thu',
                             code: item.code ? 'NT-' + item.code.replace('BGN-', '') : 'BIÊN BẢN NGHIỆM THU',
                             color: 'text-amber-600 bg-amber-50 border-amber-200',
-                            statusLabel: !item.isApproved
-                              ? 'Chờ Duyệt'
-                              : (!item.acceptanceHtml ? 'Chờ Duyệt' : ((item as any).acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
-                            statusColor: !item.isApproved
-                              ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                              : (!item.acceptanceHtml
-                                ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                                : ((item as any).acceptanceApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
+                            statusLabel: (item as any).acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).acceptanceApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           },
                           {
                             type: 'liquidation' as const,
                             label: 'Thanh Lý',
                             code: item.code ? 'TL-' + item.code.replace('BGN-', '') : 'BIÊN BẢN THANH LÝ',
                             color: 'text-purple-600 bg-purple-50 border-purple-200',
-                            statusLabel: !item.isApproved
-                              ? 'Chờ Duyệt'
-                              : (!item.liquidationHtml ? 'Chờ Duyệt' : ((item as any).liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
-                            statusColor: !item.isApproved
-                              ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                              : (!item.liquidationHtml
-                                ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                                : ((item as any).liquidationApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
+                            statusLabel: (item as any).liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).liquidationApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           }
                         ];
 

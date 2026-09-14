@@ -1823,6 +1823,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   onChange={(html) => setContractTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="indigo"
+                  // Phóng khung soạn thảo lên xấp xỉ 1 trang A4 (~1123px cao ở 96dpi,
+                  // theo đúng quy ước A4=794px bề ngang đã dùng khi xuất PDF ở nơi
+                  // khác trong file này) để dễ theo dõi toàn bộ mẫu hợp đồng dài.
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 self-start">
@@ -1905,6 +1909,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   onChange={(html) => setAcceptanceTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="indigo"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 self-start">
@@ -1967,6 +1972,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   onChange={(html) => setLiquidationTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="indigo"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 self-start">

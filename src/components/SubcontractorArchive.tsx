@@ -6,6 +6,7 @@ import { FileText, Search, Printer, Trash2, Eye, Calendar, User, Briefcase, Chev
 import { useNotification, isUserInRoleGroup } from '../context';
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
+import { docSoTiengViet } from './QuotationTableSheet';
 
 // Bản in Hợp Đồng Thầu Phụ — trước đây là các ô <input> cố định bind trực tiếp
 // vào tempQuote.<field>, nay chuyển sang 1 vùng văn bản tự do (contentEditable)
@@ -13,61 +14,158 @@ import { exportHtmlToWord } from '../lib/wordExport';
 // toolbar căn chỉnh kiểu Word + xuất Word. Các placeholder {{...}} được thay
 // bằng giá trị thật LÚC TẢI hồ sơ (xem generateSubcontractorContractHtml) —
 // sau đó người dùng tự gõ/định dạng tự do trong vùng văn bản.
+// Mẫu Hợp Đồng Giao Khoán — cập nhật theo mẫu "Mẫu HĐ Thầu Phụ Mới.docx" do chủ
+// dự án cung cấp (2026-09-14), thay cho mẫu ngắn gọn trước đây. Giữ nguyên toàn
+// bộ nội dung pháp lý của mẫu gốc (Điều 1 → Điều 13, mẫu gốc không có Điều 11);
+// chỉ thay các chỗ ghi thông tin công ty mẫu (JUSTEPS) bằng placeholder {{...}}
+// tương ứng để in đúng dữ liệu Hoàng Long Lâm Đồng + hồ sơ thầu phụ thực tế.
+// Các trường mẫu mới có (ngày sinh/CCCD ngày cấp/nơi cấp/số tài khoản Bên B)
+// nhưng hệ thống hiện CHƯA có ô nhập tương ứng trên "Lập HĐ Thầu Phụ" sẽ hiển
+// thị "Chưa cập nhật" — xem replacements bên dưới.
 const DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE = `
 <div style="text-align:center;">
-  <h2 style="margin:0;font-weight:800;text-transform:uppercase;">Hợp Đồng Thầu Phụ Thi Công</h2>
-  <p style="margin:2px 0;font-size:11px;color:#64748b;">Số hiệu: {{MA_HOP_DONG}}</p>
+  <p style="margin:0;font-weight:800;">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</p>
+  <p style="margin:2px 0;font-size:11px;color:#64748b;">Số: {{MA_HOP_DONG}}/HĐGK</p>
 </div>
 
-<p style="font-style:italic;color:#64748b;">- Căn cứ Bộ luật Dân sự số 91/2015/QH13 ban hành ngày 24/11/2015;</p>
-<p style="font-style:italic;color:#64748b;">- Căn cứ Luật Thương mại số 36/2005/QH11 ban hành ngày 14/06/2005;</p>
-<p style="font-style:italic;color:#64748b;">- Căn cứ nhu cầu thi công thực tế và năng lực của các bên;</p>
+<h2 style="text-align:center;margin:18px 0 2px;font-weight:800;text-transform:uppercase;">Hợp Đồng Giao Khoán</h2>
+<p style="text-align:center;font-style:italic;margin:0 0 16px;">V/v: Giao khoán thực hiện: {{NOI_DUNG_CONG_VIEC}}</p>
 
-<p><strong>Hôm nay, ngày {{NGAY}} tháng {{THANG}} năm {{NAM}}, tại trụ sở Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm:</strong></p>
+<p style="font-style:italic;color:#64748b;">- Căn cứ Bộ luật Dân sự năm 2015 và các văn bản pháp luật có liên quan;</p>
+<p style="font-style:italic;color:#64748b;">- Căn cứ Hợp đồng thi công đã ký giữa {{CHU_DAU_TU}} với Công ty TNHH Hoàng Long Lâm Đồng về việc thực hiện dự án {{CONG_TRINH}};</p>
+<p style="font-style:italic;color:#64748b;">- Căn cứ hồ sơ thiết kế, bản vẽ thi công, chỉ dẫn kỹ thuật, biện pháp thi công và các tài liệu dự án được phê duyệt;</p>
+<p style="font-style:italic;color:#64748b;">- Căn cứ nhu cầu, năng lực và thỏa thuận của các Bên.</p>
 
-<p><strong>Bên A (Bên giao thầu): <span style="color:#2563eb;">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span></strong></p>
+<p><strong>Hôm nay, ngày {{NGAY}} tháng {{THANG}} năm {{NAM}}, tại Văn phòng Ban chỉ huy công trường Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm có:</strong></p>
+
+<p><strong>BÊN A (BÊN GIAO KHOÁN): <span style="color:#2563eb;">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span></strong></p>
 <ul>
-  <li>Địa chỉ: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</li>
-  <li>MST: 5801452655</li>
-  <li>Đại diện: Ông Nguyễn Văn Hoàng - Chức vụ: Giám đốc</li>
-  <li>Hotline liên hệ: 0966 545 959</li>
+  <li>Mã số thuế: 5801452655</li>
+  <li>Địa chỉ trụ sở: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</li>
+  <li>Điện thoại: 0966 545 959</li>
+  <li>Đại diện: (Ông) Nguyễn Văn Hoàng &nbsp;&nbsp; Chức vụ: Giám đốc</li>
 </ul>
 
-<p><strong>Bên B (Bên nhận thầu phụ): <span style="color:#059669;">{{TEN_THAU_PHU}}</span></strong></p>
+<p><strong>BÊN B (BÊN NHẬN KHOÁN): <span style="color:#059669;">{{TEN_THAU_PHU}}</span></strong></p>
 <ul>
   <li>Mã Thầu Phụ: {{MA_THAU_PHU}}</li>
-  <li>Người đại diện: {{DAI_DIEN_THAU_PHU}}</li>
+  <li>Đại diện: {{DAI_DIEN_THAU_PHU}} - Đại diện tổ đội nhận khoán</li>
+  <li>Ngày sinh: {{NGAY_SINH_B}}</li>
+  <li>Địa chỉ thường trú: {{DIA_CHI_THAU_PHU}}</li>
   <li>Điện thoại: {{DIEN_THOAI_THAU_PHU}}</li>
-  <li>Địa chỉ: {{DIA_CHI_THAU_PHU}}</li>
-  <li>MST/CCCD: {{MST_THAU_PHU}}</li>
+  <li>Số CCCD/MST: {{MST_THAU_PHU}} &nbsp;&nbsp; Cấp ngày: {{NGAY_CAP_B}} &nbsp;&nbsp; Nơi cấp: {{NOI_CAP_B}}</li>
+  <li>Tài khoản: {{STK_B}} &nbsp;&nbsp; Tại: {{NGAN_HANG_B}}</li>
 </ul>
+<p>Bên B ký kết Hợp đồng này với tư cách là cá nhân đại diện tổ đội nhận khoán theo Danh sách thành viên tổ đội và văn bản xác nhận/ủy quyền kèm theo Hợp đồng này.</p>
 
-<p><strong>ĐIỀU 1. PHẠM VI LIÊN KẾT DỰ ÁN &amp; CÔNG VIỆC BÀN GIAO</strong></p>
-<p>1.1. Công trình liên kết: {{CONG_TRINH}}</p>
-<p>1.2. Chủ đầu tư dự án: {{CHU_DAU_TU}} - SĐT: {{SDT_CHU_DAU_TU}}</p>
-<p>1.3. Địa chỉ lắp đặt thi công: {{DIA_CHI_THI_CONG}}</p>
-<p>1.4. Nội dung công việc giao thầu: {{NOI_DUNG_CONG_VIEC}}</p>
+<p><strong>XÉT RẰNG</strong></p>
+<p>- Bên A là nhà thầu/đơn vị thi công thực hiện gói thầu, hạng mục thuộc dự án nêu tại Hợp đồng này.</p>
+<p>- Bên B là cá nhân đại diện cho tổ đội nhận khoán, có khả năng tự tổ chức nhân sự, công cụ, dụng cụ, vật tư phụ và các điều kiện cần thiết để thực hiện công việc theo phạm vi được giao khoán.</p>
+<p>Sau khi thảo luận, Các Bên thống nhất ký kết Hợp đồng giao khoán với các điều khoản sau:</p>
 
-<p><strong>ĐIỀU 2. THỜI GIAN THỰC HIỆN</strong></p>
-<p>- Ngày bắt đầu triển khai: {{NGAY_BAT_DAU}}</p>
-<p>- Ngày hoàn thiện bàn giao nghiệm thu: {{NGAY_HOAN_THIEN}}</p>
+<p><strong>Điều 1. Nội dung giao khoán</strong></p>
+<p>Bên A đồng ý giao và Bên B đồng ý nhận thi công {{NOI_DUNG_CONG_VIEC}} thuộc dự án "{{CONG_TRINH}}".</p>
+<p>Địa điểm xây dựng: {{DIA_CHI_THI_CONG}}</p>
+<p>Công việc giao khoán chi tiết bao gồm các hạng mục được liệt kê tại Phụ lục 01 và/hoặc các hạng mục phát sinh được Các Bên xác nhận bằng văn bản.</p>
+<p>Bên B tự tổ chức nhân sự, phương án thực hiện, công cụ dụng cụ thuộc trách nhiệm của mình để hoàn thành công việc đúng tiến độ, chất lượng, kỹ thuật, an toàn lao động và yêu cầu nghiệm thu của Bên A, Tư vấn giám sát và Chủ đầu tư.</p>
 
-<p><strong>ĐIỀU 3. GIÁ TRỊ HỢP ĐỒNG &amp; PHƯƠNG THỨC THANH TOÁN</strong></p>
-<p>- Giá trị hợp đồng khoán: <strong>{{GIA_TRI_HOP_DONG}}</strong></p>
-<p>- Trạng thái ký hợp đồng: {{TRANG_THAI_KY}}</p>
-<p>- Trạng thái thanh toán &amp; thi công: {{TRANG_THAI_THANH_TOAN}}</p>
+<p><strong>Điều 2. Khối lượng, đơn giá Hợp đồng</strong></p>
+<p>Khối lượng tạm tính, đơn giá cố định (theo phụ lục số 01 đính kèm).</p>
+<p>Tổng giá trị Hợp đồng tạm tính: <strong>{{GIA_TRI_HOP_DONG}}</strong></p>
+<p>Bằng chữ: {{GIA_TRI_BANG_CHU}}</p>
+<p>Khối lượng Hợp đồng là khối lượng tạm tính hoặc khối lượng theo từng biên bản xác nhận của Bên A. Khối lượng thanh toán, quyết toán là khối lượng thực tế hoàn thành, đạt yêu cầu và được Bên A nghiệm thu xác nhận.</p>
+<p>Đơn giá giao khoán là đơn giá cố định/trọn gói theo Phụ lục 01, trừ khi Các Bên có thỏa thuận điều chỉnh bằng văn bản. Đơn giá giao khoán là đơn giá trọn gói cho phần việc thuộc trách nhiệm của Bên B, bao gồm chi phí tổ chức thực hiện, nhân sự do Bên B tự bố trí, công cụ, dụng cụ, vật tư phụ, chi phí vệ sinh khu vực thi công, chi phí an toàn lao động, thuế, phí và các chi phí cần thiết khác để hoàn thành công việc, trừ các khoản thuộc trách nhiệm cung cấp của Bên A theo Hợp đồng/Phụ lục.</p>
+<p>Bên A có quyền khấu trừ các khoản thuế, phí, tạm ứng, vi phạm, bồi thường, chi phí khắc phục, chi phí vật tư vượt định mức và nghĩa vụ tài chính khác của Bên B trước khi thanh toán.</p>
 
-<p><strong>ĐIỀU 4. THỎA ƯỚC PHỤ TRỢ &amp; GHI CHÚ KỸ THUẬT</strong></p>
-<p>{{GHI_CHU}}</p>
+<p><strong>Điều 3. Năng lực tổ chức thi công và tiến độ thi công</strong></p>
+<p>3.1. Bên B có trách nhiệm tự bố trí đủ năng lực tổ chức thi công, bao gồm nhân sự, công cụ, dụng cụ, vật tư phụ và biện pháp thực hiện cần thiết để bảo đảm hoàn thành công việc theo tiến độ tổng thể của gói thầu, tiến độ chi tiết từng giai đoạn và yêu cầu điều phối thi công hợp lý của Bên A.</p>
+<p>3.2. Trường hợp tiến độ thực hiện có nguy cơ chậm hoặc đã chậm so với yêu cầu của gói thầu, Bên A có quyền yêu cầu Bên B lập phương án khắc phục, tăng cường năng lực thi công, bổ sung công cụ/dụng cụ, điều chỉnh biện pháp tổ chức thực hiện hoặc áp dụng biện pháp cần thiết khác để bảo đảm tiến độ.</p>
+<p>3.3. Bên B tự quyết định việc phân công, điều phối, bố trí thời gian thực hiện công việc của thành viên tổ đội, bao gồm việc tăng cường nhân sự hoặc tổ chức thực hiện ngoài thời gian thông thường, trên cơ sở bảo đảm tuân thủ quy định pháp luật, an toàn lao động, nội quy công trường và tiến độ đã cam kết.</p>
+<p>3.4. Nếu Bên B không khắc phục tiến độ theo yêu cầu hợp lý của Bên A, Bên A có quyền thuê tổ đội/đơn vị khác thực hiện phần việc chậm tiến độ. Toàn bộ chi phí phát sinh, chênh lệch giá, thiệt hại và chi phí quản lý liên quan được khấu trừ vào giá trị thanh toán của Bên B.</p>
+
+<p><strong>Điều 4. Quyền và nghĩa vụ của Bên A</strong></p>
+<p>4.1. Cung cấp cho Bên B bản vẽ thiết kế, chỉ dẫn kỹ thuật, yêu cầu thi công, mặt bằng thi công và các thông tin cần thiết liên quan đến phần việc giao khoán.</p>
+<p>4.2. Bố trí cán bộ kỹ thuật phối hợp, kiểm tra, hướng dẫn yêu cầu kỹ thuật, tiến độ, an toàn lao động, vệ sinh môi trường và nghiệm thu khối lượng hoàn thành. Việc kiểm tra, hướng dẫn của Bên A chỉ nhằm bảo đảm công việc nhận khoán đáp ứng yêu cầu của dự án, không được hiểu là việc Bên A trực tiếp quản lý, điều hành quan hệ lao động giữa Bên B và thành viên tổ đội.</p>
+<p>4.3. Cung cấp vật tư chính thuộc kết cấu công trình, vật tư luân chuyển, vật tư biện pháp thi công, máy móc thiết bị, lái máy, xăng dầu và sửa chữa thiết bị theo phạm vi trách nhiệm của Bên A/Phụ lục Hợp đồng.</p>
+<p>4.4. Có quyền yêu cầu Bên B sửa chữa, làm lại hoặc khắc phục các phần việc không đạt yêu cầu kỹ thuật, chất lượng, tiến độ, an toàn lao động hoặc vệ sinh môi trường.</p>
+<p>4.5. Có quyền thêm, giảm, tách hoặc điều chuyển một phần khối lượng công việc thuộc phạm vi Hợp đồng phù hợp với yêu cầu thi công thực tế của dự án.</p>
+<p>4.6. Có quyền yêu cầu Bên B thực hiện các công việc phát sinh theo yêu cầu công trường; đơn giá áp dụng theo thỏa thuận bổ sung hoặc đơn giá tương tự của tổ đội/đơn vị khác đang thi công tại dự án.</p>
+<p>4.7. Có quyền tạm dừng nghiệm thu, tạm dừng thanh toán, khấu trừ chi phí khắc phục, thuê tổ đội/đơn vị khác thực hiện thay, đình chỉ thi công hoặc chấm dứt Hợp đồng nếu Bên B vi phạm nghĩa vụ theo Hợp đồng này.</p>
+<p>4.8. Có quyền từ chối nghiệm thu đối với công việc dở dang, không bảo đảm chất lượng, không đủ hồ sơ, không dọn vệ sinh khu vực thi công hoặc chưa được Tư vấn giám sát/Chủ đầu tư chấp thuận nghiệm thu nếu thuộc phạm vi phải được chấp thuận.</p>
+<p>4.9. Thanh toán cho Bên B theo khối lượng thực tế được nghiệm thu, hồ sơ thanh toán hợp lệ và điều kiện thanh toán tại Hợp đồng này.</p>
+
+<p><strong>Điều 5. Quyền và nghĩa vụ của Bên B</strong></p>
+<p>5.1. Đề nghị Bên A nghiệm thu, tạm ứng, thanh toán khối lượng hoàn thành theo Hợp đồng này sau khi Bên B cung cấp đầy đủ hồ sơ thanh toán hợp lệ.</p>
+<p>5.2. Tự tổ chức, quản lý, điều phối và phân công thành viên tổ đội để thực hiện công việc nhận khoán; bảo đảm người tham gia thực hiện công việc có đủ năng lực, sức khỏe, kinh nghiệm, được phổ biến quy định an toàn và tuân thủ nội quy công trường.</p>
+<p>5.3. Bên B chịu trách nhiệm cung cấp danh sách thành viên tổ đội, bản sao CCCD, mã số thuế, số tài khoản ngân hàng, thông tin cư trú, hồ sơ an toàn và các hồ sơ cần thiết khác theo yêu cầu của Bên A để phục vụ thủ tục ra/vào công trường, quản lý an toàn, thuế và thanh toán. Việc Bên A tiếp nhận các thông tin này không làm phát sinh quan hệ lao động giữa Bên A và thành viên tổ đội.</p>
+<p>5.4. Thực hiện công việc đúng bản vẽ, biện pháp thi công, chỉ dẫn kỹ thuật, yêu cầu chất lượng, tiến độ, an toàn lao động, vệ sinh môi trường và nội quy công trường.</p>
+<p>5.5. Cử người phụ trách kỹ thuật hoặc người đại diện có đủ chuyên môn, kinh nghiệm và thẩm quyền để liên lạc, phối hợp, xử lý vướng mắc với Bên A trong suốt quá trình thi công.</p>
+<p>5.6. Sử dụng vật tư, thiết bị do Bên A cấp đúng mục đích, đúng định mức, bảo quản cẩn thận và bàn giao/đối chiếu theo yêu cầu của Bên A. Mọi hao hụt, hư hỏng, mất mát hoặc sử dụng vượt định mức do lỗi của Bên B bị khấu trừ vào thanh toán/quyết toán.</p>
+<p>5.7. Tự trang bị các thiết bị, máy móc cầm tay, công cụ, dụng cụ và vật tư phụ cần thiết thuộc trách nhiệm của mình để phục vụ thi công, trừ các hạng mục do Bên A cung cấp theo Hợp đồng/Phụ lục.</p>
+<p>5.8. Bảo vệ sản phẩm đã thi công đến khi bàn giao cho Bên A, Tư vấn giám sát và/hoặc Chủ đầu tư; chịu trách nhiệm đối với mọi hư hỏng, sai sót, mất mát do lỗi của Bên B hoặc thành viên tổ đội của Bên B.</p>
+<p>5.9. Chịu trách nhiệm về nghĩa vụ thuế, hồ sơ chứng từ, phân bổ tiền khoán, an toàn lao động, chế độ và các nghĩa vụ tài chính khác liên quan đến khoản tiền nhận khoán theo quy định pháp luật.</p>
+<p>5.10. Bồi thường toàn bộ thiệt hại thực tế phát sinh do lỗi của Bên B hoặc thành viên tổ đội của Bên B gây ra cho Bên A, Chủ đầu tư, bên thứ ba hoặc công trình, bao gồm cả khoản phạt, bồi thường, chi phí khắc phục, chi phí thuê đơn vị thay thế và chi phí quản lý phát sinh mà Bên A phải chịu.</p>
+<p>5.11. Bên B có trách nhiệm bảo mật toàn bộ thông tin liên quan đến Hợp đồng, đơn giá, tạm ứng, thanh toán, khấu trừ, phạt vi phạm, hồ sơ kỹ thuật, hồ sơ dự án, thông tin công trường, Bên A và Chủ đầu tư. Bên B không được tự ý tiết lộ, cung cấp, đăng tải, chia sẻ hoặc bình luận các thông tin nêu trên trên Zalo, Facebook, mạng xã hội, phương tiện truyền thông hoặc cho bất kỳ bên thứ ba nào khi chưa được Bên A chấp thuận bằng văn bản. Trường hợp vi phạm, Bên A có quyền tạm dừng nghiệm thu, tạm dừng thanh toán, chấm dứt Hợp đồng, yêu cầu Bên B chịu phạt 50.000.000 đồng/lần vi phạm và bồi thường toàn bộ thiệt hại phát sinh.</p>
+
+<p><strong>Điều 6. Tiêu chuẩn thi công, kiểm tra chất lượng và sửa lỗi</strong></p>
+<p>6.1. Các Bên thống nhất sử dụng hồ sơ thiết kế, chỉ dẫn kỹ thuật, biện pháp thi công, tiêu chuẩn nghiệm thu của dự án và hợp đồng giữa Bên A với Chủ đầu tư làm căn cứ thi công, kiểm tra và nghiệm thu chất lượng.</p>
+<p>6.2. Khi hoàn thành từng hạng mục/phần việc, Bên B có trách nhiệm thông báo cho Bên A để kiểm tra, nghiệm thu và lập biên bản nghiệm thu làm cơ sở thanh toán.</p>
+<p>6.3. Bên B có trách nhiệm sửa chữa, làm lại hoặc khắc phục các lỗi tồn tại trong thời hạn 12 giờ kể từ khi Bên A yêu cầu hoặc trong thời hạn khác do Bên A ấn định phù hợp với tính chất công việc.</p>
+<p>6.4. Nếu Bên B không bố trí nhân lực khắc phục hoặc khắc phục không đạt yêu cầu, Bên A có quyền tạm dừng nghiệm thu, tạm dừng xác nhận khối lượng đợt thanh toán kế tiếp, đưa nhân lực công nhật/tổ đội khác/bên thứ ba vào sửa chữa. Toàn bộ chi phí phát sinh được khấu trừ vào khoản thanh toán gần nhất hoặc bất kỳ khoản tiền nào Bên A còn phải thanh toán cho Bên B.</p>
+<p>6.5. Việc Bên A nghiệm thu hoặc thanh toán một phần không làm miễn trừ trách nhiệm sửa lỗi, bảo hành, bồi thường hoặc các nghĩa vụ còn tồn tại của Bên B.</p>
+
+<p><strong>Điều 7. Tạm ứng, nghiệm thu, thanh toán và quyết toán</strong></p>
+<p>7.1. Phương thức thanh toán: Bên A ưu tiên thanh toán bằng chuyển khoản vào tài khoản do Bên B cung cấp. Việc thanh toán bằng tiền mặt chỉ thực hiện khi phù hợp quy định pháp luật, quy chế tài chính của Bên A và có đầy đủ chứng từ hợp lệ. Đồng tiền thanh toán là Việt Nam đồng (VND).</p>
+<p>7.2. Tạm ứng: Trong quá trình thực hiện, căn cứ tiến độ thi công, khối lượng đã triển khai, nhu cầu tổ chức thi công của Bên B và xác nhận của đại diện Bên A tại công trường, Bên A có thể xem xét tạm ứng một phần giá trị giao khoán cho Bên B. Mức tạm ứng, thời điểm tạm ứng và điều kiện tạm ứng do Bên A phê duyệt tại từng thời điểm. Khoản tạm ứng này là tạm ứng giá trị giao khoán, không phải tiền lương hoặc khoản thanh toán trực tiếp của Bên A cho thành viên tổ đội và sẽ được khấu trừ vào các đợt thanh toán tiếp theo.</p>
+<p>7.3. Nghiệm thu và thanh toán giai đoạn: Vào ngày 25 hằng tháng hoặc thời điểm khác do Bên A thông báo, Các Bên tiến hành nghiệm thu, xác nhận khối lượng công việc hoàn thành trong tháng để làm cơ sở thanh toán. Hồ sơ thanh toán giai đoạn gồm: (i) Giấy đề nghị thanh toán của Bên B; (ii) Biên bản nghiệm thu khối lượng hoàn thành; (iii) Bảng giá trị khối lượng hoàn thành; (iv) Danh sách lỗi/defect và cam kết khắc phục của Bên B, nếu có; (v) Danh sách thành viên tổ đội, bảng xác nhận phân bổ tiền khoán hoặc tài liệu tương đương do Bên B lập; (vi) Hồ sơ thuế, thông tin cá nhân, mã số thuế, tài khoản ngân hàng và tài liệu phục vụ thanh toán, khấu trừ thuế; (vii) Biên bản giao nhận, đối chiếu vật tư, thiết bị, công cụ, dụng cụ do Bên A cấp hoặc cho mượn, nếu có. Bên A thanh toán tối đa 80% giá trị khối lượng hoàn thành được nghiệm thu hợp lệ trong kỳ, sau khi khấu trừ toàn bộ tạm ứng, thuế, phí, vi phạm, chi phí khắc phục, bồi thường, vật tư vượt định mức và các nghĩa vụ tài chính khác của Bên B, nếu có. Thời hạn thanh toán là 15 ngày làm việc kể từ ngày hồ sơ thanh toán hợp lệ được Bên A chấp thuận và không có căn cứ tạm giữ, khấu trừ hoặc tạm dừng thanh toán.</p>
+<p>7.4. Thanh toán phần giá trị còn lại: Phần giá trị còn lại được thanh toán sau khi hạng mục liên quan được Chủ đầu tư/Tư vấn giám sát nghiệm thu, Bên A nhận bàn giao, Các Bên hoàn tất đối chiếu công nợ, hồ sơ thanh toán/quyết toán. Đối với hạng mục có yêu cầu bảo hành, phần tạm giữ được thanh toán sau khi kết thúc thời gian bảo hành hoặc theo Phụ lục thanh toán được Các Bên thống nhất.</p>
+<p>7.5. Tạm dừng tạm ứng, nghiệm thu và thanh toán: Bên A có quyền tạm dừng tạm ứng, tạm dừng nghiệm thu hoặc tạm dừng thanh toán nếu Bên B chậm tiến độ, không bảo đảm năng lực tổ chức thi công, vi phạm chất lượng, an toàn, vệ sinh công trường, chưa hoàn thiện hồ sơ thanh toán hoặc còn nghĩa vụ chưa hoàn thành. Việc tạm ứng, nghiệm thu hoặc thanh toán được tiếp tục sau khi Bên B khắc phục đầy đủ và được Bên A xác nhận.</p>
+<p>7.6. Quyết toán: Sau khi hạng mục/công việc kết thúc, Bên B thông báo cho Bên A để nghiệm thu, bàn giao và thực hiện quyết toán. Hồ sơ quyết toán bao gồm: (i) Biên bản nghiệm thu bàn giao; (ii) Bảng giá trị quyết toán; (iii) Hồ sơ hoàn công/hoàn công khối lượng thanh toán, nếu có; (iv) Biên bản đối chiếu công nợ; (v) Biên bản đối chiếu giao nhận vật tư, thiết bị, công cụ, dụng cụ, nếu có; (vi) Bảng đối chiếu các khoản tạm ứng, tạm giữ, khấu trừ, vi phạm, bồi thường và nghĩa vụ tài chính khác của Bên B; (vii) Tài liệu khác theo biểu mẫu hoặc yêu cầu hợp lệ của Bên A. Trong vòng 30 ngày kể từ ngày Bên B hoàn thành bàn giao và cung cấp đủ hồ sơ hợp lệ, Bên A thực hiện/phê duyệt hồ sơ quyết toán theo quy trình nội bộ. Thời hạn thanh toán giá trị quyết toán còn lại là 30 ngày kể từ ngày hồ sơ quyết toán được Bên A phê duyệt, sau khi khấu trừ toàn bộ khoản tạm ứng, tạm giữ, vi phạm, bồi thường và nghĩa vụ tài chính khác của Bên B, nếu có.</p>
+
+<p><strong>Điều 8. Thuế, phí và nghĩa vụ tài chính</strong></p>
+<p>8.1. Bên B chịu trách nhiệm cung cấp đầy đủ, trung thực và kịp thời thông tin cá nhân, mã số thuế, số tài khoản, hồ sơ thành viên tổ đội và các hồ sơ cần thiết để phục vụ việc thanh toán, kê khai, khấu trừ thuế theo quy định.</p>
+<p>8.2. Bên A được quyền khấu trừ, kê khai và nộp thay các khoản thuế, phí hoặc nghĩa vụ tài chính liên quan đến khoản thanh toán cho Bên B/thành viên tổ đội theo quy định pháp luật và yêu cầu quản trị thuế của Bên A.</p>
+<p>8.3. Trường hợp Bên B cung cấp thông tin không chính xác, không đầy đủ hoặc không kịp thời dẫn đến phát sinh truy thu, xử phạt, tiền chậm nộp, không được chấp nhận chi phí hoặc thiệt hại cho Bên A, Bên B có trách nhiệm hoàn trả, bồi thường toàn bộ thiệt hại và chi phí phát sinh cho Bên A.</p>
+
+<p><strong>Điều 9. An toàn lao động, vệ sinh môi trường, nội quy công trường và xử lý vi phạm</strong></p>
+<p>9.1. Bên B có trách nhiệm phổ biến, hướng dẫn và giám sát thành viên tổ đội tuân thủ đầy đủ quy định về an toàn lao động, vệ sinh môi trường, phòng cháy chữa cháy, an ninh trật tự, bảo hộ lao động và nội quy công trường của Bên A/Chủ đầu tư.</p>
+<p>9.2. Bên B không được bố trí người chưa được phổ biến quy định an toàn, người không có bảo hộ phù hợp, người không đủ sức khỏe, người sử dụng ma túy, rượu bia, chất kích thích, người đang bị truy cứu trách nhiệm hình sự hoặc người không đáp ứng điều kiện ra/vào công trường vào thực hiện công việc.</p>
+<p>9.3. Bên B có trách nhiệm dọn dẹp vệ sinh khu vực thi công hằng ngày, tập kết vật tư đúng nơi quy định, bảo quản tài sản, vật tư, công cụ, dụng cụ được giao và bàn giao lại mặt bằng sau khi hoàn thành công việc theo yêu cầu của Ban chỉ huy công trường.</p>
+<p>9.4. Trường hợp Bên B hoặc thành viên tổ đội vi phạm quy định an toàn, chất lượng, vệ sinh môi trường, an ninh trật tự, nội quy công trường hoặc có hành vi đe dọa, xúc phạm, cản trở cán bộ an toàn, giám sát thi công, kỹ sư phụ trách hoặc đại diện Bên A/Chủ đầu tư, Bên A có quyền lập biên bản vi phạm, yêu cầu người vi phạm rời khỏi công trường, tạm dừng thi công, khấu trừ thanh toán, áp dụng phạt vi phạm 10.000.000 đồng/lần vi phạm và/hoặc chấm dứt Hợp đồng tùy theo mức độ vi phạm.</p>
+<p>9.5. Trường hợp xảy ra sự cố, tai nạn lao động, mất an toàn, mất an ninh trật tự hoặc thiệt hại tài sản do lỗi của Bên B hoặc thành viên tổ đội của Bên B, Bên B phải thông báo ngay cho Bên A, phối hợp xử lý và chịu toàn bộ trách nhiệm, chi phí, thiệt hại phát sinh theo quy định của Hợp đồng này và quy định pháp luật.</p>
+
+<p><strong>Điều 10. Trách nhiệm do vi phạm Hợp đồng</strong></p>
+<p>10.1. Trường hợp Bên B không bảo đảm năng lực tổ chức thi công theo cam kết, làm ảnh hưởng đến tiến độ chung quá 05 ngày kể từ ngày Bên A thông báo, Bên B chịu phạt vi phạm 500.000 đồng/ngày hoặc mức phạt khác theo Phụ lục Hợp đồng, đồng thời phải lập và thực hiện phương án khắc phục tiến độ theo yêu cầu của Bên A.</p>
+<p>10.2. Trường hợp Bên A/Ban chỉ huy công trường yêu cầu Bên B tăng cường năng lực thi công để bảo đảm tiến độ nhưng Bên B không thực hiện hoặc thực hiện không đạt yêu cầu, Bên B chịu phạt 5.000.000 đồng/lần vi phạm.</p>
+<p>10.3. Trường hợp Bên B chậm tiến độ quá 03 ngày kể từ ngày Bên A thông báo hoặc yêu cầu khắc phục, Bên B chịu phạt chậm tiến độ 5.000.000 đồng/ngày chậm, tối đa 15.000.000 đồng/lần vi phạm. Bên A đồng thời có quyền thuê tổ đội/đơn vị khác thực hiện thay và khấu trừ toàn bộ chi phí phát sinh vào khoản còn phải thanh toán cho Bên B.</p>
+<p>10.4. Trường hợp Bên B tự ý dừng thực hiện công việc trong 02 ngày liên tiếp mà không được Bên A chấp thuận bằng văn bản, Bên B chịu phạt 10.000.000 đồng/ngày, tối đa 20.000.000 đồng/lần vi phạm.</p>
+<p>10.5. Trường hợp Bên B tự ý dừng thực hiện công việc quá 03 ngày, bỏ công trường hoặc không bố trí đủ năng lực để tiếp tục thực hiện công việc, Bên A có quyền xác định đây là vi phạm nghiêm trọng, đơn phương chấm dứt Hợp đồng, thuê tổ đội/đơn vị khác thay thế và khấu trừ/bù trừ toàn bộ chi phí huy động, chi phí chậm tiến độ, chi phí quản lý và thiệt hại phát sinh vào các khoản còn phải thanh toán cho Bên B.</p>
+<p>10.6. Bên B chịu trách nhiệm bồi thường toàn bộ thiệt hại thực tế do lỗi của Bên B hoặc thành viên tổ đội của Bên B gây ra cho Bên A, Chủ đầu tư, bên thứ ba hoặc công trình, bao gồm chi phí sửa chữa, làm lại, chi phí thuê bên thứ ba, chi phí vật tư vượt định mức, chi phí quản lý, khoản phạt, bồi thường hoặc khấu trừ mà Bên A phải chịu do lỗi của Bên B.</p>
+<p>10.7. Nếu các khoản phạt, bồi thường, chi phí khắc phục và nghĩa vụ tài chính của Bên B vượt quá khoản tiền Bên A còn phải thanh toán, Bên B có trách nhiệm hoàn trả phần còn thiếu trong vòng 05 ngày làm việc kể từ ngày Bên A thông báo. Hết thời hạn này mà Bên B không thanh toán, Bên A có quyền áp dụng biện pháp pháp lý cần thiết để thu hồi khoản nợ theo quy định pháp luật.</p>
+
+<p><strong>Điều 12. Tạm dừng, đình chỉ và chấm dứt Hợp đồng</strong></p>
+<p>12.1. Bên A có quyền tạm dừng thi công, đình chỉ một phần hoặc toàn bộ công việc, yêu cầu thay thế thành viên tổ đội nếu Bên B vi phạm tiến độ, chất lượng, an toàn lao động, vệ sinh môi trường, an ninh trật tự, nội quy công trường, nghĩa vụ hồ sơ hoặc nghĩa vụ khác theo Hợp đồng này.</p>
+<p>12.2. Bên A có quyền chấm dứt Hợp đồng trước thời hạn nếu Bên B vi phạm bất kể điều khoản nào của Hợp đồng.</p>
+<p>12.3. Khi Hợp đồng bị chấm dứt, Các Bên lập biên bản xác nhận khối lượng đã thực hiện, giá trị được nghiệm thu, các khoản đã thanh toán, khoản còn phải thanh toán, khoản bị tạm giữ/khấu trừ và các nghĩa vụ còn tồn tại của mỗi Bên. Bên A chỉ thanh toán phần giá trị hợp lệ còn lại sau khi đã khấu trừ toàn bộ nghĩa vụ của Bên B.</p>
+<p>12.4. Khi Bên B bị đình chỉ thi công hoặc Hợp đồng bị chấm dứt, toàn bộ máy móc, thiết bị, công cụ, vật tư và tài sản của Bên B chỉ được đưa ra khỏi công trường sau khi được đại diện Bên A chấp thuận và hoàn tất đối chiếu công nợ, vật tư, thiết bị, hồ sơ an toàn, hồ sơ nghiệm thu/quyết toán liên quan.</p>
+
+<p><strong>Điều 13. Điều khoản chung</strong></p>
+<p>13.1. Hợp đồng này có hiệu lực kể từ ngày ký và được tự động thanh lý, chấm dứt hiệu lực khi Các Bên đã hoàn thành toàn bộ nghĩa vụ thanh toán, quyết toán, bàn giao hồ sơ, đối chiếu công nợ và các nghĩa vụ khác theo Hợp đồng này, trừ các nghĩa vụ theo bản chất vẫn tiếp tục có hiệu lực sau khi Hợp đồng chấm dứt.</p>
+<p>13.2. Hợp đồng này, các Phụ lục, biên bản nghiệm thu, biên bản giao nhận vật tư/thiết bị, thông báo điều phối thi công, biên bản vi phạm và các văn bản được Các Bên xác nhận là bộ phận không tách rời của Hợp đồng.</p>
+<p>13.3. Mọi sửa đổi, bổ sung Hợp đồng phải được lập thành văn bản và có chữ ký hoặc xác nhận hợp lệ của Các Bên.</p>
+<p>13.4. Mọi tranh chấp phát sinh từ hoặc liên quan đến Hợp đồng này trước hết được giải quyết thông qua thương lượng, hòa giải trên tinh thần thiện chí, hợp tác. Trường hợp Các Bên không giải quyết được tranh chấp trong vòng 30 ngày kể từ ngày một Bên gửi thông báo tranh chấp, tranh chấp được đưa ra Tòa án có thẩm quyền giải quyết theo quy định pháp luật.</p>
+<p>13.5. Hợp đồng này được lập thành 03 bản có giá trị pháp lý như nhau; Bên A giữ 02 bản, Bên B giữ 01 bản.</p>
+<p>&nbsp;</p>
+<p><em>Ghi chú/thỏa ước phụ trợ: {{GHI_CHU}}</em></p>
 
 <table style="width:100%;margin-top:40px;border:none;">
   <tr>
     <td style="width:50%;text-align:center;border:none;padding:0;">
-      <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN A (GIAO THẦU)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký, đóng dấu và ghi rõ họ tên</span></p>
+      <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN A (GIAO KHOÁN)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký, đóng dấu và ghi rõ họ tên</span></p>
       <p style="font-weight:bold;">Nguyễn Văn Hoàng<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Giám đốc Hoàng Long Lâm Đồng</span></p>
     </td>
     <td style="width:50%;text-align:center;border:none;padding:0;">
-      <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN B (NHẬN THẦU PHỤ)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký và ghi rõ họ tên</span></p>
+      <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN B (NHẬN KHOÁN)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký và ghi rõ họ tên</span></p>
       <p style="font-weight:bold;">{{DAI_DIEN_B_KY}}<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">{{TEN_THAU_PHU_KY}}</span></p>
     </td>
   </tr>
@@ -250,6 +348,15 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
       '{{GHI_CHU}}': q.notes || 'Không có',
       '{{DAI_DIEN_B_KY}}': q.representative || supplier?.representative || 'Chưa ký',
       '{{TEN_THAU_PHU_KY}}': q.subcontractorName || 'Tổ thợ thầu phụ',
+      // Các trường theo mẫu HĐ Giao Khoán mới (ngày sinh/CCCD ngày cấp/nơi cấp/
+      // tài khoản ngân hàng của Bên B) — hệ thống hiện chưa có ô nhập riêng cho
+      // các trường này trên "Lập HĐ Thầu Phụ" nên mặc định "Chưa cập nhật".
+      '{{NGAY_SINH_B}}': q.ngaySinhB ? fmtDate(q.ngaySinhB) : 'Chưa cập nhật',
+      '{{NGAY_CAP_B}}': q.ngayCapB ? fmtDate(q.ngayCapB) : 'Chưa cập nhật',
+      '{{NOI_CAP_B}}': q.noiCapB || 'Chưa cập nhật',
+      '{{STK_B}}': q.stkB || 'Chưa cập nhật',
+      '{{NGAN_HANG_B}}': q.nganHangB || 'Chưa cập nhật',
+      '{{GIA_TRI_BANG_CHU}}': q.contractValue ? docSoTiengViet(q.contractValue) : 'Chưa cập nhật',
     };
     Object.entries(replacements).forEach(([placeholder, value]) => {
       html = html.split(placeholder).join(value);
@@ -271,7 +378,13 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     if (!tempQuote) return;
     if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Hợp Đồng Thầu Phụ?\nSau khi sửa xong cần Duyệt Hợp Đồng lại từ đầu.\nLưu ý: hợp đồng này sẽ tạm thời không còn tính vào Công Nợ Trả cho tới khi được duyệt lại.')) return;
     try {
-      const updated = { ...tempQuote, isApproved: false } as ArchivedQuote;
+      // Khi duyệt, "status" được set cứng thành 'Hoàn thành' (xem nút Duyệt Hợp
+      // Đồng bên dưới). Nếu hủy phê duyệt mà không trả "status" về lại 'Đã Lập',
+      // mọi nơi đang tự suy ra "đã duyệt" từ status==='hoàn thành' (badge danh
+      // sách, badge trong modal, Công Nợ Trả ở FinanceManagement.tsx) sẽ TIẾP TỤC
+      // hiển thị "Đã Duyệt" dù isApproved đã false — khiến người dùng tưởng hồ sơ
+      // vẫn khóa dù vùng soạn thảo bên dưới thực ra đã mở khóa để sửa.
+      const updated = { ...tempQuote, isApproved: false, status: 'Đã Lập' } as unknown as ArchivedQuote;
       setTempQuote(updated);
       await dbService.archivedQuotes.save({ ...updated, sector: 'subcontractor' });
       setSelectedQuote(updated);

@@ -1668,6 +1668,9 @@ export default function MechanicalEstimator({
                   onChange={(html) => setContractTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="pink"
+                  // Phóng khung soạn thảo lên xấp xỉ 1 trang A4 (~1123px cao ở 96dpi)
+                  // để dễ theo dõi toàn bộ mẫu hợp đồng dài thay vì khung nhỏ mặc định.
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 self-start">
@@ -1746,6 +1749,7 @@ export default function MechanicalEstimator({
                   onChange={(html) => setAcceptanceTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="pink"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 self-start">
@@ -1812,6 +1816,7 @@ export default function MechanicalEstimator({
                   onChange={(html) => setLiquidationTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="pink"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 self-start">
