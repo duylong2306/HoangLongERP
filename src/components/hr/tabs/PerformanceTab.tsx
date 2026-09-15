@@ -1,6 +1,7 @@
 import React from 'react';
-import { Plus, CheckCircle, Users, AlertTriangle, Clock } from 'lucide-react';
+import { Plus, CheckCircle, Users, AlertTriangle, Clock, FileSpreadsheet } from 'lucide-react';
 import { EmployeeErrorLog } from '../hrTypes';
+import { calculateScoreFromErrorCount } from '../hrCalculations';
 
 interface Employee {
   id: string;
@@ -52,15 +53,6 @@ export default function PerformanceTab({
   handleEditErrorTrigger,
   handleDeleteError,
 }: PerformanceTabProps) {
-  const calculateScoreFromErrorCount = (count: number): number => {
-    if (count === 0) return 100;
-    if (count === 1) return 97;
-    if (count === 2) return 95;
-    if (count === 3) return 90;
-    if (count === 4) return 85;
-    if (count === 5) return 80;
-    return 50; // count >= 6
-  };
 
   // Filter errors logged in chosen employee, month, and year
   const filteredErrors = employeeErrors.filter(err => {
@@ -115,6 +107,99 @@ export default function PerformanceTab({
     if (errorSearchEmpId !== 'all' && sum.id !== errorSearchEmpId) return false;
     return true;
   }).sort((a, b) => b.score - a.score);
+
+  // Dùng chung cho cả hiển thị nhật ký lỗi và xuất Excel bên dưới.
+  const getCatText = (cat: string) => {
+    if (cat === 'readiness') return 'Tác phong 5S';
+    if (cat === 'progress') return 'Hiệu suất / Tiến độ';
+    if (cat === 'reporting') return 'Báo cáo / Ý thức';
+    return cat;
+  };
+
+  // Xuất Excel (.xls) 2 bảng theo ĐÚNG bộ lọc/dữ liệu đang hiển thị trên tab:
+  // (1) Bảng xếp loại tổng hợp theo nhân sự, (2) Nhật ký lỗi vi phạm chi tiết.
+  // Dùng cùng kiểu template HTML→Blob như handleExportExcel ở TripsTab (HumanResourcesManagement.tsx)
+  // để đồng bộ style file .xls xuất ra trong toàn bộ menu Hệ Thống Nhân Sự.
+  const handleExportExcel = () => {
+    const cellStyle = 'border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;';
+    const thStyle = `${cellStyle} background-color: #d97706; color: white;`;
+
+    const summaryHeaders = ['Mã NV', 'Họ Tên', 'Bộ Phận', 'Chức Vụ', 'Số Lỗi', 'Điểm Đánh Giá'];
+    let summaryRows = '<tr>' + summaryHeaders.map(h => `<th style="${thStyle}">${h}</th>`).join('') + '</tr>';
+    employeesSummaryList.forEach(sum => {
+      summaryRows += '<tr>';
+      summaryRows += `<td style="${cellStyle} font-weight: bold;">${sum.id}</td>`;
+      summaryRows += `<td style="${cellStyle}">${sum.name}</td>`;
+      summaryRows += `<td style="${cellStyle}">${sum.department}</td>`;
+      summaryRows += `<td style="${cellStyle}">${sum.position}</td>`;
+      summaryRows += `<td style="${cellStyle} text-align: center;">${sum.errorCount}</td>`;
+      summaryRows += `<td style="${cellStyle} text-align: center; font-weight: bold;">${sum.score}</td>`;
+      summaryRows += '</tr>';
+    });
+
+    const detailHeaders = ['Mã NV', 'Họ Tên', 'Ngày', 'Loại Lỗi', 'Nội Dung Lỗi', 'Ghi Chú', 'Phòng Ban Đánh Giá'];
+    let detailRows = '<tr>' + detailHeaders.map(h => `<th style="${thStyle}">${h}</th>`).join('') + '</tr>';
+    filteredErrors.forEach(err => {
+      detailRows += '<tr>';
+      detailRows += `<td style="${cellStyle} font-weight: bold;">${err.employeeId}</td>`;
+      detailRows += `<td style="${cellStyle}">${err.employeeName}</td>`;
+      detailRows += `<td style="${cellStyle}">${err.date.split('-').reverse().join('/')}</td>`;
+      detailRows += `<td style="${cellStyle}">${getCatText(err.category)}</td>`;
+      detailRows += `<td style="${cellStyle}">${err.criterionContent}</td>`;
+      detailRows += `<td style="${cellStyle}">${err.notes || ''}</td>`;
+      detailRows += `<td style="${cellStyle}">${err.departmentName}</td>`;
+      detailRows += '</tr>';
+    });
+
+    const periodLabel = `${errorFilterMonth === 'all' ? 'Tất cả các tháng' : 'Tháng ' + errorFilterMonth} / Năm ${errorFilterYear}`;
+    const empLabel = errorSearchEmpId === 'all' ? 'Tất cả nhân sự' : (employees.find(e => e.id === errorSearchEmpId)?.name || errorSearchEmpId);
+
+    const excelTemplate = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Hieu Suat Cong Viec</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <meta http-equiv="content-type" content="text/plain; charset=UTF-8"/>
+      </head>
+      <body>
+        <h2 style="font-family: Arial, sans-serif; color: #1e3a8a;">BẢNG HIỆU SUẤT CÔNG VIỆC & LỖI KỶ LUẬT - HOÀNG LONG GROUP</h2>
+        <p style="font-family: Arial, sans-serif;">Thời gian xuất file: ${new Date().toLocaleString('vi-VN')}</p>
+        <p style="font-family: Arial, sans-serif;">Bộ lọc đang chọn: Nhân viên: <strong>${empLabel}</strong> | Kỳ: <strong>${periodLabel}</strong></p>
+        <h3 style="font-family: Arial, sans-serif; color: #1e3a8a;">1. Bảng Xếp Loại Tổng Hợp Theo Nhân Sự</h3>
+        <table style="font-family: Arial, sans-serif; font-size: 11px; border-collapse: collapse; border: 1px solid #3f3f46;">
+          ${summaryRows}
+        </table>
+        <br/>
+        <h3 style="font-family: Arial, sans-serif; color: #1e3a8a;">2. Nhật Ký Lỗi Vi Phạm Chi Tiết</h3>
+        <table style="font-family: Arial, sans-serif; font-size: 11px; border-collapse: collapse; border: 1px solid #3f3f46;">
+          ${detailRows}
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `HieuSuatCongViec_${errorFilterMonth !== 'all' ? 'Thang' + errorFilterMonth : 'TatCa'}_Nam${errorFilterYear}_${Date.now()}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6 animate-fadeIn font-sans text-left">
@@ -173,7 +258,17 @@ export default function PerformanceTab({
           </div>
         </div>
 
-        <div className="flex items-end self-stretch md:self-auto pt-2 md:pt-0">
+        <div className="flex items-end gap-2 self-stretch md:self-auto pt-2 md:pt-0">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            className="bg-emerald-600 hover:bg-emerald-550 text-slate-950 font-extrabold px-3 py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-xs"
+            title="Xuất bảng xếp loại & nhật ký lỗi vi phạm ra file Excel"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Xuất file Excel
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -188,7 +283,7 @@ export default function PerformanceTab({
               setErrorFormCritSearch('');
               setShowErrorModal(true);
             }}
-            className="w-full md:w-auto bg-amber-600 hover:bg-amber-550 active:translate-y-0.5 text-white text-xs font-extrabold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-lg transition-all"
+            className="w-full md:w-auto bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:translate-y-0.5 text-white text-xs font-extrabold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-500/20 transition-all"
           >
             <Plus className="w-4 h-4 text-white" />
             Ghi Nhận Lỗi Vi Phạm
@@ -249,7 +344,7 @@ export default function PerformanceTab({
                   </tr>
                   <tr className="hover:bg-slate-850/30">
                     <td className="p-2 border-r border-slate-850 text-slate-200">≥ 6 lần</td>
-                    <td className="p-2 text-center text-red-500 font-extrabold bg-red-950/20">50</td>
+                    <td className="p-2 text-center text-red-700 font-extrabold bg-red-50">50</td>
                   </tr>
                 </tbody>
               </table>
@@ -369,13 +464,6 @@ export default function PerformanceTab({
             ) : (
               <div className="space-y-3.5">
                 {filteredErrors.map(err => {
-                  const getCatText = (cat: string) => {
-                    if (cat === 'readiness') return 'Tác phong 5S';
-                    if (cat === 'progress') return 'Hiệu suất / Tiến độ';
-                    if (cat === 'reporting') return 'Báo cáo / Ý thức';
-                    return cat;
-                  };
-
                   return (
                     <div key={err.id} className="p-3.5 bg-slate-950 border border-slate-850 rounded-xl hover:border-slate-800/80 hover:bg-slate-900/10 transition-all">
 
@@ -383,7 +471,7 @@ export default function PerformanceTab({
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-extrabold text-white text-xs">{err.employeeName}</span>
                           <span className="text-[10px] text-slate-500 font-mono">#{err.employeeId}</span>
-                          <span className="text-[10px] text-purple-400 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-900/30">
+                          <span className="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
                             {getCatText(err.category)}
                           </span>
                         </div>
@@ -430,8 +518,8 @@ export default function PerformanceTab({
 
                       <div className="flex justify-end gap-3 mt-3 pt-2.5 border-t border-slate-900/50 items-center">
                         {deletingErrorId === err.id ? (
-                          <div className="flex items-center gap-2 bg-rose-950/40 px-3 py-1.5 rounded-xl border border-rose-900/30 animate-fadeIn">
-                            <span className="text-[10.5px] font-bold text-rose-300">⚠️ Xác nhận xóa lỗi này?</span>
+                          <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 animate-fadeIn">
+                            <span className="text-[10.5px] font-bold text-rose-700">⚠️ Xác nhận xóa lỗi này?</span>
                             <button
                               type="button"
                               onClick={() => {

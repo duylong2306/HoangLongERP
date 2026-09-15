@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNotification, getConfiguredApprover } from '../context';
+import { useNotification, getConfiguredApprover, getConfiguredSettler } from '../context';
 import { isUserInRoleGroup } from '../context';
+import { useSettings } from '../context/SettingsContext';
 import {
   Users, Clock, DollarSign, Calendar, Award,
   Briefcase, FileText, MapPin, ChevronRight,
@@ -9,17 +10,21 @@ import {
   Share2, Building, UserCheck, TrendingUp, CreditCard,
   CalendarCheck, FileSpreadsheet, Printer, ChevronDown,
   Lock, Unlock, Workflow, HelpCircle, FolderMinus, Database,
-  Trash2, Percent, X, FileUp, Camera, Calculator, Shield
+  Trash2, Percent, X, FileUp, Camera, Calculator, Shield, Settings, Pencil
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
+import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
+import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
-import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll } from './hr/hrCalculations';
+import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
-import TripsTab from './hr/tabs/TripsTab';
+import TripsTab, { QuickSearchFilter } from './hr/tabs/TripsTab';
+import SearchableSelect from './SearchableSelect';
 import LeavesTab from './hr/tabs/LeavesTab';
 import PayrollTab from './hr/tabs/PayrollTab';
 import PerformanceTab from './hr/tabs/PerformanceTab';
@@ -27,6 +32,7 @@ import ProfilesTab from './hr/tabs/ProfilesTab';
 import AttendanceTab from './hr/tabs/AttendanceTab';
 import HrDataTab from './hr/tabs/HrDataTab';
 import RolesTab from './hr/tabs/RolesTab';
+
 
 /* ============================================================================
  * HumanResourcesManagement.tsx — PHÂN HỆ QUẢN LÝ NHÂN SỰ (HRM) tổng hợp
@@ -64,8 +70,8 @@ import RolesTab from './hr/tabs/RolesTab';
  * NGHIỆP VỤ (business rules đã cập nhật 07/2026):
  *   - Bảng chấm công (`attendanceFiltered`): chỉ HIỂN THỊ log của nhân viên ĐANG LÀM
  *     (`status === 'working'`), ẩn hoàn toàn nhân viên nghỉ việc/nghỉ phép.
- *   - Tạo log tự động (`executeAutoWorkdayLocking`): chỉ tạo KP/phép/lễ/cuối tuần
- *     cho nhân viên `working`.
+ *   - Chốt công thủ công (`handleBulkLock`): ngày được chốt (khóa) thì không tự động
+ *     tạo log; công do quản lý kiểm duyệt và chốt bằng tay.
  *   - Tính lương tự động (`handleCalculatePayroll`): chỉ tính lương cho nhân viên
  *     `working`, dựa trên `empAttendance` (workedDays, otSunday, otHoliday, otHours)
  *     từ log chấm công có `status === 'valid'`.
@@ -73,12 +79,27 @@ import RolesTab from './hr/tabs/RolesTab';
  *     phải `working`.
  * ========================================================================== */
 
-// html2pdf.js has no TypeScript declarations and depends on browser globals (self, document)
-// Use dynamic import to only load it in browser environment when actually needed
-const loadHtml2Pdf = async () => {
-  const mod = await import('html2pdf.js');
-  return mod.default || mod;
+// Dynamic import — chỉ tải các thư viện nặng này khi thực sự cần (in/xuất PDF,
+// nén zip phiếu lương), không đưa vào bundle chính. Cùng cơ chế html2canvas +
+// jsPDF thủ công (không dùng html2pdf.js) như generateOrderPdfBlob ở
+// MaterialCoordination.tsx — lý do: html2pdf.js gán `container.height = ...`
+// (property, không tồn tại trên <div>) nên có trường hợp chụp ra ảnh cao 0px.
+const loadHtml2Canvas = async () => {
+  const mod = await import('html2canvas');
+  return (mod as any).default || mod;
 };
+const loadJsPdf = async () => {
+  const mod = await import('jspdf');
+  return (mod as any).jsPDF || (mod as any).default;
+};
+const loadJsZip = async () => {
+  const mod = await import('jszip');
+  return (mod as any).default || mod;
+};
+
+// Escape HTML để tránh lỗi khi tên/vị trí chứa ký tự đặc biệt (dùng khi dựng
+// HTML phiếu lương cho in/xuất PDF).
+const escHtml = (s: any): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const WorkdayCell = React.memo(function WorkdayCell({
   log,
@@ -113,17 +134,19 @@ const WorkdayCell = React.memo(function WorkdayCell({
           <span>Đã chốt</span>
         </span>
       ) : (
-        <span className="text-[8.5px] text-amber-500 font-bold flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-905/20" title="Chờ duyệt">
+        <span className="text-[8.5px] text-amber-500 font-bold flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-905/20" title="Chờ chốt">
           <Unlock className="w-2.5 h-2.5 shrink-0" />
-          <span>Chờ duyệt</span>
+          <span>Chờ chốt</span>
         </span>
       )}
     </div>
   );
 });
 
-export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], defaultSubTab, hideSidebar = false }: HRMProps) {
+export default function HumanResourcesManagement({ currentUser, projects = [], customers = [], tasks = [], defaultSubTab, hideSidebar = false, systemConfig }: HRMProps) {
   const { addToast } = useNotification();
+  // Thông tin doanh nghiệp (Cài Đặt Hệ Thống) — dùng làm header phiếu lương.
+  const { businessInfo } = useSettings();
   // Tab list: "profiles", "attendance", "leaves", "payroll", "trips", "hr_data"
   const [activeSubTab, setActiveSubTab] = useState<string>(() => defaultSubTab || 'profiles');
 
@@ -201,6 +224,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return a;
     });
     setAttendance(updated);
+    // Đồng bộ sửa lên Supabase
+    const edited = updated.find(a => a.id === editingAttendance.id);
+    if (edited) dbService.attendance.save(edited).catch(err => console.warn('Lưu chấm công lên Supabase thất bại:', err));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
     setEditingAttendance(null);
     setEditForm(null);
     addToast({ title: '✅ Đã lưu', message: 'Đã cập nhật bản ghi chấm công thành công', type: 'success' });
@@ -227,6 +254,28 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     return isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_accounting');
   };
 
+  /**
+   * Khi một ngày bị chốt công (khóa), mọi đơn báo cáo chấm công đang CHỜ DUYỆT cho
+   * ngày đó sẽ bị tự động chuyển thành "Bị từ chối" — quản lý quyết định không ghi
+   * nhận công, và không để đơn pending bị ẩn lấp liếm. Chỉ chạy khi thực sự có đơn pending.
+   */
+  const rejectPendingReportsFor = (pairs: { empId: string; date: string }[]) => {
+    if (!pairs.length) return;
+    const pairSet = new Set(pairs.map(p => `${p.empId}|${p.date}`));
+    const pending = (leaves || []).filter(l =>
+      isAttendanceReportType(l.type) && l.status === 'pending' && pairSet.has(`${l.empId}|${l.fromDate}`)
+    );
+    if (!pending.length) return;
+    const updatedLeaves = (leaves || []).map(l =>
+      (isAttendanceReportType(l.type) && l.status === 'pending' && pairSet.has(`${l.empId}|${l.fromDate}`))
+        ? { ...l, status: 'rejected' as const }
+        : l
+    );
+    setLeaves(updatedLeaves);
+    pending.forEach(l => dbService.hrmLeaves.save({ ...l, status: 'rejected' }).catch(() => {}));
+    window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_hrm', { detail: updatedLeaves }));
+  };
+
   const handleBulkLock = () => {
     let toLock = attendanceFiltered;
     if (bulkLockScope === 'page') {
@@ -241,6 +290,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return a;
     });
     setAttendance(updated);
+    // Đồng bộ chốt hàng loạt lên Supabase
+    const newlyLocked = updated.filter(a => a.isLocked && !attendance.find(old => old.id === a.id && old.isLocked));
+    newlyLocked.forEach(a => dbService.attendance.save(a).catch(() => {}));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updated } }));
+    // Tự động từ chối các đơn báo cáo chấm công đang chờ duyệt của ngày bị chốt
+    rejectPendingReportsFor(toLock.map((a: any) => ({ empId: a.empId, date: a.date })));
     setShowBulkLockModal(false);
     addToast({ title: '✅ Đã chốt', message: `Đã chốt ${updated.filter(a => a.isLocked && toLock.some(t => t.id === a.id)).length} bản ghi`, type: 'success' });
   };
@@ -280,7 +335,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         const imported: AttendanceLog[] = rows.map((r, idx) => ({
           id: `AT-IMP-${Date.now()}-${idx}`,
           empId: String(r['Mã NV'] || '').trim(),
@@ -309,6 +364,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           else merged.push(imp);
         });
         setAttendance(merged);
+        // Đồng bộ import Excel lên Supabase
+        imported.forEach(imp => dbService.attendance.save(imp).catch(() => {}));
+        window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: merged } }));
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} bản ghi`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
@@ -349,7 +407,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Phép năm': emp.phepNam !== undefined ? emp.phepNam : 12,
       'Ngân hàng': emp.bankName,
       'Số tài khoản': emp.bankAccount,
-      'Trạng thái': emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm',
+      'Trạng thái': emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm',
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -368,7 +426,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         const imported: EmployeeProfile[] = rows.map((r, idx) => ({
           id: String(r['Mã NV'] || `NV_IMP_${Date.now()}_${idx}`).trim(),
           name: String(r['Họ tên'] || '').trim(),
@@ -392,7 +450,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           phepNam: Number(r['Phép năm'] || 12),
           bankName: String(r['Ngân hàng'] || ''),
           bankAccount: String(r['Số tài khoản'] || ''),
-          status: (String(r['Trạng thái'] || 'working').includes('Nghỉ làm') ? 'retired' : String(r['Trạng thái'] || 'working').includes('Nghỉ phép') ? 'leave' : 'working') as any,
+          status: (() => {
+            const s = String(r['Trạng thái'] || 'working');
+            if (s.includes('Ban giám đốc')) return 'director_board';
+            if (s.includes('Nghỉ làm')) return 'retired';
+            if (s.includes('Nghỉ phép')) return 'leave';
+            return 'working';
+          })() as any,
           docsCount: 0,
         })).filter(r => r.id && r.name);
         if (imported.length === 0) {
@@ -683,6 +747,26 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // Employee Performance Violations/Errors States
   const [employeeErrors, setEmployeeErrors] = useState<EmployeeErrorLog[]>([]);
+  // Ref tránh vòng lặp khi refresh từ event 'hl-hrm-employee-errors-updated':
+  // trong lúc setEmployeeErrors từ cloud thì effect sync không được save ngược lại
+  const isSyncingEmployeeErrorsFromCloud = useRef(false);
+  const isSyncingLeavesFromCloud = useRef(false);
+  // Ref tránh vòng lặp echo-save: trong lúc tải attendance / travelNorms từ cloud
+  // thì effect bulk-save không được ghi NGƯỢC toàn bộ dữ liệu vừa tải lên Supabase
+  // (nguồn gốc bão POST làm nghẽn kết nối → chấm công tải chậm/không tải được).
+  const isSyncingAttendanceFromCloud = useRef(false);
+  const isSyncingTravelNormsFromCloud = useRef(false);
+  // 5 cờ dưới đây chặn vòng lặp cho payroll/trips/holidays/leaveCoefficients/
+  // salaryScales — trước đây effect bulk-save của các bảng này KHÔNG có chốt
+  // chặn, khiến realtime event → tải lại → save lại toàn bộ mảng → tự sinh
+  // event mới → lặp vô hạn (xác nhận qua pg_stat_statements: 154.187 lần
+  // INSERT hrm_payroll_records — nguồn ngốn CPU chính trong cảnh báo
+  // "exhausting multiple resources" của Supabase).
+  const isSyncingPayrollFromCloud = useRef(false);
+  const isSyncingTripsFromCloud = useRef(false);
+  const isSyncingHolidaysFromCloud = useRef(false);
+  const isSyncingLeaveCoefficientsFromCloud = useRef(false);
+  const isSyncingSalaryScalesFromCloud = useRef(false);
 
   const [errorSearchEmpId, setErrorSearchEmpId] = useState<string>('all');
   const [errorFilterMonth, setErrorFilterMonth] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
@@ -821,14 +905,88 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // (Hàm getConfiguredApprover được import từ '../context')
 
   const [attendance, setAttendance] = useState<AttendanceLog[]>([]);
+  // Nhân viên bị loại trừ khỏi Báo cáo vắng mặt (không tự động phạt KP cho
+  // admin / giám đốc — những người không chấm công hàng ngày).
+  const ATTENDANCE_EXCLUDED_IDS = ['emp_admin', 'NV_ADMIN', 'admin'];
+  const ATTENDANCE_EXCLUDED_ROLES = ['director'];
+  const handleCreateMissingAttendanceRecord = (rec: any) => {
+    const next = [rec, ...attendance];
+    setAttendance(next);
+    dbService.attendance.save(rec).catch(() => {});
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: next } }));
+  };
+  // Flag đánh dấu đã load xong dữ liệu attendance từ Supabase.
+  // Chỉ khi true mới được tạo mới bản ghi auto-lock (KP/phép/lễ/cuối tuần),
+  // tránh tạo trùng với bản ghi thật từ DashboardOverview.
+
+  // Loại bỏ / gộp bản ghi trùng lặp: cùng nhân viên + ngày chỉ giữ ĐÚNG 1 bản ghi.
+  // - Nếu có bản ghi thật (GPS/FaceID/nhập tay), gộp TẤT CẢ bản ghi thật thành 1
+  //   (merge các slot giờ/thông tin còn thiếu), xóa các bản trùng trên Supabase.
+  // - Nếu chỉ có bản ghi auto (AT-AUTO-*), giữ bản gần nhất.
+  // Trước đây hàm này chỉ lọc bỏ AT-AUTO-* nên 2 bản ghi thật vẫn bị giữ lại → hiển thị trùng.
+  const dedupAttendance = (list: AttendanceLog[], mutate = true): AttendanceLog[] => {
+    const isRealTime = (t: any) => typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t);
+    const groups = new Map<string, AttendanceLog[]>();
+    for (const log of list) {
+      if (!log.empId || !log.date) { groups.set(`__orphan_${log.id}`, [log]); continue; }
+      const key = `${log.empId}|${log.date}`;
+      const arr = groups.get(key);
+      if (arr) arr.push(log);
+      else groups.set(key, [log]);
+    }
+    const deduped: AttendanceLog[] = [];
+    for (const logs of groups.values()) {
+      if (logs.length === 1) { deduped.push(logs[0]); continue; }
+      const real = logs.filter(l => !l.id.startsWith('AT-AUTO-'));
+      if (real.length > 0) {
+        // Sắp xếp: bản ghi có nhiều giờ thực tế nhất lên đầu làm base
+        const sorted = [...real].sort((a, b) => {
+          const cnt = (x: AttendanceLog) =>
+            (['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT'] as const)
+              .filter(s => isRealTime(x[s])).length;
+          return cnt(b) - cnt(a);
+        });
+        const merged: any = { ...sorted[0] };
+        for (const log of sorted.slice(1)) {
+          (['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT',
+            'photoIn', 'photoOut', 'locationIn', 'locationOut', 'coordsIn', 'coordsOut',
+            'method', 'status', 'otHours', 'notes'] as const).forEach(key => {
+            if (log[key] && log[key] !== '--:--' && log[key] !== '' &&
+                (!merged[key] || merged[key] === '--:--' || merged[key] === '')) {
+              merged[key] = log[key];
+            }
+          });
+          // Ảnh/tọa độ theo từng lượt chấm: gộp theo slot để không mất ảnh của
+          // các lượt chỉ tồn tại ở bản ghi trùng (base thắng ở slot nó đã có).
+          merged.punchMeta = mergePunchMeta((log as any).punchMeta, merged.punchMeta);
+          if ((log as any).isLocked) merged.isLocked = true;
+        }
+        deduped.push(merged);
+        // Xóa các bản ghi thật trùng (chỉ giữ merged) và mọi bản auto trên Supabase
+        if (mutate) {
+          logs.filter(l => l.id !== merged.id).forEach(l =>
+            dbService.attendance.delete(l.id).catch(() => {})
+          );
+        }
+      } else {
+        deduped.push(logs[logs.length - 1]);
+        if (mutate) {
+          logs.slice(0, -1).forEach(l => dbService.attendance.delete(l.id).catch(() => {}));
+        }
+      }
+    }
+    return deduped;
+  };
+
+  // NOTE: việc load chấm công đã chuyển xuống effect phụ thuộc
+  // [attendanceFilterMonth, attendanceFilterYear] (xem đoạn "Load attendance theo tháng"
+  // ngay sau khai báo filter) để chỉ tải KHOẢNG THÁNG đang chọn thay vì toàn bộ lịch sử.
 
   // Ngày khởi tạo dữ liệu chấm công - chỉ chấm từ ngày này trở đi
-  const [attendanceInitDate] = useState<string>(() => {
+  const [attendanceInitDate, setAttendanceInitDate] = useState<Date>(() => {
     const stored = localStorage.getItem('hl_attendance_init_date');
-    if (stored) return stored;
-    const today = new Date().toISOString().split('T')[0];
-    localStorage.setItem('hl_attendance_init_date', today);
-    return today;
+    if (stored) return new Date(stored);
+    return new Date();
   });
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -840,14 +998,20 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [weekendDays, setWeekendDays] = useState<number[]>([0]);
 
   useEffect(() => {
-    dbService.shiftConfig.get().then(config => {
+    const loadWeekendDays = () => dbService.shiftConfig.get().then(config => {
       if (config && Array.isArray(config.weekendDays)) {
         setWeekendDays(config.weekendDays);
       }
     }).catch(() => {});
+    loadWeekendDays();
+    // Trước đây chỉ tải 1 lần lúc mount — cấu hình ngày nghỉ cuối tuần đổi từ
+    // tab/máy khác (App.tsx polling shift_config mỗi 5 phút, bắn 'hl_system_settings_updated')
+    // sẽ không cập nhật tới khi F5, làm sai cách tính công cuối tuần/tăng ca.
+    window.addEventListener('hl_system_settings_updated', loadWeekendDays);
+    return () => window.removeEventListener('hl_system_settings_updated', loadWeekendDays);
   }, []);
 
-  const [travelExpensesSummary, setTravelExpensesSummary] = useState<{ id: string; employeeId?: string; empId?: string; employeeName: string; amount: number; period: string; completedDate?: string; projectName?: string; customerName?: string; taskName?: string; missionName?: string; content?: string; month?: string; fuelFee?: number; mealFee?: number; lodgeFee?: number; otherFee?: number }[]>([]);
+  const [travelExpensesSummary, setTravelExpensesSummary] = useState<{ id: string; rowId?: string; employeeId?: string; empId?: string; employeeName: string; amount: number; period: string; completedDate?: string; projectName?: string; customerName?: string; taskName?: string; missionName?: string; content?: string; month?: string; fuelFee?: number; mealFee?: number; lodgeFee?: number; otherFee?: number; status?: CTPStatus }[]>([]);
 
 
 
@@ -856,6 +1020,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [selectedEmpFilter, setSelectedEmpFilter] = useState<string>('all');
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(() => String(new Date().getMonth() + 1)); // Mặc định tháng hiện tại
   const [selectedYearFilter, setSelectedYearFilter] = useState<string>(() => String(new Date().getFullYear())); // Mặc định năm hiện tại
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>('all');
 
   const handleExportExcel = () => {
     const headers = [
@@ -867,6 +1032,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       'Nhiệm Vụ',
       'Nhân Viên',
       'Nội Dung',
+      'Trạng Thái',
       'Số Tiền'
     ];
 
@@ -876,6 +1042,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const dataRows = travelExpensesSummary.filter(item => {
       // Apply filters
       if (selectedEmpFilter !== 'all' && item.employeeName !== selectedEmpFilter) return false;
+      if (selectedProjectFilter !== 'all' && item.projectName !== selectedProjectFilter) return false;
       if (item.completedDate) {
         const parts = item.completedDate.split('/');
         if (parts.length === 3) {
@@ -906,13 +1073,14 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;">${item.missionName || ''}</td>`;
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; font-family: Arial, sans-serif; font-size: 11px;">${item.employeeName || ''}</td>`;
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;">${item.content || ''}</td>`;
+      rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-family: Arial, sans-serif; font-size: 11px;">${ctpStatusLabel(item.status as CTPStatus)}</td>`;
       rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; text-align: right; font-family: Arial, sans-serif; font-size: 11px;">${Number(item.amount || 0).toLocaleString('vi-VN')} đ</td>`;
       rowData += '</tr>';
     });
 
     const totalAmount = dataRows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     rowData += '<tr>';
-    rowData += `<td colspan="8" style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; text-align: right; background-color: #f4f4f5; font-family: Arial, sans-serif; font-size: 11px;">Tổng cộng:</td>`;
+    rowData += `<td colspan="9" style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; text-align: right; background-color: #f4f4f5; font-family: Arial, sans-serif; font-size: 11px;">Tổng cộng:</td>`;
     rowData += `<td style="border: 1px solid #3f3f46; padding: 6px; font-weight: bold; text-align: right; color: #b45309; background-color: #f4f4f5; font-family: Arial, sans-serif; font-size: 11px;">${totalAmount.toLocaleString('vi-VN')} đ</td>`;
     rowData += '</tr>';
 
@@ -938,7 +1106,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       <body>
         <h2 style="font-family: Arial, sans-serif; color: #1e3a8a;">BẢNG TỔNG HỢP CÔNG TÁC PHÍ - HOÀNG LONG GROUP</h2>
         <p style="font-family: Arial, sans-serif;">Thời gian xuất file: ${new Date().toLocaleString('vi-VN')}</p>
-        <p style="font-family: Arial, sans-serif;">Bộ lọc đang chọn: Nhân viên: <strong>${selectedEmpFilter === 'all' ? 'Tất cả nhân viên' : selectedEmpFilter}</strong> | Tháng: <strong>${selectedMonthFilter === 'all' ? 'Tất cả' : 'Tháng ' + selectedMonthFilter}</strong> | Năm: <strong>${selectedYearFilter === 'all' ? 'Tất cả' : 'Năm ' + selectedYearFilter}</strong></p>
+        <p style="font-family: Arial, sans-serif;">Bộ lọc đang chọn: Nhân viên: <strong>${selectedEmpFilter === 'all' ? 'Tất cả nhân viên' : selectedEmpFilter}</strong> | Dự án: <strong>${selectedProjectFilter === 'all' ? 'Tất cả dự án' : selectedProjectFilter}</strong> | Tháng: <strong>${selectedMonthFilter === 'all' ? 'Tất cả' : 'Tháng ' + selectedMonthFilter}</strong> | Năm: <strong>${selectedYearFilter === 'all' ? 'Tất cả' : 'Năm ' + selectedYearFilter}</strong></p>
         <table style="font-family: Arial, sans-serif; font-size: 11px; border-collapse: collapse; border: 1px solid #3f3f46;">
           ${rowData}
         </table>
@@ -963,6 +1131,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [factoryKpis, setFactoryKpis] = useState<KpiMetric[]>([]);
 
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+
 
   const [leaveCoefficients, setLeaveCoefficients] = useState<LeaveCoefficient[]>([]);
 
@@ -1021,6 +1190,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       criteria: getDeduplicatedCriteria([])
     }
   ]);
+  // Ref tránh "mount-save" ghi đè: state khởi tạo có sẵn 1 phần tử (dept_all với criteria rỗng),
+  // nên nếu không có guard, sync effect sẽ save RỖNG lên Supabase ngay khi trang load,
+  // xoá sạch 36 tiêu chí vừa lưu. Các state khác khởi tạo [] nên không dính lỗi này.
+  const isSyncingCriteriaFromCloud = useRef(false);
 
   // =====================================================================
   // CLOUD SYNC — Load dữ liệu từ Supabase khi mount + storage listener
@@ -1028,42 +1201,82 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // =====================================================================
 
   // ─── CLOUD SYNC: Load từ Supabase khi mount ───
+  // LƯU Ý: Roles/Employees/Holidays/Payroll/LeaveCoefficients/Trips/SalaryScales
+  // đều có sẵn cờ isSyncingXxxFromCloud (dùng đúng cho các listener "REALTIME
+  // LISTENER" refetch-khi-có-sự-kiện bên dưới), nhưng TRƯỚC ĐÂY không được bật
+  // ở LẦN TẢI ĐẦU TIÊN này — khiến effect "SYNC TO SUPABASE" hiểu nhầm dữ liệu
+  // vừa tải về là "người dùng vừa sửa" và tự lưu lại TOÀN BỘ từng dòng lên
+  // Supabase ngay mỗi khi mở tab Nhân sự (đã xác nhận qua log thực tế, cùng
+  // bug với Công Nợ Thu/Trả ở FinanceManagement.tsx). Bật cờ trước khi fetch,
+  // tắt sau 500ms kể từ lúc có dữ liệu — giống đúng cách Leaves/EmployeeErrors/
+  // Criteria/TravelNorms đã làm đúng ở dưới.
   useEffect(() => {
     // Roles
+    isSyncingRolesFromCloud.current = true;
     dbService.hrmRoleGroups.list().then((cloudRoles: any[]) => {
       if (cloudRoles && cloudRoles.length > 0) {
+        if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
+          cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: ['emp_admin', 'NV_ADMIN', 'admin'], permissions: {} });
+        }
         setRoles(cloudRoles.map((r: any) => ({
           id: r.id, name: r.name, description: r.description || '',
           permissions: r.permissions || {}, memberIds: r.memberIds || [],
         })));
       }
-    }).catch(err => { console.warn('Load roles from Supabase thất bại:', err); });
-    // Employees
+    }).catch(err => { console.warn('Load roles from Supabase thất bại:', err); }).finally(() => {
+      setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
+    });
+    // Employees (dùng chung cờ isSyncingRolesFromCloud — 2 effect sync bên dưới
+    // đều check đúng cờ này, xem dòng "SYNC TO SUPABASE" cho employees/roles).
+    isSyncingRolesFromCloud.current = true;
     dbService.employees.list().then((cloudEmps: any[]) => {
       if (cloudEmps && cloudEmps.length > 0) {
         setEmployees(cloudEmps);
-        // Thêm: sync localStorage với employee profile để tránh mất data
-        const cached = localStorage.getItem('hl_hrm_employees_v3');
-        if (cached) {
-          try { localStorage.setItem('hl_cached_hrm_employees', cached); } catch {}
-        }
       }
-    }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); });
+    }).catch(err => { console.warn('Load employees from Supabase thất bại:', err); }).finally(() => {
+      setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
+    });
     // Holidays
-    dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {});
+    isSyncingHolidaysFromCloud.current = true;
+    dbService.hrmHolidays.list().then((d: any[]) => { if (d?.length) setHolidays(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingHolidaysFromCloud.current = false; }, 500);
+    });
     // Leaves
-    dbService.hrmLeaves.list().then((d: any[]) => { if (d?.length) setLeaves(d); }).catch(() => {});
+    isSyncingLeavesFromCloud.current = true;
+    dbService.hrmLeaves.list().then((d: any[]) => {
+      if (d?.length) setLeaves(d);
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingLeavesFromCloud.current = false; }, 500);
+    });
     // Payroll
-    dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {});
+    isSyncingPayrollFromCloud.current = true;
+    dbService.hrmPayrollRecords.list().then((d: any[]) => { if (d?.length) setPayroll(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingPayrollFromCloud.current = false; }, 500);
+    });
     // Employee Errors
-    dbService.hrmEmployeeErrors.list().then((d: any[]) => { if (d?.length) setEmployeeErrors(d); }).catch(() => {});
+    isSyncingEmployeeErrorsFromCloud.current = true;
+    dbService.hrmEmployeeErrors.list().then((d: any[]) => {
+      if (d?.length) setEmployeeErrors(d);
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingEmployeeErrorsFromCloud.current = false; }, 500);
+    });
     // Leave Coefficients
-    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {});
+    isSyncingLeaveCoefficientsFromCloud.current = true;
+    dbService.hrmLeaveCoefficients.list().then((d: any[]) => { if (d?.length) setLeaveCoefficients(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingLeaveCoefficientsFromCloud.current = false; }, 500);
+    });
     // Trips
-    dbService.hrmTrips.list().then((d: any[]) => { if (d?.length) setTrips(d); }).catch(() => {});
+    isSyncingTripsFromCloud.current = true;
+    dbService.hrmTrips.list().then((d: any[]) => { if (d?.length) setTrips(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingTripsFromCloud.current = false; }, 500);
+    });
     // Salary Scales
-    dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {});
+    isSyncingSalaryScalesFromCloud.current = true;
+    dbService.hrmSalaryScales.list().then((d: any[]) => { if (d?.length) setSalaryScales(d); }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingSalaryScalesFromCloud.current = false; }, 500);
+    });
     // Performance Criteria
+    isSyncingCriteriaFromCloud.current = true;
     dbService.hrmPerformanceCriteria.list().then((d: any[]) => {
       if (d?.length) {
         // criteria có thể là JSON string từ Supabase → cần parse
@@ -1073,9 +1286,37 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         }));
         setDepartmentCriteria(parsed);
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      // Cho phép sync trở lại sau khi load xong (tránh mount-save rỗng ghi đè dữ liệu cloud)
+      setTimeout(() => { isSyncingCriteriaFromCloud.current = false; }, 500);
+    });
     // Travel Norms
-    dbService.travelNorms.list().then((d: any[]) => { if (d?.length) setTravelNorms(d); }).catch(() => {});
+    isSyncingTravelNormsFromCloud.current = true;
+    dbService.travelNorms.list().then((d: any[]) => {
+      if (d?.length) setTravelNorms(d);
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { isSyncingTravelNormsFromCloud.current = false; }, 500);
+    });
+  }, []);
+
+  // ─── REALTIME LISTENER: Re-fetch travel_norms khi có thay đổi từ user khác ───
+  // Bảng travel_norms trước đây không nằm trong bất kỳ nhóm Realtime/polling
+  // nào ở App.tsx — chỉ tải 1 lần lúc mount, hoàn toàn "mồ côi". Đã thêm bảng
+  // này vào nhóm polling 5 phút (App.tsx, event 'hl-travel-norms-updated').
+  useEffect(() => {
+    const handleTravelNormsChanged = async () => {
+      try {
+        isSyncingTravelNormsFromCloud.current = true;
+        const cloudNorms = await dbService.travelNorms.list();
+        if (cloudNorms && cloudNorms.length > 0) setTravelNorms(cloudNorms);
+      } catch (e) {
+        console.error('Realtime travel-norms sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingTravelNormsFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-travel-norms-updated', handleTravelNormsChanged);
+    return () => window.removeEventListener('hl-travel-norms-updated', handleTravelNormsChanged);
   }, []);
 
   // ─── REALTIME LISTENER: Re-fetch roles từ Supabase khi có thay đổi từ user khác ───
@@ -1089,10 +1330,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             id: r.id, name: r.name, description: r.description || '',
             permissions: r.permissions || {}, memberIds: r.memberIds || [],
           })));
-          // Cập nhật localStorage cache
-          const updated = JSON.stringify(cloudRoles);
-          localStorage.setItem('hl_cached_hrm_role_groups', updated);
-          localStorage.setItem('hl_hrm_roles_v2', updated);
         }
       } catch (e) {
         console.error('Realtime roles sync error:', e);
@@ -1101,8 +1338,53 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
       }
     };
-    window.addEventListener('hl-task-permissions-updated', handleRolesChanged);
-    return () => window.removeEventListener('hl-task-permissions-updated', handleRolesChanged);
+    // Trước đây nghe NHẦM 'hl-task-permissions-updated' (event của bảng
+    // hrm_task_permissions khác) thay vì 'hl-hrm-role-groups-updated' (đúng
+    // event App.tsx bắn cho bảng hrm_role_groups) — nên đổi Phân Quyền & Vai
+    // Trò ở tab/máy khác không bao giờ tự cập nhật ở đây.
+    window.addEventListener('hl-hrm-role-groups-updated', handleRolesChanged);
+    return () => window.removeEventListener('hl-hrm-role-groups-updated', handleRolesChanged);
+  }, []);
+
+  // ─── REALTIME LISTENER: Re-fetch employees khi có thay đổi từ user khác ───
+  // Trước đây `employees` chỉ tải 1 lần lúc mount, không nghe sự kiện nào —
+  // hồ sơ nhân viên do người khác sửa/thêm ở tab khác không bao giờ tự cập
+  // nhật ở đây tới khi F5. Dùng chung cờ isSyncingRolesFromCloud (effect "SYNC
+  // TO SUPABASE" cho employees ở dưới đã check đúng cờ này) để tránh vòng lặp
+  // tự lưu lại toàn bộ nhân viên ngay sau khi vừa fetch từ cloud.
+  useEffect(() => {
+    const handleEmployeesChanged = async () => {
+      try {
+        isSyncingRolesFromCloud.current = true;
+        const cloudEmps: any[] = await dbService.employees.list();
+        if (cloudEmps && cloudEmps.length > 0) setEmployees(cloudEmps);
+      } catch (e) {
+        console.error('Realtime employees sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingRolesFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-employees-updated', handleEmployeesChanged);
+    return () => window.removeEventListener('hl-employees-updated', handleEmployeesChanged);
+  }, []);
+
+  // ─── LISTENER: Vi phạm gửi từ Công việc (TaskDetailModal) → refresh Nhật ký lỗi ───
+  useEffect(() => {
+    const handleEmployeeErrorsUpdated = async () => {
+      try {
+        isSyncingEmployeeErrorsFromCloud.current = true;
+        const cloudErrors = await dbService.hrmEmployeeErrors.list();
+        if (cloudErrors && cloudErrors.length > 0) {
+          setEmployeeErrors(cloudErrors);
+        }
+      } catch (e) {
+        console.error('Realtime employee-errors sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingEmployeeErrorsFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-employee-errors-updated', handleEmployeeErrorsUpdated);
+    return () => window.removeEventListener('hl-hrm-employee-errors-updated', handleEmployeeErrorsUpdated);
   }, []);
 
   // ─── SYNC TO SUPABASE: lưu khi state thay đổi ───
@@ -1120,231 +1402,436 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   }, [roles]);
 
   useEffect(() => {
+    if (isSyncingAttendanceFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud (tránh mount-save rỗng ghi đè)
     if (attendance?.length) {
       attendance.forEach(rec => dbService.attendance.save(rec).catch(() => {}));
     }
   }, [attendance]);
 
   useEffect(() => {
+    if (isSyncingLeavesFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (leaves?.length) leaves.forEach(l => dbService.hrmLeaves.save(l).catch(() => {}));
   }, [leaves]);
 
+  // ─── LISTENER: Đơn nghỉ phép thay đổi (từ Tổng Quan hoặc user khác qua realtime) → refresh ───
   useEffect(() => {
+    const handleLeavesUpdated = async () => {
+      try {
+        isSyncingLeavesFromCloud.current = true;
+        const cloudLeaves = await dbService.hrmLeaves.list();
+        if (cloudLeaves && cloudLeaves.length > 0) {
+          setLeaves(cloudLeaves);
+        }
+      } catch (e) {
+        console.error('Realtime leaves sync error:', e);
+      } finally {
+        setTimeout(() => { isSyncingLeavesFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-leaves-updated', handleLeavesUpdated);
+    return () => window.removeEventListener('hl-hrm-leaves-updated', handleLeavesUpdated);
+  }, []);
+
+  // ─── REALTIME LISTENER: holidays / trips / payroll / leave_coefficients / salary_scales / performance_criteria ───
+  // Các bảng này hiển thị trong tab Nhân sự đang mở → refetch live khi user khác sửa.
+  useEffect(() => {
+    const handleHolidaysUpdated = async () => {
+      try {
+        isSyncingHolidaysFromCloud.current = true;
+        const d = await dbService.hrmHolidays.list();
+        if (d && d.length > 0) setHolidays(d);
+      } catch (e) { console.error('Realtime holidays sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingHolidaysFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-holidays-updated', handleHolidaysUpdated);
+    return () => window.removeEventListener('hl-hrm-holidays-updated', handleHolidaysUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleTripsUpdated = async () => {
+      try {
+        isSyncingTripsFromCloud.current = true;
+        const d = await dbService.hrmTrips.list();
+        if (d && d.length > 0) setTrips(d);
+      } catch (e) { console.error('Realtime trips sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingTripsFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-trips-updated', handleTripsUpdated);
+    return () => window.removeEventListener('hl-hrm-trips-updated', handleTripsUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handlePayrollUpdated = async () => {
+      try {
+        isSyncingPayrollFromCloud.current = true;
+        const d = await dbService.hrmPayrollRecords.list();
+        if (d && d.length > 0) setPayroll(d);
+      } catch (e) { console.error('Realtime payroll sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingPayrollFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-payroll-records-updated', handlePayrollUpdated);
+    return () => window.removeEventListener('hl-hrm-payroll-records-updated', handlePayrollUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleLeaveCoefficientsUpdated = async () => {
+      try {
+        isSyncingLeaveCoefficientsFromCloud.current = true;
+        const d = await dbService.hrmLeaveCoefficients.list();
+        if (d && d.length > 0) setLeaveCoefficients(d);
+      } catch (e) { console.error('Realtime leave-coefficients sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingLeaveCoefficientsFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-leave-coefficients-updated', handleLeaveCoefficientsUpdated);
+    return () => window.removeEventListener('hl-hrm-leave-coefficients-updated', handleLeaveCoefficientsUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleSalaryScalesUpdated = async () => {
+      try {
+        isSyncingSalaryScalesFromCloud.current = true;
+        const d = await dbService.hrmSalaryScales.list();
+        if (d && d.length > 0) setSalaryScales(d);
+      } catch (e) { console.error('Realtime salary-scales sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingSalaryScalesFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-salary-scales-updated', handleSalaryScalesUpdated);
+    return () => window.removeEventListener('hl-hrm-salary-scales-updated', handleSalaryScalesUpdated);
+  }, []);
+
+  useEffect(() => {
+    const handleCriteriaUpdated = async () => {
+      try {
+        isSyncingCriteriaFromCloud.current = true;
+        const d = await dbService.hrmPerformanceCriteria.list();
+        if (d && d.length > 0) {
+          const parsed = d.map((item: any) => ({
+            ...item,
+            criteria: typeof item.criteria === 'string' ? (() => { try { return JSON.parse(item.criteria); } catch { return []; } })() : (Array.isArray(item.criteria) ? item.criteria : []),
+          }));
+          setDepartmentCriteria(parsed);
+        }
+      } catch (e) { console.error('Realtime performance-criteria sync error:', e); }
+      finally {
+        setTimeout(() => { isSyncingCriteriaFromCloud.current = false; }, 500);
+      }
+    };
+    window.addEventListener('hl-hrm-performance-criteria-updated', handleCriteriaUpdated);
+    return () => window.removeEventListener('hl-hrm-performance-criteria-updated', handleCriteriaUpdated);
+  }, []);
+
+  useEffect(() => {
+    if (isSyncingPayrollFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (payroll?.length) payroll.forEach(p => dbService.hrmPayrollRecords.save(p).catch(() => {}));
   }, [payroll]);
 
   useEffect(() => {
+    if (isSyncingTripsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (trips?.length) trips.forEach(t => dbService.hrmTrips.save(t).catch(() => {}));
   }, [trips]);
 
   useEffect(() => {
+    if (isSyncingHolidaysFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (holidays?.length) holidays.forEach(h => dbService.hrmHolidays.save(h).catch(() => {}));
   }, [holidays]);
 
   useEffect(() => {
+    if (isSyncingLeaveCoefficientsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (leaveCoefficients?.length) leaveCoefficients.forEach(c => dbService.hrmLeaveCoefficients.save(c).catch(() => {}));
   }, [leaveCoefficients]);
 
   useEffect(() => {
+    if (isSyncingEmployeeErrorsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (employeeErrors?.length) employeeErrors.forEach(e => dbService.hrmEmployeeErrors.save(e).catch(() => {}));
   }, [employeeErrors]);
 
   useEffect(() => {
+    if (isSyncingSalaryScalesFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud
     if (salaryScales?.length) salaryScales.forEach(s => dbService.hrmSalaryScales.save(s).catch(() => {}));
   }, [salaryScales]);
 
   useEffect(() => {
-    if (departmentCriteria?.length) departmentCriteria.forEach(c => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
+    if (isSyncingCriteriaFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud (tránh mount-save rỗng ghi đè)
+    if (departmentCriteria?.length) departmentCriteria.forEach((c: any) => dbService.hrmPerformanceCriteria.save(c).catch(() => {}));
   }, [departmentCriteria]);
 
   useEffect(() => {
+    if (isSyncingTravelNormsFromCloud.current) return; // Không ghi lại khi vừa re-fetch từ cloud (tránh mount-save rỗng ghi đè)
     if (travelNorms?.length) travelNorms.forEach(n => dbService.travelNorms.save(n).catch(() => {}));
   }, [travelNorms]);
 
-  // Chức năng tự động chốt công hàng ngày lúc 22h00 cho tất cả nhân viên
-  const executeAutoWorkdayLocking = () => {
-    if (!employees || employees.length === 0) return;
+  
 
-    const getLocalYYYYMMDD = (d: Date) => {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const r = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${r}`;
-    };
-
-    const now = new Date();
-    const todayStr = getLocalYYYYMMDD(now);
-    const currentHour = now.getHours();
-
-    // Duyệt qua hôm nay và 7 ngày trước đó để chốt công tự động nếu chưa chốt
-    const datesToCheck: string[] = [];
-    for (let i = 0; i <= 7; i++) {
-      const d = new Date(now.getTime());
-      d.setDate(now.getDate() - i);
-      datesToCheck.push(getLocalYYYYMMDD(d));
+  // Loại bỏ các mục trùng lặp (cùng rowId / cùng id) để tránh React warning
+  // "Encountered two children with the same key" và tính tổng bị sai. Giữ lại
+  // mục cuối cùng gặp (mới nhất) cho mỗi khóa.
+  const dedupeTravelExpenses = (arr: any[]): any[] => {
+    const seen = new Map<string, any>();
+    for (const item of (arr || [])) {
+      const key = item?.rowId || item?.id;
+      if (key) seen.set(key, item);
     }
-
-    let updated = [...attendance];
-    let changed = false;
-
-    datesToCheck.forEach(checkDate => {
-      // Bỏ qua các ngày trước ngày khởi tạo dữ liệu chấm công
-      // (chỉ chấm từ attendanceInitDate trở đi, không ghi KP cho ngày quá khứ trước đó)
-      if (checkDate < attendanceInitDate) {
-        return;
-      }
-
-      const isToday = (checkDate === todayStr);
-      // Nếu là hôm nay, chỉ tự động chốt khi đồng hồ máy tính vượt quá mốc 22h00
-      if (isToday && currentHour < 22) {
-        return;
-      }
-
-      employees.forEach(emp => {
-        // Chỉ chốt công cho nhân viên ĐANG LÀM (ẩn các nhân viên khác khỏi bảng chấm công)
-        if (emp.status !== 'working') return;
-        // Tìm bản ghi chấm công
-        const existingIndex = updated.findIndex(a => a.empId === emp.id && a.date === checkDate);
-
-        if (existingIndex > -1) {
-          const log = updated[existingIndex];
-          if (!log.isLocked) {
-            updated[existingIndex] = {
-              ...log,
-              isLocked: true,
-              notes: log.notes ? `${log.notes} (Đã chốt công tự động lúc 22h00)` : `Đã chốt công tự động lúc 22h00`
-            };
-            changed = true;
-          }
-        } else {
-          // Chưa có bản ghi chấm công => thực hiện tự động rà quét và chốt công theo đơn phép hoặc nghỉ không phép
-          const dateObj = new Date(checkDate);
-          const dayOfWeek = dateObj.getDay();
-          const isWeekend = weekendDays.includes(dayOfWeek);
-          
-          const holidayKey = checkDate.split('-').reverse().join('/'); // DD/MM/YYYY
-          const holidayMatch = holidays.find(h => h.date === holidayKey);
-
-          // Kiểm tra xem có đơn xin phép nào được phê duyệt cho nhân viên vào ngày này không
-          const approvedLeave = leaves.find(l => {
-            if (l.status !== 'approved') return false;
-            if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') return false;
-            const sameEmp = (l.empId === emp.id) || (l.empName === emp.name);
-            return sameEmp && checkDate >= l.fromDate && checkDate <= l.toDate;
-          });
-
-          if (approvedLeave) {
-            // Có đơn phép được duyệt => Tự động ghi nhận nghỉ phép và chốt
-            const matchedCoef = leaveCoefficients.find(c => c.type === approvedLeave.type || c.id === approvedLeave.type);
-            const symbol = matchedCoef ? matchedCoef.id : 'PN';
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-LEAVE-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: symbol,
-              timeOutS: symbol,
-              timeInC: symbol,
-              timeOutC: symbol,
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Tự động phép)',
-              status: 'excused',
-              otHours: 0,
-              notes: `Nghỉ phép được phê duyệt (Tự động chốt): ${approvedLeave.type}`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          } else if (holidayMatch) {
-            // Ngày lễ => tự động chốt nghỉ lễ
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-HOLIDAY-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: 'OFF',
-              timeOutS: 'OFF',
-              timeInC: 'OFF',
-              timeOutC: 'OFF',
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Nghỉ Lễ)',
-              status: 'excused',
-              otHours: 0,
-              notes: `Nghỉ Lễ (${holidayMatch.name}) (Tự động chốt)`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          } else if (isWeekend) {
-            // Ngày cuối tuần => tự động chốt nghỉ cuối tuần
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-WEEKEND-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: 'OFF',
-              timeOutS: 'OFF',
-              timeInC: 'OFF',
-              timeOutC: 'OFF',
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Nghỉ Tuần)',
-              status: 'excused',
-              otHours: 0,
-              notes: `Nghỉ cuối tuần (Tự động chốt)`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          } else {
-            // Ngày làm việc bình thường, không chấm công và không phép => Tính Nghỉ không phép (KP)
-            const newLog: AttendanceLog = {
-              id: `AT-AUTO-KP-${emp.id}-${checkDate}`,
-              empId: emp.id,
-              empName: emp.name,
-              date: checkDate,
-              timeInS: 'KP',
-              timeOutS: 'KP',
-              timeInC: 'KP',
-              timeOutC: 'KP',
-              timeInOT: '',
-              timeOutOT: '',
-              method: 'Hệ thống (Tự động)',
-              status: 'missing',
-              otHours: 0,
-              notes: `Vắng không phép (KP) (Tự động chốt lúc 22h00)`,
-              isLocked: true
-            };
-            updated.push(newLog);
-            changed = true;
-          }
-        }
-      });
-    });
-
-    if (changed) {
-      setAttendance(updated);
-    }
+    return Array.from(seen.values());
   };
 
-  useEffect(() => {
-    executeAutoWorkdayLocking();
-    const intervalId = setInterval(() => {
-      executeAutoWorkdayLocking();
-    }, 10000);
-    return () => clearInterval(intervalId);
-  }, [attendance, employees, leaves, weekendDays, holidays, leaveCoefficients]);
+  // Load Tổng hợp Công Tác Phí: nguồn Supabase
+  const loadTravelExpensesSummary = useCallback(() => {
+    // Load bất kể sub-tab đang mở — CTP được tính vào lương (tab Tính Lương) nên
+    // không được gating theo activeSubTab === 'trips' (khi mở thẳng tab lương,
+    // mảng sẽ rỗng → Công Tác Phí không vào bảng lương).
+    dbService.hrmTravelExpenses.list()
+      .then((data: any[]) => {
+        if (data && data.length > 0) {
+          const deduped = dedupeTravelExpenses(data);
+          setTravelExpensesSummary(deduped);
+        } else {
+          setTravelExpensesSummary([]);
+        }
+      })
+      .catch((err) => {
+        console.warn('[TravelExpense][HR] Lỗi tải Supabase:', err?.message || err);
+        setTravelExpensesSummary([]);
+      });
+  }, []);
 
   useEffect(() => {
-    if (activeSubTab === 'trips') {
-      const saved = localStorage.getItem('hl_travel_expenses_summary_v4');
-      if (saved) {
-        setTravelExpensesSummary(JSON.parse(saved));
-      }
+    loadTravelExpensesSummary();
+  }, [loadTravelExpensesSummary]);
+
+  // Reload CTP khi mở lại đúng tab Công tác phí — đảm bảo danh sách luôn tươi
+  // sau khi rời tab (dữ liệu phục vụ cả tab lương nên không clear khi rời nữa).
+  useEffect(() => {
+    if (activeSubTab === 'trips') loadTravelExpensesSummary();
+  }, [activeSubTab, loadTravelExpensesSummary]);
+
+  // Làm mới ngay khi có nhiệm vụ hoàn thành gửi Công Tác Phí (cùng trình duyệt)
+  useEffect(() => {
+    const handler = () => {
+      loadTravelExpensesSummary();
+    };
+    window.addEventListener('hl-hrm-travel-expenses-updated', handler);
+    return () => window.removeEventListener('hl-hrm-travel-expenses-updated', handler);
+  }, [loadTravelExpensesSummary]);
+
+  // ─── XÉT DUYỆT CÔNG TÁC PHÍ (nút Duyệt/Từ chối trong TripsTab) ─────────────
+  const handleApproveTravelExpense = React.useCallback((rowId: string, decision: 'approved' | 'rejected') => {
+    const target = travelExpensesSummary.find(s => s.rowId === rowId || s.id === rowId);
+    if (!target) return;
+
+    const updated = travelExpensesSummary.map(s =>
+      (s.rowId === rowId || s.id === rowId) ? { ...s, status: decision } : s
+    );
+    setTravelExpensesSummary(updated);
+
+    // Upsert lên Supabase — cập nhật trạng thái xét duyệt (status nằm trong JSONB data).
+    dbService.hrmTravelExpenses.save({ ...target, status: decision }, { rowId })
+      .then(() => {
+        // Báo cho mọi nơi (Tổng Quan, App realtime) làm mới ngay.
+        window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
+      })
+      .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu trạng thái duyệt CTP thất bại:', e?.message || e));
+
+    // 📩 Gửi tin nhắn CÁ NHÂN trả kết quả về cho NGƯỜI KHỞI TẠO công tác phí
+    // (tìm theo employeeId/empId, fallback theo employeeName).
+    let recipientId = target.employeeId || target.empId;
+    if (!recipientId) {
+      recipientId = findEmployeeByName(employees, target.employeeName)?.id || '';
     }
-  }, [activeSubTab]);
+    if (currentUser?.id && recipientId && currentUser.id !== recipientId) {
+      const decisionText = decision === 'approved'
+        ? `✅ Đã duyệt công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`
+        : `❌ Đã từ chối công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`;
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId,
+        recipientName: target.employeeName || 'Người khởi tạo',
+        content: decisionText,
+        relatedEntity: { type: 'travel_expense', id: rowId },
+      }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin kết quả duyệt thất bại:', e?.message || e));
+    }
+
+    addToast({
+      title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
+      message: decision === 'approved'
+        ? `Đã duyệt công tác phí ${target.content || ''} của ${target.employeeName || ''}.`
+        : `Đã từ chối công tác phí ${target.content || ''} của ${target.employeeName || ''}.`,
+      type: decision === 'approved' ? 'success' : 'info',
+    });
+  }, [travelExpensesSummary, employees, currentUser, addToast]);
+
+  // ─── XÓA HÀNG LOẠT CÔNG TÁC PHÍ (chọn nhiều dòng trong TripsTab) ───────────
+  // Xóa trực tiếp khỏi bảng hrm_travel_expenses theo rowId (khóa chính uuid),
+  // cập nhật state + báo làm mới toàn cục cho Tổng Quan / Việc của tôi.
+  const handleDeleteTravelExpenses = React.useCallback(async (rowIds: string[]) => {
+    if (!rowIds.length) return;
+    const targets = travelExpensesSummary.filter(s => rowIds.includes(s.rowId || s.id));
+    const remaining = travelExpensesSummary.filter(s => !rowIds.includes(s.rowId || s.id));
+    setTravelExpensesSummary(remaining);
+
+    try {
+      for (const rowId of rowIds) {
+        await dbService.hrmTravelExpenses.delete(rowId).catch((e: any) =>
+          console.warn('[TravelExpense] ⚠️ Xóa CTP thất bại trên Supabase:', e?.message || e));
+      }
+      window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
+      addToast({
+        title: '🗑️ Đã xóa',
+        message: `Đã xóa ${targets.length} công tác phí đã chọn.`,
+        type: 'info',
+      });
+    } catch (err) {
+      console.error('[TravelExpense] Lỗi xóa CTP hàng loạt:', err);
+      addToast({ title: '⚠️ Lỗi', message: 'Đã xóa trên màn hình, nhưng gặp lỗi khi đồng bộ Supabase.', type: 'error' });
+    }
+  }, [travelExpensesSummary, addToast]);
+
+  // ─── SỬA 1 DÒNG CÔNG TÁC PHÍ (nút Sửa trong TripsTab) ──────────────────────
+  // Chỉ cho sửa nội dung + số tiền — 2 trường accountant hay cần đính chính
+  // sau khi CTP đã được nhân viên/nhiệm vụ tự động ghi nhận.
+  const handleEditTravelExpense = React.useCallback((rowId: string, updates: { content?: string; amount?: number }) => {
+    const target = travelExpensesSummary.find(s => s.rowId === rowId || s.id === rowId);
+    if (!target) return;
+
+    const updatedItem = { ...target, ...updates };
+    const updated = travelExpensesSummary.map(s =>
+      (s.rowId === rowId || s.id === rowId) ? updatedItem : s
+    );
+    setTravelExpensesSummary(updated);
+
+    dbService.hrmTravelExpenses.save(updatedItem, { rowId })
+      .then(() => window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')))
+      .catch((e: any) => {
+        console.warn('[TravelExpense] ⚠️ Lưu sửa CTP thất bại:', e?.message || e);
+        addToast({ title: '⚠️ Lỗi', message: 'Đã sửa trên màn hình, nhưng gặp lỗi khi đồng bộ Supabase.', type: 'error' });
+      });
+
+    addToast({ title: '✅ Đã lưu', message: `Đã cập nhật công tác phí của ${target.employeeName || ''}.`, type: 'success' });
+  }, [travelExpensesSummary, addToast]);
+
+  // ─── Modal "Thêm công tác phí" (tab Công tác phí): chọn xâu chuỗi
+  // Dự án -> Công việc -> Nhiệm vụ, rồi Nhân viên + Ngày hoàn thành + Nội dung.
+  const [showAddTravelExpenseModal, setShowAddTravelExpenseModal] = useState(false);
+  const [addCtpProjectId, setAddCtpProjectId] = useState('');
+  const [addCtpTaskId, setAddCtpTaskId] = useState('');
+  const [addCtpMissionId, setAddCtpMissionId] = useState('');
+  const [addCtpEmpId, setAddCtpEmpId] = useState('');
+  const [addCtpDate, setAddCtpDate] = useState(() => getLocalYYYYMMDD(new Date()));
+  const [addCtpContent, setAddCtpContent] = useState('');
+
+  const resetAddTravelExpenseForm = () => {
+    setShowAddTravelExpenseModal(false);
+    setAddCtpProjectId('');
+    setAddCtpTaskId('');
+    setAddCtpMissionId('');
+    setAddCtpEmpId('');
+    setAddCtpDate(getLocalYYYYMMDD(new Date()));
+    setAddCtpContent('');
+  };
+
+  // Công việc thuộc đúng dự án đã chọn; nhiệm vụ thuộc đúng công việc đã chọn.
+  const addCtpTaskOptions = tasks.filter((t: any) => t.projectId === addCtpProjectId);
+  const addCtpSelectedTask = addCtpTaskOptions.find((t: any) => t.id === addCtpTaskId);
+  const addCtpMissionOptions = (addCtpSelectedTask?.missions || []) as any[];
+
+  const handleSubmitAddTravelExpense = () => {
+    if (!addCtpProjectId || !addCtpTaskId || !addCtpMissionId || !addCtpEmpId || !addCtpDate || !addCtpContent.trim()) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn đầy đủ Dự án, Công việc, Nhiệm vụ, Nhân viên, Ngày hoàn thành và Nội dung.', type: 'warning' });
+      return;
+    }
+    // Input type="date" trả về yyyy-mm-dd -> đổi sang dd/mm/yyyy để khớp định
+    // dạng completedDate dùng chung trong toàn bộ dữ liệu Công Tác Phí.
+    const [y, m, d] = addCtpDate.split('-');
+    handleCreateTravelExpenseManual({
+      projectId: addCtpProjectId,
+      taskId: addCtpTaskId,
+      missionId: addCtpMissionId,
+      empId: addCtpEmpId,
+      completedDate: `${d}/${m}/${y}`,
+      content: addCtpContent.trim(),
+    });
+    resetAddTravelExpenseForm();
+  };
+
+  // ─── THÊM MỚI 1 DÒNG CÔNG TÁC PHÍ THỦ CÔNG (nút "Thêm công tác phí" trong
+  // TripsTab) ─────────────────────────────────────────────────────────────
+  // Bình thường CTP được tự sinh khi hoàn thành nhiệm vụ trong Task (xem
+  // persistTravelExpense ở TaskDetailModal.tsx). Hàm này cho phép kế toán/
+  // quản lý ghi nhận trực tiếp 1 khoản CTP từ tab Công tác phí mà không cần
+  // mở đúng nhiệm vụ trong Task — vẫn gắn đúng dự án/công việc/nhiệm vụ đã
+  // chọn để đồng bộ dữ liệu (lọc theo dự án, tính vào lương...). Số tiền mặc
+  // định 0đ — dùng nút "Sửa" sẵn có để điền số tiền sau khi tạo.
+  const handleCreateTravelExpenseManual = React.useCallback((payload: {
+    projectId: string; taskId: string; missionId: string; empId: string;
+    completedDate: string; content: string;
+  }) => {
+    const project = projects.find((p: any) => p.id === payload.projectId);
+    const customer = customers.find((c: any) => c.id === project?.customerId);
+    const task = tasks.find((t: any) => t.id === payload.taskId);
+    const mission = (task?.missions || []).find((m: any) => m.id === payload.missionId);
+    const emp = employees.find((e: any) => e.id === payload.empId);
+
+    const rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+
+    // completedDate vào đây dạng dd/mm/yyyy -> rút gọn "MM/YYYY" để khớp kỳ lương.
+    const parts = payload.completedDate.split('/');
+    const month = parts.length === 3 ? `${parts[1]}/${parts[2]}` : '';
+
+    const summaryItem = {
+      id: `THCTP-${Date.now()}`,
+      rowId,
+      code: `THCTP-${Date.now()}`,
+      status: 'pending' as CTPStatus,
+      completedDate: payload.completedDate,
+      period: '',
+      empId: payload.empId,
+      month,
+      projectName: project?.name || 'Chưa rõ',
+      customerName: customer?.name || 'Khách hàng lẻ',
+      taskName: task?.name || '',
+      missionName: mission?.name || '',
+      employeeName: emp?.name || 'Chưa gán',
+      creatorId: currentUser.id,
+      creatorName: currentUser.name,
+      content: payload.content,
+      amount: 0,
+      createdAt: new Date().toISOString(),
+      taskId: payload.taskId,
+      missionId: payload.missionId,
+    };
+
+    setTravelExpensesSummary(prev => [...prev, summaryItem]);
+    dbService.hrmTravelExpenses.save(summaryItem, { rowId })
+      .then(() => window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')))
+      .catch((e: any) => {
+        console.warn('[TravelExpense] ⚠️ Lưu CTP mới thất bại:', e?.message || e);
+        addToast({ title: '⚠️ Lỗi', message: 'Đã thêm trên màn hình, nhưng gặp lỗi khi đồng bộ Supabase.', type: 'error' });
+      });
+
+    addToast({ title: '✅ Đã thêm', message: `Đã tạo công tác phí cho ${emp?.name || ''}. Bấm "Sửa" để điền số tiền.`, type: 'success' });
+  }, [projects, customers, tasks, employees, currentUser, addToast]);
+
+  // Người được cấu hình xét duyệt Công Tác Phí (Quyền Phê Duyệt → Công Tác Phí)
+  // có quyền thấy nút Duyệt/Từ chối trong TripsTab. Fallback: vai trò Kế toán.
+  const canApproveTravelExpense = React.useMemo(() => {
+    if (!currentUser?.id) return false;
+    const configured = getConfiguredApprover('travel_expense');
+    if (configured?.id === currentUser.id) return true;
+    return isUserInRoleGroup(currentUser.id, 'role_accounting');
+  }, [currentUser]);
 
   // Form states
   const [showEmpModal, setShowEmpModal] = useState(false);
@@ -1409,7 +1896,67 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [attendanceFilter, setAttendanceFilter] = useState('');
   const [attendanceSearchEmpId, setAttendanceSearchEmpId] = useState('all');
   const [attendanceFilterMonth, setAttendanceFilterMonth] = useState(String(new Date().getMonth() + 1)); // '6' for June
+  const [attendanceFilterDay, setAttendanceFilterDay] = useState('today'); // 'today' = lọc ngày hiện tại
   const [attendanceFilterYear, setAttendanceFilterYear] = useState(String(new Date().getFullYear())); // '2026' for this year
+
+  // ── Load attendance theo THÁNG đang chọn (thay vì toàn bộ lịch sử) ──────────
+  // Tab "Chấm công ngày" / báo cáo chỉ cần dữ liệu trong tháng được lọc → tải
+  // KHOẢNG [YYYY-MM-01, YYYY-MM-31] thay vì SELECT * toàn bộ bảng attendance_records
+  // (đây là nguyên nhân cũ gây load chậm khi lịch sử phình to). Khi đổi Tháng/Năm,
+  // effect chạy lại tải đúng tháng. Chọn 'all' thì fallback tải toàn bộ (hiếm dùng).
+  useEffect(() => {
+    let mounted = true;
+    const loadRange = async () => {
+      // Cờ chống echo-save: dữ liệu đang tải từ cloud thì không ghi ngược lên Supabase
+      isSyncingAttendanceFromCloud.current = true;
+      try {
+        const isAll = attendanceFilterMonth === 'all' || attendanceFilterYear === 'all';
+        const from = `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-01`;
+        const to = `${attendanceFilterYear}-${String(attendanceFilterMonth).padStart(2, '0')}-31`;
+
+        // 1) Render NGAY bằng cache tháng (nếu có) để bảng hiện lên tức thì,
+        //    không phải chờ mạng — đây là mục tiêu chính của việc cải tiến tốc độ.
+        if (!isAll) {
+          const cached = dbService.attendance.getCachedRange(from, to);
+          if (mounted && cached && cached.length > 0) setAttendance(dedupAttendance(cached));
+        }
+
+        // 2) Fetch dữ liệu mới từ Supabase, rồi cập nhật lại ở nền.
+        //    listForRange tự ghi vào cache → lần sau mở tab lại load ngay lập tức.
+        const list = isAll
+          ? await dbService.attendance.list()
+          : await dbService.attendance.listForRange(from, to);
+        if (mounted && list.length > 0) setAttendance(dedupAttendance(list));
+      } catch (err) {
+        console.warn('Lỗi tải chấm công từ Supabase:', err);
+      } finally {
+        setTimeout(() => { isSyncingAttendanceFromCloud.current = false; }, 500);
+      }
+    };
+    loadRange();
+    // Trước đây chỉ tải lại khi NGƯỜI DÙNG tự đổi bộ lọc Tháng/Năm — nhân viên
+    // khác chấm công (Realtime bắn 'hl-attendance-realtime' mỗi lần có thay
+    // đổi, hoặc 'hl-attendance-updated' khi refetch cả tháng) không làm bảng
+    // Chấm công ngày tự cập nhật, phải F5 mới thấy. Debounce 1.5s để 25 người
+    // cùng chấm công không dội hàng chục request tải lại cả tháng liên tiếp
+    // (bảng này xem NHIỀU nhân viên cùng lúc nên không patch từng dòng như
+    // Dashboard — refetch cả tháng debounce là đủ, vẫn được `isSyncingAttendanceFromCloud`
+    // bảo vệ khỏi vòng lặp tự ghi ngược lên Supabase).
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedLoadRange = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadRange, 1500);
+    };
+    window.addEventListener('hl-attendance-realtime', debouncedLoadRange);
+    window.addEventListener('hl-attendance-updated', debouncedLoadRange);
+    return () => {
+      mounted = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('hl-attendance-realtime', debouncedLoadRange);
+      window.removeEventListener('hl-attendance-updated', debouncedLoadRange);
+    };
+  }, [attendanceFilterMonth, attendanceFilterYear]);
+
   const [showBulkLockModal, setShowBulkLockModal] = useState(false);
   const [bulkLockScope, setBulkLockScope] = useState<'page' | 'month'>('page');
   const [employeeSearch, setEmployeeSearch] = useState('');
@@ -1424,33 +1971,51 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // ── Filter attendance once (dùng cho cả table, paginator, summary) ────────
   const attendanceFiltered = useMemo(() => {
-    // Chỉ ghi nhận chấm công của nhân viên ĐANG LÀM; ẩn các nhân viên khác khỏi bảng
+    // Chỉ ghi nhận chấm công của nhân viên ĐANG LÀM; ẩn nhân viên đã nghỉ việc/nghỉ phép.
     const workingEmpIds = new Set(
       employees.filter((e: any) => e.status === 'working').map((e: any) => e.id)
     );
+    // Tập TẤT CẢ mã nhân viên tồn tại (kể cả đã nghỉ) — dùng để phân biệt
+    // "nhân viên đã nghỉ" (cố ý ẩn) với "bản ghi mồ côi" (emp_id sai/không tồn tại).
+    const knownEmpIds = new Set(employees.map((e: any) => e.id));
     return attendance.filter(el => {
-      if (!workingEmpIds.has(el.empId)) return false;
+      // Bản ghi MỒ CÔI (emp_id không có trong bảng nhân sự) vẫn phải hiển thị:
+      // đây là lỗi dữ liệu, nếu ẩn đi thì nhìn như bị mất bản ghi.
+      const isOrphan = !knownEmpIds.has(el.empId);
+      if (!isOrphan && !workingEmpIds.has(el.empId)) return false;
       if (attendanceSearchEmpId !== 'all' && el.empId !== attendanceSearchEmpId) return false;
       if (!el.date) return true;
       const parts = el.date.split('-');
-      let itemMonth: string, itemYear: string;
+      let itemMonth: string, itemYear: string, itemDay: string;
       if (parts.length === 3) {
         itemMonth = String(parseInt(parts[1], 10));
         itemYear = parts[0];
+        itemDay = String(parseInt(parts[2], 10));
       } else {
         const slashParts = el.date.split('/');
         if (slashParts.length === 3) {
           itemMonth = String(parseInt(slashParts[1], 10));
           itemYear = slashParts[2];
+          itemDay = String(parseInt(slashParts[0], 10));
         } else {
           return true;
         }
       }
-      if (attendanceFilterMonth !== 'all' && itemMonth !== attendanceFilterMonth) return false;
-      if (attendanceFilterYear !== 'all' && itemYear !== attendanceFilterYear) return false;
+      const today = new Date();
+      const todayDay = String(today.getDate());
+      const todayMonth = String(today.getMonth() + 1);
+      const todayYear = String(today.getFullYear());
+      if (attendanceFilterDay === 'today') {
+        // Lọc riêng ngày hôm nay (bỏ qua Tháng/Năm chọn ở trên)
+        if (itemDay !== todayDay || itemMonth !== todayMonth || itemYear !== todayYear) return false;
+      } else {
+        if (attendanceFilterMonth !== 'all' && itemMonth !== attendanceFilterMonth) return false;
+        if (attendanceFilterDay !== 'all' && itemDay !== attendanceFilterDay) return false;
+        if (attendanceFilterYear !== 'all' && itemYear !== attendanceFilterYear) return false;
+      }
       return true;
     });
-  }, [attendance, employees, attendanceSearchEmpId, attendanceFilterMonth, attendanceFilterYear]);
+  }, [attendance, employees, attendanceSearchEmpId, attendanceFilterMonth, attendanceFilterDay, attendanceFilterYear]);
 
   // Holiday state & handlers
   const [showHolidayModal, setShowHolidayModal] = useState(false);
@@ -1461,6 +2026,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [holidaySingleDate, setHolidaySingleDate] = useState('');
   const [holidayFromDate, setHolidayFromDate] = useState('');
   const [holidayToDate, setHolidayToDate] = useState('');
+  // Đang sửa dòng nào (null = đang ở chế độ Thêm mới). Sửa chỉ cho đổi tên +
+  // 1 ngày duy nhất (không hỗ trợ tách theo khoảng ngày như lúc thêm mới).
+  const [editingHolidayId, setEditingHolidayId] = useState<string | null>(null);
 
   const getDatesInRange = (startStr: string, endStr: string): string[] => {
     const dates = [];
@@ -1551,9 +2119,45 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   // ---------- CRUD Ngày lễ (Holiday) ----------
+  // Mở modal ở chế độ Sửa: đổ sẵn tên + ngày (dd/mm/yyyy -> yyyy-mm-dd cho input date),
+  // luôn ép về chế độ "một ngày duy nhất" vì đang sửa đúng 1 dòng đã tồn tại.
+  const handleOpenEditHoliday = (item: Holiday) => {
+    setEditingHolidayId(item.id);
+    setNewHolidayName(item.name);
+    setHolidayInputMode('single');
+    const [day, month, year] = item.date.split('/');
+    setHolidaySingleDate(day && month && year ? `${year}-${month}-${day}` : '');
+    setShowHolidayModal(true);
+  };
+
+  const closeHolidayModal = () => {
+    setShowHolidayModal(false);
+    setEditingHolidayId(null);
+    setNewHolidayName('');
+    setHolidayInputMode('range');
+    setHolidaySingleDate('');
+    setHolidayFromDate('');
+    setHolidayToDate('');
+  };
+
   const handleAddHoliday = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newHolidayName.trim()) return;
+
+    // Chế độ Sửa: chỉ cập nhật tên + ngày của đúng dòng đang sửa.
+    if (editingHolidayId) {
+      if (!holidaySingleDate) return;
+      const [year, month, day] = holidaySingleDate.split('-');
+      const newDate = `${day}/${month}/${year}`;
+      if (holidays.some(h => h.id !== editingHolidayId && h.date === newDate)) {
+        addToast({ title: '⚠️ Trùng ngày', message: `Ngày ${newDate} đã có dịp lễ khác được ghi nhận.`, type: 'warning' });
+        return;
+      }
+      setHolidays(holidays.map(h => h.id === editingHolidayId ? { ...h, date: newDate, name: newHolidayName.trim() } : h));
+      addToast({ title: '✅ Đã lưu', message: `✅ Đã cập nhật ngày nghỉ lễ "${newHolidayName.trim()}".`, type: 'success' });
+      closeHolidayModal();
+      return;
+    }
 
     let datesToAdd: string[] = [];
     if (holidayInputMode === 'range') {
@@ -1579,12 +2183,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     });
 
     setHolidays(updatedHolidays);
-    setShowHolidayModal(false);
-    setNewHolidayName('');
-    setHolidayInputMode('range');
-    setHolidaySingleDate('');
-    setHolidayFromDate('');
-    setHolidayToDate('');
+    closeHolidayModal();
   };
 
   const handleDeleteHoliday = (id: string) => {
@@ -1946,30 +2545,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [showEditPayrollModal, setShowEditPayrollModal] = useState(false);
   const [editingPayrollItem, setEditingPayrollItem] = useState<PayrollItem | null>(null);
 
-  // States for printing custom payslip
+  // States for printing custom payslip — "Người phát lương"/"Kế toán" nay đọc
+  // trực tiếp từ Quyền Phê Duyệt (getConfiguredApprover/getConfiguredSettler,
+  // loại 'payroll') và địa điểm/ngày lập lấy "Lâm Đồng" + ngày khóa kỳ
+  // (xem getPayslipDatePlace) — không còn phải nhập lại thủ công mỗi lần in
+  // qua thẻ "Tùy Biến Thông Tin In" (đã bỏ theo yêu cầu). Ghi chú nay lưu
+  // THEO TỪNG DÒNG hạng mục lương trực tiếp trên PayrollItem.lineNotes (persist
+  // lên Supabase), không còn 1 ô ghi chú chung cho cả phiếu.
   const [showPrintPayslipModal, setShowPrintPayslipModal] = useState(false);
   const [printingPayrollItem, setPrintingPayrollItem] = useState<PayrollItem | null>(null);
-  const [printNotes, setPrintNotes] = useState<string>('');
-  const [printNguoiPhat, setPrintNguoiPhat] = useState<string>('');
-  const [printKeToanTruong, setPrintKeToanTruong] = useState<string>('');
-  const [printDatePlace, setPrintDatePlace] = useState<string>('');
-
-  // Automatically update printing defaults when selected item changes
-  useEffect(() => {
-    if (printingPayrollItem) {
-      setPrintNotes('');
-
-      // Calculate 15th of the following month for Vietnamese default payment date
-      let m = parseInt(payrollMonth) + 1;
-      let y = parseInt(payrollYear);
-      if (m > 12) {
-        m = 1;
-        y += 1;
-      }
-      const mStr = m.toString().padStart(2, '0');
-      setPrintDatePlace(`Lâm Đồng, ngày 15 tháng ${mStr} năm ${y}`);
-    }
-  }, [printingPayrollItem, payrollMonth, payrollYear]);
 
   // Form states for editing a single payroll item
   const [editWorkedDays, setEditWorkedDays] = useState(0);
@@ -1988,11 +2572,75 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const _calcPayroll = (emp: any, monthStr: string, inputs: any) => calculateSingleEmployeePayroll(emp, monthStr, inputs, salaryScales, standardWorkDays);
 
   // ===================== BLOCK TÍNH LƯƠNG (payroll) =====================
-  const handleCalculatePayroll = () => {
+  const handleCalculatePayroll = async () => {
     const monthStr = `${payrollMonth}/${payrollYear}`;
 
-    const newPayrollItems = employees
-      .filter((emp: any) => emp.status === 'working')
+    // Tải đúng công của KỲ LƯƠNG (payrollMonth/payrollYear) thay vì state `attendance`
+    // (chỉ chứa 1 tháng theo bộ lọc tab Chấm công ngày). Nếu hai bộ lọc khác tháng,
+    // payroll cũ rơi về mặc định standardWorkDays, không phản ánh "công đã chốt" thực tế.
+    const payFrom = `${payrollYear}-${payrollMonth}-01`;
+    const payTo = `${payrollYear}-${payrollMonth}-31`;
+    let monthAttendance: any[];
+    try {
+      const cached = dbService.attendance.getCachedRange(payFrom, payTo);
+      const base = cached && cached.length > 0 ? cached : (attendance || []);
+      const fresh = await dbService.attendance.listForRange(payFrom, payTo);
+      monthAttendance = fresh && fresh.length > 0 ? fresh : base;
+      // dedupe không mutate: làm sạch trùng lặp cục bộ, KHÔNG xoá record trên Supabase
+      monthAttendance = dedupAttendance(monthAttendance, false);
+    } catch (err) {
+      console.warn('Lỗi tải chấm công phục vụ tính lương, dùng dữ liệu đã tải trong tháng:', err);
+      monthAttendance = (attendance || []).filter((a: any) => {
+        if (!a.date) return false;
+        const parts = a.date.split('-');
+        return parts[1] === payrollMonth && parts[0] === payrollYear;
+      });
+    }
+
+    // Ban giám đốc KHÔNG cần chấm công (loại khỏi Bảng chấm công ngày như cũ)
+    // nhưng VẪN được tính lương tự động — luôn tính đủ công chuẩn ngày thường
+    // (xem `empAttendance` ép rỗng bên dưới), các cột khác (KPI, công tác phí,
+    // tạm ứng, bảo hiểm, thuế...) tính giống hệt nhân viên `working`.
+    const workingEmps = employees.filter((emp: any) => emp.status === 'working' || emp.status === 'director_board');
+    // Loại bỏ bản ghi trùng (cùng empId) để không nhân bản dòng lương trong bảng lương.
+    // (Bảng employees trên Supabase đôi khi có dòng trùng do import/lưu trước đó.)
+    const seenEmpIds = new Set<string>();
+    const uniqueWorkingEmps = workingEmps.filter((emp: any) => {
+      if (!emp.id) return true;
+      if (seenEmpIds.has(emp.id)) return false;
+      seenEmpIds.add(emp.id);
+      return true;
+    });
+
+    // ─── Tạm ứng từ Phiếu chi (đồng bộ) ──────────────────────────────────
+    // Lấy các phiếu chi "Ứng Lương Nhân Sự" (category = 'salary_advance')
+    // đã lập trong ĐÚNG kỳ lương, ghép theo TÊN người nhận (recipient = tên NV),
+    // tính tổng đưa vào cột Tạm ứng của bảng lương tự động.
+    let advancePayments: any[] = [];
+    try {
+      advancePayments = await dbService.payments.list();
+    } catch (err) {
+      console.warn('Lỗi tải phiếu chi phục vụ tính tạm ứng:', err);
+    }
+    const payrollPeriodPrefix = `${payrollYear}-${payrollMonth}`;
+    const sumAdvancesForEmp = (emp: any) =>
+      (advancePayments || [])
+        .filter((p: any) => {
+          // Chỉ tính phiếu chi ĐÃ DUYỆT — đề xuất tạm ứng đang chờ duyệt/bị từ chối
+          // chưa thực chi, không được trừ vào lương.
+          if (p.status !== 'approved') return false;
+          if (!p.date || !String(p.date).startsWith(payrollPeriodPrefix)) return false;
+          // Bắt buộc đúng nhóm gốc chi "Ứng Lương" (salary_advance) — không tính nhầm
+          // các phiếu chi khác nhóm (vd. thanh toán NCC/thầu phụ) dù có cùng employeeId.
+          if (p.category !== 'salary_advance') return false;
+          // Ưu tiên khớp CHÍNH XÁC theo MÃ NHÂN VIÊN (employeeId) khi có.
+          if (p.employeeId && emp.id) return p.employeeId === emp.id;
+          // Dự phòng cho phiếu chi cũ chưa có employeeId: ghép theo tên.
+          return !!(p.recipient && emp.name && String(p.recipient).trim().toLowerCase() === String(emp.name).trim().toLowerCase());
+        })
+        .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+
+    const newPayrollItems = uniqueWorkingEmps
       .map((emp) => {
       let inputs: any = {
         workedDays: standardWorkDays,
@@ -2008,30 +2656,35 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         expenses: 0
       };
 
-      const empAttendance = (attendance || []).filter((a: any) => {
+      // Ban giám đốc không chấm công → ép rỗng để nhánh "else" bên dưới tự áp
+      // dụng đủ công chuẩn (standardWorkDays), không tăng ca CN/Lễ — KHÔNG tra
+      // cứu log chấm công thật (nếu có sót log cũ cũng không dùng để tính).
+      const empAttendance = emp.status === 'director_board' ? [] : (monthAttendance || []).filter((a: any) => {
         if (!a.date) return false;
         const [aYear, aMonth] = a.date.split('-');
-        return aMonth === payrollMonth && aYear === payrollYear && a.empId === emp.id && a.status === 'valid';
+        // BỎ filter `a.status === 'valid'`: ngày bị đánh dấu invalid (vd. báo cáo
+        // lỗi chấm ra ca bị từ chối) vẫn giữ công thực tế đã làm (ca sáng 0.5),
+        // còn ca bị tranh chấp = 0. computeDailyWorkday tự trả 0 cho ngày nghỉ
+        // không phép (KP) hay OFF, nên không cần loại trừ theo status nữa.
+        return aMonth === payrollMonth && aYear === payrollYear && a.empId === emp.id;
       });
 
       const empErrors = (employeeErrors || []).filter((err: any) => {
         if (!err.date) return false;
         const [errYear, errMonth] = err.date.split('-');
-        return errMonth === String(Number(payrollMonth)) && errYear === payrollYear && err.employeeId === emp.id;
+        // KHÔNG dùng String(Number(payrollMonth)) — payrollMonth luôn có số 0 ở đầu
+        // (vd '08'), String(Number('08')) = '8' → so sánh '08' === '8' luôn sai với
+        // tháng 01-09, khiến KPI không bao giờ bị trừ. So sánh trực tiếp chuỗi.
+        return errMonth === payrollMonth && errYear === payrollYear && err.employeeId === emp.id;
       });
 
-      let deducedKpi = 100;
-      empErrors.forEach((err: any) => {
-        const notes = (err.notes || '').toLowerCase();
-        if (notes.includes('nặng') || notes.includes('nghiêm trọng')) deducedKpi -= 10;
-        else if (notes.includes('trung bình') || notes.includes('vừa')) deducedKpi -= 5;
-        else deducedKpi -= 2;
-      });
-      inputs.kpiScore = Math.max(0, deducedKpi);
+      // Điểm hiệu suất % theo ĐẾM SỐ LỖI vi phạm trong kỳ — dùng ĐÚNG bảng điểm của
+      // tab Hiệu suất (PerformanceTab) để hai nơi cho cùng một con số %.
+      inputs.kpiScore = calculateScoreFromErrorCount(empErrors.length);
 
-      let sundayCount = 0;
-      let holidayCount = 0;
-      let normalCount = 0;
+      let sundayWork = 0;
+      let holidayWork = 0;
+      let normalWork = 0;
 
       empAttendance.forEach((a: any) => {
         const aDateObj = new Date(a.date);
@@ -2044,16 +2697,24 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           }
         });
 
-        if (isHolidayDate) holidayCount++;
-        else if (isSunday) sundayCount++;
-        else normalCount++;
+        // Dùng công chi tiết (0.5/1.0/-1.0/...) thay vì đếm 1 bản ghi.
+        // Không truyền applyMultiplier:false → giữ hệ số nhân của computeDailyWorkday:
+        //   - Ngày thường: ×1 (công cơ sở)
+        //   - Chủ nhật đi làm: × hệ số TC (cấu hình Hệ số chấm công)
+        //   - Lễ/Tết đi làm: × hệ số TCL (cấu hình Hệ số chấm công)
+        //   - Phép (PN/P/KP/...), OFF, KP: trả đúng hệ số, KHÔNG nhân hệ số.
+        const wd = computeDailyWorkday(a, leaveCoefficients, holidays, weekendDays, leaves).workday;
+
+        if (isHolidayDate) holidayWork += wd;
+        else if (isSunday) sundayWork += wd;
+        else normalWork += wd;
       });
 
       // Determine workedDays (Công nhật), otSunday (TC Chủ Nhật), otHoliday (TC Lễ)
       if (empAttendance.length > 0) {
-        inputs.workedDays = normalCount;
-        inputs.otSunday = sundayCount;
-        inputs.otHoliday = holidayCount;
+        inputs.workedDays = normalWork;
+        inputs.otSunday = sundayWork;
+        inputs.otHoliday = holidayWork;
       } else {
         inputs.workedDays = standardWorkDays;
         inputs.otSunday = 0;
@@ -2071,14 +2732,16 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       inputs.otHours = totalOtHrs;
       inputs.otCount = otClts;
 
-      // Sum Expenses from Business trips
-      const tripSummary = (travelExpensesSummary || []).find((s: any) => s.empId === emp.id && s.month === `${payrollMonth}/${payrollYear}`);
-      inputs.expenses = tripSummary ? ((tripSummary.fuelFee ?? 0) + (tripSummary.mealFee ?? 0) + (tripSummary.lodgeFee ?? 0) + (tripSummary.otherFee ?? 0)) : 0;
+      // ─── Công Tác Phí (CTP) ──────────────────────────────────────────────
+      // Tổng CTP ĐÃ DUYỆT (status approved/completed) của nhân viên trong đúng kỳ lương.
+      // Logic thuần (đã kiểm thử) nằm ở sumApprovedTravelExpenses (hrCalculations.ts).
+      inputs.expenses = sumApprovedTravelExpenses(travelExpensesSummary, emp, payrollMonth, payrollYear);
 
       inputs.bonusHoliday = 0;
       inputs.bonusCreative = 0;
       inputs.otherDeductions = 0;
-      inputs.advances = 0;
+      // Đồng bộ Tạm ứng từ phiếu chi "Ứng Lương Nhân Sự" (salary_advance) của kỳ lương.
+      inputs.advances = sumAdvancesForEmp(emp);
 
       const calculated = _calcPayroll(emp, monthStr, inputs);
 
@@ -2117,18 +2780,23 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const emp = employees.find(e => e.id === editingPayrollItem.empId);
     if (!emp) return;
 
+    // Đọc từ state edit* (đã đổ sẵn giá trị gốc lúc mở modal ở handleOpenEditPayroll,
+    // người dùng có thể sửa qua các ô input) — TRƯỚC ĐÂY đọc thẳng từ
+    // editingPayrollItem (dữ liệu gốc, không đổi) nên "Ghi đè & Tái tính toán lương"
+    // không thể ghi đè được các trường chấm công/phụ cấp, chỉ đổi được 3 trường
+    // thưởng/giảm trừ — đây là lý do nút không dùng được đúng như tên gọi.
     const inputs = {
-      workedDays: Number(editingPayrollItem.workedDays) || 0,
-      kpiScore: Number(editingPayrollItem.kpiScore) || 0,
-      otSunday: Number(editingPayrollItem.otSunday) || 0,
-      otHoliday: Number(editingPayrollItem.otHoliday) || 0,
-      otHours: Number(editingPayrollItem.otHours) || 0,
-      otCount: Number(editingPayrollItem.otCount) || 0,
+      workedDays: Number(editWorkedDays) || 0,
+      kpiScore: Number(editKpiScore) || 0,
+      otSunday: Number(editOtSunday) || 0,
+      otHoliday: Number(editOtHoliday) || 0,
+      otHours: Number(editOtHours) || 0,
+      otCount: Number(editOtCount) || 0,
       bonusHoliday: Number(editBonusHoliday) || 0,
       bonusCreative: Number(editBonusCreative) || 0,
       otherDeductions: Number(editOtherDeductions) || 0,
-      advances: Number(editingPayrollItem.advances) || 0,
-      expenses: Number(editingPayrollItem.expenses) || 0
+      advances: Number(editAdvances) || 0,
+      expenses: Number(editExpenses) || 0
     };
 
     const calculated = _calcPayroll(emp, editingPayrollItem.month, inputs);
@@ -2186,6 +2854,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <th rowspan="2">Trừ BHXH (10.5%)</th>
               <th rowspan="2">Khoản giảm trừ khác</th>
               <th rowspan="2">Tạm ứng</th>
+              <th rowspan="2">Thu nhập miễn thuế</th>
+              <th rowspan="2">Thu nhập chịu thuế</th>
+              <th colspan="3">Giảm trừ gia cảnh</th>
+              <th rowspan="2">Thu nhập tính thuế</th>
+              <th rowspan="2">Thuế TNCN</th>
               <th rowspan="2">Thực lĩnh</th>
             </tr>
             <tr>
@@ -2198,12 +2871,31 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <th>Giờ TC</th>
               <th>Số lần TC</th>
               <th>Tiền TC ngoài giờ</th>
+              <th>Giảm trừ bản thân</th>
+              <th>Số người phụ thuộc</th>
+              <th>Giảm trừ người phụ thuộc</th>
             </tr>
           </thead>
           <tbody>
     `;
 
-    payroll.forEach((pay, index) => {
+    // BUG CŨ: forEach thẳng qua `payroll` (state chứa TOÀN BỘ lịch sử mọi kỳ đã
+    // từng tính, nạp 1 lần lúc mount từ hrm_payroll_records) mà không lọc theo kỳ
+    // đang chọn — 1 nhân viên đã từng được tính lương ở nhiều tháng sẽ bị xuất
+    // lặp lại nhiều dòng trong file Excel. Lọc đúng kỳ (giống filteredPayroll ở
+    // PayrollTab.tsx) trước khi xuất, đồng thời dedupe theo empId (giữ bản ghi
+    // cuối cùng) phòng trường hợp có dữ liệu trùng id sót lại.
+    const periodPayroll = (payroll || []).filter((p: any) => p.month === `${payrollMonth}/${payrollYear}`);
+    const seenExportEmpIds = new Set<string>();
+    const dedupedPayroll: any[] = [];
+    for (let i = periodPayroll.length - 1; i >= 0; i--) {
+      const p = periodPayroll[i];
+      if (p.empId && seenExportEmpIds.has(p.empId)) continue;
+      if (p.empId) seenExportEmpIds.add(p.empId);
+      dedupedPayroll.unshift(p);
+    }
+
+    dedupedPayroll.forEach((pay, index) => {
       const emp = employees.find(e => e.id === pay.empId);
       const roleName = emp ? emp.position : 'Nhân viên';
       
@@ -2220,10 +2912,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           <td class="number bold" style="background-color: #f7f9fa;">${(pay.monthlySalary || 0).toLocaleString()}</td>
           <td class="number">${pay.otSunday || 0}</td>
           <td class="number">${pay.otHoliday || 0}</td>
-          <td class="number">${(pay.otWeekendSalary || 0).toLocaleString()}</td>
+          <td class="number">${((pay.otSundaySalary || 0) + (pay.otHolidaySalary || 0)).toLocaleString()}</td>
           <td class="number">${pay.otHours || 0}</td>
           <td class="number">${pay.otCount || 0}</td>
-          <td class="number">${(pay.totalOtHoursSalary || 0).toLocaleString()}</td>
+          <td class="number">${(pay.otHoursSalary || 0).toLocaleString()}</td>
           <td class="number">${(pay.expenses || 0).toLocaleString()}</td>
           <td class="number">${(pay.bonusHoliday || 0).toLocaleString()}</td>
           <td class="number">${(pay.bonusCreative || 0).toLocaleString()}</td>
@@ -2231,21 +2923,35 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
           <td class="number" style="color: #c00000;">${(pay.insurance || 0).toLocaleString()}</td>
           <td class="number">${(pay.otherDeductions || 0).toLocaleString()}</td>
           <td class="number">${(pay.advances || 0).toLocaleString()}</td>
+          <td class="number">${(pay.taxExemptIncome || 0).toLocaleString()}</td>
+          <td class="number">${(pay.taxableIncome || 0).toLocaleString()}</td>
+          <td class="number">${(pay.personalDeduction || 0).toLocaleString()}</td>
+          <td class="number">${pay.dependentCount || 0}</td>
+          <td class="number">${(pay.dependentDeduction || 0).toLocaleString()}</td>
+          <td class="number">${(pay.taxableNetIncome || 0).toLocaleString()}</td>
+          <td class="number" style="color: #c00000;">${(pay.tax || 0).toLocaleString()}</td>
           <td class="number bold" style="background-color: #fff2cc; color: maroon; font-size: 11px;">${(pay.netSalary || 0).toLocaleString()}</td>
         </tr>
       `;
     });
 
-    const totalBase = payroll.reduce((sum, p) => sum + (p.baseSalary || 0), 0);
-    const totalMonthly = payroll.reduce((sum, p) => sum + (p.monthlySalary || 0), 0);
-    const totalOtW = payroll.reduce((sum, p) => sum + (p.otWeekendSalary || 0), 0);
-    const totalOtH = payroll.reduce((sum, p) => sum + (p.totalOtHoursSalary || 0), 0);
-    const totalExp = payroll.reduce((sum, p) => sum + (p.expenses || 0), 0);
-    const totalInc = payroll.reduce((sum, p) => sum + (p.totalIncome || 0), 0);
-    const totalIns = payroll.reduce((sum, p) => sum + (p.insurance || 0), 0);
-    const totalDed = payroll.reduce((sum, p) => sum + (p.otherDeductions || 0), 0);
-    const totalAdv = payroll.reduce((sum, p) => sum + (p.advances || 0), 0);
-    const totalNet = payroll.reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    const totalBase = dedupedPayroll.reduce((sum, p) => sum + (p.baseSalary || 0), 0);
+    const totalMonthly = dedupedPayroll.reduce((sum, p) => sum + (p.monthlySalary || 0), 0);
+    const totalOtW = dedupedPayroll.reduce((sum, p) => sum + (p.otSundaySalary || 0) + (p.otHolidaySalary || 0), 0);
+    const totalOtH = dedupedPayroll.reduce((sum, p) => sum + (p.otHoursSalary || 0), 0);
+    const totalExp = dedupedPayroll.reduce((sum, p) => sum + (p.expenses || 0), 0);
+    const totalInc = dedupedPayroll.reduce((sum, p) => sum + (p.totalIncome || 0), 0);
+    const totalIns = dedupedPayroll.reduce((sum, p) => sum + (p.insurance || 0), 0);
+    const totalDed = dedupedPayroll.reduce((sum, p) => sum + (p.otherDeductions || 0), 0);
+    const totalAdv = dedupedPayroll.reduce((sum, p) => sum + (p.advances || 0), 0);
+    const totalNet = dedupedPayroll.reduce((sum, p) => sum + (p.netSalary || 0), 0);
+    const totalExempt = dedupedPayroll.reduce((sum, p) => sum + (p.taxExemptIncome || 0), 0);
+    const totalTaxableIncome = dedupedPayroll.reduce((sum, p) => sum + (p.taxableIncome || 0), 0);
+    const totalPersonalDed = dedupedPayroll.reduce((sum, p) => sum + (p.personalDeduction || 0), 0);
+    const totalDependents = dedupedPayroll.reduce((sum, p) => sum + (p.dependentCount || 0), 0);
+    const totalDependentDed = dedupedPayroll.reduce((sum, p) => sum + (p.dependentDeduction || 0), 0);
+    const totalTaxableNet = dedupedPayroll.reduce((sum, p) => sum + (p.taxableNetIncome || 0), 0);
+    const totalTax = dedupedPayroll.reduce((sum, p) => sum + (p.tax || 0), 0);
 
     htmlContent += `
           <tr style="font-weight: bold; background-color: #f2f2f2;">
@@ -2269,6 +2975,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             <td class="number" style="color: #c00000;">${totalIns.toLocaleString()}</td>
             <td class="number">${totalDed.toLocaleString()}</td>
             <td class="number">${totalAdv.toLocaleString()}</td>
+            <td class="number">${totalExempt.toLocaleString()}</td>
+            <td class="number">${totalTaxableIncome.toLocaleString()}</td>
+            <td class="number">${totalPersonalDed.toLocaleString()}</td>
+            <td class="number">${totalDependents.toLocaleString()}</td>
+            <td class="number">${totalDependentDed.toLocaleString()}</td>
+            <td class="number">${totalTaxableNet.toLocaleString()}</td>
+            <td class="number" style="color: #c00000;">${totalTax.toLocaleString()}</td>
             <td class="number" style="background-color: #ffe699; color: maroon;">${totalNet.toLocaleString()}</td>
           </tr>
         </tbody>
@@ -2326,7 +3039,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return;
     }
     const newLog: AttendanceLog = {
-      id: `AT-${Date.now().toString().slice(-4)}`,
+      // id XÁC ĐỊNH từ empId + ngày → mọi lần chấm của cùng 1 NV trong ngày trúng CÙNG dòng.
+      // (dbService.attendance.save cũng chuẩn hóa về đúng id này, nên nhất quán.)
+      id: `AT-${empId}-${todayStr.replace(/-/g, '')}`,
       empId,
       empName: name,
       date: todayStr,
@@ -2342,6 +3057,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       notes: 'Hệ thống vệ tinh xác nhận chấm công thực tế thành công'
     };
     setAttendance([newLog, ...attendance]);
+    // Đồng bộ lên Supabase
+    dbService.attendance.save(newLog).catch(err => console.warn('Lưu chấm công lên Supabase thất bại:', err));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: [newLog, ...attendance] } }));
     addToast({ title: '✅ Thành công', message: `⚡ Chấm công thành công cho [${empId}] ${name} vào lúc 07:28 sáng ngày hôm nay!`, type: 'success' });
   };
 
@@ -2479,7 +3197,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return dates;
     };
 
-    setLeaves(leaves.map(l => {
+    const updatedLeaves = leaves.map(l => {
       if (l.id === id) {
         if (status === 'approved') {
           try {
@@ -2490,7 +3208,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             leaveDates.forEach(dStr => {
               const idx = updatedAttendance.findIndex(at => at.empId === l.empId && at.date === dStr);
               if (idx !== -1) {
-                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') {
+                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) {
                   const currentAt = updatedAttendance[idx];
                   let timeInS = currentAt.timeInS;
                   let timeOutS = currentAt.timeOutS;
@@ -2505,6 +3223,16 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     }
                   } else if (l.type === 'Báo cáo nghỉ ca') {
                     // Trạng thái ngày đó sẽ là HỢP LỆ, không cần ghi thêm giờ nếu không có sẵn
+                  } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
+                    // Lỗi hệ thống không thể chấm công: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO
+                    // (chỉ ca đó; ca còn lại giữ nguyên giờ hiện tại để không làm sai lệch).
+                    if (l.shift === 'morning') {
+                      timeInS = '07:30';
+                      timeOutS = '11:30';
+                    } else if (l.shift === 'afternoon') {
+                      timeInC = '13:00';
+                      timeOutC = '17:00';
+                    }
                   } else {
                     timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : '07:30';
                     timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : '11:30';
@@ -2535,7 +3263,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   };
                 }
               } else {
-                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') {
+                if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) {
                   let timeInS = '07:30';
                   let timeOutS = '11:30';
                   let timeInC = '13:00';
@@ -2565,10 +3293,23 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       timeInC = '';
                       timeOutC = '';
                     }
+                  } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
+                    // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO, ca còn lại để trống.
+                    if (l.shift === 'morning') {
+                      timeInS = '07:30';
+                      timeOutS = '11:30';
+                      timeInC = '';
+                      timeOutC = '';
+                    } else if (l.shift === 'afternoon') {
+                      timeInS = '';
+                      timeOutS = '';
+                      timeInC = '13:00';
+                      timeOutC = '17:00';
+                    }
                   }
 
                   const simulatedLog: AttendanceLog = {
-                    id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`,
+                    id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
@@ -2587,7 +3328,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   updatedAttendance.unshift(simulatedLog);
                 } else {
                   const simulatedLog: AttendanceLog = {
-                    id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`,
+                    id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
@@ -2608,11 +3349,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             });
 
             setAttendance(updatedAttendance);
+            // Đồng bộ các log mới tạo khi duyệt phép lên Supabase
+            updatedAttendance.filter(a => a.id.startsWith('AT-')).forEach(a =>
+              dbService.attendance.save(a).catch(() => {}));
+            window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updatedAttendance } }));
           } catch (e) {
             console.error(e);
           }
         } else if (status === 'rejected') {
-          if (l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') {
+          if (isAttendanceReportType(l.type)) {
             try {
               const leaveDates = getDaysDiffList(l.fromDate, l.toDate);
               let updatedAttendance = [...attendance];
@@ -2628,7 +3373,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   };
                 } else {
                   const simulatedLog: AttendanceLog = {
-                    id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`,
+                    id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
@@ -2649,6 +3394,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               });
 
               setAttendance(updatedAttendance);
+              // Đồng bộ khi từ chối đơn phép lên Supabase
+              updatedAttendance.filter(a => a.id.startsWith('AT-')).forEach(a =>
+                dbService.attendance.save(a).catch(() => {}));
+              window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: updatedAttendance } }));
             } catch (e) {
               console.error(e);
             }
@@ -2657,12 +3406,37 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         return { ...l, status };
       }
       return l;
-    }));
+    });
+    setLeaves(updatedLeaves);
+    // Đồng bộ ngay trạng thái duyệt sang Dashboard (Tổng quan) để huy hiệu
+    // "✅ Đã duyệt" và việc ẩn cảnh báo "!" cập nhật tức thì, không chờ remount tab.
+    window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_hrm', { detail: updatedLeaves }));
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → nhân viên nộp đơn)
+    if (currentUser?.id && targetLeave?.empId && currentUser.id !== targetLeave.empId) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: targetLeave.empId,
+        recipientName: targetLeave.empName,
+        content: status === 'approved'
+          ? `✅ Đã duyệt đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`
+          : `❌ Đã từ chối đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`,
+        relatedEntity: { type: 'leave', id: targetLeave.id },
+      });
+    }
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });
     } else {
       addToast({ title: 'ℹ️ Thông báo', message: "Từ chối", type: 'info' });
     }
+  };
+
+  // Xóa hẳn 1 đơn nghỉ phép (dùng cho nút Xóa ở thẻ Chi tiết / xóa hàng loạt
+  // trong LeavesTab). Không hoàn tác — component con đã hỏi xác nhận trước khi gọi.
+  const handleDeleteLeave = (id: string) => {
+    setLeaves(prev => prev.filter(l => l.id !== id));
+    dbService.hrmLeaves.delete(id).catch(err => console.warn('Xóa đơn nghỉ phép trên Supabase thất bại:', err));
   };
 
   // ===================== BLOCK CÔNG TÁC PHÍ (trips) =====================
@@ -2761,332 +3535,362 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     setShowPrintPayslipModal(true);
   };
 
-  const downloadPDFPayslip = async (item: PayrollItem) => {
-    const element = document.getElementById('printable-payslip-canvas-content');
-    if (!element) {
-      addToast({ title: 'ℹ️ Thông báo', message: 'Không tìm thấy nội dung phiếu lương để tải PDF!', type: 'warning' });
-      return;
-    }
-
-    const opt = {
-      margin:       10, // 10mm margins for a crisp fit
-      filename:     `PhieuLuong_${item.empId}_Thang${item.month.replace('/', '_')}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-
-    const html2pdf = (await loadHtml2Pdf()) as any;
-    html2pdf().from(element).set(opt).save();
+  // Địa điểm cố định "Lâm Đồng"; ngày lập lấy theo ngày "Khóa kỳ & Phát phiếu
+  // lương" (item.lockedAt) nếu kỳ đã khóa — chưa khóa thì tạm dùng ngày hiện tại.
+  const getPayslipDatePlace = (item: PayrollItem): string => {
+    const d = item.lockedAt ? new Date(item.lockedAt) : new Date();
+    return `Lâm Đồng, ngày ${d.getDate()} tháng ${d.getMonth() + 1} năm ${d.getFullYear()}`;
   };
 
-  const downloadRawTextSlip = (item: PayrollItem) => {
-    const slipText = `
-========================================
-    PHIẾU LƯƠNG NHÂN VIÊN CHI TIẾT
-         CÔNG TY HOÀNG LONG (LÂM ĐỒNG)
-========================================
-Mã nhân viên   : ${item.empId}
-Tên nhân viên  : ${item.empName}
-Thời điểm kỳ   : Tháng ${item.month}
-----------------------------------------
-Thu nhập chính thức:
- + Lương theo công : ${item.baseSalary.toLocaleString('vi-VN')} đ
- + Ngày công đạt   : ${item.workedDays} ngày công
- + Lương tăng ca   : ${(item.otSundaySalary + item.otHolidaySalary).toLocaleString('vi-VN')} đ
- + Lương tăng ca ngoài giờ: ${(item.otHoursSalary || 0).toLocaleString('vi-VN')} đ (${item.otHours} giờ)
- + Thưởng KPI      : ${item.kpiBonus.toLocaleString('vi-VN')} đ
-----------------------------------------
-Các khoản khấu trừ:
- - Tạm ứng kỳ trước: ${item.advances.toLocaleString('vi-VN')} đ
- - Đóng Bảo hiểm   : ${item.insurance.toLocaleString('vi-VN')} đ
- - Thuế TNCN tạm tính: ${(item.tax || 0).toLocaleString('vi-VN')} đ
- - Khấu trừ khác   : ${item.otherDeductions.toLocaleString('vi-VN')} đ
-----------------------------------------
-THỰC NHẬN CHUYỂN KHOẢN:
- >>> ${item.netSalary.toLocaleString('vi-VN')} đ <<<
-----------------------------------------
-Kế Toán: ${printKeToanTruong}
-Người lập/phát phiếu: ${printNguoiPhat}
-========================================
-Generated by HL ERP Cloud v2.1 (2026)
-`;
-    const textBlob = new Blob([slipText], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(textBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `PhieuLuong_${item.empId}_Thang${item.month.replace('/', '_')}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handlePrintPayslip = (
-    item: PayrollItem,
-    notes: string,
-    nguoiPhat: string,
-    keToan: string
-  ) => {
-    const targetEmp = employees.find((e: any) => e.id === item.empId);
-    const position = targetEmp?.position || 'Nhân viên';
-    
+  // Danh sách dòng hạng mục lương hiển thị trên phiếu — dùng chung cho cả bảng
+  // xem trước, HTML xuất PDF/in, và danh sách ô nhập "ghi chú theo dòng".
+  const getPayslipLineItems = (item: PayrollItem) => {
     const dayAndPerformanceSalary = item.daySalary || 0;
     const otWeekendAndHoliday = (item.otSundaySalary || 0) + (item.otHolidaySalary || 0);
-    const perfSalary = item.performanceSalary || 0;
-    const kpiBonus = item.kpiBonus || 0;
-    const docTien = docSoTiengViet(item.netSalary);
+    return [
+      { key: 'baseSalary', label: 'Lương cơ bản', value: (item.baseSalary || 0).toLocaleString('vi-VN') },
+      { key: 'workedDays', label: 'Ngày công đi làm', value: String(item.workedDays || 0) },
+      { key: 'performanceSalary', label: 'Thưởng hiệu suất 100%', value: (item.performanceSalary || 0).toLocaleString('vi-VN') },
+      { key: 'kpiScore', label: 'Điểm KPI', value: String(item.kpiScore || 100) },
+      { key: 'kpiBonus', label: 'Mức hưởng KPI', value: (item.kpiBonus || 0).toLocaleString('vi-VN') },
+      { key: 'dayAndPerformanceSalary', label: 'Lương ngày công + Hiệu suất', value: dayAndPerformanceSalary.toLocaleString('vi-VN'), bold: true },
+      { key: 'otWeekendAndHoliday', label: 'Lương tăng ca lễ, CN', value: otWeekendAndHoliday.toLocaleString('vi-VN') },
+      { key: 'otHoursSalary', label: 'Lương tăng ca ngoài giờ', value: (item.otHoursSalary || 0).toLocaleString('vi-VN') },
+      { key: 'bonusHoliday', label: 'Thưởng lễ', value: (item.bonusHoliday || 0).toLocaleString('vi-VN') },
+      { key: 'bonusCreative', label: 'Thưởng sáng kiến', value: (item.bonusCreative || 0).toLocaleString('vi-VN') },
+      { key: 'expenses', label: 'Công tác phí', value: (item.expenses || 0).toLocaleString('vi-VN') },
+      { key: 'totalIncome', label: 'Tổng thu nhập & công tác phí', value: (item.totalIncome || 0).toLocaleString('vi-VN'), bold: true },
+      { key: 'otherDeductions', label: 'Khoản giảm trừ khác', value: (item.otherDeductions || 0).toLocaleString('vi-VN') },
+      { key: 'tax', label: 'Thuế TNCN', value: (item.tax || 0).toLocaleString('vi-VN') },
+      { key: 'insurance', label: 'Khấu trừ BHXH 10,5%', value: (item.insurance || 0).toLocaleString('vi-VN') },
+      { key: 'advances', label: 'Tạm ứng hoặc lĩnh trước', value: (item.advances || 0).toLocaleString('vi-VN') },
+    ];
+  };
 
+  // Dựng phần NỘI DUNG (style + .page) của phiếu lương — dùng chung cho cả xem
+  // trước trên màn hình (dangerouslySetInnerHTML), in (window.print) và xuất
+  // PDF (html2canvas), tránh 3 bản viết tay lệch nhau như trước đây.
+  // editable=true CHỈ dùng cho bản xem trước trên màn hình (cho phép bấm thẳng
+  // vào dòng ghi chú để gõ, khỏi cần ô nhập riêng) — bản in/PDF/zip luôn dựng
+  // với editable=false (contenteditable không có ý nghĩa khi in/xuất ảnh tĩnh,
+  // và tránh viền nét đứt hiện tác dụng phụ trên phiếu in thật).
+  const buildPayslipFragment = (item: PayrollItem, editable: boolean = false): string => {
+    const emp = employees.find((e: any) => e.id === item.empId);
+    const position = emp?.position || 'Nhân viên';
+    const cp: any = businessInfo || {};
+    const docTien = docSoTiengViet(item.netSalary);
+    const nguoiPhat = getConfiguredApprover('payroll');
+    const keToan = getConfiguredSettler('payroll');
+    const lineNotes = item.lineNotes || {};
+    const rows = getPayslipLineItems(item).map(li => {
+      const noteText = lineNotes[li.key] || '';
+      const noteHtml = editable
+        ? `<div class="line-note line-note-editable" contenteditable="true" data-note-key="${escHtml(li.key)}" data-placeholder="+ Bấm để ghi chú...">${escHtml(noteText)}</div>`
+        : (noteText ? `<div class="line-note">${escHtml(noteText)}</div>` : '');
+      return `
+      <tr>
+        <td class="lbl">${escHtml(li.label)}${noteHtml}</td>
+        <td class="val${li.bold ? ' bold' : ''}">${li.value}</td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <style>
+        /* Khổ A5 (148 x 210mm) — thu gọn cỡ chữ/khoảng cách so với khổ A4 cũ.
+           QUAN TRỌNG: MỌI selector bên dưới đều được scope trong ".pdf-export-root"
+           (class gắn trên chính div gốc của fragment này) — KHÔNG được dùng selector
+           trần (*, body, hr, table...) vì fragment này render trực tiếp vào document
+           CHÍNH của app qua dangerouslySetInnerHTML (bản xem trước) và qua
+           document.body.appendChild (lúc xuất PDF ở generatePayslipPdfBlob), KHÔNG
+           phải trong 1 document/iframe cô lập riêng. Từng có sự cố thật: rule
+           "* { padding: 0 }" không scope đã rò rỉ ra TOÀN BỘ trang, xóa mất padding
+           của mọi nút bấm dùng class py-2.5 trong cả app khi đang mở modal phiếu
+           lương — chỉ buildPayslipHtml() (mở cửa sổ in riêng, document độc lập) mới
+           thực sự an toàn với selector trần, còn 2 chỗ dùng chung fragment này thì không. */
+        @page { size: A5; margin: 8mm 10mm; }
+        .pdf-export-root, .pdf-export-root * { box-sizing: border-box; margin: 0; padding: 0; }
+        .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 9.5px; line-height: 1.4; }
+        .pdf-export-root.page { padding: 0; }
+        .pdf-export-root table.header { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+        .pdf-export-root table.header td { vertical-align: top; padding: 0; }
+        .pdf-export-root .company-info { width: 55%; }
+        .pdf-export-root .company-info .name { font-size: 11px; font-weight: bold; margin-bottom: 2px; }
+        .pdf-export-root .company-info .detail { font-size: 8.5px; color: #333; margin: 1px 0; }
+        .pdf-export-root .doc-title-block { width: 45%; text-align: right; }
+        .pdf-export-root .doc-title-block .doc-title { font-size: 14px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; }
+        .pdf-export-root .doc-title-block .doc-period { font-size: 10px; font-weight: bold; margin-top: 2px; }
+        .pdf-export-root hr { border: none; border-top: 1.5px solid #222; margin: 5px 0; }
+        .pdf-export-root table.info { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+        .pdf-export-root table.info td { padding: 1.5px 0; font-size: 9.5px; }
+        .pdf-export-root table.info .lbl { font-weight: bold; width: 70px; }
+        .pdf-export-root table.salary { width: 100%; border-collapse: collapse; margin-top: 4px; background: #fff; }
+        /* !important bắt buộc: src/index.css có rule toàn cục "td, th, tr { border-color:
+           #e2e8f0 !important }" (ép viền xám nhạt cho MỌI bảng trong app) — do bản xem
+           trước phiếu lương render trực tiếp trong document chính (dangerouslySetInnerHTML,
+           không phải cửa sổ in riêng), rule đó vẫn áp dụng và đè mất viền đen nếu không
+           dùng !important tương tự cách bảng báo giá đã xử lý (xem .border-black trong
+           index.css). */
+        .pdf-export-root table.salary td { border: 0.5px solid #000 !important; background: #fff; padding: 3px 5px; font-size: 9px; font-family: 'Times New Roman', serif; }
+        .pdf-export-root table.salary td.lbl { font-weight: bold; width: 62%; }
+        .pdf-export-root table.salary td.val { text-align: right; width: 38%; }
+        .pdf-export-root table.salary td.bold { font-weight: bold; }
+        .pdf-export-root .line-note { font-weight: normal; font-style: italic; font-size: 7.5px; color: #666; margin-top: 1px; }
+        /* Chỉ áp dụng cho bản xem trước editable=true — viền nét đứt/placeholder
+           chỉ hiện trên màn hình, KHÔNG lộ ra khi in/xuất PDF (editable=false
+           không gắn class này nên không có CSS này áp dụng). */
+        /* Vùng bấm được nới rộng hơn khung chữ thật (padding + min-height) để dễ
+           bấm trúng trên preview thu nhỏ — chữ vẫn nhỏ (7.5px) nhưng vùng nhận
+           click/chạm cao hơn nhiều so với chỉ 1 dòng chữ (đủ cho ngón tay/chuột). */
+        .pdf-export-root .line-note-editable { display: block; outline: none; cursor: text; border-bottom: 1px dashed transparent; min-height: 14px; padding: 2px 3px; margin: 1px -3px 0; border-radius: 2px; }
+        .pdf-export-root .line-note-editable:hover, .pdf-export-root .line-note-editable:focus { border-bottom-color: #f59e0b; background: #fffbeb; }
+        .pdf-export-root .line-note-editable:empty::before { content: attr(data-placeholder); color: #bbb; font-style: italic; }
+        .pdf-export-root .net-row td { background: #fff; font-weight: bold; font-size: 10.5px; }
+        .pdf-export-root .words-row td { font-style: italic; font-size: 8.5px; }
+        .pdf-export-root .sign-date { text-align: right; font-size: 9px; font-style: italic; margin: 6px 0 4px; }
+        .pdf-export-root table.signatures { width: 100%; border-collapse: collapse; text-align: center; font-size: 8.5px; margin-top: 4px; }
+        .pdf-export-root table.signatures td { vertical-align: top; width: 33.33%; }
+        .pdf-export-root .signatures .sig-title { font-weight: bold; }
+        .pdf-export-root .signatures .sig-note { font-size: 7.5px; color: #666; font-style: italic; margin-top: 2px; }
+        .pdf-export-root .signatures .sig-name { font-weight: bold; margin-top: 24px; }
+      </style>
+      <div class="page pdf-export-root">
+        <table class="header"><tr>
+          <td class="company-info">
+            <div class="name">${escHtml(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
+            ${cp.address ? `<div class="detail">Địa chỉ: ${escHtml(cp.address)}</div>` : ''}
+            ${cp.phone ? `<div class="detail">Điện thoại: ${escHtml(cp.phone)}</div>` : ''}
+            ${cp.taxCode ? `<div class="detail">MST: ${escHtml(cp.taxCode)}</div>` : ''}
+          </td>
+          <td class="doc-title-block">
+            <div class="doc-title">Phiếu Lương</div>
+            <div class="doc-period">Tháng ${escHtml(item.month)}</div>
+          </td>
+        </tr></table>
+        <hr/>
+        <table class="info">
+          <tr><td class="lbl">Họ và tên:</td><td><strong>${escHtml(item.empName)}</strong></td></tr>
+          <tr><td class="lbl">Mã NV:</td><td>${escHtml(item.empId)}</td></tr>
+          <tr><td class="lbl">Chức vụ:</td><td>${escHtml(position)}</td></tr>
+        </table>
+        <table class="salary">
+          ${rows}
+          <tr class="net-row"><td class="lbl">Thực lĩnh tháng này</td><td class="val">${(item.netSalary || 0).toLocaleString('vi-VN')}</td></tr>
+          <tr class="words-row"><td class="lbl">Số tiền bằng chữ</td><td>${escHtml(docTien)}</td></tr>
+        </table>
+        <div class="sign-date">${getPayslipDatePlace(item)}</div>
+        <table class="signatures"><tr>
+          <td>
+            <div class="sig-title">Người nhận</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${escHtml(item.empName)}</div>
+          </td>
+          <td>
+            <div class="sig-title">Người phát lương</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${escHtml(nguoiPhat?.name || '')}</div>
+          </td>
+          <td>
+            <div class="sig-title">Kế toán</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${escHtml(keToan?.name || '')}</div>
+          </td>
+        </tr></table>
+      </div>
+    `;
+  };
+
+  const buildPayslipHtml = (item: PayrollItem): string =>
+    `<!doctype html><html><head><meta charset="utf-8"><title>Phieu_Luong_${item.empId}_${item.month.replace('/', '_')}</title></head><body>${buildPayslipFragment(item)}</body></html>`;
+
+  // Bọc useMemo: bản xem trước chỉnh sửa được (editable=true, dangerouslySetInnerHTML)
+  // chỉ nên dựng lại DOM khi `printingPayrollItem` THỰC SỰ đổi (chọn phiếu khác /
+  // vừa lưu ghi chú). Nếu gọi buildPayslipFragment() trực tiếp trong JSX, MỌI
+  // re-render khác của component (kể cả không liên quan gì tới phiếu lương) đều
+  // tạo ra 1 chuỗi HTML mới → React reset lại toàn bộ nội dung contenteditable,
+  // XÓA MẤT chữ người dùng đang gõ dở trước khi kịp blur để lưu. useMemo giữ
+  // nguyên chuỗi (React so sánh giá trị __html, không phải reference) nên DOM
+  // không bị reset ngoài ý muốn giữa lúc đang gõ.
+  const payslipPreviewFragment = React.useMemo(
+    () => (printingPayrollItem ? buildPayslipFragment(printingPayrollItem, true) : ''),
+    [printingPayrollItem]
+  );
+
+  // Dựng PDF phiếu lương thành Blob — dùng chung cho "Tải PDF" (1 người) và
+  // "Tải toàn bộ phiếu lương" (nén .zip toàn bộ nhân viên trong kỳ), cùng cơ
+  // chế html2canvas + jsPDF thủ công như generateOrderPdfBlob (Đơn Mua Hàng)
+  // ở MaterialCoordination.tsx — KHÔNG dùng html2pdf.js (từng gây ảnh cao 0px).
+  const generatePayslipPdfBlob = async (item: PayrollItem): Promise<Blob> => {
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '559px'; // ~ khổ A5 148mm ở 96dpi
+    container.style.background = '#ffffff';
+    container.innerHTML = buildPayslipFragment(item);
+    document.body.appendChild(container);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 8, marginSide = 10;
+      const pageWidthMm = 148, pageHeightMm = 210;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a5', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Tên file không dấu, viết liền, theo đúng format yêu cầu (TenNhanVien_ThangMM_NamYYYY)
+  const payslipFileBaseName = (item: PayrollItem): string => {
+    const nameNoDiacritics = removeVietnameseTones(item.empName || item.empId).replace(/\s+/g, '');
+    return `${nameNoDiacritics}_Thang${item.month.replace('/', '_Nam')}`;
+  };
+
+  const downloadPDFPayslip = async (item: PayrollItem) => {
+    try {
+      const blob = await generatePayslipPdfBlob(item);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${payslipFileBaseName(item)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file PDF phiếu lương.', type: 'warning' });
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF phiếu lương — dùng chung cơ chế Web Share API
+  // với sharePayslip/shareOrder của Đơn Mua Hàng (MaterialCoordination.tsx):
+  // ưu tiên hộp thoại Chia sẻ của hệ điều hành (gửi thẳng file qua Zalo/Messenger...),
+  // rơi về tải file PDF nếu thiết bị/trình duyệt không hỗ trợ chia sẻ file.
+  const sharePayslip = async (item: PayrollItem) => {
+    try {
+      const blob = await generatePayslipPdfBlob(item);
+      const fileName = `${payslipFileBaseName(item)}.pdf`;
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Phiếu lương ${item.empName}`, text: `Phiếu lương ${item.empName} - tháng ${item.month}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: 'ℹ️ Đã tải PDF', message: 'Thiết bị không hỗ trợ chia sẻ file trực tiếp — đã tải PDF về máy để gửi thủ công.', type: 'info' });
+    } catch (e) {
+      addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file PDF để chia sẻ.', type: 'warning' });
+    }
+  };
+
+  // Ghi chú theo TỪNG DÒNG hạng mục lương — lưu trực tiếp vào PayrollItem.lineNotes
+  // (persist lên Supabase qua bulk-save effect của `payroll`), phản ánh ngay trên
+  // bản xem trước + PDF/in.
+  const handleSavePayslipLineNote = (item: PayrollItem, key: string, note: string) => {
+    const updated: PayrollItem = { ...item, lineNotes: { ...(item.lineNotes || {}), [key]: note } };
+    setPrintingPayrollItem(updated);
+    setPayroll(payroll.map(p => p.id === updated.id ? updated : p));
+  };
+
+  // In phiếu lương — dùng chung buildPayslipHtml với PDF/xem trước (xem comment
+  // ở generatePayslipPdfBlob), giống cách printOrder dùng buildPurchaseOrderHtml
+  // ở MaterialCoordination.tsx, thay vì tự dựng riêng 1 bản HTML khác như trước.
+  const handlePrintPayslip = (item: PayrollItem) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng cho phép mở popup trên trình duyệt của bạn để thực hiện in phiếu lương!', type: 'warning' });
       return;
     }
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Phieu_Luong_${item.empId}</title>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
-            body {
-              font-family: 'Roboto', 'Times New Roman', Times, serif;
-              color: #000;
-              background: #fff;
-              margin: 30px;
-              font-size: 13.5px;
-              line-height: 1.4;
-            }
-            .title-container {
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              margin-bottom: 12px;
-              border-bottom: 2px solid #000;
-              padding-bottom: 6px;
-            }
-            .title-main {
-              font-size: 21px;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            .title-subtitle {
-              font-size: 18px;
-              font-weight: bold;
-              text-transform: uppercase;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 15px;
-            }
-            th, td {
-              border: 1px solid #000;
-              padding: 6.5px 10px;
-              text-align: left;
-              vertical-align: middle;
-            }
-            .col-name {
-              width: 38%;
-              font-weight: bold;
-              background-color: #f7f7f7;
-            }
-            .col-val {
-              width: 32%;
-              text-align: right;
-            }
-            .col-notes {
-              width: 30%;
-              vertical-align: top;
-            }
-            .align-left {
-              text-align: left !important;
-            }
-            .align-right {
-              text-align: right !important;
-            }
-            .align-center {
-              text-align: center !important;
-            }
-            .bg-highlight {
-              background-color: #FAD7A0 !important;
-              font-weight: bold;
-            }
-            .text-highlight {
-              color: #784212 !important;
-            }
-            .footer-section {
-              margin-top: 15px;
-              text-align: right;
-              font-style: italic;
-              font-size: 13px;
-              margin-bottom: 12px;
-            }
-            .sign-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              text-align: center;
-              margin-top: 20px;
-              font-size: 13.5px;
-            }
-            .sign-title {
-              font-weight: bold;
-              margin-bottom: 65px;
-            }
-            .sign-name {
-              font-weight: bold;
-            }
-            .no-print-btn {
-              text-align: center;
-              margin-top: 35px;
-            }
-            .btn {
-              background-color: #e67e22;
-              color: #fff;
-              border: none;
-              padding: 10px 20px;
-              font-size: 14px;
-              font-weight: bold;
-              border-radius: 5px;
-              cursor: pointer;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-            }
-            @media print {
-              body { margin: 15px; }
-              .no-print-btn { display: none !important; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="title-container">
-            <div class="title-main">PHIẾU LƯƠNG</div>
-            <div class="title-subtitle">THÁNG ${item.month}</div>
-          </div>
-          
-          <table>
-            <tbody>
-              <tr>
-                <td class="col-name">Họ và tên</td>
-                <td class="col-val align-left bg-highlight" style="font-size: 14.5px;">${item.empName}</td>
-                <td class="col-notes" rowspan="2" style="font-weight: bold; text-align: center; background-color: #f2f2f2; width: 30%;">
-                  Ghi chú
-                  <div style="font-weight: normal; font-style: italic; text-align: left; margin-top: 6px; font-size: 12px; font-family: sans-serif; white-space: pre-wrap; line-height: 1.4;">${notes || ''}</div>
-                </td>
-              </tr>
-              <tr>
-                <td class="col-name">Chức vụ</td>
-                <td class="col-val align-left">${position}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Lương cơ bản</td>
-                <td class="col-val">${(item.baseSalary || 0).toLocaleString('vi-VN')}</td>
-                <td rowspan="17" style="background-color: #fafafa;"></td>
-              </tr>
-              <tr>
-                <td class="col-name">Ngày công đi làm</td>
-                <td class="col-val">${item.workedDays || 0}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thưởng hiệu suất 100 %</td>
-                <td class="col-val">${(perfSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Điểm KPI</td>
-                <td class="col-val">${item.kpiScore || 100}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Mức hưởng KPI</td>
-                <td class="col-val">${(kpiBonus || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr style="font-weight: bold;">
-                <td class="col-name">Lương ngày công + Hiệu suất</td>
-                <td class="col-val">${(dayAndPerformanceSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Lương tăng ca lễ, CN</td>
-                <td class="col-val">${(otWeekendAndHoliday || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Lương tăng ca ngoài giờ</td>
-                <td class="col-val">${(item.otHoursSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thưởng lễ</td>
-                <td class="col-val">${(item.bonusHoliday || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thưởng sáng kiến</td>
-                <td class="col-val">${(item.bonusCreative || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Công tác phí</td>
-                <td class="col-val">${(item.expenses || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr style="font-weight: bold;">
-                <td class="col-name">Tổng thu nhập & công tác phí</td>
-                <td class="col-val">${(item.totalIncome || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Khoản giảm trừ khác</td>
-                <td class="col-val">${(item.otherDeductions || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Thuế TNCN</td>
-                <td class="col-val">${(item.tax || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Khấu trừ BHXH 10,5%</td>
-                <td class="col-val">${(item.insurance || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name">Tạm ứng hoặc lĩnh trước</td>
-                <td class="col-val">${(item.advances || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr class="bg-highlight">
-                <td class="col-name">Thực lĩnh tháng này</td>
-                <td class="col-val align-center scale-105" style="font-size: 15.5px; background-color: #FAD7A0;">${(item.netSalary || 0).toLocaleString('vi-VN')}</td>
-              </tr>
-              <tr>
-                <td class="col-name" style="font-family: serif; font-style: italic;">Số tiền bằng chữ</td>
-                <td colspan="2" class="align-left" style="font-family: serif; font-style: italic; font-size: 13px; line-height: 1.5; font-weight: bold;">${docTien}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="footer-section">
-            ${printDatePlace}
-          </div>
-
-          <div class="sign-grid">
-            <div>
-              <div class="sign-title">Người nhận</div>
-              <div class="sign-name">${item.empName}</div>
-            </div>
-            <div>
-              <div class="sign-title">Người phát</div>
-              <div class="sign-name">${nguoiPhat}</div>
-            </div>
-            <div>
-              <div class="sign-title">Kế Toán</div>
-              <div class="sign-name">${keToan}</div>
-            </div>
-          </div>
-
-          <div class="no-print-btn">
-            <button class="btn" onclick="window.print();">🖨️ In Phiếu Lương Này</button>
-          </div>
-        </body>
-      </html>
-    `);
+    printWindow.document.write(buildPayslipHtml(item));
     printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
-    }, 450);
+    printWindow.focus();
+    setTimeout(() => { try { printWindow.print(); } catch (e) { /* ignore */ } }, 400);
+  };
+
+  // "Khóa kỳ & Phát phiếu lương" — đánh dấu TOÀN BỘ payroll của kỳ đang chọn là
+  // đã khóa (locked + lockedAt = hôm nay), dùng làm ngày lập mặc định in trên
+  // phiếu lương (xem getPayslipDatePlace). Cho phép tải toàn bộ phiếu lương
+  // (.zip) ngay sau khi khóa.
+  const handleLockPayrollPeriod = async () => {
+    const period = `${payrollMonth}/${payrollYear}`;
+    const periodItems = payroll.filter(p => p.month === period);
+    if (periodItems.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Chưa có dữ liệu lương của kỳ này để khóa. Vui lòng "Tính lương tự động" trước.', type: 'warning' });
+      return;
+    }
+    const lockedAt = new Date().toISOString();
+    const lockedItems = periodItems.map(p => ({ ...p, locked: true, lockedAt }));
+    setPayroll(payroll.map(p => {
+      const found = lockedItems.find(l => l.id === p.id);
+      return found || p;
+    }));
+    await Promise.all(lockedItems.map(p => dbService.hrmPayrollRecords.save(p).catch(() => {})));
+    addToast({ title: '🔒 Đã khóa kỳ lương', message: `Đã khóa kỳ ${period} và chốt phiếu lương cho ${lockedItems.length} nhân viên.`, type: 'success' });
+  };
+
+  // Tải toàn bộ phiếu lương của kỳ đang chọn, nén chung 1 file .zip — chỉ dùng
+  // sau khi đã "Khóa kỳ & Phát phiếu lương". Tên từng file: TenNhanVienKhongDau_
+  // ThangMM_NamYYYY.pdf (viết liền không dấu theo đúng yêu cầu).
+  const handleDownloadAllPayslips = async () => {
+    const period = `${payrollMonth}/${payrollYear}`;
+    const periodItems = payroll.filter(p => p.month === period);
+    if (periodItems.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Chưa có dữ liệu lương của kỳ này.', type: 'warning' });
+      return;
+    }
+    if (!periodItems.every(p => p.locked)) {
+      addToast({ title: '⚠️ Chưa khóa kỳ', message: 'Vui lòng "Khóa kỳ & Phát phiếu lương" trước khi tải toàn bộ phiếu lương.', type: 'warning' });
+      return;
+    }
+    try {
+      const JSZip = await loadJsZip();
+      const zip = new JSZip();
+      for (const item of periodItems) {
+        const blob = await generatePayslipPdfBlob(item);
+        zip.file(`${payslipFileBaseName(item)}.pdf`, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `PhieuLuong_Thang${payrollMonth}_Nam${payrollYear}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: '✅ Đã tải xuống', message: `Đã nén ${periodItems.length} phiếu lương vào 1 file .zip.`, type: 'success' });
+    } catch (e) {
+      addToast({ title: '⚠️ Lỗi', message: 'Không thể tạo file .zip phiếu lương.', type: 'warning' });
+    }
   };
 
   return (
@@ -3279,7 +4083,7 @@ Generated by HL ERP Cloud v2.1 (2026)
                   <div className="flex gap-2">
                     <button
                       onClick={() => setShowEmpModal(true)}
-                      className="bg-amber-600 hover:bg-amber-550 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg px-3 py-1.5 text-sm font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" /> Thêm nhân viên
                     </button>
@@ -3308,19 +4112,29 @@ Generated by HL ERP Cloud v2.1 (2026)
                 {activeSubTab === 'trips' && (
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
+                      <span className="text-slate-400 text-[10px] font-bold uppercase">Dự án:</span>
+                      <QuickSearchFilter
+                        value={selectedProjectFilter}
+                        onChange={setSelectedProjectFilter}
+                        options={Array.from(new Set([
+                          ...(projects || []).map((p: any) => p?.name).filter(Boolean),
+                          ...travelExpensesSummary.map((item: any) => item.projectName).filter(Boolean),
+                        ])).sort((a: any, b: any) => a.localeCompare(b, 'vi'))
+                          .map((name: any) => ({ value: name, label: name }))}
+                        placeholder="Tất cả dự án"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
                       <span className="text-slate-400 text-[10px] font-bold uppercase">Nhân viên:</span>
-                      <select
+                      <QuickSearchFilter
                         value={selectedEmpFilter}
-                        onChange={(e) => setSelectedEmpFilter(e.target.value)}
-                        className="bg-slate-900 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] outline-none font-medium focus:border-amber-500 transition-colors cursor-pointer"
-                      >
-                        <option value="all">Tất cả nhân viên</option>
-                        {Array.from(new Set(travelExpensesSummary.map(item => item.employeeName).filter(Boolean))).map((empName: any) => (
-                          <option key={empName} value={empName}>
-                            {empName}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setSelectedEmpFilter}
+                        options={Array.from(new Set(travelExpensesSummary.map((item: any) => item.employeeName).filter(Boolean)))
+                          .sort((a: any, b: any) => a.localeCompare(b, 'vi'))
+                          .map((name: any) => ({ value: name, label: name }))}
+                        placeholder="Tất cả nhân viên"
+                      />
                     </div>
 
                     <div className="flex items-center gap-1.5">
@@ -3359,37 +4173,19 @@ Generated by HL ERP Cloud v2.1 (2026)
                       <FileSpreadsheet className="w-3.5 h-3.5" /> Xuất file Excel
                     </button>
 
-                  </div>
-                )}
-
-                {activeSubTab === 'leaves' && (
-                  <div className="flex gap-2">
                     <button
-                      onClick={() => {
-                        const configuredApprover = getConfiguredApprover('leave');
-                        if (configuredApprover) {
-                          setNewLeave(prev => ({ ...prev, approverName: configuredApprover.name, approverId: configuredApprover.id, approverPosition: configuredApprover.position || '' }));
-                        }
-                        setShowLeaveModal(true);
-                      }}
-                      className="bg-pink-600 hover:bg-pink-550 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      onClick={() => setShowAddTravelExpenseModal(true)}
+                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg px-3 py-1.5 font-extrabold shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+                      title="Thêm công tác phí mới"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Tạo Đơn Phép
+                      <Plus className="w-3.5 h-3.5" /> Thêm công tác phí
                     </button>
+
                   </div>
                 )}
 
-                {activeSubTab === 'payroll' && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCreateSalaryAdvance}
-                      className="bg-cyan-600 hover:bg-cyan-550 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <DollarSign className="w-3.5 h-3.5" /> Tạm Ứng Lương Nhanh
-                    </button>
-                  </div>
-                )}
 
+                
               </div>
             </div>
 
@@ -3439,6 +4235,8 @@ Generated by HL ERP Cloud v2.1 (2026)
                 setAttendanceSearchEmpId={setAttendanceSearchEmpId}
                 attendanceFilterMonth={attendanceFilterMonth}
                 setAttendanceFilterMonth={setAttendanceFilterMonth}
+                attendanceFilterDay={attendanceFilterDay}
+                setAttendanceFilterDay={setAttendanceFilterDay}
                 attendanceFilterYear={attendanceFilterYear}
                 setAttendanceFilterYear={setAttendanceFilterYear}
                 attendancePage={attendancePage}
@@ -3458,9 +4256,14 @@ Generated by HL ERP Cloud v2.1 (2026)
                 setEditingAttendance={setEditingAttendance}
                 handleDeleteAttendance={handleDeleteAttendance}
                 addToast={addToast}
+                attendance={attendance}
+                excludedIds={ATTENDANCE_EXCLUDED_IDS}
+                excludedRoles={ATTENDANCE_EXCLUDED_ROLES}
+                onCreateMissingRecord={handleCreateMissingAttendanceRecord}
                 WorkdayCell={WorkdayCell}
               />
             )}
+
 
             {/* TAB: LEAVES */}
             {/* [2] NGHI PHEP - LeavesTab (props: employees, holidays, leaveCoefficients, leaves, handlers duyet/tu choi) */}
@@ -3470,6 +4273,7 @@ Generated by HL ERP Cloud v2.1 (2026)
                 selectedLeaveId={selectedLeaveId}
                 setSelectedLeaveId={setSelectedLeaveId}
                 handleApproveLeave={handleApproveLeave}
+                onDeleteLeave={handleDeleteLeave}
                 globalPageSize={globalPageSize}
                 setGlobalPageSize={setGlobalPageSize}
                 leavePage={leavePage}
@@ -3483,6 +4287,7 @@ Generated by HL ERP Cloud v2.1 (2026)
             {activeSubTab === 'payroll' && (
               <PayrollTab
                 payroll={payroll}
+                employees={employees}
                 payrollMonth={payrollMonth}
                 setPayrollMonth={setPayrollMonth}
                 payrollYear={payrollYear}
@@ -3499,6 +4304,8 @@ Generated by HL ERP Cloud v2.1 (2026)
                 handleExportPayrollExcel={handleExportPayrollExcel}
                 handleOpenEditPayroll={handleOpenEditPayroll}
                 triggerDownloadPayslip={triggerDownloadPayslip}
+                handleLockPayrollPeriod={handleLockPayrollPeriod}
+                handleDownloadAllPayslips={handleDownloadAllPayslips}
                 addToast={addToast}
               />
             )}
@@ -3540,8 +4347,14 @@ Generated by HL ERP Cloud v2.1 (2026)
                 setSelectedMonthFilter={setSelectedMonthFilter}
                 selectedYearFilter={selectedYearFilter}
                 setSelectedYearFilter={setSelectedYearFilter}
+                selectedProjectFilter={selectedProjectFilter}
+                setSelectedProjectFilter={setSelectedProjectFilter}
                 handleExportExcel={handleExportExcel}
                 setClearingState={setClearingState}
+                onApproveTravelExpense={handleApproveTravelExpense}
+                canApprove={canApproveTravelExpense}
+                onDeleteTravelExpenses={handleDeleteTravelExpenses}
+                onEditTravelExpense={handleEditTravelExpense}
               />
             )}
 
@@ -3552,12 +4365,15 @@ Generated by HL ERP Cloud v2.1 (2026)
               <HrDataTab
                 activeHrDataSubTab={activeHrDataSubTab}
                 setActiveHrDataSubTab={setActiveHrDataSubTab}
+                attendanceInitDate={attendanceInitDate}
+                setAttendanceInitDate={setAttendanceInitDate}
                 holidays={holidays}
                 setHolidays={setHolidays}
                 holidaySearchQuery={holidaySearchQuery}
                 setHolidaySearchQuery={setHolidaySearchQuery}
                 setShowHolidayModal={setShowHolidayModal}
                 handleDeleteHoliday={handleDeleteHoliday}
+                onEditHoliday={handleOpenEditHoliday}
                 leaveCoefficients={leaveCoefficients}
                 setLeaveCoefficients={setLeaveCoefficients}
                 coefSearchQuery={coefSearchQuery}
@@ -3744,7 +4560,11 @@ Generated by HL ERP Cloud v2.1 (2026)
                       onChange={(e) => setInsDependentCount(Number(e.target.value) || 0)}
                       className="w-full bg-slate-955 border border-slate-800 focus:border-amber-555 focus:outline-none rounded-xl px-3 py-2 text-white font-bold font-mono"
                     />
-                    <span className="text-[9px] text-slate-500 block">4.400.000đ / người / tháng</span>
+                    {/* Đồng bộ đúng mức 6.200.000đ/người/tháng theo công thức sheet
+                        "LƯƠNG OK" (Quyết định 05/2026/QĐ-HLLĐ) — trước đây ghi nhầm
+                        4.400.000đ (mức giảm trừ cũ theo luật, không phải mức công ty
+                        đang áp dụng thực tế trong Tính lương tự động). */}
+                    <span className="text-[9px] text-slate-500 block">6.200.000đ / người / tháng</span>
                   </div>
                 </div>
 
@@ -3788,7 +4608,7 @@ Generated by HL ERP Cloud v2.1 (2026)
         const targetEmp = employees.find((e: any) => e.id === editingPayrollItem?.empId);
         return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-xs font-sans">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-2xl w-full text-left space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-2xl w-full text-left space-y-4 shadow-2xl overflow-y-auto max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
               <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                 <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
                   <Calculator className="w-5 h-5 text-orange-400" />
@@ -3821,44 +4641,91 @@ Generated by HL ERP Cloud v2.1 (2026)
                 </div>
               )}
 
-              {/* READ-ONLY AUTOMATIC SECTION */}
+              {/* THÔNG TIN CHẤM CÔNG & PHỤ CẤP — trước đây để "ĐỌC - CHỈ" (chỉ hiển thị
+                  <p>, không có <input>) nên "Ghi đè & Tái tính toán lương" chỉ đổi được
+                  đúng 3 trường thưởng/giảm trừ bên dưới, không "ghi đè" được các số
+                  chấm công/phụ cấp gốc như tên nút mô tả — đây là lý do nút không dùng
+                  được đúng như kỳ vọng. Đổi thành input số, đồng bộ đúng state
+                  editWorkedDays/... đã có sẵn (trước đây bị bỏ không dùng tới). */}
               <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-850 space-y-3">
                 <h6 className="font-extrabold text-slate-400 text-[10px] uppercase tracking-wider flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-slate-500" />
-                  THÔNG TIN TỔNG HỢP TỰ ĐỘNG (ĐỌC - CHỈ)
+                  <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                  THÔNG TIN CHẤM CÔNG &amp; PHỤ CẤP (CÓ THỂ GHI ĐÈ)
                 </h6>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-sans">
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">Công nhật:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{editingPayrollItem?.workedDays || 0} ngày</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">Công nhật:</label>
+                    <input
+                      type="number"
+                      value={editWorkedDays}
+                      onChange={(e) => setEditWorkedDays(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">Điểm hiệu suất:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{editingPayrollItem?.kpiScore || 100}%</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">Điểm hiệu suất (%):</label>
+                    <input
+                      type="number"
+                      value={editKpiScore}
+                      onChange={(e) => setEditKpiScore(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">TC Chủ Nhật:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{editingPayrollItem?.otSunday || 0} ngày</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">TC Chủ Nhật (ngày):</label>
+                    <input
+                      type="number"
+                      value={editOtSunday}
+                      onChange={(e) => setEditOtSunday(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">TC Ngày Lễ:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{editingPayrollItem?.otHoliday || 0} ngày</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">TC Ngày Lễ (ngày):</label>
+                    <input
+                      type="number"
+                      value={editOtHoliday}
+                      onChange={(e) => setEditOtHoliday(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">Giờ tăng ca:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{editingPayrollItem?.otHours || 0} h</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">Giờ tăng ca (h):</label>
+                    <input
+                      type="number"
+                      value={editOtHours}
+                      onChange={(e) => setEditOtHours(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">Số lần tăng ca:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{editingPayrollItem?.otCount || 0} lần</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">Số lần tăng ca:</label>
+                    <input
+                      type="number"
+                      value={editOtCount}
+                      onChange={(e) => setEditOtCount(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">Tạm ứng:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{(editingPayrollItem?.advances || 0).toLocaleString('vi-VN')} đ</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">Tạm ứng (đ):</label>
+                    <input
+                      type="number"
+                      step="10000"
+                      value={editAdvances}
+                      onChange={(e) => setEditAdvances(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg">
-                    <p className="text-[10px] text-slate-500 font-bold">Công tác phí:</p>
-                    <p className="font-mono text-slate-300 font-semibold">{(editingPayrollItem?.expenses || 0).toLocaleString('vi-VN')} đ</p>
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                    <label className="text-[10px] text-slate-500 font-bold block">Công tác phí (đ):</label>
+                    <input
+                      type="number"
+                      step="10000"
+                      value={editExpenses}
+                      onChange={(e) => setEditExpenses(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
                 </div>
               </div>
@@ -3937,246 +4804,131 @@ Generated by HL ERP Cloud v2.1 (2026)
 
       {showPrintPayslipModal && printingPayrollItem && (() => {
         const pay = printingPayrollItem;
-        const targetEmp = employees.find((e: any) => e.id === pay.empId);
-        const position = targetEmp?.position || 'Phụ Trách Nhiệm Vụ';
-        
-        const dayAndPerformanceSalary = pay.daySalary || 0;
-        const otWeekendAndHoliday = (pay.otSundaySalary || 0) + (pay.otHolidaySalary || 0);
-        const perfSalary = pay.performanceSalary || 0;
-        const kpiBonus = pay.kpiBonus || 0;
-        const docTien = docSoTiengViet(pay.netSalary);
 
         return (
-          <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4 backdrop-blur-xs font-sans overflow-y-auto" id="payslip_print_modal">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-5xl w-full text-left space-y-5 shadow-2xl my-8">
-              
-              {/* Header */}
-              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
-                  <Calculator className="w-5 h-5 text-orange-400" />
-                  <span>Xử Lý In Phiếu Lương Nhanh Nhân Viên: <strong className="text-orange-400 font-mono">{pay.empId}</strong></span>
-                </h4>
+          // Drawer trượt từ phải — đồng bộ NGUYÊN VĂN class Tailwind với chi tiết
+          // Điều Phối Vật Tư (MaterialCoordination.tsx:1922-2021, 2584-2589 — xem
+          // docs/design-system-dieu-phoi-vat-tu.md mục 8): overlay + panel trắng,
+          // header dạng "icon badge + mã/badge trạng thái + tiêu đề", body chia
+          // trái=nội dung chính / phải=sidebar công cụ card trắng bo góc.
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}>
+            <div className="w-full max-w-[1024px] bg-white border-l border-slate-200 h-full flex flex-col text-xs text-slate-800 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+
+              {/* Drawer Header */}
+              <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-orange-500 rounded-lg flex items-center justify-center shadow-md shrink-0">
+                    <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                      <span className="font-mono font-extrabold text-[10px] text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                        {pay.empId}
+                      </span>
+                      <span className="font-bold text-[9px] sm:text-[9.5px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded bg-teal-100 text-teal-700 border border-teal-200">
+                        Phiếu lương {pay.month}
+                      </span>
+                    </div>
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base mt-0.5 truncate">{pay.empName}</h4>
+                    <div className="text-slate-500 text-[10px] hidden sm:block">
+                      Thực lĩnh: <strong className="text-slate-700">{Math.round(pay.netSalary || 0).toLocaleString('vi-VN')} đ</strong>
+                    </div>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
-                  className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  className="p-1.5 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
+                  <span className="hidden sm:inline">Đóng</span>
                 </button>
               </div>
 
-              {/* Grid content */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Configuration Sidebar */}
-                <div className="lg:col-span-4 bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4 h-fit">
-                  <div className="border-b border-slate-850 pb-2">
-                    <h5 className="font-black text-xs text-amber-500 uppercase tracking-widest">📝 Tùy Biến Thông Tin In</h5>
-                    <p className="text-[10px] text-slate-500 mt-1">Các thông tin dưới đây sẽ hiển thị trực tiếp trên phôi in phiếu lương.</p>
-                  </div>
-                  
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">✍️ Ghi chú của phiếu (Bên phải)</label>
-                      <textarea
-                        value={printNotes}
-                        onChange={(e) => setPrintNotes(e.target.value)}
-                        placeholder="Có thể thêm ghi chú phụ cấp, giải thích tăng ca..."
-                        rows={3}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all"
-                      />
-                    </div>
+              {/* Body: trái = xem trước phiếu lương (nội dung chính), phải = sidebar công cụ.
+                  lg:justify-center gộp 2 khối lại SÁT nhau (thay vì trái flex-1 chiếm hết
+                  phần dư ra), tránh khoảng trắng thừa nằm giữa 2 cột. */}
+              <div className="flex-1 overflow-y-auto flex flex-col lg:flex-row lg:justify-center bg-slate-50" id="payslip_drawer_scrollable_body">
 
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">👤 Người phát lương</label>
-                      <input
-                        type="text"
-                        value={printNguoiPhat}
-                        onChange={(e) => setPrintNguoiPhat(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none font-medium"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">💼 Kế Toán</label>
-                      <input
-                        type="text"
-                        value={printKeToanTruong}
-                        onChange={(e) => setPrintKeToanTruong(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none font-medium"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">📍 Địa điểm & Ngày lập</label>
-                      <input
-                        type="text"
-                        value={printDatePlace}
-                        onChange={(e) => setPrintDatePlace(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none font-medium text-amber-400"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => handlePrintPayslip(pay, printNotes, printNguoiPhat, printKeToanTruong)}
-                      className="w-full py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      🖨️ In Phiếu Lương Nhanh
-                    </button>
-                    
-                    <button
-                      type="button"
-                      onClick={() => downloadPDFPayslip(pay)}
-                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-550 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      📥 Tải Phiếu Lương (PDF)
-                    </button>
-                    
-                    <button
-                      type="button"
-                      onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
-                      className="w-full py-2 text-slate-450 hover:text-white text-xs font-bold transition-all text-center cursor-pointer"
-                    >
-                      Hủy & Đóng lại
-                    </button>
+                {/* Trái: Xem trước — dựng từ ĐÚNG buildPayslipFragment dùng cho in/PDF (chỉ
+                    khác tham số editable=true), tránh 3 bản viết tay lệch nhau như
+                    thiết kế cũ (JSX riêng + print window riêng + html2pdf.js trên
+                    JSX riêng). Ghi chú theo dòng được gõ TRỰC TIẾP vào ô contenteditable
+                    ngay trên bản xem trước này (khỏi cần ô nhập riêng ở sidebar) — lưu
+                    khi rời khỏi ô (blur), qua handleSavePayslipLineNote. Bỏ flex-1: khối
+                    này chỉ rộng vừa đủ khung phiếu lương (420px + padding), không chiếm
+                    hết phần trống còn lại. */}
+                <div className="p-3 sm:p-5 overflow-y-auto border-b lg:border-b-0 lg:border-r border-slate-200" id="payslip_drawer_left_pane">
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-3 sm:p-4 mx-auto" style={{ maxWidth: 480 }}>
+                    <div
+                      className="bg-white text-black rounded-lg border border-slate-200 mx-auto overflow-hidden"
+                      style={{ width: '420px' }}
+                      dangerouslySetInnerHTML={{ __html: payslipPreviewFragment }}
+                      onBlur={(e) => {
+                        const target = e.target as HTMLElement;
+                        const key = target.dataset?.noteKey;
+                        if (!key) return;
+                        handleSavePayslipLineNote(pay, key, target.textContent || '');
+                      }}
+                      onKeyDown={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (!target.dataset?.noteKey) return;
+                        // Ghi chú theo dòng chỉ 1 dòng — Enter để lưu & rời ô thay vì xuống dòng.
+                        if (e.key === 'Enter') { e.preventDefault(); target.blur(); }
+                      }}
+                    />
                   </div>
                 </div>
 
-                {/* Printable Excel View Frame */}
-                <div className="lg:col-span-8 bg-slate-950 p-3 rounded-xl border border-slate-850 overflow-x-auto">
-                  <div className="text-[10px] text-slate-500 uppercase tracking-widest font-black text-center py-1 mb-2 border-b border-slate-900">
-                    🖼️ Giao Diện Bản In Thực Tế (Bám Sát Mẫu Ảnh)
-                  </div>
+                {/* Phải: sidebar công cụ — chỉ còn các nút thao tác (In / Tải PDF / Chia
+                    sẻ / Đóng — đúng cơ chế In-Tải-Chia sẻ của chi tiết Đơn Mua Hàng ở
+                    MaterialCoordination.tsx), cỡ nút NGUYÊN VĂN theo chuẩn "CÔNG CỤ ĐIỀU
+                    PHỐI" (docs/design-system-dieu-phoi-vat-tu.md mục 4): py-2.5, text-[11px],
+                    icon w-4 — gọn gàng, không lồng thêm card phụ. Đã bỏ khối "Người ký
+                    phiếu"/gợi ý ghi chú theo yêu cầu (thông tin cấu hình 1 lần, không cần
+                    lặp lại mỗi lần in phiếu — vẫn áp dụng đúng khi in/PDF qua
+                    buildPayslipFragment). lg:self-start (thay vì h-full) để tránh khoảng
+                    trắng thừa bên dưới khi nội dung sidebar ngắn hơn khung xem trước phiếu
+                    lương bên trái. */}
+                <div className="lg:w-[280px] shrink-0 lg:self-start">
+                  <div className="p-4 sm:p-5 bg-white lg:bg-slate-50 border-t lg:border-t-0 lg:border-l border-slate-200 space-y-4" id="payslip_drawer_right_pane">
+                    <span className="font-extrabold text-[10px] text-slate-600 block uppercase tracking-wider">
+                      Công cụ phiếu lương
+                    </span>
 
-                  <div id="printable-payslip-canvas-content" className="bg-white text-black p-5 rounded-lg shadow-2xl mx-auto min-w-[500px] max-w-[580px] border border-slate-300 pointer-events-none select-none">
-                    
-                    {/* Header */}
-                    <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-3">
-                      <div className="text-lg font-black tracking-tight text-slate-900 font-serif">PHIẾU LƯƠNG</div>
-                      <div className="text-sm font-black text-slate-800 font-serif">THÁNG {pay.month}</div>
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintPayslip(pay)}
+                        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <Printer className="w-4 h-4" /> In
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadPDFPayslip(pay)}
+                        className="w-full bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <Download className="w-4 h-4" /> Tải
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => sharePayslip(pay)}
+                        className="w-full bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <Share2 className="w-4 h-4" /> Chia sẻ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
+                        className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                      >
+                        Hủy &amp; Đóng lại
+                      </button>
                     </div>
-
-                    {/* Table block */}
-                    <table className="w-full border-collapse border border-slate-400 text-[10.5px] text-left mb-3 font-serif">
-                      <tbody>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold w-[38%]">Họ và tên</td>
-                          <td className="border border-slate-400 p-1.5 font-bold bg-[#FAD7A0] text-slate-950 text-left w-[32%] text-[11.5px] uppercase">{pay.empName}</td>
-                          <td className="border border-slate-400 p-1.5 font-extrabold bg-slate-100 text-slate-900 text-center w-[30%]" rowSpan={2}>
-                            Ghi chú
-                            <div className="font-normal text-[9.5px] text-left pt-1.5 text-slate-700 italic block leading-snug whitespace-pre-wrap font-sans max-h-[42px] overflow-hidden">
-                              {printNotes || ''}
-                            </div>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Chức vụ</td>
-                          <td className="border border-slate-400 p-1.5 text-left text-slate-800">{position}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Lương cơ bản</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800 font-bold">{(pay.baseSalary || 0).toLocaleString('vi-VN')}</td>
-                          <td className="border border-slate-400 p-1.5 text-center bg-slate-50/40" rowSpan={17}></td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Ngày công đi làm</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-805 font-bold">{pay.workedDays || 0}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thưởng hiệu suất 100 %</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(perfSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Điểm KPI</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{pay.kpiScore || 100}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Mức hưởng KPI</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(kpiBonus || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr className="font-extrabold text-slate-950">
-                          <td className="border border-slate-400 bg-slate-100 p-1.5">Lương ngày công + Hiệu suất</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-900 bg-slate-50">{(dayAndPerformanceSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Lương tăng ca lễ, CN</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(otWeekendAndHoliday || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Lương tăng ca ngoài giờ</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.otHoursSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thưởng lễ</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.bonusHoliday || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thưởng sáng kiến</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800 font-medium">{(pay.bonusCreative || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Công tác phí</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.expenses || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr className="font-bold text-slate-950">
-                          <td className="border border-slate-400 bg-slate-100 p-1.5">Tổng thu nhập & công tác phí</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono">{(pay.totalIncome || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Khoản giảm trừ khác</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.otherDeductions || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Thuế TNCN</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.tax || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Khấu trừ BHXH 10,5%</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-800">{(pay.insurance || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold">Tạm ứng hoặc lĩnh trước</td>
-                          <td className="border border-slate-400 p-1.5 text-right font-mono text-slate-850">{(pay.advances || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr className="bg-[#FAD7A0] font-bold text-amber-950">
-                          <td className="border border-slate-400 p-1.5 text-[11.5px]">Thực lĩnh tháng này</td>
-                          <td className="border border-slate-400 p-1.5 text-center text-[12.5px] bg-[#FAD7A0]">{(pay.netSalary || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-400 bg-slate-100 p-1.5 font-bold italic text-slate-800">Số tiền bằng chữ</td>
-                          <td className="border border-slate-400 p-1.5 text-slate-800 italic text-[10.5px] text-left leading-normal" colSpan={2}>
-                            {docTien}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    {/* Footer sign */}
-                    <div className="text-right text-[10.5px] text-slate-800 italic font-serif mb-2">
-                      {printDatePlace}
-                    </div>
-
-                    <div className="grid grid-cols-3 text-center text-[10px] text-slate-900 font-serif gap-2">
-                      <div>
-                        <div className="font-extrabold text-slate-900">Người nhận</div>
-                        <div className="text-[8.5px] text-slate-400 italic mb-10">(Ký ghi rõ họ tên)</div>
-                        <div className="font-bold text-slate-950 text-[10.5px]">{pay.empName}</div>
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-slate-900">Người phát</div>
-                        <div className="text-[8.5px] text-slate-400 italic mb-10">(Ký ghi rõ họ tên)</div>
-                        <div className="font-bold text-slate-950 text-[10.5px]">{printNguoiPhat}</div>
-                      </div>
-                      <div>
-                        <div className="font-extrabold text-slate-900">Kế Toán</div>
-                        <div className="text-[8.5px] text-slate-400 italic mb-10">(Ký ghi rõ họ tên)</div>
-                        <div className="font-bold text-slate-950 text-[10.5px]">{printKeToanTruong}</div>
-                      </div>
-                    </div>
-
                   </div>
                 </div>
 
@@ -4346,7 +5098,7 @@ Generated by HL ERP Cloud v2.1 (2026)
       {/* RENDER DYNAMIC POPUP MODAL FOR ADDING EMPLOYEE PROFILE */}
       {showEmpModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-lg w-full text-left space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-lg w-full text-left space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
             <h4 className="font-extrabold text-white text-base border-b border-slate-800 pb-2 flex items-center gap-2">
               <Plus className="w-5 h-5 text-amber-500" /> Đăng ký Hồ Sơ Nhân Sự Mới (Xây dựng, mộc, xưởng)
             </h4>
@@ -4866,12 +5618,102 @@ Generated by HL ERP Cloud v2.1 (2026)
         </div>
       )}
 
+      {/* RENDER "THÊM CÔNG TÁC PHÍ" MODAL — chọn xâu chuỗi Dự án -> Công việc -> Nhiệm vụ */}
+      {showAddTravelExpenseModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full text-left space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <h4 className="font-extrabold text-white text-sm border-b border-slate-805 pb-1 flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-amber-500" /> Thêm Công Tác Phí Mới
+            </h4>
+            <div className="space-y-3 text-[11px] text-slate-300">
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Dự án:</label>
+                <SearchableSelect
+                  options={projects.map((p: any) => ({ id: p.id, label: p.name }))}
+                  value={addCtpProjectId}
+                  onChange={(id) => { setAddCtpProjectId(id); setAddCtpTaskId(''); setAddCtpMissionId(''); }}
+                  placeholder="— Chọn dự án —"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Công việc:</label>
+                <SearchableSelect
+                  options={addCtpTaskOptions.map((t: any) => ({ id: t.id, label: t.name }))}
+                  value={addCtpTaskId}
+                  onChange={(id) => { setAddCtpTaskId(id); setAddCtpMissionId(''); }}
+                  placeholder={addCtpProjectId ? '— Chọn công việc —' : 'Vui lòng chọn dự án trước'}
+                  disabled={!addCtpProjectId}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nhiệm vụ:</label>
+                <SearchableSelect
+                  options={addCtpMissionOptions.map((m: any) => ({ id: m.id, label: m.name }))}
+                  value={addCtpMissionId}
+                  onChange={setAddCtpMissionId}
+                  placeholder={addCtpTaskId ? '— Chọn nhiệm vụ —' : 'Vui lòng chọn công việc trước'}
+                  disabled={!addCtpTaskId}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nhân viên:</label>
+                <SearchableSelect
+                  options={employees.map((e: any) => ({ id: e.id, label: e.name }))}
+                  value={addCtpEmpId}
+                  onChange={setAddCtpEmpId}
+                  placeholder="— Chọn nhân viên —"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Ngày hoàn thành:</label>
+                <input
+                  type="date"
+                  required
+                  value={addCtpDate}
+                  onChange={(e) => setAddCtpDate(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nội dung:</label>
+                <textarea
+                  required
+                  rows={2}
+                  value={addCtpContent}
+                  onChange={(e) => setAddCtpContent(e.target.value)}
+                  placeholder="Ví dụ: Đi Nam Ban - Đà Lạt (xe 1 người)"
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
+                />
+              </div>
+
+              <p className="text-[10px] text-slate-500 italic leading-relaxed">
+                * Số tiền mặc định 0đ — sau khi thêm, dùng nút "Sửa" trong bảng để điền số tiền.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button type="button" onClick={resetAddTravelExpenseForm} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
+                <button type="button" onClick={handleSubmitAddTravelExpense} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* RENDER HOLIDAY CREATION MODAL */}
       {showHolidayModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full text-left space-y-4">
             <h4 className="font-extrabold text-white text-sm border-b border-slate-805 pb-1 flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-amber-500" /> Thêm Ngày Nghỉ Lễ Mới
+              <Calendar className="w-4 h-4 text-amber-500" /> {editingHolidayId ? 'Sửa Ngày Nghỉ Lễ' : 'Thêm Ngày Nghỉ Lễ Mới'}
             </h4>
             <form onSubmit={handleAddHoliday} className="space-y-3 text-[11px] text-slate-300">
               <div>
@@ -4886,31 +5728,33 @@ Generated by HL ERP Cloud v2.1 (2026)
                 />
               </div>
 
-              <div>
-                <label className="block text-slate-400 font-bold mb-1">Phương thức nhập ngày:</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="holidayInputMode"
-                      checked={holidayInputMode === 'range'}
-                      onChange={() => setHolidayInputMode('range')}
-                      className="cursor-pointer"
-                    />
-                    <span>Theo khoảng ngày</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="holidayInputMode"
-                      checked={holidayInputMode === 'single'}
-                      onChange={() => setHolidayInputMode('single')}
-                      className="cursor-pointer"
-                    />
-                    <span>Một ngày duy nhất</span>
-                  </label>
+              {!editingHolidayId && (
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Phương thức nhập ngày:</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="holidayInputMode"
+                        checked={holidayInputMode === 'range'}
+                        onChange={() => setHolidayInputMode('range')}
+                        className="cursor-pointer"
+                      />
+                      <span>Theo khoảng ngày</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="holidayInputMode"
+                        checked={holidayInputMode === 'single'}
+                        onChange={() => setHolidayInputMode('single')}
+                        className="cursor-pointer"
+                      />
+                      <span>Một ngày duy nhất</span>
+                    </label>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {holidayInputMode === 'single' ? (
                 <div>
@@ -4948,13 +5792,15 @@ Generated by HL ERP Cloud v2.1 (2026)
                 </div>
               )}
 
-              <p className="text-[10px] text-slate-500 italic mt-1 leading-relaxed">
-                * Note: Nếu chọn theo khoảng ngày, hệ thống sẽ tự động tách các ngày được nghỉ ra thành các hàng khác nhau trong danh mục đúng như quy định.
-              </p>
+              {!editingHolidayId && (
+                <p className="text-[10px] text-slate-500 italic mt-1 leading-relaxed">
+                  * Note: Nếu chọn theo khoảng ngày, hệ thống sẽ tự động tách các ngày được nghỉ ra thành các hàng khác nhau trong danh mục đúng như quy định.
+                </p>
+              )}
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                <button type="button" onClick={() => setShowHolidayModal(false)} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
-                <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
+                <button type="button" onClick={closeHolidayModal} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
+                <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">{editingHolidayId ? 'Lưu thay đổi' : 'Thêm mới'}</button>
               </div>
             </form>
           </div>
@@ -5143,7 +5989,7 @@ Generated by HL ERP Cloud v2.1 (2026)
       {/* RENDER EMPLOYEE ERROR LOGGING / EDIT MODAL */}
       {showErrorModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-lg w-full text-left space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-lg w-full text-left space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h4 className="font-extrabold text-white text-sm border-b border-slate-805 pb-2.5 flex items-center gap-1.5 font-sans">
               <AlertTriangle className="w-4 h-4 text-amber-500" />
               {editingErrorId ? "Cập Nhật Nhật Ký Vi Phạm" : "Ghi Nhận Lỗi Vi Phạm Mới"}
@@ -5629,7 +6475,7 @@ Generated by HL ERP Cloud v2.1 (2026)
       {/* RENDER ATTENDANCE EDIT MODAL */}
       {editingAttendance && editForm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-lg w-full text-left space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-lg w-full text-left space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h4 className="font-extrabold text-white text-sm flex items-center gap-1.5">
                 ✏️ Sửa bản ghi chấm công — <span className="text-amber-400">{editingAttendance.empName}</span> ({editingAttendance.date})

@@ -8,9 +8,17 @@ export function exportToExcel<T extends Record<string, any>>(
   data: T[],
   sheetName: string,
   fileName: string,
-  headerOrder?: (keyof T)[]
+  headerOrder?: (keyof T)[],
+  headers?: string[]
 ): void {
   if (data.length === 0) {
+    if (headers && headers.length > 0) {
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      XLSX.writeFile(wb, fileName);
+      return;
+    }
     console.warn('exportToExcel: empty data, skipping');
     return;
   }
@@ -37,7 +45,7 @@ export function importFromExcel<T>(
         const binary = ev.target?.result as string;
         const wb = XLSX.read(binary, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, any>[];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false }) as Record<string, any>[];
         if (rows.length === 0) {
           resolve([]);
           return;
@@ -77,6 +85,7 @@ export const EXCEL_HEADERS = {
     'Số điện thoại',
     'Email',
     'Địa chỉ',
+    'Công nợ đầu kỳ',
     'Ghi chú',
   ],
   supplier: [
@@ -87,6 +96,7 @@ export const EXCEL_HEADERS = {
     'Email',
     'Địa chỉ',
     'Loại vật tư',
+    'Công nợ đầu kỳ',
     'Ghi chú',
   ],
   subcontractor: [
@@ -97,6 +107,7 @@ export const EXCEL_HEADERS = {
     'Email',
     'Địa chỉ',
     'Chuyên môn',
+    'Công nợ đầu kỳ',
     'Ghi chú',
   ],
   houseEstimatePrice: [
@@ -196,6 +207,49 @@ export const EXCEL_HEADERS = {
     'Mức ăn trưa (đ)',
     'Mức lưu trú (đ/đêm)',
     'Mức khác (đ)',
+    'Ghi chú',
+  ],
+  inventory: [
+    'Mã Vật Tư',
+    'Tên Nguyên Vật Liệu',
+    'ĐVT',
+    'Số lượng tồn',
+    'Đơn giá đ.mức',
+    'Ngưỡng cảnh báo',
+    'Vị trí lưu kho',
+  ],
+  receipt: [
+    'Mã Phiếu Thu',
+    'Ngày lập sổ',
+    'Công trình',
+    'Chú giải',
+    'Tổng thực thu',
+    'Hình thức',
+    'Người thu',
+  ],
+  payment: [
+    'Mã Phiếu Chi',
+    'Nhóm gốc chi',
+    'Nạn thầu nhận',
+    'Tổng thực chi',
+    'Trạng thái duyệt',
+    'Ghi chú',
+  ],
+  receivable: [
+    'Dự án công trình',
+    'Chủ đầu tư',
+    'Lĩnh vực',
+    'Giá trị HĐ',
+    'Đã Thu',
+    'Còn phải thu',
+    'Ghi chú',
+  ],
+  liability: [
+    'Tên Đơn Vị',
+    'Phân Loại',
+    'Giá Trị',
+    'Đã Trả',
+    'Còn lại',
     'Ghi chú',
   ],
 } as const;

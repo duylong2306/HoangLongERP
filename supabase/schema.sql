@@ -116,8 +116,26 @@ create table if not exists public.tasks (
   is_material_self_coordinated boolean,
   material_coordinator_id     text,
   subcontractor_approver_id   text,
-  subcontractor_settler_id    text,
-  missions                    jsonb            -- SubTaskMission[]
+  subcontractor_settler_id    text
+  -- Cột "missions" (jsonb) đã bị xóa — xem migration 20260824d. Dữ liệu nằm
+  -- ở bảng public.task_missions (mục 4b bên dưới).
+);
+
+-- -----------------------------------------------------------------------------
+-- 4b. TASK_MISSIONS (Nhiệm vụ con trong 1 Công việc — tách từ tasks.missions,
+-- xem migration 20260824_task_missions_table.sql +
+-- 20260824b_fix_task_missions_id_collision.sql +
+-- 20260824c_fix_task_missions_duplicate_ids_keep_latest.sql +
+-- 20260824d_drop_tasks_missions_column.sql. Mỗi mission 1 dòng, để lưu 1
+-- mission không ghi đè toàn bộ mảng của các mission khác.)
+-- -----------------------------------------------------------------------------
+create table if not exists public.task_missions (
+  -- id = khóa GHÉP "task_id::mission.id" (KHÔNG phải mission.id đơn thuần) —
+  -- mission.id chỉ đảm bảo duy nhất trong 1 task, có thể trùng giữa 2 task
+  -- khác nhau (xem 20260824b). data.id mới là id thật của mission.
+  id      text primary key,
+  task_id text not null references public.tasks(id) on delete cascade,
+  data    jsonb not null default '{}'::jsonb    -- SubTaskMission đầy đủ (gồm cả id), giữ camelCase
 );
 
 -- -----------------------------------------------------------------------------
@@ -153,7 +171,8 @@ create table if not exists public.payments (
   approver        text,
   status          text,                        -- pending|approved|rejected
   attachment_name text,
-  approvals       jsonb                        -- ApprovalStep[]
+  approvals       jsonb,                       -- ApprovalStep[]
+  images          text[] default '{}'          -- Base64 data URLs sao kê / biên lai đính kèm phiếu chi
 );
 
 -- -----------------------------------------------------------------------------
@@ -692,7 +711,10 @@ create table if not exists public.chat_messages (
   deleted          boolean default false,
   deleted_at       text,
   pinned           boolean default false,
-  reply_to         jsonb
+  reply_to         jsonb,
+  mentions         jsonb,
+  reactions        jsonb,
+  read_by          jsonb
 );
 
 -- -----------------------------------------------------------------------------
@@ -756,7 +778,7 @@ begin
       'quotation_configs','notifications','suppliers','inventory','warehouse_logs',
       'subcontractor_catalog_items','attendance_records','conversations',
       'chat_messages','fcm_tokens','construction_norms',
-      'product_prices','product_materials'
+      'product_prices','product_materials','task_missions'
     ])
   loop
     execute format('alter table public.%I enable row level security;', t);
@@ -811,6 +833,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
   representative text,
   tax_or_id_number text,
   notes text,
+  opening_debt numeric DEFAULT 0,
   CONSTRAINT customers_pkey PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public.projects (
@@ -883,9 +906,16 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   material_coordinator_id text,
   subcontractor_approver_id text,
   subcontractor_settler_id text,
-  missions jsonb,
+  -- Cột "missions" đã bị xóa (migration 20260824d) — xem public.task_missions
   CONSTRAINT tasks_pkey PRIMARY KEY (id),
   CONSTRAINT tasks_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
+);
+CREATE TABLE IF NOT EXISTS public.task_missions (
+  id text NOT NULL,
+  task_id text NOT NULL,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT task_missions_pkey PRIMARY KEY (id),
+  CONSTRAINT task_missions_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS public.receipts (
   id text NOT NULL,
@@ -917,6 +947,10 @@ CREATE TABLE IF NOT EXISTS public.payments (
   status text,
   attachment_name text,
   approvals jsonb,
+  images text[] DEFAULT '{}'::text[],
+  purchase_order_id text,
+  subcontractor_id text,
+  related_advance_id text,
   CONSTRAINT payments_pkey PRIMARY KEY (id),
   CONSTRAINT payments_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
 );
@@ -1124,6 +1158,7 @@ CREATE TABLE IF NOT EXISTS public.archived_quotes (
   customer_id text,
   project_id text,
   subcontractor_id text,
+  subcontractor_name text,
   contract_value numeric,
   status text,
   scope_work text,
@@ -1189,8 +1224,13 @@ CREATE TABLE IF NOT EXISTS public.subcontractor_advances (
   task_id text,
   task_name text,
   amount numeric,
+  approved_amount numeric,
   reason text,
   approver text,
+  rejected_at text,
+  payment_id text,
+  pay_creator_id text,
+  pay_creator_name text,
   creator text,
   status text,
   date text,
@@ -1278,6 +1318,7 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   cccd_date text,
   cccd_place text,
   tax_code text,
+  opening_debt numeric DEFAULT 0,
   CONSTRAINT suppliers_pkey PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public.inventory (
@@ -1385,6 +1426,9 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
   deleted_at text,
   pinned boolean DEFAULT false,
   reply_to jsonb,
+  mentions jsonb,
+  reactions jsonb,
+  read_by jsonb,
   CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
   CONSTRAINT chat_messages_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.conversations(id)
 );
@@ -1430,7 +1474,9 @@ CREATE TABLE IF NOT EXISTS public.shift_config (
   ot_punch_out_open_before_minutes integer DEFAULT 15,
   ot_punch_out_close_after_minutes integer DEFAULT 15,
   allowed_late_minutes integer DEFAULT 15,
+  allowed_late_count integer DEFAULT 3,
   weekend_days integer[] DEFAULT '{0}'::integer[],
+  company_profile jsonb,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT shift_config_pkey PRIMARY KEY (id)
@@ -1491,8 +1537,23 @@ CREATE TABLE IF NOT EXISTS public.accounting_sub_contracts (
   CONSTRAINT accounting_sub_contracts_pkey PRIMARY KEY (id)
 );
 CREATE TABLE IF NOT EXISTS public.accounting_liabilities (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  id text NOT NULL,
+  name text,
+  category text,
+  value numeric,
+  paid numeric,
+  remaining numeric,
+  notes text,
+  sales_order_id text,
+  paid_at timestamp with time zone,
+  related_advance_id text,
+  subcontractor_id text,
+  recorded_purchase_order_ids text[] DEFAULT '{}',
+  date text,
+  is_auto boolean DEFAULT false,
+  is_opening_debt boolean DEFAULT false,
+  opening_debt numeric DEFAULT 0,
+  balance_basis text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT accounting_liabilities_pkey PRIMARY KEY (id)

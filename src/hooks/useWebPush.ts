@@ -4,7 +4,9 @@ import { getSupabase } from '../lib/supabase';
 // VAPID public key
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEBPUSH_VAPID_PUBLIC_KEY || '';
 
-// sessionStorage key to track this device's subscription endpoint
+// localStorage key to track THIS device's subscription endpoint — dùng
+// localStorage (không phải sessionStorage) để việc dọn endpoint cũ của chính
+// thiết bị này vẫn nhớ được qua các lần đóng/mở lại trình duyệt.
 const PUSH_ENDPOINT_KEY = 'hl_push_endpoint';
 
 // Convert base64 URL-safe string to ArrayBuffer
@@ -68,22 +70,17 @@ async function subscribeToPush(userId: string): Promise<void> {
       return;
     }
 
-    // ─── CLEANUP: Xóa subscription cũ trong DB không khớp endpoint hiện tại ───
+    // ─── CLEANUP: chỉ xóa subscription CŨ CỦA CHÍNH THIẾT BỊ NÀY (khi trình
+    // duyệt đổi sang endpoint mới cho cùng 1 thiết bị) — KHÔNG xóa theo
+    // user_id. Bug cũ: lọc theo user_id nên mỗi lần MỘT thiết bị bất kỳ của
+    // user mở lại app sẽ xóa mất subscription của MỌI thiết bị khác cùng
+    // user, gây hiện tượng "push lúc được lúc không" (chỉ thiết bị mở app
+    // gần nhất mới nhận được thông báo).
     try {
-      const { data: existingSubs } = await supabase
-        .from('push_subscriptions')
-        .select('id, endpoint')
-        .eq('user_id', userId);
-
-      if (existingSubs && existingSubs.length > 0) {
-        const staleIds = existingSubs
-          .filter(sub => sub.endpoint !== endpoint)
-          .map(sub => sub.id);
-
-        if (staleIds.length > 0) {
-          await supabase.from('push_subscriptions').delete().in('id', staleIds);
-          console.log(`Web Push: Đã dọn ${staleIds.length} subscription cũ`);
-        }
+      const previousEndpoint = localStorage.getItem(PUSH_ENDPOINT_KEY);
+      if (previousEndpoint && previousEndpoint !== endpoint) {
+        await supabase.from('push_subscriptions').delete().eq('endpoint', previousEndpoint);
+        console.log('Web Push: Đã dọn endpoint cũ của thiết bị này');
       }
     } catch (cleanupErr) {
       console.warn('Web Push: Cleanup subscription cũ lỗi (không nghiêm trọng):', cleanupErr);
@@ -103,7 +100,7 @@ async function subscribeToPush(userId: string): Promise<void> {
       return;
     }
 
-    sessionStorage.setItem(PUSH_ENDPOINT_KEY, endpoint);
+    localStorage.setItem(PUSH_ENDPOINT_KEY, endpoint);
     console.log('Web Push: Đăng ký thành công cho user', userId);
   } catch (err) {
     console.error('Web Push: Lỗi đăng ký:', err);
@@ -116,7 +113,7 @@ async function unsubscribeFromPush(): Promise<void> {
 
   try {
     // Xóa subscription của thiết bị hiện tại (theo endpoint)
-    const currentEndpoint = sessionStorage.getItem(PUSH_ENDPOINT_KEY);
+    const currentEndpoint = localStorage.getItem(PUSH_ENDPOINT_KEY);
 
     if (supabase && currentEndpoint) {
       const { error } = await supabase
@@ -129,7 +126,7 @@ async function unsubscribeFromPush(): Promise<void> {
       } else {
         console.log('Web Push: Đã xóa subscription thiết bị hiện tại');
       }
-      sessionStorage.removeItem(PUSH_ENDPOINT_KEY);
+      localStorage.removeItem(PUSH_ENDPOINT_KEY);
     }
 
     // Unsubscribe from browser push

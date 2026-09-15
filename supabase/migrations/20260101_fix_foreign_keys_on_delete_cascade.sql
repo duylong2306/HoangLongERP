@@ -89,10 +89,19 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'hrm_payroll_records_emp_id_fkey'
   ) THEN
-    ALTER TABLE hrm_payroll_records
-      ADD CONSTRAINT hrm_payroll_records_emp_id_fkey
-        FOREIGN KEY (emp_id) REFERENCES employees(id) ON DELETE CASCADE;
-    RAISE NOTICE '✅ Added: hrm_payroll_records.emp_id → employees ON DELETE CASCADE';
+    -- Kiểm tra xem có ít nhất 1 record có emp_id hợp lệ trước khi thêm FK
+    IF EXISTS (
+      SELECT 1 FROM hrm_payroll_records hrp
+      JOIN employees e ON hrp.emp_id = e.id
+      WHERE hrp.emp_id IS NOT NULL
+    ) THEN
+      ALTER TABLE hrm_payroll_records
+        ADD CONSTRAINT hrm_payroll_records_emp_id_fkey
+          FOREIGN KEY (emp_id) REFERENCES employees(id) ON DELETE CASCADE;
+      RAISE NOTICE '✅ Added: hrm_payroll_records.emp_id → employees ON DELETE CASCADE';
+    ELSE
+      RAISE NOTICE '⚠️ No valid employee records found, skipping FK constraint for hrm_payroll_records';
+    END IF;
   END IF;
 END $$;
 

@@ -1,6 +1,8 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
-import { Employee, Project, ArchivedQuote } from '../types';
+import { Employee, Project, ArchivedQuote, Customer } from '../types';
+import { generateProjectId } from '../lib/projectId';
 import { useNotification } from '../context';
 import { isUserInRoleGroup } from '../context';
 import {
@@ -9,7 +11,14 @@ import {
   Printer,
   Trash2,
   Eye,
-  Plus
+  Plus,
+  Camera,
+  Upload,
+  X,
+  Pencil,
+  Download,
+  Share2,
+  Lock
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 
@@ -17,16 +26,395 @@ interface MechanicalArchiveProps {
   currentUser: Employee;
   canEdit?: boolean;
   canDelete?: boolean;
+  preselectedProjectId?: string;
+  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  /** Điều hướng về giao diện Lập Báo Giá và tải lại dữ liệu để sửa chi tiết */
+  onEditQuote?: (quote: ArchivedQuote) => void;
 }
 
-export default function MechanicalArchive({ currentUser, canEdit = true, canDelete = true }: MechanicalArchiveProps) {
+export default function MechanicalArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab, onEditQuote }: MechanicalArchiveProps) {
   const { addToast } = useNotification();
+
+  // Tải động html2canvas/jsPDF — dùng lại đúng cách export PDF đã ổn định của
+  // Đơn Mua Hàng (MaterialCoordination.tsx): gọi html2canvas trực tiếp rồi tự
+  // ghép ảnh vào jsPDF (tự chia trang nếu nội dung dài hơn 1 trang A4), KHÔNG
+  // dùng html2pdf.js (thư viện đó gán nhầm property `container.height` thay vì
+  // `.style.height` khiến ảnh chụp ra trắng hoàn toàn — đã xác minh ở đó).
+  const loadHtml2Canvas = async () => {
+    const mod = await import('html2canvas-pro');
+    return (mod as any).default || mod;
+  };
+  const loadJsPdf = async () => {
+    const mod = await import('jspdf');
+    return (mod as any).jsPDF || (mod as any).default;
+  };
+
+  // html2canvas-pro chụp ở chế độ "màn hình" bình thường, KHÔNG kích hoạt
+  // được @media print — nên các lớp Tailwind "print:border-none /
+  // print:shadow-none / print:p-0" đã có sẵn trong QuotationTableSheet/
+  // ContractDocument/AcceptanceDocument/LiquidationDocument (dùng để bỏ
+  // khung viền xám + đổ bóng + đệm của khung card khi in thật qua trình
+  // duyệt) không có tác dụng khi xuất PDF qua html2canvas. Áp lại thủ công
+  // đúng hiệu ứng đó lên bản sao trước khi chụp.
+  const applyPrintVariantOverrides = (root: HTMLElement) => {
+    const all: HTMLElement[] = [root, ...Array.from(root.querySelectorAll('*'))] as HTMLElement[];
+    all.forEach((el) => {
+      const cls = el.className;
+      if (typeof cls !== 'string') return; // bỏ qua SVG (className là SVGAnimatedString)
+      if (cls.includes('print:border-none')) el.style.border = 'none';
+      if (cls.includes('print:shadow-none')) el.style.boxShadow = 'none';
+      if (cls.includes('print:p-0')) el.style.padding = '0';
+    });
+  };
+
+  // Dựng PDF từ đúng vùng nội dung đang hiển thị trong modal xem/in
+  // (#print-area-archive) — nhân bản (clone) ra 1 khung ẩn khổ A4 cố định
+  // trước khi chụp, vì vùng gốc trên màn hình bị giới hạn max-h-[70vh]
+  // overflow-y-auto (chỉ chụp được phần đang cuộn tới nếu chụp thẳng).
+  const generateArchivePdfBlob = async (): Promise<Blob> => {
+    const source = document.getElementById('print-area-archive');
+    if (!source) throw new Error('Không tìm thấy nội dung để xuất PDF.');
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.background = '#ffffff';
+    container.innerHTML = source.innerHTML;
+    // Bỏ các nút hành động/badge chỉ dành cho màn hình (không nằm trong bản in)
+    container.querySelectorAll('.print-hide, .no-print, [class*="print\\:hidden"]').forEach(el => el.remove());
+    applyPrintVariantOverrides(container);
+    document.body.appendChild(container);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 15, marginSide = 18;
+      const pageWidthMm = 210, pageHeightMm = 297;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      // Danh sách các điểm "cắt an toàn" — ngay dưới đáy mỗi dòng bảng (<tr>) —
+      // quy đổi sang toạ độ pixel của canvas (nhân với scale:2 lúc chụp phía
+      // trên). Trước đây cắt trang theo đúng bội số pageHeightPx một cách mù
+      // quáng, có thể cắt ngang giữa 1 dòng đang chứa ghi chú nhiều dòng, làm
+      // nửa trên/dưới của dòng đó tách rời sang 2 trang khác nhau.
+      const containerRect = container.getBoundingClientRect();
+      const safeBreaksPx = Array.from(container.querySelectorAll('tr'))
+        .map((el) => Math.round((el.getBoundingClientRect().bottom - containerRect.top) * 2))
+        .filter((v) => v > 0 && v < canvas.height)
+        .sort((a, b) => a - b);
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const idealEnd = Math.min(renderedPx + pageHeightPx, canvas.height);
+        // Nếu chưa phải trang cuối, dò lùi tới điểm cắt an toàn gần nhất
+        // (đáy 1 dòng bảng hoàn chỉnh) thay vì cắt cứng theo pixel.
+        let sliceEnd = idealEnd;
+        if (idealEnd < canvas.height) {
+          const minAdvance = renderedPx + Math.min(60, pageHeightPx * 0.15);
+          const candidate = safeBreaksPx.filter((b) => b > minAdvance && b <= idealEnd).pop();
+          if (candidate) sliceEnd = candidate;
+        }
+        const sliceHeightPx = sliceEnd - renderedPx;
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Tải PDF hồ sơ về máy — không qua hộp thoại Share của hệ điều hành (Windows
+  // Share không có lựa chọn "Lưu về máy" trực tiếp).
+  const downloadArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `HoSo_${quote.code || quote.id}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: '✅ Đã tải PDF', message: `Đã tải "HoSo_${quote.code || quote.id}.pdf" về thư mục Tải xuống.`, type: 'success' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF.', type: 'error' });
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF hồ sơ (thay vì chỉ chia sẻ link)
+  const shareArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const file = new File([blob], `HoSo_${quote.code || quote.id}.pdf`, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Hồ sơ ${quote.code || quote.id}`, text: `Hồ sơ ${quote.code || quote.id}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: 'ℹ️ Đã tải PDF', message: 'Đã tải file PDF hồ sơ về máy để gửi thủ công.', type: 'info' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF để chia sẻ.', type: 'warning' });
+    }
+  };
+
   const [archivedList, setArchivedList] = useState<ArchivedQuote[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
+  // Danh sách khách hàng — dùng để tự động lấy "Người đại diện" cho các hồ sơ CŨ
+  // (lập trước khi có trường này) chưa từng lưu customerRepresentative riêng.
+  const [customersList, setCustomersList] = useState<Customer[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<ArchivedQuote | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>('quote');
+
+  // Hồ sơ LẬP TRƯỚC khi có trường "Người đại diện" chưa từng lưu config.customerRepresentative
+  // riêng — tự động lấy theo hồ sơ Khách Hàng (trường "representative") thay vì để trống,
+  // để không bắt người dùng phải mở từng hồ sơ cũ để nhập lại thủ công.
+  const displayedQuote = useMemo(() => {
+    if (!selectedQuote) return selectedQuote;
+    if (selectedQuote.config?.customerRepresentative) return selectedQuote;
+    const cust = customersList.find(c => c.id === selectedQuote.customerId);
+    if (!cust?.representative) return selectedQuote;
+    return { ...selectedQuote, config: { ...selectedQuote.config, customerRepresentative: cust.representative } };
+  }, [selectedQuote, customersList]);
+
+  // Image upload states for mechanical quotes
+  const [quoteImagePreview, setQuoteImagePreview] = useState<string | null>(null);
+  const [quoteGalleryImages, setQuoteGalleryImages] = useState<string[]>([]);
+  const [isUploadingQuoteImage, setIsUploadingQuoteImage] = useState(false);
+
+  // Camera states for quote images
+  const [quoteCameraOpen, setQuoteCameraOpen] = useState(false);
+  const quoteCameraStreamRef = useRef<MediaStream | null>(null);
+  const quoteVideoRef = useRef<HTMLVideoElement>(null);
+  const quoteImageInputRef = useRef<HTMLInputElement>(null);
+  const quoteGalleryInputRef = useRef<HTMLInputElement>(null);
+
+  // Camera helper functions
+  const stopQuoteCamera = () => {
+    if (quoteCameraStreamRef.current) {
+      quoteCameraStreamRef.current.getTracks().forEach(t => t.stop());
+      quoteCameraStreamRef.current = null;
+    }
+    setQuoteCameraOpen(false);
+  };
+
+  const openQuoteCamera = async () => {
+    try {
+      stopQuoteCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      quoteCameraStreamRef.current = stream;
+      setQuoteCameraOpen(true);
+      setTimeout(() => {
+        if (quoteVideoRef.current) {
+          quoteVideoRef.current.srcObject = stream;
+          quoteVideoRef.current.play().catch(() => { /* noop */ });
+        }
+      }, 150);
+    } catch (err) {
+      addToast({ title: '⚠️ Không thể mở camera', message: 'Vui lòng cấp quyền camera hoặc tải ảnh lên từ thiết bị.', type: 'warning' });
+    }
+  };
+
+  const captureQuoteImage = () => {
+    const video = quoteVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `quote_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      // Convert to base64 for preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (result) {
+          setQuoteImagePreview(result);
+        }
+      };
+      reader.readAsDataURL(blob);
+      // Upload to Supabase if available
+      try {
+        setIsUploadingQuoteImage(true);
+        const { url, stored } = await dbService.uploadQuoteImage(selectedQuote?.id || '', file);
+        if (stored === 'supabase') {
+          setQuoteImagePreview(url);
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo giá đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          setQuoteImagePreview(url);
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Chưa có bucket "quote-images" trên Supabase. Chạy migration 025 trong SQL Editor để tạo bucket và lưu ảnh lên cloud.', type: 'warning', duration: 7000 });
+        }
+      } catch (err) {
+        addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' });
+      } finally {
+        setIsUploadingQuoteImage(false);
+      }
+      stopQuoteCamera();
+    }, 'image/jpeg');
+  };
+
+  const handleQuoteImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!selectedQuote?.id) {
+      addToast({ title: '⚠️ Cảnh báo', message: 'Vui lòng chọn báo giá trước khi tải ảnh lên.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) { // 10MB
+      addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    // Convert to base64 for preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        setQuoteImagePreview(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Upload to Supabase
+    dbService.uploadQuoteImage(selectedQuote.id, file)
+      .then(({ url, stored }) => {
+        setQuoteImagePreview(url);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo giá đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Chưa có bucket "quote-images" trên Supabase. Chạy migration 025 trong SQL Editor để tạo bucket và lưu ảnh lên cloud.', type: 'warning', duration: 7000 });
+        }
+      })
+      .catch(() => addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên.', type: 'error' }));
+    e.target.value = '';
+  };
+
+  const handleQuoteGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (!selectedQuote?.id) {
+      addToast({ title: '⚠️ Cảnh báo', message: 'Vui lòng chọn báo giá trước khi tải ảnh lên.', type: 'warning' });
+      e.target.value = '';
+      return;
+    }
+    const validFiles = Array.from(files).filter(file => {
+      if (!file.type.startsWith('image/')) {
+        addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+        return false;
+      }
+      if (file.size > 10 * 1024 * 1024) { // 10MB
+        addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+        return false;
+      }
+      return true;
+    });
+    if (validFiles.length === 0) {
+      e.target.value = '';
+      return;
+    }
+    // Upload each file to Supabase
+    const uploadPromises = validFiles.map(file => {
+      const reader = new FileReader();
+      return new Promise<{ url: string, stored: 'supabase' | 'local' }>((resolve, reject) => {
+        reader.onload = async (e) => {
+          const result = e.target?.result as string;
+          if (result) {
+            try {
+              const { url, stored } = await dbService.uploadQuoteImage(selectedQuote.id, file);
+              resolve({ url, stored });
+            } catch (err) {
+              reject(err);
+            }
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    Promise.allSettled(uploadPromises).then((results) => {
+      const successUrls: string[] = [];
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successUrls.push(result.value.url);
+        }
+      });
+      if (successUrls.length > 0) {
+        setQuoteGalleryImages(prev => [...prev, ...successUrls]);
+        addToast({ title: '✅ Đã tải lên', message: `Đã tải lên ${successUrls.length} ảnh thành công.`, type: 'success' });
+      }
+      const failedCount = results.length - successUrls.length;
+      if (failedCount > 0) {
+        addToast({ title: '⚠️ Một số ảnh thất bại', message: `Không thể tải lên ${failedCount} ảnh.`, type: 'warning' });
+      }
+    });
+    e.target.value = '';
+  };
+
+  const removeQuoteImage = (type: 'primary' | 'gallery', index?: number) => {
+    if (type === 'primary') {
+      setQuoteImagePreview(null);
+    } else if (type === 'gallery' && typeof index === 'number') {
+      setQuoteGalleryImages(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const resetQuoteImageState = () => {
+    setQuoteImagePreview(null);
+    setQuoteGalleryImages([]);
+    stopQuoteCamera();
+  };
+
+  // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
+  // Lưu ý: KHÔNG đưa selectedQuote vào dependency để tránh popup bị mở lại ngay sau khi đóng.
+  const openedPreselectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (preselectedProjectId && archivedList.length > 0) {
+      const q = archivedList.find(x => x.projectId === preselectedProjectId);
+      if (q && openedPreselectedRef.current !== preselectedProjectId) {
+        openedPreselectedRef.current = preselectedProjectId;
+        setSelectedQuote(q);
+        if (initialDetailTab) setActiveDetailTab(initialDetailTab);
+      }
+    }
+  }, [preselectedProjectId, archivedList, initialDetailTab]);
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
 
   // States for Quick Project Creation from Quote detail
@@ -64,7 +452,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
     }
 
     try {
-      const generatedProjId = selectedQuote.projectId || `proj_${Date.now()}`;
+      const generatedProjId = selectedQuote.projectId || generateProjectId('mechanical');
       const generatedCode = `DA-CK-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 101)}`;
 
       const newProjPayload: Project = {
@@ -81,13 +469,11 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
         status: 'new',
         progress: 0,
         kanbanColumnId: quickProjKanbanColId,
-        involvedEmployeeIds: ['emp_3', 'emp_1'],
         baoGiaFile: {
           name: `${selectedQuote.code || 'BAO_GIA'}.pdf`,
           size: '1.2 MB',
           createdAt: new Date().toLocaleDateString('vi-VN'),
           totalAmount: selectedQuote.totalAmount || 0,
-          discountPercent: selectedQuote.config?.discountPercent || 0,
           items: selectedQuote.items || []
         }
       };
@@ -119,10 +505,18 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
   const fetchArchives = async () => {
     setLoading(true);
     try {
-      const data = await dbService.archivedQuotes.list('mechanical');
+      // Tải song song thay vì tuần tự (await nối tiếp) — 3 lệnh độc lập nhau nên
+      // gộp qua Promise.all giảm gần 3 lần thời gian chờ so với trước, đồng thời
+      // tránh hiện tượng danh sách "nháy" do render 2-3 lần liên tiếp khi từng
+      // phần dữ liệu về không cùng lúc.
+      const [data, projs, custs] = await Promise.all([
+        dbService.archivedQuotes.list('mechanical'),
+        dbService.projects.list(),
+        dbService.customers.list(),
+      ]);
       setArchivedList(data);
-      const projs = await dbService.projects.list();
       setProjectsList(projs);
+      setCustomersList(custs);
     } catch (error) {
       console.error("Lỗi khi tải hồ sơ báo giá cơ khí:", error);
     } finally {
@@ -203,12 +597,9 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
     <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-6 space-y-6 text-left" id="mechanical_archive_workspace">
       <div>
         <h3 className="font-black text-lg text-slate-100 uppercase tracking-wider flex items-center gap-2">
-          <span className="p-1 px-2.5 bg-pink-500/10 text-pink-400 rounded-lg border border-pink-500/20 text-xs">⚙️ MECHANICAL ARCHIVE</span>
+          <span className="p-1 px-2.5 bg-pink-50 text-pink-700 rounded-lg border border-pink-200 text-xs">⚙️ MECHANICAL ARCHIVE</span>
           Hồ Sơ Lưu Trữ Báo Giá Cơ Khí Hàn
         </h3>
-        <p className="text-[11px] text-slate-400 mt-1 max-w-2xl">
-          Lịch sử lưu vết các báo giá kết cấu thép hình SS400, bóc tách khối lượng que hàn, sơn tĩnh điện, gia công bản mã thầu CNC.
-        </p>
       </div>
 
       <div className="flex gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
@@ -248,7 +639,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                 <th className="px-4 py-3">Chi Tiết Sản Phẩm Thép / Hàn</th>
                 <th className="px-4 py-3 text-right">Tổng Khối Lượng</th>
                 <th className="px-4 py-3">Ngày Lập</th>
-                <th className="px-4 py-3 text-right">Tổng Tiền (Gồm VAT)</th>
+                <th className="px-4 py-3 text-right">Tổng Tiền</th>
                 <th className="px-4 py-3 text-center">Trạng Thái Hồ Sơ</th>
                 <th className="px-4 py-3 text-center">Hành Động</th>
               </tr>
@@ -268,7 +659,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                           <div className="flex items-center gap-2">
                             <span>📁 Dự án:</span>
                             <span className="text-slate-100">{proj ? (proj as any).name : 'Vãng lai - Chưa liên kết'}</span>
-                            {proj && <span className="px-1.5 py-0.5 text-[9px] bg-indigo-950 text-indigo-300 rounded border border-indigo-900/40 font-mono font-bold">{(proj as any).code}</span>}
+                            {proj && <span className="px-1.5 py-0.5 text-[9px] bg-indigo-50 text-indigo-700 rounded border border-indigo-200 font-mono font-bold">{(proj as any).code}</span>}
                           </div>
                         </td>
                       </tr>
@@ -290,7 +681,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                             type: 'quote' as const,
                             label: 'Báo Giá',
                             code: item.code || 'BÁO GIÁ LẺ',
-                            color: 'text-indigo-400 bg-indigo-950/40 border-indigo-900/30',
+                            color: 'text-indigo-600 bg-indigo-50 border-indigo-200',
                             statusLabel: item.isApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
                             statusColor: item.isApproved 
                               ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' 
@@ -300,43 +691,37 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                             type: 'contract' as const,
                             label: 'Hợp Đồng',
                             code: item.code ? 'HĐ-' + item.code.replace('BGCK-', '') : 'HỒ SƠ HỢP ĐỒNG',
-                            color: 'text-sky-400 bg-sky-950/40 border-sky-900/30',
-                            statusLabel: !item.isApproved
-                              ? 'Chờ Duyệt'
-                              : (!item.contractHtml ? 'Chưa Lập' : ((item as any).contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
-                            statusColor: !item.isApproved
-                              ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                              : (!item.contractHtml
-                                ? 'bg-white text-slate-500 border-slate-300 shadow-sm'
-                                : ((item as any).contractApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
+                            color: 'text-sky-600 bg-sky-50 border-sky-200',
+                            // Nguồn xác định "Đã Duyệt" DUY NHẤT là contractApproved — KHÔNG
+                            // điều kiện thêm theo contractHtml có tồn tại hay không, vì hồ sơ
+                            // có thể đã duyệt (contractApproved=true) mà contractHtml vẫn rỗng
+                            // (bản in được sinh động từ template lúc mở xem) — trước đây điều
+                            // kiện !item.contractHtml khiến các hồ sơ dạng này hiện sai thành
+                            // "Chờ Duyệt" dù đã duyệt thật.
+                            statusLabel: (item as any).contractApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).contractApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           },
                           {
                             type: 'acceptance' as const,
                             label: 'Nghiệm Thu',
                             code: item.code ? 'NT-' + item.code.replace('BGCK-', '') : 'BIÊN BẢN NGHIỆM THU',
-                            color: 'text-amber-400 bg-amber-950/40 border-amber-900/30',
-                            statusLabel: !item.isApproved
-                              ? 'Chờ Duyệt'
-                              : (!item.acceptanceHtml ? 'Chưa Lập' : ((item as any).acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
-                            statusColor: !item.isApproved
-                              ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                              : (!item.acceptanceHtml
-                                ? 'bg-white text-slate-500 border-slate-300 shadow-sm'
-                                : ((item as any).acceptanceApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
+                            color: 'text-amber-600 bg-amber-50 border-amber-200',
+                            statusLabel: (item as any).acceptanceApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).acceptanceApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           },
                           {
                             type: 'liquidation' as const,
                             label: 'Thanh Lý',
                             code: item.code ? 'TL-' + item.code.replace('BGCK-', '') : 'BIÊN BẢN THANH LÝ',
-                            color: 'text-purple-400 bg-purple-950/40 border-purple-900/30',
-                            statusLabel: !item.isApproved
-                              ? 'Chờ Duyệt'
-                              : (!item.liquidationHtml ? 'Chưa Lập' : ((item as any).liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt')),
-                            statusColor: !item.isApproved
-                              ? 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
-                              : (!item.liquidationHtml
-                                ? 'bg-white text-slate-500 border-slate-300 shadow-sm'
-                                : ((item as any).liquidationApproved ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm' : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'))
+                            color: 'text-purple-600 bg-purple-50 border-purple-200',
+                            statusLabel: (item as any).liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).liquidationApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           }
                         ];
 
@@ -398,10 +783,36 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                                   >
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
+                                  {doc.type === 'quote' && onEditQuote && (
+                                    item.isApproved ? (
+                                      <span
+                                        className="p-1.5 text-slate-400 rounded border border-slate-200 shadow cursor-not-allowed"
+                                        title="Đã duyệt — hủy phê duyệt để chỉnh sửa"
+                                      >
+                                        <Lock className="w-3.5 h-3.5" />
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (!canEdit) {
+                                            addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                                            return;
+                                          }
+                                          onEditQuote(item);
+                                        }}
+                                        className="p-1.5 bg-amber-50 text-amber-700 hover:text-amber-800 rounded border border-amber-200 hover:bg-amber-100 transition shadow cursor-pointer"
+                                        title="Sửa Báo Giá"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                    )
+                                  )}
                                   <button
                                     type="button"
                                     onClick={(e) => handleDeleteClick(item, e)}
-                                    className="p-1.5 bg-rose-950/20 text-rose-400 hover:text-rose-300 rounded border border-rose-950/30 hover:bg-rose-950/40 transition shadow cursor-pointer"
+                                    className="p-1.5 bg-rose-50 text-rose-600 hover:text-rose-700 rounded border border-rose-200 hover:bg-rose-100 transition shadow cursor-pointer"
                                     title="Xóa Lưu Trữ"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -424,7 +835,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
       {/* Delete confirmation dialog */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[120] p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <h4 className="text-sm font-extrabold uppercase text-rose-500">Xác Nhận Xóa Hồ Sơ</h4>
             <p className="text-xs text-slate-300 leading-relaxed">
               Bạn có chắc chắn muốn xóa hồ sơ báo giá <strong className="text-white">{deleteTarget.code}</strong> khỏi hệ thống lưu trữ báo giá Cơ Khí? Thao tác này không thể hoàn tác.
@@ -449,13 +860,14 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
         </div>
       )}
 
-      {/* Detail & Print Popup */}
-      {selectedQuote && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fadeIn select-text text-left">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-scaleIn">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+      {/* Detail & Print Popup — dùng React Portal render thẳng vào document.body, tách
+          hoàn toàn khỏi cây component của ứng dụng để tránh lỗi in đè chữ ở các trang sau. */}
+      {selectedQuote && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fadeIn select-text text-left print-portal-backdrop">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 print-portal-card">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between print-hide">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-pink-50 flex items-center justify-center border border-pink-250">
+                <div className="w-8 h-8 rounded-xl bg-pink-50 flex items-center justify-center border border-pink-200">
                   <FileText className="w-4 h-4 text-pink-600" />
                 </div>
                 <div>
@@ -465,7 +877,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                   <p className="text-[10px] text-slate-500 font-medium">Báo giá gia công & thiết kế cơ khí hoàn chỉnh</p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedQuote(null)}
                 className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs"
               >
@@ -473,11 +885,74 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
               </button>
             </div>
 
-            <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
-              <QuotationTableSheet quoteData={selectedQuote} initialTab={activeDetailTab} />
+            <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto" id="print-area-archive">
+              {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ ứng dụng (#root), chỉ chừa lại
+                  đúng modal đã tách portal này để nội dung chảy tự nhiên qua nhiều trang
+                  mà không bị lỗi in đè chữ. */}
+              <style>{`
+                @media print {
+                  #root {
+                    display: none !important;
+                  }
+                  .print-portal-backdrop {
+                    position: static !important;
+                    display: block !important;
+                    background: none !important;
+                    padding: 0 !important;
+                  }
+                  .print-portal-card {
+                    max-width: 100% !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    border-radius: 0 !important;
+                    overflow: visible !important;
+                  }
+                  #print-area-archive {
+                    max-height: none !important;
+                    overflow: visible !important;
+                    padding: 0 !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                     khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                     nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                  #print-area-archive * {
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  .print-hide {
+                    display: none !important;
+                  }
+                  /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                     panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                     hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                     của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                     duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                     cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                     hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                     khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                  #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                  #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                  #print-area-archive .md\\:text-right { text-align: right !important; }
+                  #print-area-archive .md\\:text-left { text-align: left !important; }
+                  #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                  #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                  #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                  #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+                }
+              `}</style>
+              <QuotationTableSheet
+                quoteData={displayedQuote}
+                initialTab={activeDetailTab}
+                onApproved={(updated) => {
+                  setSelectedQuote(prev => prev ? { ...prev, ...updated } : prev);
+                  setArchivedList(prev => prev.map(q => (q.id === updated.id ? { ...q, ...updated } : q)));
+                }}
+              />
             </div>
 
-            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center gap-4">
+            <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-between items-center gap-4 print-hide">
               <div>
                 {!projectsList.some(p => p.id === selectedQuote.projectId) ? (
                   <button
@@ -509,24 +984,65 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
                 >
                   Đóng
                 </button>
+                {onEditQuote && activeDetailTab === 'quote' && (
+                  (selectedQuote as any).isApproved ? (
+                    <span className="px-5 py-2.5 text-[11px] text-slate-500 font-sans italic flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      Đã duyệt — hủy phê duyệt để chỉnh sửa
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!canEdit) {
+                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA báo giá.', type: 'error' });
+                          return;
+                        }
+                        onEditQuote(selectedQuote);
+                      }}
+                      className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Sửa Báo Giá
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  onClick={() => downloadArchivePdf(selectedQuote)}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                  title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Tải PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shareArchivePdf(selectedQuote)}
+                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  Chia Sẻ
+                </button>
                 <button
                   type="button"
                   onClick={() => window.print()}
                   className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  In Báo Giá
+                  In Hồ Sơ
                 </button>
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Quick Create Project Drawer/Modal */}
       {showQuickCreateProj && selectedQuote && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center z-[130] p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full text-left space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full text-left space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h4 className="text-sm font-extrabold uppercase text-indigo-400">Khởi Tạo Dự Án Nhanh</h4>
               <button 

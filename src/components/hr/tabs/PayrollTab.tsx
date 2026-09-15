@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { Calculator, FileSpreadsheet, Download } from 'lucide-react';
 import { PayrollItem } from '../hrTypes';
 
 interface PayrollTabProps {
   payroll: PayrollItem[];
+  employees?: any[];
   payrollMonth: string;
   setPayrollMonth: (v: string) => void;
   payrollYear: string;
@@ -20,11 +21,14 @@ interface PayrollTabProps {
   handleExportPayrollExcel: () => void;
   handleOpenEditPayroll: (pay: PayrollItem) => void;
   triggerDownloadPayslip: (pay: PayrollItem) => void;
+  handleLockPayrollPeriod: () => void;
+  handleDownloadAllPayslips: () => void;
   addToast: (msg: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
 }
 
 export default function PayrollTab({
   payroll,
+  employees,
   payrollMonth,
   setPayrollMonth,
   payrollYear,
@@ -41,8 +45,73 @@ export default function PayrollTab({
   handleExportPayrollExcel,
   handleOpenEditPayroll,
   triggerDownloadPayslip,
+  handleLockPayrollPeriod,
+  handleDownloadAllPayslips,
   addToast,
 }: PayrollTabProps) {
+  const [payrollNameSearch, setPayrollNameSearch] = useState('');
+  const [showNameSuggest, setShowNameSuggest] = useState(false);
+
+  // Chuẩn hóa về chữ thường, bỏ dấu để tìm kiếm gần đúng (không phân biệt dấu/hoa thường).
+  const normStr = (s: string) =>
+    String(s || '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase();
+
+  // Lọc kết quả theo Kỳ lương (tháng/năm) VÀ theo tên nhân viên (tìm gần đúng),
+  // sau đó sắp xếp theo mã nhân viên (empId) theo thứ tự số tự nhiên.
+  const empIdNum = (id: string) => {
+    const m = String(id || '').match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+  };
+  const filteredPayroll = (payroll || [])
+    .filter((p: any) => {
+      const monthOk = p.month === `${payrollMonth}/${payrollYear}`;
+      const q = payrollNameSearch.trim();
+      const nameOk = !q || normStr(p.empName).includes(normStr(q));
+      return monthOk && nameOk;
+    })
+    .sort((a: any, b: any) => {
+      const na = empIdNum(a.empId);
+      const nb = empIdNum(b.empId);
+      if (na !== nb) return na - nb;
+      return String(a.empId).localeCompare(String(b.empId));
+    });
+
+  // Toàn bộ payroll của kỳ đang chọn (KHÔNG lọc theo tên tìm kiếm) — dùng để
+  // xác định kỳ này đã "Khóa kỳ & Phát phiếu lương" hay chưa.
+  const periodPayrollAll = (payroll || []).filter((p: any) => p.month === `${payrollMonth}/${payrollYear}`);
+  const periodLocked = periodPayrollAll.length > 0 && periodPayrollAll.every((p: any) => p.locked);
+
+  // Tổng cộng theo bộ lọc hiện tại (kỳ lương + tên nhân viên) — tính trên TOÀN BỘ
+  // danh sách đã lọc (filteredPayroll), không phải chỉ trang đang xem, giống cách
+  // tab "Công nợ Trả" (Tài Chính - Kế Toán) tính tổng ở dòng cuối bảng.
+  const payrollTotals = useMemo(() => {
+    return filteredPayroll.reduce((acc: any, p: any) => {
+      acc.baseSalary += p.baseSalary || 0;
+      acc.dailyWage += Math.round(((p.baseSalary || 0) / standardWorkDays) * (p.workedDays || 0));
+      acc.kpiBonus += p.kpiBonus || 0;
+      // Trước đây đọc otWeekendSalary/totalOtHoursSalary — 2 field KHÔNG tồn tại
+      // trong dữ liệu tính lương thực tế (calculateSingleEmployeePayroll trả về
+      // otSundaySalary/otHolidaySalary/otHoursSalary) nên cột "Tăng ca (H)" luôn
+      // hiện 0đ dù nhân viên có tăng ca thật.
+      acc.otAmount += (p.otSundaySalary || 0) + (p.otHolidaySalary || 0) + (p.otHoursSalary || 0);
+      acc.advances += p.advances || 0;
+      acc.insurance += p.insurance || 0;
+      acc.tax += p.tax || 0;
+      acc.netSalary += p.netSalary || 0;
+      return acc;
+    }, { baseSalary: 0, dailyWage: 0, kpiBonus: 0, otAmount: 0, advances: 0, insurance: 0, tax: 0, netSalary: 0 });
+  }, [filteredPayroll, standardWorkDays]);
+
+  // Gợi ý nhân viên (từ danh sách employees) khớp gần đúng với từ khoá đang nhập.
+  const nameSuggestions = !payrollNameSearch.trim()
+    ? []
+    : (employees || [])
+        .filter((e: any) => e && normStr(e.name).includes(normStr(payrollNameSearch.trim())))
+        .slice(0, 10);
+
   return (
     <div className="space-y-4 animate-fadeIn">
       {/* TOOLBAR CONTROLS */}
@@ -60,13 +129,13 @@ export default function PayrollTab({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleCalculatePayroll}
-              className="bg-amber-600 hover:bg-amber-550 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-all duration-150 active:translate-y-0.5"
+              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/20 transition-all duration-150 active:translate-y-0.5"
             >
               ⚡ Tính lương tự động
             </button>
             <button
               onClick={handleExportPayrollExcel}
-              className="bg-blue-600 hover:bg-blue-550 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-all duration-150 active:translate-y-0.5"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-[10.5px] px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer shadow transition-all duration-150 active:translate-y-0.5"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" /> Xuất Excel bảng lương
             </button>
@@ -78,7 +147,7 @@ export default function PayrollTab({
             <label className="block text-[9.5px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">Kỳ Tính Lương (Tháng)</label>
             <select
               value={payrollMonth}
-              onChange={(e) => setPayrollMonth(e.target.value)}
+              onChange={(e) => { setPayrollMonth(e.target.value); setPayrollPage(1); }}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
             >
               {Array.from({ length: 12 }, (_, i) => {
@@ -91,7 +160,7 @@ export default function PayrollTab({
             <label className="block text-[9.5px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">Kỳ Tính Lương (Năm)</label>
             <select
               value={payrollYear}
-              onChange={(e) => setPayrollYear(e.target.value)}
+              onChange={(e) => { setPayrollYear(e.target.value); setPayrollPage(1); }}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
             >
               <option value="2024">Năm 2024</option>
@@ -134,10 +203,38 @@ export default function PayrollTab({
                     : 'bg-slate-955 text-slate-400 border-slate-800 hover:text-white'
                 }`}
               >
-                Worksheet (Chi tiết mộc)
+                Worksheet chi tiết
               </button>
             </div>
           </div>
+
+          {/* BỘ LỌC TÊN NHÂN VIÊN */}
+          <div className="relative">
+            <label className="block text-[9.5px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">Tìm kiếm nhân viên</label>
+            <input
+              type="text"
+              value={payrollNameSearch}
+              onChange={(e) => { setPayrollNameSearch(e.target.value); setPayrollPage(1); setShowNameSuggest(true); }}
+              onFocus={() => setShowNameSuggest(true)}
+              onBlur={() => setTimeout(() => setShowNameSuggest(false), 150)}
+              placeholder="Nhập tên nhân viên (gần đúng)..."
+              className="w-full sm:w-72 px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+            />
+            {showNameSuggest && nameSuggestions.length > 0 && (
+              <ul className="absolute z-20 mt-1 w-full sm:w-72 max-h-60 overflow-auto rounded-lg border border-slate-700 bg-slate-800 shadow-lg">
+                {nameSuggestions.map((emp: any) => (
+                  <li
+                    key={emp.id || emp.name}
+                    onMouseDown={() => { setPayrollNameSearch(emp.name); setShowNameSuggest(false); setPayrollPage(1); }}
+                    className="px-3 py-2 text-sm text-slate-200 hover:bg-amber-600 hover:text-white cursor-pointer"
+                  >
+                    {emp.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
         </div>
       </div>
 
@@ -145,7 +242,7 @@ export default function PayrollTab({
       <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3 font-sans text-left text-white">
         <div className="flex justify-between items-center border-b border-slate-850 pb-2">
           <span className="font-bold text-[11px] text-amber-500 uppercase tracking-widest flex items-center gap-1">
-            {payrollViewMode === 'summary' ? 'Bảng tóm tắt tiền lương' : 'Bảng tính toán mộc chi tiết đầy đủ 100%'}
+            {payrollViewMode === 'summary' ? 'Bảng tóm tắt tiền lương' : 'Worksheet chi tiết'}
             <span className="text-[10px] text-slate-400 normal-case font-normal ml-1">({payrollMonth}/{payrollYear} - Công chuẩn: {standardWorkDays} ngày)</span>
           </span>
           <span className="text-[9.5px] text-slate-400 italic font-medium hidden sm:inline">Click để ghi đè công, điểm KPI, thưởng tăng ca & các khoản trừ liên thông</span>
@@ -156,7 +253,9 @@ export default function PayrollTab({
             <table className="w-full text-left whitespace-nowrap border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 text-[10.5px]">
+                  <th className="pb-2 text-center w-10">STT</th>
                   <th className="pb-2">Nhân viên</th>
+                  <th className="pb-2">Chức vụ</th>
                   <th className="pb-2">Lương gốc</th>
                   <th className="pb-2">Công đạt</th>
                   <th className="pb-2">Lương công nhật</th>
@@ -172,22 +271,24 @@ export default function PayrollTab({
               </thead>
               <tbody>
                 {(() => {
-                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? payroll.length : (globalPageSize as number));
-                  const endIndex = globalPageSize === 'all' ? payroll.length : startIndex + (globalPageSize as number);
-                  const paginated = payroll.slice(startIndex, endIndex);
+                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? filteredPayroll.length : (globalPageSize as number));
+                  const endIndex = globalPageSize === 'all' ? filteredPayroll.length : startIndex + (globalPageSize as number);
+                  const paginated = filteredPayroll.slice(startIndex, endIndex);
                   if (paginated.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={12} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương hiện tại. Vui lòng click "Tính lương tự động" phía trên.</td>
+                        <td colSpan={14} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kỳ lương {payrollMonth}/{payrollYear}. Vui lòng chọn đúng kỳ lương hoặc click "Tính lương tự động" phía trên.</td>
                       </tr>
                     );
                   }
-                  return paginated.map(pay => (
+                  return paginated.map((pay, idx) => (
                     <tr key={pay.id} className="border-b border-slate-850/60 hover:bg-slate-950/30 transition-all">
+                      <td className="py-2.5 text-center text-slate-400 font-mono">{startIndex + idx + 1}</td>
                       <td className="py-2.5 font-bold text-white">
                         {pay.empName}
                         <span className="block text-[8.5px] text-slate-400 font-mono mt-0.5">{pay.empId}</span>
                       </td>
+                      <td className="py-2.5 text-slate-300">{(employees || []).find((e: any) => e.id === pay.empId)?.position || '—'}</td>
                       <td className="py-2.5 font-mono">{(pay.baseSalary || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 font-mono text-slate-300">{pay.workedDays || 0} ngày</td>
                       <td className="py-2.5 font-mono text-slate-100">
@@ -196,7 +297,7 @@ export default function PayrollTab({
                       <td className="py-2.5 font-mono">{(pay.allowance || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 font-mono text-emerald-400">+{(pay.kpiBonus || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 font-mono text-amber-450">
-                        +{((pay.otWeekendSalary || 0) + (pay.totalOtHoursSalary || 0)).toLocaleString('vi-VN')} đ
+                        +{((pay.otSundaySalary || 0) + (pay.otHolidaySalary || 0) + (pay.otHoursSalary || 0)).toLocaleString('vi-VN')} đ
                         <span className="block text-[8.5px] text-slate-500 font-mono mt-0.5">({pay.otHours || 0}h)</span>
                       </td>
                       <td className="py-2.5 font-mono text-red-400">-{(pay.advances || 0).toLocaleString('vi-VN')} đ</td>
@@ -227,13 +328,38 @@ export default function PayrollTab({
                   ));
                 })()}
               </tbody>
+              {filteredPayroll.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-slate-700 bg-slate-950/60 font-bold">
+                    <td colSpan={3} className="py-3 pr-2 text-right text-slate-400 uppercase tracking-wider text-[10px] font-extrabold">
+                      Tổng cộng ({filteredPayroll.length} nhân viên):
+                    </td>
+                    <td className="py-3 font-mono font-black text-white">{payrollTotals.baseSalary.toLocaleString('vi-VN')} đ</td>
+                    <td></td>
+                    <td className="py-3 font-mono font-black text-slate-100">{payrollTotals.dailyWage.toLocaleString('vi-VN')} đ</td>
+                    <td></td>
+                    <td className="py-3 font-mono font-black text-emerald-400">+{payrollTotals.kpiBonus.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-amber-450">+{payrollTotals.otAmount.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-red-400">-{payrollTotals.advances.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-purple-400">-{payrollTotals.insurance.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-mono font-black text-slate-400">-{payrollTotals.tax.toLocaleString('vi-VN')} đ</td>
+                    <td className="py-3 font-black text-emerald-400 font-sans text-xs">{payrollTotals.netSalary.toLocaleString('vi-VN')} đ</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           ) : (
-            <table className="w-full text-left whitespace-nowrap border-collapse min-w-[2200px]">
+            /* Border kẻ ô + màu xen kẽ dòng kiểu Excel cho dễ nhìn với bảng nhiều
+               cột — [&_th]:border/[&_td]:border áp border cho MỌI ô mà không phải
+               sửa tay từng thẻ th/td, tránh sai sót khi bảng có tới 33 cột. */
+            <table className="w-full text-left whitespace-nowrap border-collapse min-w-[2200px] border border-slate-300 [&_th]:border [&_th]:border-slate-300 [&_td]:border [&_td]:border-slate-200 [&_th]:px-2 [&_td]:px-2">
               <thead>
-                <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+                <tr className="bg-slate-100 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
+                  <th className="pb-2 text-center w-10">STT</th>
                   <th className="pb-2">Mã BLU</th>
                   <th className="pb-2">Nhân viên</th>
+                  <th className="pb-2">Chức vụ</th>
                   <th className="pb-2">Công nhật</th>
                   <th className="pb-2">Lương cơ bản</th>
                   <th className="pb-2">Lương hiệu suất</th>
@@ -255,29 +381,42 @@ export default function PayrollTab({
                   <th className="pb-2">BHXH (10.5%)</th>
                   <th className="pb-2">Khoản giảm trừ khác</th>
                   <th className="pb-2">Tạm ứng</th>
+                  <th className="pb-2">Thu nhập miễn thuế</th>
+                  <th className="pb-2">Thu nhập chịu thuế</th>
+                  <th className="pb-2">Giảm trừ bản thân</th>
+                  <th className="pb-2">Số người phụ thuộc</th>
+                  <th className="pb-2">Giảm trừ người phụ thuộc</th>
+                  <th className="pb-2">Thu nhập tính thuế</th>
+                  <th className="pb-2">Thuế TNCN</th>
                   <th className="pb-2 text-emerald-400">Thu nhập thực lĩnh tháng</th>
                   <th className="pb-2 text-center">Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-850/65">
+              <tbody>
                 {(() => {
-                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? payroll.length : (globalPageSize as number));
-                  const endIndex = globalPageSize === 'all' ? payroll.length : startIndex + (globalPageSize as number);
-                  const paginated = payroll.slice(startIndex, endIndex);
+                  const startIndex = (payrollPage - 1) * (globalPageSize === 'all' ? filteredPayroll.length : (globalPageSize as number));
+                  const endIndex = globalPageSize === 'all' ? filteredPayroll.length : startIndex + (globalPageSize as number);
+                  const paginated = filteredPayroll.slice(startIndex, endIndex);
                   if (paginated.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={25} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương mộc.</td>
+                        <td colSpan={34} className="py-8 text-center text-slate-500 italic">Không có dữ liệu kì tính lương mộc.</td>
                       </tr>
                     );
                   }
-                  return paginated.map(pay => (
-                    <tr key={pay.id} className="hover:bg-slate-950/40 text-[10.5px] font-mono transition-all">
+                  return paginated.map((pay, idx) => (
+                    // Màu nhẹ xen kẽ dòng (zebra) kiểu Excel để dễ dò theo hàng dài
+                    // 33 cột — bg-slate-50/bg-white thay vì bg-slate-9xx vì các class
+                    // bg-slate-800/900/950 bị index.css ép về trắng/xám nhạt toàn cục
+                    // (xem docs/design-system-dieu-phoi-vat-tu.md mục "Đính chính").
+                    <tr key={pay.id} className={`${idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-amber-50 text-[10.5px] font-mono transition-all`}>
+                      <td className="py-2.5 text-center text-slate-400 font-mono">{startIndex + idx + 1}</td>
                       <td className="py-2.5 text-slate-400 font-mono text-[9.5px]">{pay.bluCode}</td>
                       <td className="py-2.5 font-sans">
                         <b className="text-white block">{pay.empName}</b>
                         <span className="text-[9px] text-slate-400 font-mono">{pay.empId}</span>
                       </td>
+                      <td className="py-2.5 text-slate-300 font-sans">{(employees || []).find((e: any) => e.id === pay.empId)?.position || '—'}</td>
                       <td className="py-2.5 text-slate-300">{pay.workedDays || 0} ngày</td>
                       <td className="py-2.5">{(pay.baseSalary || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5">{(pay.performanceSalary || 0).toLocaleString('vi-VN')} đ</td>
@@ -299,6 +438,13 @@ export default function PayrollTab({
                       <td className="py-2.5 text-rose-350">{(pay.insurance || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-rose-450">{(pay.otherDeductions || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-rose-500">{(pay.advances || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-teal-400">{(pay.taxExemptIncome || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-slate-300">{(pay.taxableIncome || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-slate-400">{(pay.personalDeduction || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-center text-slate-400">{pay.dependentCount || 0}</td>
+                      <td className="py-2.5 text-slate-400">{(pay.dependentDeduction || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-slate-200 font-bold">{(pay.taxableNetIncome || 0).toLocaleString('vi-VN')} đ</td>
+                      <td className="py-2.5 text-rose-400 font-bold">{(pay.tax || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-emerald-400 font-extrabold bg-emerald-950/10 px-1 font-sans text-xs">{(pay.netSalary || 0).toLocaleString('vi-VN')} đ</td>
                       <td className="py-2.5 text-center font-sans">
                         <div className="flex items-center justify-center gap-1">
@@ -328,7 +474,7 @@ export default function PayrollTab({
 
         {/* Payroll Pagination helper */}
         {(() => {
-          const totalFiltered = payroll.length;
+          const totalFiltered = filteredPayroll.length;
           if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
           const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
           return (
@@ -358,7 +504,7 @@ export default function PayrollTab({
 
         {/* Global Row Selector inside Payroll footer */}
         <div className="flex justify-between items-center mt-3 pt-2 text-[10px] text-slate-500 border-t border-slate-850/50">
-          <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, payroll.length)} / ${payroll.length} dòng`} mỗi trang.</div>
+          <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, filteredPayroll.length)} / ${filteredPayroll.length} dòng`} mỗi trang.</div>
           <div className="flex items-center gap-1.5">
             <span>Hiển thị:</span>
             <select
@@ -382,15 +528,31 @@ export default function PayrollTab({
       </div>
 
       <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-2">
-        <span className="text-[10px] text-slate-400 uppercase tracking-wide font-mono font-medium">Khóa kỳ sổ & Đẩy thông tin liên hệ sỹ thợ mộc qua webhook Ngân hàng</span>
-        <button
-          onClick={() => {
-            addToast({ title: 'Thông báo', message: 'Đang phát hành yêu cầu phê duyệt chuyển khoản Vietcombank tự động sang liên thông Tài chính Kế toán.', type: 'warning' });
-          }}
-          className="bg-emerald-650 hover:bg-emerald-600 text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer animate-pulse"
-        >
-          Khóa kỳ & Phát phiếu lương VNĐ
-        </button>
+        <span className="text-[10px] text-slate-400 uppercase tracking-wide font-mono font-medium">
+          {periodLocked
+            ? `✅ Đã khóa kỳ ${payrollMonth}/${payrollYear} — phiếu lương đã chốt, có thể tải toàn bộ`
+            : `Khóa kỳ ${payrollMonth}/${payrollYear} để chốt phiếu lương & cho phép tải toàn bộ`}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              if (!confirm(`Khóa kỳ lương ${payrollMonth}/${payrollYear}? Sau khi khóa, ngày lập trên phiếu lương sẽ chốt theo ngày hôm nay.`)) return;
+              handleLockPayrollPeriod();
+            }}
+            disabled={periodLocked}
+            className="bg-emerald-650 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer"
+          >
+            {periodLocked ? '🔒 Đã khóa kỳ' : 'Khóa kỳ & Phát phiếu lương'}
+          </button>
+          <button
+            onClick={handleDownloadAllPayslips}
+            disabled={!periodLocked}
+            title={periodLocked ? 'Tải toàn bộ phiếu lương của kỳ này (.zip)' : 'Cần khóa kỳ trước khi tải toàn bộ'}
+            className="bg-indigo-600 hover:bg-indigo-550 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" /> Tải toàn bộ phiếu lương
+          </button>
+        </div>
       </div>
     </div>
   );

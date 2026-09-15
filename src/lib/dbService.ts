@@ -1,4 +1,6 @@
 import { getSupabase } from './supabase';
+import { ensureProjectChatGroup } from './chatStore';
+import { parsePunchMeta, mergePunchMeta, hasAnyPunchMeta } from './attendanceMeta';
 import {
   Employee,
   Customer,
@@ -50,11 +52,103 @@ export function keysToSnake(obj: any): any {
 
 export function rowToCamel(row: any): any {
   if (!row) return row;
+  if (Array.isArray(row)) return row.map(rowToCamel);
+  if (typeof row !== 'object') return row;
   const n: any = {};
   Object.keys(row).forEach(k => {
-    n[snakeToCamel(k)] = row[k];
+    const val = row[k];
+    // Đệ quy vào object con để chuyển snake_case → camelCase
+    // (xử lý JSONB columns như bao_gia_file có keys bị keysToSnake biến đổi)
+    n[snakeToCamel(k)] = (val !== null && typeof val === 'object')
+      ? rowToCamel(val)
+      : val;
   });
   return n;
+}
+
+/**
+ * So sánh sâu bất biến: serialize có sắp xếp key để 2 object cùng nội dung
+ * (dù khác thứ tự key / tham chiếu) cho ra chuỗi giống nhau. Dùng để CHẶN
+ * vòng lặp realtime: event → setState(object mới cùng nội dung) → effect save
+ * → INSERT → event mới → ... (đã xảy ra thật với business_profile: >100K
+ * INSERT làm cháy CPU Supabase).
+ */
+export function stableStr(v: any): string {
+  if (v === null || v === undefined || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return '[' + v.map(stableStr).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stableStr(v[k])).join(',') + '}';
+}
+
+/**
+ * Chuẩn hóa cột `items` của sales_orders / purchase_orders về đúng array.
+ * Dữ liệu cũ đã bị JSON.stringify trước khi ghi vào cột JSONB nên đọc ra
+ * là string thay vì array → UI crash khi gọi .map(). Hàm này parse lại,
+ * đảm bảo items LUÔN là array kể cả khi null/lỗi format.
+ */
+export function normalizeOrderItems(order: any): any {
+  if (!order) return order;
+  let items = order.items;
+  // Có thể bị stringify nhiều lần → parse cho tới khi ra array
+  let guard = 0;
+  while (typeof items === 'string' && guard < 5) {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      items = [];
+      break;
+    }
+    guard++;
+  }
+  return { ...order, items: Array.isArray(items) ? items : [] };
+}
+
+// ─── Date helpers (múi giờ local VN, khớp cột date trên Supabase) ───────────
+/** 'YYYY-MM-DD' theo giờ local — khớp với cách cột date được lưu trên Supabase (Asia/Ho_Chi_Minh). */
+export function todayString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const r = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${r}`;
+}
+
+/**
+ * Khoảng [ngày đầu, ngày cuối] của tháng chứa refDate (mặc định hôm nay).
+ * Dùng 'YYYY-MM-31' làm bound trên — an toàn cho mọi tháng vì ngày được lưu
+ * dạng chuỗi cố định 'YYYY-MM-DD' (so sánh từ điển đúng).
+ */
+export function currentMonthRange(refDate?: string): { start: string; end: string } {
+  const ds = refDate || todayString();
+  const ym = ds.slice(0, 7); // 'YYYY-MM'
+  return { start: `${ym}-01`, end: `${ym}-31` };
+}
+
+/** Map 1 dòng thô từ Supabase attendance_records → object dùng trong app. */
+export function mapAttendanceRow(r: any) {
+  return {
+    id: r.id,
+    empId: r.emp_id,
+    empName: r.emp_name,
+    date: r.date,
+    timeInS: normalizeTime(r.time_in_s),
+    timeOutS: normalizeTime(r.time_out_s),
+    timeInC: normalizeTime(r.time_in_c),
+    timeOutC: normalizeTime(r.time_out_c),
+    timeInOT: normalizeTime(r.time_in_ot),
+    timeOutOT: normalizeTime(r.time_out_ot),
+    method: r.method,
+    status: r.status,
+    otHours: r.ot_hours,
+    notes: r.notes,
+    photoIn: r.photo_in,
+    locationIn: r.location_in,
+    coordsIn: r.coords_in,
+    photoOut: r.photo_out,
+    locationOut: r.location_out,
+    coordsOut: r.coords_out,
+    punchMeta: parsePunchMeta(r.punch_meta),
+    isLocked: r.is_locked,
+  };
 }
 
 // NOTE: The helper that returned static initial data has been removed because the app now relies on Supabase for all defaults.
@@ -89,31 +183,142 @@ export async function seedTableToSupabase(tableName: string, data: any[]): Promi
   }
 }
 
-// Query helper for Supabase
-async function querySupabase<T>(tableName: string, fallbackData: T[]): Promise<T[]> {
+// ─── Query Cache ─────────────────────────────────────────────────────────
+// Tránh query trùng bảng: cùng 1 table chỉ gọi Supabase 1 lần / session.
+// Save/delete tự động invalidate cache để lần query sau lấy data mới.
+const _queryCache = new Map<string, any[]>();
+const _inflight = new Map<string, Promise<any[]>>();
+// Cache theo tháng cho attendance_records (tab Chấm công ngày): `listForRange`
+// tải nguyên 1 tháng mỗi lần bật tab. Cache để render bảng NGAY rồi mới refresh
+// nền — hết cảm giác "mở tab chờ 1 lúc". Bị xóa khi attendance save/delete hoặc
+// khi invalidateCache('attendance_records') (xem bên dưới).
+const _attendanceRangeCache = new Map<string, { rows: any[]; ts: number }>();
+
+export function invalidateCache(tableName?: string) {
+  if (tableName) {
+    _queryCache.delete(tableName);
+    if (tableName === 'attendance_records') _attendanceRangeCache.clear();
+  } else {
+    _queryCache.clear();
+    _attendanceRangeCache.clear();
+  }
+}
+
+/** Populate cache từ dữ liệu bên ngoài (dùng khi RPC đã fetch sẵn, tránh query lại) */
+export function populateCache(tableName: string, data: any[]) {
+  _queryCache.set(tableName, data);
+}
+
+// ─── Write Queue ─────────────────────────────────────────────────────────
+// Giới hạn số request GHI (upsert/insert/delete) tới Supabase chạy đồng thời.
+//
+// Trước đây các effect "bulk-save" (mỗi dòng data 1 request POST song song)
+// bắn N request cùng lúc. Khi nhiều người dùng mở app, tổng request vượt giới
+// hạn connection pool của PostgREST → server đóng kết nối với
+// ERR_CONNECTION_CLOSED, kéo theo CẢ request GET đọc dữ liệu (chấm công ngày,
+// dashboard) bị nghẽn → tải chậm hoặc không tải được.
+//
+// Queue này tuần tự hoá các lần ghi: mỗi lúc chỉ có WRITE_CONCURRENCY request
+// chạy, phần còn lại xếp hàng. Request ĐỌC không qua queue nên luồng xem dữ
+// liệu không bị chặn bởi hàng đợi ghi.
+const WRITE_CONCURRENCY = 5;
+let _writeQueue: Array<() => void> = [];
+let _activeWrites = 0;
+
+function pumpWriteQueue() {
+  while (_activeWrites < WRITE_CONCURRENCY && _writeQueue.length > 0) {
+    const run = _writeQueue.shift()!;
+    _activeWrites++;
+    run();
+  }
+}
+
+/** Đưa 1 request ghi vào queue. Trả về Promise resolve/reject theo kết quả của task. */
+function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    _writeQueue.push(() => {
+      task().then(resolve, reject).finally(() => {
+        _activeWrites--;
+        pumpWriteQueue();
+      });
+    });
+    pumpWriteQueue();
+  });
+}
+
+// ─── Upload Queue (Storage) ───────────────────────────────────────────────
+// Tương tự write queue nhưng dành riêng cho upload ảnh lên Supabase Storage
+// (bucket attendance-photos). 25 user cùng chấm → 25 upload ảnh nhỏ đồng thời
+// có thể tạo spike băng thông / kết nối. Hàng đợi này giới hạn số upload chạy
+// song song, dàn đều tải trọng. Tách biệt khỏi write queue để upload ảnh không
+// làm trễ các lệnh ghi DB (chấm công, duyệt...).
+const UPLOAD_CONCURRENCY = 4;
+let _uploadQueue: Array<() => void> = [];
+let _activeUploads = 0;
+
+function pumpUploadQueue() {
+  while (_activeUploads < UPLOAD_CONCURRENCY && _uploadQueue.length > 0) {
+    const run = _uploadQueue.shift()!;
+    _activeUploads++;
+    run();
+  }
+}
+
+function enqueueUpload<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    _uploadQueue.push(() => {
+      task().then(resolve, reject).finally(() => {
+        _activeUploads--;
+        pumpUploadQueue();
+      });
+    });
+    pumpUploadQueue();
+  });
+}
+
+// Query helper for Supabase (cached per table). `selectClause` cho phép 1 bảng
+// dùng select() gọn hơn mặc định '*' (vd loại cột nặng như payments.images) —
+// LƯU Ý cache key chỉ theo `tableName`, nên KHÔNG gọi hàm này với 2 selectClause
+// khác nhau cho CÙNG 1 bảng ở 2 nơi (sẽ đụng cache, trả nhầm shape dữ liệu).
+async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh = false, selectClause = '*'): Promise<T[]> {
+  // Trả cache nếu có (trừ khi forceFresh — dùng cho purchase_orders sau khi lưu
+  // đơn giá / gán dự án, để realtime refetch KHÔNG trả dữ liệu cũ ghi đè state)
+  if (!forceFresh && _queryCache.has(tableName)) {
+    return _queryCache.get(tableName) as T[];
+  }
+  // Deduplicate concurrent requests cho cùng 1 table
+  if (!forceFresh && _inflight.has(tableName)) {
+    return _inflight.get(tableName) as Promise<T[]>;
+  }
+
   const supabase = getSupabase();
   if (!supabase) {
     console.warn(`[DB] Supabase client is NULL — cannot query ${tableName}`);
     return fallbackData;
   }
-  try {
-    console.log(`[DB] Querying ${tableName}...`);
-    const { data, error } = await supabase.from(tableName).select('*');
-    if (error) {
-      console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
-      throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
+
+  const promise = (async () => {
+    try {
+      console.log(`[DB] Querying ${tableName}...`);
+      const { data, error } = await supabase.from(tableName).select(selectClause);
+      if (error) {
+        console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
+        throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
+      }
+      const rows = data && data.length > 0 ? data.map(rowToCamel) as T[] : [];
+      console.log(`[DB] ✅ Loaded ${tableName}:`, rows.length, 'rows');
+      _queryCache.set(tableName, rows);
+      return rows;
+    } catch (err) {
+      console.error(`[DB] ❌ Supabase fetch exception for ${tableName}:`, err);
+      throw err;
+    } finally {
+      _inflight.delete(tableName);
     }
-    console.log(`[DB] ✅ Loaded ${tableName}:`, data?.length || 0, 'rows');
-    if (data && data.length > 0) {
-      return data.map(rowToCamel) as T[];
-    }
-    // KHÔNG tự động bơm dữ liệu mẫu khi bảng rỗng — tránh "hồi sinh" dữ liệu
-    // người dùng đã cố tình xóa trực tiếp trên Supabase. Bảng rỗng trả về [].
-    return [];
-  } catch (err) {
-    console.error(`[DB] ❌ Supabase fetch exception for ${tableName}:`, err);
-    throw err;
-  }
+  })();
+
+  _inflight.set(tableName, promise);
+  return promise;
 }
 
 // Upsert helper
@@ -126,16 +331,321 @@ async function saveSupabase(tableName: string, item: any): Promise<void> {
   try {
     const snakeItem = keysToSnake(item);
     console.log(`[DB] Saving to ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
-    const { data, error } = await supabase.from(tableName).upsert(snakeItem).select();
-    if (error) {
-      console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
-      throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
-    }
-    console.log(`[DB] ✅ Saved to ${tableName}:`, data?.length, 'row(s)');
+    // Đưa request ghi vào queue giới hạn concurrency — tránh bắn N POST song
+    // song làm vượt connection pool của PostgREST (nguồn gốc ERR_CONNECTION_CLOSED).
+    await enqueueWrite(async () => {
+      const { data, error } = await supabase.from(tableName).upsert(snakeItem).select();
+      if (error) {
+        console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
+        throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
+      }
+      console.log(`[DB] ✅ Saved to ${tableName}:`, data?.length, 'row(s)');
+      invalidateCache(tableName);
+    });
   } catch (err) {
     console.error(`[DB] ❌ Supabase save exception for ${tableName}:`, err);
     throw err;
   }
+}
+
+/**
+ * Insert helper — dùng cho bản ghi MỚI.
+ *
+ * Khác `saveSupabase` (upsert): nếu id đã tồn tại thì insert sẽ báo lỗi
+ * unique violation (code 23505) thay vì âm thầm ghi đè hàng cũ. Đây là lớp
+ * bảo vệ cuối cho lỗi "tạo đơn mới nhưng chỉ cập nhật hàng dữ liệu cũ".
+ * Trả về true nếu insert thành công, false nếu id đã tồn tại.
+ */
+async function insertSupabase(tableName: string, item: any): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    console.error(`[DB] Supabase client is NULL — cannot insert ${tableName}. Check VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in .env`);
+    throw new Error(`Supabase chưa được cấu hình — không thể lưu ${tableName}`);
+  }
+  const snakeItem = keysToSnake(item);
+  console.log(`[DB] Inserting into ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
+  // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+  return await enqueueWrite(async () => {
+    const { data, error } = await supabase.from(tableName).insert(snakeItem).select();
+    if (error) {
+      if (error.code === '23505') {
+        console.warn(`[DB] ⚠️ ${tableName}: id "${item.id}" đã tồn tại — không ghi đè.`);
+        return false;
+      }
+      console.error(`[DB] ❌ Supabase insert error for ${tableName}:`, error.message, error.details, error.hint);
+      throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
+    }
+    console.log(`[DB] ✅ Inserted into ${tableName}:`, data?.length, 'row(s)');
+    invalidateCache(tableName);
+    return true;
+  });
+}
+
+/**
+ * Tạo đơn hàng MỚI với mã đảm bảo không trùng.
+ *
+ * Nếu mã do client sinh ra đã tồn tại (vì danh sách phía client chưa load đủ,
+ * hoặc 2 người tạo đơn cùng lúc), hàm tăng số thứ tự cuối của mã rồi thử lại
+ * thay vì ghi đè hàng cũ. Trả về đơn đã lưu (có thể mang id mới).
+ */
+async function createOrderUnique(tableName: string, order: any): Promise<any> {
+  const match = /^(.*-)(\d+)$/.exec(String(order.id ?? ''));
+  let candidate = { ...order };
+
+  for (let attempt = 0; attempt < 25; attempt++) {
+    if (await insertSupabase(tableName, candidate)) return candidate;
+
+    if (!match) {
+      // Mã không theo định dạng <head>-<số> → không thể tự tăng
+      throw new Error(`Mã "${order.id}" đã tồn tại trong ${tableName} và không thể tự cấp lại.`);
+    }
+    const head = match[1];
+    const width = match[2].length;
+    const next = parseInt(match[2], 10) + attempt + 1;
+    const newId = `${head}${String(next).padStart(width, '0')}`;
+    // Giữ liên kết nội bộ (notes/receipt) trỏ đúng mã mới
+    candidate = { ...candidate, id: newId };
+    console.warn(`[DB] ${tableName}: mã trùng → thử lại với "${newId}"`);
+  }
+  throw new Error(`Không thể cấp mã đơn duy nhất cho ${tableName} sau 25 lần thử.`);
+}
+
+// ─── Cascade delete helpers ──────────────────────────────────────────────
+// Schema mỗi môi trường một khác (bảng/cột có thể chưa tồn tại), nên các
+// helper dưới đây LUÔN thất bại êm: log cảnh báo rồi trả 0, không ném lỗi,
+// để một bảng lỗi không chặn việc dọn các bảng còn lại.
+
+/** Mã lỗi Postgres nghĩa là "bảng/cột không tồn tại" → bỏ qua, không phải lỗi thật */
+function isMissingSchemaError(error: { code?: string; message?: string }): boolean {
+  return error.code === '42P01'          // undefined_table
+      || error.code === '42703'          // undefined_column
+      || error.code === 'PGRST204'       // PostgREST: column not found in schema cache
+      || /does not exist/i.test(error.message || '');
+}
+
+// ─── Biết trước bảng nào có cột nào ──────────────────────────────────────
+// Gọi DELETE lên một cột không tồn tại trả HTTP 400 và trình duyệt log đỏ
+// ngay ở tầng network — JS KHÔNG nuốt được. Nên phải biết TRƯỚC rồi mới bắn.
+//
+// PostgREST có phơi OpenAPI spec ở gốc /rest/v1/ nhưng Supabase đời mới chỉ
+// cho service_role đọc (anon nhận 401), nên không dùng được từ trình duyệt.
+// Thay vào đó migration 20260731_project_cascade_delete.sql tạo RPC
+// `hl_link_columns()` trả về đúng danh sách (bảng, cột) liên kết.
+
+export interface LinkColumnMap {
+  /** Bảng có cột project_id */
+  byProject: Set<string>;
+  /** Bảng có cột task_id */
+  byTask: Set<string>;
+  /** Bảng lưu object trong cột `data jsonb`, không có cột liên kết thật */
+  byJsonb: Set<string>;
+}
+
+/**
+ * Danh sách đã ĐỐI CHIẾU với database thật (07/2026).
+ * Dùng khi RPC hl_link_columns chưa tồn tại (migration chưa được áp).
+ * Chỉ liệt kê bảng CHẮC CHẮN có cột đó — thà bỏ sót còn hơn bắn request lỗi.
+ */
+const VERIFIED_LINK_COLUMNS: LinkColumnMap = {
+  byProject: new Set([
+    'tasks',
+    'receipts',                     // Phiếu Thu
+    'payments',                     // Phiếu Chi
+    'quotes',                       // Báo Giá
+    'archived_quotes',              // Hợp Đồng / Nghiệm Thu / Thanh Lý
+    'subcontractor_advances',       // Đề Xuất tạm ứng thầu phụ
+    'accounting_receivables',       // Công Nợ phải thu
+    'project_permission_overrides', // Phân quyền riêng của dự án
+    'conversations',                // Nhóm chat
+  ]),
+  byTask: new Set([
+    'quotes',
+    'subcontractor_advances',
+    'hrm_employee_errors',          // Ghi nhận vi phạm kỷ luật & hiệu suất
+    'conversations',
+  ]),
+  byJsonb: new Set([
+    'hrm_travel_expenses',          // Công tác phí — chỉ lưu projectName/taskName
+    'accounting_sub_contracts',     // HĐ Thầu
+  ]),
+};
+
+// Ghi chú đã kiểm chứng trên database thật (07/2026):
+//   • accounting_liabilities (Công Nợ phải trả) chỉ có cột id, name, created_at
+//     — KHÔNG có bất kỳ liên kết nào tới dự án, nên không thể cascade. Muốn
+//     xóa theo dự án thì phải bổ sung cột project_id cho bảng này trước.
+//   • hrm_trips, purchase_orders, sales_orders, warehouse_logs cũng không có
+//     cột liên kết dự án → cố tình bỏ khỏi danh sách để khỏi quét vô ích.
+
+let _linkColumnsPromise: Promise<LinkColumnMap> | null = null;
+
+/**
+ * Hỏi database xem bảng nào có project_id / task_id / data jsonb.
+ * Ưu tiên RPC (tự bắt kịp bảng mới thêm về sau); RPC chưa có thì dùng
+ * danh sách đã đối chiếu ở trên.
+ */
+async function getLinkColumns(): Promise<LinkColumnMap> {
+  if (_linkColumnsPromise) return _linkColumnsPromise;
+
+  _linkColumnsPromise = (async () => {
+    const supabase = getSupabase();
+    if (!supabase) return VERIFIED_LINK_COLUMNS;
+
+    try {
+      const { data, error } = await supabase.rpc('hl_link_columns');
+      if (error || !Array.isArray(data) || data.length === 0) {
+        if (error) {
+          console.warn(
+            '[DB] RPC hl_link_columns chưa có (chạy migration 20260731 để bật) — dùng danh sách mặc định:',
+            error.message
+          );
+        }
+        return VERIFIED_LINK_COLUMNS;
+      }
+
+      const map: LinkColumnMap = {
+        byProject: new Set<string>(),
+        byTask: new Set<string>(),
+        byJsonb: new Set<string>(),
+      };
+      data.forEach((row: any) => {
+        const table = row?.table_name;
+        if (!table) return;
+        if (row.has_project_id) map.byProject.add(table);
+        if (row.has_task_id) map.byTask.add(table);
+        if (row.has_jsonb_data && !row.has_project_id && !row.has_task_id) {
+          map.byJsonb.add(table);
+        }
+      });
+      console.log(
+        `[DB] Schema liên kết: ${map.byProject.size} bảng project_id, ` +
+        `${map.byTask.size} bảng task_id, ${map.byJsonb.size} bảng jsonb`
+      );
+      return map;
+    } catch (err) {
+      console.warn('[DB] Ngoại lệ khi gọi hl_link_columns — dùng danh sách mặc định:', err);
+      return VERIFIED_LINK_COLUMNS;
+    }
+  })();
+
+  return _linkColumnsPromise;
+}
+
+/** Xóa mọi dòng của `tableName` có `column` nằm trong `values`. Trả về số dòng đã xóa. */
+async function deleteWhereIn(tableName: string, column: string, values: string[]): Promise<number> {
+  if (values.length === 0) return 0;
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  try {
+    const { data, error } = await supabase.from(tableName).delete().in(column, values).select('id');
+    if (error) {
+      if (!isMissingSchemaError(error)) {
+        console.warn(`[DB] cascade: xóa ${tableName}.${column} lỗi:`, error.message);
+      }
+      return 0;
+    }
+    const n = data?.length ?? 0;
+    if (n > 0) invalidateCache(tableName);
+    return n;
+  } catch (err) {
+    console.warn(`[DB] cascade: ngoại lệ khi xóa ${tableName}.${column}:`, err);
+    return 0;
+  }
+}
+
+/** Thông tin nhận dạng dự án dùng để đối chiếu trong các bảng jsonb */
+export interface CascadeMatchKeys {
+  projectId: string;
+  taskIds: Set<string>;
+  /** Tên dự án — cần vì có bảng chỉ lưu tên, không lưu id */
+  projectName: string;
+  /** Tên các công việc thuộc dự án */
+  taskNames: Set<string>;
+}
+
+/**
+ * Xóa cho các bảng lưu cả object trong cột `data jsonb`
+ * (hrm_travel_expenses = Công tác phí, accounting_sub_contracts = HĐ Thầu):
+ * không có cột project_id thật nên FK CASCADE không với tới được.
+ * Đọc toàn bộ về rồi lọc ngay trong JSON.
+ *
+ * ⚠️ Một số bảng CHỈ lưu tên chứ không lưu id — ví dụ hrm_travel_expenses chỉ
+ * có `projectName` / `taskName`. Với những dòng đó buộc phải đối chiếu bằng
+ * tên, nên hai dự án TRÙNG TÊN sẽ xóa nhầm của nhau. Mỗi lần khớp bằng tên
+ * đều được log ra Console để còn kiểm chứng.
+ */
+async function deleteJsonbLinked(tableName: string, keys: CascadeMatchKeys): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  try {
+    const { data, error } = await supabase.from(tableName).select('*');
+    if (error) {
+      if (!isMissingSchemaError(error)) {
+        console.warn(`[DB] cascade: đọc ${tableName} lỗi:`, error.message);
+      }
+      return 0;
+    }
+
+    let matchedByName = 0;
+    const victims = (data || [])
+      .filter((row: any) => {
+        // Object thật có thể nằm trong cột `data`, hoặc chính là dòng phẳng
+        const d = row?.data && typeof row.data === 'object' ? row.data : row;
+
+        // Ưu tiên đối chiếu bằng id — chắc chắn, không nhầm lẫn
+        const pid = d?.projectId ?? d?.project_id ?? row?.project_id;
+        const tid = d?.taskId ?? d?.task_id ?? row?.task_id;
+        if (pid && pid === keys.projectId) return true;
+        if (tid && keys.taskIds.has(tid)) return true;
+
+        // Không có id thì mới đành đối chiếu bằng tên
+        const pname = d?.projectName ?? d?.project_name;
+        const tname = d?.taskName ?? d?.task_name;
+        const hitByName =
+          (!!keys.projectName && !!pname && pname === keys.projectName) ||
+          (!!tname && keys.taskNames.has(tname));
+        if (hitByName) matchedByName++;
+        return hitByName;
+      })
+      .map((row: any) => row?.id)
+      .filter(Boolean);
+
+    if (victims.length === 0) return 0;
+
+    const { error: delErr } = await supabase.from(tableName).delete().in('id', victims);
+    if (delErr) {
+      console.warn(`[DB] cascade: xóa ${tableName} (jsonb) lỗi:`, delErr.message);
+      return 0;
+    }
+    if (matchedByName > 0) {
+      console.warn(
+        `[DB] cascade: ${tableName} — ${matchedByName}/${victims.length} dòng khớp bằng TÊN ` +
+        `(bảng này không lưu id dự án). Kiểm tra lại nếu có dự án trùng tên.`
+      );
+    }
+    invalidateCache(tableName);
+    return victims.length;
+  } catch (err) {
+    console.warn(`[DB] cascade: ngoại lệ khi quét ${tableName}:`, err);
+    return 0;
+  }
+}
+
+/** Bảng KHÔNG dọn theo vòng quét cột, vì đã xử lý riêng đúng thứ tự */
+const CASCADE_SKIP_TABLES = new Set([
+  'projects',      // chính nó — xóa cuối cùng
+  'tasks',         // xóa sau khi dọn xong con của nó
+  'conversations', // xử lý riêng cùng chat_messages
+  'chat_messages',
+]);
+
+export interface ProjectCascadeReport {
+  projectId: string;
+  taskIds: string[];
+  /** Số dòng đã xóa, gom theo tên bảng */
+  deleted: Record<string, number>;
+  /** Tổng số dòng dữ liệu phát sinh đã dọn (không tính chính dòng dự án) */
+  total: number;
 }
 
 // Delete helper
@@ -145,24 +655,106 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
     throw new Error(`Supabase chưa được cấu hình — không thể xóa ${tableName}`);
   }
   try {
-    const { error } = await supabase.from(tableName).delete().eq('id', id);
-    if (error) {
-      console.error(`Supabase delete error for ${tableName}:`, error.message);
-      throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
-    }
+    // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+    await enqueueWrite(async () => {
+      const { error } = await supabase.from(tableName).delete().eq('id', id);
+      if (error) {
+        console.error(`Supabase delete error for ${tableName}:`, error.message);
+        throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
+      }
+      invalidateCache(tableName);
+    });
   } catch (err) {
     console.error(`Supabase delete exception for ${tableName}:`, err);
     throw err;
   }
 }
 
+// Delete helper theo cột tùy chỉnh — dùng cho bảng có khóa chính KHÔNG phải 'id'
+// (vd: purchase_product_catalog / sales_product_catalog có PK là ma_san_pham).
+async function deleteSupabaseByColumn(tableName: string, column: string, value: string): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error(`Supabase chưa được cấu hình — không thể xóa ${tableName}`);
+  }
+  try {
+    // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+    await enqueueWrite(async () => {
+      const { error } = await supabase.from(tableName).delete().eq(column, value);
+      if (error) {
+        console.error(`Supabase delete error for ${tableName}:`, error.message);
+        throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
+      }
+      invalidateCache(tableName);
+    });
+  } catch (err) {
+    console.error(`Supabase delete exception for ${tableName}:`, err);
+    throw err;
+  }
+}
+
+// Helper: chuẩn hóa giá trị thời gian, xử lý cả trường hợp bị lưu object timestamp
+function normalizeTime(v: any): string {
+  if (!v || v === '--:--' || v === '') return '--:--';
+  if (typeof v === 'string') {
+    // Một số bản ghi cũ lỡ ghi NGUYÊN object server-time vào cột TEXT, ví dụ:
+    //   '{"date":"2026-07-29","time":"07:32","datetime":"...","epoch_ms":...}'
+    // → phải bóc lấy trường .time, nếu không giao diện sẽ in ra cả cục JSON.
+    if (v.startsWith('{') && v.includes('"time"')) {
+      try {
+        const parsed = JSON.parse(v);
+        if (parsed && typeof parsed.time === 'string') return parsed.time;
+      } catch { /* không phải JSON hợp lệ → trả nguyên chuỗi */ }
+    }
+    return v;
+  }
+  if (typeof v === 'object' && v.time) return v.time; // object cũ: {date, time, datetime, epoch_ms}
+  return String(v);
+}
+
 export const dbService = {
+  /** Populate cache từ data bên ngoài (dùng khi RPC đã fetch sẵn) */
+  populateCache(tableName: string, data: any[]) {
+    _queryCache.set(tableName, data);
+  },
+
+  // ─── BATCH LOAD: gộp tất cả bảng core thành 1 RPC call ──────────────────
+  // Giảm từ 9 HTTP requests → 1 request duy nhất
+  async loadAllCore(): Promise<Record<string, any[]>> {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Supabase not configured');
+
+    // Thử gọi RPC function (cần tạo trên Supabase)
+    const { data, error } = await supabase.rpc('load_all_core_data');
+    if (error) throw error;
+    if (!data) throw new Error('No data returned from RPC');
+
+    // RPC trả về JSON object { employees: [...], customers: [...], ... }
+    return typeof data === 'string' ? JSON.parse(data) : data;
+  },
+
+  // ─── SERVER TIMESTAMP: Lấy giờ server PostgreSQL (chống gian lận giờ client) ──
+  // Trả về { date: 'YYYY-MM-DD', time: 'HH:MI', datetime: 'ISO8601', epoch_ms: number }
+  async fetchServerTimestamp(): Promise<{ date: string; time: string; datetime: string; epoch_ms: number } | null> {
+    const supabase = getSupabase();
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.rpc('get_server_timestamp');
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('[DB] Không thể lấy giờ server, fallback về giờ client:', err);
+      return null;
+    }
+  },
+
   // 1. EMPLOYEES
   employees: {
     async list(): Promise<Employee[]> {
       return querySupabase<Employee>('employees', INITIAL_EMPLOYEES);
     },
-    async save(employee: Employee): Promise<void> {
+    // Cho phép lưu bản ghi đầy đủ hoặc cập nhật một phần (upsert chỉ ghi đè các cột được truyền).
+    async save(employee: Partial<Employee> & { id: string }): Promise<void> {
       await saveSupabase('employees', employee);
     },
     async delete(id: string): Promise<void> {
@@ -175,7 +767,18 @@ export const dbService = {
   // 1.1. HRM ROLE GROUPS (Phân quyền nhóm vai trò)
   hrmRoleGroups: {
     async list(): Promise<HrmRoleGroup[]> {
-      return querySupabase<HrmRoleGroup>('hrm_role_groups', []);
+      const rows = await querySupabase<HrmRoleGroup>('hrm_role_groups', []);
+      // querySupabase áp dụng rowToCamel đệ quy, đổi TẤT CẢ key snake_case → camelCase.
+      // Điều này làm sai lệch các MÃ MODULE trong cột JSONB `permissions`
+      // (projects_construction → projectsConstruction), khiến RolesTab tra cứu
+      // bằng mã snake_case không tìm thấy → ma trận phân quyền hiện trống dù DB có dữ liệu.
+      // Khôi phục lại snake_case cho permissions (keysToSnake không đổi mã đã snake_case
+      // như projects_construction, nhưng sẽ đưa projectsConstruction về đúng dạng).
+      return rows.map((r) => ({
+        ...r,
+        permissions: r.permissions ? keysToSnake(r.permissions) : {},
+        memberIds: r.memberIds || [],
+      }));
     },
     async save(group: HrmRoleGroup): Promise<void> {
       await saveSupabase('hrm_role_groups', group);
@@ -251,6 +854,9 @@ export const dbService = {
     },
     async save(coef: any): Promise<void> {
       await saveSupabase('hrm_leave_coefficients', coef);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('hrm_leave_coefficients', id);
     }
   },
 
@@ -313,12 +919,12 @@ export const dbService = {
           .from('hrm_task_permissions')
           .select('matrix')
           .eq('id', 'task_permission_matrix_v1')
-          .single();
+          .limit(1);
         if (error) {
           console.warn('Supabase load task permissions error:', error.message);
           return null;
         }
-        return data?.matrix ?? null;
+        return data?.[0]?.matrix ?? null;
       } catch (e) {
         console.warn('Supabase load task permissions error:', e);
         return null;
@@ -362,6 +968,41 @@ export const dbService = {
     }
   },
 
+  // 1.10b. HRM TRAVEL EXPENSES SUMMARY (Tổng hợp Công Tác Phí từ nhiệm vụ hoàn thành)
+  // Lưu các mục THCTP (Tổng hợp Công Tác Phí) sinh ra khi Xác Nhận Hoàn Thành một
+  // nhiệm vụ thi công có Công Tác Phí chuyến đi. Dùng cột data jsonb (pattern giống hrm_trips).
+  hrmTravelExpenses: {
+    async list(): Promise<any[]> {
+      const rows = await querySupabase<any>('hrm_travel_expenses', []);
+      return Array.isArray(rows) ? rows.map((r: any) => (r && r.data ? r.data : r)) : [];
+    },
+    async save(item: any, opts?: { rowId?: string }): Promise<void> {
+      if (!item) {
+        throw new Error('hrmTravelExpenses.save: thiếu item');
+      }
+      // ⚠️ CỘT id CỦA BẢNG hrm_travel_expenses LÀ uuid (xem migration 021).
+      // KHÔNG được dùng mã THCTP (vd: "THCTP-1699000000000-0") làm id — Postgres sẽ
+      // báo "invalid input syntax for type uuid" và upsert THẤT BẠI SILENT (chỉ
+      // log warn), khiến dữ liệu CHỈ lưu localStorage mà KHÔNG lên Supabase.
+      // → Sinh UUID hợp lệ cho khóa chính; giữ nguyên item.id (mã THCTP hiển thị)
+      // bên trong cột data jsonb (được rowToCamel đảo ngược lại khi đọc).
+      // `opts.rowId` (nếu có) dùng để upsert LẶP LẠI an toàn (idempotent) cùng 1
+      // khoản CTP — tránh tạo dòng trùng khi vừa lưu lúc "Thêm" vừa lưu lúc "Hoàn
+      // thành".
+      let rowId = opts?.rowId;
+      if (!rowId) {
+        rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+          ? crypto.randomUUID()
+          : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+      }
+      // Lưu toàn bộ object vào cột data jsonb, dùng rowId làm khóa chính uuid
+      await saveSupabase('hrm_travel_expenses', { id: rowId, data: item });
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('hrm_travel_expenses', id);
+    }
+  },
+
   // 1.11. HRM PERFORMANCE CRITERIA (Tiêu chí đánh giá)
   hrmPerformanceCriteria: {
     async list(): Promise<any[]> {
@@ -384,6 +1025,9 @@ export const dbService = {
     },
     async save(scale: any): Promise<void> {
       await saveSupabase('hrm_salary_scales', scale);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('hrm_salary_scales', id);
     }
   },
 
@@ -433,29 +1077,35 @@ export const dbService = {
       }
     },
     async save(profile: any): Promise<void> {
+      // Trước đây hàm này nuốt mọi lỗi (chỉ console.warn rồi return bình thường),
+      // khiến các nơi gọi có await/try-catch không thể biết lưu thất bại — nút
+      // "Cập nhật hồ sơ doanh nghiệp" luôn báo thành công dù dữ liệu không hề lên
+      // Supabase. Nay ném lỗi thật để caller xử lý/hiển thị đúng cho người dùng;
+      // 2 nơi gọi kiểu "fire-and-forget" khác đã có sẵn .catch() nên không ảnh hưởng.
       const supabase = getSupabase();
       if (!supabase) {
-        console.warn('Supabase chưa cấu hình — không lưu được business_profile');
-        return;
+        throw new Error('Supabase chưa cấu hình — không lưu được business_profile');
       }
-      try {
-        const { error } = await supabase.from('business_profile').upsert({
-          id: 'current',
-          company_name: profile.companyName,
-          tax_code: profile.taxCode,
-          representative: profile.representative,
-          phone: profile.phone,
-          email: profile.email,
-          address: profile.address,
-          founding_year: profile.foundingYear,
-          business_sector: profile.businessSector,
-          bank_info: profile.bankInfo,
-          scale: profile.scale
-        });
-        if (error) console.warn('Supabase business_profile save error:', error.message);
-      } catch (e) {
-        console.warn('Supabase business_profile save exception:', e);
-      }
+      const { error } = await supabase.from('business_profile').upsert({
+        id: 'current',
+        company_name: profile.companyName,
+        tax_code: profile.taxCode,
+        representative: profile.representative,
+        phone: profile.phone,
+        email: profile.email,
+        address: profile.address,
+        founding_year: profile.foundingYear,
+        business_sector: profile.businessSector,
+        bank_info: profile.bankInfo,
+        scale: profile.scale
+      });
+      if (error) throw new Error(error.message);
+    },
+    // Trả về mảng [profile] (hoặc []) để tương thích với RPC load_all_core_data
+    // (vốn jsonb_agg → mảng). Dùng chung get() đã map sang camelCase.
+    async list(): Promise<any[]> {
+      const p = await this.get();
+      return p ? [p] : [];
     }
   },
 
@@ -492,7 +1142,18 @@ export const dbService = {
           otPunchOutOpenBeforeMinutes: data.ot_punch_out_open_before_minutes,
           otPunchOutCloseAfterMinutes: data.ot_punch_out_close_after_minutes,
           allowedLateMinutes: data.allowed_late_minutes,
-          weekendDays: data.weekend_days
+          allowedLateCount: data.allowed_late_count ?? 3,
+          allowedLateMorning: data.allowed_late_morning ?? 15,
+          allowedLateAfternoon: data.allowed_late_afternoon ?? 15,
+          weekendDays: data.weekend_days,
+          autoAttendanceDays: data.auto_attendance_days,
+          autoAttendanceStartDate: data.auto_attendance_start_date,
+          directorBaseSalary: data.director_base_salary,
+          pmBaseSalary: data.pm_base_salary,
+          accountantBaseSalary: data.accountant_base_salary,
+          staffBaseSalary: data.staff_base_salary,
+          constructionSites: data.construction_sites,
+          companyProfile: data.company_profile
         } : null;
       } catch (e) {
         console.warn('Supabase shift_config load error:', e);
@@ -525,12 +1186,29 @@ export const dbService = {
           ot_punch_out_open_before_minutes: config.otPunchOutOpenBeforeMinutes,
           ot_punch_out_close_after_minutes: config.otPunchOutCloseAfterMinutes,
           allowed_late_minutes: config.allowedLateMinutes,
-          weekend_days: config.weekendDays
+          allowed_late_count: config.allowedLateCount,
+          allowed_late_morning: config.allowedLateMorning ?? 15,
+          allowed_late_afternoon: config.allowedLateAfternoon ?? 15,
+          weekend_days: config.weekendDays,
+          auto_attendance_days: config.autoAttendanceDays,
+          auto_attendance_start_date: config.autoAttendanceStartDate,
+          director_base_salary: config.directorBaseSalary,
+          pm_base_salary: config.pmBaseSalary,
+          accountant_base_salary: config.accountantBaseSalary,
+          staff_base_salary: config.staffBaseSalary,
+          construction_sites: config.constructionSites,
+          company_profile: config.companyProfile
         });
         if (error) console.warn('Supabase shift_config save error:', error.message);
       } catch (e) {
         console.warn('Supabase shift_config save exception:', e);
       }
+    },
+    // Trả về mảng [config] (hoặc []) để tương thích với RPC load_all_core_data
+    // (vốn jsonb_agg → mảng). Dùng chung get() đã map sang camelCase.
+    async list(): Promise<any[]> {
+      const c = await this.get();
+      return c ? [c] : [];
     }
   },
 
@@ -604,19 +1282,185 @@ export const dbService = {
     },
     async save(project: Project): Promise<void> {
       await saveSupabase('projects', project);
+      // Tự động tạo NHÓM CHAT DỰ ÁN khi khởi tạo/cập nhật dự án
+      // (idempotent: không tạo trùng, đồng bộ thành viên khi dự án thay đổi)
+      ensureProjectChatGroup(project).catch(err =>
+        console.error('ensureProjectChatGroup error:', err)
+      );
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('projects', id);
+    },
+
+    /**
+     * XÓA DỰ ÁN + TOÀN BỘ DỮ LIỆU PHÁT SINH.
+     *
+     * Xóa sạch mọi thứ sinh ra từ dự án: Công Việc (kèm Nhiệm Vụ nằm trong
+     * JSON của task), Nhóm chat + tin nhắn, Ghi nhận vi phạm, Công tác phí,
+     * Báo giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, HĐ Thầu, Công Nợ, Đề Xuất,
+     * Phiếu Thu, Phiếu Chi...
+     *
+     * Chạy được kể cả khi migration 20260731_project_cascade_delete.sql CHƯA
+     * được áp lên database: hàm tự dọn con trước rồi mới xóa cha. Khi migration
+     * đã áp thì các lệnh dọn này chỉ là no-op (0 dòng) vì Postgres đã cascade.
+     *
+     * Xóa con trước cha là bắt buộc — nếu FK còn ở chế độ RESTRICT/NO ACTION,
+     * xóa dự án trước sẽ bị Postgres từ chối.
+     */
+    async deleteCascade(projectId: string): Promise<ProjectCascadeReport> {
+      const report: ProjectCascadeReport = { projectId, taskIds: [], deleted: {}, total: 0 };
+      if (!projectId) return report;
+
+      const supabase = getSupabase();
+      if (!supabase) {
+        throw new Error('Supabase chưa được cấu hình — không thể xóa dự án');
+      }
+
+      const bump = (table: string, n: number) => {
+        if (n > 0) {
+          report.deleted[table] = (report.deleted[table] || 0) + n;
+          report.total += n;
+        }
+      };
+
+      // ── 0. Biết trước bảng nào có cột nào, TRƯỚC khi bắn request ────────
+      // DELETE/SELECT lên cột không tồn tại trả HTTP 400 và trình duyệt log
+      // đỏ ngay ở tầng network — JS không nuốt được.
+      const links = await getLinkColumns();
+
+      // ── 1. Gom Công Việc + tên dự án ─────────────────────────────────────
+      // Lấy cả TÊN vì có bảng (Công tác phí) chỉ lưu projectName/taskName
+      // chứ không lưu id — phải đọc trước khi xóa, sau đó là mất dấu.
+      let taskIds: string[] = [];
+      const taskNames = new Set<string>();
+      try {
+        const { data, error } = await supabase
+          .from('tasks').select('id, name').eq('project_id', projectId);
+        if (error) {
+          console.warn('[DB] cascade: không đọc được danh sách tasks:', error.message);
+        } else {
+          (data || []).forEach((r: any) => {
+            if (r?.id) taskIds.push(r.id);
+            if (r?.name) taskNames.add(r.name);
+          });
+        }
+      } catch (err) {
+        console.warn('[DB] cascade: ngoại lệ khi đọc tasks:', err);
+      }
+      report.taskIds = taskIds;
+      const taskIdSet = new Set(taskIds);
+
+      let projectName = '';
+      try {
+        const { data } = await supabase
+          .from('projects').select('name').eq('id', projectId).maybeSingle();
+        projectName = (data as any)?.name || '';
+      } catch {
+        // Không lấy được tên thì bỏ qua phần đối chiếu theo tên
+      }
+
+      const matchKeys: CascadeMatchKeys = {
+        projectId,
+        taskIds: taskIdSet,
+        projectName,
+        taskNames,
+      };
+
+      // ── 2. Dọn nhóm chat (dự án + từng công việc) và tin nhắn bên trong ──
+      // Nhóm chat được đặt id theo quy ước conv_project_<id> / conv_task_<id>,
+      // đồng thời có thể có cột project_id/task_id → gom cả hai nguồn.
+      const convIds = new Set<string>([
+        `conv_project_${projectId}`,
+        ...taskIds.map(tid => `conv_task_${tid}`),
+      ]);
+      const convCols = ['id'];
+      if (links.byProject.has('conversations')) convCols.push('project_id');
+      if (links.byTask.has('conversations')) convCols.push('task_id');
+      if (convCols.length > 1) {
+        try {
+          const { data, error } = await supabase
+            .from('conversations')
+            .select(convCols.join(', '));
+          if (!error) {
+            (data || []).forEach((row: any) => {
+              if (row?.project_id === projectId) convIds.add(row.id);
+              if (row?.task_id && taskIdSet.has(row.task_id)) convIds.add(row.id);
+            });
+          }
+        } catch {
+          // Quy ước id conv_project_<id> / conv_task_<id> ở trên đã đủ dùng
+        }
+      }
+      const convIdList = Array.from(convIds);
+      bump('chat_messages', await deleteWhereIn('chat_messages', 'conversation_id', convIdList));
+      bump('conversations', await deleteWhereIn('conversations', 'id', convIdList));
+
+      // ── 3. Chốt danh sách bảng cần dọn ──────────────────────────────────
+      const notSkipped = (t: string) => !CASCADE_SKIP_TABLES.has(t);
+      const projectLinked = Array.from(links.byProject).filter(notSkipped);
+      const taskLinked = Array.from(links.byTask).filter(notSkipped);
+      const jsonbLinked = Array.from(links.byJsonb).filter(notSkipped);
+
+      // ── 4. Dọn dữ liệu gắn theo từng Công Việc ───────────────────────────
+      if (taskIds.length > 0) {
+        for (const table of taskLinked) {
+          bump(table, await deleteWhereIn(table, 'task_id', taskIds));
+        }
+      }
+
+      // ── 5. Dọn dữ liệu gắn thẳng vào Dự Án ───────────────────────────────
+      for (const table of projectLinked) {
+        bump(table, await deleteWhereIn(table, 'project_id', [projectId]));
+      }
+
+      // ── 6. Bảng lưu dạng `data jsonb` — FK không với tới, quét thủ công ──
+      for (const table of jsonbLinked) {
+        bump(table, await deleteJsonbLinked(table, matchKeys));
+      }
+
+      // ── 7. Xóa Công Việc (Nhiệm Vụ nằm trong JSON nên chết theo) ─────────
+      bump('tasks', await deleteWhereIn('tasks', 'project_id', [projectId]));
+
+      // ── 8. Cuối cùng mới xóa chính dòng Dự Án ────────────────────────────
+      await deleteSupabase('projects', projectId);
+
+      console.log(
+        `[DB] 🗑️ Đã xóa dự án ${projectId} — dọn ${report.total} dòng dữ liệu phát sinh`,
+        report.deleted
+      );
+      return report;
     }
   },
 
   // 4. TASKS
   tasks: {
+    // "missions" (nhiệm vụ con) không còn nằm trong cột jsonb của bảng tasks —
+    // đã tách sang bảng task_missions (mỗi mission 1 dòng, xem taskMissions
+    // bên dưới) để tránh mất dữ liệu khi 2 client sửa 2 mission khác nhau gần
+    // như đồng thời (upsert cả cột jsonb trước đây sẽ ghi đè lẫn nhau).
+    // list() gắn lại `.missions` từ bảng mới để phía trên (App.tsx và mọi
+    // component đọc `task.missions`) không cần thay đổi gì.
     async list(): Promise<Task[]> {
-      return querySupabase<Task>('tasks', INITIAL_TASKS);
+      const rows = await querySupabase<Task>('tasks', INITIAL_TASKS);
+      // Supabase chưa cấu hình → giữ nguyên dữ liệu demo trong INITIAL_TASKS
+      // (đã có sẵn missions mẫu), không override bằng mảng rỗng.
+      if (!getSupabase()) return rows;
+      const missionRows = await querySupabase<any>('task_missions', []);
+      const missionsByTask = new Map<string, any[]>();
+      missionRows.forEach((r: any) => {
+        const list = missionsByTask.get(r.taskId) || [];
+        list.push({ id: r.id, ...(r.data || {}) });
+        missionsByTask.set(r.taskId, list);
+      });
+      return rows.map(t => ({ ...t, missions: missionsByTask.get(t.id) || [] } as Task));
     },
     async save(task: Task): Promise<void> {
-      await saveSupabase('tasks', task);
+      // Bỏ "missions" khỏi row ghi vào bảng tasks — việc đồng bộ từng mission
+      // sang task_missions do nơi gọi chủ động làm qua taskMissions.save()/
+      // delete() (cần biết bản CŨ để chỉ ghi mission thực sự thay đổi, xem
+      // App.tsx performUpdateTask), tasks.save() không tự làm việc đó.
+      const { missions, ...taskRow } = task as any;
+      await saveSupabase('tasks', taskRow);
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('tasks', id);
@@ -635,6 +1479,54 @@ export const dbService = {
     }
   },
 
+  // 4b. TASK_MISSIONS (Nhiệm vụ con trong 1 Công việc — bảng riêng, mỗi
+  // mission 1 dòng. Xem migration 20260824_task_missions_table.sql,
+  // 20260824b_fix_task_missions_id_collision.sql và ghi chú ở tasks.list()/
+  // save() phía trên.)
+  //
+  // ⚠️ Khóa chính (cột id) của bảng task_missions KHÔNG dùng thẳng mission.id
+  // — một số nơi sinh mission.id kiểu `mission_${Date.now()}` (không có phần
+  // ngẫu nhiên), chỉ đảm bảo duy nhất TRONG PHẠM VI 1 task, KHÔNG đảm bảo duy
+  // nhất giữa các task khác nhau (2 mission ở 2 task khác nhau có thể trùng id
+  // nếu tạo cùng mili-giây). Vì id là khóa chính TOÀN CỤC của bảng, dùng thẳng
+  // mission.id có thể làm 1 upsert ghi ĐÈ NHẦM mission của task khác, hoặc
+  // khiến backfill bỏ sót dữ liệu (ON CONFLICT DO NOTHING). → Dùng khóa ghép
+  // `${taskId}::${mission.id}` làm id thật của dòng — luôn duy nhất toàn cục.
+  // mission.id GỐC vẫn được giữ nguyên bên trong cột data (data.id).
+  taskMissions: {
+    // Toàn bộ mission của TẤT CẢ task, gom nhóm theo taskId — dùng nội bộ bởi
+    // tasks.list() và listByTask() bên dưới (tận dụng chung cache của
+    // querySupabase, tránh gọi lại nhiều lần).
+    async _listAllGrouped(): Promise<Map<string, any[]>> {
+      const missionRows = await querySupabase<any>('task_missions', []);
+      const grouped = new Map<string, any[]>();
+      missionRows.forEach((r: any) => {
+        const list = grouped.get(r.taskId) || [];
+        // r.data đã chứa đầy đủ mission (gồm cả id gốc của mission) — không
+        // dùng r.id (đó là khóa ghép task_id::mission.id của DÒNG, không phải
+        // id thật của mission).
+        list.push({ ...(r.data || {}) });
+        grouped.set(r.taskId, list);
+      });
+      return grouped;
+    },
+    async listByTask(taskId: string): Promise<any[]> {
+      const grouped = await this._listAllGrouped();
+      return grouped.get(taskId) || [];
+    },
+    async save(taskId: string, mission: any): Promise<void> {
+      if (!mission?.id) throw new Error('taskMissions.save: thiếu mission.id');
+      const rowId = `${taskId}::${mission.id}`;
+      // saveSupabase() chỉ convert key TẦNG NGOÀI (id/taskId/data) sang
+      // snake_case — nội dung "data" (toàn bộ mission, gồm cả id gốc) giữ
+      // nguyên camelCase, đúng hành vi mảng missions jsonb cũ trước khi tách bảng.
+      await saveSupabase('task_missions', { id: rowId, taskId, data: mission });
+    },
+    async delete(taskId: string, missionId: string): Promise<void> {
+      await deleteSupabase('task_missions', `${taskId}::${missionId}`);
+    }
+  },
+
   // 5. RECEIPTS
   receipts: {
     async list(): Promise<Receipt[]> {
@@ -650,11 +1542,94 @@ export const dbService = {
 
   // 6. PAYMENTS
   payments: {
+    /**
+     * Bản LEAN mặc định — loại cột `images` (mảng base64 sao kê/biên lai, có
+     * thể tới hàng trăm KB/phiếu) khỏi payload, thay bằng `imageCount` (chỉ 1
+     * số nguyên, tính server-side qua computed column payments_image_count()
+     * — xem migration 20260905_payments_lean_list_exclude_images.sql) để UI
+     * vẫn hiển thị đúng badge/số lượng/trạng thái "Hoàn Thành" mà không phải
+     * tải ảnh đầy đủ cho MỌI phiếu chi ngay lúc khởi động app. Ảnh đầy đủ chỉ
+     * tải khi cần qua getImages()/getFull() bên dưới (FinanceManagement.tsx
+     * dùng khi mở lightbox / merge ảnh mới vào phiếu đã có).
+     */
     async list(): Promise<Payment[]> {
-      return querySupabase<Payment>('payments', INITIAL_PAYMENTS);
+      return querySupabase<Payment>(
+        'payments',
+        INITIAL_PAYMENTS,
+        false,
+        'id, code, date, payment_at, recipient, project_id, category, amount, payment_method, notes, proposer, approver, status, attachment_name, approvals, purchase_order_id, subcontractor_id, related_advance_id, employee_id, supplier_id, proposer_id, approver_id, source, image_count:payments_image_count'
+      );
+    },
+    /** Tải ĐẦY ĐỦ ảnh sao kê/biên lai của 1 phiếu chi — dùng khi mở lightbox xem ảnh. */
+    async getImages(id: string): Promise<string[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase.from('payments').select('images').eq('id', id).maybeSingle();
+        if (error) {
+          console.error('[DB] ❌ Supabase payments.getImages error:', error.message);
+          return [];
+        }
+        return (data as any)?.images || [];
+      } catch (err) {
+        console.error('[DB] ❌ Supabase payments.getImages exception:', err);
+        return [];
+      }
+    },
+    /**
+     * Tải ĐẦY ĐỦ 1 phiếu chi (kèm images thật) trực tiếp từ Supabase — dùng
+     * TRƯỚC KHI merge thêm ảnh mới vào phiếu (xem handleSaveVoucherImages,
+     * FinanceManagement.tsx). KHÔNG được lấy `images` từ state `payments`
+     * trong bộ nhớ (giờ chỉ có imageCount, không có mảng ảnh thật) để merge,
+     * nếu không ảnh cũ sẽ bị GHI ĐÈ MẤT khi lưu ảnh mới.
+     */
+    async getFull(id: string): Promise<Payment | null> {
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      try {
+        const { data, error } = await supabase.from('payments').select('*').eq('id', id).maybeSingle();
+        if (error) {
+          console.error('[DB] ❌ Supabase payments.getFull error:', error.message);
+          return null;
+        }
+        return data ? rowToCamel(data) : null;
+      } catch (err) {
+        console.error('[DB] ❌ Supabase payments.getFull exception:', err);
+        return null;
+      }
+    },
+    /**
+     * Bản tải NHẸ của payments — CHỈ lấy các cột cần cho tổng hợp Quỹ Tiền Mặt
+     * (số dư/tổng nạp/tổng chi), không kéo `approvals`. (payments.list() ở trên
+     * nay đã tự loại `images` mặc định — xem comment tại đó — nhưng hàm này vẫn
+     * giữ riêng vì không qua cache chung, luôn lấy số liệu mới nhất tức thời.)
+     */
+    async listCashFundSummary(): Promise<Pick<Payment, 'id' | 'code' | 'date' | 'category' | 'paymentMethod' | 'status' | 'amount' | 'notes' | 'proposer' | 'proposerId'>[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      try {
+        const { data, error } = await supabase
+          .from('payments')
+          .select('id, code, date, category, payment_method, status, amount, notes, proposer, proposer_id');
+        if (error) {
+          console.error('[DB] ❌ Supabase payments (cash fund summary) load error:', error.message);
+          throw new Error(`Không thể tải dữ liệu Quỹ tiền mặt: ${error.message}`);
+        }
+        return (data || []).map((r: any) => rowToCamel(r));
+      } catch (err) {
+        console.error('[DB] ❌ Supabase payments cash fund summary fetch exception:', err);
+        throw err;
+      }
     },
     async save(payment: Payment): Promise<void> {
-      await saveSupabase('payments', payment);
+      // `imageCount` là field ẢO — chỉ tính server-side qua computed column
+      // payments_image_count() khi ĐỌC (list()), KHÔNG phải cột thật trong bảng
+      // payments. Object `payment` truyền vào đây thường lấy từ state (spread
+      // từ 1 item của payments.list(), vốn có sẵn field này) — nếu upsert
+      // nguyên vẹn, PostgREST sẽ báo lỗi "column image_count does not exist"
+      // vì cố ghi vào 1 cột không tồn tại. Luôn loại field này trước khi lưu.
+      const { imageCount, ...toSave } = payment as Payment & { imageCount?: number };
+      await saveSupabase('payments', toSave);
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('payments', id);
@@ -694,6 +1669,9 @@ export const dbService = {
           customerId: row.customer_id,
           projectId: row.project_id,
           subcontractorId: row.subcontractor_id,
+          subcontractorName: row.subcontractor_name,
+          taskId: row.task_id,
+          workName: row.work_name,
           contractValue: row.contract_value,
           status: row.status,
           scopeWork: row.scope_work,
@@ -765,6 +1743,9 @@ export const dbService = {
           customer_id: quote.customerId || null,
           project_id: quote.projectId || null,
           subcontractor_id: quote.subcontractorId,
+          subcontractor_name: quote.subcontractorName || null,
+          task_id: quote.taskId || null,
+          work_name: quote.workName || null,
           contract_value: quote.contractValue,
           status: quote.status,
           scope_work: quote.scopeWork,
@@ -837,6 +1818,21 @@ export const dbService = {
         throw e;
       }
     },
+    async deleteByProjectId(projectId: string): Promise<void> {
+      if (!projectId) return;
+      const supabase = getSupabase();
+      if (!supabase) {
+        console.warn('Supabase chưa cấu hình — không xóa được archived_quotes theo dự án');
+        return;
+      }
+      try {
+        const { error } = await supabase.from('archived_quotes').delete().eq('project_id', projectId);
+        if (error) throw new Error(`Xóa archived_quotes theo dự án thất bại: ${error.message}`);
+      } catch (e) {
+        console.error('Supabase archived_quotes deleteByProjectId error:', e);
+        throw e;
+      }
+    },
     async listBySector(sector: string): Promise<any[]> {
       return this.list(sector);
     }
@@ -845,7 +1841,13 @@ export const dbService = {
   // 8.0. SUBCONTRACTOR ADVANCES (Đề xuất thu chi thầu phụ)
   subcontractorAdvances: {
     async list(): Promise<SubcontractorAdvanceProposal[]> {
-      return querySupabase<SubcontractorAdvanceProposal>('subcontractor_advances', []);
+      // forceFresh: bỏ qua _queryCache — App.tsx gọi list() này mỗi khi nhận
+      // event 'hl-subcontractor-advances-updated' (từ Realtime postgres_changes)
+      // để refetch. Không forceFresh thì list() trả về CACHE cũ (chỉ được
+      // invalidate khi CHÍNH session này tự save()), khiến thay đổi từ
+      // tab/người khác không bao giờ hiện ra cho tới khi F5 lại trang — cùng
+      // lỗi gốc đã từng xảy ra và được vá cho purchase_orders (xem bên dưới).
+      return querySupabase<SubcontractorAdvanceProposal>('subcontractor_advances', [], true);
     },
     async save(proposal: SubcontractorAdvanceProposal): Promise<void> {
       await saveSupabase('subcontractor_advances', proposal);
@@ -1133,29 +2135,6 @@ export const dbService = {
     }
   },
 
-  // 10.5. NOTIFICATIONS (Thông báo hệ thống - Đồng bộ Supabase)
-  notifications: {
-    async list(): Promise<any[]> {
-      return querySupabase<any>('notifications', []);
-    },
-    async save(notif: any): Promise<void> {
-      await saveSupabase('notifications', notif);
-    },
-    async delete(id: string): Promise<void> {
-      await deleteSupabase('notifications', id);
-    },
-    async markRead(id: string): Promise<void> {
-      const supabase = getSupabase();
-      if (!supabase) return;
-      try {
-        const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
-        if (error) console.warn('Supabase markRead error:', error.message);
-      } catch (e) {
-        console.warn('Supabase markRead exception:', e);
-      }
-    }
-  },
-
   // 11. SUPPLIERS (Đồng bộ Supabase)
   suppliers: {
     async list(): Promise<any[]> {
@@ -1179,6 +2158,29 @@ export const dbService = {
     }
   },
 
+  // 11.5 ACCOUNTING SUBCONTRACTORS (DANH SÁCH THẦU PHỤ — bảng riêng, tách khỏi suppliers/NCC)
+  accountingSubcontractors: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('accounting_subcontractors', []);
+    },
+    async save(supplier: any): Promise<void> {
+      await saveSupabase('accounting_subcontractors', supplier);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: supplier }));
+      } catch (e) {
+        console.warn('Failed to dispatch subcontractors event:', e);
+      }
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('accounting_subcontractors', id);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
+      } catch (e) {
+        console.warn('Failed to dispatch subcontractors event:', e);
+      }
+    }
+  },
+
   // 12. INVENTORY (Đồng bộ Supabase)
   inventory: {
     async list(): Promise<any[]> {
@@ -1198,6 +2200,52 @@ export const dbService = {
         window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
       } catch (e) {
         console.warn('Failed to dispatch inventory event:', e);
+      }
+    }
+  },
+
+  // 12a. PURCHASE PRODUCT CATALOG (Danh mục MUA — Dữ liệu Kho, PK = ma_san_pham)
+  purchaseProductCatalog: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('purchase_product_catalog', []);
+    },
+    async save(item: any): Promise<void> {
+      await saveSupabase('purchase_product_catalog', item);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated', { detail: item }));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    },
+    async delete(maSanPham: string): Promise<void> {
+      await deleteSupabaseByColumn('purchase_product_catalog', 'ma_san_pham', maSanPham);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated'));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    }
+  },
+
+  // 12b. SALES PRODUCT CATALOG (Danh mục BÁN — Dữ liệu Kho, PK = ma_san_pham)
+  salesProductCatalog: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('sales_product_catalog', []);
+    },
+    async save(item: any): Promise<void> {
+      await saveSupabase('sales_product_catalog', item);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated', { detail: item }));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
+      }
+    },
+    async delete(maSanPham: string): Promise<void> {
+      await deleteSupabaseByColumn('sales_product_catalog', 'ma_san_pham', maSanPham);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated'));
+      } catch (e) {
+        console.warn('Failed to dispatch warehouse data event:', e);
       }
     }
   },
@@ -1248,6 +2296,19 @@ export const dbService = {
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('accounting_liabilities', id);
+    }
+  },
+
+  // 17. ACCOUNTING CUSTOM RECEIVABLES (Công nợ phải thu thủ công / import Excel)
+  accountingReceivables: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('accounting_receivables', []);
+    },
+    async save(receivable: any): Promise<void> {
+      await saveSupabase('accounting_receivables', receivable);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('accounting_receivables', id);
     }
   },
 
@@ -1369,6 +2430,102 @@ export const dbService = {
     }
   },
 
+  // 14d. ACCOUNTING PRODUCT CATALOG (Danh mục sản phẩm kế toán)
+  accountingProductCatalog: {
+    async list(): Promise<any[]> {
+      return querySupabase<any>('accounting_product_catalog', []);
+    },
+    async save(item: any): Promise<void> {
+      await saveSupabase('accounting_product_catalog', item);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('accounting_product_catalog', id);
+    }
+  },
+
+  // 14e. SALES ORDERS (Đơn hàng bán — sync Supabase)
+  salesOrders: {
+    async list(): Promise<any[]> {
+      const rows = await querySupabase<any>('sales_orders', []);
+      return rows.map(normalizeOrderItems);
+    },
+    async save(order: any): Promise<void> {
+      // items là cột JSONB → truyền thẳng array, KHÔNG stringify.
+      // (keysToSnake không đệ quy vào value nên key camelCase bên trong
+      //  items vẫn được giữ nguyên. Stringify sẽ khiến Postgres lưu thành
+      //  JSON scalar string → đọc ra không phải array → crash khi .map)
+      await saveSupabase('sales_orders', order);
+    },
+    /** Tạo đơn MỚI — không bao giờ ghi đè đơn cũ; tự cấp lại mã nếu trùng. */
+    async create(order: any): Promise<any> {
+      return createOrderUnique('sales_orders', order);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('sales_orders', id);
+    }
+  },
+
+  // 14f. PURCHASE ORDERS (Đơn mua hàng — sync Supabase)
+  purchaseOrders: {
+    async list(): Promise<any[]> {
+      // forceFresh: bỏ QUA CẢ _queryCache lẫn _inflight để realtime refetch (sau khi
+      // lưu đơn giá / gán dự án) luôn trả dữ liệu MỚI nhất từ Supabase, không bao giờ
+      // ghi đè state local vừa cập nhật bằng dữ liệu cũ (nguyên nhân "đơn giá lưu rồi
+      // lại về 0" do race đọc cache/in-flight trả giá cũ).
+      const rows = await querySupabase<any>('purchase_orders', [], true);
+      return rows.map(normalizeOrderItems);
+    },
+    async save(order: any): Promise<void> {
+      await saveSupabase('purchase_orders', order);
+    },
+    /** Tạo đơn MỚI — không bao giờ ghi đè đơn cũ; tự cấp lại mã nếu trùng. */
+    async create(order: any): Promise<any> {
+      return createOrderUnique('purchase_orders', order);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('purchase_orders', id);
+    }
+  },
+
+  // 14g. MATERIAL PROPOSALS (Đề xuất vật tư theo luồng mới — sync Supabase)
+  materialProposals: {
+    async list(): Promise<any[]> {
+      const rows = await querySupabase<any>('material_proposals', []);
+      return rows.map((r: any) => ({
+        ...r,
+        items: Array.isArray(r.items) ? r.items : [],
+        quotes: Array.isArray(r.quotes) ? r.quotes : [],
+        purchaseOrderIds: Array.isArray(r.purchaseOrderIds) ? r.purchaseOrderIds : [],
+      }));
+    },
+    async save(proposal: any): Promise<void> {
+      await saveSupabase('material_proposals', proposal);
+    },
+    /** Tạo đề xuất MỚI — không bao giờ ghi đè đề xuất cũ; tự cấp lại mã nếu trùng. */
+    async create(proposal: any): Promise<any> {
+      return createOrderUnique('material_proposals', proposal);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('material_proposals', id);
+    }
+  },
+
+  // 14h. CASH FUND CONFIG (Số dư đầu kỳ Quỹ tiền mặt — bản ghi đơn/singleton)
+  cashFundConfig: {
+    async get(): Promise<any | null> {
+      const rows = await querySupabase<any>('cash_fund_config', []);
+      return rows[0] || null;
+    },
+    async save(cfg: any): Promise<void> {
+      await saveSupabase('cash_fund_config', cfg);
+      try {
+        window.dispatchEvent(new CustomEvent('hl-cash-fund-config-updated', { detail: cfg }));
+      } catch (e) {
+        console.warn('Failed to dispatch cash fund config event:', e);
+      }
+    }
+  },
+
   // 15. ATTENDANCE (Chấm công) — sync với Supabase attendance_records
   attendance: {
     async list(): Promise<any[]> {
@@ -1383,48 +2540,85 @@ export const dbService = {
           console.error('Supabase attendance load error:', error.message);
           throw new Error(`Không thể tải chấm công: ${error.message}`);
         }
-        return (data || []).map((r: any) => ({
-          id: r.id,
-          empId: r.emp_id,
-          empName: r.emp_name,
-          date: r.date,
-          timeInS: r.time_in_s,
-          timeOutS: r.time_out_s,
-          timeInC: r.time_in_c,
-          timeOutC: r.time_out_c,
-          timeInOT: r.time_in_ot,
-          timeOutOT: r.time_out_ot,
-          method: r.method,
-          status: r.status,
-          otHours: r.ot_hours,
-          notes: r.notes,
-          photoIn: r.photo_in,
-          locationIn: r.location_in,
-          coordsIn: r.coords_in,
-          photoOut: r.photo_out,
-          locationOut: r.location_out,
-          coordsOut: r.coords_out,
-          isLocked: r.is_locked,
-        }));
+        return (data || []).map((r: any) => mapAttendanceRow(r));
       } catch (err) {
         console.error('Supabase attendance fetch exception:', err);
         throw err;
       }
     },
-    async save(record: any): Promise<void> {
+    /**
+     * Tải chấm công trong khoảng [startDate, endDate] (định dạng 'YYYY-MM-DD').
+     * Dùng cho luồng điểm danh / realtime để TRÁNH tải toàn bộ lịch sử — nguyên nhân
+     * gây lag khi nhiều user chấm công cùng lúc (bầy đàn tái tải). Mặc định nên dùng
+     * khoảng = tháng hiện tại (xem currentMonthRange()).
+     *
+     * THAM SỐ `empId` (tùy chọn): khi truyền vào, query thêm `.eq('emp_id', empId)`
+     * để CHỈ tải dòng của đúng nhân viên đó. Mỗi tab Dashboard từ giờ chỉ download
+     * ~30 dòng của mình thay vì toàn bộ dòng của 25 user → băng thông giảm ~25 lần,
+     * và tab không bao giờ phải xử lý dữ liệu người khác. Dùng index
+     * (emp_id, date) nên vẫn nhanh. HRM (cần xem toàn bộ) gọi KHÔNG truyền empId.
+     */
+    async listForRange(startDate: string, endDate: string, empId?: string): Promise<any[]> {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const cacheKey = empId ? `${startDate}~${endDate}~${empId}` : `${startDate}~${endDate}`;
+      try {
+        let query = supabase
+          .from('attendance_records')
+          .select('*')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: false })
+          .limit(empId ? 500 : 5000); // 1 nhân viên / tháng tối đa vài chục dòng → bound nhỏ
+        if (empId) query = query.eq('emp_id', empId);
+        const { data, error } = await query;
+        if (error) {
+          console.error('Supabase attendance range load error:', error.message);
+          throw new Error(`Không thể tải chấm công: ${error.message}`);
+        }
+        const rows = (data || []).map((r: any) => mapAttendanceRow(r));
+        // Ghi vào cache theo khóa tháng (+ empId nếu có) → lần sau mở tab render ngay từ cache.
+        _attendanceRangeCache.set(cacheKey, { rows, ts: Date.now() });
+        return rows;
+      } catch (err) {
+        console.error('Supabase attendance range fetch exception:', err);
+        throw err;
+      }
+    },
+    /**
+     * Đọc NHANH dữ liệu tháng đã tải trước đó trong phiên (KHÔNG gọi mạng).
+     * Trả null nếu chưa có cache cho khoảng này. Dùng để render bảng tức thì
+     * rồi mới refresh nền bằng listForRange().
+     */
+    getCachedRange(startDate: string, endDate: string): any[] | null {
+      const hit = _attendanceRangeCache.get(`${startDate}~${endDate}`);
+      return hit ? hit.rows : null;
+    },
+    /**
+     * Lưu chấm công với thời gian máy chủ (Server-side time).
+     * Tham số `punchSlot` xác định ca nào đang được chấm (timeInS, timeOutS, timeInC, timeOutC, timeInOT, timeOutOT).
+     * Hàm này sẽ dùng hàm `now()` của PostgreSQL/Supabase để ghi nhận thời điểm chính xác, chống gian lận giờ client.
+     */
+    async save(record: any, punchSlot?: 'timeInS' | 'timeOutS' | 'timeInC' | 'timeOutC' | 'timeInOT' | 'timeOutOT'): Promise<void> {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase chưa được cấu hình — không thể lưu chấm công');
-      const row = {
-        id: record.id,
+
+      // Chuẩn hóa id theo empId + date để mọi lượt lưu của bản ghi THẬT (punch, import, sửa tay)
+      // đều ghi vào CÙNG 1 dòng trên Supabase → KHÔNG bao giờ tạo bản ghi trùng (cùng empId + ngày).
+      // Bản ghi auto (AT-AUTO-*) được GIỮ NGUYÊN id riêng biệt: auto-lock và chấm công thật nằm ở
+      // 2 dòng, dedup sẽ ưu tiên giữ bản thật và xóa bản auto. Nếu HR không lắng nghe sự kiện chấm
+      // công (state có thể cũ), auto-lock tạo nhầm AT-AUTO-* trùng empId+date thì ràng buộc UNIQUE
+      // sẽ TỪ CHỐI (reject, không ghi đè) → dữ liệu chấm công thật được bảo vệ, không bị mất.
+      const isAuto = typeof record.id === 'string' && record.id.startsWith('AT-AUTO-');
+      const deterministicId = (!isAuto && record.empId && record.date)
+        ? `AT-${record.empId}-${String(record.date).replace(/-/g, '')}`
+        : record.id;
+
+      const row: any = {
+        id: deterministicId,
         emp_id: record.empId,
         emp_name: record.empName,
         date: record.date,
-        time_in_s: record.timeInS,
-        time_out_s: record.timeOutS,
-        time_in_c: record.timeInC,
-        time_out_c: record.timeOutC,
-        time_in_ot: record.timeInOT,
-        time_out_ot: record.timeOutOT,
         method: record.method,
         status: record.status,
         ot_hours: record.otHours,
@@ -1437,9 +2631,91 @@ export const dbService = {
         coords_out: record.coordsOut,
         is_locked: record.isLocked,
       };
+
+      // Nếu có chỉ định punchSlot, ta dùng hàm now() của DB cho slot đó.
+      // Các slot khác sẽ lấy giá trị từ client (để giữ lịch sử) hoặc null.
+      const slotMap: Record<string, string> = {
+        timeInS: 'time_in_s',
+        timeOutS: 'time_out_s',
+        timeInC: 'time_in_c',
+        timeOutC: 'time_out_c',
+        timeInOT: 'time_in_ot',
+        timeOutOT: 'time_out_ot',
+      };
+
+      // Mặc định: không ghi đè time bằng now() nếu không có punchSlot (trường hợp update thủ công/admin)
+      // Chỉ khi chấm công thực tế (punch) thì mới dùng now()
+      if (punchSlot && slotMap[punchSlot]) {
+        // Sử dụng raw SQL expression `now() at time zone 'Asia/Ho_Chi_Minh'` để lấy giờ VN chính xác
+        // Cách 1: Dùng RPC hoặc trigger (phức tạp).
+        // Cách 2 (Đơn giản, hiệu quả): Client gửi `punchSlot`, Server (Edge Function/Trigger) xử lý.
+        // Cách 3 (Tạm thời, phía Client nhưng an toàn hơn): Client tự lấy giờ server qua API `/time` rồi mới gửi.
+        // ----> Ở đây ta sẽ triển khai Cách 3 nhẹ: Client sẽ tự lấy giờ server trước khi gọi save.
+        // Nhưng để giữ tương thích, ta thêm logic: Nếu record có trường `_serverTime` (do client lấy trước), dùng nó.
+
+        if (record._serverTime) {
+          // Chỉ lấy chuỗi thời gian "HH:mm" từ object server timestamp, không lưu toàn bộ object
+          row[slotMap[punchSlot]] = record._serverTime.time;
+        } else {
+          // Fallback: dùng giờ client nhưng log cảnh báo
+          console.warn('[Attendance] Saving with CLIENT time (fallback). Implement server-time fetch for production.');
+          row[slotMap[punchSlot]] = record[punchSlot];
+        }
+
+        // Bổ sung: ghi đầy đủ các slot KHÁC nếu record đã có giá trị thực.
+        // Tránh lỗi: lần chấm đầu (Vào) chưa kịp lưu lên DB, lần chấm sau (Ra) lưu được →
+        // INSERT tạo row chỉ có 1 cột time → bảng "Chấm công ngày" hiển thị thiếu/mất dữ liệu.
+        const otherSlots: Array<[keyof typeof slotMap, string]> = [
+          ['timeInS', 'time_in_s'],
+          ['timeOutS', 'time_out_s'],
+          ['timeInC', 'time_in_c'],
+          ['timeOutC', 'time_out_c'],
+          ['timeInOT', 'time_in_ot'],
+          ['timeOutOT', 'time_out_ot'],
+        ];
+        for (const [recKey, colKey] of otherSlots) {
+          if (colKey === slotMap[punchSlot]) continue; // slot chính đã set ở trên
+          const v = normalizeTime(record[recKey]);
+          if (v !== '--:--') row[colKey] = v;
+        }
+      } else {
+        // Update thủ công/admin: ghi toàn bộ các trường time từ record
+        row.time_in_s = record.timeInS;
+        row.time_out_s = record.timeOutS;
+        row.time_in_c = record.timeInC;
+        row.time_out_c = record.timeOutC;
+        row.time_in_ot = record.timeInOT;
+        row.time_out_ot = record.timeOutOT;
+      }
+
+      // ─── Ảnh + tọa độ theo TỪNG LƯỢT chấm (punch_meta) ───
+      // upsert ghi đè NGUYÊN cột, nên nếu client gửi state cũ/thiếu (ví dụ mở app ở máy
+      // khác, chỉ có metadata lượt vừa chấm) thì ảnh các lượt trước sẽ bị xóa sạch.
+      // → Đọc punch_meta hiện có trên DB rồi GỘP theo từng slot (client thắng ở slot nó có).
+      if (hasAnyPunchMeta(record)) {
+        let existingMeta: any = null;
+        try {
+          const { data: prev } = await supabase
+            .from('attendance_records')
+            .select('punch_meta')
+            .eq('id', deterministicId)
+            .maybeSingle();
+          existingMeta = prev?.punch_meta ?? null;
+        } catch {
+          // Không đọc được bản cũ (mạng/quyền) → vẫn ghi phần client có, không chặn chấm công
+          existingMeta = null;
+        }
+        row.punch_meta = mergePunchMeta(existingMeta, record.punchMeta);
+      }
+
+      // Request ghi qua queue giới hạn concurrency — auto-lock / import / nhiều
+      // user chấm cùng lúc nếu bắn song song sẽ làm nghẽn connection pool PostgREST.
       try {
-        const { error } = await supabase.from('attendance_records').upsert(row);
-        if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);
+        await enqueueWrite(async () => {
+          const { error } = await supabase.from('attendance_records').upsert(row);
+          if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);
+        });
+        _attendanceRangeCache.clear(); // dữ liệu thay đổi → cache cũ không còn đúng
       } catch (err) {
         console.error('Supabase attendance save exception:', err);
         throw err;
@@ -1449,12 +2725,338 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase chưa được cấu hình — không thể xóa chấm công');
       try {
-        const { error } = await supabase.from('attendance_records').delete().eq('id', id);
-        if (error) throw new Error(`Xóa chấm công thất bại: ${error.message}`);
+        // Queue giới hạn concurrency (xem phần Write Queue ở trên).
+        await enqueueWrite(async () => {
+          const { error } = await supabase.from('attendance_records').delete().eq('id', id);
+          if (error) throw new Error(`Xóa chấm công thất bại: ${error.message}`);
+        });
+        _attendanceRangeCache.clear(); // dữ liệu thay đổi → cache cũ không còn đúng
       } catch (err) {
         console.error('Supabase attendance delete exception:', err);
         throw err;
       }
+    }
+  },
+
+  /**
+   * Kiểm tra user có phải Super Admin không — query trực tiếp Supabase, KHÔNG dùng localStorage.
+   * Fail-secure: network error → false.
+   */
+  async checkSuperAdmin(empId: string): Promise<boolean> {
+    const supabase = getSupabase();
+    if (!supabase) return false;
+    try {
+      const { data, error } = await supabase
+        .from('hrm_role_groups')
+        .select('member_ids')
+        .eq('id', 'role_superadmin')
+        .single();
+      if (error) return false;
+      return data?.member_ids?.includes(empId) ?? false;
+    } catch {
+      return false; // fail secure
+    }
+  },
+
+  /**
+   * Upload một hình ảnh Báo cáo nhiệm vụ thi công lên Supabase Storage.
+   * Trả về public URL của ảnh. Nếu Supabase chưa cấu hình hoặc upload thất bại
+   * (ví dụ bucket chưa tồn tại), tự động fallback về data URL base64 để chức
+   * năng vẫn hoạt động offline / local.
+   */
+  async uploadMissionReportImage(
+    taskId: string,
+    missionId: string,
+    file: File
+  ): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      // Không có Supabase → dùng data URL local
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'mission-report-images';
+    // Trước đây ép về 1 trong 5 đuôi ảnh (mất đuôi thật nếu là file khác ảnh) — nay
+    // giữ ĐÚNG đuôi gốc để hỗ trợ "Đính kèm báo cáo" bằng mọi định dạng file (PDF,
+    // Word, video...), chỉ lọc ký tự lạ để an toàn cho đường dẫn Storage.
+    const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    const safeTask = String(taskId || 'task').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeMission = String(missionId || 'mission').replace(/[^a-zA-Z0-9_-]/g, '_');
+    // Giữ lại tên gốc (đã lược ký tự lạ) trong đường dẫn để tên file khi "Tải về"
+    // gần với tên người dùng đã chọn, thay vì chỉ có mã mission + timestamp.
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_\-\.]/g, '_').slice(0, 60) || 'baocao';
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `${safeTask}/${safeMission}_${ts}_${baseName}.${ext}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    const localFallback = (): Promise<{ url: string; stored: 'local' }> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string'
+        ? resolve({ url: reader.result, stored: 'local' })
+        : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      // Bucket chưa tồn tại → thử tự tạo (nếu role được phép) rồi upload lại 1 lần
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          // Không giới hạn allowedMimeTypes — bucket này nhận mọi định dạng file
+          // đính kèm báo cáo (ảnh, PDF, Word, video...), không chỉ ảnh như trước.
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 26214400,
+          });
+          return { url: await doUpload(), stored: 'supabase' };
+        } catch (createErr: any) {
+          console.warn('[uploadMissionReportImage] Không tự tạo được bucket (cần chạy migration tạo bucket):', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadMissionReportImage] Upload Supabase thất bại, lưu cục bộ (data URL):', msg);
+      return await localFallback();
+    }
+  },
+
+  // ===== HÀM UPLOAD HÌNH ẢNH CHO SẢN PHẨM CATALOG =====
+  async uploadProductImage(productId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'product-catalog-images';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeProduct = String(productId || 'product').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `products/${safeProduct}_${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    const localFallback = (): Promise<{ url: string; stored: 'local' }> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string'
+        ? resolve({ url: reader.result, stored: 'local' })
+        : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 10485760,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' };
+        } catch (createErr: any) {
+          console.warn('[uploadProductImage] Không tự tạo được bucket:', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadProductImage] Upload Supabase failed, storing locally:', msg);
+      return await localFallback();
+    }
+  },
+
+  // ===== HÀM UPLOAD HÌNH ẢNH CHO BÁO GIÁ (Quote) =====
+  async uploadQuoteImage(quoteId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'quote-images';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeQuote = String(quoteId || 'quote').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `quotes/${safeQuote}_${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    const localFallback = (): Promise<{ url: string; stored: 'local' }> => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string'
+        ? resolve({ url: reader.result, stored: 'local' })
+        : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' as const };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 10485760,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' as const };
+        } catch (createErr: any) {
+          console.warn('[uploadQuoteImage] Không tự tạo được bucket:', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadQuoteImage] Upload Supabase thất bại, lưu cục bộ:', msg);
+      return await localFallback();
+    }
+  },
+
+  // ===== UPLOAD ẢNH SELFIE CHẤM CÔNG =====
+  // Ảnh lúc điểm danh được upload lên bucket 'attendance-photos' (migration 029)
+  // thay vì lưu base64 vào cột photo_in/photo_out/punch_meta.photo — nguồn gốc
+  // payload nặng 5–15 MB/tháng khiến tab Chấm công / Dashboard tải chậm.
+  // Tên object là UUID ngẫu nhiên → không lộ mã NV/ngày, khó đoán URL.
+  // Trả public URL; null nếu upload thất bại (caller giữ base64 để outbox fallback).
+  async uploadAttendancePhoto(dataUrl: string): Promise<string | null> {
+    if (!dataUrl) return null;
+    // Đã là public URL (hoặc ảnh không phải data URL) → không cần upload
+    if (!dataUrl.startsWith('data:image')) return dataUrl;
+    const supabase = getSupabase();
+    if (!supabase) return null;
+
+    const BUCKET = 'attendance-photos';
+    // Đưa upload vào hàng đợi giới hạn concurrency (UPLOAD_CONCURRENCY) để 25 user
+    // cùng chấm không bắn 25 upload song song → dàn đều tải trọng mạng/storage.
+    const doUpload = async (): Promise<string | null> => {
+      const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(dataUrl);
+      if (!m) return null;
+      const mime = m[1];
+      const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'jpg';
+      const bin = atob(m[2]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mime });
+      const uuid = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `a${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+      const path = `attendance/${uuid}.${ext}`;
+
+      const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
+        contentType: mime,
+        upsert: false,
+      });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+    try {
+      return await enqueueUpload(doUpload);
+    } catch (err) {
+      console.warn('[uploadAttendancePhoto] Upload thất bại — giữ base64 để outbox fallback:', (err as any)?.message || err);
+      return null;
+    }
+  },
+
+  // ===== UPLOAD AVATAR (xem migration 034_create_avatars_bucket.sql) =====
+  async uploadAvatar(empId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    const BUCKET = 'avatars';
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safeEmp = String(empId || 'emp').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    const path = `${safeEmp}/${ts}.${safeExt}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+      if (error) throw error;
+      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    };
+
+    try {
+      return { url: await doUpload(), stored: 'supabase' };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/bucket not found|not found/i.test(msg)) {
+        try {
+          await supabase.storage.createBucket(BUCKET, {
+            public: true,
+            fileSizeLimit: 5242880,
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          });
+          return { url: await doUpload(), stored: 'supabase' };
+        } catch (createErr: any) {
+          console.warn('[uploadAvatar] Không tự tạo được bucket avatars:', createErr?.message || createErr);
+        }
+      }
+      console.warn('[uploadAvatar] Upload Supabase thất bại, lưu cục bộ:', msg);
+      const reader = new FileReader();
+      return await new Promise<{ url: string; stored: 'local' }>((resolve, reject) => {
+        reader.onloadend = () => typeof reader.result === 'string'
+          ? resolve({ url: reader.result, stored: 'local' })
+          : reject(new Error('Không đọc được file'));
+        reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+        reader.readAsDataURL(file);
+      });
     }
   },
 
@@ -1481,5 +3083,13 @@ export const dbService = {
     } catch (err) {
       console.warn('Error bootstrapping initial tables to Supabase:', err);
     }
-  }
+  },
+
+  // ===== KHỞI TẠO STORAGE BUCKET =====
+  // (Đã bỏ ensureStorageBuckets chạy từ client.) App chạy với anon key nên KHÔNG
+  // có quyền createBucket() (chỉ service_role) — gọi getBucket/createBucket từ
+  // trình duyệt trả 400 + "row violates row-level security policy" và in rác vào
+  // console. Việc tạo bucket "quote-images" / "product-catalog-images" là trách
+  // nhiệm của migration 025 (chạy trên Supabase SQL editor / supabase db push),
+  // không phải runtime. Upload ảnh vẫn hoạt động bình thường một khi bucket tồn tại.
 };

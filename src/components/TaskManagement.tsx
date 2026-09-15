@@ -1,5 +1,5 @@
-﻿import React, { useState } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, Customer, Quote, LeaveRequest, Payment, SubcontractorAdvanceProposal } from '../types';
+﻿import React, { useState, useEffect } from 'react';
+import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, Customer, Quote, LeaveRequest, Payment, SubcontractorAdvanceProposal } from '../types';
 import {
   Plus, Check, Clock, Filter, CheckSquare, Eye, Users, ShieldCheck,
   MessageSquare, UserPlus, Trash2, Shield, DollarSign, Zap, FileText,
@@ -8,44 +8,9 @@ import {
 import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
-import { createGroupConversation, addMessage, getConversations } from '../lib/chatStore';
-
-/**
- * Tự động gửi tin nhắn vào nhóm chat của công việc (conv_task_<taskId>).
- * Nếu nhóm chưa tồn tại thì tạo mới từ danh sách người liên quan.
- * Tin nhắn được gắn cờ system: true (hoạt động tự động, không phải chat tay).
- */
-function postTaskChat(
-  taskId: string,
-  senderId: string,
-  senderName: string,
-  senderRole: string,
-  content: string,
-  members: string[],
-  taskName?: string,
-  projectName?: string
-) {
-  const convId = `conv_task_${taskId}`;
-  const convs = getConversations();
-  const exists = convs.some(c => c.id === convId);
-  if (!exists && members.length > 0) {
-    createGroupConversation(
-      `${projectName ? projectName.substring(0, 30) + ' - ' : ''}${taskName ? taskName.substring(0, 30) : 'Công việc'}`,
-      Array.from(new Set(members.filter(Boolean))),
-      senderId,
-      taskId
-    );
-  }
-  addMessage({
-    conversationId: convId,
-    senderId,
-    senderName,
-    senderRole: (senderRole || 'member') as any,
-    content,
-    system: true
-  });
-}
+import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
+import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
+import { isAttendanceReportType } from '../lib/attendanceMeta';
 
 interface TaskManagementProps {
   tasks: Task[];
@@ -53,7 +18,7 @@ interface TaskManagementProps {
   employees: Employee[];
   currentUser: Employee;
   onAddTask: (newTask: Task) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  onUpdateTask: (id: string, updates: TaskUpdatePayload) => Promise<boolean> | void;
   onUpdateProject?: (id: string, updates: Partial<Project>) => void;
   onDeleteTask?: (id: string) => void;
   onDeleteMultipleTasks?: (ids: string[]) => void;
@@ -61,7 +26,18 @@ interface TaskManagementProps {
   quotes?: Quote[];
   onRedirectToQuote?: (projectId: string) => void;
   onRedirectToSubcontractor?: (projectId: string, subcontractorId: string, workName: string) => void;
+  onRedirectToHrLeaves?: () => void; // Điều hướng sang menu Phòng Nhân Sự > Đơn nghỉ phép
+  /** Điều hướng sang Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng. */
+  onOpenFinanceVoucher?: (proposalId: string) => void;
   subcontractorAdvances?: SubcontractorAdvanceProposal[]; // Đề xuất tạm ứng / Thu Chi từ Tài Chính
+  /** Công việc cần bung modal chi tiết ngay khi vào tab (deep link từ thông báo đẩy). */
+  initialTaskId?: string;
+  /** Gọi lại sau khi đã mở `initialTaskId`, để App reset state deep link. */
+  onInitialTaskOpened?: () => void;
+  /** Phạm vi khởi tạo (deep link từ tin nhắn xét duyệt → mở thẳng bảng "Công việc phải duyệt"). */
+  initialTaskScope?: 'assigned' | 'all' | 'toreview';
+  /** Gọi lại sau khi đã áp dụng `initialTaskScope`, để App reset state deep link. */
+  onInitialTaskScopeOpened?: () => void;
 }
 
 export default function TaskManagement({
@@ -78,7 +54,13 @@ export default function TaskManagement({
   quotes,
   onRedirectToQuote,
   onRedirectToSubcontractor,
-  subcontractorAdvances = []
+  onRedirectToHrLeaves,
+  onOpenFinanceVoucher,
+  subcontractorAdvances = [],
+  initialTaskId,
+  onInitialTaskOpened,
+  initialTaskScope,
+  onInitialTaskScopeOpened
 }: TaskManagementProps) {
   const { addToast } = useNotification();
   // Bộ lọc
@@ -86,11 +68,36 @@ export default function TaskManagement({
   const [filterEmployee, setFilterEmployee] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // Phạm vi SCOPE: "assigned" (Công việc được giao), "all" (Công việc liên quan) hoặc "toreview" (Công việc phải duyệt)
-  const [taskScope, setTaskScope] = useState<'assigned' | 'all' | 'toreview'>('assigned');
+  // Phạm vi SCOPE: "assigned" (Công việc được giao), "all" (Nhiệm vụ liên quan) hoặc "toreview" (Công việc phải duyệt)
+  const [taskScope, setTaskScope] = useState<'assigned' | 'all' | 'toreview'>(initialTaskScope || 'assigned');
 
   // Trạng thái cho Chi tiết công việc chọn Xem
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  // ── Deep link từ thông báo đẩy ──────────────────────────────────────────
+  // App truyền `initialTaskId` khi người dùng bấm vào thông báo đẩy của một
+  // công việc → bung thẳng modal chi tiết. Đồng thời nới bộ lọc về "tất cả"
+  // để công việc đó chắc chắn nằm trong danh sách phía sau modal (VD việc do
+  // người khác làm sẽ không có trong scope mặc định "Công việc được giao").
+  useEffect(() => {
+    if (!initialTaskId) return;
+    const task = tasks.find(t => t.id === initialTaskId);
+    if (!task) return;
+
+    setSelectedTaskId(initialTaskId);
+    if (task.assigneeId !== currentUser?.id) setTaskScope('all');
+    setFilterProject('all');
+    setFilterEmployee('all');
+    setFilterStatus('all');
+    onInitialTaskOpened?.();
+  }, [initialTaskId, tasks, currentUser?.id, onInitialTaskOpened]);
+
+  // Deep link xét duyệt → mở thẳng bảng "Công việc phải duyệt"
+  useEffect(() => {
+    if (!initialTaskScope) return;
+    setTaskScope(initialTaskScope);
+    onInitialTaskScopeOpened?.();
+  }, [initialTaskScope, onInitialTaskScopeOpened]);
 
   // States to view leave request or payment details under "Việc của tôi"
   const [viewingLeave, setViewingLeave] = useState<LeaveRequest | null>(null);
@@ -144,8 +151,7 @@ export default function TaskManagement({
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('medium');
   const [newTaskDept, setNewTaskDept] = useState('Phòng Kỹ Thuật');
 
-  // Trạng thái phụ tạo mẻ công việc mới: Người liên quan và Cấp duyệt ban đầu
-  const [newInvolvedIds, setNewInvolvedIds] = useState<string[]>([]);
+  // Trạng thái phụ tạo mẻ công việc mới: Cấp duyệt ban đầu
   const [newApprovals, setNewApprovals] = useState<{ levelName: string; approverId: string }[]>([]);
   const [tempLevelName, setTempLevelName] = useState('');
   const [tempApproverId, setTempApproverId] = useState(employees[0]?.id || '');
@@ -175,13 +181,32 @@ export default function TaskManagement({
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  // Công Tác Phí (hrm_travel_expenses) chờ duyệt — hiển thị trong cột Phòng Kế toán
+  const [travelExpenses, setTravelExpenses] = useState<any[]>([]);
 
-  // Tải leaves & payments từ Supabase khi mount hoặc chuyển tab
+  // Tải leaves & payments từ Supabase ngay khi mount (để badge "Công việc phải duyệt"
+  // hiển thị đúng số ngay từ đầu, không phải chờ mở tab), và tải lại khi chuyển tab.
   React.useEffect(() => {
-    if (taskScope === 'toreview') {
-      dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
-      dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
-    }
+    const loadLeaves = () => dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
+    const loadPayments = () => dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
+    const loadTravelExpenses = () => dbService.hrmTravelExpenses.list().then(data => setTravelExpenses(data || [])).catch(console.error);
+    loadLeaves();
+    loadPayments();
+    loadTravelExpenses();
+    // Trước đây chỉ tải lại khi chuyển tab (đổi taskScope) hoặc remount — nếu ai
+    // đó duyệt/tạo đơn nghỉ phép, phiếu chi, công tác phí ở tab khác trong lúc
+    // người dùng đang xem "Việc của tôi", badge "Công việc phải duyệt" sẽ hiện
+    // sai số cho tới khi họ tự chuyển tab. Nghe đúng 3 event tương ứng (payments
+    // vừa được App.tsx bắn thêm khi Realtime cập nhật; hrm_leaves core Realtime;
+    // hrm_travel_expenses polling 5 phút) để tự làm mới theo thời gian thực.
+    window.addEventListener('hl-payments-updated', loadPayments);
+    window.addEventListener('hl-hrm-leaves-updated', loadLeaves);
+    window.addEventListener('hl-hrm-travel-expenses-updated', loadTravelExpenses);
+    return () => {
+      window.removeEventListener('hl-payments-updated', loadPayments);
+      window.removeEventListener('hl-hrm-leaves-updated', loadLeaves);
+      window.removeEventListener('hl-hrm-travel-expenses-updated', loadTravelExpenses);
+    };
   }, [taskScope]);
 
   const handleApproveLeave = async (id: string, status: 'approved' | 'rejected') => {
@@ -236,7 +261,7 @@ export default function TaskManagement({
             if (changedEmp) {
               const currentPhep = (changedEmp as any).phepNam !== undefined ? (changedEmp as any).phepNam : 12;
               const leaveDays = targetLeave.daysCount !== undefined ? targetLeave.daysCount : 1;
-              const updatedEmp = { ...changedEmp, phepNam: Math.max(0, currentPhep - leaveDays) } as any;
+              const updatedEmp = { ...changedEmp, phepNam: Math.max(0, Number((currentPhep - leaveDays).toFixed(1))) } as any;
               await dbService.employees.save(updatedEmp).catch(() => {});
             }
           }
@@ -248,19 +273,26 @@ export default function TaskManagement({
       // B. Cập nhật attendance trên Supabase
       try {
         const symbol = getLeaveSymbol(targetLeave.type);
-        const attendance = await dbService.attendance.list();
         const leaveDates = getDaysDiffList(targetLeave.fromDate, targetLeave.toDate);
+        // Chỉ tải KHOẢNG NGÀY NGHỈ (thay vì toàn bộ lịch sử) để tìm/sửa bản ghi tương ứng.
+        const attendance = leaveDates.length > 0
+          ? await dbService.attendance.listForRange(leaveDates[0], leaveDates[leaveDates.length - 1])
+          : [];
         const toSave: any[] = [];
 
         leaveDates.forEach(dStr => {
           const idx = attendance.findIndex((at: any) => at.empId === targetLeave.empId && at.date === dStr);
           if (idx !== -1) {
-            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || targetLeave.type === 'Báo cáo nghỉ ca' || targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
+            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(targetLeave.type)) {
               const currentAt = attendance[idx];
               let timeInS = currentAt.timeInS, timeOutS = currentAt.timeOutS, timeInC = currentAt.timeInC, timeOutC = currentAt.timeOutC;
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
                 if (targetLeave.shift === 'morning') timeOutS = '11:30';
                 else if (targetLeave.shift === 'afternoon') timeOutC = '17:00';
+              } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
+                // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO (giữ ca còn lại nguyên).
+                if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; }
+                else if (targetLeave.shift === 'afternoon') { timeInC = '13:00'; timeOutC = '17:00'; }
               } else if (targetLeave.type !== 'Báo cáo nghỉ ca') {
                 timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : '07:30';
                 timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : '11:30';
@@ -275,7 +307,7 @@ export default function TaskManagement({
             }
           } else {
             let timeInS = symbol, timeOutS = symbol, timeInC = symbol, timeOutC = symbol, method = 'Hành chính phép', st = 'excused';
-            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || targetLeave.type === 'Báo cáo nghỉ ca' || targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
+            if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(targetLeave.type)) {
               method = 'Duyệt công'; st = 'valid';
               timeInS = '07:30'; timeOutS = '11:30'; timeInC = '13:00'; timeOutC = '17:00';
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
@@ -284,6 +316,9 @@ export default function TaskManagement({
               } else if (targetLeave.type === 'Báo cáo nghỉ ca') {
                 if (targetLeave.shift === 'morning') { timeInS = ''; timeOutS = ''; }
                 else { timeInC = ''; timeOutC = ''; }
+              } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
+                if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; timeInC = ''; timeOutC = ''; }
+                else { timeInS = ''; timeOutS = ''; timeInC = '13:00'; timeOutC = '17:00'; }
               }
             }
             const newLog = { id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`, empId: targetLeave.empId, empName: targetLeave.empName, date: dStr, timeInS, timeOutS, timeInC, timeOutC, timeInOT: '', timeOutOT: '', method, status: st, statusMsg: st === 'valid' ? 'Hợp lệ' : undefined, otHours: 0, leaveSymbol: st === 'excused' ? symbol : undefined, notes: targetLeave.reason || `Nghỉ phép được duyệt: ${targetLeave.type} (${symbol})` };
@@ -300,10 +335,13 @@ export default function TaskManagement({
       }
     } else if (status === 'rejected') {
       // Cập nhật attendance khi từ chối
-      if (targetLeave.type === 'Báo cáo nghỉ ca' || targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
+      if (isAttendanceReportType(targetLeave.type)) {
         try {
-          const attendance = await dbService.attendance.list();
           const leaveDates = getDaysDiffList(targetLeave.fromDate, targetLeave.toDate);
+          // Chỉ tải KHOẢNG NGÀY NGHỈ (thay vì toàn bộ lịch sử) để tìm/sửa bản ghi tương ứng.
+          const attendance = leaveDates.length > 0
+            ? await dbService.attendance.listForRange(leaveDates[0], leaveDates[leaveDates.length - 1])
+            : [];
           const toSave: any[] = [];
 
           leaveDates.forEach(dStr => {
@@ -333,6 +371,20 @@ export default function TaskManagement({
     // Lưu đơn đã duyệt/từ chối lên Supabase
     const changed = updated.find(l => l.id === id);
     if (changed) dbService.hrmLeaves.save(changed).catch(() => {});
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và nhân viên nộp đơn
+    if (currentUser.id && targetLeave.empId && currentUser.id !== targetLeave.empId) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: targetLeave.empId,
+        recipientName: targetLeave.empName,
+        content: status === 'approved'
+          ? `✅ Đã duyệt đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`
+          : `❌ Đã từ chối đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`,
+        relatedEntity: { type: 'leave', id: targetLeave.id },
+      });
+    }
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });
     } else {
@@ -347,6 +399,21 @@ export default function TaskManagement({
     if (updatedPayment) {
       dbService.payments.save({ ...updatedPayment, status }).catch(err =>
         console.warn('Lỗi khi lưu trạng thái duyệt thanh toán lên Supabase:', err));
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
+      const proposerEmp = findEmployeeByName(employees, updatedPayment.proposer);
+      if (currentUser.id && proposerEmp?.id && currentUser.id !== proposerEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: proposerEmp.id,
+          recipientName: proposerEmp.name || updatedPayment.proposer,
+          content: status === 'approved'
+            ? `✅ Đã duyệt phiếu chi ${updatedPayment.code} (${updatedPayment.recipient}) ${updatedPayment.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối phiếu chi ${updatedPayment.code} (${updatedPayment.recipient}) ${updatedPayment.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'payment', id: updatedPayment.id },
+        });
+      }
     }
     addToast({ title: '✅ Đã cập nhật', message: `Đã cập nhật đề xuất thanh toán [${id}] sang trạng thái: ${status === 'approved' ? 'Phê duyệt ✅' : 'Từ chối ❌'}`, type: 'success' });
   };
@@ -361,6 +428,21 @@ export default function TaskManagement({
     try {
       await dbService.subcontractorAdvances.save(updated);
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người lập đề xuất
+      const creatorEmp = adv.creator ? employees.find(e => e.id === adv.creator) : findEmployeeByName(employees, adv.creatorName);
+      if (currentUser.id && creatorEmp?.id && currentUser.id !== creatorEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: creatorEmp.id,
+          recipientName: creatorEmp.name || adv.creatorName || 'Người lập đề xuất',
+          content: decision === 'approved'
+            ? `✅ Đã duyệt đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'advance', id: adv.id },
+        });
+      }
       addToast({
         title: decision === 'approved' ? '✅ Đã phê duyệt' : '❌ Đã từ chối',
         message: `Đề xuất ${id} → ${decision === 'approved' ? 'Chờ Lập Phiếu (KT)' : 'Từ Chối'}`,
@@ -369,6 +451,50 @@ export default function TaskManagement({
     } catch (err) {
       addToast({ title: '❌ Lỗi', message: `Thất bại: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
     }
+  };
+
+  // Xử lý duyệt CÔNG TÁC PHÍ (cột Phòng Kế toán) — đồng bộ với handler trong
+  // HumanResourcesManagement.handleApproveTravelExpense: cập nhật status, upsert
+  // Supabase, fire sự kiện làm mới toàn cục + gửi tin nhắn cá nhân trả kết quả
+  // cho NGƯỜI KHỞI TẠO (creatorId/creatorName) của công tác phí.
+  const handleApproveTravelExpense = (rowId: string, decision: 'approved' | 'rejected') => {
+    const target = travelExpenses.find((s: any) => s.rowId === rowId || s.id === rowId);
+    if (!target) return;
+
+    const updated = travelExpenses.map((s: any) =>
+      (s.rowId === rowId || s.id === rowId) ? { ...s, status: decision } : s
+    );
+    setTravelExpenses(updated);
+
+    dbService.hrmTravelExpenses.save({ ...target, status: decision }, { rowId })
+      .then(() => window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated')))
+      .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu trạng thái duyệt CTP thất bại:', e?.message || e));
+
+    // 📩 Gửi tin nhắn CÁ NHÂN trả kết quả về cho NGƯỜI KHỞI TẠO công tác phí.
+    let recipientId = target.creatorId || target.employeeId || target.empId;
+    if (!recipientId) recipientId = findEmployeeByName(employees, target.employeeName)?.id || '';
+    if (currentUser?.id && recipientId && currentUser.id !== recipientId) {
+      const decisionText = decision === 'approved'
+        ? `✅ Đã duyệt công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`
+        : `❌ Đã từ chối công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`;
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId,
+        recipientName: target.employeeName || 'Người khởi tạo',
+        content: decisionText,
+        relatedEntity: { type: 'travel_expense', id: rowId },
+      }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin kết quả duyệt thất bại:', e?.message || e));
+    }
+
+    addToast({
+      title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
+      message: decision === 'approved'
+        ? `Đã duyệt công tác phí ${target.content || ''} của ${target.employeeName || ''}.`
+        : `Đã từ chối công tác phí ${target.content || ''} của ${target.employeeName || ''}.`,
+      type: decision === 'approved' ? 'success' : 'info',
+    });
   };
 
   const handleClearPendingPayments = async () => {
@@ -414,9 +540,9 @@ export default function TaskManagement({
   };
 
   const priorityColors: Record<TaskPriority, string> = {
-    high: 'text-red-400 bg-red-950/40 border border-red-900/50',
-    medium: 'text-amber-400 bg-amber-950/40 border border-amber-900/50',
-    low: 'text-blue-400 bg-blue-950/40 border border-blue-900/50'
+    high: 'text-red-700 bg-red-50 border border-red-200',
+    medium: 'text-amber-700 bg-amber-50 border border-amber-200',
+    low: 'text-blue-700 bg-blue-50 border border-blue-200'
   };
 
   const statusColors: Record<TaskStatus, string> = {
@@ -448,8 +574,7 @@ export default function TaskManagement({
       priority: newTaskPriority,
       status: 'todo',
       completionRate: 0,
-      involvedEmployeeIds: newInvolvedIds.length > 0 ? newInvolvedIds : undefined,
-      
+
       // Khai mốc duyệt ngầm định
       approvals: newApprovals.length > 0 ? newApprovals.map((ap, i) => ({
         id: `app_${Date.now()}_${i}`,
@@ -504,31 +629,49 @@ export default function TaskManagement({
 
     onAddTask(newlyCreatedTask);
 
-    // Tự động gửi tin nhắn vào nhóm chat của công việc (người gửi = người thao tác)
-    const proj = projects.find(p => p.id === newTaskProj);
-    postTaskChat(
-      newlyCreatedTask.id,
-      currentUser.id,
-      currentUser.name,
-      currentUser.role || 'member',
-      `🆕 ${currentUser.name} đã tạo công việc mới: "${newTaskName}".`,
-      [currentUser.id, newTaskAssignee, ...(newInvolvedIds || []), proj?.pmId].filter(Boolean) as string[],
-      newTaskName,
-      proj?.name
-    );
+    // 📩 Thông báo GIAO VIỆC → HỘI THOẠI CÁ NHÂN người được giao.
+    // Người nhận việc có thể CHƯA có trong nhóm chat dự án, nên phải nhắn riêng
+    // 1-1 (sendApprovalDirectMessage) để họ thấy tin + badge đỏ ngay trong hộp thư.
+    const assigneeEmp = employees.find(e => e.id === newTaskAssignee);
+    if (currentUser.id && newTaskAssignee && currentUser.id !== newTaskAssignee && assigneeEmp) {
+      sendApprovalDirectMessage({
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: newTaskAssignee,
+        recipientName: assigneeEmp.name,
+        content: `📌 ${currentUser.name} đã GIAO cho bạn công việc "${newTaskName}"${newTaskDeadline ? ` (Hạn: ${newTaskDeadline})` : ''}.`,
+        relatedEntity: { type: 'task', id: newlyCreatedTask.id },
+      });
+    }
+    // 👥 Đồng thời thêm người giao (assigner) VÀ người được giao (assignee) vào nhóm
+    // chat dự án (nếu có dự án liên kết) để cả hai mở được nhóm qua deep-link "💬 Nhóm
+    // dự án" trên tin nhắn giao việc — không phụ thuộc bấm "Đồng bộ nhân sự".
+    if (newTaskProj) {
+      const proj = projects.find(p => p.id === newTaskProj);
+      if (proj) {
+        ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: proj.pmId })
+          .then(conv => {
+            if (!conv) return;
+            const members = Array.from(new Set([currentUser.id, newTaskAssignee].filter(Boolean) as string[]));
+            members.forEach(mid => addMemberToConversation(conv.id, mid));
+          })
+          .catch(() => {});
+      }
+    }
 
     // Reset form states
     setNewTaskName('');
     setNewTaskDesc('');
-    setNewInvolvedIds([]);
     setNewApprovals([]);
     setShowForm(false);
   };
 
-  // Lọc dữ liệu hiển thị
-  const filteredTasks = tasks.filter(task => {
+  // Lọc dữ liệu hiển thị — bọc useMemo vì file này chạy re-render rất thường
+  // xuyên (gõ tìm kiếm, mở/đóng modal...), không nên quét lại toàn bộ `tasks`
+  // mỗi lần như vậy.
+  const filteredTasks = React.useMemo(() => tasks.filter(task => {
     const hasMainAssigneeMission = task.missions?.some(m => m.mainAssigneeId === currentUser?.id);
-    const hasMemberMission = task.missions?.some(m => m.memberIds?.includes(currentUser?.id));
 
     if (taskScope === 'assigned') {
       // Công việc được giao: Chỉ hiển thị các công việc mà người nhận việc được giao (hoặc có nhiệm vụ phụ mà user là phụ trách chính)
@@ -538,120 +681,135 @@ export default function TaskManagement({
       }
     } else if (taskScope === 'toreview') {
       // Công việc phải duyệt: Có trạng thái chờ duyệt mà người giao việc phụ trách (Kiểm tra linh hoạt theo cả ID, tên, hoặc nếu có quy trình duyệt cho user)
-      const isMyAssignedTask = task.assignerId === currentUser?.id || 
+      const isMyAssignedTask = task.assignerId === currentUser?.id ||
                                task.assignerId === currentUser?.name ||
                                task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
       if (task.status !== 'reviewing' || !isMyAssignedTask) {
         return false;
       }
     } else {
-      // taskScope === 'all' đại diện cho Công việc liên quan:
-      // Chỉ hiển thị cho những người hỗ trợ liên quan, KHÔNG hiển thị cho người giao việc và người nhận việc
-      const isAssignee = task.assigneeId === currentUser?.id || task.assigneeId === currentUser?.name || hasMainAssigneeMission;
-      const isAssigner = task.assignerId === currentUser?.id || 
-                         task.assignerId === currentUser?.name ||
-                         task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-
-      if (isAssignee || isAssigner) {
-        return false;
-      }
-
-      const projectOfTask = projects.find(p => p.id === task.projectId);
-      const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser?.id);
-      const isTaskInvolved = task.involvedEmployeeIds?.includes(currentUser?.id) || 
-                             task.involvedEmployeeIds?.includes(currentUser?.name) ||
-                             hasMemberMission;
-
-      if (!isProjectInvolved && !isTaskInvolved) {
-        return false;
-      }
+      // taskScope === 'all' đại diện cho Nhiệm vụ liên quan:
+      // được render riêng bằng bảng relatedMissions bên dưới nên loại toàn bộ khỏi danh sách công việc
+      return false;
     }
 
     const matchProj = filterProject === 'all' || task.projectId === filterProject;
-    const matchEmp = filterEmployee === 'all' || task.assigneeId === filterEmployee || task.involvedEmployeeIds?.includes(filterEmployee);
+    const matchEmp = filterEmployee === 'all' || task.assigneeId === filterEmployee;
     const matchStatus = taskScope === 'toreview' ? true : (filterStatus === 'all' || task.status === filterStatus);
     return matchProj && matchEmp && matchStatus;
-  });
+  }), [tasks, currentUser, taskScope, filterProject, filterEmployee, filterStatus]);
 
-  // Đếm số lượng công việc liên quan để hiển thị ở tab badge
-  const relatedTasksCount = tasks.filter(task => {
-    const hasMainAssigneeMission = task.missions?.some(m => m.mainAssigneeId === currentUser?.id);
-    const hasMemberMission = task.missions?.some(m => m.memberIds?.includes(currentUser?.id));
+  // Map tra cứu O(1) cho project/customer — dùng trong relatedMissions bên dưới
+  // để tránh .find() lồng bên trong .flatMap()/.map() (O(N×M) cũ).
+  const projectsById = React.useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
+  const customersById = React.useMemo(() => new Map((customers || []).map(c => [c.id, c])), [customers]);
 
-    const isAssignee = task.assigneeId === currentUser?.id || task.assigneeId === currentUser?.name || hasMainAssigneeMission;
-    const isAssigner = task.assignerId === currentUser?.id || 
-                       task.assignerId === currentUser?.name ||
-                       task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-
-    if (isAssignee || isAssigner) {
-      return false;
-    }
-
-    const projectOfTask = projects.find(p => p.id === task.projectId);
-    const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser?.id);
-    const isTaskInvolved = task.involvedEmployeeIds?.includes(currentUser?.id) || 
-                           task.involvedEmployeeIds?.includes(currentUser?.name) ||
-                           hasMemberMission;
-
-    return isProjectInvolved || isTaskInvolved;
-  }).length;
+  // NHIỆM VỤ LIÊN QUAN: liệt kê các Nhiệm vụ (mission trong Công việc) mà user được gán
+  // với vai trò Phụ trách chính (mainAssigneeId) hoặc Nhân sự tham gia (memberIds)
+  const relatedMissions = React.useMemo(() => tasks.flatMap(task =>
+    (task.missions || [])
+      .filter(m => m.mainAssigneeId === currentUser?.id || (m.memberIds || []).includes(currentUser?.id))
+      .map(m => {
+        const project = projectsById.get(task.projectId);
+        const customer = project ? customersById.get(project.customerId) : null;
+        return { task, mission: m, project, customer };
+      })
+  ).filter(x => filterProject === 'all' || x.task.projectId === filterProject), [tasks, currentUser, projectsById, customersById, filterProject]);
 
   // Đếm số lượng công việc phải duyệt của tôi
-  const toReviewTasksCount = tasks.filter(t => 
-    t.status === 'reviewing' && 
-    (t.assignerId === currentUser?.id || 
+  const toReviewTasksCount = React.useMemo(() => tasks.filter(t =>
+    t.status === 'reviewing' &&
+    (t.assignerId === currentUser?.id ||
      t.assignerId === currentUser?.name ||
      t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  ).length;
+  ).length, [tasks, currentUser]);
 
   // --- TÍNH TOÁN CÁC CÔNG VIỆC CHƯA HOÀN THÀNH ĐỂ HIỂN THỊ BADGE ĐỎ ---
   // 1. Công việc được giao chưa hoàn thành (status !== 'completed')
-  const assignedUncompletedCount = tasks.filter(t => {
+  const assignedUncompletedCount = React.useMemo(() => tasks.filter(t => {
     const hasMainAssigneeMission = t.missions?.some(m => m.mainAssigneeId === currentUser?.id);
     const isAssignee = t.assigneeId === currentUser?.id || t.assigneeId === currentUser?.name || hasMainAssigneeMission;
     return isAssignee && t.status !== 'completed';
-  }).length;
+  }).length, [tasks, currentUser]);
 
   // 2. Công việc phải duyệt chưa hoàn thành (mặc định đã là trạng thái 'reviewing' nên tương đương toReviewTasksCount)
-  const toReviewUncompletedCount = toReviewTasksCount 
-    + leaves.filter(l => l.status === 'pending').length 
-    + payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length;
+  // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt (lọc theo ID lẫn tên,
+  // tương tự logic công việc phải duyệt ở trên — vì một số đơn fallback chỉ lưu tên người duyệt)
+  const myPendingLeaves = React.useMemo(() => leaves.filter(l =>
+    l.status === 'pending' &&
+    (l.approverId === currentUser?.id ||
+     l.approverName === currentUser?.name ||
+     l.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+  ), [leaves, currentUser]);
 
-  // 3. Công việc liên quan chưa hoàn thành (status !== 'completed')
-  const relatedUncompletedCount = tasks.filter(task => {
-    if (task.status === 'completed') {
-      return false;
-    }
-    const hasMainAssigneeMission = task.missions?.some(m => m.mainAssigneeId === currentUser?.id);
-    const hasMemberMission = task.missions?.some(m => m.memberIds?.includes(currentUser?.id));
+  // Đề xuất TÀI CHÍNH chờ duyệt mà user hiện tại có quyền xét duyệt:
+  // (a) được CHỈ ĐỊNH làm người duyệt (approver theo ID/tên, kể cả chuỗi duyệt approvals), HOẶC
+  // (b) thuộc nhóm Kế toán (role_accounting) / Giám đốc (role_admin) → xem & duyệt toàn bộ.
+  // Đồng nhất với canApproveProposal trong FinanceManagement.
+  const isFinanceApprover = isUserInRoleGroup(currentUser?.id, 'role_accounting') || isUserInRoleGroup(currentUser?.id, 'role_admin');
+  const myPendingPayments = React.useMemo(() => payments.filter(p =>
+    p.status === 'pending' &&
+    (isFinanceApprover ||
+     p.proposer === currentUser?.name ||
+     p.recipient === currentUser?.name ||
+     p.approver === currentUser?.name ||
+     (p.approver && currentUser?.name && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
+     p.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+  ), [payments, currentUser, isFinanceApprover]);
+  const myPendingAdvances = React.useMemo(() => subcontractorAdvances.filter(a =>
+    a.status === 'pending_approval' &&
+    (isFinanceApprover ||
+     a.approver === currentUser?.id ||
+     (a.approverName && currentUser?.name && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
+     a.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+  ), [subcontractorAdvances, currentUser, isFinanceApprover]);
+  // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê
+  // Duyệt → Công Tác Phí) hoặc thuộc nhóm Kế toán → thấy & duyệt toàn bộ.
+  const canApproveTravelExpense = React.useMemo(() => {
+    if (!currentUser?.id) return false;
+    const configured = getConfiguredApprover('travel_expense');
+    if (configured?.id === currentUser.id) return true;
+    return isUserInRoleGroup(currentUser.id, 'role_accounting');
+  }, [currentUser]);
+  const myPendingTravelExpenses = React.useMemo(() => travelExpenses.filter((t: any) =>
+    t.status === 'pending' && canApproveTravelExpense
+  ), [travelExpenses, canApproveTravelExpense]);
+  // ĐỀ XUẤT THU CHI chờ LẬP PHIẾU (KT) — status 'pending_payment' = "Chờ Lập Phiếu (KT)".
+  // Hiển thị những đề xuất mà user hiện tại được CHỈ ĐỊNH lập phiếu (creator = "Người Lập Phiếu"),
+  // hoặc thuộc phòng Kế toán (vì mặc định người lập phiếu là "Kế Toán").
+  const myPendingVouchers = React.useMemo(() => subcontractorAdvances.filter(a =>
+    a.status === 'pending_payment' &&
+    (isFinanceApprover ||
+     a.creator === currentUser?.id ||
+     (a.creatorName && currentUser?.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase()) ||
+     (a.creator && currentUser?.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))
+  ), [subcontractorAdvances, currentUser, isFinanceApprover]);
+  const toReviewUncompletedCount = toReviewTasksCount
+    + myPendingLeaves.length
+    + myPendingPayments.length
+    + myPendingAdvances.length
+    + myPendingTravelExpenses.length;
 
-    const isAssignee = task.assigneeId === currentUser?.id || task.assigneeId === currentUser?.name || hasMainAssigneeMission;
-    const isAssigner = task.assignerId === currentUser?.id || 
-                       task.assignerId === currentUser?.name ||
-                       task.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-
-    if (isAssignee || isAssigner) {
-      return false;
-    }
-
-    const projectOfTask = projects.find(p => p.id === task.projectId);
-    const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser?.id);
-    const isTaskInvolved = task.involvedEmployeeIds?.includes(currentUser?.id) || 
-                           task.involvedEmployeeIds?.includes(currentUser?.name) ||
-                           hasMemberMission;
-
-    return isProjectInvolved || isTaskInvolved;
-  }).length;
+  // 3. Nhiệm vụ liên quan chưa hoàn thành (mission.status !== 'completed')
+  const relatedUncompletedCount = React.useMemo(() => tasks.reduce((count, task) =>
+    count + (task.missions || []).filter(m =>
+      m.status !== 'completed' &&
+      (m.mainAssigneeId === currentUser?.id || (m.memberIds || []).includes(currentUser?.id))
+    ).length
+  , 0), [tasks, currentUser]);
 
   // Nhóm công việc theo từng Dự Án
-  const groupedTasks: Record<string, Task[]> = {};
-  filteredTasks.forEach(task => {
-    const pId = task.projectId || 'unassigned';
-    if (!groupedTasks[pId]) {
-      groupedTasks[pId] = [];
-    }
-    groupedTasks[pId].push(task);
-  });
+  const groupedTasks: Record<string, Task[]> = React.useMemo(() => {
+    const grouped: Record<string, Task[]> = {};
+    filteredTasks.forEach(task => {
+      const pId = task.projectId || 'unassigned';
+      if (!grouped[pId]) {
+        grouped[pId] = [];
+      }
+      grouped[pId].push(task);
+    });
+    return grouped;
+  }, [filteredTasks]);
 
   return (
     <div className="space-y-4 text-slate-100">
@@ -660,10 +818,10 @@ export default function TaskManagement({
         <div>
           <h2 className="text-base font-extrabold flex items-center gap-2">
             <CheckSquare className={`w-5 h-5 ${accentTextClass}`} />
-            Bảng Điều Hành Công Việc & Giám Sát Kỹ Thuật (Phê Duyệt Nhiều Cấp)
+            Bảng Điều Hành Công Việc
           </h2>
           <p className="text-[11px] text-slate-400 font-medium">
-            Giám sát kỹ thuật xây dựng công trình, sản xuất mộc mạc xưởng, dán chỉ cạnh tự do găm người và chấm công giờ thực địa.
+            Nhận việc được giao, xét duyệt theo yêu cầu.
           </p>
         </div>
       </div>
@@ -689,6 +847,23 @@ export default function TaskManagement({
         </button>
         <button
           type="button"
+          onClick={() => setTaskScope('all')}
+          className={`py-2 px-3 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer ${
+            taskScope === 'all'
+              ? `${accentBgClass} shadow-sm`
+              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Nhiệm vụ được giao</span>
+          {relatedUncompletedCount > 0 && (
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
+              {relatedUncompletedCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           onClick={() => setTaskScope('toreview')}
           className={`py-2 px-3 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer ${
             taskScope === 'toreview'
@@ -701,23 +876,6 @@ export default function TaskManagement({
           {toReviewUncompletedCount > 0 && (
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
               {toReviewUncompletedCount}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTaskScope('all')}
-          className={`py-2 px-3 text-xs font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer ${
-            taskScope === 'all'
-              ? `${accentBgClass} shadow-sm`
-              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Công việc liên quan</span>
-          {relatedUncompletedCount > 0 && (
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-danger-soft text-fg-danger-strong text-[10px] font-black shadow-sm ring-1 ring-rose-500/30 animate-pulse">
-              {relatedUncompletedCount}
             </span>
           )}
         </button>
@@ -775,7 +933,7 @@ export default function TaskManagement({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-slate-300 font-bold mb-1">Độ ưu tiên</label>
               <select
@@ -811,34 +969,6 @@ export default function TaskManagement({
               />
             </div>
 
-            <div>
-              <label className="block text-slate-300 font-bold mb-1">Nhân sự liên quan hỗ trợ giám sát</label>
-              <div className="flex gap-1 flex-wrap border border-slate-800 rounded p-1.5 bg-slate-955 min-h-[32px]">
-                {employees
-                  .filter(e => e.id !== newTaskAssignee)
-                  .map(emp => {
-                    const isSelected = newInvolvedIds.includes(emp.id);
-                    return (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        onClick={() => {
-                          if (isSelected) {
-                            setNewInvolvedIds(newInvolvedIds.filter(id => id !== emp.id));
-                          } else {
-                            setNewInvolvedIds([...newInvolvedIds, emp.id]);
-                          }
-                        }}
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition cursor-pointer ${
-                          isSelected ? `${accentBgClass} border-transparent` : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white border-slate-800'
-                        }`}
-                      >
-                        {isSelected ? '✓ ' : '+ '}{emp.name}
-                      </button>
-                    );
-                  })}
-              </div>
-            </div>
           </div>
 
           <div>
@@ -985,8 +1115,133 @@ export default function TaskManagement({
         </span>
       </div>
 
-      {/* 3 COLUMNS APPROVAL BOARD FOR 'toreview' OR NORMAL LIST FOR OTHERS */}
-      {taskScope === 'toreview' ? (
+      {/* BẢNG NHIỆM VỤ LIÊN QUAN: Các nhiệm vụ user được gán vai trò Phụ trách chính / Nhân sự */}
+      {taskScope === 'all' ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-md">
+          <div className="bg-slate-950 px-4 py-3 border-b border-slate-850 flex items-center justify-between">
+            <span className="font-extrabold text-[12px] text-white uppercase tracking-wider flex items-center gap-2">
+              <Users className={`w-4 h-4 ${accentTextClass}`} />
+              Nhiệm vụ được giao của tôi
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono font-bold">
+              {relatedMissions.length} nhiệm vụ được gán
+            </span>
+          </div>
+
+          {relatedMissions.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 italic text-xs">
+              Bạn chưa được gán vào nhiệm vụ nào với vai trò Phụ trách chính hoặc Nhân sự tham gia.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="bg-slate-950/70 text-slate-400 uppercase text-[9.5px] tracking-wider border-b border-slate-850">
+                    <th className="p-3 font-extrabold">Tên dự án</th>
+                    <th className="p-3 font-extrabold">Khách hàng</th>
+                    <th className="p-3 font-extrabold">Tên công việc</th>
+                    <th className="p-3 font-extrabold">Tên nhiệm vụ</th>
+                    <th className="p-3 font-extrabold">Vai trò</th>
+                    <th className="p-3 font-extrabold">Thời hạn</th>
+                    <th className="p-3 font-extrabold">Trạng thái</th>
+                    <th className="p-3 font-extrabold text-center">Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850">
+                  {relatedMissions.map(({ task, mission, project, customer }) => {
+                    const isMain = mission.mainAssigneeId === currentUser?.id;
+                    const isMissionOverdue = mission.status !== 'completed' && mission.deadline && new Date(mission.deadline) < new Date();
+                    return (
+                      <tr key={`${task.id}_${mission.id}`} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3 font-bold text-slate-200 max-w-[180px] truncate">
+                          {project ? project.name : 'Nhiệm vụ chung nội bộ'}
+                        </td>
+                        <td className="p-3 text-slate-300 max-w-[140px] truncate">
+                          {customer?.name || '—'}
+                        </td>
+                        <td className="p-3 text-slate-300 max-w-[180px] truncate font-semibold">
+                          {task.name}
+                        </td>
+                        <td className="p-3 text-slate-100 font-bold max-w-[200px] truncate">
+                          {mission.name}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase border ${
+                            isMain
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-sky-50 text-sky-700 border-sky-200'
+                          }`}>
+                            {isMain ? 'Phụ trách chính' : 'Nhân sự'}
+                          </span>
+                        </td>
+                        <td className={`p-3 font-mono font-bold ${isMissionOverdue ? 'text-rose-400' : 'text-slate-300'}`}>
+                          {mission.deadline || task.deadline || '—'}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase border ${
+                            mission.status === 'completed'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : isMissionOverdue
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : mission.status === 'doing'
+                                  ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}>
+                            {mission.status === 'completed'
+                              ? 'Hoàn thành'
+                              : isMissionOverdue
+                                ? 'Quá hạn'
+                                : mission.status === 'doing'
+                                  ? 'Đang làm'
+                                  : 'Chưa làm'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Nút NHẬN NV: chỉ hiện cho Phụ trách chính khi nhiệm vụ Chưa làm */}
+                            {isMain && mission.status === 'todo' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updatedMissions = (task.missions || []).map(m =>
+                                    m.id === mission.id ? { ...m, status: 'doing' as const } : m
+                                  );
+                                  onUpdateTask(task.id, { missions: updatedMissions });
+                                  addToast({
+                                    title: '✅ Đã nhận nhiệm vụ',
+                                    message: `Nhiệm vụ "${mission.name}" đã chuyển sang trạng thái Đang làm.`,
+                                    type: 'success',
+                                  });
+                                }}
+                                title="Nhận nhiệm vụ này (chuyển sang Đang làm)"
+                                className="bg-sky-600 hover:bg-sky-500 text-white border border-sky-500/40 px-2 py-1 rounded-lg cursor-pointer transition inline-flex items-center gap-1 text-[10px] font-bold"
+                              >
+                                <Check className="w-3 h-3" />
+                                Nhận NV
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTaskId(task.id)}
+                              title="Xem chi tiết Công việc chứa nhiệm vụ này"
+                              className="bg-slate-950 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800 p-1.5 rounded-lg cursor-pointer transition inline-flex items-center justify-center"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) :
+
+      /* 3 COLUMNS APPROVAL BOARD FOR 'toreview' OR NORMAL LIST FOR OTHERS */
+      taskScope === 'toreview' ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-2">
           {/* CỘT PHÒNG DỰ ÁN */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col h-[750px] shadow-lg">
@@ -997,7 +1252,7 @@ export default function TaskManagement({
                   Phòng Dự án
                 </h3>
               </div>
-              <span className="bg-amber-955 border border-amber-500/20 text-text-amber-400 text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+              <span className="bg-amber-50 border border-amber-200 text-amber-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                 {filteredTasks.length} chờ duyệt
               </span>
             </div>
@@ -1066,26 +1321,37 @@ export default function TaskManagement({
                                 notes: `${currentUser.name} đã Từ Chối duyệt kết quả thông qua cổng duyệt nhanh.`
                               }]
                             });
-                            // 🤖 Auto-post to task chat group
-                            const proj = projects.find(p => p.id === t.projectId);
-                            postTaskChat(
-                              t.id,
-                              currentUser.id,
-                              currentUser.name,
-                              currentUser.role || 'member',
-                              `❌ ${currentUser.name} đã Từ Chối duyệt kết quả công việc "${t.name}".`,
-                              [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                              t.name,
-                              proj?.name
-                            );
+                            // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → người giao)
+                            const assignerEmp = employees.find(e => e.id === t.assignerId);
+                            if (currentUser.id && t.assignerId && currentUser.id !== t.assignerId) {
+                              sendApprovalDirectMessage({
+                                senderId: currentUser.id,
+                                senderName: currentUser.name,
+                                senderRole: currentUser.role,
+                                recipientId: t.assignerId,
+                                recipientName: assignerEmp?.name || 'Người giao việc',
+                                content: `❌ ${currentUser.name} đã TỪ CHỐI duyệt kết quả công việc "${t.name}".`,
+                                relatedEntity: { type: 'task', id: t.id },
+                              });
+                            }
                           }}
-                          className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                          className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-2.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                         >
                           Từ chối
                         </button>
                         <button
                           type="button"
                           onClick={() => {
+                            // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                            const pendingMissions = (t.missions || []).filter(m => m.status !== 'completed');
+                            if (pendingMissions.length > 0) {
+                              addToast({
+                                title: '⚠️ Còn nhiệm vụ chưa hoàn thành',
+                                message: `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi phê duyệt hoàn thành công việc "${t.name}".`,
+                                type: 'warning'
+                              });
+                              return;
+                            }
                             const wl = t.workLogs || [];
                             onUpdateTask(t.id, {
                               status: 'completed',
@@ -1099,18 +1365,19 @@ export default function TaskManagement({
                                 notes: `${currentUser.name} đã Phê Duyệt kết quả hoàn thành sản phẩm mốc nghiệm thu.`
                               }]
                             });
-                            // 🤖 Auto-post to task chat group
-                            const proj = projects.find(p => p.id === t.projectId);
-                            postTaskChat(
-                              t.id,
-                              currentUser.id,
-                              currentUser.name,
-                              currentUser.role || 'member',
-                              `✅ ${currentUser.name} đã Phê Duyệt hoàn thành công việc "${t.name}".`,
-                              [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                              t.name,
-                              proj?.name
-                            );
+                            // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người duyệt → người giao)
+                            const assignerEmp = employees.find(e => e.id === t.assignerId);
+                            if (currentUser.id && t.assignerId && currentUser.id !== t.assignerId) {
+                              sendApprovalDirectMessage({
+                                senderId: currentUser.id,
+                                senderName: currentUser.name,
+                                senderRole: currentUser.role,
+                                recipientId: t.assignerId,
+                                recipientName: assignerEmp?.name || 'Người giao việc',
+                                content: `✅ ${currentUser.name} đã DUYỆT hoàn thành công việc "${t.name}".`,
+                                relatedEntity: { type: 'task', id: t.id },
+                              });
+                            }
                           }}
                           className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-2.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer"
                         >
@@ -1138,24 +1405,36 @@ export default function TaskManagement({
                   Phòng Nhân sự
                 </h3>
               </div>
-              <span className="bg-pink-955 border border-pink-500/20 text-pink-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                {leaves.filter(l => l.status === 'pending').length} chờ duyệt
-              </span>
+              <div className="flex items-center gap-2">
+                {onRedirectToHrLeaves && (
+                  <button
+                    type="button"
+                    onClick={onRedirectToHrLeaves}
+                    title="Mở danh sách Đơn nghỉ phép trong menu Phòng Nhân Sự"
+                    className="text-pink-700 hover:text-pink-800 text-[10px] bg-pink-50 border border-pink-200 px-2 py-0.5 rounded hover:bg-pink-100 font-bold cursor-pointer transition active:scale-95 flex items-center gap-1"
+                  >
+                    <Eye className="w-3 h-3" /> Đơn nghỉ phép
+                  </button>
+                )}
+                <span className="bg-pink-50 border border-pink-200 text-pink-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                  {myPendingLeaves.length} chờ duyệt
+                </span>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {leaves.filter(l => l.status === 'pending').length === 0 ? (
+              {myPendingLeaves.length === 0 ? (
                 <div className="text-center py-16 text-slate-500 italic text-xs">
-                  Không có đơn nghỉ phép nào chờ duyệt.
+                  Không có đơn nghỉ phép nào chờ bạn duyệt.
                 </div>
               ) : (
-                leaves.filter(l => l.status === 'pending').map(l => (
+                myPendingLeaves.map(l => (
                   <div 
                     key={l.id} 
                     className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                   >
                     <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                      <span className="text-[10px] font-mono font-extrabold text-pink-400 tracking-wider bg-pink-950/50 px-1.5 py-0.5 rounded">{l.id}</span>
+                      <span className="text-[10px] font-mono font-extrabold text-pink-700 tracking-wider bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded">{l.id}</span>
                       <span className="text-[9.5px] font-bold text-slate-300">
                         {l.type}
                       </span>
@@ -1178,7 +1457,7 @@ export default function TaskManagement({
                       <button
                         type="button"
                         onClick={() => handleApproveLeave(l.id, 'rejected')}
-                        className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                        className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                       >
                         Từ chối
                       </button>
@@ -1215,30 +1494,36 @@ export default function TaskManagement({
                   <button
                     onClick={handleClearPendingPayments}
                     title="Xóa toàn bộ các đề xuất đang chờ duyệt trong bộ nhớ tạm"
-                    className="text-rose-400 hover:text-rose-300 text-[10px] bg-rose-950/30 border border-rose-500/20 px-2 py-0.5 rounded hover:bg-rose-950/60 font-sans cursor-pointer transition active:scale-95 flex items-center gap-0.5"
+                    className="text-rose-700 hover:text-rose-800 text-[10px] bg-rose-50 border border-rose-200 px-2 py-0.5 rounded hover:bg-rose-100 font-sans cursor-pointer transition active:scale-95 flex items-center gap-0.5"
                   >
                     <Trash2 className="w-3 h-3" /> Xóa bộ nhớ tạm
                   </button>
                 )}
-                {/* Count: payments + subcontractor advances pending_approval where currentUser is approver */}
-                <span className="bg-emerald-955 border border-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                {/* Count: payments + subcontractor advances + công tác phí chờ duyệt mà user có quyền duyệt */}
+                <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                   {
-                    payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length
+                    myPendingPayments.length
                     +
-                    subcontractorAdvances.filter(a => a.status === 'pending_approval' && a.approverName === currentUser.name).length
-                  } chờ duyệt
+                    myPendingAdvances.length
+                    +
+                    myPendingTravelExpenses.length
+                    +
+                    myPendingVouchers.length
+                  } cần xử lý
                 </span>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Combine payments and subcontractor advances */}
+              {/* Combine payments, subcontractor advances và công tác phí chờ duyệt */}
               {(() => {
-                const pendingPayments = payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name));
-                const pendingAdvances = subcontractorAdvances.filter(a => a.status === 'pending_approval' && a.approverName === currentUser.name);
+                const pendingPayments = myPendingPayments;
+                const pendingAdvances = myPendingAdvances;
+                const pendingTravelExpenses = myPendingTravelExpenses;
                 const allPending = [
                   ...pendingPayments.map(p => ({ type: 'payment' as const, data: p })),
-                  ...pendingAdvances.map(a => ({ type: 'advance' as const, data: a }))
+                  ...pendingAdvances.map(a => ({ type: 'advance' as const, data: a })),
+                  ...pendingTravelExpenses.map(t => ({ type: 'travel' as const, data: t }))
                 ];
 
                 if (allPending.length === 0) {
@@ -1251,12 +1536,66 @@ export default function TaskManagement({
 
                 // Sort by date descending
                 allPending.sort((a, b) => {
-                  const dateA = a.type === 'payment' ? a.data.date : a.data.date;
-                  const dateB = b.type === 'payment' ? b.data.date : b.data.date;
+                  const dateA = a.type === 'payment' ? a.data.date : (a.data.completedDate || a.data.createdAt || '');
+                  const dateB = b.type === 'payment' ? b.data.date : (b.data.completedDate || b.data.createdAt || '');
                   return dateB.localeCompare(dateA);
                 });
 
                 return allPending.map(item => {
+                  if (item.type === 'travel') {
+                    const t = item.data;
+                    const creatorName = t.creatorName || t.employeeName || 'Nhân viên';
+                    return (
+                      <div
+                        key={t.rowId || t.id}
+                        className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
+                      >
+                        <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
+                          <span className="text-[10px] font-mono font-extrabold text-amber-700 tracking-wider bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">{t.code || t.id}</span>
+                          <span className="text-[11.5px] font-mono font-black text-rose-400">
+                            {Number(t.amount || 0).toLocaleString('vi-VN')} đ
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 text-[10.5px] text-slate-400">
+                          <div className="text-slate-200">
+                            Nhân viên: <strong className="text-slate-100 text-xs font-bold leading-none">{t.employeeName}</strong>
+                          </div>
+                          <div className="font-mono text-[10px]">
+                            Ngày: <strong className="text-slate-300">{t.completedDate || t.createdAt || ''}</strong>
+                          </div>
+                          <p>Dự án: <strong className="text-slate-355">{t.projectName || 'Chưa rõ'}</strong></p>
+                          <p>Nhiệm vụ: <strong className="text-slate-355">{t.missionName || t.taskName || ''}</strong></p>
+                          <p>Người khởi tạo: <strong className="text-slate-355">{creatorName}</strong></p>
+                          <p className="text-amber-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                            <span>Công Tác Phí</span>
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
+                          </p>
+
+                          <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
+                            "{t.content || 'Công tác phí'}"
+                          </div>
+                        </div>
+
+                        <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleApproveTravelExpense(t.rowId || t.id, 'rejected')}
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                          >
+                            Từ chối
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveTravelExpense(t.rowId || t.id, 'approved')}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer"
+                          >
+                            Duyệt
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
                   if (item.type === 'payment') {
                     const p = item.data;
                     return (
@@ -1265,7 +1604,7 @@ export default function TaskManagement({
                         className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                       >
                         <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                          <span className="text-[10px] font-mono font-extrabold text-emerald-400 tracking-wider bg-emerald-950/50 px-1.5 py-0.5 rounded">{p.code}</span>
+                          <span className="text-[10px] font-mono font-extrabold text-emerald-700 tracking-wider bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">{p.code}</span>
                           <span className="text-[11.5px] font-mono font-black text-rose-400">
                             -{p.amount.toLocaleString('vi-VN')} đ
                           </span>
@@ -1290,7 +1629,7 @@ export default function TaskManagement({
                           <button
                             type="button"
                             onClick={() => handleApprovePayment(p.id, 'rejected')}
-                            className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                           >
                             Từ chối
                           </button>
@@ -1312,7 +1651,7 @@ export default function TaskManagement({
                         className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                       >
                         <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                          <span className="text-[10px] font-mono font-extrabold text-orange-400 tracking-wider bg-orange-950/50 px-1.5 py-0.5 rounded">{a.id}</span>
+                          <span className="text-[10px] font-mono font-extrabold text-orange-700 tracking-wider bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">{a.id}</span>
                           <span className="text-[11.5px] font-mono font-black text-rose-400">
                             {a.amount.toLocaleString('vi-VN')} đ
                           </span>
@@ -1327,7 +1666,10 @@ export default function TaskManagement({
                           </div>
                           <p>Thầu phụ: <strong className="text-slate-355">{a.subcontractorName}</strong></p>
                           <p>Người lập: <strong className="text-slate-355">{a.creatorName || 'Kế Toán'}</strong></p>
-                          <p className="text-sky-400 font-bold text-[9px] uppercase">Đề Xuất Thu Chi / Tạm Ứng</p>
+                          <p className="text-sky-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                            <span>Đề Xuất Chi / Tạm Ứng</span>
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Duyệt</span>
+                          </p>
 
                           <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
                             "Diễn giải: {a.reason}"
@@ -1338,7 +1680,7 @@ export default function TaskManagement({
                           <button
                             type="button"
                             onClick={() => handleApproveAdvance(a.id, 'rejected')}
-                            className="bg-[#3a1c1c] hover:bg-rose-950 border border-rose-500/20 text-rose-400 hover:text-rose-300 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
+                            className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                           >
                             Từ chối
                           </button>
@@ -1355,6 +1697,66 @@ export default function TaskManagement({
                   }
                 });
               })()}
+
+              {/* PHẦN ĐỀ XUẤT THU CHI CHỜ LẬP PHIẾU (KT) — người dùng được chỉ định lập phiếu */}
+              {myPendingVouchers.length > 0 && (
+                <div className="space-y-2 pt-3 mt-3 border-t border-dashed border-slate-800">
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                    <h4 className="font-extrabold text-[11px] text-orange-400 uppercase tracking-wider">
+                      Chờ Lập Phiếu (KT)
+                    </h4>
+                    <span className="bg-orange-50 border border-orange-200 text-orange-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                      {myPendingVouchers.length}
+                    </span>
+                  </div>
+
+                  {myPendingVouchers.map(v => (
+                    <div
+                      key={v.id}
+                      className="bg-slate-950/80 border border-orange-500/30 p-3.5 rounded-lg hover:border-orange-400 transition-all duration-150 space-y-3 shadow-sm"
+                    >
+                      <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
+                        <span className="text-[10px] font-mono font-extrabold text-orange-700 tracking-wider bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">{v.id}</span>
+                        <span className="text-[11.5px] font-mono font-black text-rose-400">
+                          {v.amount.toLocaleString('vi-VN')} đ
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 text-[10.5px] text-slate-400">
+                        <div className="text-slate-200">
+                          Dự án: <strong className="text-slate-100 text-xs font-bold leading-none">{v.projectName}</strong>
+                        </div>
+                        <div className="font-mono text-[10px]">
+                          Công việc: <strong className="text-slate-300">{v.taskName}</strong>
+                        </div>
+                        <p>Thầu phụ: <strong className="text-slate-300">{v.subcontractorName}</strong></p>
+                        <p>Người lập phiếu: <strong className="text-slate-300">{v.creatorName || v.creator || 'Kế Toán'}</strong></p>
+                        <p className="text-orange-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                          <span>Đề Xuất Thu Chi / Tạm Ứng</span>
+                          <span className="bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ Lập Phiếu (KT)</span>
+                        </p>
+
+                        <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
+                          "Diễn giải: {v.reason}"
+                        </div>
+                      </div>
+
+                      <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onOpenFinanceVoucher?.(v.id)}
+                          className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer flex items-center gap-1"
+                          title="Mở Tài Chính để lập phiếu chi tất toán đề xuất này"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Lập phiếu (KT)
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="bg-slate-955 p-2 border-t border-slate-850 mt-3 text-[10px] text-slate-500 font-mono flex justify-between items-center">
@@ -1507,18 +1909,7 @@ export default function TaskManagement({
                                             notes: `${currentUser.name} đã Nhận Việc từ danh sách việc.`
                                           }]
                                         });
-                                        // 🤖 Auto-post to task chat group
-                                        const proj = projects.find(p => p.id === t.projectId);
-                                        postTaskChat(
-                                          t.id,
-                                          currentUser.id,
-                                          currentUser.name,
-                                          currentUser.role || 'member',
-                                          `🙋 ${currentUser.name} đã Nhận Việc "${t.name}".`,
-                                          [currentUser.id, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                                          t.name,
-                                          proj?.name
-                                        );
+                                        // 🤖 (Đã loại bỏ: thông báo công việc gửi về nhóm chat)
                                       }}
                                       className="bg-sky-600 hover:bg-sky-500 text-slate-950 text-[10.5px] font-black px-2.5 py-1 rounded cursor-pointer transition flex-1 sm:flex-initial"
                                     >
@@ -1562,18 +1953,6 @@ export default function TaskManagement({
                                               notes: `${currentUser.name} đã Từ Chối duyệt kết quả, yêu cầu người phụ trách xem lại sản phẩm.`
                                             }]
                                           });
-                                          // 🤖 Auto-post to task chat group
-                                          const proj = projects.find(p => p.id === t.projectId);
-                                          postTaskChat(
-                                            t.id,
-                                            currentUser.id,
-                                            currentUser.name,
-                                            currentUser.role || 'member',
-                                            `❌ ${currentUser.name} đã Từ Chối duyệt kết quả công việc "${t.name}".`,
-                                            [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                                            t.name,
-                                            proj?.name
-                                          );
                                         }}
                                         className="bg-rose-600 hover:bg-rose-500 text-white text-[10.5px] font-bold px-2 py-1 rounded cursor-pointer transition"
                                       >
@@ -1595,18 +1974,6 @@ export default function TaskManagement({
                                               notes: `${currentUser.name} đã Xét Duyệt hoàn thành xuất sắc công việc.`
                                             }]
                                           });
-                                          // 🤖 Auto-post to task chat group
-                                          const proj = projects.find(p => p.id === t.projectId);
-                                          postTaskChat(
-                                            t.id,
-                                            currentUser.id,
-                                            currentUser.name,
-                                            currentUser.role || 'member',
-                                            `✅ ${currentUser.name} đã Xét Duyệt hoàn thành công việc "${t.name}".`,
-                                            [currentUser.id, t.assigneeId, t.assignerId, proj?.pmId].filter(Boolean) as string[],
-                                            t.name,
-                                            proj?.name
-                                          );
                                         }}
                                         className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-[10.5px] font-black px-2 py-1 rounded cursor-pointer transition"
                                       >
@@ -1616,7 +1983,7 @@ export default function TaskManagement({
                                   );
                                 } else {
                                   return (
-                                    <div className="bg-amber-950/40 text-amber-400 px-2 py-1 rounded border border-amber-900/40 font-bold text-[9px] uppercase tracking-wide flex items-center justify-center animate-pulse flex-1 sm:flex-initial text-center whitespace-nowrap">
+                                    <div className="bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-200 font-bold text-[9px] uppercase tracking-wide flex items-center justify-center animate-pulse flex-1 sm:flex-initial text-center whitespace-nowrap">
                                       Đang chờ duyệt
                                     </div>
                                   );
@@ -1625,7 +1992,7 @@ export default function TaskManagement({
 
                               if (t.status === 'completed') {
                                 return (
-                                  <span className="text-[9px] text-emerald-400 font-extrabold bg-emerald-950/20 px-1.5 py-0.5 rounded border border-emerald-900/30">
+                                  <span className="text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                                     ✓ Hoàn thành
                                   </span>
                                 );

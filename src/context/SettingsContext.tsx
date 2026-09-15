@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
-import { dbService } from '../lib/dbService';
+import { dbService, stableStr } from '../lib/dbService';
 import { refreshHrmConfigCache } from '../components/hr/hrCalculations';
 import type { HrmRoleGroup, HrmApprovalConfig, HrmApprovalConfig as ApprovalPermission } from '../types';
 
@@ -46,6 +46,8 @@ export interface HrmConfig {
   otPunchOutOpenBeforeMinutes: number;
   otPunchOutCloseAfterMinutes: number;
   allowedLateMinutes: number;
+  allowedLateMorning?: number;    // Dung sai đi muộn ca Sáng (phút)
+  allowedLateAfternoon?: number;  // Dung sai đi muộn ca Chiều (phút)
   weekendDays: number[];
 }
 
@@ -56,11 +58,13 @@ const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   logoText: 'HL',
   brandName: 'Hoàng Long',
   brandSlogan: 'Lâm Đồng ERP',
-  dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
+  dashboardTitle: 'Tổng Quan',
   motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
   fontFamily: 'Inter',
 };
 
+// Dùng làm giá trị hiện tạm thời (trước khi tải xong từ Supabase) cho bản sao
+// CHỈ ĐỌC của businessInfo trong context này (xem ghi chú tại nơi khai báo state).
 const DEFAULT_BUSINESS_INFO: BusinessInfo = {
   companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
   taxCode: '5801456789',
@@ -92,6 +96,8 @@ const DEFAULT_HRM_CONFIG: HrmConfig = {
   otPunchOutOpenBeforeMinutes: 15,
   otPunchOutCloseAfterMinutes: 15,
   allowedLateMinutes: 15,
+  allowedLateMorning: 15,
+  allowedLateAfternoon: 15,
   weekendDays: [0],
 };
 
@@ -184,8 +190,11 @@ export function getAccentClasses(accent: string) {
 interface SettingsContextValue {
   displaySettings: DisplaySettings;
   updateDisplaySettings: (updates: Partial<DisplaySettings>) => void;
+  /** CHỈ ĐỌC — dùng để in phiếu/hoá đơn (FinanceManagement, MaterialCoordination).
+   * Nguồn chỉnh sửa duy nhất là form "1. Hồ Sơ Thông Tin Doanh Nghiệp" trong
+   * App.tsx (tự lưu thẳng qua dbService.businessProfile). Xem ghi chú tại nơi
+   * khai báo bên dưới để biết lý do KHÔNG có updateBusinessInfo ở context này. */
   businessInfo: BusinessInfo;
-  updateBusinessInfo: (updates: Partial<BusinessInfo>) => void;
   hrmConfig: HrmConfig;
   updateHrmConfig: (updates: Partial<HrmConfig>) => void;
   /** Computed accent classes (reactive) */
@@ -217,7 +226,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setDisplaySettings(prev => ({ ...prev, ...updates }));
   }, []);
 
-  // ── Business Info ──
+  // ── Business Info (CHỈ ĐỌC, không tự lưu) ──
+  // Trước đây có state ghi/lưu riêng ở đây, khởi tạo mặc định cứng rồi LƯU ĐÈ
+  // lên Supabase ngay mỗi khi Provider mount (kể cả không ai sửa gì) — xóa mất
+  // dữ liệu thật vừa được cập nhật từ form "Hồ Sơ Thông Tin Doanh Nghiệp" ở
+  // App.tsx mỗi lần tải lại trang. Nay chỉ ĐỌC 1 lần từ cache local (hiện ngay,
+  // tránh nháy UI khi in phiếu) rồi tải bản mới nhất từ Supabase để cập nhật —
+  // không còn ghi ngược lại bảng business_profile từ đây nữa.
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo>(() => {
     try {
       const saved = localStorage.getItem('hl_business_info');
@@ -227,13 +242,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    // Update both localStorage and Supabase when businessInfo changes
-    localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
-    dbService.businessProfile.save(businessInfo).catch(err => console.warn('SettingsContext: save businessProfile failed:', err));
-  }, [businessInfo]);
-
-  const updateBusinessInfo = useCallback((updates: Partial<BusinessInfo>) => {
-    setBusinessInfo(prev => ({ ...prev, ...updates }));
+    dbService.businessProfile.get().then(profile => {
+      if (!profile) return;
+      setBusinessInfo(profile);
+      try { localStorage.setItem('hl_business_info', JSON.stringify(profile)); } catch {} /* eslint-disable-line no-empty */
+    }).catch(() => {});
   }, []);
 
   // ── HRM Config ──
@@ -251,6 +264,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             ...cloud,
             weekendDays: cloud.weekendDays ?? [0],
             allowedLateMinutes: cloud.allowedLateMinutes ?? 15,
+            allowedLateMorning: cloud.allowedLateMorning ?? 15,
+            allowedLateAfternoon: cloud.allowedLateAfternoon ?? 15,
           }));
         }
         // Nạp cache cho hrCalculations (readHrmConfigFromStorage)
@@ -263,14 +278,39 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  // Save Supabase only khi hrmConfig thay đổi SAU KHI đã load xong
+  // Save Supabase only khi hrmConfig thay đổi SAU KHI đã load xong.
+  // Chặn vòng lặp realtime: chỉ save khi NỘI DUNG thật sự khác lần lưu trước.
+  const lastSavedCfgRef = React.useRef<string | null>(null);
   useEffect(() => {
     if (!hrmConfigLoadedRef.current) return;
+    const next = stableStr(hrmConfig);
+    if (lastSavedCfgRef.current !== null && next === lastSavedCfgRef.current) return;
+    lastSavedCfgRef.current = next;
     dbService.shiftConfig.save(hrmConfig).catch(err => console.warn('SettingsContext: save shiftConfig failed:', err));
   }, [hrmConfig]);
 
   const updateHrmConfig = useCallback((updates: Partial<HrmConfig>) => {
     setHrmConfig(prev => ({ ...prev, ...updates }));
+  }, []);
+
+  // ── Lắng nghe realtime: refresh in-memory cache phân quyền (role groups + approval config) ──
+  useEffect(() => {
+    const handleRoleGroupsUpdated = () => {
+      dbService.hrmRoleGroups.list()
+        .then(groups => { if (groups && groups.length > 0) setRoleGroupsCache(groups); })
+        .catch(err => console.warn('SettingsContext: realtime refresh role groups failed:', err));
+    };
+    const handleApprovalConfigUpdated = () => {
+      syncApprovalConfigFromDb()
+        .then(configs => { if (configs && configs.length > 0) setApprovalConfigCache(configs); })
+        .catch(err => console.warn('SettingsContext: realtime refresh approval config failed:', err));
+    };
+    window.addEventListener('hl-hrm-role-groups-updated', handleRoleGroupsUpdated);
+    window.addEventListener('hl-hrm-approval-config-updated', handleApprovalConfigUpdated);
+    return () => {
+      window.removeEventListener('hl-hrm-role-groups-updated', handleRoleGroupsUpdated);
+      window.removeEventListener('hl-hrm-approval-config-updated', handleApprovalConfigUpdated);
+    };
   }, []);
 
   // ── Computed accent classes (reactive) ──
@@ -280,7 +320,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     displaySettings,
     updateDisplaySettings,
     businessInfo,
-    updateBusinessInfo,
     hrmConfig,
     updateHrmConfig,
     accentTextClass: accentClasses.accentTextClass,
@@ -289,7 +328,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     sidebarActiveTabClass: accentClasses.sidebarActiveTabClass,
   }), [
     displaySettings, updateDisplaySettings,
-    businessInfo, updateBusinessInfo,
+    businessInfo,
     hrmConfig, updateHrmConfig,
     accentClasses,
   ]);
@@ -316,28 +355,57 @@ export function useSettings(): SettingsContextValue {
 // Các interface HrmRoleGroup, ApprovalPermission đã được chuyển sang ../types
 export type { HrmRoleGroup, HrmApprovalConfig as ApprovalPermission } from '../types';
 
-/** Đọc danh sách Role Groups từ localStorage (fallback) hoặc Supabase */
-export function loadHrmRoleGroups(): HrmRoleGroup[] {
-  // Ưu tiên cache local để tránh async
+// In-memory cache: được populate từ Supabase khi app mount.
+// Ngoài ra còn phản hồi qua localStorage (bản snapshot lần đồng bộ thành công gần
+// nhất) để khi mạng chậm — điển hình trên mobile — phân quyền vẫn đọc được NGAY,
+// tránh lỗi "Giám đốc không thấy toàn bộ công việc" do cache rỗng lúc khởi tạo.
+const ROLE_GROUPS_STORAGE_KEY = 'hl_role_groups_cache_v1';
+let _roleGroupsCache: HrmRoleGroup[] | null = null;
+
+// In-memory cache cho cấu hình Quyền Phê Duyệt — populate từ Supabase khi app mount
+// (cũng như role groups). Đây là nguồn duy nhất cho getConfiguredApprover.
+let _approvalConfigCache: ApprovalPermission[] | null = null;
+
+/** Được gọi từ App.tsx (poll) và RolesTab sau khi lưu, để nạp config vào bộ nhớ. */
+export function setApprovalConfigCache(configs: ApprovalPermission[]): void {
+  _approvalConfigCache = configs;
+}
+
+/**
+ * Gọi từ App.tsx sau khi fetch role groups từ Supabase để populate in-memory cache.
+ * Đồng thời snapshot xuống localStorage — nguồn fallback đồng bộ cho lần mở sau.
+ */
+export function setRoleGroupsCache(groups: HrmRoleGroup[]): void {
+  _roleGroupsCache = groups;
   try {
-    const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) return parsed as HrmRoleGroup[];
-    }
+    localStorage.setItem(ROLE_GROUPS_STORAGE_KEY, JSON.stringify(groups));
   } catch (e) {
-    console.error('Lỗi đọc cache hrm_role_groups:', e);
+    console.warn('Không thể snapshot role groups xuống localStorage:', e);
   }
-  // Fallback: đọc từ localStorage cũ
+}
+
+/**
+ * Đọc danh sách Role Groups.
+ * Ưu tiên in-memory cache (đã load từ Supabase). Nếu chưa có (mạng chậm, khởi
+ * động lại), đọc snapshot đồng bộ từ localStorage của lần đồng bộ thành công
+ * trước đó — đảm bảo phân quyền (vd. Giám Đốc / role_admin) sẵn sàng NGAY trên
+ * render đầu tiên mà không cần chờ Supabase.
+ */
+export function loadHrmRoleGroups(): HrmRoleGroup[] {
+  if (_roleGroupsCache) return _roleGroupsCache;
   try {
-    const saved = localStorage.getItem('hl_hrm_roles_v2');
+    const saved = localStorage.getItem(ROLE_GROUPS_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed as HrmRoleGroup[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        _roleGroupsCache = parsed as HrmRoleGroup[];
+        return _roleGroupsCache;
+      }
     }
   } catch (e) {
-    console.error('Lỗi đọc hl_hrm_roles_v2:', e);
+    console.warn('Lỗi đọc role groups snapshot từ localStorage:', e);
   }
+  // Chưa có dữ liệu nào → fail-secure: trả về []
   return [];
 }
 
@@ -346,7 +414,6 @@ export function loadHrmRoleGroups(): HrmRoleGroup[] {
  */
 export async function saveApprovalConfig(config: ApprovalPermission[]): Promise<void> {
   try {
-    localStorage.setItem('hl_hrm_approval_config', JSON.stringify(config));
     // Đồng bộ Supabase — chờ tất cả hoàn tất
     await Promise.all(
       config.map(cfg =>
@@ -357,23 +424,30 @@ export async function saveApprovalConfig(config: ApprovalPermission[]): Promise<
       )
     );
   } catch (e) {
-    console.error('Lỗi ghi hl_hrm_approval_config:', e);
+    console.error('Lỗi lưu cấu hình phê duyệt:', e);
     throw e;
   }
 }
 
 /**
- * Đọc danh sách cấu hình Quyền Phê Duyệt từ localStorage
+ * Đọc danh sách cấu hình Quyền Phê Duyệt (nguồn: in-memory cache đã nạp từ Supabase).
  */
 export function loadApprovalConfig(): ApprovalPermission[] {
+  return _approvalConfigCache ?? [];
+}
+
+/**
+ * Đồng bộ cấu hình Quyền Phê Duyệt từ Supabase.
+ * Gọi khi component mount để đảm bảo dữ liệu mới nhất từ DB.
+ */
+export async function syncApprovalConfigFromDb(): Promise<ApprovalPermission[]> {
   try {
-    const saved = localStorage.getItem('hl_hrm_approval_config');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed as ApprovalPermission[];
+    const dbConfigs = await dbService.hrmApprovalConfig.list();
+    if (dbConfigs && dbConfigs.length > 0) {
+      return dbConfigs as ApprovalPermission[];
     }
   } catch (e) {
-    console.error('Lỗi đọc hl_hrm_approval_config:', e);
+    console.error('Supabase hrmApprovalConfig sync error:', e);
   }
   return [];
 }
@@ -433,6 +507,33 @@ export function getConfiguredApprover(documentType: ApprovalPermission['document
 }
 
 /**
+ * Lấy người quyết toán (kế toán lập phiếu chi) được cấu hình trong Quyền Phê Duyệt
+ * theo loại hồ sơ (toàn cục). Dùng cho Đề Xuất Chi Phí & Tạm Ứng Thầu Phụ.
+ */
+export function getConfiguredSettler(documentType: ApprovalPermission['documentType']): { name: string; id: string; position?: string } | null {
+  const configs = loadApprovalConfig();
+  const match = configs.find(p => p.documentType === documentType && p.canApprove);
+  if (match && match.settlerId) {
+    return { name: match.settlerName || '', id: match.settlerId, position: match.settlerPosition };
+  }
+  return null;
+}
+
+/**
+ * Lấy người điều phối vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_coordinator')
+ */
+export function getMaterialCoordinator(): { name: string; id: string; position?: string } | null {
+  return getConfiguredApprover('material_coordinator');
+}
+
+/**
+ * Lấy người xét duyệt vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_approver')
+ */
+export function getMaterialApprover(): { name: string; id: string; position?: string } | null {
+  return getConfiguredApprover('material_approver');
+}
+
+/**
  * Kiểm tra user có thuộc Role Group nào đó không
  * @param empId ID của nhân viên
  * @param groupId ID của Role Group (vd: 'role_admin', 'role_accounting')
@@ -441,7 +542,13 @@ export function isUserInRoleGroup(empId: string | undefined, groupId: string): b
   if (!empId) return false;
   const groups = loadHrmRoleGroups();
   const group = groups.find(g => g.id === groupId);
-  return group ? group.memberIds.includes(empId) : false;
+  if (group ? group.memberIds.includes(empId) : false) return true;
+  // Super admin: thuộc mọi role group
+  const superGroup = groups.find(g => g.id === 'role_superadmin');
+  if (superGroup?.memberIds?.includes(empId)) return true;
+  // Fallback: tài khoản admin đặc biệt luôn full quyền
+  if (empId === 'emp_admin' || empId === 'NV_ADMIN' || empId === 'admin') return true;
+  return false;
 }
 
 /**
@@ -450,5 +557,53 @@ export function isUserInRoleGroup(empId: string | undefined, groupId: string): b
 export function isUserInAnyRoleGroup(empId: string | undefined, groupIds: string[]): boolean {
   if (!empId) return false;
   return groupIds.some(gid => isUserInRoleGroup(empId, gid));
+}
+
+/**
+ * Ánh xạ parent-child cho module permissions
+ */
+const MODULE_PARENT_CHILDREN: Record<string, string[]> = {
+  director_office: ['director_dashboard'],
+  project_office: ['projects_construction', 'projects_furniture', 'projects_mechanical'],
+  hr_office: ['employees', 'hr_data'],
+  accounting_office: ['finance', 'finance_data'],
+  warehouse_office: ['material_coordination', 'warehouse_suppliers', 'warehouse_management'],
+  subcontractor_office: ['subcontractor_management'],
+  library_office: ['quotes_construction', 'quotes', 'quotes_mechanical', 'quotes_subcontractor'],
+  system_office: ['settings_accounts', 'settings_roles', 'settings'],
+};
+
+/**
+ * Kiểm tra user có quyền cụ thể (view/create/edit/delete) trên module code không.
+ * Hỗ trợ kế thừa: có quyền cha → có quyền con.
+ * @param empId   ID nhân viên
+ * @param moduleCode  Mã phân hệ (VD: 'projects_construction')
+ * @param action  Hành động: 'view' | 'create' | 'edit' | 'delete'
+ * @returns boolean
+ */
+export function hasModulePermission(empId: string | undefined, moduleCode: string, action: 'view' | 'create' | 'edit' | 'delete'): boolean {
+  if (!empId) return false;
+
+  // Admin role luôn full quyền
+  if (isUserInRoleGroup(empId, 'role_admin')) return true;
+
+  const groups = loadHrmRoleGroups();
+  const userGroups = groups.filter(g => g.memberIds?.includes(empId));
+  if (userGroups.length === 0) return false;
+
+  for (const group of userGroups) {
+    const perms = group.permissions || {};
+
+    // 1. Kiểm tra trực tiếp trên module
+    if (perms[moduleCode]?.[action]) return true;
+
+    // 2. Kế thừa từ cha: nếu có quyền cha → có quyền con
+    const parentCode = Object.keys(MODULE_PARENT_CHILDREN).find(
+      p => MODULE_PARENT_CHILDREN[p].includes(moduleCode)
+    );
+    if (parentCode && perms[parentCode]?.[action]) return true;
+  }
+
+  return false;
 }
 

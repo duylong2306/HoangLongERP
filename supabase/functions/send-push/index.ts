@@ -82,24 +82,39 @@ serve(async (req) => {
     let failureCount = 0;
     const failedEndpoints: string[] = [];
 
-    for (const sub of subs) {
-      try {
-        await webPush.sendNotification(
+    // Gửi SONG SONG (Promise.allSettled) thay vì tuần tự — gửi tuần tự cho
+    // nhiều thiết bị/participant có thể khiến Edge Function timeout giữa
+    // chừng, làm các subscription đứng sau trong danh sách không bao giờ
+    // được gửi (góp phần gây hiện tượng "push lúc được lúc không").
+    const results = await Promise.allSettled(
+      subs.map((sub) =>
+        webPush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           payload
-        );
-        successCount++;
-      } catch (err) {
-        failureCount++;
-        const statusCode = err.statusCode || err.status || 0;
-        const errMsg = err.message || String(err);
-        console.error("Push failed:", statusCode, errMsg, "endpoint:", sub.endpoint.substring(0, 60));
+        )
+      )
+    );
 
-        // Xóa subscription fail: 410/404 (expired) hoặc bất kỳ lỗi nào (sai VAPID key, v.v.)
-        // → Tự dọn subscription không hợp lệ, không cần can thiệp thủ công
+    results.forEach((result, i) => {
+      const sub = subs[i];
+      if (result.status === "fulfilled") {
+        successCount++;
+        return;
+      }
+      failureCount++;
+      const err = result.reason;
+      const statusCode = err?.statusCode || err?.status || 0;
+      const errMsg = err?.message || String(err);
+      console.error("Push failed:", statusCode, errMsg, "endpoint:", sub.endpoint.substring(0, 60));
+
+      // Chỉ xóa subscription khi lỗi là 404/410 (endpoint đã bị thu hồi/hết
+      // hạn THẬT SỰ). Lỗi khác (timeout, 5xx tạm thời, rate limit...) KHÔNG
+      // xóa — để lần gửi sau vẫn thử lại thay vì mất push vĩnh viễn chỉ vì
+      // 1 lần trục trặc mạng thoáng qua.
+      if (statusCode === 404 || statusCode === 410) {
         failedEndpoints.push(sub.endpoint);
       }
-    }
+    });
 
     // Delete all failed subscriptions (tự dọn dẹp)
     if (failedEndpoints.length > 0) {

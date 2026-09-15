@@ -1,14 +1,15 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Task, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, Conversation, ChatMessage } from '../types';
+import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage, ChatAttachment } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
   UserPlus, MessageSquare, Paperclip, Send, Calendar,
   DollarSign, Plus, ArrowRight, CheckCircle2,
   AlertTriangle, Briefcase, FileText, Zap, Edit2, Shield, Award, ListTodo, Search, Camera,
-  Download, Upload, FileSpreadsheet, UserCheck
+  Download, Upload, FileSpreadsheet, UserCheck, Image as ImageIcon
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
+import SearchableSelect from './SearchableSelect';
 import { canDoTaskAction, loadTaskPermissionMatrix, getTaskRoleScope } from './hr/hrTaskPermissions';
 import * as XLSX from 'xlsx';
 
@@ -20,12 +21,63 @@ interface TravelAllowanceNorm {
   unitPrice: number;
   notes: string;
 }
-import { useNotification, isUserInRoleGroup } from '../context';
+
+// Dùng làm giá trị khởi tạo trong lúc chờ dbService.travelNorms.list() trả về
+// (tránh dropdown trống trong tích tắc đầu) — sẽ được thay bằng dữ liệu thật
+// từ Supabase (bảng travel_norms) ngay khi load xong, xem effect load bên dưới.
+const TRAVEL_NORMS_FALLBACK: TravelAllowanceNorm[] = [
+  { id: 'ctp_1', code: 'CTP_001', content: 'Đi Đà Lạt - Nam Ban (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_2', code: 'CTP_002', content: 'Đi Đà Lạt - Nam Ban (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_3', code: 'CTP_003', content: 'Đi Đà Lạt - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
+  { id: 'ctp_4', code: 'CTP_004', content: 'Đi Đà Lạt - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
+  { id: 'ctp_5', code: 'CTP_005', content: 'Đi Đà Lạt - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
+  { id: 'ctp_6', code: 'CTP_006', content: 'Đi Đà Lạt - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
+  { id: 'ctp_7', code: 'CTP_007', content: 'Đi Đà Lạt - Di Linh (xe 1 người)', quantity: 1, unitPrice: 200000, notes: '' },
+  { id: 'ctp_8', code: 'CTP_008', content: 'Đi Đà Lạt - Di Linh (xe 2 người)', quantity: 2, unitPrice: 240000, notes: '' },
+  { id: 'ctp_9', code: 'CTP_009', content: 'Đi Đà Lạt - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 240000, notes: '' },
+  { id: 'ctp_10', code: 'CTP_010', content: 'Đi Đà Lạt - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 280000, notes: '' },
+  { id: 'ctp_11', code: 'CTP_011', content: 'Đi Đà Lạt - Đơn Dương (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
+  { id: 'ctp_12', code: 'CTP_012', content: 'Đi Đà Lạt - Đơn Dương (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
+  { id: 'ctp_13', code: 'CTP_013', content: 'Đi Nam Ban - Đà Lạt (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_14', code: 'CTP_014', content: 'Đi Nam Ban - Đà Lạt (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_15', code: 'CTP_015', content: 'Đi Nam Ban - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_16', code: 'CTP_016', content: 'Đi Nam Ban - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_17', code: 'CTP_017', content: 'Đi Nam Ban - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 140000, notes: '' },
+  { id: 'ctp_18', code: 'CTP_018', content: 'Đi Nam Ban - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 180000, notes: '' },
+  { id: 'ctp_19', code: 'CTP_019', content: 'Đi Nam Ban - Di Linh (xe 1 người)', quantity: 1, unitPrice: 150000, notes: '' },
+  { id: 'ctp_20', code: 'CTP_020', content: 'Đi Nam Ban - Di Linh (xe 2 người)', quantity: 2, unitPrice: 190000, notes: '' },
+  { id: 'ctp_21', code: 'CTP_021', content: 'Đi Nam Ban - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
+  { id: 'ctp_22', code: 'CTP_022', content: 'Đi Nam Ban - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
+  { id: 'ctp_23', code: 'CTP_023', content: 'Đi Nam Ban - Đan Phượng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
+  { id: 'ctp_24', code: 'CTP_024', content: 'Đi Nam Ban - Đan Phượng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
+  { id: 'ctp_25', code: 'CTP_025', content: 'Đi Nam Ban - Phi Liêng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
+  { id: 'ctp_26', code: 'CTP_026', content: 'Đi Nam Ban - Phi Liêng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
+  { id: 'ctp_27', code: 'CTP_027', content: 'Đi Nam Ban - Tân Hà (xe 1 người)', quantity: 1, unitPrice: 80000, notes: '' },
+  { id: 'ctp_28', code: 'CTP_028', content: 'Đi Nam Ban - Tân Hà (xe 2 người)', quantity: 2, unitPrice: 120000, notes: '' },
+  { id: 'ctp_29', code: 'CTP_029', content: 'Nghỉ qua đêm', quantity: 1, unitPrice: 180000, notes: '' },
+];
+import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
 import { dbService } from '../lib/dbService';
-import {
-  getConversations, getMessages, addMessage, createGroupConversation,
-  markConversationRead, addMemberToConversation
-} from '../lib/chatStore';
+import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
+import { CTPStatus } from '../lib/travelExpenseStatus';
+import UserAvatar from './UserAvatar';
+
+// Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
+const sectorArchiveTab = (type?: string): string =>
+  type === 'construction' ? 'quotes-construction'
+  : type === 'mechanical' ? 'quotes-mechanical'
+  : 'quotes'; // furniture / general / mặc định → Hồ Sơ Nội Thất
+
+// Lấy chữ cái viết tắt cho avatar tròn — dùng ĐÚNG công thức đã áp dụng ở khu vực
+// "PHỤ TRÁCH CHÍNH:" / "NHÂN SỰ:" của danh sách nhiệm vụ (lấy chữ đầu của 2 từ cuối
+// trong họ tên), để avatar ở form Tạo nhiệm vụ hiển thị nhất quán với danh sách.
+const getEmployeeInitials = (name: string): string => {
+  const parts = (name || '').trim().split(' ').filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??';
+};
 
 interface TaskDetailModalProps {
   taskId: string;
@@ -34,7 +86,7 @@ interface TaskDetailModalProps {
   projects: Project[];
   employees: Employee[];
   currentUser: Employee;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  onUpdateTask: (id: string, updates: TaskUpdatePayload) => Promise<boolean> | void;
   onUpdateProject?: (projectId: string, updates: Partial<Project>) => void;
   isReadOnly?: boolean;
   onOpenConnectedTool?: (tool: 'approval' | 'cost' | 'material' | 'quotation' | 'contract' | 'acceptance' | 'liquidation') => void;
@@ -61,59 +113,109 @@ export default function TaskDetailModal({
   if (!selectedTask) return null;
 
   const [advProposalApprover, setAdvProposalApprover] = useState('Ban Giám Đốc');
+  const [subcontractors, setSubcontractors] = useState<any[]>([]);
 
   const isCurrentUserAdmin = currentUser.role === 'director' || currentUser.id === 'NV_ADMIN' || currentUser.id === 'emp_admin';
 
-  // Load Travel Allowance Norms from localStorage
-  const travelNorms = React.useMemo<TravelAllowanceNorm[]>(() => {
-    const saved = localStorage.getItem('hl_acc_travel_norms');
-    if (saved) {
+  // Load subcontractors from Supabase (accounting_subcontractors table)
+  useEffect(() => {
+    const loadSubcontractors = async () => {
       try {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.length > 0 && 'content' in parsed[0]) {
-          const needsMigration = parsed.some((item: any) => item.content !== 'Nghỉ qua đêm' && !item.content.startsWith('Đi '));
-          if (!needsMigration) {
-            return parsed as TravelAllowanceNorm[];
-          }
-        }
+        const data = await dbService.accountingSubcontractors.list();
+        setSubcontractors(data);
       } catch (e) {
-        console.error(e);
+        console.error("Lỗi load thầu phụ từ Supabase:", e);
       }
-    }
-    return [
-      { id: 'ctp_1', code: 'CTP_001', content: 'Đi Đà Lạt - Nam Ban (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_2', code: 'CTP_002', content: 'Đi Đà Lạt - Nam Ban (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_3', code: 'CTP_003', content: 'Đi Đà Lạt - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
-      { id: 'ctp_4', code: 'CTP_004', content: 'Đi Đà Lạt - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
-      { id: 'ctp_5', code: 'CTP_005', content: 'Đi Đà Lạt - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
-      { id: 'ctp_6', code: 'CTP_006', content: 'Đi Đà Lạt - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
-      { id: 'ctp_7', code: 'CTP_007', content: 'Đi Đà Lạt - Di Linh (xe 1 người)', quantity: 1, unitPrice: 200000, notes: '' },
-      { id: 'ctp_8', code: 'CTP_008', content: 'Đi Đà Lạt - Di Linh (xe 2 người)', quantity: 2, unitPrice: 240000, notes: '' },
-      { id: 'ctp_9', code: 'CTP_009', content: 'Đi Đà Lạt - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 240000, notes: '' },
-      { id: 'ctp_10', code: 'CTP_010', content: 'Đi Đà Lạt - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 280000, notes: '' },
-      { id: 'ctp_11', code: 'CTP_011', content: 'Đi Đà Lạt - Đơn Dương (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
-      { id: 'ctp_12', code: 'CTP_012', content: 'Đi Đà Lạt - Đơn Dương (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
-      { id: 'ctp_13', code: 'CTP_013', content: 'Đi Nam Ban - Đà Lạt (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_14', code: 'CTP_014', content: 'Đi Nam Ban - Đà Lạt (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_15', code: 'CTP_015', content: 'Đi Nam Ban - Đức Trọng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_16', code: 'CTP_016', content: 'Đi Nam Ban - Đức Trọng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_17', code: 'CTP_017', content: 'Đi Nam Ban - Đam Rông (xe 1 người)', quantity: 1, unitPrice: 140000, notes: '' },
-      { id: 'ctp_18', code: 'CTP_018', content: 'Đi Nam Ban - Đam Rông (xe 2 người)', quantity: 2, unitPrice: 180000, notes: '' },
-      { id: 'ctp_19', code: 'CTP_019', content: 'Đi Nam Ban - Di Linh (xe 1 người)', quantity: 1, unitPrice: 150000, notes: '' },
-      { id: 'ctp_20', code: 'CTP_020', content: 'Đi Nam Ban - Di Linh (xe 2 người)', quantity: 2, unitPrice: 190000, notes: '' },
-      { id: 'ctp_21', code: 'CTP_021', content: 'Đi Nam Ban - Bảo Lộc (xe 1 người)', quantity: 1, unitPrice: 180000, notes: '' },
-      { id: 'ctp_22', code: 'CTP_022', content: 'Đi Nam Ban - Bảo Lộc (xe 2 người)', quantity: 2, unitPrice: 220000, notes: '' },
-      { id: 'ctp_23', code: 'CTP_023', content: 'Đi Nam Ban - Đan Phượng (xe 1 người)', quantity: 1, unitPrice: 100000, notes: '' },
-      { id: 'ctp_24', code: 'CTP_024', content: 'Đi Nam Ban - Đan Phượng (xe 2 người)', quantity: 2, unitPrice: 140000, notes: '' },
-      { id: 'ctp_25', code: 'CTP_025', content: 'Đi Nam Ban - Phi Liêng (xe 1 người)', quantity: 1, unitPrice: 120000, notes: '' },
-      { id: 'ctp_26', code: 'CTP_026', content: 'Đi Nam Ban - Phi Liêng (xe 2 người)', quantity: 2, unitPrice: 160000, notes: '' },
-      { id: 'ctp_27', code: 'CTP_027', content: 'Đi Nam Ban - Tân Hà (xe 1 người)', quantity: 1, unitPrice: 80000, notes: '' },
-      { id: 'ctp_28', code: 'CTP_028', content: 'Đi Nam Ban - Tân Hà (xe 2 người)', quantity: 2, unitPrice: 120000, notes: '' },
-      { id: 'ctp_29', code: 'CTP_029', content: 'Nghỉ qua đêm', quantity: 1, unitPrice: 180000, notes: '' }
-    ];
+    };
+    loadSubcontractors();
+    const handleSync = () => loadSubcontractors();
+    window.addEventListener('hl-suppliers-updated', handleSync);
+    return () => window.removeEventListener('hl-suppliers-updated', handleSync);
+  }, []);
+
+  // Định mức công tác phí — đọc từ Supabase (bảng travel_norms) qua dbService,
+  // ĐÚNG NGUỒN với màn hình cấu hình "Định mức công tác phí" trong Dữ Liệu
+  // Nhân Sự (HumanResourcesManagement.tsx). Trước đây đọc từ localStorage
+  // key 'hl_acc_travel_norms' — key này KHÔNG BAO GIỜ được ghi bởi bất kỳ màn
+  // hình nào trong ứng dụng thật (chỉ dùng trong test), nên luôn rơi vào mảng
+  // hardcode mặc định bên dưới, khiến sửa định mức trên Dữ Liệu Nhân Sự không
+  // bao giờ có tác dụng ở đây.
+  const [travelNorms, setTravelNorms] = useState<TravelAllowanceNorm[]>(TRAVEL_NORMS_FALLBACK);
+  useEffect(() => {
+    const loadTravelNorms = () => dbService.travelNorms.list()
+      .then((d: any[]) => { if (d?.length) setTravelNorms(d as TravelAllowanceNorm[]); })
+      .catch((e) => console.error('Lỗi tải định mức công tác phí:', e));
+    loadTravelNorms();
+    window.addEventListener('hl-travel-norms-updated', loadTravelNorms);
+    return () => window.removeEventListener('hl-travel-norms-updated', loadTravelNorms);
   }, []);
 
   const project = projects.find(p => p.id === selectedTask.projectId);
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN ───────────────────────────────────
+  // Hàm bọc quanh sendGroupChatMessage (lib/chatStore). Truyền sẵn MÃ NHÓM CHAT
+  // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
+  // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
+  // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
+  // 🔧 FIX: Đảm bảo NHÓM CHAT DỰ ÁN tồn tại (cache + Supabase) VÀ user hiện tại là
+  // thành viên TRƯỚC KHI gửi. Nguyên nhân lỗi "Cơ khí/Xây dựng không cập nhật nhóm
+  // chat, Nội thất vẫn gửi được": sendGroupChatMessage chỉ gửi khi conversation
+  // conv_project_<id> đã nằm trong cache, và MessagesView chỉ hiển thị nhóm có
+  // user là participant. Với dự án mà user KHÔNG phải PM (hoặc chưa bấm "Đồng bộ
+  // nhân sự"), conversation không được nạp vào cache → sendGroupChatMessage trả
+  // về null → tin nhắn bị bỏ qua SILENT (không lỗi). Gửi tin nhắn BÊN TRONG .then
+  // của ensureProjectChatGroup để đảm bảo conversation đã được upsert lên Supabase
+  // (tránh vi phạm FK conversation_id khi push message song song).
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[], extraMemberIds?: string[]) => {
+    const pid = selectedTask.projectId;
+    if (!pid) return;
+    const convId = `conv_project_${pid}`;
+    ensureProjectChatGroup({
+      id: pid,
+      name: project?.name || selectedTask.name,
+      pmId: project?.pmId,
+    }).then(conv => {
+      if (!conv) return;
+      // Thêm các nhân sự liên quan vào nhóm (idempotent) để họ mở được nhóm.
+      // extraMemberIds: cho phép caller truyền thêm mainAssigneeId/memberIds của
+      // Nhiệm vụ vừa gán — nếu không truyền, người được gán ở cấp Nhiệm vụ sẽ
+      // không lọt vào nhóm chat dự án cho tới khi có ai đó bấm "Đồng bộ nhân sự".
+      const memberIds = Array.from(new Set([
+        currentUser?.id,
+        selectedTask.assigneeId,
+        selectedTask.assignerId,
+        project?.pmId,
+        ...(extraMemberIds || []),
+      ].filter(Boolean) as string[]));
+      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
+      sendGroupChatMessage({
+        conversationId: convId,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        content,
+        relatedEntity,
+        attachments,
+      });
+    }).catch(() => {});
+  };
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
+  // Wrapper: await onUpdateTask, nếu save thành công (true) thì mới gửi tin nhắn.
+  // Trả về kết quả save (boolean) để caller có thể xử lý tiếp.
+  const notifyProjectChatAfterSave = async (
+    savePromise: void | Promise<boolean>,
+    content: string,
+    relatedEntity?: ChatMessage['relatedEntity'],
+    extraMemberIds?: string[]
+  ): Promise<boolean> => {
+    const ok = await savePromise;
+    if (ok === true && selectedTask.projectId) {
+      notifyProjectChat(content, relatedEntity, undefined, extraMemberIds);
+    }
+    return ok === true;
+  };
+
   const assignee = employees.find(e => e.id === selectedTask.assigneeId);
   const assigner = employees.find(e => e.id === selectedTask.assignerId);
 
@@ -161,189 +263,6 @@ export default function TaskDetailModal({
   const [advProposalCreator, setAdvProposalCreator] = useState('Kế Toán');
   const [advProposalDate, setAdvProposalDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
-  // ─── Chat Group for this task ───────────────────────────────────────────────────
-  const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
-  const taskGroupId = `conv_task_${selectedTask.id}`;
-  const taskGroup = useMemo(() => {
-    const convs = getConversations();
-    return convs.find(c => c.id === taskGroupId);
-  }, [selectedTask.id, conversations]);
-
-  const [showTaskChatAddMember, setShowTaskChatAddMember] = useState(false);
-
-  // Add member function for task chat
-  const addMemberToTaskChat = (memberId: string) => {
-    if (!taskGroup || taskGroup.type !== 'task') return false;
-    const updated = addMemberToConversation(taskGroup.id, memberId);
-    if (updated) {
-      setConversations(getConversations());
-      return true;
-    }
-    return false;
-  };
-
-  // Create task chat group if doesn't exist
-  const ensureTaskChatGroup = useCallback(async () => {
-    let group = taskGroup;
-    if (!group) {
-      const memberIds = Array.from(new Set([
-        selectedTask.assignerId,
-        selectedTask.assigneeId,
-        ...(selectedTask.involvedEmployeeIds || []),
-        currentUser.id,
-        ...(selectedTask.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]),
-        ...(project?.involvedEmployeeIds || []),
-        project?.pmId,
-      ].filter((id): id is string => Boolean(id))));
-
-      const created = await createGroupConversation(
-        `${project?.name?.substring(0, 30)} - ${selectedTask.name.substring(0, 30)}`,
-        memberIds,
-        currentUser.id,
-        selectedTask.id,
-        selectedTask.projectId
-      );
-      setConversations(getConversations());
-      return created;
-    }
-    return group;
-  }, [selectedTask.id, selectedTask.assigneeId, selectedTask.assignerId, selectedTask.involvedEmployeeIds, selectedTask.missions, project?.pmId, project?.involvedEmployeeIds, project?.name, currentUser.id, conversations, taskGroup]);
-
-  const createTaskChatGroup = async () => ensureTaskChatGroup();
-
-  // Tự động đồng bộ thành viên vào nhóm chat từ Công việc (loại trùng lặp).
-  // Chỉ thêm những người CHƯA có trong nhóm; không xóa ai.
-  const syncTaskChatMembers = useCallback(() => {
-    const convs = getConversations();
-    const group = convs.find(c => c.id === taskGroupId);
-    if (!group || group.type !== 'task') return;
-
-    // Tập hợp tất cả thành viên liên quan đến Công việc (trùng chỉ lấy 1 lần)
-    const desiredIds = Array.from(new Set([
-      selectedTask.assignerId,
-      selectedTask.assigneeId,
-      ...(selectedTask.involvedEmployeeIds || []),
-      ...(selectedTask.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]),
-      ...(project?.involvedEmployeeIds || []),
-      project?.pmId,
-    ].filter((id): id is string => Boolean(id))));
-
-    const existingIds = new Set(group.participantIds.filter(Boolean));
-    let changed = false;
-    desiredIds.forEach(id => {
-      if (!existingIds.has(id)) {
-        const updated = addMemberToConversation(taskGroupId, id);
-        if (updated) changed = true;
-      }
-    });
-    if (changed) setConversations(getConversations());
-  }, [selectedTask.assignerId, selectedTask.assigneeId, selectedTask.involvedEmployeeIds, selectedTask.missions, project?.pmId, project?.involvedEmployeeIds, taskGroupId]);
-
-  // Post activity to task chat group (only if group exists)
-  const postToTaskChat = useCallback((content: string) => {
-    const convs = getConversations();
-    const exists = convs.some(c => c.id === taskGroupId);
-    if (!exists) return;
-    addMessage({
-      conversationId: taskGroupId,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderRole: currentUser.role || 'member',
-      content,
-      system: true,
-    });
-    setConversations(getConversations());
-    setChatMessages(getMessages(taskGroupId));
-  }, [taskGroupId, currentUser.id, currentUser.name, currentUser.role]);
-
-  // Wrapper: update task + auto-post activity to task chat group if exists
-  const updateTaskWithChat = useCallback((id: string, updates: Partial<Task>) => {
-    onUpdateTask(id, updates);
-
-    // Tự động đồng bộ thành viên mới (nếu có) vào nhóm chat Công việc
-    syncTaskChatMembers();
-
-    // Post status change
-    if (updates.status && updates.status !== selectedTask.status) {
-      const statusLabels: Record<string, string> = {
-        todo: 'Chưa làm', doing: 'Đang làm', reviewing: 'Chờ duyệt',
-        completed: 'Hoàn thành', overdue: 'Trễ hạn'
-      };
-      postToTaskChat(`🔄 ${currentUser.name} đã chuyển trạng thái công việc thành: ${statusLabels[updates.status] || updates.status}`);
-    }
-
-    // Post progress change
-    if (updates.completionRate !== undefined && updates.completionRate !== selectedTask.completionRate) {
-      postToTaskChat(`📈 ${currentUser.name} đã cập nhật tiến độ: ${updates.completionRate}%`);
-    }
-
-    // Post approval changes
-    if (updates.approvals && updates.approvals !== selectedTask.approvals) {
-      const newStep = updates.approvals[updates.approvals.length - 1];
-      if (newStep) {
-        const statusText = newStep.status === 'approved' ? 'đã duyệt' : newStep.status === 'rejected' ? 'đã từ chối' : 'chờ duyệt';
-        postToTaskChat(`✅ ${currentUser.name} ${statusText} bước: ${newStep.levelName}`);
-      }
-    }
-
-    // Post mission (nhiệm vụ con) add/edit/delete changes
-    if (updates.missions) {
-      const oldMissions = selectedTask.missions || [];
-      const oldIds = new Set(oldMissions.map(m => m.id));
-      const newIds = new Set(updates.missions.map(m => m.id));
-
-      // Added missions
-      updates.missions.filter(m => !oldIds.has(m.id)).forEach(m => {
-        postToTaskChat(`📝 ${currentUser.name} đã thêm nhiệm vụ con: "${m.name}"`);
-      });
-
-      // Deleted missions
-      oldMissions.filter(m => !newIds.has(m.id)).forEach(m => {
-        postToTaskChat(`🗑️ ${currentUser.name} đã xóa nhiệm vụ con: "${m.name}"`);
-      });
-
-      // Updated missions (changed content/assignee/members)
-      updates.missions.filter(m => oldIds.has(m.id)).forEach(m => {
-        const old = oldMissions.find(o => o.id === m.id);
-        if (old && (
-          old.name !== m.name ||
-          old.mainAssigneeId !== m.mainAssigneeId ||
-          JSON.stringify(old.memberIds || []) !== JSON.stringify(m.memberIds || [])
-        )) {
-          postToTaskChat(`✏️ ${currentUser.name} đã cập nhật nhiệm vụ con: "${m.name}"`);
-        }
-      });
-    }
-
-    // Post subcontractor link change
-    if (updates.subcontractorId !== undefined && updates.subcontractorId !== selectedTask.subcontractorId) {
-      const subName = updates.subcontractorName || updates.subcontractorId || 'n/a';
-      if (updates.subcontractorId) {
-        postToTaskChat(`🔗 ${currentUser.name} đã liên kết thầu phụ: "${subName}"`);
-      } else {
-        postToTaskChat(`🔗 ${currentUser.name} đã hủy liên kết thầu phụ`);
-      }
-    }
-
-    // Post advance request add/remove
-    if (updates.advanceRequests) {
-      const oldReqs = selectedTask.advanceRequests || [];
-      const oldIds = new Set(oldReqs.map(r => r.id));
-      const newIds = new Set(updates.advanceRequests.map(r => r.id));
-      updates.advanceRequests.filter(r => !oldIds.has(r.id)).forEach(r => {
-        postToTaskChat(`💰 ${currentUser.name} đã đề xuất tạm ứng: ${Number(r.amount || 0).toLocaleString('vi-VN')} đ — "${r.title}"`);
-      });
-      oldReqs.filter(r => !newIds.has(r.id)).forEach(r => {
-        postToTaskChat(`💰 ${currentUser.name} đã thu hồi đề xuất tạm ứng: "${r.title}"`);
-      });
-    }
-
-    // Post new comment (tự động log bình luận)
-    if (updates.comments && updates.comments.length > (selectedTask.comments?.length || 0)) {
-      const last = updates.comments[updates.comments.length - 1];
-      postToTaskChat(`💬 ${currentUser.name}: ${last.content}`);
-    }
-  }, [onUpdateTask, selectedTask.status, selectedTask.completionRate, selectedTask.approvals, selectedTask.missions, selectedTask.advanceRequests, selectedTask.comments, selectedTask.subcontractorId, selectedTask.subcontractorName, postToTaskChat, currentUser.name, syncTaskChatMembers]);
 
   const [customDialog, setCustomDialog] = useState<{
     show: boolean;
@@ -497,16 +416,39 @@ export default function TaskDetailModal({
   }, [projects, selectedTask.projectId]);
   
   // States for sub-task missions (Nhiệm vụ trong công việc con)
-  const getTodayPlusTenDaysISO = (): string => {
-    const d = new Date();
-    d.setDate(d.getDate() + 10);
-    d.setHours(12, 0, 0, 0);
+  // Định dạng một Date sang chuỗi input datetime-local (YYYY-MM-DDTHH:mm) theo giờ địa phương
+  const toDateTimeLocalInput = (d: Date): string => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     const hours = String(d.getHours()).padStart(2, '0');
     const minutes = String(d.getMinutes()).padStart(2, '0');
     return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  // Trả về input datetime-local = (ngày của `base`) + `addDays` ngày, đặt giờ mặc định 18:00
+  const dateAt18 = (base: Date, addDays: number = 0): string => {
+    const d = new Date(base);
+    d.setDate(d.getDate() + addDays);
+    d.setHours(18, 0, 0, 0);
+    return toDateTimeLocalInput(d);
+  };
+
+  // Quy tắc Hạn hoàn thành mặc định của thẻ ⚡ Tạo nhiệm vụ:
+  //  - Chưa có nhiệm vụ nào: lấy ngày hiện tại, giờ mặc định 18:00.
+  //  - Đã có nhiệm vụ trước đó: lấy ngày của nhiệm vụ mới nhất + 1 ngày, giờ 18:00.
+  const getDefaultMissionDeadline = (): string => {
+    const missions = selectedTask?.missions || [];
+    if (missions.length === 0) {
+      return dateAt18(new Date(), 0);
+    }
+    // Nhiệm vụ "trước đó" = nhiệm vụ có hạn muộn nhất trong số đã tạo
+    const latest = missions.reduce((acc, m) => {
+      const t = m.deadline ? new Date(m.deadline).getTime() : 0;
+      return t > acc ? t : acc;
+    }, 0);
+    const base = latest > 0 ? new Date(latest) : new Date();
+    return dateAt18(base, 1);
   };
 
   // ===========================================================================
@@ -543,7 +485,7 @@ export default function TaskDetailModal({
       'STT': idx + 1,
       'Tên nhiệm vụ': m.name || '',
       'Hạn hoàn thành': m.deadline ? formatDateTime(m.deadline) : '',
-      'Trạng thái': m.status === 'completed' ? 'Hoàn thành' : 'Chưa làm',
+      'Trạng thái': m.status === 'completed' ? 'Hoàn thành' : m.status === 'doing' ? 'Đang làm' : 'Chưa làm',
       'Người phụ trách chính': empNameById(m.mainAssigneeId),
       'Thành viên': (m.memberIds || []).map(id => empNameById(id)).join(', '),
       'Báo cáo': m.workReports || '',
@@ -564,63 +506,110 @@ export default function TaskDetailModal({
   const handleImportMissionsExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Hiển thị thông báo bắt đầu import
+    addToast({ title: '⏳ Đang xử lý', message: 'Đang đọc file Excel...', type: 'info' });
+
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        // Use blankrows: false to skip completely empty rows, and raw: false to get formatted values
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
         if (rows.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dòng nào.', type: 'warning' });
           return;
         }
-        const imported: SubTaskMission[] = rows.map((r, idx) => {
-          const name = String(r['Tên nhiệm vụ'] || '').trim();
-          const statusRaw = String(r['Trạng thái'] || '').trim().toLowerCase();
-          const deadlineRaw = String(r['Hạn hoàn thành'] || '').trim();
-          let deadline: string | undefined;
-          if (deadlineRaw) {
-            // Hỗ trợ cả định dạng dd/mm/yyyy HH:MM và ISO
-            const isoMatch = deadlineRaw.match(/^\d{4}-\d{2}-\d{2}/);
-            if (isoMatch) {
-              deadline = new Date(deadlineRaw).toISOString();
-            } else {
-              const parts = deadlineRaw.split(/[\/\s:]/).map(Number);
-              if (parts.length >= 3) {
-                const [day, month, year, hh = 12, mm = 0] = parts;
-                const d = new Date(year, month - 1, day, hh, mm, 0, 0);
-                if (!isNaN(d.getTime())) deadline = d.toISOString();
-              }
-            }
-          }
-          const memberNames = String(r['Thành viên'] || '').split(',').map(s => s.trim()).filter(Boolean);
-          const memberIds = memberNames.map(n => empIdByName(n)).filter((v): v is string => Boolean(v));
-          const mainAssigneeName = String(r['Người phụ trách chính'] || '').trim();
-          const mainAssigneeId = empIdByName(mainAssigneeName);
-          return {
-            id: `mission_${Date.now()}_${idx}`,
-            name: name || `Nhiệm vụ ${idx + 1}`,
-            memberIds,
-            mainAssigneeId,
-            status: statusRaw === 'hoàn thành' || statusRaw === 'completed' || statusRaw === 'xong' ? 'completed' : 'todo',
-            workReports: String(r['Báo cáo'] || ''),
-            evidence: String(r['Bằng chứng'] || ''),
-            createdAt: new Date().toISOString(),
-            deadline,
-          } as SubTaskMission;
-        }).filter(m => m.name && m.name.trim());
 
-        if (imported.length === 0) {
+        // Process rows in smaller batches to prevent UI freezing
+        const batchSize = 100; // Process 100 rows at a time
+        let processedRows: SubTaskMission[] = [];
+        let batchCount = 0;
+
+        // Add a loading toast that will be updated with progress
+        const loadingToast = addToast({ title: '⏳ Đang xử lý', message: `Đang xử lý hàng ${batchCount + 1}-${Math.min(batchCount + batchSize, rows.length)} trong tổng số ${rows.length} dòng...`, type: 'info' });
+
+        for (let i = 0; i < rows.length; i += batchSize) {
+          const batch = rows.slice(i, i + batchSize);
+          batchCount = i / batchSize + 1;
+
+          // Update loading message
+          addToast({
+            title: '⏳ Đang xử lý',
+            message: `Đang xử lý hàng ${i + 1}-${Math.min(i + batchSize, rows.length)} trong tổng số ${rows.length} dòng...`,
+            type: 'info'
+          });
+
+          const batchImported: SubTaskMission[] = batch
+            .map((r, idx) => {
+              // Check if the row has actual data in "Tên nhiệm vụ" column
+              const rawName = r['Tên nhiệm vụ'];
+              // Skip rows where "Tên nhiệm vụ" is undefined, null, or empty string
+              if (rawName === undefined || rawName === null || String(rawName).trim() === '') {
+                return null;
+              }
+              const name = String(rawName).trim();
+              const statusRaw = String(r['Trạng thái'] || '').trim().toLowerCase();
+              const deadlineRaw = String(r['Hạn hoàn thành'] || '').trim();
+              let deadline: string | undefined;
+              if (deadlineRaw) {
+                // Hỗ trợ cả định dạng dd/mm/yyyy HH:MM và ISO
+                const isoMatch = deadlineRaw.match(/^\d{4}-\d{2}-\d{2}/);
+                if (isoMatch) {
+                  deadline = new Date(deadlineRaw).toISOString();
+                } else {
+                  const parts = deadlineRaw.split(/[\/\s:]/).map(Number);
+                  if (parts.length >= 3) {
+                    const [day, month, year, hh = 12, mm = 0] = parts;
+                    const d = new Date(year, month - 1, day, hh, mm, 0, 0);
+                    if (!isNaN(d.getTime())) deadline = d.toISOString();
+                  }
+                }
+              }
+              const memberNames = String(r['Thành viên'] || '').split(',').map(s => s.trim()).filter(Boolean);
+              const memberIds = memberNames.map(n => empIdByName(n)).filter((v): v is string => Boolean(v));
+              const mainAssigneeName = String(r['Người phụ trách chính'] || '').trim();
+              const mainAssigneeId = empIdByName(mainAssigneeName);
+              return {
+                id: `mission_${Date.now()}_${i + idx}`, // Sử dụng index để tránh trùng lặp
+                name,
+                memberIds,
+                mainAssigneeId,
+                status: statusRaw === 'hoàn thành' || statusRaw === 'completed' || statusRaw === 'xong'
+                  ? 'completed'
+                  : statusRaw === 'đang làm' || statusRaw === 'doing' || statusRaw === 'đang thực hiện'
+                    ? 'doing'
+                    : 'todo',
+                workReports: String(r['Báo cáo'] || ''),
+                evidence: String(r['Bằng chứng'] || ''),
+                createdAt: new Date().toISOString(),
+                deadline,
+              } as SubTaskMission;
+            })
+            .filter((m): m is SubTaskMission => m !== null && !!m.name?.trim());
+
+          // Add batch to processed rows
+          processedRows = [...processedRows, ...batchImported];
+
+          // Allow UI to update between batches
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        if (processedRows.length === 0) {
           addToast({ title: '⚠️ Không có dữ liệu hợp lệ', message: 'Cần cột "Tên nhiệm vụ" trong file Excel.', type: 'warning' });
           return;
         }
 
-        // Gộp với missions hiện tại (giữ nguyên các nhiệm vụ cũ, thêm mới từ Excel)
+        // Gộp với missions hiện tại (giữ nguyên các nhiệm vụ cũ, thêm mới từ Excel).
+        // Chỉ THÊM, không loại bỏ mission nào — an toàn ngay cả khi `currentMissions`
+        // (đọc từ prop) đang cũ hơn server, vì syncMissionsDiff (App.tsx) chỉ upsert
+        // mission có mặt trong mảng gửi lên, không còn xóa mission vắng mặt.
         const currentMissions = selectedTask.missions || [];
-        updateTaskWithChat(selectedTask.id, {
-          missions: [...currentMissions, ...imported]
+        onUpdateTask(selectedTask.id, {
+          missions: [...currentMissions, ...processedRows]
         });
-        addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} nhiệm vụ chi tiết từ Excel.`, type: 'success' });
+        addToast({ title: '✅ Nhập thành công', message: `Đã import ${processedRows.length} nhiệm vụ chi tiết từ Excel.`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel. Vui lòng kiểm tra định dạng.', type: 'error' });
       }
@@ -630,9 +619,29 @@ export default function TaskDetailModal({
   };
 
   const [newMissionName, setNewMissionName] = useState('');
+  // Nhân sự tham gia được CHỌN NGAY LÚC KHỞI TẠO nhiệm vụ (state này trước đây đã có
+  // sẵn — được reset sau khi tạo — nhưng chưa có UI nào set giá trị/dùng để tạo mission,
+  // nay bổ sung ô chọn thực sự trong form "Tạo nhiệm vụ" bên dưới).
   const [selectedMissionMemberIds, setSelectedMissionMemberIds] = useState<string[]>([]);
+  // Người phụ trách chính chọn ngay lúc khởi tạo nhiệm vụ (tùy chọn — có thể gán sau).
+  const [newMissionMainAssigneeId, setNewMissionMainAssigneeId] = useState('');
+  // Checklist (Đầu mục kiểm soát kỹ thuật) nhập ngay lúc khởi tạo nhiệm vụ — chuyển từ
+  // cấp Công Việc xuống cấp Nhiệm Vụ (xem SubTaskMission.checklistTexts, types.ts).
+  const [newMissionChecklist, setNewMissionChecklist] = useState<string[]>([]);
+  const [newMissionChecklistInput, setNewMissionChecklistInput] = useState('');
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
-  const [newMissionDeadline, setNewMissionDeadline] = useState(getTodayPlusTenDaysISO());
+  const [newMissionDeadline, setNewMissionDeadline] = useState(() => getDefaultMissionDeadline());
+
+  // Trạng thái chỉnh sửa Nhiệm vụ (tên + hạn hoàn thành) — chỉ áp dụng cho nhiệm vụ CHƯA hoàn thành.
+  const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+  const [editMissionName, setEditMissionName] = useState('');
+  const [editMissionDeadline, setEditMissionDeadline] = useState('');
+  const [editingMissionError, setEditingMissionError] = useState('');
+
+  // Phân trang danh sách nhiệm vụ đã khởi tạo: 5 / 10 / 20 / 50 / tất cả dòng
+  // 'all' = hiển thị toàn bộ. Danh sách sắp xếp mới nhất → cũ nhất.
+  const [missionPageSize, setMissionPageSize] = useState<number | 'all'>(5);
+  const [missionPage, setMissionPage] = useState(1);
 
   // Hidden file input for importing Nhiệm vụ chi tiết (missions) from Excel
   const missionExcelInputRef = useRef<HTMLInputElement>(null);
@@ -643,8 +652,213 @@ export default function TaskDetailModal({
   const [missionAttachedFile, setMissionAttachedFile] = useState<{ name: string; size: string } | null>(null);
   const [missionImagePreview, setMissionImagePreview] = useState<string | null>(null);
 
+  // Hình ảnh báo cáo nhiệm vụ thi công (bắt buộc) — URL từ Supabase Storage hoặc data URL
+  const [missionReportImages, setMissionReportImages] = useState<string[]>([]);
+  const [missionReportCameraOpen, setMissionReportCameraOpen] = useState(false);
+  const missionReportVideoRef = useRef<HTMLVideoElement>(null);
+  const missionReportImageInputRef = useRef<HTMLInputElement>(null);
+  const missionReportCameraStreamRef = useRef<MediaStream | null>(null);
+
+  const stopMissionReportCamera = () => {
+    if (missionReportCameraStreamRef.current) {
+      missionReportCameraStreamRef.current.getTracks().forEach(t => t.stop());
+      missionReportCameraStreamRef.current = null;
+    }
+    setMissionReportCameraOpen(false);
+  };
+
+  const openMissionReportCamera = async () => {
+    try {
+      stopMissionReportCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      missionReportCameraStreamRef.current = stream;
+      setMissionReportCameraOpen(true);
+      setTimeout(() => {
+        if (missionReportVideoRef.current) {
+          missionReportVideoRef.current.srcObject = stream;
+          missionReportVideoRef.current.play().catch(() => { /* noop */ });
+        }
+      }, 150);
+    } catch (err) {
+      addToast({ title: '⚠️ Không thể mở camera', message: 'Vui lòng cấp quyền camera hoặc tải ảnh lên từ thiết bị.', type: 'warning' });
+    }
+  };
+
+  const captureMissionReportImage = () => {
+    const video = missionReportVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `baocao_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      try {
+        const { url, stored } = await dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file);
+        setMissionReportImages(prev => [...prev, url]);
+        if (stored === 'supabase') {
+          addToast({ title: '✅ Đã tải ảnh lên', message: 'Hình ảnh báo cáo đã được gửi lên Supabase.', type: 'success' });
+        } else {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Ảnh lưu tạm dưới dạng base64.', type: 'warning' });
+        }
+      } catch (e) {
+        addToast({ title: '⛔ Lỗi', message: 'Không thể xử lý ảnh báo cáo.', type: 'error' });
+      }
+      stopMissionReportCamera();
+    }, 'image/jpeg');
+  };
+
+  const handleMissionReportImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    let done = 0;
+    let successCount = 0;
+    let warningShown = false;
+    // Tải nhiều tệp (mọi định dạng) song song; dồn kết quả vào missionReportImages
+    // theo thứ tự chọn.
+    files.forEach((file, idx) => {
+      dbService.uploadMissionReportImage(selectedTask.id, selectedMissionId || '', file)
+        .then(({ url, stored }) => {
+          setMissionReportImages(prev => [...prev, url]);
+          if (stored === 'supabase') successCount++;
+          else if (!warningShown) { warningShown = true; addToast({ title: '⚠️ Lưu cục bộ', message: 'Supabase chưa có bucket "mission-report-images" (cần chạy migration). Tệp lưu tạm dưới dạng base64.', type: 'warning' }); }
+        })
+        .catch(() => addToast({ title: '⛔ Lỗi', message: `Không thể xử lý tệp "${file.name}".`, type: 'error' }))
+        .finally(() => {
+          done++;
+          if (done === files.length) {
+            if (successCount === files.length) {
+              addToast({ title: '✅ Đã tải tệp lên', message: `${files.length} tệp đính kèm báo cáo đã được gửi lên Supabase.`, type: 'success' });
+            }
+          }
+        });
+    });
+    e.target.value = '';
+  };
+
+  const removeMissionReportImage = (idx: number) => {
+    setMissionReportImages(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const resetMissionReportState = () => {
+    setMissionReportImages([]);
+    stopMissionReportCamera();
+  };
+
+  // ─── TIỆN ÍCH "ĐÍNH KÈM BÁO CÁO" ───────────────────────────────────────────
+  // missionReportImages chỉ lưu URL (không kèm tên/mimeType gốc) — vì giờ cho
+  // phép đính kèm MỌI định dạng file (không chỉ ảnh), phải tự đoán tên hiển thị
+  // và có phải ảnh hay không từ chính URL để hiện đúng giao diện (thumbnail ảnh
+  // hay dòng file + nút Tải về) cho cả ảnh lẫn file khác.
+  const getAttachedFileName = (url: string): string => {
+    try {
+      const path = decodeURIComponent(url.split('?')[0].split('/').pop() || '');
+      return path || 'tep-dinh-kem';
+    } catch {
+      return 'tep-dinh-kem';
+    }
+  };
+  const isImageAttachment = (url: string): boolean => /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(url);
+
+  // ─── SỬA NHIỆM VỤ (tên + hạn hoàn thành) — nhiệm vụ chưa Hoàn thành ───────
+  // Khởi động chế độ sửa: nạp giá trị hiện tại vào form, báo lỗi nếu Công việc cha
+  // đã Hoàn thành (khi đó toàn bộ thao tác sửa nhiệm vụ bị khóa).
+  const startEditMission = (mission: SubTaskMission) => {
+    if (selectedTask.status === 'completed') {
+      addToast({ title: '⛔ Công việc đã hoàn thành', message: 'Không thể chỉnh sửa nhiệm vụ của công việc đã Hoàn thành.', type: 'error' });
+      return;
+    }
+    setEditingMissionId(mission.id);
+    setEditMissionName(mission.name);
+    setEditMissionDeadline(mission.deadline ? toDateTimeLocalInput(new Date(mission.deadline)) : '');
+    setEditingMissionError('');
+  };
+
+  const cancelEditMission = () => {
+    setEditingMissionId(null);
+    setEditMissionName('');
+    setEditMissionDeadline('');
+    setEditingMissionError('');
+  };
+
+  // Lưu chỉnh sửa: kiểm tra TÊN không rỗng + HẠN không vượt quá Hạn bàn giao công
+  // việc cha (giống quy tắc khi khởi tạo), rồi cập nhật missions.
+  const saveEditMission = async (mission: SubTaskMission) => {
+    const name = editMissionName.trim();
+    if (!name) {
+      setEditingMissionError('⚠️ Tên nhiệm vụ không được để trống.');
+      return;
+    }
+
+    // Hạn mới: rỗng = thừa hưởng hạn của công việc cha (giống quy tắc khởi tạo).
+    let finalDeadline = mission.deadline;
+    if (editMissionDeadline) {
+      finalDeadline = new Date(editMissionDeadline).toISOString();
+    } else if (selectedTask.deadline) {
+      finalDeadline = selectedTask.deadline;
+    }
+
+    if (selectedTask.deadline && finalDeadline) {
+      const newDeadlineDate = new Date(finalDeadline);
+      // Chỉ so sánh DATE (bỏ qua giờ): task deadline được coi là 23:59:59 của ngày đó.
+      const taskEndOfDay = new Date(selectedTask.deadline);
+      taskEndOfDay.setHours(23, 59, 59, 999);
+      // Chỉ chặn khi công việc cha CHƯA quá hạn — không ngăn người dùng hoàn tất
+      // nhiệm vụ trễ sau hạn bàn giao.
+      if (newDeadlineDate.getTime() > taskEndOfDay.getTime() && !isDeadlineDayOver(selectedTask.deadline)) {
+        setEditingMissionError(`⚠️ Hạn hoàn thành mới (${formatDateTime(finalDeadline)}) không được lớn hơn Hạn bàn giao của công việc cha (${formatDateTime(selectedTask.deadline)})!`);
+        return;
+      }
+    }
+
+    const updatedMissions = (selectedTask.missions || []).map(m => {
+      if (m.id === mission.id) {
+        return { ...m, name, deadline: finalDeadline };
+      }
+      return m;
+    });
+
+    const ok = await notifyProjectChatAfterSave(
+      onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+      `✏️ ${currentUser.name} đã cập nhật Nhiệm Vụ "${mission.name}" → "${name}"${mission.deadline !== finalDeadline ? ` (Hạn mới: ${formatDateTime(finalDeadline)})` : ''}.`,
+      { type: 'mission', id: mission.id }
+    );
+
+    if (ok === false) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu chỉnh sửa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+      return;
+    }
+    cancelEditMission();
+  };
+
   // States inside detail modal of a mission for Travel Allowance recording
   const [allowanceMemberId, setAllowanceMemberId] = useState('');
+  // Bản sao cục bộ các Công Tác Phí đã ghi nhận, key theo missionId.
+  // Quan trọng: selectedTask được tính lại từ props `tasks` mỗi render, và có
+  // những lúc `tasks` bị thay thế bởi dữ liệu tải từ Supabase (sự kiện
+  // hl-tasks-updated) làm mất travelAllowances vừa thêm. Lưu cục bộ đảm bảo
+  // dữ liệu CTP không bao giờ bị mất trước khi "Xác Nhận Hoàn Thành".
+  // Để chống cả trường hợp modal bị remount (state React reset), ta persist
+  // xuống localStorage theo missionId — survive reload/remount/refresh.
+  const [localTravelAllowances, setLocalTravelAllowances] = useState<Record<string, any[]>>(() => {
+    try {
+      const raw = localStorage.getItem('hl_local_travel_allowances_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  // Ghi mirror xuống localStorage mỗi khi thay đổi (an toàn nếu JSON lỗi)
+  useEffect(() => {
+    try {
+      localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(localTravelAllowances));
+    } catch {
+      /* ignore quota / serialization errors */
+    }
+  }, [localTravelAllowances]);
   const [allowanceNormId, setAllowanceNormId] = useState('');
   const [allowanceCustomContent, setAllowanceCustomContent] = useState('');
   const [allowanceCustomQty, setAllowanceCustomQty] = useState(1);
@@ -700,24 +914,52 @@ export default function TaskDetailModal({
   }, []);
 
   const [submittedViolations, setSubmittedViolations] = useState<{ id: string; criterionId: string; employeeIds: string[]; notes: string; images: string[]; createdAt: string }[]>([]);
+  // Toàn bộ lỗi vi phạm load trực tiếp từ Supabase (không dùng localStorage)
+  const [cloudErrors, setCloudErrors] = useState<any[]>([]);
+  // Cờ cho biết đã load xong dữ liệu vi phạm từ Supabase. Dùng để ngăn effect
+  // tự ghi quá hạn chạy TRƯỚC khi biết các log cũ đã có trong DB (tránh ghi trùng).
+  const [cloudErrorsLoaded, setCloudErrorsLoaded] = useState(false);
 
-  const loadSubmittedViolations = () => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_employee_errors_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const matched = parsed.filter((item: any) => 
-            item.taskId === selectedTask.id || (item.notes && item.notes.includes(selectedTask.name))
-          );
-          setSubmittedViolations(matched);
-        }
-      } else {
-        setSubmittedViolations([]);
-      }
-    } catch (e) {
-      console.error(e);
+  const loadSubmittedViolations = (source?: any[]) => {
+    const errors = source ?? cloudErrors;
+    const matched = (errors || []).filter((item: any) =>
+      item.taskId === selectedTask.id || (item.notes && item.notes.includes(selectedTask.name))
+    );
+    setSubmittedViolations(matched);
+  };
+
+  // Load lỗi vi phạm từ Supabase khi mở modal (nguồn dữ liệu chính)
+  useEffect(() => {
+    let mounted = true;
+    dbService.hrmEmployeeErrors.list()
+      .then((d: any[]) => {
+        if (!mounted) return;
+        setCloudErrors(d || []);
+        loadSubmittedViolations(d || []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!mounted) return;
+        // Đánh dấu đã load xong (dù thành công hay lỗi) để effect tự ghi quá hạn
+        // được phép chạy — nó sẽ dựa trên dữ liệu đã có, không chạy mù trước DB.
+        setCloudErrorsLoaded(true);
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  // Đồng bộ lỗi vi phạm lên Supabase để xuất hiện trong Nhật ký lỗi vi phạm (HR).
+  // Lưu nguyên taskId/autoSource (cột task_id / auto_source đã có từ migration 017).
+  const syncEmployeeErrorsToSupabase = async (errors: any[]) => {
+    const results = await Promise.allSettled(
+      errors.map((err) => dbService.hrmEmployeeErrors.save(err))
+    );
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) {
+      console.warn(`Sync ${failed}/${errors.length} lỗi vi phạm lên Supabase thất bại`);
     }
+    // Báo cho màn hình HR refresh danh sách (nếu đang mở cùng trình duyệt)
+    try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+    return failed === 0;
   };
 
   const convertToDatetimeLocal = (isoString?: string): string => {
@@ -741,13 +983,18 @@ export default function TaskDetailModal({
     try {
       const end = new Date(deadlineStr);
       if (isNaN(end.getTime())) return '';
+      // Tính theo NGÀY: so sánh từ 00:00 của ngày hôm nay với cuối ngày deadline,
+      // thống nhất với quy tắc "quá hạn = quá hết ngày" (isDeadlineDayOver).
       const now = new Date();
-      const diffTime = end.getTime() - now.getTime();
-      if (diffTime < 0) {
-        const diffDays = Math.ceil(Math.abs(diffTime) / (1000 * 60 * 60 * 24));
+      now.setHours(0, 0, 0, 0);
+      const deadlineEnd = new Date(end);
+      deadlineEnd.setHours(23, 59, 59, 999);
+      const diffMs = deadlineEnd.getTime() - now.getTime();
+      if (diffMs < 0) {
+        const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
         return `Trễ ${diffDays} ngày`;
       } else {
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
         if (diffDays === 0) {
           return 'Hôm nay';
         }
@@ -758,10 +1005,22 @@ export default function TaskDetailModal({
     }
   };
 
+  // Quy tắc QUÁ HẠN thống nhất: một deadline được coi là quá hạn khi đã qua
+  // 23:59:59 của NGÀY deadline — bất kể deadline lưu dạng 'YYYY-MM-DD'
+  // (công việc con) hay 'YYYY-MM-DDTHH:mm' (nhiệm vụ cấu hình trước).
+  // → Cả ngày deadline vẫn được tính là còn hạn, quá nửa đêm mới tính trễ.
+  const isDeadlineDayOver = (deadlineStr?: string): boolean => {
+    if (!deadlineStr) return false;
+    const d = new Date(deadlineStr);
+    if (isNaN(d.getTime())) return false;
+    d.setHours(23, 59, 59, 999);
+    return d.getTime() < Date.now();
+  };
+
   useEffect(() => {
     loadSubmittedViolations();
 
-    setNewMissionDeadline(getTodayPlusTenDaysISO());
+    setNewMissionDeadline(getDefaultMissionDeadline());
 
     const proj = projects.find(p => p.id === selectedTask.projectId);
     setViolationRows([
@@ -778,41 +1037,43 @@ export default function TaskDetailModal({
     ]);
   }, [selectedTask.id, selectedTask.deadline]);
 
-  const allCriteria = React.useMemo(() => {
-    const flat: { id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[] = [];
-    try {
-      const saved = localStorage.getItem('hl_hrm_performance_criteria_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((dept: any) => {
-            if (dept.criteria && Array.isArray(dept.criteria)) {
-              dept.criteria.forEach((crit: any) => {
-                flat.push({
-                  id: crit.id,
-                  content: crit.content,
-                  category: (crit.category || 'readiness') as 'readiness' | 'progress' | 'reporting',
-                  deptName: dept.departmentName
-                });
-              });
-            }
+  // Load tiêu chí từ Supabase (nguồn chính xác) — trước đây chỉ đọc localStorage
+  // 'hl_hrm_performance_criteria_v1' nhưng không có nơi nào ghi key này nên luôn rỗng.
+  const [cloudCriteria, setCloudCriteria] = React.useState<{ id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[]>([]);
+  React.useEffect(() => {
+    let mounted = true;
+    dbService.hrmPerformanceCriteria.list()
+      .then((d: any[]) => {
+        if (!mounted) return;
+        const flat: { id: string; content: string; category: 'readiness' | 'progress' | 'reporting'; deptName?: string }[] = [];
+        d.forEach((dept: any) => {
+          const criteriaArr = typeof dept.criteria === 'string'
+            ? (() => { try { return JSON.parse(dept.criteria); } catch { return []; } })()
+            : (Array.isArray(dept.criteria) ? dept.criteria : []);
+          criteriaArr.forEach((crit: any) => {
+            flat.push({
+              id: crit.id,
+              content: crit.content,
+              category: (crit.category || 'readiness') as 'readiness' | 'progress' | 'reporting',
+              deptName: dept.departmentName
+            });
           });
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-
-    return flat;
+        });
+        setCloudCriteria(flat);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
   }, []);
+
+  const allCriteria = React.useMemo(() => {
+    // Dữ liệu từ Supabase (nguồn duy nhất)
+    return cloudCriteria;
+  }, [cloudCriteria]);
 
   const relatedEmployees = React.useMemo(() => {
     const relatedIds = new Set<string>();
     if (selectedTask.assigneeId) {
       relatedIds.add(selectedTask.assigneeId);
-    }
-    if (selectedTask.involvedEmployeeIds) {
-      selectedTask.involvedEmployeeIds.forEach(id => relatedIds.add(id));
     }
     if (selectedTask.missions) {
       selectedTask.missions.forEach(mission => {
@@ -829,50 +1090,86 @@ export default function TaskDetailModal({
 
   useEffect(() => {
     if (selectedTask.status === 'completed') return;
+    // ⚠️ CHỈ tự ghi quá hạn SAU khi đã load xong dữ liệu vi phạm từ Supabase.
+    // Nếu chạy sớm hơn (cloudErrors còn rỗng), sẽ không thấy log tự động cũ đã
+    // lưu ở lần mở modal trước → ghi trùng thêm một bản nữa cho cùng autoSource.
+    if (!cloudErrorsLoaded) return;
     try {
-      let existingErrors: any[] = [];
-      const saved = localStorage.getItem('hl_hrm_employee_errors_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          existingErrors = parsed;
-        }
-      }
+      // Nguồn dữ liệu trực tiếp từ Supabase (đã load khi mở modal)
+      let existingErrors: any[] = cloudErrors || [];
+      // Sắp xếp để các phần tử mới (unshift vào đầu) không ghi đè lẫn nhau khi chống trùng
+      existingErrors = existingErrors.slice();
+
+      // Trả về các log trùng của một autoKey — hỗ trợ cả key camelCase
+      // (autoSource, sau rowToCamel) lẫn snake_case (auto_source, dữ liệu thô).
+      const getAutoLogs = (autoKey: string) =>
+        existingErrors.filter((err: any) =>
+          err.autoSource === autoKey || err.auto_source === autoKey
+        );
+      const isAutoLogged = (autoKey: string) => getAutoLogs(autoKey).length > 0;
 
       let hasChanged = false;
+      // Theo dõi các log tự động mới tạo để đồng bộ lên Supabase
+      const newlyCreatedLogs: any[] = [];
+      // id của các bản ghi TRÙNG cũ (đã bị nhân đôi do id Date.now() trước đây)
+      // cần xóa khỏi Supabase để dọn dẹp dữ liệu lịch sử.
+      const duplicateIdsToDelete: string[] = [];
+      // Chống trùng trong CHÍNH lần chạy này (cùng autoKey chỉ tạo 1 log)
+      const createdKeys = new Set<string>();
+
+      // ─── DỌN DẸP DỮ LIỆU CŨ ĐÃ NHÂN ĐÔI ─────────────────────────────────
+      // Trước đây id auto-log chứa Date.now() nên mỗi lần chạy lại (hoặc mỗi lần
+      // mở modal) tạo id khác nhau → upsert chèn THÊM dòng mới → nhiều bản ghi
+      // cùng một autoKey. Giờ gộp: với mỗi autoKey quá hạn có NHIỀU dòng, giữ
+      // đúng 1 dòng (ưu tiên bản id deterministic err_auto_...), xóa các bản còn lại.
+      const overdueAutoKeys = new Set<string>();
+      existingErrors.forEach((err: any) => {
+        const k = err.autoSource || err.auto_source;
+        if (k && typeof k === 'string' && k.startsWith('auto_overdue_')) overdueAutoKeys.add(k);
+      });
+      overdueAutoKeys.forEach((k) => {
+        const matches = existingErrors.filter((err: any) => err.autoSource === k || err.auto_source === k);
+        if (matches.length <= 1) return;
+        const keep = matches.find((m: any) => m.id === `err_auto_${k}`) || matches[0];
+        const dupIds = new Set<string>();
+        matches.forEach((m: any) => {
+          if (m !== keep && m.id) {
+            dupIds.add(m.id);
+            duplicateIdsToDelete.push(m.id);
+            hasChanged = true;
+          }
+        });
+        // Giữ bản đại diện; chỉ loại các bản trùng đã đánh dấu khỏi danh sách cục bộ
+        if (dupIds.size > 0) {
+          existingErrors = existingErrors.filter((err: any) => !(err.id && dupIds.has(err.id)));
+        }
+      });
+
       const proj = projects.find(p => p.id === selectedTask.projectId);
       const projName = proj?.name || 'Không rõ';
 
       // 1. Check if the subtask itself is overdue
       if (selectedTask.deadline) {
-        const isTaskOverdue = new Date(selectedTask.deadline).getTime() < Date.now();
+        const isTaskOverdue = isDeadlineDayOver(selectedTask.deadline);
         if (isTaskOverdue && selectedTask.assigneeId) {
           const autoKey = `auto_overdue_task_${selectedTask.id}_${selectedTask.assigneeId}`;
-          const isAlreadyLogged = existingErrors.some((err: any) => err.autoSource === autoKey);
-          
-          if (!isAlreadyLogged) {
+
+          if (!isAutoLogged(autoKey) && !createdKeys.has(autoKey)) {
+            createdKeys.add(autoKey);
             const assignee = employees.find(e => e.id === selectedTask.assigneeId);
             if (assignee) {
-              // Resolve employee ID mapped to HRM
-              let resolvedEmployeeId = assignee.id;
-              try {
-                const hrmEmpsStr = localStorage.getItem('hl_hrm_employees_v3');
-                if (hrmEmpsStr) {
-                  const hrmEmps = JSON.parse(hrmEmpsStr);
-                  if (Array.isArray(hrmEmps)) {
-                    const matchedHrmEmp = hrmEmps.find((he: any) => he.name && assignee.name && (he.name.toLowerCase().trim() === assignee.name.toLowerCase().trim()));
-                    if (matchedHrmEmp) {
-                      resolvedEmployeeId = matchedHrmEmp.id;
-                    }
-                  }
-                }
-              } catch (e) {
-                console.error(e);
-              }
+              // employee_id trong bảng hrm_employee_errors có khóa ngoại tới employees(id)
+              // → PHẢI dùng đúng id từ danh sách employees (đã chuẩn), KHÔNG được đoán
+              // lại theo tên qua cache localStorage 'hl_hrm_employees_v3' (id khác hệ,
+              // có thể lệch/cũ → insert vi phạm khóa ngoại, gửi vi phạm thất bại).
+              const resolvedEmployeeId = assignee.id;
 
               const criterion = allCriteria.find((c: any) => c.content === 'Làm chậm công việc và ảnh hưởng đến phòng ban khác') || { id: 'crit_B_10', content: 'Làm chậm công việc và ảnh hưởng đến phòng ban khác', category: 'progress' };
-              const logId = `err_log_auto_task_${selectedTask.id}_${Date.now()}`;
-              
+              // id DETERMINISTIC theo autoKey (không dùng Date.now()):
+              // vì id là khóa chính, upsert sẽ GHI ĐÈ cùng một dòng dù effect có chạy
+              // lại bao nhiêu lần → KHÔNG BAO GIỜ nhân đôi vi phạm ở cấp database.
+              const logId = `err_auto_${autoKey}`;
+
               existingErrors.unshift({
                 id: logId,
                 employeeId: resolvedEmployeeId,
@@ -888,6 +1185,7 @@ export default function TaskDetailModal({
                 taskId: selectedTask.id,
                 autoSource: autoKey
               });
+              newlyCreatedLogs.push(existingErrors[0]);
               hasChanged = true;
             }
           }
@@ -898,38 +1196,29 @@ export default function TaskDetailModal({
       if (selectedTask.missions && Array.isArray(selectedTask.missions)) {
         selectedTask.missions.forEach((mission: any) => {
           if (mission.deadline && mission.status !== 'completed') {
-            const isMissionOverdue = new Date(mission.deadline).getTime() < Date.now();
+            const isMissionOverdue = isDeadlineDayOver(mission.deadline);
             if (isMissionOverdue) {
               // Collect all people involved: main assignee + members
               const targetEmpIds = Array.from(new Set([mission.mainAssigneeId, ...(mission.memberIds || [])].filter(Boolean) as string[]));
               
               targetEmpIds.forEach((empId) => {
                 const autoKey = `auto_overdue_mission_${mission.id}_${empId}`;
-                const isAlreadyLogged = existingErrors.some((err: any) => err.autoSource === autoKey);
-                
-                if (!isAlreadyLogged) {
+
+                if (!isAutoLogged(autoKey) && !createdKeys.has(autoKey)) {
+                  createdKeys.add(autoKey);
                   const emp = employees.find(e => e.id === empId);
                   if (emp) {
-                    // Resolve employee ID mapped to HRM
-                    let resolvedEmployeeId = emp.id;
-                    try {
-                      const hrmEmpsStr = localStorage.getItem('hl_hrm_employees_v3');
-                      if (hrmEmpsStr) {
-                        const hrmEmps = JSON.parse(hrmEmpsStr);
-                        if (Array.isArray(hrmEmps)) {
-                          const matchedHrmEmp = hrmEmps.find((he: any) => he.name && emp.name && (he.name.toLowerCase().trim() === emp.name.toLowerCase().trim()));
-                          if (matchedHrmEmp) {
-                            resolvedEmployeeId = matchedHrmEmp.id;
-                          }
-                        }
-                      }
-                    } catch (e) {
-                      console.error(e);
-                    }
+                    // employee_id có khóa ngoại tới employees(id) → dùng thẳng id chuẩn,
+                    // không đoán lại theo tên qua cache 'hl_hrm_employees_v3' (xem giải
+                    // thích ở nhánh "task overdue" phía trên).
+                    const resolvedEmployeeId = emp.id;
 
                     const criterion = allCriteria.find((c: any) => c.content === 'Làm chậm công việc và ảnh hưởng đến phòng ban khác') || { id: 'crit_B_10', content: 'Làm chậm công việc và ảnh hưởng đến phòng ban khác', category: 'progress' };
-                    const logId = `err_log_auto_m_${mission.id}_${empId}_${Date.now()}`;
-                    
+                    // id DETERMINISTIC theo autoKey (không dùng Date.now()):
+                    // vì id là khóa chính, upsert sẽ GHI ĐÈ cùng một dòng dù effect có chạy
+                    // lại bao nhiêu lần → KHÔNG BAO GIỜ nhân đôi vi phạm ở cấp database.
+                    const logId = `err_auto_${autoKey}`;
+
                     existingErrors.unshift({
                       id: logId,
                       employeeId: resolvedEmployeeId,
@@ -945,6 +1234,7 @@ export default function TaskDetailModal({
                       taskId: selectedTask.id,
                       autoSource: autoKey
                     });
+                    newlyCreatedLogs.push(existingErrors[0]);
                     hasChanged = true;
                   }
                 }
@@ -955,20 +1245,31 @@ export default function TaskDetailModal({
       }
 
       if (hasChanged) {
-        localStorage.setItem('hl_hrm_employee_errors_v3', JSON.stringify(existingErrors));
-        // Reload local list and notify HRM component to re-read from localStorage
-        loadSubmittedViolations();
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new CustomEvent('hl_hrm_employee_errors_updated'));
+        // Đồng bộ lên Supabase (nguồn dữ liệu chính — không ghi localStorage)
+        syncEmployeeErrorsToSupabase(newlyCreatedLogs);
+        // Xóa các bản ghi quá hạn TRÙNG cũ (dọn dẹp dữ liệu đã nhân đôi trước đây)
+        duplicateIdsToDelete.forEach((dupId) => {
+          dbService.hrmEmployeeErrors.delete(dupId)
+            .catch((e) => console.warn('Xóa vi phạm quá hạn trùng lặp thất bại:', e?.message || e));
+        });
+        if (duplicateIdsToDelete.length > 0) {
+          try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+        }
+        // Cập nhật state cục bộ + lịch sử hiển thị
+        setCloudErrors(existingErrors);
+        loadSubmittedViolations(existingErrors);
       }
     } catch (err) {
       console.error("Autologging error logs failed:", err);
     }
-  }, [selectedTask, employees, projects, allCriteria]);
+    // cloudErrors trong deps để khi load xong từ Supabase, effect chạy lại
+    // và check autoSource đúng → không tạo log trùng.
+    // cloudErrorsLoaded: chỉ chạy tự ghi sau khi đã load xong DB (chống trùng).
+  }, [selectedTask, employees, projects, allCriteria, cloudErrors, cloudErrorsLoaded]);
 
   const isMissionAssignee = selectedTask.missions?.some(m => m.mainAssigneeId === currentUser.id || m.memberIds?.includes(currentUser.id)) || false;
 
-  const handleSendViolations = () => {
+  const handleSendViolations = async () => {
     for (let i = 0; i < violationRows.length; i++) {
       const row = violationRows[i];
       if (!row.selectedCriterionId) {
@@ -981,18 +1282,8 @@ export default function TaskDetailModal({
       }
     }
 
-    let existingErrors: any[] = [];
-    try {
-      const saved = localStorage.getItem('hl_hrm_employee_errors_v3');
-      if (saved) {
-        existingErrors = JSON.parse(saved);
-        if (!Array.isArray(existingErrors)) {
-          existingErrors = [];
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    // Nguồn dữ liệu trực tiếp từ Supabase (đã load khi mở modal)
+    const existingErrors = cloudErrors || [];
 
     const newLogsToInsert: any[] = [];
     const loggedNames: string[] = [];
@@ -1005,21 +1296,10 @@ export default function TaskDetailModal({
         const emp = employees.find(e => e.id === empId);
         if (!emp) return;
 
-        let resolvedEmployeeId = emp.id;
-        try {
-          const hrmEmpsStr = localStorage.getItem('hl_hrm_employees_v3');
-          if (hrmEmpsStr) {
-            const hrmEmps = JSON.parse(hrmEmpsStr);
-            if (Array.isArray(hrmEmps)) {
-              const matchedHrmEmp = hrmEmps.find((he: any) => he.name && emp.name && (he.name.toLowerCase().trim() === emp.name.toLowerCase().trim()));
-              if (matchedHrmEmp) {
-                resolvedEmployeeId = matchedHrmEmp.id;
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Failed to map employee name to HRM id:", err);
-        }
+        // employee_id có khóa ngoại tới employees(id) → dùng thẳng id chuẩn từ
+        // danh sách employees, không đoán lại theo tên qua cache 'hl_hrm_employees_v3'
+        // (id khác hệ/cũ → vi phạm khóa ngoại khi insert, khiến "Gửi vi phạm" báo lỗi).
+        const resolvedEmployeeId = emp.id;
 
         const logId = `err_log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         newLogsToInsert.push({
@@ -1044,10 +1324,16 @@ export default function TaskDetailModal({
     });
 
     const updatedErrors = [...newLogsToInsert, ...existingErrors];
-    localStorage.setItem('hl_hrm_employee_errors_v3', JSON.stringify(updatedErrors));
-    loadSubmittedViolations();
+    // Đồng bộ lên Supabase (nguồn dữ liệu chính — không ghi localStorage)
+    const syncOk = await syncEmployeeErrorsToSupabase(newLogsToInsert);
+    if (!syncOk) {
+      addToast({ title: '❌ Đồng bộ thất bại', message: 'Một số vi phạm không thể đồng bộ lên Supabase. Vui lòng kiểm tra kết nối.', type: 'error' });
+      return;
+    }
+    // Cập nhật state cục bộ + lịch sử hiển thị
+    setCloudErrors(updatedErrors);
+    loadSubmittedViolations(updatedErrors);
 
-    postToTaskChat(`⚠️ ${currentUser.name} đã ghi nhận vi phạm cho: [${loggedNames.join(', ')}]`);
 
     if (detailCameraStream) {
       detailCameraStream.getTracks().forEach(track => track.stop());
@@ -1056,6 +1342,8 @@ export default function TaskDetailModal({
     setCameraRowId(null);
 
     addToast({ title: '✅ Thành công', message: 'Đã gửi vi phạm thành công!', type: 'success' });
+    // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    notifyProjectChat(`⚠️ ${currentUser.name} đã ghi nhận vi phạm cho: [${loggedNames.join(', ')}] trong công việc "${selectedTask.name}".`);
     const proj = projects.find(p => p.id === selectedTask.projectId);
     setViolationRows([
       { 
@@ -1071,7 +1359,19 @@ export default function TaskDetailModal({
     ]);
   };
 
-  const handleConfirmApprovalRequest = () => {
+  const handleConfirmApprovalRequest = async () => {
+    // ⛔ Bảo vệ: chỉ cho gửi yêu cầu phê duyệt khi TẤT CẢ nhiệm vụ đã hoàn thành.
+    const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
+    if (pendingMissions.length > 0) {
+      addToast({
+        title: '⚠️ Còn nhiệm vụ chưa hoàn thành',
+        message: `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi gửi yêu cầu phê duyệt công việc "${selectedTask.name}".`,
+        type: 'warning'
+      });
+      setShowApprovalWarning(false);
+      return;
+    }
+
     // Build approval chain (chọn tự do)
     let updatedApprovals: any[];
     let approverName: string;
@@ -1099,11 +1399,31 @@ export default function TaskDetailModal({
       createdAt: timestamp
     };
 
-    updateTaskWithChat(selectedTask.id, {
+    const saveResult = await onUpdateTask(selectedTask.id, {
       status: 'reviewing',
       completionRate: 90,
       approvals: updatedApprovals,
       comments: [newComment, ...(selectedTask.comments || [])]
+    });
+    if (saveResult === false) {
+      // ⛔ Save thất bại → báo lỗi, không đóng modal, không gửi tin nhóm.
+      addToast({
+        title: '❌ Lưu thất bại',
+        message: 'Không thể gửi yêu cầu phê duyệt công việc lên hệ thống. Vui lòng kiểm tra kết nối và thử lại.',
+        type: 'error'
+      });
+      return;
+    }
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người khởi tạo và người duyệt
+    const approverEmp = employees.find(e => e.id === approverId);
+    sendApprovalDirectMessage({
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderRole: currentUser.role,
+      recipientId: approverId,
+      recipientName: approverEmp?.name || approverName,
+      content: `🔔 ${currentUser.name} đã gửi Yêu cầu phê duyệt công việc "${selectedTask.name}". Vui lòng xem xét.`,
+      relatedEntity: { type: 'task', id: selectedTask.id },
     });
 
     setShowApprovalWarning(false);
@@ -1111,7 +1431,7 @@ export default function TaskDetailModal({
   };
 
   // Xử lý duyệt từng cấp (sequential) — chỉ bước đang chờ mới được duyệt
-  const handleApproveStep = (stepId: string, decision: 'approved' | 'rejected') => {
+  const handleApproveStep = async (stepId: string, decision: 'approved' | 'rejected') => {
     if (!selectedTask.approvals) return;
     const next = selectedTask.approvals.map((s: any) =>
       s.id === stepId
@@ -1125,12 +1445,42 @@ export default function TaskDetailModal({
       status: allApproved ? 'completed' as const : selectedTask.status,
       completionRate: allApproved ? 100 : selectedTask.completionRate,
     };
-    onUpdateTask?.(selectedTask.id, updatedTask as any);
-    addToast({
-      title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
-      message: decision === 'approved' ? 'Bước duyệt đã được phê duyệt.' : 'Bước duyệt đã bị từ chối.',
-      type: decision === 'approved' ? 'success' : 'warning',
-    });
+    const ok = await onUpdateTask?.(selectedTask.id, updatedTask as any);
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người giao việc
+    // - CHỈ SAU KHI SAVE THÀNH CÔNG
+    if (ok === true) {
+      const assignerEmp = employees.find(e => e.id === selectedTask.assignerId);
+      if (decision === 'approved') {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: selectedTask.assignerId,
+          recipientName: assignerEmp?.name || 'Người giao việc',
+          content: `✅ ${currentUser.name} đã DUYỆT công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`,
+          relatedEntity: { type: 'task', id: selectedTask.id },
+        });
+      } else {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: selectedTask.assignerId,
+          recipientName: assignerEmp?.name || 'Người giao việc',
+          content: `❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`,
+          relatedEntity: { type: 'task', id: selectedTask.id },
+        });
+      }
+    } else if (ok === false) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu kết quả duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+    }
+    if (ok !== false) {
+      addToast({
+        title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
+        message: decision === 'approved' ? 'Bước duyệt đã được phê duyệt.' : 'Bước duyệt đã bị từ chối.',
+        type: decision === 'approved' ? 'success' : 'warning',
+      });
+    }
   };
 
   const taskStatusLabels: Record<TaskStatus, string> = {
@@ -1175,7 +1525,7 @@ export default function TaskDetailModal({
 
     const prevRequests = selectedTask.advanceRequests || [];
 
-    updateTaskWithChat(selectedTask.id, {
+    onUpdateTask(selectedTask.id, {
       advanceRequests: [...prevRequests, newRequest]
     });
 
@@ -1190,7 +1540,7 @@ export default function TaskDetailModal({
     const updated = prevRequests.map(r => r.id === reqId ? { ...r, status: action } : r);
     const item = prevRequests.find(r => r.id === reqId);
 
-    updateTaskWithChat(selectedTask.id, {
+    onUpdateTask(selectedTask.id, {
       advanceRequests: updated
     });
   };
@@ -1250,6 +1600,35 @@ export default function TaskDetailModal({
     try {
       await dbService.subcontractorAdvances.save(proposal);
 
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người lập → người duyệt)
+      const approverEmp = employees.find(e => e.id === approver) || findEmployeeByName(employees, approver);
+      const creatorEmp = employees.find(e => e.id === creator);
+      if (creatorEmp?.id && approverEmp?.id && creatorEmp.id !== approverEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: creatorEmp.id,
+          senderName: creatorEmp.name || 'Người lập đề xuất',
+          senderRole: creatorEmp.role,
+          recipientId: approverEmp.id,
+          recipientName: approverEmp.name || approver,
+          content: `🔔 Đề xuất tạm ứng ${code} (${taskName}) ${amount.toLocaleString('vi-VN')}đ cho thầu phụ ${subcontractorName}. Lý do: ${reason}. Vui lòng xem xét.`,
+          relatedEntity: { type: 'advance', id: code },
+        });
+      }
+
+      // 💬 Tin nhắn NHÓM CHAT dự án: người lập đề xuất đã gửi đề xuất tạm ứng
+      notifyProjectChat(
+        `📝 ĐỀ XUẤT TẠM ỨNG THẦU PHỤ\n` +
+        `Mã đề xuất: ${code}\n` +
+        `Thầu phụ: ${subcontractorName}\n` +
+        `Công việc: ${taskName}\n` +
+        `Số tiền: ${amount.toLocaleString('vi-VN')}đ\n` +
+        `Lý do: ${reason || '—'}\n` +
+        `Người lập đề xuất: ${creator}\n` +
+        `Người xét duyệt: ${approver}\n` +
+        `→ Chờ xét duyệt.`,
+        { type: 'advance', id: code }
+      );
+
       // Show high-end custom success notification
       setCustomDialog({
         show: true,
@@ -1273,9 +1652,6 @@ export default function TaskDetailModal({
     }
   };
 
-  const involvedEmployees = employees.filter(emp => selectedTask.involvedEmployeeIds?.includes(emp.id));
-  const nonInvolvedEmployees = employees.filter(emp => emp.id !== selectedTask.assigneeId && !selectedTask.involvedEmployeeIds?.includes(emp.id));
-
   const managementGroup = employees.filter(e => e.role === 'director' || e.role === 'pm' || e.role === 'accountant');
   const finalManagementGroup = managementGroup.length > 0 ? managementGroup : employees;
 
@@ -1290,75 +1666,84 @@ export default function TaskDetailModal({
                       : rate >= 30 ? 'bg-amber-500' 
                       : 'bg-rose-500';
 
-  // Format initials for Avatars exactly like project member displays
-  const renderInitialsAvatar = (emp: Employee, options?: { showNameLabel?: boolean, statusText?: string, onDelete?: () => void }) => {
-    const parts = emp.name.split(' ');
-    const initials = parts.length >= 2
-      ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-      : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-    
-    return (
-      <div className="flex items-center gap-2 group/avatar relative shrink-0" key={emp.id}>
-        <div 
-          className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center font-black text-white text-[11px] shadow-lg border border-white/10 transition-all duration-200 hover:scale-[1.07] relative cursor-pointer"
-          title={`${emp.name} (${emp.role?.toUpperCase() || '—'} - ${emp.department})`}
-        >
-          {initials}
-          {options?.onDelete && (
-            <div 
-              onClick={(e) => { e.stopPropagation(); options.onDelete?.(); }}
-              className="absolute inset-0 bg-red-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[10px] opacity-0 group-hover/avatar:opacity-100 transition-opacity"
-            >
-              ✕
-            </div>
-          )}
+  // Format avatar cho hiển thị nhân viên (đọc emp.avatar thực, fallback chữ cái/emoji)
+  const renderUserAvatar = (emp: Employee, options?: { showNameLabel?: boolean, statusText?: string, onDelete?: () => void }) => (
+    <div className="flex items-center gap-2 group/avatar relative shrink-0" key={emp.id}>
+      <UserAvatar
+        employee={emp}
+        size="md"
+        title={`${emp.name} (${emp.role?.toUpperCase() || '—'} - ${emp.department})`}
+      />
+      {(options?.showNameLabel !== false) && (
+        <div>
+          <span className="font-bold text-slate-100 block text-[11px] leading-tight">{emp.name}</span>
+          <span className="text-[9px] text-slate-400 block leading-none mt-0.5">{emp.department}</span>
+          {options?.statusText && <span className="text-[8px] text-emerald-400 font-semibold block mt-0.5">{options.statusText}</span>}
         </div>
-        {(options?.showNameLabel !== false) && (
-          <div>
-            <span className="font-bold text-slate-100 block text-[11px] leading-tight">{emp.name}</span>
-            <span className="text-[9px] text-slate-400 block leading-none mt-0.5">{emp.department}</span>
-            {options?.statusText && <span className="text-[8px] text-emerald-400 font-semibold block mt-0.5">{options.statusText}</span>}
-          </div>
-        )}
-      </div>
-    );
+      )}
+      {options?.onDelete && (
+        <div
+          onClick={(e) => { e.stopPropagation(); options.onDelete?.(); }}
+          className="absolute inset-0 bg-red-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[10px] opacity-0 group-hover/avatar:opacity-100 transition-opacity"
+        >
+          ✕
+        </div>
+      )}
+    </div>
+  );
+
+  // ─── ĐỒNG BỘ CÔNG TÁC PHÍ LÊN SUPABASE (hrm_travel_expenses) ───────────────
+  // GỌI NGAY KHI "Thêm công tác phí" để dữ liệu được lưu TỨC THÌ, KHÔNG phụ
+  // thuộc vào bước "Xác Nhận Hoàn Thành" (vốn dễ bị mất do task reload từ
+  // Supabase làm rỗng mảng missions giữa lúc ghi nhận và lúc hoàn thành).
+  // `ta.rowId` (UUID) đảm bảo upsert lặp lại an toàn, không tạo dòng trùng.
+  const persistTravelExpense = (ta: any, missionName: string, status: CTPStatus = 'pending') => {
+    if (!ta) return;
+    const project = projects.find(p => p.id === selectedTask.projectId);
+    const customer = customers?.find(c => c.id === project?.customerId);
+    const emp = employees.find(e => e.id === ta.memberId);
+    let rowId: string = ta.rowId;
+    if (!rowId) {
+      rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+    }
+    // completedDate dạng dd/mm/yyyy → rút gọn về "MM/YYYY" để khớp kỳ lương.
+    const completedDate = new Date().toLocaleDateString('vi-VN');
+    const completedParts = completedDate.split('/');
+    const completedMonth = completedParts.length === 3
+      ? `${String(Number(completedParts[1])).padStart(2, '0')}/${completedParts[2]}`
+      : '';
+    const summaryItem = {
+      id: ta.id || `THCTP-${Date.now()}`,
+      rowId,
+      code: ta.code || `THCTP-${ta.id || Date.now()}`,
+      status,
+      completedDate,
+      // empId + month phục vụ tính lương: khớp CTP ĐÃ DUYỆT của nhân viên trong
+      // đúng tháng-năm của chuyến đi (trước đây chỉ lưu employeeName + amount nên
+      // không khớp được vào tab Tính Lương Tự Động).
+      empId: ta.memberId || emp?.id || undefined,
+      month: completedMonth,
+      projectName: project?.name || 'Chưa rõ',
+      customerName: customer?.name || 'Khách hàng lẻ',
+      taskName: selectedTask.name,
+      missionName,
+      employeeName: emp?.name || 'Chưa gán',
+      // Người khởi tạo CTP (người phụ trách nhiệm vụ thêm CTP) — dùng để lọc
+      // "Công Tác Phí Của Tôi" trong menu Tổng Quan.
+      creatorId: currentUser.id,
+      creatorName: currentUser.name,
+      content: ta.content || 'Công tác phí',
+      amount: ta.amount || 0,
+      createdAt: new Date().toISOString(),
+      taskId: selectedTask.id,
+      missionId: selectedMissionId || undefined,
+    };
+    dbService.hrmTravelExpenses.save(summaryItem, { rowId })
+      .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu Supabase (thêm CTP) thất bại:', e?.message || e));
   };
 
-  // Load chat messages from central store for this task group
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  useEffect(() => {
-    setChatMessages(getMessages(taskGroupId));
-  }, [taskGroupId, taskGroup]);
-  const combinedItems = [
-    ...(selectedTask.comments || []).map(c => ({
-      id: c.id,
-      type: 'comment' as const,
-      timestamp: c.createdAt,
-      displayTime: formatDateTime(c.createdAt),
-      senderName: c.senderName,
-      senderRole: c.senderRole,
-      content: c.content,
-      attachmentName: c.attachmentName,
-      attachmentSize: c.attachmentSize,
-      attachmentUrl: c.attachmentUrl
-    })),
-    ...chatMessages.map(m => ({
-      id: m.id,
-      type: 'comment' as const,
-      timestamp: m.createdAt,
-      displayTime: formatDateTime(m.createdAt),
-      senderName: m.senderName || 'Không xác định',
-      senderRole: m.senderRole,
-      content: m.content,
-      system: m.system || false,
-      attachmentName: undefined,
-      attachmentSize: undefined,
-      attachmentUrl: undefined
-    }))
-  ];
-
-  // Oldest on top, newest on bottom for chat-like interface
-  combinedItems.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   return (
     <div 
@@ -1377,7 +1762,7 @@ export default function TaskDetailModal({
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono font-bold text-[10px] text-emerald-400 bg-emerald-950/50 px-2.5 py-0.5 rounded border border-emerald-900/30">
+                <span className="font-mono font-bold text-[10px] text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200">
                   {selectedTask.code}
                 </span>
               </div>
@@ -1404,23 +1789,23 @@ export default function TaskDetailModal({
               {selectedTask.isApprovalRequired === true && (
                 <div className="space-y-3" id="approval_status_banner">
                   {selectedTask.status === 'doing' && (
-                    <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 p-4 rounded-xl flex items-start gap-3">
+                    <div className="bg-amber-50 border border-amber-200 text-amber-700 p-4 rounded-xl flex items-start gap-3">
                       <Shield className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
                       <div>
-                        <span className="font-extrabold text-[12px] block text-white uppercase tracking-wider">⚠️ Quy trình phê duyệt bắt buộc</span>
-                        <span className="text-[11.5px] text-amber-350 leading-relaxed block mt-1">
+                        <span className="font-extrabold text-[12px] block text-slate-900 uppercase tracking-wider">⚠️ Quy trình phê duyệt bắt buộc</span>
+                        <span className="text-[11.5px] text-amber-700 leading-relaxed block mt-1">
                           Công việc này bắt buộc phải được phê duyệt để được hoàn thành, vui lòng bấm <strong className="text-white bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">Yêu cầu phê duyệt</strong>.
                         </span>
                       </div>
                     </div>
                   )}
                   {selectedTask.status === 'reviewing' && (
-                    <div className="bg-sky-500/10 border border-sky-500/30 text-sky-450 p-4 rounded-xl flex items-start gap-3">
-                      <Clock className="w-5 h-5 text-sky-400 shrink-0 mt-0.5 animate-spin" />
+                    <div className="bg-sky-50 border border-sky-200 text-sky-700 p-4 rounded-xl flex items-start gap-3">
+                      <Clock className="w-5 h-5 text-sky-500 shrink-0 mt-0.5 animate-spin" />
                       <div>
-                        <span className="font-extrabold text-[12px] block text-white uppercase tracking-wider">⏳ Trạng thái chờ xét duyệt</span>
-                        <span className="text-[11.5px] text-sky-300 leading-relaxed block mt-1">
-                          Công việc đang được chờ phê duyệt của <strong className="text-white font-extrabold underline">{assigner?.name || 'người giao việc'}</strong>.
+                        <span className="font-extrabold text-[12px] block text-slate-900 uppercase tracking-wider">⏳ Trạng thái chờ xét duyệt</span>
+                        <span className="text-[11.5px] text-sky-700 leading-relaxed block mt-1">
+                          Công việc đang được chờ phê duyệt của <strong className="text-slate-900 font-extrabold underline">{assigner?.name || 'người giao việc'}</strong>.
                         </span>
                       </div>
                     </div>
@@ -1472,10 +1857,32 @@ export default function TaskDetailModal({
                         </span>
                       </div>
                     )}
+
+                    {/* Nút Vào nhóm chat dự án */}
+                    {project && (
+                      <div className="sm:col-span-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const convId = `conv_project_${project.id}`;
+                            window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
+                          }}
+                          className="w-full bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-bold text-[11px] py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                          title="Mở nhóm chat dự án"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                          Vào nhóm chat Dự Án
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-              {/* Thẻ Hạn bàn giao & Đầu mục kiểm soát kĩ thuật (Checklist) chung 1 thẻ */}
+              {/* Thẻ Hạn bàn giao. Checklist (Đầu mục kiểm soát kỹ thuật) trước đây hiện ở
+                  đây đã CHUYỂN xuống cấp Nhiệm Vụ (SubTaskMission.checklistTexts) — ở cấp
+                  Công Việc không có nơi nào cho người dùng tự thêm đầu mục nên gần như
+                  không dùng tới; nay thêm được ngay lúc khởi tạo từng nhiệm vụ và hiện
+                  trong khối chi tiết nhiệm vụ (xem "Checklist kiểm soát kỹ thuật" bên dưới). */}
               <div className="bg-slate-900/30 p-4 rounded-xl border border-slate-850/50 space-y-4">
                 <div className="flex justify-between items-start">
                   <div className="space-y-1">
@@ -1489,70 +1896,14 @@ export default function TaskDetailModal({
                   </div>
                   {selectedTask.deadline && selectedTask.status !== 'completed' && (
                     <span className={`px-2 py-0.5 rounded text-[9.5px] font-black border uppercase select-none ${
-                      new Date(selectedTask.deadline).getTime() < Date.now()
-                        ? 'bg-rose-955/35 text-rose-400 border-rose-900/40 animate-pulse'
-                        : 'bg-emerald-955/35 text-emerald-400 border-emerald-900/30'
+                      isDeadlineDayOver(selectedTask.deadline)
+                        ? 'bg-rose-50 text-rose-700 border-rose-200 animate-pulse'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     }`}>
                       {getRemainingDaysText(selectedTask.deadline)}
                     </span>
                   )}
                 </div>
-
-                {selectedTask.checklistTexts && selectedTask.checklistTexts.length > 0 && (
-                  <div className="space-y-2.5 pt-3.5 border-t border-slate-800/40">
-                    <span className="block text-slate-450 font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 select-none">
-                      <ListTodo className="w-3.5 h-3.5 text-emerald-400" />
-                      ĐẦU MỤC KIỂM SOÁT KỸ THUẬT (CHECKLIST):
-                    </span>
-                    <div className="space-y-2">
-                      {selectedTask.checklistTexts.map((chk, idx) => {
-                        const isCompleted = selectedTask.completedChecklistTexts?.includes(chk) || false;
-                        return (
-                          <div 
-                            key={idx} 
-                            onClick={() => {
-                              if (selectedTask.status === 'completed') return;
-                              const currentCompleted = selectedTask.completedChecklistTexts || [];
-                              let updatedCompleted: string[];
-                              if (currentCompleted.includes(chk)) {
-                                updatedCompleted = currentCompleted.filter(t => t !== chk);
-                              } else {
-                                updatedCompleted = [...currentCompleted, chk];
-                              }
-
-                              updateTaskWithChat(selectedTask.id, {
-                                completedChecklistTexts: updatedCompleted
-                              });
-                            }}
-                            className={`flex items-center gap-2.5 text-[11px] group transition-all duration-200 select-none ${
-                              selectedTask.status === 'completed' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                            }`}
-                          >
-                            <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-all duration-200 ${
-                              isCompleted 
-                                ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_8px_rgba(16,185,129,0.35)]' 
-                                : 'bg-slate-950 border-slate-800 text-slate-500 group-hover:border-slate-700'
-                            }`}>
-                              {isCompleted ? (
-                                <Check className="w-3 h-3 stroke-[3]" />
-                              ) : (
-                                <span className="text-[9px] font-mono font-bold">{idx + 1}</span>
-                              )}
-                            </div>
-                            
-                            <div className={`flex-1 px-3 py-2 border rounded-lg font-mono transition-all duration-200 ${
-                              isCompleted 
-                                ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.06)] font-bold' 
-                                : 'bg-slate-950/40 border-slate-850/50 text-slate-300'
-                            }`}>
-                              {chk}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Hệ thống Avatar Nhân Sự Công Trình */}
@@ -1566,7 +1917,7 @@ export default function TaskDetailModal({
                   {/* 1. NGƯỜI GIAO VIỆC */}
                   <div className="space-y-1.5">
                     <span className="block text-slate-500 text-[9.5px] font-bold uppercase tracking-wider">Người Giao Việc</span>
-                    {assigner ? renderInitialsAvatar(assigner, { statusText: 'Chủ trì việc gốc' }) : (
+                    {assigner ? renderUserAvatar(assigner, { statusText: 'Chủ trì việc gốc' }) : (
                       <span className="text-slate-500 italic block text-[11px] pt-1">Chưa xác định</span>
                     )}
                   </div>
@@ -1582,26 +1933,33 @@ export default function TaskDetailModal({
                       )}
                     </span>
                     {isReadOnly ? (
-                      assignee ? renderInitialsAvatar(assignee, { statusText: 'Chịu trách nhiệm' }) : (
+                      assignee ? renderUserAvatar(assignee, { statusText: 'Chịu trách nhiệm' }) : (
                         <span className="text-slate-500 italic block text-[11px] pt-1">Chưa có Phụ Trách Chính</span>
                       )
                     ) : (
                       <div className={`flex items-center gap-2 max-w-full overflow-hidden ${
-                        (selectedTask.status === 'completed' || selectedTask.status === 'doing' || (currentUser.id !== assigner?.id && currentUser.id !== selectedTask.assignerId)) ? 'opacity-65' : ''
+                        (selectedTask.status === 'completed' || !canEditTask) ? 'opacity-65' : ''
                       }`}>
-                        {assignee && renderInitialsAvatar(assignee, { showNameLabel: false })}
+                        {assignee && renderUserAvatar(assignee, { showNameLabel: false })}
                         <select
-                          disabled={selectedTask.status === 'completed' || selectedTask.status === 'doing' || (currentUser.id !== assigner?.id && currentUser.id !== selectedTask.assignerId)}
+                          disabled={selectedTask.status === 'completed' || !canEditTask}
                           value={selectedTask.assigneeId || ''}
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const val = e.target.value;
                             const empName = employees.find(emp => emp.id === val)?.name || 'Chưa gán';
-                            updateTaskWithChat(selectedTask.id, {
-                              assigneeId: val
-                            });
+                            const ok = await notifyProjectChatAfterSave(
+                              onUpdateTask(selectedTask.id, {
+                                assigneeId: val
+                              }),
+                              `👤 ${currentUser.name} đã chuyển Phụ Trách Chính công việc "${selectedTask.name}" sang ${empName}.`,
+                              { type: 'task', id: selectedTask.id }
+                            );
+                            if (ok === false) {
+                              addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi Phụ Trách Chính. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                            }
                           }}
                           className={`bg-transparent text-slate-205 text-[11px] outline-none font-bold flex-1 max-w-[110px] ${
-                            (selectedTask.status === 'completed' || selectedTask.status === 'doing' || (currentUser.id !== assigner?.id && currentUser.id !== selectedTask.assignerId)) ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer'
+                            (selectedTask.status === 'completed' || !canEditTask) ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer'
                           }`}
                         >
                           {employees.map(emp => (
@@ -1610,50 +1968,6 @@ export default function TaskDetailModal({
                         </select>
                       </div>
                     )}
-                  </div>
-
-                  {/* 3. THỢ THI CÔNG LIÊN ĐỚI LÀM CHUNG */}
-                  <div className="space-y-1.5">
-                    <span className="block text-slate-500 text-[9.5px] font-bold uppercase tracking-wider">Nhân Sự Liên Quan</span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {involvedEmployees.map(emp => 
-                        renderInitialsAvatar(emp, {
-                          showNameLabel: false,
-                          onDelete: (isReadOnly || selectedTask.status === 'completed') ? undefined : () => {
-                            const updatedIds = (selectedTask.involvedEmployeeIds || []).filter(id => id !== emp.id);
-                            updateTaskWithChat(selectedTask.id, {
-                              involvedEmployeeIds: updatedIds
-                            });
-                          }
-                        })
-                      )}
-                      
-                      {!isReadOnly && selectedTask.status !== 'completed' && nonInvolvedEmployees.length > 0 && (
-                        <div className="relative shrink-0">
-                          <button className="w-9 h-9 rounded-full bg-slate-900 border border-slate-800 hover:border-emerald-500 flex items-center justify-center text-slate-400 hover:text-emerald-400 transition cursor-pointer shadow">
-                            <Plus className="w-4 h-4" />
-                          </button>
-                          <select
-                            value=""
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (!val) return;
-                              const empName = employees.find(emp => emp.id === val)?.name || '';
-                              const updatedIds = [...(selectedTask.involvedEmployeeIds || []), val];
-                              updateTaskWithChat(selectedTask.id, {
-                                involvedEmployeeIds: updatedIds
-                              });
-                            }}
-                            className="absolute inset-0 opacity-0 cursor-pointer w-9 h-9 rounded-full"
-                          >
-                            <option value="">+ Thêm...</option>
-                            {nonInvolvedEmployees.map(emp => (
-                              <option key={emp.id} value={emp.id} className="bg-slate-950 text-slate-100">{emp.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                    </div>
                   </div>
 
                 </div>
@@ -1669,7 +1983,7 @@ export default function TaskDetailModal({
                     🤝 THẦU PHỤ LIÊN KẾT CHÍNH THỨC
                   </span>
                   {!canAssignMembers && (
-                    <span className="text-[9.5px] bg-rose-950/40 text-rose-300 font-bold px-2.2 py-0.5 rounded border border-rose-900/30 flex items-center gap-1">
+                    <span className="text-[9.5px] bg-rose-50 text-rose-700 font-bold px-2.2 py-0.5 rounded border border-rose-200 flex items-center gap-1">
                       (🔒)
                     </span>
                   )}
@@ -1684,21 +1998,10 @@ export default function TaskDetailModal({
                       value={selectedTask.subcontractorId || ''}
                       onChange={(e) => {
                         const val = e.target.value;
-                        const suppliersList = (() => {
-                          const saved = localStorage.getItem('hl_acc_suppliers');
-                          if (saved) {
-                            try {
-                              return JSON.parse(saved);
-                            } catch(e) {
-                              console.error(e);
-                            }
-                          }
-                          return [];
-                        })();
-                        const matchedSup = suppliersList.find((s: any) => s.id === val);
+                        const matchedSup = subcontractors.find((s: any) => s.id === val);
                         const matchedName = matchedSup ? matchedSup.name : '';
 
-                        updateTaskWithChat(selectedTask.id, {
+                        onUpdateTask(selectedTask.id, {
                           subcontractorId: val,
                           subcontractorName: matchedName
                         });
@@ -1706,18 +2009,11 @@ export default function TaskDetailModal({
                       className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 w-full focus:outline-none focus:border-orange-500 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <option value="">-- Click để chọn Thầu Phụ --</option>
-                      {(() => {
-                        const saved = localStorage.getItem('hl_acc_suppliers');
-                        let list = [];
-                        if (saved) {
-                          try { list = JSON.parse(saved); } catch(e) {}
-                        }
-                        return list.map((s: any) => (
-                          <option key={s.id} value={s.id}>
-                            [{s.id}] {s.name}
-                          </option>
-                        ));
-                      })()}
+                      {subcontractors.map((s: any) => (
+                        <option key={s.id} value={s.id}>
+                          [{s.id}] {s.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -1728,12 +2024,7 @@ export default function TaskDetailModal({
                         Chưa có thầu phụ liên kết cho hạng mục công việc này.
                       </div>
                     );
-                    const saved = localStorage.getItem('hl_acc_suppliers');
-                    let list = [];
-                    if (saved) {
-                      try { list = JSON.parse(saved); } catch(e) {}
-                    }
-                    const activeSup = list.find((s: any) => s.id === selectedTask.subcontractorId);
+                    const activeSup = subcontractors.find((s: any) => s.id === selectedTask.subcontractorId);
                     if (!activeSup) return null;
 
                     return (
@@ -1769,7 +2060,7 @@ export default function TaskDetailModal({
                           </div>
                           <div className="sm:col-span-2">
                             <span className="text-slate-500 block text-[9px] uppercase tracking-wider">Tài khoản ngân hàng giải ngân</span>
-                            <span className="bg-teal-950/20 text-teal-400 px-2.5 py-1 rounded border border-teal-900/30 font-bold text-[12px] inline-block">{activeSup.bankAccount || 'Chưa cập nhật'}</span>
+                            <span className="bg-teal-50 text-teal-700 px-2.5 py-1 rounded border border-teal-200 font-bold text-[12px] inline-block">{activeSup.bankAccount || 'Chưa cập nhật'}</span>
                           </div>
                           {activeSup.note && (
                             <div className="sm:col-span-2">
@@ -1819,7 +2110,7 @@ export default function TaskDetailModal({
                 </div>
               </div>
 
-              {(canAssignMembers || canAssignSubWorkers) && selectedTask.status !== 'completed' && (
+              {(canAssignMembers || canAssignSubWorkers || canManageSubTask) && selectedTask.status !== 'completed' && (
                 <div className="bg-slate-900/40 border border-slate-850/50 p-3.5 rounded-xl space-y-3.5">
                   <div className="flex justify-between items-center pb-1">
                     <span className="text-[10px] font-extrabold uppercase text-amber-400 block tracking-wide">
@@ -1850,29 +2141,179 @@ export default function TaskDetailModal({
                           </span>
                         )}
                       </label>
-                      <input 
+                      <input
                         type="datetime-local"
                         value={newMissionDeadline}
                         onChange={(e) => setNewMissionDeadline(e.target.value)}
                         className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-xl px-3 py-2.5 text-[11.5px] font-mono outline-none mt-1 shadow-inner cursor-pointer"
                       />
                     </div>
+
+                    {/* Phụ trách chính — tùy chọn, có thể gán sau khi tạo qua nút "+ Gán".
+                        Dùng SearchableSelect để gõ-tìm nhanh trong danh sách nhân sự, và hiển
+                        thị người đã chọn dạng avatar tròn (giống cách hiện ở danh sách nhiệm vụ). */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Người phụ trách chính (tùy chọn):</label>
+                      <SearchableSelect
+                        value={newMissionMainAssigneeId}
+                        onChange={(val) => {
+                          setNewMissionMainAssigneeId(val);
+                          // Phụ trách chính cũng luôn được tính là Nhân sự tham gia thực hiện.
+                          if (val) setSelectedMissionMemberIds(prev => Array.from(new Set([...prev, val])));
+                        }}
+                        options={employees.map(emp => ({ id: emp.id, label: `${emp.name} (${emp.department || emp.role})` }))}
+                        placeholder="Chưa gán — có thể gán sau"
+                        searchPlaceholder="🔍 Gõ tên để tìm nhân sự..."
+                      />
+                      {newMissionMainAssigneeId && (() => {
+                        const emp = employees.find(e => e.id === newMissionMainAssigneeId);
+                        if (!emp) return null;
+                        const initials = getEmployeeInitials(emp.name);
+                        return (
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <div className="w-6.5 h-6.5 rounded-full bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-550 flex items-center justify-center font-black text-slate-950 text-[8px] shadow-sm border border-slate-905 shrink-0">
+                              {initials}
+                            </div>
+                            <span className="text-[10px] text-amber-200 font-extrabold">{emp.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewMissionMainAssigneeId('');
+                                setSelectedMissionMemberIds(prev => prev.filter(id => id !== newMissionMainAssigneeId));
+                              }}
+                              className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                              title="Bỏ chọn"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Nhân sự tham gia — có thể chọn nhiều, gán thêm sau cũng được. SearchableSelect
+                        dùng làm ô "chọn 1 → thêm vào danh sách" (tự reset sau mỗi lần chọn), hiển thị
+                        kết quả dạng dãy avatar tròn giống danh sách nhiệm vụ. */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Nhân sự tham gia (tùy chọn):</label>
+                      <SearchableSelect
+                        value=""
+                        onChange={(val) => {
+                          if (!val) return;
+                          setSelectedMissionMemberIds(prev => Array.from(new Set([...prev, val])));
+                        }}
+                        options={employees
+                          .filter(emp => !selectedMissionMemberIds.includes(emp.id))
+                          .map(emp => ({ id: emp.id, label: `${emp.name} (${emp.department || emp.role})` }))}
+                        placeholder="+ Thêm nhân sự..."
+                        searchPlaceholder="🔍 Gõ tên để tìm nhân sự..."
+                      />
+                      {selectedMissionMemberIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1.5">
+                          {selectedMissionMemberIds.map(memId => {
+                            const emp = employees.find(e => e.id === memId);
+                            if (!emp) return null;
+                            const initials = getEmployeeInitials(emp.name);
+                            return (
+                              <div key={memId} className="flex items-center gap-1.5 bg-slate-900 pl-1 pr-2 py-1 rounded-full border border-slate-800">
+                                <div className="w-6 h-6 rounded-full bg-slate-850 border border-slate-900 flex items-center justify-center font-bold text-slate-300 text-[8px] shrink-0">
+                                  {initials}
+                                </div>
+                                <span className="text-[10px] text-slate-300 font-bold">{emp.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    // Phụ trách chính luôn phải là Nhân sự tham gia — nếu gỡ đúng
+                                    // người đang được chọn làm phụ trách chính, bỏ luôn lựa chọn đó.
+                                    if (memId === newMissionMainAssigneeId) setNewMissionMainAssigneeId('');
+                                    setSelectedMissionMemberIds(prev => prev.filter(id => id !== memId));
+                                  }}
+                                  className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Checklist — Đầu mục kiểm soát kỹ thuật, thêm ngay lúc khởi tạo nhiệm vụ */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Checklist kiểm soát kỹ thuật (tùy chọn):</label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={newMissionChecklistInput}
+                          onChange={(e) => setNewMissionChecklistInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            const text = newMissionChecklistInput.trim();
+                            if (!text) return;
+                            setNewMissionChecklist(prev => [...prev, text]);
+                            setNewMissionChecklistInput('');
+                          }}
+                          placeholder="VD: Kiểm tra độ phẳng mặt bàn, siết chặt bulong..."
+                          className="flex-1 bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-xl px-3 py-2.5 text-[11.5px] font-mono outline-none shadow-inner placeholder:text-slate-650"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = newMissionChecklistInput.trim();
+                            if (!text) return;
+                            setNewMissionChecklist(prev => [...prev, text]);
+                            setNewMissionChecklistInput('');
+                          }}
+                          disabled={!newMissionChecklistInput.trim()}
+                          className="px-3 rounded-xl bg-slate-900 hover:bg-slate-850 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-800 text-slate-300 cursor-pointer transition"
+                          title="Thêm đầu mục"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {newMissionChecklist.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {newMissionChecklist.map((chk, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-2 bg-slate-950/60 border border-slate-850/50 rounded-lg px-2.5 py-1.5">
+                              <span className="text-[10.5px] text-slate-300 font-mono">{idx + 1}. {chk}</span>
+                              <button
+                                type="button"
+                                onClick={() => setNewMissionChecklist(prev => prev.filter((_, i) => i !== idx))}
+                                className="text-slate-500 hover:text-rose-400 cursor-pointer shrink-0"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (!newMissionName.trim()) return;
 
-                      const finalDeadline = newMissionDeadline 
-                        ? new Date(newMissionDeadline).toISOString() 
+                      const finalDeadline = newMissionDeadline
+                        ? new Date(newMissionDeadline).toISOString()
                         : (selectedTask.deadline || new Date().toISOString());
 
                       if (selectedTask.deadline) {
                         const mDeadlineDate = new Date(finalDeadline);
-                        const tDeadlineDate = new Date(selectedTask.deadline);
-                        if (mDeadlineDate.getTime() > tDeadlineDate.getTime() && tDeadlineDate.getTime() > Date.now()) {
-                          addToast({ title: '⚠️ Thông báo', message: `Hạn hoàn thành nhiệm vụ không được lớn hơn Hạn bàn giao của công việc con (${formatDateTime(selectedTask.deadline)})!`, type: 'warning' });
+                        // Chỉ so sánh DATE (bỏ qua giờ): task deadline được coi là 23:59:59 của ngày đó
+                        const taskEndOfDay = new Date(selectedTask.deadline);
+                        taskEndOfDay.setHours(23, 59, 59, 999);
+                        // Chỉ chặn khi công việc cha CHƯA quá hạn (theo quy tắc hết ngày),
+                        // để không ngăn người dùng hoàn tất nhiệm vụ trễ sau hạn bàn giao.
+                        if (mDeadlineDate.getTime() > taskEndOfDay.getTime() && !isDeadlineDayOver(selectedTask.deadline)) {
+                          addToast({
+                            title: '⚠️ Không thể tạo nhiệm vụ',
+                            message: `Hạn hoàn thành nhiệm vụ (${formatDateTime(finalDeadline)}) không được lớn hơn Hạn bàn giao của công việc cha (${formatDateTime(selectedTask.deadline)})! Vui lòng chọn ngày sớm hơn hoặc cùng ngày.`,
+                            type: 'warning'
+                          });
                           return;
                         }
                       }
@@ -1880,23 +2321,73 @@ export default function TaskDetailModal({
                       const newMission: SubTaskMission = {
                         id: `mission_${Date.now()}`,
                         name: newMissionName.trim(),
-                        memberIds: [],
+                        memberIds: selectedMissionMemberIds,
+                        mainAssigneeId: newMissionMainAssigneeId || undefined,
                         status: 'todo',
                         workReports: '',
                         evidence: '',
                         createdAt: new Date().toISOString(),
-                        deadline: finalDeadline
+                        deadline: finalDeadline,
+                        checklistTexts: newMissionChecklist.length > 0 ? newMissionChecklist : undefined,
                       };
+                      // Chỉ THÊM 1 mission mới, không loại bỏ mission nào khác — an toàn
+                      // ngay cả khi `currentMissions` đang cũ hơn server (VD: sự cố thực tế
+                      // 2026-08-31 "Thi công sắt tại công trình" — kênh Realtime của client
+                      // này bị rớt ngầm một lúc), vì syncMissionsDiff (App.tsx) chỉ upsert
+                      // mission có mặt trong mảng gửi lên, không còn xóa mission vắng mặt.
                       const currentMissions = selectedTask.missions || [];
 
-                      updateTaskWithChat(selectedTask.id, {
-                        missions: [...currentMissions, newMission]
-                      });
+                      const ok = await notifyProjectChatAfterSave(
+                        onUpdateTask(selectedTask.id, {
+                          missions: [...currentMissions, newMission]
+                        }),
+                        `📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`,
+                        { type: 'task', id: selectedTask.id },
+                        // Thêm Phụ trách chính + Nhân sự tham gia của Nhiệm vụ vừa tạo vào
+                        // nhóm chat dự án — nếu không, người mới được gán ở cấp Nhiệm vụ sẽ
+                        // không thấy nhóm chat cho tới khi ai đó bấm "Đồng bộ nhân sự".
+                        [newMission.mainAssigneeId, ...(newMission.memberIds || [])].filter(Boolean) as string[]
+                      );
+                      if (ok === false) {
+                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể tạo nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                        return;
+                      }
 
-                      // Reset inputs
+                      // 📩 Thông báo Nhiệm Vụ MỚI → HỘI THOẠI CÁ NHÂN người phụ trách công việc cha.
+                      // Người phụ trách có thể CHƯA có trong nhóm chat dự án → nhắn riêng 1-1
+                      // (sendApprovalDirectMessage) để họ thấy tin + badge đỏ ngay trong hộp thư.
+                      const parentAssigneeEmp = employees.find(e => e.id === selectedTask.assigneeId);
+                      if (currentUser.id && selectedTask.assigneeId && currentUser.id !== selectedTask.assigneeId && parentAssigneeEmp) {
+                        // 👥 Thêm người phụ trách công việc cha vào nhóm chat dự án (nếu có) để
+                        // họ mở được deep-link "💬 Nhóm dự án" trên tin nhắn nhiệm vụ vừa gửi.
+                        if (selectedTask.projectId) {
+                          const proj = projects.find(p => p.id === selectedTask.projectId);
+                          if (proj) {
+                            ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: proj.pmId })
+                              .then(conv => { if (conv) addMemberToConversation(conv.id, selectedTask.assigneeId); })
+                              .catch(() => {});
+                          }
+                        }
+                        sendApprovalDirectMessage({
+                          senderId: currentUser.id,
+                          senderName: currentUser.name,
+                          senderRole: currentUser.role,
+                          recipientId: selectedTask.assigneeId,
+                          recipientName: parentAssigneeEmp.name,
+                          content: `🧩 ${currentUser.name} đã thêm Nhiệm Vụ "${newMission.name}" vào công việc "${selectedTask.name}" của bạn.`,
+                          relatedEntity: { type: 'task', id: selectedTask.id },
+                        });
+                      }
+
+                      // Reset inputs. selectedTask.missions chưa gồm nhiệm vụ vừa tạo
+                      // (cập nhật bất đồng bộ qua parent), nên tính hạn mặc định kế tiếp
+                      // trực tiếp = ngày của nhiệm vụ vừa tạo + 1 ngày, giờ 18:00.
                       setNewMissionName('');
                       setSelectedMissionMemberIds([]);
-                      setNewMissionDeadline(getTodayPlusTenDaysISO());
+                      setNewMissionMainAssigneeId('');
+                      setNewMissionChecklist([]);
+                      setNewMissionChecklistInput('');
+                      setNewMissionDeadline(dateAt18(new Date(finalDeadline), 1));
                     }}
                     disabled={!newMissionName.trim()}
                     className={`w-full py-2.5 px-3 rounded-xl font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition ${
@@ -1917,24 +2408,98 @@ export default function TaskDetailModal({
                   <div className="p-5 rounded-xl border border-dashed border-slate-800 text-center text-[11px] text-slate-500 leading-relaxed bg-slate-950/20">
                     Chưa có nhiệm vụ chi tiết nào được thiết lập cho công việc này.
                   </div>
-                ) : (
+                ) : (() => {
+                  // Sắp xếp mới nhất → cũ nhất theo ngày tạo (fallback timestamp trong id)
+                  const missionSortKey = (m: SubTaskMission): number => {
+                    if (m.createdAt) return new Date(m.createdAt).getTime();
+                    const parsed = parseInt(m.id.replace('mission_', ''));
+                    return isNaN(parsed) ? 0 : parsed;
+                  };
+                  const sortedMissions = [...selectedTask.missions].sort((a, b) => missionSortKey(b) - missionSortKey(a));
+                  const total = sortedMissions.length;
+                  const pageSize = missionPageSize === 'all' ? total : missionPageSize;
+                  const totalPages = missionPageSize === 'all' ? 1 : Math.max(1, Math.ceil(total / pageSize));
+                  const safePage = Math.min(missionPage, totalPages);
+                  const startIdx = missionPageSize === 'all' ? 0 : (safePage - 1) * pageSize;
+                  const pagedMissions = missionPageSize === 'all'
+                    ? sortedMissions
+                    : sortedMissions.slice(startIdx, startIdx + pageSize);
+
+                  return (
+                  <>
+                  {/* Thanh điều khiển phân trang */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9.5px] text-slate-500 font-bold uppercase tracking-wider">Hiển thị:</span>
+                      <select
+                        value={String(missionPageSize)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMissionPageSize(v === 'all' ? 'all' : parseInt(v));
+                          setMissionPage(1);
+                        }}
+                        className="bg-slate-950 text-slate-200 border border-slate-850 focus:border-emerald-500/40 rounded-lg px-2 py-1 text-[10.5px] font-bold outline-none cursor-pointer"
+                      >
+                        <option value="5">5 dòng</option>
+                        <option value="10">10 dòng</option>
+                        <option value="15">15 dòng</option>
+                        <option value="20">20 dòng</option>
+                        <option value="50">50 dòng</option>
+                        <option value="all">Tất cả</option>
+                      </select>
+                      <span className="text-[9.5px] text-slate-500 font-mono">Tổng {total} nhiệm vụ</span>
+                    </div>
+                    {missionPageSize !== 'all' && totalPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={safePage <= 1}
+                          onClick={() => setMissionPage(p => Math.max(1, p - 1))}
+                          className={`px-2 py-1 rounded-lg border text-[10.5px] font-bold transition ${
+                            safePage <= 1
+                              ? 'bg-slate-900 text-slate-600 border-slate-850 cursor-not-allowed'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 cursor-pointer'
+                          }`}
+                        >
+                          ‹ Trước
+                        </button>
+                        <span className="text-[10px] text-slate-400 font-mono px-1">
+                          Trang {safePage}/{totalPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={safePage >= totalPages}
+                          onClick={() => setMissionPage(p => Math.min(totalPages, p + 1))}
+                          className={`px-2 py-1 rounded-lg border text-[10.5px] font-bold transition ${
+                            safePage >= totalPages
+                              ? 'bg-slate-900 text-slate-600 border-slate-850 cursor-not-allowed'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 cursor-pointer'
+                          }`}
+                        >
+                          Sau ›
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 gap-2.5">
-                    {selectedTask.missions.map((mission) => {
+                    {pagedMissions.map((mission) => {
                       const isCompleted = mission.status === 'completed';
                       const creationTime = mission.createdAt 
                         ? formatDateTime(mission.createdAt) 
                         : formatDateTime(new Date(parseInt(mission.id.replace('mission_', '')) || Date.now()).toISOString());
                       const isMissionAssigneeInline = mission.memberIds?.includes(currentUser.id) || false;
                       const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
-                      const hasMissionPermission = canReceive || canAssignMembers || isMissionMainAssignee;
+                      const hasMissionPermission = canReceive || canAssignMembers || canManageSubTask || isMissionMainAssignee;
 
                       return (
                         <div 
                           key={mission.id}
                           onClick={() => {
+                            cancelEditMission();
                             setSelectedMissionId(mission.id);
                             setMissionReportText(mission.workReports || '');
                             setMissionEvidenceText(mission.evidence || '');
+                            setMissionReportImages(mission.reportImages && mission.reportImages.length > 0 ? [...mission.reportImages] : []);
                             if (mission.evidence && (mission.evidence.startsWith('data:image/') || mission.evidence.startsWith('blob:') || mission.evidence.startsWith('http'))) {
                               setMissionImagePreview(mission.evidence);
                             } else {
@@ -1949,51 +2514,130 @@ export default function TaskDetailModal({
                             setAllowanceNotes('');
                           }}
                           className={`p-3 rounded-xl border transition-all duration-150 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 group ${
-                            isCompleted 
-                              ? 'bg-emerald-950/15 border-emerald-500/20 text-emerald-300 hover:border-emerald-500/40' 
+                            isCompleted
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:border-emerald-400'
                               : 'bg-slate-900 border-slate-850 hover:border-slate-750 text-slate-205'
                           }`}
                         >
+                          {/* Thumbnail hình ảnh báo cáo đầu tiên (khung nét đứt khi chưa có).
+                              Click vào ảnh sẽ kích hoạt onClick của cả thẻ → mở chi tiết nhiệm vụ. */}
+                          {(() => {
+                            const thumbSrc = (mission.reportImages && mission.reportImages.length > 0)
+                              ? mission.reportImages[0]
+                              : (mission.evidence && (mission.evidence.startsWith('data:image/') || mission.evidence.startsWith('blob:') || mission.evidence.startsWith('http')))
+                                ? mission.evidence
+                                : '';
+                            return (
+                              <div className="relative shrink-0 w-11 h-11 rounded-lg overflow-hidden group/thumb">
+                                {thumbSrc ? (
+                                  <img
+                                    src={thumbSrc}
+                                    alt="Ảnh báo cáo đầu tiên"
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover rounded-lg border border-slate-800 group-hover/thumb:border-emerald-500/50 transition"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full rounded-lg border-2 border-dashed border-slate-700 flex items-center justify-center text-slate-600">
+                                    <ImageIcon className="w-4 h-4" />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
                           {/* Info area */}
                           <div className="space-y-1 flex-1 min-w-0 pr-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${
-                                isCompleted ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                              }`} />
-                              <h5 className={`text-[11.5px] font-bold truncate text-left ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
-                                {mission.name}
-                              </h5>
-                            </div>
-                            
-                            <div className="flex flex-col gap-y-1">
-                              <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 font-mono">
-                                <Clock className="w-3 h-3 text-slate-550 shrink-0" />
-                                <span>Ngày tạo: <b className="text-slate-300 font-semibold">{creationTime}</b></span>
-                              </div>
-                              
-                              {(() => {
-                                const mDeadline = mission.deadline || selectedTask.deadline;
-                                if (!mDeadline) return null;
-                                const isOverdue = new Date(mDeadline).getTime() < Date.now();
-                                return (
-                                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-400 font-mono">
-                                    <div className="flex items-center gap-1">
-                                      <Calendar className="w-3 h-3 text-rose-500 shrink-0" />
-                                      <span>Hạn hoàn thành: <b className="text-rose-400 font-semibold">{formatDateTime(mDeadline)}</b></span>
-                                    </div>
-                                    {!isCompleted && (
-                                      <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black border uppercase select-none ${
-                                        isOverdue
-                                          ? 'bg-rose-950/40 text-rose-400 border-rose-900/40 animate-pulse'
-                                          : 'bg-emerald-955/35 text-emerald-400 border-emerald-900/30'
-                                      }`}>
-                                        {getRemainingDaysText(mDeadline)}
-                                      </span>
+                            {editingMissionId === mission.id ? (
+                              // ─── FORM CHỈNH SỬA NHIỆM VỤ (tên + hạn hoàn thành) ───
+                              <div className="space-y-2 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] text-slate-400 font-bold uppercase block tracking-wider">Tên nhiệm vụ:</label>
+                                  <input
+                                    type="text"
+                                    value={editMissionName}
+                                    onChange={(e) => setEditMissionName(e.target.value)}
+                                    placeholder="Tên nhiệm vụ"
+                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none placeholder:text-slate-650"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] text-slate-400 font-bold uppercase block tracking-wider flex justify-between">
+                                    <span>Hạn hoàn thành:</span>
+                                    {selectedTask.deadline && (
+                                      <span className="text-zinc-500 font-sans normal-case">(Hạn bàn giao: {formatDateTime(selectedTask.deadline)})</span>
                                     )}
+                                  </label>
+                                  <input
+                                    type="datetime-local"
+                                    value={editMissionDeadline}
+                                    onChange={(e) => setEditMissionDeadline(e.target.value)}
+                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none cursor-pointer"
+                                  />
+                                </div>
+                                {editingMissionError && (
+                                  <div className="text-[9.5px] text-rose-700 font-bold bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 leading-relaxed animate-fade-in">
+                                    {editingMissionError}
                                   </div>
-                                );
-                              })()}
-                            </div>
+                                )}
+                                <div className="flex items-center gap-1.5 pt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveEditMission(mission)}
+                                    className="flex-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9.5px] font-extrabold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1"
+                                  >
+                                    <Check className="w-3 h-3 stroke-[3]" /> Lưu
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={cancelEditMission}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 text-slate-300 text-[9.5px] font-bold transition cursor-pointer"
+                                  >
+                                    Hủy
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                    isCompleted ? 'bg-emerald-500 animate-pulse' : mission.status === 'doing' ? 'bg-sky-500' : 'bg-amber-500'
+                                  }`} />
+                                  <h5 className={`text-[11.5px] font-bold truncate text-left flex-1 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
+                                    {mission.name}
+                                  </h5>
+                                </div>
+
+                                <div className="flex flex-col gap-y-1">
+                                  <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 font-mono">
+                                    <Clock className="w-3 h-3 text-slate-550 shrink-0" />
+                                    <span>Ngày tạo: <b className="text-slate-300 font-semibold">{creationTime}</b></span>
+                                  </div>
+
+                                  {(() => {
+                                    const mDeadline = mission.deadline || selectedTask.deadline;
+                                    if (!mDeadline) return null;
+                                    const isOverdue = isDeadlineDayOver(mDeadline);
+                                    return (
+                                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[9.5px] text-slate-400 font-mono">
+                                        <div className="flex items-center gap-1">
+                                          <Calendar className="w-3 h-3 text-rose-500 shrink-0" />
+                                          <span>Hạn hoàn thành: <b className="text-rose-400 font-semibold">{formatDateTime(mDeadline)}</b></span>
+                                        </div>
+                                        {!isCompleted && (
+                                          <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-black border uppercase select-none ${
+                                            isOverdue
+                                              ? 'bg-rose-50 text-rose-700 border-rose-200 animate-pulse'
+                                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          }`}>
+                                            {getRemainingDaysText(mDeadline)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </>
+                            )}
                           </div>
 
                           {/* Quick Tagging and Members at the end */}
@@ -2014,16 +2658,28 @@ export default function TaskDetailModal({
                                   <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                                     <div 
                                       className="group/avatar relative shrink-0"
-                                      onClick={(e) => {
+                                      onClick={async (e) => {
                                         e.stopPropagation();
                                         if (!(canReceive || canAssignMembers) || selectedTask.status === 'completed' || isCompleted) return;
                                         const updatedMissions = (selectedTask.missions || []).map(m => {
                                           if (m.id === mission.id) {
-                                            return { ...m, mainAssigneeId: undefined };
+                                            // Bỏ Phụ trách chính đồng thời gỡ họ khỏi Nhân sự tham gia thực hiện
+                                            return {
+                                              ...m,
+                                              mainAssigneeId: undefined,
+                                              memberIds: (m.memberIds || []).filter(id => id !== m.mainAssigneeId),
+                                            };
                                           }
                                           return m;
                                         });
-                                        updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                        const ok = await notifyProjectChatAfterSave(
+                                          onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                          `🔓 ${currentUser.name} đã bỏ Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                                          { type: 'mission', id: mission.id }
+                                        );
+                                        if (ok === false) {
+                                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                        }
                                       }}
                                     >
                                       <div
@@ -2061,16 +2717,33 @@ export default function TaskDetailModal({
                                       </button>
                                       <select
                                         value=""
-                                        onChange={(e) => {
+                                        onChange={async (e) => {
                                           const val = e.target.value;
                                           if (!val) return;
                                           const updatedMissions = (selectedTask.missions || []).map(m => {
                                             if (m.id === mission.id) {
-                                              return { ...m, mainAssigneeId: val };
+                                              // Phụ trách chính nhiệm vụ cũng được tính là Nhân sự tham gia thực hiện
+                                              // (tự thêm vào memberIds) để không phải gán tên 2 lần khi thêm công tác phí.
+                                              return {
+                                                ...m,
+                                                mainAssigneeId: val,
+                                                memberIds: Array.from(new Set([...(m.memberIds || []), val]))
+                                              };
                                             }
                                             return m;
                                           });
-                                          updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                          const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
+                                          const ok = await notifyProjectChatAfterSave(
+                                            onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                            `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                                            { type: 'mission', id: mission.id },
+                                            // Thêm người vừa được gán vào nhóm chat dự án — nếu không, người
+                                            // mới lần đầu tham gia Nhiệm vụ sẽ không thấy nhóm chat này.
+                                            [val]
+                                          );
+                                          if (ok === false) {
+                                            addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                          }
                                         }}
                                         className="absolute inset-0 opacity-0 cursor-pointer w-5.5 h-5.5 rounded-full"
                                       >
@@ -2103,19 +2776,33 @@ export default function TaskDetailModal({
                                     : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                                   
                                   return (
-                                    <div 
-                                      key={memId} 
+                                    <div
+                                      key={memId}
                                       className="group/mem relative shrink-0"
-                                      onClick={(e) => {
+                                      onClick={async (e) => {
                                         e.stopPropagation();
                                         if (!(canReceive || canAssignMembers || isMissionMainAssignee) || selectedTask.status === 'completed' || isCompleted) return;
+                                        // Phụ trách chính là trường bắt buộc và luôn là Nhân sự tham gia —
+                                        // không cho gỡ khỏi danh sách nhân sự (chỉ gỡ qua ô Phụ trách chính).
+                                        if (memId === mission.mainAssigneeId) {
+                                          addToast({ title: '⚠️ Không thể gỡ', message: 'Người Phụ trách chính luôn là Nhân sự tham gia thực hiện. Muốn gỡ hãy bỏ chọn Phụ trách chính trước.', type: 'warning' });
+                                          return;
+                                        }
                                         const updatedMissions = (selectedTask.missions || []).map(m => {
                                           if (m.id === mission.id) {
                                             return { ...m, memberIds: (m.memberIds || []).filter(id => id !== memId) };
                                           }
                                           return m;
                                         });
-                                        updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                        const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
+                                        const ok = await notifyProjectChatAfterSave(
+                                          onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                          `➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`,
+                                          { type: 'mission', id: mission.id }
+                                        );
+                                        if (ok === false) {
+                                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                        }
                                       }}
                                     >
                                       <div
@@ -2149,7 +2836,7 @@ export default function TaskDetailModal({
                                   </button>
                                   <select
                                     value=""
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                       const val = e.target.value;
                                       if (!val) return;
                                       const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -2158,7 +2845,17 @@ export default function TaskDetailModal({
                                         }
                                         return m;
                                       });
-                                      updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                      const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
+                                      const ok = await notifyProjectChatAfterSave(
+                                        onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                                        `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
+                                        { type: 'mission', id: mission.id },
+                                        // Thêm nhân sự vừa được gán vào nhóm chat dự án.
+                                        [val]
+                                      );
+                                      if (ok === false) {
+                                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                      }
                                     }}
                                     className="absolute inset-0 opacity-0 cursor-pointer w-5.5 h-5.5 rounded-full"
                                   >
@@ -2178,29 +2875,56 @@ export default function TaskDetailModal({
                             {/* Status and Arrow */}
                             <div className="flex items-center gap-2">
                               {!isCompleted && hasMissionPermission && selectedTask.status !== 'completed' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
-                                      const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
-                                      updateTaskWithChat(selectedTask.id, {
-                                        missions: updatedMissions
-                                      });
-                                    }
-                                  }}
-                                  className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
-                                  title="Xóa nhiệm vụ này"
-                                >
-                                  <Trash2 className="w-3 h-3 text-rose-400" />
-                                </button>
+                                <>
+                                  {/* ✏️ Nút Sửa — đặt cạnh nút Xóa */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); startEditMission(mission); }}
+                                    className="p-1 px-1.5 bg-slate-950 hover:bg-amber-950/40 border border-slate-850 hover:border-amber-900 text-slate-500 hover:text-amber-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
+                                    title="Sửa tên / hạn hoàn thành"
+                                  >
+                                    <Edit2 className="w-3 h-3 text-amber-400" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
+                                        // `missions` (đã lược mission này ra) chỉ để cập nhật UI optimistic
+                                        // ngay lập tức — việc XÓA THẬT ở task_missions do `deletedMissionIds`
+                                        // khai báo TƯỜNG MINH quyết định (xem syncMissionsDiff, App.tsx).
+                                        // Không còn suy luận "vắng mặt trong mảng = đã xóa" như trước, vì
+                                        // mảng `missions` cục bộ có thể đang cũ hơn server (mất mission của
+                                        // người khác một cách vô tình nếu chỉ dựa vào việc lược ra).
+                                        const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== mission.id);
+                                        const ok = await notifyProjectChatAfterSave(
+                                          onUpdateTask(selectedTask.id, {
+                                            missions: updatedMissions,
+                                            deletedMissionIds: [mission.id]
+                                          }),
+                                          `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
+                                          { type: 'mission', id: mission.id }
+                                        );
+                                        if (ok === false) {
+                                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể xóa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                                        }
+                                      }
+                                    }}
+                                    className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
+                                    title="Xóa nhiệm vụ này"
+                                  >
+                                    <Trash2 className="w-3 h-3 text-rose-400" />
+                                  </button>
+                                </>
                               )}
                               <span className={`text-[9px] font-bold px-2 py-0.5 rounded border whitespace-nowrap leading-none select-none ${
-                                isCompleted 
-                                  ? 'bg-emerald-950/40 text-emerald-300 border-emerald-900/30' 
-                                  : 'bg-slate-900/40 text-amber-505 border-slate-850'
+                                isCompleted
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : mission.status === 'doing'
+                                    ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                    : 'bg-slate-50 text-slate-600 border-slate-200'
                               }`}>
-                                {isCompleted ? 'Hoàn thành' : 'Đang làm'}
+                                {isCompleted ? 'Hoàn thành' : mission.status === 'doing' ? 'Đang làm' : 'Chưa làm'}
                               </span>
                               <ArrowRight className="w-3.5 h-3.5 text-slate-550 group-hover:text-slate-300 group-hover:translate-x-0.5 transition-all" />
                             </div>
@@ -2209,7 +2933,9 @@ export default function TaskDetailModal({
                       );
                     })}
                   </div>
-                )}
+                  </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -2232,7 +2958,7 @@ export default function TaskDetailModal({
                       const queryNorm = removeVietnameseTones(row.searchQuery);
                       const critNorm = removeVietnameseTones(crit.content);
                       return critNorm.includes(queryNorm);
-                    }).slice(0, 7);
+                    });
 
                     return (
                       <div key={row.id} className="relative p-4 border border-slate-900 rounded-xl bg-slate-950/40 space-y-3">
@@ -2296,16 +3022,16 @@ export default function TaskDetailModal({
 
                           {/* Suggestions block */}
                           {row.isSearchOpen && filteredCriteria.length > 0 && (
-                            <div className="absolute z-55 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-850 rounded-xl shadow-2xl p-1">
+                            <div className="absolute z-55 left-0 right-0 mt-1 max-h-60 overflow-y-auto overscroll-contain bg-slate-950 border border-slate-850 rounded-xl shadow-2xl p-1">
                               {filteredCriteria.map(crit => {
                                 let catText = 'Tác phong';
-                                let catColor = 'text-purple-400 bg-purple-950/40 border-purple-900/30';
+                                let catColor = 'text-purple-700 bg-purple-50 border-purple-200';
                                 if (crit.category === 'progress') {
                                   catText = 'Hiệu suất';
-                                  catColor = 'text-amber-400 bg-amber-955/40 border-amber-900/30';
+                                  catColor = 'text-amber-700 bg-amber-50 border-amber-200';
                                 } else if (crit.category === 'reporting') {
                                   catText = 'Báo cáo';
-                                  catColor = 'text-pink-450 bg-pink-955/40 border-pink-900/30';
+                                  catColor = 'text-pink-700 bg-pink-50 border-pink-200';
                                 }
 
                                 return (
@@ -2344,9 +3070,9 @@ export default function TaskDetailModal({
                               <span className="text-[10px] text-slate-500">Tiêu chí:</span>
                               <span className="text-[11px] text-slate-200 font-extrabold">"{criterion.content}"</span>
                               <span className={`px-2 py-0.5 rounded text-[9.5px] font-bold border ${
-                                criterion.category === 'progress' ? 'text-amber-400 bg-amber-955/40 border-amber-900/40' :
-                                criterion.category === 'reporting' ? 'text-pink-400 bg-pink-955/40 border-pink-900/40' :
-                                'text-purple-400 bg-purple-955/40 border-purple-900/40'
+                                criterion.category === 'progress' ? 'text-amber-700 bg-amber-50 border-amber-200' :
+                                criterion.category === 'reporting' ? 'text-pink-700 bg-pink-50 border-pink-200' :
+                                'text-purple-700 bg-purple-50 border-purple-200'
                               }`}>
                                 {criterion.category === 'progress' ? 'Hiệu suất / Tiến độ' : criterion.category === 'reporting' ? 'Báo cáo / Thái độ' : 'Tác phong 5S'}
                               </span>
@@ -2368,9 +3094,9 @@ export default function TaskDetailModal({
                                 return (
                                   <div 
                                     key={empId} 
-                                    className="flex items-center gap-1.5 bg-slate-900/85 text-white border border-slate-800 px-2 py-1 rounded-xl text-[10px] font-bold"
+                                    className="flex items-center gap-1.5 bg-slate-100 text-slate-800 border border-slate-300 px-2 py-1 rounded-xl text-[10px] font-bold"
                                   >
-                                    <div className="w-4 h-4 rounded-full bg-slate-800 flex items-center justify-center font-extrabold text-[8px] uppercase text-emerald-400 border border-emerald-900/20 select-none">
+                                    <div className="w-4 h-4 rounded-full bg-emerald-50 flex items-center justify-center font-extrabold text-[8px] uppercase text-emerald-700 border border-emerald-200 select-none">
                                       {emp.name.substring(0, 2).toUpperCase()}
                                     </div>
                                     <span>{emp.name}</span>
@@ -2396,7 +3122,7 @@ export default function TaskDetailModal({
                               onClick={() => {
                                 setViolationRows(prev => prev.map(r => r.id === row.id ? { ...r, isTagOpen: !r.isTagOpen } : r));
                               }}
-                              className="w-5.5 h-5.5 bg-indigo-950 hover:bg-indigo-900 text-indigo-400 rounded-full flex items-center justify-center border border-indigo-900/40 text-[11px] font-black transition-all shrink-0 cursor-pointer active:scale-90 align-middle"
+                              className="w-5.5 h-5.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center border border-indigo-200 text-[11px] font-black transition-all shrink-0 cursor-pointer active:scale-90 align-middle"
                               title="Thêm người vi phạm"
                             >
                               +
@@ -2655,13 +3381,13 @@ export default function TaskDetailModal({
                       <div className="max-h-60 overflow-y-auto space-y-2 pr-1" id="submitted_violations_list">
                         {submittedViolations.map((item: any, idx: number) => {
                           let catText = 'Tác phong 5S';
-                          let catColor = 'text-purple-400 bg-purple-955/30 border-purple-900/40';
+                          let catColor = 'text-purple-700 bg-purple-50 border-purple-200';
                           if (item.category === 'progress') {
                             catText = 'Hiệu suất / Tiến độ';
-                            catColor = 'text-amber-400 bg-amber-955/35 border-amber-900/40';
+                            catColor = 'text-amber-700 bg-amber-50 border-amber-200';
                           } else if (item.category === 'reporting') {
                             catText = 'Báo cáo / Thái độ';
-                            catColor = 'text-pink-400 bg-pink-955/35 border-pink-900/40';
+                            catColor = 'text-pink-700 bg-pink-50 border-pink-200';
                           }
 
                           return (
@@ -2703,102 +3429,6 @@ export default function TaskDetailModal({
             )}
           </div>
 
-          {/* NHÓM CHAT CÔNG VIỆC CON */}
-          <div className="bg-slate-950 border border-slate-850 p-3.5 rounded-xl flex-1 flex flex-col min-h-[300px] mt-4">
-            {!taskGroup ? (
-              /* Chưa có nhóm chat → nút tạo nhanh */
-              <div className="flex-1 flex flex-col items-center justify-center gap-4 py-8">
-                <div className="w-16 h-16 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-                  <MessageSquare className="w-7 h-7 text-indigo-400" />
-                </div>
-                <div className="text-center">
-                  <p className="text-[12px] text-slate-300 font-bold">Nhóm chat công việc</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Tạo nhóm để thảo luận và theo dõi cập nhật tự động</p>
-                </div>
-                <button
-                  onClick={async () => { const g = await createTaskChatGroup(); if (g) addToast({ title: '✅ Đã tạo', message: `Nhóm "${g.name}" sẵn sàng`, type: 'success' }); }}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold rounded-lg transition-all cursor-pointer shadow-lg flex items-center gap-2"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  Tạo nhóm hội thoại của Tin Nhắn
-                </button>
-                <p className="text-[9px] text-slate-600 text-center max-w-[280px]">
-                  Nhóm sẽ bao gồm: những người liên quan của dự án, người được giao, người giao việc, PM. Mọi thay đổi sẽ được tự động cập nhật vào Tin Nhắn.
-                </p>
-              </div>
-            ) : (
-              /* Đã có nhóm chat → hiển thị khung chat mini */
-              <>
-                <div className="flex justify-between items-center border-b border-slate-900 pb-2 shrink-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-[9px] shrink-0"
-                      style={{ backgroundColor: taskGroup.color, color: '#FFFFFF' }}>
-                      {taskGroup.avatar}
-                    </div>
-                    <div className="min-w-0">
-                      <span className="font-extrabold uppercase text-[10px] text-indigo-400 tracking-wider flex items-center gap-1">
-                        <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-                        NHÓM CHAT
-                      </span>
-                      <p className="text-[8px] text-slate-500 truncate">{taskGroup.participantIds.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).length} thành viên</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => setShowTaskChatAddMember(true)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-indigo-400 hover:text-white hover:bg-indigo-500/20 transition-all cursor-pointer border border-indigo-500/30"
-                      title="Thêm thành viên nhanh"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-[8px] bg-indigo-950/40 text-indigo-300 font-bold px-1.5 py-0.5 rounded border border-indigo-900/30 whitespace-nowrap">
-                      #{selectedTask.name.substring(0, 15)}..
-                    </span>
-                  </div>
-                </div>
-
-                {/* Message Feed - combined comments + system logs */}
-                <div className="flex-1 overflow-y-auto my-2 pr-1 space-y-1.5 max-h-[320px]" id="task_chat_scroller">
-                  {combinedItems.length === 0 ? (
-                    <div className="text-center py-8 text-slate-600 text-[10px]">Chưa có thảo luận.</div>
-                  ) : (
-                    combinedItems.map(item => {
-                      // System message from chat store (task activity)
-                      if ((item as any).system) {
-                        return (
-                          <div key={item.id} className="flex items-center gap-1.5 text-[9px] text-indigo-300 px-2 py-0.5 bg-indigo-950/20 rounded-lg mx-auto text-center max-w-[95%]">
-                            <Zap className="w-3 h-3 shrink-0" />
-                            <span><strong className="text-indigo-200">{item.senderName}</strong> • {item.content}</span>
-                          </div>
-                        );
-                      }
-                      const isMe = item.senderName === currentUser.name;
-                      return (
-                        <div key={item.id} className={`flex gap-1.5 items-start ${isMe ? 'flex-row-reverse' : ''}`}>
-                          <div className="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center font-black text-[7px] text-slate-300 shrink-0">
-                            {item.senderName?.substring(0, 2).toUpperCase() || '??'}
-                          </div>
-                          <div className={`max-w-[88%] ${isMe ? 'text-right' : ''}`}>
-                            <div className={`px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed ${
-                              isMe ? 'bg-indigo-600 text-white rounded-tr-md' : 'bg-slate-900 text-slate-300 rounded-tl-md border border-slate-850/60'
-                            }`}>
-                              <p className="whitespace-pre-wrap">{item.content}</p>
-                            </div>
-                            <span className="text-[7px] text-slate-600 mt-0.5 block">{item.displayTime}</span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Read-only footer: tất cả tin nhắn đều tự động từ các thao tác */}
-                <div className="mt-auto border-t border-slate-900 pt-2 text-center text-[9px] text-slate-500 font-bold">
-                  🔒 Nhóm chat tự động cập nhật theo mọi thao tác trên công việc
-                </div>
-              </>
-            )}
-          </div>
 
         </div>
 
@@ -2821,7 +3451,7 @@ export default function TaskDetailModal({
                     <div className="space-y-2" id="connected_tools_menu">
                       <span className="font-black text-[10px] text-slate-450 flex items-center justify-between uppercase tracking-wider border-b border-white/5 pb-1 select-none">
                         <span>Công cụ liên thông</span>
-                        <span className="bg-sky-500/10 text-sky-400 text-[8.5px] px-1.5 py-0.5 rounded-md border border-sky-500/20 font-mono tracking-normal normal-case shrink-0">LIÊN THÔNG</span>
+                        <span className="bg-sky-50 text-sky-700 text-[8.5px] px-1.5 py-0.5 rounded-md border border-sky-200 font-mono tracking-normal normal-case shrink-0">LIÊN THÔNG</span>
                       </span>
 
                       {selectedTask.status === 'todo' ? (
@@ -2841,7 +3471,7 @@ export default function TaskDetailModal({
                               }}
                               className={`w-full border p-2.5 rounded-xl flex items-center gap-2 font-bold text-left transition-colors ${
                                 isCompleted
-                                  ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-400 cursor-pointer'
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-pointer'
                                   : isApprovalLocked
                                     ? 'bg-slate-900 border-slate-800 text-indigo-400 hover:bg-slate-850 cursor-pointer'
                                     : 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-300 hover:text-white cursor-pointer'
@@ -2926,10 +3556,14 @@ export default function TaskDetailModal({
                 {selectedTask.status !== 'todo' && (
                   <>
                     {selectedTask.isDocGenerationEnabled === true && (() => {
-                      const projectArchivedQuotes = archivedQuotesList.filter(q => 
-                        q.projectId === project?.id && 
-                        (q._sectorType === project?.type || (!q._sectorType && project?.type === 'general'))
-                      );
+                      // Khớp hồ sơ lưu trữ theo dự án: ưu tiên projectId, fallback projectName.
+                      // (Không lọc theo _sectorType để tránh loại nhầm hồ sơ đã gắn đúng dự án)
+                      const targetProjectId = project?.id || selectedTask?.projectId;
+                      const projectArchivedQuotes = archivedQuotesList.filter(q => {
+                        if (targetProjectId) return q.projectId === targetProjectId;
+                        if (project?.name) return q.projectName === project.name;
+                        return false;
+                      });
                       const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                       const hasQuoteFile = latestArchivedQuote;
 
@@ -2949,67 +3583,68 @@ export default function TaskDetailModal({
                       let contractStatusText = "Chưa Lập";
                       let contractStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
                       if (hasQuoteFile) {
-                        if (!latestArchivedQuote.isApproved) {
+                        // Hồ sơ Hợp Đồng tự sinh từ Báo Giá → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if (latestArchivedQuote.contractApproved) {
+                          contractStatusText = "Đã Duyệt";
+                          contractStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
                           contractStatusText = "Chờ Duyệt";
                           contractStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                        } else if (latestArchivedQuote.contractHtml) {
-                          if (latestArchivedQuote.contractApproved) {
-                            contractStatusText = "Đã Duyệt";
-                            contractStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
-                          } else {
-                            contractStatusText = "Chờ Duyệt";
-                            contractStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                          }
                         }
                       }
 
                       let acceptanceStatusText = "Chưa Lập";
                       let acceptanceStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
                       if (hasQuoteFile) {
-                        if (!latestArchivedQuote.isApproved) {
+                        // Hồ sơ Nghiệm Thu tự sinh từ Báo Giá → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if (latestArchivedQuote.acceptanceApproved) {
+                          acceptanceStatusText = "Đã Duyệt";
+                          acceptanceStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
                           acceptanceStatusText = "Chờ Duyệt";
                           acceptanceStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                        } else if (latestArchivedQuote.acceptanceHtml) {
-                          if (latestArchivedQuote.acceptanceApproved) {
-                            acceptanceStatusText = "Đã Duyệt";
-                            acceptanceStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
-                          } else {
-                            acceptanceStatusText = "Chờ Duyệt";
-                            acceptanceStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                          }
                         }
                       }
 
                       let liquidationStatusText = "Chưa Lập";
                       let liquidationStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
                       if (hasQuoteFile) {
-                        if (!latestArchivedQuote.isApproved) {
+                        // Hồ sơ Thanh Lý tự sinh từ Báo Giá → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if (latestArchivedQuote.liquidationApproved) {
+                          liquidationStatusText = "Đã Duyệt";
+                          liquidationStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
                           liquidationStatusText = "Chờ Duyệt";
                           liquidationStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                        } else if (latestArchivedQuote.liquidationHtml) {
-                          if (latestArchivedQuote.liquidationApproved) {
-                            liquidationStatusText = "Đã Duyệt";
-                            liquidationStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
-                          } else {
-                            liquidationStatusText = "Chờ Duyệt";
-                            liquidationStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
-                          }
                         }
                       }
+
+                      // Điều hướng Menu Hồ Sơ Dự Án sang Lưu Trữ Hồ Sơ theo lĩnh vực (Xây dựng / Nội thất / Cơ khí)
+                      const quoteLocked = quoteStatusText === 'Chưa Lập';
+                      const goArchive = (docType: 'quote' | 'contract' | 'acceptance' | 'liquidation' = 'quote') => {
+                        const targetProjectId = project?.id || selectedTask?.projectId;
+                        window.dispatchEvent(new CustomEvent('hl-switch-tab', {
+                          detail: {
+                            tab: sectorArchiveTab(project?.type),
+                            projectId: targetProjectId,
+                            customerId: project?.customerId,
+                            quotesSubTab: 'archive',
+                            docType,
+                          },
+                        }));
+                        onClose();
+                      };
 
                       return (
                         <div className="space-y-2 pt-4 border-t border-slate-900/60" id="project_docs_menu">
                           <span className="font-black text-[10px] text-slate-450 flex items-center justify-between uppercase tracking-wider border-b border-white/5 pb-1 select-none">
                             <span>Menu Hồ Sơ Dự Án</span>
-                            <span className="bg-indigo-500/10 text-indigo-400 text-[8.5px] px-1.5 py-0.5 rounded-md border border-indigo-500/20 font-mono tracking-normal normal-case shrink-0">HỒ SƠ</span>
+                            <span className="bg-indigo-50 text-indigo-700 text-[8.5px] px-1.5 py-0.5 rounded-md border border-indigo-200 font-mono tracking-normal normal-case shrink-0">HỒ SƠ</span>
                           </span>
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('quotation');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
+                            onClick={() => goArchive('quote')}
                             className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-indigo-400 hover:text-indigo-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
                           >
                             <div className="flex items-center gap-2">
@@ -3023,11 +3658,9 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('contract');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-400 hover:text-rose-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            onClick={() => goArchive('contract')}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-400 hover:text-rose-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
                               <Briefcase className="w-4 h-4 text-rose-400" />
@@ -3040,11 +3673,9 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('acceptance');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            onClick={() => goArchive('acceptance')}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
                               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -3057,11 +3688,9 @@ export default function TaskDetailModal({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setActiveConnectedTool('liquidation');
-                              setConnectedTaskId(selectedTask.id);
-                            }}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-amber-400 hover:text-amber-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            onClick={() => goArchive('liquidation')}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-amber-400 hover:text-amber-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
                               <Award className="w-4 h-4 text-amber-400" />
@@ -3104,7 +3733,7 @@ export default function TaskDetailModal({
                         <div className="space-y-2 pt-4 border-t border-slate-900/60" id="subcontractor_tool_menu">
                           <span className="font-black text-[10px] text-slate-450 flex items-center justify-between uppercase tracking-wider border-b border-white/5 pb-1 select-none">
                             <span>🤝 Menu Thầu Phụ</span>
-                            <span className="bg-orange-500/10 text-orange-400 text-[8.5px] px-1.5 py-0.5 rounded-md border border-orange-500/20 font-mono tracking-normal normal-case shrink-0">THẦU PHỤ</span>
+                            <span className="bg-orange-50 text-orange-700 text-[8.5px] px-1.5 py-0.5 rounded-md border border-orange-200 font-mono tracking-normal normal-case shrink-0">THẦU PHỤ</span>
                           </span>
 
                           <button
@@ -3112,10 +3741,18 @@ export default function TaskDetailModal({
                             onClick={() => {
                               if (matchedContract) {
                                 // Đã có HĐ → set ID để App.tsx redirect tới Lưu Trữ Hồ Sơ Thầu Phụ (Đường 2)
+                                // Xóa hl_preselected_task_id còn sót lại từ lần bấm "Lập HĐ mới" trước đó
+                                // (nếu không xóa, dự án nhiều thầu phụ có thể lẫn dữ liệu công việc cũ).
+                                localStorage.removeItem('hl_preselected_task_id');
                                 localStorage.setItem('hl_view_contract_id', matchedContract.id);
                               } else {
                                 // Chưa có HĐ → set task ID để form Lập HĐ tự điền dự án/thầu phụ/công việc
+                                // Xóa hl_view_contract_id còn sót lại từ lần xem HĐ khác trước đó — nếu không,
+                                // QuotationSystem sẽ tự nạp nhầm hợp đồng cũ (kể cả đã duyệt) vào form đang lập
+                                // cho thầu phụ mới, khiến hợp đồng mới bị khóa do "dính" trạng thái Đã Duyệt.
+                                localStorage.removeItem('hl_view_contract_id');
                                 localStorage.setItem('hl_preselected_task_id', selectedTask.id);
+                                window.dispatchEvent(new CustomEvent('hl-subcontractor-new-contract-requested', { detail: { taskId: selectedTask.id } }));
                               }
 
                               if (onRedirectToSubcontractor) {
@@ -3138,9 +3775,7 @@ export default function TaskDetailModal({
                             <button
                               type="button"
                               onClick={() => {
-                                setCtCostType('contractor-advance');
-                                setActiveConnectedTool('cost');
-                                setConnectedTaskId(selectedTask.id);
+                                setIsAdvancingSubcontractor(true);
                               }}
                               className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 p-2.5 rounded-xl flex items-center justify-start gap-2 font-bold cursor-pointer transition-colors text-xs text-left"
                             >
@@ -3165,16 +3800,28 @@ export default function TaskDetailModal({
             const isAssignee = currentUser.id === selectedTask.assigneeId;
             const isAssigner = currentUser.id === selectedTask.assignerId || isUserInRoleGroup(currentUser.id, 'role_admin') || currentUser.id === project?.pmId;
 
+            // Chặn Hoàn thành công việc / Gửi phê duyệt khi còn nhiệm vụ (missions) chưa hoàn thành.
+            const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
+            const allMissionsCompleted = pendingMissions.length === 0;
+            const missionBlockMsg = `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi ${selectedTask.isApprovalRequired === true ? 'gửi yêu cầu phê duyệt' : 'hoàn thành công việc'} này.`;
+
             if (selectedTask.status === 'todo') {
               if (isAssignee) {
                 return (
                   <button
                     type="button"
-                    onClick={() => {
-                      updateTaskWithChat(selectedTask.id, {
-                        status: 'doing',
-                        completionRate: 20
-                      });
+                    onClick={async () => {
+                      const ok = await notifyProjectChatAfterSave(
+                        onUpdateTask(selectedTask.id, {
+                          status: 'doing',
+                          completionRate: 20
+                        }),
+                        `🙋 ${currentUser.name} đã Nhận Việc "${selectedTask.name}".`,
+                        { type: 'task', id: selectedTask.id }
+                      );
+                      if (ok === false) {
+                        addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái Nhận Việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                      }
                     }}
                     className="bg-sky-600 hover:bg-sky-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
                   >
@@ -3197,13 +3844,26 @@ export default function TaskDetailModal({
                   return (
                     <button
                       type="button"
-                      onClick={() => {
-                        updateTaskWithChat(selectedTask.id, {
+                      disabled={!allMissionsCompleted}
+                      title={!allMissionsCompleted ? missionBlockMsg : 'Hoàn thành công việc'}
+                      onClick={async () => {
+                        // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                        if (!allMissionsCompleted) {
+                          addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
+                          return;
+                        }
+                        const ok = await onUpdateTask(selectedTask.id, {
                           status: 'completed',
                           completionRate: 100
                         });
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái hoàn thành công việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                          return;
+                        }
+                        // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                        notifyProjectChat(`🎉 ${currentUser.name} (Phụ Trách Chính) đã HOÀN THÀNH công việc "${selectedTask.name}".`);
                       }}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
+                      className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-emerald-600' : ''}`}
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       Hoàn thành công việc
@@ -3213,10 +3873,17 @@ export default function TaskDetailModal({
                   return (
                     <button
                       type="button"
+                      disabled={!allMissionsCompleted}
+                      title={!allMissionsCompleted ? missionBlockMsg : 'Gửi yêu cầu phê duyệt'}
                       onClick={() => {
+                        // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                        if (!allMissionsCompleted) {
+                          addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
+                          return;
+                        }
                         setShowApprovalWarning(true);
                       }}
-                      className="bg-rose-600 hover:bg-rose-500 text-white font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md animate-pulse"
+                      className={`bg-rose-600 hover:bg-rose-500 text-white font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md animate-pulse ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-rose-600' : ''}`}
                     >
                       <Shield className="w-4 h-4" />
                       Yêu cầu phê duyệt
@@ -3238,11 +3905,18 @@ export default function TaskDetailModal({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        updateTaskWithChat(selectedTask.id, {
-                          status: 'doing',
-                          completionRate: 50
-                        });
+                      onClick={async () => {
+                        const ok = await notifyProjectChatAfterSave(
+                          onUpdateTask(selectedTask.id, {
+                            status: 'doing',
+                            completionRate: 50
+                          }),
+                          `❌ ${currentUser.name} đã TỪ CHỐI duyệt công việc "${selectedTask.name}".`,
+                          { type: 'task', id: selectedTask.id }
+                        );
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái Từ Chối duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                        }
                       }}
                       className="bg-rose-600 hover:bg-rose-500 text-white font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-sm"
                     >
@@ -3251,13 +3925,28 @@ export default function TaskDetailModal({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        updateTaskWithChat(selectedTask.id, {
-                          status: 'completed',
-                          completionRate: 100
-                        });
+                      disabled={!allMissionsCompleted}
+                      title={!allMissionsCompleted ? missionBlockMsg : 'Xét duyệt hoàn thành công việc'}
+                      onClick={async () => {
+                        // ⛔ Chặn khi còn nhiệm vụ chưa hoàn thành.
+                        if (!allMissionsCompleted) {
+                          addToast({ title: '⚠️ Còn nhiệm vụ chưa hoàn thành', message: missionBlockMsg, type: 'warning' });
+                          return;
+                        }
+                        const ok = await notifyProjectChatAfterSave(
+                          onUpdateTask(selectedTask.id, {
+                            status: 'completed',
+                            completionRate: 100
+                          }),
+                          `✅ ${currentUser.name} đã XÉT DUYỆT hoàn thành công việc "${selectedTask.name}".`,
+                          { type: 'task', id: selectedTask.id }
+                        );
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái hoàn thành công việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                          return;
+                        }
                       }}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
+                      className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-emerald-600' : ''}`}
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       Xét Duyệt
@@ -3266,7 +3955,7 @@ export default function TaskDetailModal({
                 );
               } else {
                 return (
-                  <span className="text-[10px] text-amber-400 bg-amber-950/40 border border-amber-900/40 px-3 py-1.5 rounded-lg select-none">
+                  <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg select-none">
                     ⏳ Đang chờ người giao việc [{assigner?.name || 'Quản lý'}] phê duyệt nghiệm thu
                   </span>
                 );
@@ -3286,57 +3975,10 @@ export default function TaskDetailModal({
 
       </div>
 
-      {/* QUICK ADD MEMBER TO TASK CHAT GROUP */}
-      {showTaskChatAddMember && taskGroup && (
-        <div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] text-slate-100 font-sans"
-          onClick={(e) => { e.stopPropagation(); setShowTaskChatAddMember(false); }}
-        >
-          <div
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">👥 Thêm thành viên vào nhóm chat</h3>
-              <button onClick={() => setShowTaskChatAddMember(false)} className="text-slate-400 hover:text-white cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="max-h-[400px] overflow-y-auto space-y-1 border border-slate-700 rounded-lg p-2">
-              {employees.filter(e => !taskGroup.participantIds.includes(e.id)).map(emp => (
-                <div key={emp.id} onClick={() => {
-                  const ok = addMemberToTaskChat(emp.id);
-                  if (ok) {
-                    addToast({ title: '✅ Đã thêm', message: `${emp.name} đã vào nhóm chat`, type: 'success' });
-                  }
-                }}
-                  className="flex items-center gap-2 p-2 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-                >
-                  <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[9px] font-bold text-indigo-400 shrink-0">
-                    {emp.name.substring(0, 2).toUpperCase()}
-                  </div>
-                  <span className="text-[12px] text-white flex-1">{emp.name}</span>
-                  <span className="text-[9px] text-slate-500">{emp.department}</span>
-                  <Plus className="w-3.5 h-3.5 text-emerald-500" />
-                </div>
-              ))}
-              {employees.filter(e => !taskGroup.participantIds.includes(e.id)).length === 0 && (
-                <p className="text-[12px] text-slate-500 text-center py-4">Tất cả nhân viên đã có trong nhóm</p>
-              )}
-            </div>
-            <div className="flex justify-end">
-              <button onClick={() => setShowTaskChatAddMember(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-400 text-[12px] font-semibold rounded-lg hover:bg-slate-700 transition-all cursor-pointer">
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showApprovalWarning && (
         <div 
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] text-slate-100 font-sans"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] text-slate-100 font-sans animate-fadeIn"
           onClick={(e) => {
             e.stopPropagation();
             setShowApprovalWarning(false);
@@ -3413,7 +4055,7 @@ export default function TaskDetailModal({
         const isMissionCompleted = mission.status === 'completed';
         const isMissionAssignee = mission.memberIds?.includes(currentUser.id) || false;
         const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
-        const hasMissionPermission = canReceive || canAssignMembers || isMissionMainAssignee;
+        const hasMissionPermission = canReceive || canAssignMembers || canManageSubTask || isMissionMainAssignee;
 
         return (
           <div 
@@ -3422,9 +4064,10 @@ export default function TaskDetailModal({
               e.stopPropagation();
               setSelectedMissionId(null);
               setMissionAttachedFile(null);
+              resetMissionReportState();
             }}
           >
-            <div 
+            <div
               className="bg-slate-950 border-l border-slate-850 w-full max-w-md h-full flex flex-col shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
@@ -3442,6 +4085,7 @@ export default function TaskDetailModal({
                   onClick={() => {
                     setSelectedMissionId(null);
                     setMissionAttachedFile(null);
+                    resetMissionReportState();
                   }}
                   className="p-1 px-2 rounded-lg bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white border border-slate-800 transition cursor-pointer text-[10.5px] font-bold"
                 >
@@ -3451,9 +4095,55 @@ export default function TaskDetailModal({
 
               {/* Scrollable details */}
               <div className="p-5 space-y-4 overflow-y-auto flex-1">
-                {/* Phụ trách chính */}
+                {/* Phụ trách chính — bắt buộc phải có trước khi hoàn thành nhiệm vụ */}
                 <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
-                  <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider">👑 Phụ trách chính nhiệm vụ:</span>
+                  <div className="flex justify-between items-center">
+                    <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider">👑 Phụ trách chính nhiệm vụ <span className="text-rose-400">*</span>:</span>
+                    {!mission.mainAssigneeId && hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                      <div className="relative shrink-0">
+                        <button className="flex items-center gap-1 text-[8.5px] font-bold text-amber-700 hover:text-amber-800 transition bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
+                          <Plus className="w-2 h-2" /> Gán
+                        </button>
+                        <select
+                          value=""
+                          onChange={async (e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const updatedMissions = (selectedTask.missions || []).map(m => {
+                              if (m.id === mission.id) {
+                                // Phụ trách chính cũng được tính là Nhân sự tham gia thực hiện
+                                return {
+                                  ...m,
+                                  mainAssigneeId: val,
+                                  memberIds: Array.from(new Set([...(m.memberIds || []), val])),
+                                };
+                              }
+                              return m;
+                            });
+                            const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
+                            const ok = await notifyProjectChatAfterSave(
+                              onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                              `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                              { type: 'mission', id: mission.id },
+                              // Thêm người vừa được gán vào nhóm chat dự án.
+                              [val]
+                            );
+                            if (ok === false) {
+                              addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                            }
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full rounded"
+                        >
+                          <option value="">Chọn phụ trách chính...</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.id} className="bg-slate-950 text-slate-100">
+                              {emp.name} ({emp.department || emp.role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
                   <div className="pt-1">
                     {mission.mainAssigneeId ? (() => {
                       const emp = employees.find(e => e.id === mission.mainAssigneeId);
@@ -3463,11 +4153,11 @@ export default function TaskDetailModal({
                         ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
                         : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                       return (
-                        <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg w-fit">
+                        <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg w-fit">
                           <div className="w-5.5 h-5.5 rounded-full bg-gradient-to-br from-amber-500 to-yellow-500 flex items-center justify-center text-[8px] font-black text-slate-950 shrink-0">
                             {initials}
                           </div>
-                          <span className="text-[10px] text-amber-200 font-extrabold">{emp.name} ({emp.role?.toUpperCase() || '—'})</span>
+                          <span className="text-[10px] text-amber-800 font-extrabold">{emp.name} ({emp.role?.toUpperCase() || '—'})</span>
                         </div>
                       );
                     })() : (
@@ -3483,12 +4173,12 @@ export default function TaskDetailModal({
                     {/* Add member button in popup detail */}
                     {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && employees.filter(emp => !(mission.memberIds || []).includes(emp.id)).length > 0 && (
                       <div className="relative shrink-0">
-                        <button className="flex items-center gap-1 text-[8.5px] font-bold text-emerald-450 hover:text-emerald-305 transition bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                        <button className="flex items-center gap-1 text-[8.5px] font-bold text-emerald-700 hover:text-emerald-800 transition bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200">
                           <Plus className="w-2 h-2" /> Thêm thợ
                         </button>
                         <select
                           value=""
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const val = e.target.value;
                             if (!val) return;
                             const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -3497,7 +4187,17 @@ export default function TaskDetailModal({
                               }
                               return m;
                             });
-                            updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                            const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
+                            const ok = await notifyProjectChatAfterSave(
+                              onUpdateTask(selectedTask.id, { missions: updatedMissions }),
+                              `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
+                              { type: 'mission', id: mission.id },
+                              // Thêm nhân sự vừa được gán vào nhóm chat dự án.
+                              [val]
+                            );
+                            if (ok === false) {
+                              addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thay đổi. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                            }
                           }}
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full rounded"
                         >
@@ -3531,13 +4231,22 @@ export default function TaskDetailModal({
                             <button
                               type="button"
                               onClick={() => {
+                                // Phụ trách chính là trường bắt buộc và luôn là Nhân sự tham gia —
+                                // không cho gỡ khỏi danh sách nhân sự (chỉ gỡ qua ô Phụ trách chính).
+                                if (memId === mission.mainAssigneeId) {
+                                  addToast({ title: '⚠️ Không thể gỡ', message: 'Người Phụ trách chính luôn là Nhân sự tham gia thực hiện. Muốn gỡ hãy bỏ chọn Phụ trách chính trước.', type: 'warning' });
+                                  return;
+                                }
                                 const updatedMissions = (selectedTask.missions || []).map(m => {
                                   if (m.id === mission.id) {
                                     return { ...m, memberIds: (m.memberIds || []).filter(id => id !== memId) };
                                   }
                                   return m;
                                 });
-                                updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+                                const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
+                                notifyProjectChat(`➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`);
                               }}
                               className="text-slate-500 hover:text-rose-400 font-extrabold text-[9px] pl-1 cursor-pointer border-none bg-transparent"
                               title={`Xóa ${emp.name}`}
@@ -3553,6 +4262,47 @@ export default function TaskDetailModal({
                     )}
                   </div>
                 </div>
+
+                {/* Checklist kiểm soát kỹ thuật của nhiệm vụ — chuyển từ cấp Công Việc xuống
+                    đây (xem SubTaskMission.checklistTexts, types.ts). Chỉ hiện khi mission có
+                    sẵn đầu mục (thêm lúc khởi tạo ở form "Tạo nhiệm vụ"). */}
+                {mission.checklistTexts && mission.checklistTexts.length > 0 && (
+                  <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
+                    <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider flex items-center gap-1.5">
+                      <ListTodo className="w-3 h-3 text-emerald-400" /> Checklist kiểm soát kỹ thuật:
+                    </span>
+                    <div className="space-y-1.5 pt-1">
+                      {mission.checklistTexts.map((chk, idx) => {
+                        const isChecked = mission.completedChecklistTexts?.includes(chk) || false;
+                        const canToggle = hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed';
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (!canToggle) return;
+                              const currentCompleted = mission.completedChecklistTexts || [];
+                              const updatedCompleted = currentCompleted.includes(chk)
+                                ? currentCompleted.filter(t => t !== chk)
+                                : [...currentCompleted, chk];
+                              const updatedMissions = (selectedTask.missions || []).map(m =>
+                                m.id === mission.id ? { ...m, completedChecklistTexts: updatedCompleted } : m
+                              );
+                              onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                            }}
+                            className={`flex items-center gap-2 text-[10.5px] select-none ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+                          >
+                            <div className={`w-4.5 h-4.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                              isChecked ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'
+                            }`}>
+                              {isChecked ? <Check className="w-3 h-3 stroke-[3]" /> : <span className="text-[8.5px] font-mono font-bold">{idx + 1}</span>}
+                            </div>
+                            <span className={`flex-1 font-mono ${isChecked ? 'text-emerald-700 font-bold line-through' : 'text-slate-300'}`}>{chk}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* 🚗 BIÊN BẢN CÔNG TÁC PHÍ CHUYẾN ĐI (NẾU CÓ) */}
                 <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
@@ -3583,7 +4333,8 @@ export default function TaskDetailModal({
                                 </span>
                               </div>
 
-                              {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                              {/* CTP bị khóa khi nhiệm vụ đã Hoàn thành — không xóa/đổi được (theo yêu cầu) */}
+                              {hasMissionPermission && !isMissionCompleted && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -3596,7 +4347,21 @@ export default function TaskDetailModal({
                                       }
                                       return m;
                                     });
-                                    updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                    // Đồng bộ bản sao cục bộ (ghi đồng bộ xuống localStorage)
+                                    setLocalTravelAllowances(prev => {
+                                      const next = { ...prev, [mission.id]: (prev[mission.id] || []).filter(ta => ta.id !== item.id) };
+                                      try { localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(next)); } catch {}
+                                      return next;
+                                    });
+                                    onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                    // ─── XÓA ĐỒNG BỘ KHỎI BẢNG hrm_travel_expenses ───
+                                    // Trước đây chỉ xóa khỏi missions/local, dòng CTP vẫn nằm lại
+                                    // trong bảng tổng hợp → bảng Công tác phí bị nhân bản (pending
+                                    // mồ côi hiển thị mãi). Xóa cả rowId tương ứng để khỏi dư thừa.
+                                    if (item.rowId) {
+                                      dbService.hrmTravelExpenses.delete(item.rowId)
+                                        .catch((e) => console.warn('[TravelExpense] ⚠️ Xóa Supabase CTP thất bại:', e?.message || e));
+                                    }
                                   }}
                                   className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-150/80 rounded transition cursor-pointer shrink-0"
                                   title="Xóa công tác phí"
@@ -3611,8 +4376,8 @@ export default function TaskDetailModal({
                     )}
                   </div>
 
-                  {/* Form Ghi nhận CTP mới (Nếu chưa hoàn thành) */}
-                  {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                  {/* Form Ghi nhận CTP mới — KHÓA khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
+                  {hasMissionPermission && !isMissionCompleted && (
                     <div className="mt-3.5 pt-3.5 border-t border-slate-150 space-y-3 bg-white p-1 rounded-xl">
                       <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-slate-600">
                         <Plus className="w-3.5 h-3.5 text-emerald-500" /> Đăng ký công tác phí chuyến đi:
@@ -3688,6 +4453,9 @@ export default function TaskDetailModal({
 
                                 const newAllowance = {
                                   id: `ta_${Date.now()}`,
+                                  rowId: (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+                                    ? crypto.randomUUID()
+                                    : `te_${Date.now()}_${Math.floor(Math.random() * 1e9)}`,
                                   memberId: finalMemId,
                                   normId: allowanceNormId,
                                   code: selectedNorm.code,
@@ -3708,7 +4476,38 @@ export default function TaskDetailModal({
                                   return m;
                                 });
 
-                                updateTaskWithChat(selectedTask.id, { missions: updatedMissions });
+                                onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                // Lưu cục bộ để không bị mất khi `tasks` reload từ Supabase.
+                                // Ghi ĐỒNG BỘ xuống localStorage ngay tại đây (không chỉ qua useEffect)
+                                // để chắc chắn sống sót kể cả khi modal bị remount ngay sau đó.
+                                setLocalTravelAllowances(prev => {
+                                  const next = { ...prev, [mission.id]: [...(prev[mission.id] || []), newAllowance] };
+                                  try { localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(next)); } catch {}
+                                  return next;
+                                });
+                                // ─── LƯU TỨC THÌ LÊN SUPABASE (bảng hrm_travel_expenses) ───
+                                // CTP mới luôn ở trạng thái 'pending' (Chờ duyệt) — người được cấu
+                                // hình xét duyệt Công Tác Phí sẽ duyệt/từ chối sau đó, kể cả khi
+                                // nhiệm vụ đã hoàn thành (theo quy trình xét duyệt mới).
+                                persistTravelExpense(newAllowance, mission.name, 'pending');
+
+                                // 📩 Gửi tin nhắn CÁ NHÂN cho người xét duyệt CTP (cấu hình trong
+                                // Phân Quyền → Quyền Phê Duyệt → Công Tác Phí). Best-effort — không
+                                // chặn luồng nếu chưa cấu hình người duyệt hoặc gửi lỗi.
+                                const ctpApprover = getConfiguredApprover('travel_expense');
+                                if (ctpApprover && ctpApprover.id !== currentUser.id) {
+                                  const creatorEmp = employees.find(e => e.id === finalMemId);
+                                  const creatorName = creatorEmp?.name || currentUser.name;
+                                  sendApprovalDirectMessage({
+                                    senderId: currentUser.id,
+                                    senderName: currentUser.name,
+                                    senderRole: currentUser.role,
+                                    recipientId: ctpApprover.id,
+                                    recipientName: ctpApprover.name,
+                                    content: `🚗 ${currentUser.name} vừa đăng ký CÔNG TÁC PHÍ "${selectedNorm.content}" cho ${creatorName} (${Number(selectedNorm.unitPrice).toLocaleString('vi-VN')} đ) trong nhiệm vụ "${mission.name}". Vui lòng xét duyệt.`,
+                                    relatedEntity: { type: 'travel_expense', id: newAllowance.rowId },
+                                  }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin cho người duyệt thất bại:', e?.message || e));
+                                }
 
                                 // Reset form states
                                 setAllowanceNormId('');
@@ -3772,6 +4571,140 @@ export default function TaskDetailModal({
                     )}
                   </div>
                 </div>
+
+                {/* 2. Đính kèm báo cáo (bắt buộc) — mọi định dạng file, không chỉ ảnh */}
+                <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-200 font-extrabold text-[10px] uppercase tracking-wider flex items-center gap-1">
+                      <Paperclip className="w-3.5 h-3.5 text-emerald-400" /> ĐÍNH KÈM BÁO CÁO (BẮT BUỘC):
+                    </span>
+                    <span className={`text-[8.5px] px-1.5 py-0.5 rounded border ${missionReportImages.length > 0 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-rose-700 bg-rose-50 border-rose-200'}`}>
+                      {missionReportImages.length > 0 ? `Đã có ${missionReportImages.length} tệp` : 'Cần ít nhất 1 tệp'}
+                    </span>
+                  </div>
+
+                  {isMissionCompleted ? (
+                    mission.reportImages && mission.reportImages.length > 0 ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                        {mission.reportImages.map((src, i) => (
+                          isImageAttachment(src) ? (
+                            <a key={i} href={src} download={getAttachedFileName(src)} target="_blank" rel="noreferrer" className="block relative group" title="Tải về">
+                              <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800 hover:border-emerald-500/40 transition cursor-pointer" />
+                              <span className="absolute bottom-1 right-1 bg-black/60 group-hover:bg-emerald-600 text-white p-1 rounded transition-colors">
+                                <Download className="w-3 h-3" />
+                              </span>
+                            </a>
+                          ) : (
+                            <a key={i} href={src} download={getAttachedFileName(src)} target="_blank" rel="noreferrer"
+                              className="flex flex-col items-center justify-center gap-1 h-24 rounded-lg border border-slate-800 hover:border-emerald-500/40 bg-slate-950 transition text-center p-1.5">
+                              <FileText className="w-6 h-6 text-indigo-400" />
+                              <span className="text-[9px] text-slate-400 truncate max-w-full">{getAttachedFileName(src)}</span>
+                              <span className="text-[8.5px] text-emerald-500 flex items-center gap-0.5"><Download className="w-2.5 h-2.5" /> Tải về</span>
+                            </a>
+                          )
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="block text-[10px] text-slate-500 italic">Nhiệm vụ này chưa có tệp đính kèm báo cáo.</span>
+                    )
+                  ) : (
+                    <>
+                      {/* Preview danh sách tệp đã chụp / tải lên */}
+                      {missionReportImages.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                          {missionReportImages.map((src, i) => (
+                            <div key={i} className="relative group">
+                              {isImageAttachment(src) ? (
+                                <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800" />
+                              ) : (
+                                <div className="flex flex-col items-center justify-center gap-1 h-24 rounded-lg border border-slate-800 bg-slate-950 text-center p-1.5">
+                                  <FileText className="w-6 h-6 text-indigo-400" />
+                                  <span className="text-[9px] text-slate-400 truncate max-w-full">{getAttachedFileName(src)}</span>
+                                </div>
+                              )}
+                              <a
+                                href={src}
+                                download={getAttachedFileName(src)}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Tải về"
+                                className="absolute bottom-1 left-1 bg-black/60 hover:bg-emerald-600 text-white p-1 rounded border border-slate-850 cursor-pointer"
+                              >
+                                <Download className="w-3 h-3" />
+                              </a>
+                              {hasMissionPermission && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeMissionReportImage(i)}
+                                  className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white text-[9px] p-1 px-1.5 rounded border border-slate-850 cursor-pointer font-bold"
+                                  title="Xóa tệp này"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Nút chụp / tải file báo cáo */}
+                      {hasMissionPermission && (
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={openMissionReportCamera}
+                            disabled={missionReportCameraOpen}
+                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                          >
+                            <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                            {missionReportCameraOpen ? 'Đang mở camera...' : 'Chụp từ Camera'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => missionReportImageInputRef.current?.click()}
+                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <FileUp className="w-3.5 h-3.5 text-indigo-400" />
+                            File báo cáo
+                          </button>
+                          {/* Không giới hạn `accept` — cho phép đính kèm mọi định dạng file
+                              (ảnh, PDF, Word, video...), không chỉ ảnh như trước. */}
+                          <input
+                            ref={missionReportImageInputRef}
+                            type="file"
+                            multiple
+                            onChange={handleMissionReportImageUpload}
+                            className="hidden"
+                          />
+                        </div>
+                      )}
+
+                      {/* Khung camera live */}
+                      {missionReportCameraOpen && (
+                        <div className="relative rounded-lg overflow-hidden border border-emerald-900/40 bg-black mt-2 aspect-video flex flex-col items-center justify-center">
+                          <video ref={missionReportVideoRef} className="w-full h-full object-cover" playsInline muted />
+                          <div className="absolute bottom-1.5 left-0 right-0 flex justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={captureMissionReportImage}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer flex items-center gap-1"
+                            >
+                              <Camera className="w-3.5 h-3.5" /> Chụp hình
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopMissionReportCamera}
+                              className="bg-black/60 hover:bg-black/90 text-white text-[9px] p-1 px-2 rounded border border-slate-850 cursor-pointer font-bold"
+                            >
+                              ✕ Hủy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
               </div>
 
               {/* Footer actions */}
@@ -3781,6 +4714,7 @@ export default function TaskDetailModal({
                   onClick={() => {
                     setSelectedMissionId(null);
                     setMissionAttachedFile(null);
+                    resetMissionReportState();
                   }}
                   className="px-4 py-2 border border-slate-800 hover:border-slate-755 text-slate-400 hover:text-slate-100 rounded-xl text-[10.5px] font-bold transition cursor-pointer"
                 >
@@ -3791,14 +4725,40 @@ export default function TaskDetailModal({
                   <button
                     type="button"
                     disabled={
-                      !hasMissionPermission || 
-                      !missionReportText.trim() || 
-                      missionReportText.trim().length < 10
+                      !hasMissionPermission ||
+                      !missionReportText.trim() ||
+                      missionReportText.trim().length < 10 ||
+                      missionReportImages.length === 0 ||
+                      !mission.mainAssigneeId
                     }
-                    onClick={() => {
-                      if (!missionReportText.trim()) return;
+                    onClick={async () => {
+                      if (!missionReportText.trim() || missionReportImages.length === 0) return;
+                      // Phụ trách chính nhiệm vụ là trường BẮT BUỘC phải có trước khi hoàn thành
+                      if (!mission.mainAssigneeId) {
+                        addToast({ title: '⚠️ Thiếu phụ trách chính', message: 'Vui lòng gán Người Phụ trách chính cho nhiệm vụ trước khi Xác Nhận Hoàn Thành.', type: 'warning' });
+                        return;
+                      }
 
                       const currentMission = (selectedTask.missions || []).find(m => m.id === selectedMissionId);
+
+                      // Gộp Công Tác Phí từ hai nguồn:
+                      //  - currentMission.travelAllowances: nguồn từ selectedTask (có thể bị mất
+                      //    nếu `tasks` reload từ Supabase giữa lúc ghi nhận và lúc hoàn thành).
+                      //  - localTravelAllowances[selectedMissionId]: bản sao cục bộ luôn giữ nguyên.
+                      // Loại trùng theo id để tránh ghi kép.
+                      const dedupeById = (arr: any[]) => {
+                        const seen = new Set<string>();
+                        return (arr || []).filter(ta => {
+                          if (!ta || !ta.id) return false;
+                          if (seen.has(ta.id)) return false;
+                          seen.add(ta.id);
+                          return true;
+                        });
+                      };
+                      const mergedCtp = dedupeById([
+                        ...(currentMission?.travelAllowances || []),
+                        ...(localTravelAllowances[selectedMissionId || ''] || [])
+                      ]);
 
                       // Mark current mission as completed in original task list
                       const updatedMissions = (selectedTask.missions || []).map(m => {
@@ -3807,67 +4767,164 @@ export default function TaskDetailModal({
                             ...m,
                             status: 'completed' as const,
                             workReports: missionReportText.trim(),
-                            evidence: '',
+                            evidence: missionReportImages[0] || '',
+                            reportImages: [...missionReportImages],
+                            travelAllowances: mergedCtp.length > 0 ? mergedCtp : m.travelAllowances,
                             completedAt: new Date().toISOString()
                           };
                         }
                         return m;
                       });
 
-                      // Gửi toàn bộ thông tin Công Tác Phí qua Menu Công tác phí
-                      if (currentMission && currentMission.travelAllowances && currentMission.travelAllowances.length > 0) {
+                      // Push task update — chờ kết quả lưu lên Supabase.
+                      let saveOk: boolean | void;
+                      try {
+                        saveOk = await onUpdateTask(selectedTask.id, {
+                          missions: updatedMissions
+                        });
+                      } catch (err) {
+                        console.error('Lỗi khi lưu hoàn thành nhiệm vụ:', err);
+                        saveOk = false;
+                      }
+                      // ⛔ Nếu lưu thất bại → báo lỗi, KHÔNG gửi CTP / tin nhóm / đóng modal.
+                      if (saveOk === false) {
+                        addToast({
+                          title: '❌ Lưu thất bại',
+                          message: `Không thể lưu trạng thái hoàn thành nhiệm vụ "${mission?.name || selectedMissionId}" lên hệ thống. Vui lòng kiểm tra kết nối và thử lại.`,
+                          type: 'error'
+                        });
+                        return;
+                      }
+
+                      // Gửi toàn bộ thông tin Công Tác Phí qua Menu Công tác phí (HR System)
+                      if (mergedCtp.length > 0) {
                         const project = projects.find(p => p.id === selectedTask.projectId);
                         const customer = customers?.find(c => c.id === project?.customerId);
-                        
+
                         const completedDate = new Date().toLocaleDateString('vi-VN');
                         const projectName = project?.name || 'Chưa rõ';
                         const customerName = customer?.name || 'Khách hàng lẻ';
                         const taskName = selectedTask.name;
-                        const missionName = currentMission.name;
+                        const missionName = currentMission?.name || '';
 
-                        const savedSummary = localStorage.getItem('hl_travel_expenses_summary_v4');
-                        let summaryList = savedSummary ? JSON.parse(savedSummary) : [];
+                        let summaryList: any[] = [];
+                        try {
+                          summaryList = await dbService.hrmTravelExpenses.list();
+                        } catch (err) {
+                          console.warn('Lỗi tải tổng hợp công tác phí từ Supabase:', err);
+                        }
+                        summaryList = summaryList || [];
 
-                        currentMission.travelAllowances.forEach((ta) => {
+                        mergedCtp.forEach((ta, taIdx) => {
                           const emp = employees.find(e => e.id === ta.memberId);
                           const employeeName = emp?.name || 'Chưa gán';
                           const content = ta.content || 'Công tác phí';
                           const amount = ta.amount || 0;
-                          
-                          const nextIdx = summaryList.length + 1;
-                          const code = `THCTP-${String(nextIdx).padStart(3, '0')}`;
+
+                          // id duy nhất (mã hiển thị) + code hiển thị THCTP-XXX.
+                          // `rowId` (UUID) dùng làm khóa chính Supabase — ưu tiên ta.rowId
+                          // (đã sinh lúc "Thêm công tác phí") để upsert lặp lại an toàn, không
+                          // tạo dòng trùng với bản ghi đã lưu tức thì ở bước thêm.
+                          const uniqueId = `THCTP-${Date.now()}-${taIdx}`;
+                          const code = `THCTP-${String(summaryList.length + 1).padStart(3, '0')}`;
+                          let rowId: string = ta.rowId;
+                          if (!rowId) {
+                            rowId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+                              ? crypto.randomUUID()
+                              : `te_${Date.now()}_${taIdx}_${Math.floor(Math.random() * 1e9)}`;
+                          }
 
                           const newSummaryItem = {
-                            id: code,
+                            id: uniqueId,
+                            rowId,
+                            code,
+                            // Giữ nguyên trạng thái 'pending' (Chờ duyệt) khi hoàn thành nhiệm vụ —
+                            // CTP vẫn phải chờ người xét duyệt Công Tác Phí duyệt/từ chối.
+                            status: 'pending',
                             completedDate,
+                            // empId + month phục vụ tính lương (khớp CTP ĐÃ DUYỆT vào đúng kỳ lương).
+                            empId: ta.memberId || emp?.id || undefined,
+                            month: (() => {
+                              const cp = String(completedDate || '').split('/');
+                              return cp.length === 3
+                                ? `${String(Number(cp[1])).padStart(2, '0')}/${cp[2]}`
+                                : '';
+                            })(),
                             projectName,
                             customerName,
                             taskName,
                             missionName,
                             employeeName,
+                            // Giữ nguyên thông tin người khởi tạo (đã lưu lúc "Thêm CTP") —
+                            // tránh upsert ghi đè làm mất creatorId/creatorName.
+                            creatorId: ta.creatorId || currentUser.id,
+                            creatorName: ta.creatorName || currentUser.name,
                             content,
-                            amount
+                            amount,
+                            createdAt: new Date().toISOString()
                           };
 
                           summaryList.push(newSummaryItem);
+
+                          // Gửi lên Supabase (bảng hrm_travel_expenses) — best-effort, không chặn luồng.
+                          // Truyền rowId để upsert cùng dòng đã lưu lúc "Thêm" (idempotent).
+                          dbService.hrmTravelExpenses.save(newSummaryItem, { rowId })
+                            .catch((e) => console.warn('[TravelExpense] ⚠️ Lưu Supabase thất bại (vẫn lưu localStorage):', e?.message || e));
                         });
 
-                        localStorage.setItem('hl_travel_expenses_summary_v4', JSON.stringify(summaryList));
+                        window.dispatchEvent(new CustomEvent('hl-hrm-travel-expenses-updated'));
                       }
 
-                      // Push task update
-                      updateTaskWithChat(selectedTask.id, {
-                        missions: updatedMissions
+                      // 🎉 Thông báo Toast khi Xác Nhận Hoàn Thành nhiệm vụ thành công
+                      addToast({
+                        title: '✅ Hoàn thành nhiệm vụ',
+                        message: `Đã xác nhận hoàn thành nhiệm vụ "${mission?.name || selectedMissionId}"${mergedCtp.length > 0 ? ` và lưu ${mergedCtp.length} công tác phí.` : '.'}`,
+                        type: 'success'
                       });
+                      // Xoá bản sao cục bộ cho nhiệm vụ vừa hoàn thành (đã nằm trong missions của task)
+                      setLocalTravelAllowances(prev => {
+                        if (!prev[selectedMissionId || '']) return prev;
+                        const nxt = { ...prev };
+                        delete nxt[selectedMissionId || ''];
+                        return nxt;
+                      });
+                      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage).
+                      // Kèm BÁO CÁO CÔNG VIỆC + TỆP ĐÍNH KÈM để cả nhóm xem/tải về được.
+                      // Đính kèm giờ có thể là mọi định dạng file (không chỉ ảnh) — phải tự
+                      // nhận diện ảnh hay file thường để tin nhắn hiện đúng (thumbnail ảnh
+                      // hay dòng file kèm nút Tải về, xem MessagesView.tsx).
+                      const _reportText = missionReportText.trim();
+                      const _reportImgs = [...missionReportImages];
+                      const _missionReportMsg = `✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`
+                        + (_reportText ? `\n\n📋 Báo cáo: ${_reportText}` : '')
+                        + (_reportImgs.length > 0 ? `\n📎 ${_reportImgs.length} tệp đính kèm báo cáo.` : '');
+                      notifyProjectChat(
+                        _missionReportMsg,
+                        { type: 'mission', id: mission?.id || selectedMissionId || '' },
+                        _reportImgs.length > 0
+                          ? _reportImgs.map((url, i) => {
+                              const isImg = isImageAttachment(url);
+                              return {
+                                id: `att_${Date.now()}_${i}`,
+                                type: isImg ? ('image' as const) : ('file' as const),
+                                name: getAttachedFileName(url),
+                                url,
+                                mimeType: isImg ? 'image/jpeg' : undefined,
+                              };
+                            })
+                          : undefined
+                      );
 
                       // Clear states
                       setSelectedMissionId(null);
                       setMissionAttachedFile(null);
+                      resetMissionReportState();
                     }}
                     className={`px-5 py-2.5 rounded-xl font-bold text-[10.5px] uppercase tracking-wider flex items-center gap-1.5 transition ${
-                      hasMissionPermission && 
-                      missionReportText.trim() && 
-                      missionReportText.trim().length >= 10
+                      hasMissionPermission &&
+                      missionReportText.trim() &&
+                      missionReportText.trim().length >= 10 &&
+                      mission.mainAssigneeId
                         ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 cursor-pointer shadow-lg shadow-emerald-500/15'
                         : 'bg-slate-850 text-slate-550 border border-slate-800 cursor-not-allowed'
                     }`}
@@ -3881,18 +4938,30 @@ export default function TaskDetailModal({
                 {!isMissionCompleted && hasMissionPermission && (
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (confirm(`Bạn thật sự muốn xóa nhiệm vụ "${mission.name}" này?`)) {
+                        // `missions` chỉ để cập nhật UI optimistic ngay — việc XÓA THẬT ở
+                        // task_missions do `deletedMissionIds` khai báo tường minh quyết định
+                        // (xem syncMissionsDiff, App.tsx — không còn suy luận theo vắng mặt).
                         const updatedMissions = (selectedTask.missions || []).filter(m => m.id !== selectedMissionId);
-                        updateTaskWithChat(selectedTask.id, {
-                          missions: updatedMissions
-                        });
+                        const ok = await notifyProjectChatAfterSave(
+                          onUpdateTask(selectedTask.id, {
+                            missions: updatedMissions,
+                            deletedMissionIds: selectedMissionId ? [selectedMissionId] : []
+                          }),
+                          `🗑️ ${currentUser.name} đã xóa Nhiệm Vụ "${mission.name}".`,
+                          { type: 'mission', id: mission.id }
+                        );
+                        if (ok === false) {
+                          addToast({ title: '❌ Lưu thất bại', message: 'Không thể xóa nhiệm vụ. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+                        }
 
                         setSelectedMissionId(null);
                         setMissionAttachedFile(null);
+                        resetMissionReportState();
                       }
                     }}
-                    className="px-3.5 py-2 rounded-xl border border-rose-950 hover:bg-rose-950/20 text-rose-400 text-[10.5px] font-bold transition cursor-pointer ml-auto"
+                    className="px-3.5 py-2 rounded-xl border border-rose-200 hover:bg-rose-50 text-rose-700 text-[10.5px] font-bold transition cursor-pointer ml-auto"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

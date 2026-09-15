@@ -17,8 +17,11 @@ const getAbbrev = (nameStr: string): string => {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
-  const words = norm.trim().split(/\s+/).filter(Boolean);
-  return words.map(w => w[0].toUpperCase()).join('');
+  // Bỏ các "từ" chỉ toàn ký tự đặc biệt (vd: "-") và bỏ dấu ngoặc/ký tự đặc biệt
+  // đứng đầu mỗi từ (vd: "(Minh" → lấy "M" thay vì "("), tránh mã sinh ra dính
+  // dấu ngoặc/gạch ngang xấu như "AH-PHT(H".
+  const words = norm.trim().split(/\s+/).filter(w => /[a-zA-Z0-9]/.test(w));
+  return words.map(w => (w.match(/[a-zA-Z0-9]/) as RegExpMatchArray)[0].toUpperCase()).join('');
 };
 
 export const QuickAddCustomerModal: React.FC<QuickAddCustomerModalProps> = ({
@@ -43,8 +46,10 @@ export const QuickAddCustomerModal: React.FC<QuickAddCustomerModalProps> = ({
     if (!quickCustName) return;
 
     const abbrev = getAbbrev(quickCustName);
-    const orderIndex = customers.length + 1;
-    const generatedId = `KH_${abbrev}_${orderIndex}`;
+    // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
+    // trùng khi 2 người tạo khách gần như đồng thời, hoặc khi khách cũ đã bị
+    // xóa làm độ dài mảng tụt xuống rồi tái sử dụng lại đúng số thứ tự cũ.
+    const generatedId = `KH_${abbrev}_${Date.now()}`;
 
     const newCust: Customer = {
       id: generatedId,
@@ -86,7 +91,7 @@ export const QuickAddCustomerModal: React.FC<QuickAddCustomerModalProps> = ({
             <input
               type="text"
               disabled
-              value={quickCustName ? `KH_${getAbbrev(quickCustName)}_${customers.length + 1}` : 'KH_[Tên viết tắt]_[STT]'}
+              value={quickCustName ? `KH_${getAbbrev(quickCustName)}_...` : 'KH_[Tên viết tắt]_[Mã duy nhất]'}
               className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-orange-400 font-mono font-bold cursor-not-allowed outline-none"
             />
           </div>

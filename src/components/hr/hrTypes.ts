@@ -1,6 +1,8 @@
 // ─── Core HRM types & interfaces ───────────────────────────────────────
 // Tách từ HumanResourcesManagement.tsx để dễ bảo trì.
 
+import type { PunchMeta } from '../../lib/attendanceMeta';
+
 export interface Role {
   id: string;
   name: string;
@@ -20,8 +22,10 @@ export interface HRMProps {
   currentUser: any;
   projects?: any[];
   customers?: any[];
+  tasks?: any[];
   defaultSubTab?: string;
   hideSidebar?: boolean;
+  systemConfig: import('../../types').SystemConfig; // Add SystemConfig here
 }
 
 export interface TravelAllowanceNorm {
@@ -51,7 +55,7 @@ export interface EmployeeProfile {
   startDate: string;
   contractType: string;
   contractDurationMonths?: number; // Thời hạn HĐ (tháng) - chỉ dùng khi HĐ Có thời hạn
-  status: 'working' | 'leave' | 'retired';
+  status: 'working' | 'leave' | 'retired' | 'director_board';
   phepNam?: number;
   bankAccount: string;
   bankName: string;
@@ -109,12 +113,16 @@ export interface AttendanceLog {
   otHours: number;
   notes: string;
   approvedBy?: string;
+  // Ảnh + tọa độ CŨ: chỉ 1 cặp vào/ra cho cả ngày (lượt chấm sau ghi đè lượt trước).
+  // Giữ lại cho dữ liệu lịch sử & các màn hình chưa nâng cấp.
   photoIn?: string;
   photoOut?: string;
   locationIn?: string;
   coordsIn?: string;
   locationOut?: string;
   coordsOut?: string;
+  /** Ảnh + tọa độ RIÊNG cho từng lượt chấm: Vào/Ra sáng, chiều, tăng ca (cột jsonb punch_meta). */
+  punchMeta?: PunchMeta;
   isLocked?: boolean;
   statusMsg?: string;
   leaveSymbol?: string;
@@ -172,12 +180,29 @@ export interface PayrollItem {
   tax?: number;
   kpiMaxAllowed?: number;
   monthlySalary?: number;
-  otWeekendSalary?: number;
   otHourlySalary?: number;
   otAllowance?: number;
-  totalOtHoursSalary?: number;
   taxableIncome?: number;
   taxableNetIncome?: number;
+  // ─── Thuế TNCN & Giảm trừ gia cảnh (theo đúng công thức sheet "LƯƠNG OK" của
+  // file BẢNG LƯƠNG, NHÂN SỰ) ─────────────────────────────────────────────
+  // Thu nhập miễn thuế = toàn bộ tiền tăng ca (CN/Lễ + ngoài giờ) — theo đúng
+  // công thức gốc, không tách riêng phần chênh lệch.
+  taxExemptIncome?: number;
+  // Giảm trừ bản thân — snapshot từ employee.taxPersonalRelief tại thời điểm tính.
+  personalDeduction?: number;
+  // Số người phụ thuộc — snapshot từ employee.dependentCount tại thời điểm tính.
+  dependentCount?: number;
+  // Giảm trừ người phụ thuộc = dependentCount × 6.200.000đ (đúng theo sheet gốc).
+  dependentDeduction?: number;
+  // Ghi chú theo TỪNG DÒNG hạng mục lương trên phiếu lương (key = tên hạng mục,
+  // vd "baseSalary", "otWeekend"...), hiển thị cạnh dòng tương ứng khi in phiếu.
+  lineNotes?: Record<string, string>;
+  // Đã "Khóa kỳ & Phát phiếu lương" chưa — khi true, cho phép tải toàn bộ phiếu
+  // lương (.zip) của kỳ này. lockedAt dùng làm ngày lập mặc định in trên phiếu
+  // lương (thay vì ngày cố định "15 tháng sau" trước đây).
+  locked?: boolean;
+  lockedAt?: string;
 }
 
 export interface KpiMetric {

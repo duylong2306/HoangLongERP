@@ -2,9 +2,13 @@
 // PWA Service Worker - Offline caching & Installable app
 // =====================================================================
 // Cache name with version for easy updates
-const CACHE_NAME = 'hl-erp-v1';
-const CACHE_STATIC = 'hl-erp-static-v1';
-const CACHE_DYNAMIC = 'hl-erp-dynamic-v1';
+// ⚠️ Tăng số phiên bản mỗi khi sửa chiến lược cache, để `activate` dọn cache cũ.
+// v2: thêm SPA navigation fallback (sửa lỗi 404 khi bấm thông báo đẩy).
+// v3: bỏ SW can thiệp request Supabase/API — để supabase-js tự retry (trước đây
+//     networkFirst làm tải chậm + trả 503 Offline giả che mất lỗi thật).
+const CACHE_NAME = 'hl-erp-v3';
+const CACHE_STATIC = 'hl-erp-static-v3';
+const CACHE_DYNAMIC = 'hl-erp-dynamic-v3';
 
 // Assets to cache immediately on install (App Shell)
 // Chỉ include các file chắc chắn tồn tại, tránh lỗi addAll
@@ -61,7 +65,25 @@ self.addEventListener('fetch', (event) => {
   // Skip chrome-extension, data:, blob: URLs
   if (!url.protocol.startsWith('http')) return;
 
-  // API requests (Supabase, Firebase) - Network first, fallback to cache
+  // ─── SPA NAVIGATION FALLBACK ───────────────────────────────────────────
+  // App là SPA nhưng host chỉ phục vụ file tĩnh (không có rewrite về
+  // index.html). Mọi điều hướng tới đường dẫn không phải file thật → 404.
+  // Đây chính là màn hình 404 khi bấm thông báo đẩy trên điện thoại.
+  //
+  // Với MỌI request điều hướng: thử mạng trước; nếu server trả 404/5xx (hoặc
+  // mất mạng) thì phục vụ app shell '/' để React tự route bằng query string.
+  if (request.mode === 'navigate') {
+    event.respondWith(navigationHandler(request));
+    return;
+  }
+
+  // API requests (Supabase, Firebase) - KHÔNG can thiệp.
+  // Cho request đi thẳng mạng để supabase-js tự retry (executeWithRetry) và trình
+  // duyệt dùng cache HTTP thường. Trước đây SW chặn bằng networkFirst gây ra:
+  //   1) load chậm — phải chờ fetch fail mới rơi về cache;
+  //   2) cache.put() crash ("Cache.put() encountered a network error") khi mạng giật;
+  //   3) trả 503 Offline GIẢ, che mất lỗi thật và vô hiệu hoá retry của supabase-js
+  //      → triệu chứng "thi thoảng tải chấm công rất chậm / không tải được".
   if (
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('firebaseio.com') ||
@@ -69,7 +91,6 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('fcm.googleapis.com') ||
     url.pathname.startsWith('/api/')
   ) {
-    event.respondWith(networkFirst(request, CACHE_DYNAMIC));
     return;
   }
 
@@ -95,6 +116,55 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(networkFirst(request, CACHE_DYNAMIC));
 });
 
+/**
+ * Xử lý request điều hướng (mở trang / bấm link / mở từ thông báo đẩy).
+ *
+ * Thứ tự: mạng → nếu 404/lỗi thì trả app shell '/' (từ mạng hoặc cache).
+ * Nhờ vậy '/tasks/CV-1' của các thông báo CŨ vẫn vào được app thay vì 404;
+ * React đọc query string / đường dẫn rồi tự mở đúng màn hình.
+ */
+async function navigationHandler(request) {
+  const cache = await caches.open(CACHE_STATIC);
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) return response;
+    // Server trả 404/5xx cho một "route" của SPA → phục vụ app shell thay thế
+    console.warn('[SW] Điều hướng', request.url, '→', response.status, '· trả app shell');
+  } catch (err) {
+    console.log('[SW] Điều hướng thất bại (offline?):', request.url);
+  }
+
+  // Ưu tiên app shell trong cache; nếu chưa có thì tải '/' từ mạng
+  const shell = await cache.match('/');
+  if (shell) return shell;
+
+  try {
+    const rootResponse = await fetch('/');
+    if (rootResponse.ok) {
+      safeCachePut(cache, '/', rootResponse);
+      return rootResponse;
+    }
+  } catch (err) {
+    /* vẫn không được → trả thông báo offline bên dưới */
+  }
+
+  return new Response('Offline', {
+    status: 503,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
+}
+
+// Cache.put() với body bị hỏng do mạng giật sẽ ném "Cache.put() encountered a
+// network error" → bọc try/catch để không làm crash toàn bộ handler fetch.
+async function safeCachePut(cache, request, response) {
+  try {
+    await cache.put(request, response.clone());
+  } catch (err) {
+    console.warn('[SW] Bỏ qua cache.put lỗi:', request.url, err && err.message);
+  }
+}
+
 // Cache-first strategy (for static assets)
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
@@ -104,7 +174,7 @@ async function cacheFirst(request, cacheName) {
     // Serve from cache, update in background (stale-while-revalidate)
     const fetchPromise = fetch(request)
       .then((response) => {
-        if (response.ok) cache.put(request, response.clone());
+        if (response.ok) safeCachePut(cache, request, response);
         return response;
       })
       .catch(() => cached);
@@ -114,7 +184,7 @@ async function cacheFirst(request, cacheName) {
   // Not in cache - fetch and store
   try {
     const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+    if (response.ok) safeCachePut(cache, request, response);
     return response;
   } catch (err) {
     console.log('[SW] Cache first fetch failed:', request.url, err);
@@ -132,7 +202,7 @@ async function networkFirst(request, cacheName) {
 
   try {
     const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+    if (response.ok) safeCachePut(cache, request, response);
     return response;
   } catch (err) {
     console.log('[SW] Network first fetch failed:', request.url, err);
@@ -175,15 +245,81 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(data.title || 'Hoàng Long ERP', options));
 });
 
+// Chuẩn hoá URL deep link về '/?taskId=...' (luôn ở đường dẫn gốc, tránh 404
+// vì host không có SPA fallback) + dịch ngược định dạng cũ '/tasks/<id>'.
+// Giữ đồng bộ với public/web-push-sw.js và src/lib/pushDeepLink.ts.
+function hlNormalizePushUrl(data) {
+  data = data || {};
+  var taskId = data.taskId;
+  var taskCode = data.taskCode;
+  var conversationId = data.conversationId;
+  var projectId = data.projectId;
+
+  try {
+    var u = new URL(data.url || '/', self.location.origin);
+    var q = u.searchParams;
+    taskId = taskId || q.get('taskId') || undefined;
+    taskCode = taskCode || q.get('taskCode') || undefined;
+    conversationId =
+      conversationId || q.get('conversation') || q.get('conversationId') || undefined;
+    projectId = projectId || q.get('projectId') || undefined;
+
+    var legacy = u.pathname.match(/^\/(tasks|projects|messages)\/([^/]+)\/?$/);
+    if (legacy) {
+      var id = decodeURIComponent(legacy[2]);
+      if (legacy[1] === 'tasks' && !taskId) taskId = id;
+      if (legacy[1] === 'projects' && !projectId) projectId = id;
+      if (legacy[1] === 'messages' && !conversationId) conversationId = id;
+    }
+  } catch (e) { /* URL rác → rơi về '/' */ }
+
+  var params = new URLSearchParams();
+  if (taskId) params.set('taskId', taskId);
+  else if (taskCode) params.set('taskCode', taskCode);
+  if (conversationId) params.set('conversation', conversationId);
+  if (projectId && !taskId && !taskCode) params.set('projectId', projectId);
+
+  var qs = params.toString();
+  return qs ? '/?' + qs : '/';
+}
+
+// Bấm thông báo → focus tab app đang mở & postMessage deep link, hoặc mở tab mới.
+// (Cùng logic với public/web-push-sw.js — xem giải thích chi tiết ở file đó.)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || '/';
+
+  const data = event.notification.data || {};
+  const targetUrl = self.location.origin + hlNormalizePushUrl(data);
+
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if (client.url === url && 'focus' in client) return client.focus();
+    (async () => {
+      const clientList = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      const sameOrigin = clientList.filter((c) => {
+        try {
+          return new URL(c.url).origin === self.location.origin;
+        } catch (e) {
+          return false;
+        }
+      });
+
+      if (sameOrigin.length > 0) {
+        const client = sameOrigin.find((c) => c.focused) || sameOrigin[0];
+        try {
+          if ('focus' in client) await client.focus();
+        } catch (e) { /* bỏ qua */ }
+        client.postMessage({
+          type: 'HL_NOTIFICATION_CLICK',
+          action: event.action || '',
+          data,
+        });
+        return;
       }
-      return clients.openWindow(url);
-    })
+
+      await self.clients.openWindow(targetUrl);
+    })()
   );
 });

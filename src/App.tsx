@@ -1,20 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { dbService } from './lib/dbService';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
+import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
-import { createGroupConversation, deleteConversation, getUserConversations, getConversations } from './lib/chatStore';
+import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations, sendApprovalDirectMessage, findEmployeeByName, ensureAttendanceChatGroup } from './lib/chatStore';
 import {
   Employee,
   Customer,
   Project,
   ProjectDoc,
   Task,
+  TaskUpdatePayload,
   Receipt,
   Payment,
   Quote,
   ProjectStatus,
   QuoteConfig,
-  AppNotification,
-  Conversation
+  Conversation,
+  SalesOrder,
+  PurchaseOrder,
+  SubcontractorAdvanceProposal,
+  LeaveRequest
 } from './types';
 import {
   INITIAL_EMPLOYEES,
@@ -24,14 +29,18 @@ import {
   INITIAL_RECEIPTS,
   INITIAL_PAYMENTS,
   INITIAL_QUOTES,
-  DEFAULT_QUOTE_CONFIG
+  DEFAULT_QUOTE_CONFIG,
+  DEFAULT_SYSTEM_CONFIG
 } from './data';
 
 // CONTEXT PROVIDERS (required by child components)
+import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover } from './context';
+import { Toast } from './context/NotificationContext';
 import { hashPasswordSync } from './lib/passwordUtils';
+import { migrateLegacyData } from './lib/migrateLocalStorage';
 
 // COMPONENTS
 import DashboardOverview from './components/DashboardOverview';
@@ -48,11 +57,13 @@ import QuoteArchive from './components/QuoteArchive';
 import MaterialCoordination from './components/MaterialCoordination';
 import WarehouseSuppliers from './components/WarehouseSuppliers';
 import WarehouseManagement from './components/WarehouseManagement';
+import WarehouseDataManagement from './components/WarehouseDataManagement';
 import SubcontractorManagement from './components/SubcontractorManagement';
 import DirectorDashboard from './components/DirectorDashboard';
 import Login from './components/Login';
 import UserProfileModal from './components/UserProfileModal';
 import MessagesView from './components/MessagesView';
+import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
 import { 
@@ -81,7 +92,6 @@ import {
   Info,
   Plus,
   Trash2,
-  UserPlus,
   Building,
   Lock,
   Check,
@@ -97,10 +107,19 @@ import {
   X,
   Menu,
   RefreshCw,
-  User
+  Calendar,
+  ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase } from './lib/supabase';
+import {
+  parsePushData,
+  readDeepLinkFromLocation,
+  clearDeepLinkFromLocation,
+  hasDeepLinkTarget,
+  NOTIFICATION_CLICK_MESSAGE,
+  type PushDeepLink,
+} from './lib/pushDeepLink';
 import { createClient } from '@supabase/supabase-js';
 
 const generateUsername = (name: string): string => {
@@ -133,24 +152,15 @@ const generateUsernameWithPhone = (name: string, phone: string): string => {
 
 const getEmployeePermissionGroupName = (emp: any): string => {
   try {
-    // 1. Đọc từ cache của dbService trước (từ Supabase)
-    const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-    let hrmRoles: any[] = [];
-    if (cached) {
-      hrmRoles = JSON.parse(cached);
-    }
-    // 2. Nếu không có cache, fallback sang localStorage cũ
-    if (!Array.isArray(hrmRoles) || hrmRoles.length === 0) {
-      const rolesSaved = localStorage.getItem('hl_hrm_roles_v2');
-      hrmRoles = rolesSaved ? JSON.parse(rolesSaved) : [];
-    }
+    // Đọc từ in-memory cache (đã load từ Supabase)
+    const hrmRoles = loadHrmRoleGroups();
 
-    if (Array.isArray(hrmRoles)) {
+    if (Array.isArray(hrmRoles) && hrmRoles.length > 0) {
       const foundRole = hrmRoles.find((r: any) => r.memberIds && r.memberIds.includes(emp.id));
       if (foundRole) return foundRole.name;
     }
 
-    // 3. Try mapping from old role field
+    // Try mapping from old role field
     if (emp.role === 'director' || emp.username === 'admin') return 'Ban Giám Đốc (Admin)';
     if (emp.role === 'accountant') return 'Kế toán viên';
     if (emp.role === 'pm') return 'Quản lý dự án';
@@ -173,17 +183,8 @@ const getEmployeePermissionGroupName = (emp: any): string => {
 const getAllowedTabsFromRoleGroups = (emp: Employee | null): string[] => {
   if (!emp) return [];
   try {
-    // 1. Đọc từ cache của dbService trước
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    let groups: any[] = [];
-    if (supCached) {
-      groups = JSON.parse(supCached);
-    }
-    // 2. Fallback sang localStorage cũ
-    if (!Array.isArray(groups) || groups.length === 0) {
-      const saved = localStorage.getItem('hl_hrm_roles_v2');
-      groups = saved ? JSON.parse(saved) : [];
-    }
+    // Đọc từ in-memory cache (đã load từ Supabase)
+    const groups = loadHrmRoleGroups();
     if (!Array.isArray(groups) || groups.length === 0) return [];
 
     const userGroups = groups.filter(g =>
@@ -203,7 +204,7 @@ const getAllowedTabsFromRoleGroups = (emp: Employee | null): string[] => {
 
     return Array.from(allowed);
   } catch (e) {
-    console.error('Lỗi đọc phân quyền từ hl_hrm_roles_v2:', e);
+    console.error('Lỗi đọc phân quyền từ Role Groups cache:', e);
     return [];
   }
 };
@@ -216,21 +217,44 @@ const ADMIN_EMPLOYEE: Employee = {
   phone: '0000000000',
   department: 'Ban Giám Đốc',
   username: 'admin',
-  password: 'admin'
+  password: 'admin',
+  roleGroupIds: ['role_superadmin', 'role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
+  status: 'working',
+  hasSystemAccount: true
 };
 
 const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
   const mapped: Employee[] = emps.map(emp => {
     if (emp.username === 'admin' || emp.id === 'emp_admin') {
+      // CHỈ chuẩn hoá id/username/quyền hạn (đảm bảo tài khoản admin không bao giờ bị
+      // khóa quyền do lỗi dữ liệu) — KHÔNG ghi đè password/email/phone/... bằng
+      // ADMIN_EMPLOYEE nữa. Mật khẩu phải lấy đúng theo dữ liệu đang lưu trên Supabase;
+      // ADMIN_EMPLOYEE.password chỉ dùng làm giá trị khởi tạo lần đầu khi tài khoản admin
+      // trong DB chưa có mật khẩu nào (trường hợp gần như không xảy ra ngoài bootstrap).
       return {
         ...emp,
+        id: 'emp_admin',
         username: 'admin',
-        password: 'admin',
-        role: 'director' as const
+        roleGroupIds: ['role_superadmin', 'role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
+        hasSystemAccount: true,
+        password: emp.password || ADMIN_EMPLOYEE.password
       };
+    }
+    // Enrich roleGroupIds for non-admin users
+    let roleGroupIds = emp.roleGroupIds;
+    if (!roleGroupIds || roleGroupIds.length === 0) {
+      try {
+        const groups = loadHrmRoleGroups();
+        if (Array.isArray(groups)) {
+          roleGroupIds = groups
+            .filter(g => g.memberIds?.includes(emp.id))
+            .map((g: any) => g.id);
+        }
+      } catch { /* ignore */ }
     }
     return {
       ...emp,
+      roleGroupIds: roleGroupIds && roleGroupIds.length > 0 ? roleGroupIds : undefined,
       username: emp.username || generateUsername(emp.name),
       password: emp.password || hashPasswordSync('123')
     };
@@ -259,17 +283,13 @@ async function loadAllRoleGroups(): Promise<{ id: string; name: string }[]> {
     console.warn('Supabase hrm_role_groups load error:', e);
   }
 
-  // Fallback: đọc từ localStorage
-  try {
-    const saved = localStorage.getItem('hl_hrm_roles_v2');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        return parsed.map((r: any) => ({ id: r.id, name: r.name }));
-      }
-    }
-  } catch {}
+  // Fallback: đọc từ in-memory cache (đã load từ Supabase)
+  const cached = loadHrmRoleGroups();
+  if (cached && cached.length > 0) {
+    return cached.map((r: any) => ({ id: r.id, name: r.name }));
+  }
   return [
+    { id: 'role_superadmin', name: 'Siêu Admin (Super Admin)' },
     { id: 'role_admin', name: 'Ban Giám Đốc (Admin)' },
     { id: 'role_accounting', name: 'Kế toán viên' },
     { id: 'role_office', name: 'Nhân viên Văn phòng' },
@@ -294,7 +314,11 @@ function ShiftMinuteInput({
     const val = rawVal === '' ? '' : Math.max(0, parseInt(rawVal, 10));
     const updated = { ...hrmConfig, [field]: val };
     setHrmConfig?.(updated);
-    dbService.shiftConfig.save(updated).catch(e => console.error('Supabase shiftConfig save error:', e));
+    // Chỉ save khi nội dung thật sự khác state hiện có (chặn save trùng lặp
+    // mỗi lần render lại từ realtime event với cùng giá trị).
+    if (stableStr(updated) !== stableStr(hrmConfig)) {
+      dbService.shiftConfig.save(updated).catch(e => console.error('Supabase shiftConfig save error:', e));
+    }
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
   };
@@ -326,14 +350,81 @@ function ShiftMinuteInput({
   );
 }
 
+/** Bỏ password khỏi user object trước khi lưu session — KHÔNG lưu password hash vào storage */
+const stripPassword = (emp: any) => {
+  if (!emp) return emp;
+  const { password, ...safe } = emp;
+  return safe;
+};
+
+/**
+ * Nạp ngược (backfill) khóa ngoại theo MÃ cho phiếu thu/chi CŨ đã lưu bằng TÊN.
+ * Chỉ điền các trường id còn thiếu (idempotent). Trả về mảng đã làm giàu + danh sách
+ * bản ghi bị đổi (để gọi save lên Supabase).
+ * Lưu ý: salesOrderId / purchaseOrderId KHÔNG có tên để đối chiếu → bỏ qua (chỉ nạp
+ * cho các FK có thể suy từ tên: collectorId, employeeId, supplierId, proposerId, approverId).
+ */
+const backfillVoucherFks = (
+  receipts: any[],
+  payments: any[],
+  masters: { employees: any[]; suppliers: any[]; customers: any[]; projects: any[]; salesOrders: any[]; purchaseOrders: any[] }
+) => {
+  const { employees, suppliers } = masters;
+  const norm = (s?: string) => (s ? s.trim().toLowerCase() : '');
+  const empByName = (name?: string) => (name ? employees.find(e => e.name && norm(e.name) === norm(name)) : undefined);
+  const supByName = (name?: string) => (name ? suppliers.find(s => s.name && norm(s.name) === norm(name)) : undefined);
+  const changed: { table: 'receipts' | 'payments'; row: any }[] = [];
+
+  const newReceipts = (receipts || []).map(r => {
+    let upd: any = null;
+    if (!r.collectorId) {
+      const e = empByName(r.collector);
+      if (e) upd = { ...(upd || r), collectorId: e.id };
+    }
+    if (upd) { changed.push({ table: 'receipts', row: upd }); return upd; }
+    return r;
+  });
+
+  const newPayments = (payments || []).map(p => {
+    let upd: any = null;
+    const cat = p.category;
+    // Người nhận (recipient) → id theo nhóm
+    if (!p.employeeId && !p.supplierId && !p.subcontractorId && p.recipient) {
+      if (['salary', 'salary_advance', 'site_expense'].includes(cat)) {
+        const e = empByName(p.recipient); if (e) upd = { ...(upd || p), employeeId: e.id };
+      } else if (['supplier_payment', 'material', 'shipping', 'machinery', 'general', 'other'].includes(cat)) {
+        const s = supByName(p.recipient); if (s) upd = { ...(upd || p), supplierId: s.id };
+      } else {
+        // subcontractor_advance / labor: thầu phụ thủ công dùng bảng suppliers → thử supplier trước
+        const s = supByName(p.recipient); if (s) upd = { ...(upd || p), supplierId: s.id };
+      }
+    }
+    if (!p.proposerId && p.proposer) { const e = empByName(p.proposer); if (e) upd = { ...(upd || p), proposerId: e.id }; }
+    if (!p.approverId && p.approver) {
+      const e = employees.find(e => e.name && (p.approver as string).startsWith(e.name));
+      if (e) upd = { ...(upd || p), approverId: e.id };
+    }
+    if (upd) { changed.push({ table: 'payments', row: upd }); return upd; }
+    return p;
+  });
+
+  return { receipts: newReceipts, payments: newPayments, changed };
+};
+
 export default function App() {
-  // 1. Cấu hình Phân quyền từng vai trò
-  const [toasts, setToasts] = useState<any[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => {
     const id = `${Date.now()}_${Math.random()}`;
     const duration = toast.duration === undefined ? 5000 : toast.duration;
-    setToasts(prev => [...prev, { ...toast, id, duration }]);
+    const type = toast.type === undefined ? 'info' : toast.type;
+    // Đẩy cập nhật state vào microtask thay vì chạy ngay. Tránh warning
+    // "Cannot update a component while rendering a different component" khi
+    // addToast tình cờ bị gọi trong lúc một component khác đang ở pha render
+    // (ví dụ bên trong .map() hoặc hàm tính toán chạy lúc render).
+    queueMicrotask(() => {
+      setToasts(prev => [...prev, { ...toast, id, duration, type }]);
+    });
     if (duration > 0) {
       setTimeout(() => {
         setToasts(prev => prev.filter(t => t.id !== id));
@@ -345,115 +436,82 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>(() => {
-    const saved = localStorage.getItem('hl_role_permissions');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const healed: Record<string, string[]> = {};
-        for (const role in parsed) {
-          if (Array.isArray(parsed[role])) {
-            const arr = parsed[role].map((item: string) => item.replace(/_/g, '-'));
-            // Đảm bảo mọi role đều có quyền truy cập Tin Nhắn
-            if (!arr.includes('messages')) arr.push('messages');
-            healed[role] = arr;
-          } else {
-            healed[role] = parsed[role];
-          }
-        }
-        return healed;
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return {
-      director: [
-        'dashboard', 'director-office', 'director-dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees', 'hr-data',
-        'accounting-office', 'finance', 'finance-data',
-        'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
-        'subcontractor-office', 'subcontractor-management',
-        'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor',
-        'system-office', 'settings-accounts', 'settings-roles', 'settings'
-      ],
-      accountant: [
-        'dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees',
-        'accounting-office', 'finance', 'finance-data',
-        'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management',
-        'subcontractor-office', 'subcontractor-management',
-        'library-office', 'quotes',
-        'system-office', 'settings'
-      ],
-      pm: [
-        'dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees',
-        'subcontractor-office', 'subcontractor-management',
-        'library-office', 'quotes',
-        'system-office', 'settings'
-      ],
-      engineer: [
-        'dashboard',
-        'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
-        'hr-office', 'employees',
-        'system-office', 'settings'
-      ],
-      quotation: [
-        'dashboard', 'tasks', 'employees', 'settings', 'messages',
-        'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'
-      ],
-      purchasing: [
-        'dashboard', 'tasks', 'employees', 'settings', 'messages',
-        'warehouse-office', 'material-coordination', 'warehouse-suppliers'
-      ],
-      factory: [
-        'dashboard', 'tasks', 'employees', 'settings', 'messages',
-        'project-office', 'projects-furniture'
-      ]
-    };
+  const [employees, setEmployees] = useState<Employee[]>([]);
+
+  return (
+    <DisplaySettingsProvider>
+      <AppContent
+        toasts={toasts} setToasts={setToasts} addToast={addToast} removeToast={removeToast}
+        employees={employees} setEmployees={setEmployees}
+      />
+    </DisplaySettingsProvider>
+  );
+}
+
+interface AppContentProps {
+  toasts: Toast[];
+  setToasts: React.Dispatch<React.SetStateAction<Toast[]>>;
+  addToast: (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
+  removeToast: (id: string) => void;
+  employees: Employee[];
+  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
+}
+
+function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEmployees }: AppContentProps) {
+  // ── Trạng thái khởi tạo: hiển thị splash screen trong khi load data từ Supabase ──
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // 1. Cấu hình Phân quyền từng vai trò
+
+  const { displaySettings } = useDisplaySettings();
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
+    director: [
+      'dashboard', 'director-office', 'director-dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees', 'hr-data',
+      'accounting-office', 'finance', 'finance-data',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management', 'warehouse-data',
+      'subcontractor-office', 'subcontractor-management',
+      'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor',
+      'system-office', 'settings-accounts', 'settings-roles', 'settings', 'display-settings'
+    ],
+    accountant: [
+      'dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees',
+      'accounting-office', 'finance', 'finance-data',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-management', 'warehouse-data',
+      'subcontractor-office', 'subcontractor-management',
+      'library-office', 'quotes',
+      'system-office', 'settings'
+    ],
+    pm: [
+      'dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees',
+      'subcontractor-office', 'subcontractor-management',
+      'library-office', 'quotes',
+      'system-office', 'settings'
+    ],
+    engineer: [
+      'dashboard',
+      'project-office', 'projects-construction', 'projects-furniture', 'projects-mechanical', 'tasks', 'messages',
+      'hr-office', 'employees',
+      'system-office', 'settings'
+    ],
+    quotation: [
+      'dashboard', 'tasks', 'employees', 'settings', 'messages',
+      'library-office', 'quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'
+    ],
+    purchasing: [
+      'dashboard', 'tasks', 'employees', 'settings', 'messages',
+      'warehouse-office', 'material-coordination', 'warehouse-suppliers', 'warehouse-data'
+    ],
+    factory: [
+      'dashboard', 'tasks', 'employees', 'settings', 'messages',
+      'project-office', 'projects-furniture'
+    ]
   });
-
-  useEffect(() => {
-    localStorage.setItem('hl_role_permissions', JSON.stringify(rolePermissions));
-  }, [rolePermissions]);
-
-  // 2. Cấu hình Hiển thị (Màu chủ đạo, Slogan, Tên nhãn hiệu, Giao diện, Font chữ)
-  const [displaySettings, setDisplaySettings] = useState(() => {
-    const saved = localStorage.getItem('hl_display_settings');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          primaryAccent: 'emerald',
-          logoText: 'HL',
-          brandName: 'Hoàng Long',
-          brandSlogan: 'Lâm Đồng ERP',
-          dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
-          motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
-          fontFamily: 'Inter',
-          ...parsed
-        };
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return {
-      primaryAccent: 'emerald', // emerald, sky, indigo, amber, rose, violet
-      logoText: 'HL',
-      brandName: 'Hoàng Long',
-      brandSlogan: 'Lâm Đồng ERP',
-      dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
-      motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
-      fontFamily: 'Inter' // Inter, Roboto, Be Vietnam Pro, Nunito, Lora, Fira Sans
-    };
-  });
-
-  useEffect(() => {
-    localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
-  }, [displaySettings]);
 
   // Helper cho Màu chủ đạo hiển thị động
   const accentTextClass = 
@@ -484,49 +542,122 @@ export default function App() {
     displaySettings.primaryAccent === 'amber' ? 'bg-slate-800 text-amber-400 border-amber-500/20 font-bold' :
     displaySettings.primaryAccent === 'rose' ? 'bg-slate-800 text-rose-400 border-rose-500/20 font-bold' : 'bg-slate-800 text-violet-400 border-violet-500/20 font-bold';
 
-  // 3. Hồ sơ doanh nghiệp
-  const [businessInfo, setBusinessInfo] = useState(() => {
-    const saved = localStorage.getItem('hl_business_info');
-    if (saved) return JSON.parse(saved);
-    return {
-      companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
-      taxCode: '5801456789',
-      representative: 'Trương Hữu Long',
-      phone: '0988.123.456',
-      email: 'contact@hoanglonglamdong.vn',
-      address: 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
-      foundingYear: '2016',
-      businessSector: 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
-      bankInfo: '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
-      scale: 'Hơn 150 kỹ sư & thợ lành nghề'
-    };
+  // 3. Hồ sơ doanh nghiệp (nguồn: Supabase)
+  const [businessInfo, setBusinessInfo] = useState({
+    companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
+    taxCode: '5801456789',
+    representative: 'Trương Hữu Long',
+    phone: '0988.123.456',
+    email: 'contact@hoanglonglamdong.vn',
+    address: 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
+    foundingYear: '2016',
+    businessSector: 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
+    bankInfo: '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
+    scale: 'Hơn 150 kỹ sư & thợ lành nghề'
   });
 
+  const isBusinessInfoInitRef = React.useRef(true);
+  // Chuỗi stableStr của giá trị ĐÃ lưu lần gần nhất — chặn vòng lặp realtime:
+  // fireConfigEvent → setBusinessInfo(object mới cùng nội dung) → nếu không
+  // chặn, effect sẽ INSERT lại → event mới → mọi tab lặp lại vô hạn.
+  const lastSavedBizRef = React.useRef<string | null>(null);
   useEffect(() => {
-    localStorage.setItem('hl_business_info', JSON.stringify(businessInfo));
-    dbService.businessProfile.save(businessInfo);
+    // Skip save lần đầu (khi load từ cloud) — chỉ ghi nhớ nội dung để so sánh sau
+    if (isBusinessInfoInitRef.current) {
+      isBusinessInfoInitRef.current = false;
+      lastSavedBizRef.current = stableStr(businessInfo);
+      return;
+    }
+    const next = stableStr(businessInfo);
+    if (next === lastSavedBizRef.current) {
+      return; // chỉ đổi tham chiếu, KHÔNG đổi nội dung → không save, không sinh event
+    }
+    lastSavedBizRef.current = next;
+    dbService.businessProfile.save(businessInfo).catch(err => console.warn('Lưu business_profile thất bại:', err));
   }, [businessInfo]);
 
-  // Bootstrap và đồng bộ hoá dữ liệu từ Cloud Firestore trên nền tảng Firebase
+  // Bootstrap và đồng bộ hoá dữ liệu từ Cloud trên nền tảng Supabase
+  // ── BƯỚC 1: Load từ localStorage (instant) → hiện app ngay ──
+  // ── BƯỚC 2: Fetch employees từ cloud (bắt buộc cho auth) ──
+  // ── BƯỚC 3: Sync tất cả data từ cloud ở background → update state + localStorage ──
   useEffect(() => {
+    const CACHE_KEY = 'hl_core_cache_v1';
+    const CACHE_TABLES = ['customers', 'projects', 'tasks', 'receipts', 'payments', 'quotes'];
+
+    const toCamel = (rows: any[]) => (rows || []).map((r: any) => {
+      const n: any = {};
+      Object.keys(r).forEach(k => {
+        const camel = k.replace(/([-_][a-z])/g, g => g.toUpperCase().replace('-', '').replace('_', ''));
+        n[camel] = r[k];
+      });
+      return n;
+    });
+
+    const saveToCache = (table: string, data: any[]) => {
+      try {
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+        cache[table] = data;
+        cache._ts = Date.now();
+        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      } catch {}
+    };
+
+    const loadFromCache = (): Record<string, any[]> | null => {
+      try {
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+        if (cache._ts && Object.keys(cache).length > 1) return cache;
+      } catch {}
+      return null;
+    };
+
     const initAndSync = async () => {
       try {
-        await dbService.bootstrapFirstTime();
+        // ── BƯỚC 1: Load non-sensitive data từ localStorage (instant) ──
+        const cache = loadFromCache();
+        if (cache) {
+          console.log('[Init] 📦 Loaded from localStorage cache');
+          if (cache.customers) setCustomers(cache.customers);
+          if (cache.projects) {
+            const filtered = cache.projects.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+            setProjects(filtered);
+          }
+          if (cache.tasks) setTasks(cache.tasks);
+          if (cache.receipts) setReceipts(cache.receipts);
+          if (cache.payments) setPayments(cache.payments);
+          if (cache.quotes) setQuotes(cache.quotes);
+          // Populate query cache để các component query lẻ dùng luôn
+          for (const t of CACHE_TABLES) {
+            if (cache[t]) dbService.populateCache(t, cache[t]);
+          }
+        }
 
-        // Cloud (Supabase) là nguồn sự thật duy nhất. KHÔNG đọc localStorage làm chuẩn
-        // để tránh "hồi sinh" dữ liệu đã xóa trực tiếp trên Supabase khi reload ứng dụng.
-        const cloudEmps = await dbService.employees.list();
+        // ── BƯỚC 2: Fetch employees từ cloud (bắt buộc cho auth) ──
+        let cloudEmps: Employee[];
+        try {
+          let data: Record<string, any[]> | null = null;
+          try {
+            data = await dbService.loadAllCore();
+          } catch { /* RPC chưa có */ }
+          cloudEmps = data
+            ? toCamel(data.employees || [])
+            : await dbService.employees.list();
+        } catch {
+          cloudEmps = await dbService.employees.list();
+        }
         const finalEmps = ensureAdminAndPasswords(cloudEmps);
         setEmployees(finalEmps);
-        // Đồng bộ ngược cache localStorage cho khớp cloud (chỉ là bản sao, không ghi đè lên cloud)
-        localStorage.setItem('hl_erp_employees', JSON.stringify(finalEmps));
 
-        // Ensure admin is saved to db as well
+        // ── Nhóm chat "Điểm danh" (idempotent, không chặn init) ──
+        ensureAttendanceChatGroup(finalEmps).catch(err =>
+          console.warn('ensureAttendanceChatGroup error:', err));
+
+        // Ensure admin
         const hasAdminInDb = finalEmps.some(e => e.username === 'admin' || e.id === 'emp_admin');
         if (!hasAdminInDb) {
-          dbService.employees.save(ADMIN_EMPLOYEE).catch(err => console.error("Error saving admin employee:", err));
+          dbService.employees.save(ADMIN_EMPLOYEE).catch(() => {});
         }
-        // Cập nhật thông tin tài khoản hiện tại từ database vừa tải nếu đã đăng nhập trước đó
+
+        // Session
         const activeSessionStr = sessionStorage.getItem('hl_erp_active_session') || localStorage.getItem('hl_erp_active_session');
         if (activeSessionStr) {
           try {
@@ -534,91 +665,157 @@ export default function App() {
             const foundUser = finalEmps.find(e => e.id === parsedSession.id || e.username === parsedSession.username);
             if (foundUser) {
               setCurrentUser(foundUser);
-              sessionStorage.setItem('hl_erp_active_session', JSON.stringify(foundUser));
-              if (localStorage.getItem('hl_erp_active_session')) {
-                localStorage.setItem('hl_erp_active_session', JSON.stringify(foundUser));
-              }
+              sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(foundUser)));
             } else {
               setCurrentUser(parsedSession);
             }
-          } catch (e) {
-            setCurrentUser(null);
-          }
+          } catch { setCurrentUser(null); }
         } else {
           setCurrentUser(null);
         }
 
-        const custs = await dbService.customers.list();
-        setCustomers(custs);
+        // Employees xong → ẩn splash screen
+        setIsInitializing(false);
 
-        const projs = await dbService.projects.list();
-        const filteredProjs = projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
-        const autoProjIds = projs.filter(p => p.name.startsWith('Dự án độc lập - ') && p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')).map(p => p.id);
-        for (const pid of autoProjIds) {
-          dbService.projects.delete(pid).catch(err => console.error("Could not delete legacy auto project", err));
-        }
-        setProjects(filteredProjs);
+        // ── MIGRATION MỘT LẦN: đẩy dữ liệu nghiệp vụ cũ từ localStorage lên Supabase ──
+        migrateLegacyData();
 
-        const tsks = await dbService.tasks.list();
-        setTasks(tsks);
+        // ── BƯỚC 3: Sync cloud ở background → update state + cache ──
+        // (non-blocking, app đã render xong từ localStorage)
+        (async () => {
+          try {
+            let cloudData: Record<string, any[]> | null = null;
+            try {
+              cloudData = await dbService.loadAllCore();
+            } catch {
+              // Fallback: query từng bảng
+              const [custs, projs, tsks, recs, pays, qtes, sOrders, pOrders, sups, advances, bps, scs] = await Promise.all([
+                dbService.customers.list(), dbService.projects.list(),
+                dbService.tasks.list(), dbService.receipts.list(),
+                dbService.payments.list(), dbService.quotes.list(),
+                dbService.salesOrders.list(), dbService.purchaseOrders.list(),
+                dbService.suppliers.list().catch(() => []),
+                dbService.subcontractorAdvances.list(),
+                dbService.businessProfile.list().catch(() => []),
+                dbService.shiftConfig.list().catch(() => []),
+              ]);
+              cloudData = {
+                customers: custs, projects: projs, tasks: tsks,
+                receipts: recs, payments: pays, quotes: qtes,
+                sales_orders: sOrders, purchase_orders: pOrders,
+                suppliers: sups,
+                subcontractor_advances: advances,
+                business_profile: bps, shift_config: scs,
+              };
+            }
 
-        const recs = await dbService.receipts.list();
-        setReceipts(recs);
+            // Update state từ cloud
+            const custRows = toCamel(cloudData.customers || []);
+            const projRows = toCamel(cloudData.projects || []);
+            const taskRows = toCamel(cloudData.tasks || []);
+            const recRows = toCamel(cloudData.receipts || []);
+            const payRows = toCamel(cloudData.payments || []);
+            const quoteRows = toCamel(cloudData.quotes || []);
+            // Đơn hàng bán / mua: RPC load_all_core_data() ở các bản migration cũ
+            // KHÔNG trả về 2 key này. RPC không báo lỗi trong trường hợp đó, nên
+            // phải kiểm tra tường minh và query bù, nếu không danh sách sẽ trống
+            // → generateSOCode() đếm 0 → mã đơn trùng → upsert ghi đè hàng cũ.
+            let sOrderRaw = cloudData.sales_orders;
+            let pOrderRaw = cloudData.purchase_orders;
+            if (!Array.isArray(sOrderRaw) || !Array.isArray(pOrderRaw)) {
+              console.warn('[Init] RPC load_all_core_data() thiếu sales_orders/purchase_orders — query bù trực tiếp. Hãy chạy migration 015.');
+              const [sFix, pFix] = await Promise.all([
+                Array.isArray(sOrderRaw) ? Promise.resolve(sOrderRaw) : dbService.salesOrders.list().catch(e => { console.error('[Init] Query bù sales_orders thất bại:', e); return []; }),
+                Array.isArray(pOrderRaw) ? Promise.resolve(pOrderRaw) : dbService.purchaseOrders.list().catch(e => { console.error('[Init] Query bù purchase_orders thất bại:', e); return []; }),
+              ]);
+              // dbService.*.list() đã trả về camelCase → không toCamel lần nữa
+              sOrderRaw = sFix; pOrderRaw = pFix;
+            }
+            const sOrderRows = toCamel(sOrderRaw || []).map(normalizeOrderItems);
+            const pOrderRows = toCamel(pOrderRaw || []).map(normalizeOrderItems);
 
-        const pays = await dbService.payments.list();
-        const pendingPays = pays.filter(p => p.status === 'pending');
-        if (pendingPays.length > 0) {
-          const cleanedPays = pays.filter(p => p.status !== 'pending');
-          setPayments(cleanedPays);
-          for (const p of pendingPays) {
-            dbService.payments.delete(p.id).catch(err => console.error("Lỗi xóa đồng bộ payment chờ duyệt:", err));
+            // business_profile / shift_config chỉ có trong RPC load_all_core_data.
+            // Nếu RPC trả [] cho 1 trong 2 (do lỗi phụ trợ), query bù trực tiếp
+            // để không làm mất thông tin công ty / cấu hình ca làm việc.
+            if (!Array.isArray(cloudData.business_profile) || cloudData.business_profile.length === 0) {
+              cloudData.business_profile = await dbService.businessProfile.list().catch(() => []);
+            }
+            if (!Array.isArray(cloudData.shift_config) || cloudData.shift_config.length === 0) {
+              cloudData.shift_config = await dbService.shiftConfig.list().catch(() => []);
+            }
+
+            const supRows = toCamel(cloudData.suppliers || []);
+            const advRows = toCamel(cloudData.subcontractor_advances || []);
+            setCustomers(custRows);
+            setProjects(projRows.filter((p: any) => !p.name?.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
+            setTasks(taskRows);
+            // ─── Nạp ngược FK (name → id) cho phiếu cũ ─────────────────────
+            let finalReceipts = recRows;
+            let finalPayments = payRows;
+            try {
+              const empRows = await dbService.employees.list().catch(() => []);
+              const bf = backfillVoucherFks(recRows, payRows, {
+                employees: empRows, suppliers: supRows, customers: custRows,
+                projects: projRows, salesOrders: sOrderRows, purchaseOrders: pOrderRows,
+              });
+              if (bf.changed.length > 0) {
+                await Promise.all(bf.changed.map(c =>
+                  c.table === 'receipts' ? dbService.receipts.save(c.row) : dbService.payments.save(c.row)
+                ));
+                console.log(`[Init] Nạp ngược ${bf.changed.length} phiếu (FK theo mã).`);
+              }
+              finalReceipts = bf.receipts;
+              finalPayments = bf.payments;
+            } catch (bfErr) {
+              console.warn('[Init] Backfill FK thất bại, dùng dữ liệu gốc:', bfErr);
+            }
+            setReceipts(finalReceipts);
+            setPayments(finalPayments);
+            setSubcontractorAdvances(advRows);
+            setQuotes(quoteRows);
+            setSalesOrders(sOrderRows);
+            setPurchaseOrders(pOrderRows);
+            setSuppliers(supRows);
+            console.log('[Init] Loaded sales_orders:', sOrderRows.length, 'rows | purchase_orders:', pOrderRows.length, 'rows | suppliers:', supRows.length, 'rows');
+
+            if (cloudData.business_profile?.[0]) {
+              const bp = toCamel([cloudData.business_profile[0]])[0];
+              setBusinessInfo(bp);
+              // Đồng bộ luôn baseline (lastSavedBizRef) tại đây — nếu không, effect
+              // "chặn vòng lặp" phía trên có thể đã tiêu cờ isBusinessInfoInitRef ở
+              // lần render với businessInfo còn là giá trị mặc định hard-code (trước
+              // khi cloud load xong), khiến setBusinessInfo(bp) THẬT ở đây bị hiểu
+              // nhầm là "vừa sửa" nếu bp khác mặc định dù chỉ 1 field → lưu thừa 1 lần.
+              isBusinessInfoInitRef.current = false;
+              lastSavedBizRef.current = stableStr(bp);
+            }
+            if (cloudData.shift_config?.[0]) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...toCamel([cloudData.shift_config[0]])[0] }));
+
+            // Save vào cache (bỏ qua sensitive tables — KHÔNG lưu sales_orders, purchase_orders vào localStorage)
+            for (const t of CACHE_TABLES) {
+              const key = t === 'projects' ? 'projects' : t;
+              const rows = { customers: custRows, projects: projRows, tasks: taskRows, receipts: recRows, payments: payRows, quotes: quoteRows }[key];
+              if (rows) saveToCache(t, rows);
+              if (rows) dbService.populateCache(t, rows);
+            }
+
+            console.log('[Init] ✅ Cloud sync done — cache updated');
+          } catch (e) {
+            console.warn('[Init] ⚠️ Cloud sync failed, using cached data:', e);
           }
-        } else {
-          setPayments(pays);
-        }
+        })();
 
-        const qtes = await dbService.quotes.list();
-        setQuotes(qtes);
-
-        // Đồng bộ hồ sơ doanh nghiệp từ Supabase
-        const cloudProfile = await dbService.businessProfile.get();
-        if (cloudProfile) {
-          setBusinessInfo(cloudProfile);
-          localStorage.setItem('hl_business_info', JSON.stringify(cloudProfile));
-        } else {
-          // Chưa có trên cloud → push dữ liệu local lên Supabase
-          const localProfile = localStorage.getItem('hl_business_info');
-          if (localProfile) {
-            const parsed = JSON.parse(localProfile);
-            await dbService.businessProfile.save(parsed);
-          }
-        }
-
-        // Đồng bộ cấu hình ca từ Supabase
-        const cloudShiftConfig = await dbService.shiftConfig.get();
-        if (cloudShiftConfig) {
-          setHrmConfig(cloudShiftConfig);
-        }
-
-        // displaySettings chỉ lưu localStorage (cá nhân hóa - màu sắc, font chữ)
       } catch (err) {
-        console.warn("Lỗi kết nối đồng bộ cơ sở dữ liệu Firebase Firestore:", err);
+        console.warn("Lỗi kết nối:", err);
+        setIsInitializing(false);
       }
     };
     initAndSync();
   }, []);
 
-  // Khối Dữ Liệu Nhân Viên - Khởi tạo rỗng, sẽ nạp từ Supabase trong useEffect
-  const [employees, setEmployees] = useState<Employee[]>(() => {
-    // Trả về mảng rỗng - dữ liệu sẽ được nạp từ Supabase trong useEffect
-    return [];
-  });
+  // Khối Dữ Liệu Nhân Viên — KHÔNG cache localStorage để tránh lộ thông tin nhạy cảm
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-
-  useEffect(() => {
-    localStorage.setItem('hl_erp_employees', JSON.stringify(employees));
-  }, [employees]);
 
   // Trạng thái Người dùng hiện tại (bỏ chế độ phân quyền giả định, bắt buộc đăng nhập thực thụ)
   const [currentUser, setCurrentUser] = useState<Employee | null>(() => {
@@ -647,20 +844,122 @@ export default function App() {
   // Web Push notification registration
   useWebPush(currentUser?.id ?? null);
 
-  const [activeTab, setActiveTab ] = useState<string>('dashboard');
+  // ─── Super Admin check: query Supabase DB trực tiếp, KHÔNG dùng localStorage ──
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  useEffect(() => {
+    if (!currentUser?.id) { setIsSuperAdmin(false); return; }
+    dbService.checkSuperAdmin(currentUser.id).then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
+  }, [currentUser?.id]);
+
+  // ─── Load chat conversations từ sớm để sidebar badge hoạt động ──────────────
+  const [, forceChatUpdate] = useState(0);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    loadConversationsFromCloud(currentUser.id);
+  }, [currentUser?.id]);
+
+  // Subscribe realtime + trigger re-render để sidebar badge cập nhật
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const unsub = subscribeConversations(currentUser.id, () => {
+      forceChatUpdate(n => n + 1);
+    });
+    return () => unsub();
+  }, [currentUser?.id]);
+
+  const [activeTab, setActiveTabState] = useState<string>(() => {
+    return sessionStorage.getItem('hl_erp_active_tab') || 'dashboard';
+  });
+  const [tabHistory, setTabHistory] = useState<string[]>([]);
+  // Wrapper setActiveTab tự động lưu tab hiện tại vào history trước khi chuyển tab
+  const setActiveTab = useCallback((tab: string) => {
+    setTabHistory(prev => activeTab !== tab ? [...prev, activeTab] : prev);
+    setActiveTabState(tab);
+  }, [activeTab]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
 
   useEffect(() => {
+    sessionStorage.setItem('hl_erp_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
     setMobileMenuOpen(false);
   }, [activeTab]);
 
+  // Giữ FinanceManagement MOUNTED sau lần đầu vào tab (ẩn bằng CSS display:none
+  // khi rời tab thay vì unmount hoàn toàn) — trước đây mỗi lần rời rồi quay lại
+  // menu Tài Chính, component 10.000+ dòng này bị unmount/mount lại từ đầu, làm
+  // mất cache của toàn bộ useMemo (mergedLiabilities, filteredReceipts/Payments,
+  // receiptGroups/paymentGroups...) và chạy lại các fetch phụ, gây cảm giác
+  // "load lại" dù dữ liệu nguồn không hề đổi.
+  const [hasVisitedFinance, setHasVisitedFinance] = useState(() => activeTab === 'finance');
+  useEffect(() => {
+    if (activeTab === 'finance') setHasVisitedFinance(true);
+  }, [activeTab]);
+
+  // Tương tự Tài Chính: giữ mounted Quản Lý Thầu Phụ và Danh Mục NCC Vật Tư
+  // sau lần đầu vào tab, tránh unmount/remount tốn network mỗi lần chuyển qua lại.
+  const [hasVisitedSubcontractorManagement, setHasVisitedSubcontractorManagement] = useState(() => activeTab === 'subcontractor-management');
+  useEffect(() => {
+    if (activeTab === 'subcontractor-management') setHasVisitedSubcontractorManagement(true);
+  }, [activeTab]);
+  const [hasVisitedWarehouseSuppliers, setHasVisitedWarehouseSuppliers] = useState(() => activeTab === 'warehouse-suppliers');
+  useEffect(() => {
+    if (activeTab === 'warehouse-suppliers') setHasVisitedWarehouseSuppliers(true);
+  }, [activeTab]);
+
+  // Tương tự: giữ mounted Việc Của Tôi, Điều Phối Vật Tư, Hồ Sơ (Báo Giá) sau
+  // lần đầu vào tab, tránh unmount/remount tốn network/tính toán lại mỗi lần
+  // chuyển qua tab khác rồi quay lại.
+  const [hasVisitedTasks, setHasVisitedTasks] = useState(() => activeTab === 'tasks');
+  useEffect(() => {
+    if (activeTab === 'tasks') setHasVisitedTasks(true);
+  }, [activeTab]);
+  const [hasVisitedMaterialCoordination, setHasVisitedMaterialCoordination] = useState(() => activeTab === 'material-coordination');
+  useEffect(() => {
+    if (activeTab === 'material-coordination') setHasVisitedMaterialCoordination(true);
+  }, [activeTab]);
+  const QUOTES_TABS = ['quotes', 'quotes-construction', 'quotes-mechanical', 'quotes-subcontractor'];
+  const [hasVisitedQuotes, setHasVisitedQuotes] = useState(() => QUOTES_TABS.includes(activeTab));
+  useEffect(() => {
+    if (QUOTES_TABS.includes(activeTab)) setHasVisitedQuotes(true);
+  }, [activeTab]);
+  const [hasVisitedMessages, setHasVisitedMessages] = useState(() => activeTab === 'messages');
+  useEffect(() => {
+    if (activeTab === 'messages') setHasVisitedMessages(true);
+  }, [activeTab]);
+
   const [financeSubTab, setFinanceSubTab] = useState<string>('de_xuat_thu_chi');
+  const [financeInitialProposalId, setFinanceInitialProposalId] = useState<string | null>(null);
+  // Mở Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng.
+  const openFinanceVoucher = (proposalId: string) => {
+    setFinanceInitialProposalId(proposalId);
+    setFinanceSubTab('de_xuat_thu_chi');
+    setActiveTab('finance');
+  };
+  // Mở Điều Phối Vật Tư và tự động mở chi tiết Đề Xuất Vật Tư tương ứng (từ tab Đơn Hàng).
+  const [materialInitialProposalId, setMaterialInitialProposalId] = useState<string | null>(null);
+  const openMaterialProposal = (proposalId: string) => {
+    setMaterialInitialProposalId(proposalId);
+    setActiveTab('material-coordination');
+  };
   const [hrSubTab, setHrSubTab] = useState<string>('profiles');
   const [financeDuLieuTab, setFinanceDuLieuTab] = useState<string>('khach_hang');
   const [preselectedCustomerId, setPreselectedCustomerId] = useState<string>('');
   const [preselectedProjectId, setPreselectedProjectId] = useState<string>('');
+  const [preselectedQuotesSubTab, setPreselectedQuotesSubTab] = useState<string | null>(null);
+  const [preselectedDocType, setPreselectedDocType] = useState<string | null>(null);
+
+  // Reset sub-tab/preselect khi rời khỏi module báo giá để tránh stale "archive"
+  useEffect(() => {
+    if (!['quotes', 'quotes-construction', 'quotes-mechanical', 'quotes-subcontractor'].includes(activeTab)) {
+      setPreselectedQuotesSubTab(null);
+      setPreselectedDocType(null);
+    }
+  }, [activeTab]);
 
   // Thu gọn sidebar & hệ thống thông báo tin nhắn mới
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -670,20 +969,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('hl_erp_sidebar_collapsed', sidebarCollapsed ? 'true' : 'false');
   }, [sidebarCollapsed]);
-
-  const [showNotificationsPanel, setShowNotificationsPanel] = useState<boolean>(false);
-  // Đóng popup Thông báo & Tin nhắn khi click ra ngoài cửa sổ
-  useEffect(() => {
-    if (!showNotificationsPanel) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('#notification_bell_root')) return;
-      setShowNotificationsPanel(false);
-    };
-    // Dùng capture để bắt event trước khi các handler khác chạy
-    document.addEventListener('mousedown', handleClickOutside, true);
-    return () => document.removeEventListener('mousedown', handleClickOutside, true);
-  }, [showNotificationsPanel]);
 
   // Đóng dropdown tài khoản khi click ra ngoài
   useEffect(() => {
@@ -696,214 +981,98 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside, true);
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [showUserMenu]);
-  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread' | 'tasks' | 'finance' | 'employees_attendance' | 'chat'>('all');
-  // Tab phân hệ Messenger được mở từ lối tắt chuông thông báo
-  const [messengerInitialTab, setMessengerInitialTab] = useState<'all' | 'personal' | 'group' | 'notifications'>('all');
-  // Bộ lọc trong popover Thông báo & Tin nhắn (4 tab)
-  const [popoverFilter, setPopoverFilter] = useState<'all' | 'personal' | 'group' | 'notifications'>('all');
   // Hội thoại cần mở khi điều hướng vào Messenger
   const [initialConvId, setInitialConvId] = useState<string | null>(null);
-  // Thông báo cần mở chi tiết khi điều hướng vào Messenger
-  const [initialNotificationId, setInitialNotificationId] = useState<string | null>(null);
-  // Sau khi MessagesView đã nhận initialConvId / initialNotificationId, reset để lần click sau vẫn kích hoạt lại
+  // Sau khi MessagesView đã nhận initialConvId, reset để lần click sau vẫn kích hoạt lại
   useEffect(() => {
     if (initialConvId) {
       const t = setTimeout(() => setInitialConvId(null), 300);
       return () => clearTimeout(t);
     }
   }, [initialConvId]);
-  useEffect(() => {
-    if (initialNotificationId) {
-      const t = setTimeout(() => setInitialNotificationId(null), 300);
-      return () => clearTimeout(t);
-    }
-  }, [initialNotificationId]);
   // Hiển thị badge đếm số chưa đọc trên tab
   const [showBadgeCounts, setShowBadgeCounts] = useState<boolean>(() => localStorage.getItem('hl_show_badge_counts') !== 'false');
 
-  // Deep-link từ FCM push notification: /messages?conversation=xxx
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const convId = params.get('conversation');
-    if (convId) {
-      setInitialConvId(convId);
+  // ═══════════════════════════════════════════════════════════════════════
+  // DEEP LINK TỪ THÔNG BÁO ĐẨY (Web Push)
+  // Bấm vào thông báo → mở ĐÚNG chi tiết công việc / hội thoại tương ứng.
+  // Hai đường vào (xem src/lib/pushDeepLink.ts):
+  //   1. App đang mở  → service worker postMessage sang đây (không reload).
+  //   2. App chưa mở  → SW openWindow('/?taskId=...') → đọc từ location.search.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Công việc cần bung modal chi tiết (truyền xuống <TaskManagement initialTaskId>)
+  const [deepLinkTaskId, setDeepLinkTaskId] = useState<string | null>(null);
+  // Deep link công việc đang chờ `tasks` tải xong để tra ID/mã
+  const [pendingTaskLink, setPendingTaskLink] = useState<PushDeepLink | null>(null);
+  // Deep link xét duyệt (leave/payment/advance) → mở thẳng "Công việc phải duyệt" trong tab Công việc
+  const [approvalDeepLink, setApprovalDeepLink] = useState<{ kind: string; id: string } | null>(null);
+
+  const handlePushDeepLink = useCallback((link: PushDeepLink) => {
+    // Ưu tiên 1: hội thoại chat
+    if (link.conversationId) {
       setActiveTab('messages');
-      // Xoá query param khỏi URL để không mở lại khi reload
-      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+      setInitialConvId(link.conversationId);
+      return;
     }
-  }, []);
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    // Trả về mảng rỗng - dữ liệu thông báo sẽ được nạp từ Supabase trong useEffect
-    return [];
-  });
 
-  // Load notifications from Supabase on mount
-  useEffect(() => {
-    let mounted = true;
-    dbService.notifications.list()
-      .then(list => {
-        if (mounted && Array.isArray(list) && list.length > 0) {
-          const sorted = [...list].sort((a, b) =>
-            (b.createdAt || '').localeCompare(a.createdAt || ''));
-          setNotifications(sorted as AppNotification[]);
-        }
-      })
-      .catch(err => console.warn('Lỗi khi tải thông báo từ Supabase:', err));
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('hl_erp_notifications', JSON.stringify(notifications));
-  }, [notifications]);
-
-  const addNotification = (notif: Partial<AppNotification>) => {
-    const randomNum = Math.floor(100 + Math.random() * 900);
-    const id = notif.id || `MSG-${Date.now()}-${randomNum}`;
-    const recipientId = notif.recipientId || 'emp_1';
-    const recipient = employees.find(e => e.id === recipientId) || currentUser;
-
-    if (!recipient) return;
-
-    const newNotif: AppNotification = {
-      id,
-      recipientId: recipient.id,
-      recipientName: recipient.name,
-      department: recipient.department || 'Phòng Ban',
-      content: notif.content || 'Thông báo mới từ hệ thống.',
-      subTaskCode: notif.subTaskCode || 'CV-GEN',
-      createdAt: notif.createdAt || new Date().toISOString(),
-      read: false,
-      senderId: notif.senderId || 'system',
-      senderName: notif.senderName || 'Hệ Thống',
-      senderAvatar: notif.senderAvatar || 'HT',
-      category: notif.category || 'tasks',
-      title: notif.title || 'Thông báo hệ thống',
-      detailedContent: notif.detailedContent || notif.content || 'Nội dung chi tiết thông báo hệ thống.',
-      conversationId: notif.conversationId,
-      taskId: notif.taskId
-    };
-
-    setNotifications(prev => {
-      // Chống trùng lặp: bỏ qua nếu đã có thông báo giống hệt (cùng người nhận, tiêu đề, nội dung)
-      // được tạo trong vòng 5 giây gần đây
-      const isDuplicate = prev.some(n =>
-        n.recipientId === newNotif.recipientId &&
-        n.title === newNotif.title &&
-        n.content === newNotif.content &&
-        Math.abs(new Date(n.createdAt).getTime() - new Date(newNotif.createdAt).getTime()) < 5000
-      );
-      if (isDuplicate) return prev;
-      return [newNotif, ...prev];
-    });
-
-    addToast({
-      title: `🔔 ${newNotif.title}`,
-      message: newNotif.content,
-      type: 'info'
-    });
-
-    // Persist to Supabase (non-blocking)
-    dbService.notifications.save(newNotif).catch(err =>
-      console.warn('Lỗi khi lưu thông báo lên Supabase:', err));
-
-    // 🔔 Gửi Web Push notification đến thiết bị người nhận (non-blocking)
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      if (supabaseUrl && supabaseAnonKey && recipient.id) {
-        fetch(`${supabaseUrl}/functions/v1/send-push`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            userIds: [recipient.id],
-            title: newNotif.title || 'Thông báo mới',
-            body: newNotif.content || '',
-            data: {
-              url: '/',
-              type: newNotif.category,
-              sourceId: newNotif.subTaskCode,
-              tag: `system-${newNotif.category}`,
-            },
-          }),
-        }).catch(err => console.warn('Web Push error:', err));
-      }
-    } catch (err) {
-      console.warn('Web Push error (ignored):', err);
+    // Ưu tiên 2: công việc — chuyển tab NGAY, còn modal chi tiết đợi `tasks`
+    // tải xong mới bung (xử lý ở effect resolver bên dưới).
+    if (link.taskId || link.taskCode) {
+      setActiveTab('tasks');
+      setPendingTaskLink(link);
+      return;
     }
-  };
 
+    // Ưu tiên 3: dự án
+    if (link.projectId) {
+      setActiveTab('projects-construction');
+      return;
+    }
+
+    // Không có đích cụ thể → điều hướng thô theo phân loại
+    switch (link.category) {
+      case 'tasks':
+      case 'approval':   setActiveTab('tasks'); break;
+      case 'finance':    setActiveTab('finance'); break;
+      case 'hr':
+      case 'employees':  setActiveTab('employees'); break;
+      case 'projects':   setActiveTab('projects-construction'); break;
+      case 'chat':       setActiveTab('messages'); break;
+      default:           setActiveTab('dashboard'); break;
+    }
+  }, [setActiveTab]);
+
+  // (1) App ĐANG MỞ: nhận message từ service worker khi người dùng bấm thông báo
   useEffect(() => {
-    const handleDispatchNotification = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail) {
-        addNotification(customEvent.detail);
-      }
+    if (!('serviceWorker' in navigator)) return;
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data?.type !== NOTIFICATION_CLICK_MESSAGE) return;
+      handlePushDeepLink(parsePushData(event.data.data));
     };
-    window.addEventListener('hl-dispatch-notification', handleDispatchNotification);
-    return () => window.removeEventListener('hl-dispatch-notification', handleDispatchNotification);
-  }, [employees, currentUser]);
+    navigator.serviceWorker.addEventListener('message', onSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onSwMessage);
+  }, [handlePushDeepLink]);
 
+  // (2) App MỞ MỚI từ thông báo: đọc deep link trên query string rồi dọn URL
   useEffect(() => {
-    if (!currentUser) return;
-    const checkAttendanceTimeAndNotify = () => {
-      const now = new Date();
-      const day = now.getDay(); // 0: Sunday, 6: Saturday
-      if (day === 0) return; // Do not notify on Sundays (rest day)
+    const link = readDeepLinkFromLocation();
+    if (hasDeepLinkTarget(link)) {
+      handlePushDeepLink(link);
+    }
+    // Xoá query param để F5 không mở lại modal cũ
+    clearDeepLinkFromLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      // Kiểm tra nghỉ lễ cố định Việt Nam (01/01, 30/04, 01/05, 02/09)
-      const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const holidays = ['01/01', '30/04', '01/05', '02/09'];
-      if (holidays.includes(dateStr)) return; // Không thông báo điểm danh ngày nghỉ lễ
-
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-
-      // Ca sáng: 7:00 - 7:30
-      if (hours === 7 && minutes >= 0 && minutes <= 30) {
-        const key = `attendance_morning_notified_${now.toDateString()}`;
-        if (!localStorage.getItem(key)) {
-          addNotification({
-            category: 'attendance',
-            title: '⏰ Điểm danh Ca Sáng',
-            content: 'Sắp đến ca làm việc sáng (07:30). Hãy điểm danh vân tay/khuôn mặt ngay!',
-            detailedContent: 'Ca làm việc chính thức: Sáng 07:30 - 11:30.\nThời gian bắt đầu điểm danh vào ca: 07:00.\nHãy thực hiện điểm danh sinh trắc học trên hệ thống ERP để ghi nhận công chuẩn.',
-            senderName: 'Phòng Hành Chính Nhân Sự',
-            senderAvatar: 'NS',
-            recipientId: currentUser.id
-          });
-          localStorage.setItem(key, 'true');
-        }
-      }
-
-      // Ca chiều: 12:30 - 13:00 (13:00)
-      if ((hours === 12 && minutes >= 30) || (hours === 13 && minutes === 0)) {
-        const key = `attendance_afternoon_notified_${now.toDateString()}`;
-        if (!localStorage.getItem(key)) {
-          addNotification({
-            category: 'attendance',
-            title: '⏰ Điểm danh Ca Chiều',
-            content: 'Sắp đến ca làm việc chiều (13:00). Hãy điểm danh vân tay/khuôn mặt!',
-            detailedContent: 'Ca làm việc chính thức: Chiều 13:00 - 17:00.\nThời gian bắt đầu điểm danh vào ca: 12:30.\nHãy thực hiện điểm danh để không bị ghi nhận đi muộn.',
-            senderName: 'Phòng Hành Chính Nhân Sự',
-            senderAvatar: 'NS',
-            recipientId: currentUser.id
-          });
-          localStorage.setItem(key, 'true');
-        }
-      }
-    };
-
-    checkAttendanceTimeAndNotify();
-    const interval = setInterval(checkAttendanceTimeAndNotify, 60000);
-    return () => clearInterval(interval);
-  }, [currentUser, employees]);
+  // ⚠️ Client-side attendance timer ĐÃ BỎ (gây trùng lặp).
+  // Thông báo điểm danh giờ chỉ chạy qua server-side:
+  //   1. pg_cron SQL (trigger_attendance_reminders) — nguồn chính
+  //   2. Edge Function (send-attendance-reminders) — backup
 
   // Trạng thái cây thư mục Sidebar dạng mô phỏng
   const [isDirectorGroupExpanded, setIsDirectorGroupExpanded] = useState(true);
-  const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor'>('projects');
+  const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary'>('projects');
   const [isProjectGroupExpanded, setIsProjectGroupExpanded] = useState(true);
   const [isHrGroupExpanded, setIsHrGroupExpanded] = useState(true);
   const [isFinanceGroupExpanded, setIsFinanceGroupExpanded] = useState(true);
@@ -916,9 +1085,75 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Phản chiếu tasks mới nhất để handler sự kiện đọc được giá trị cập nhật mà
+  // không phải chạy side-effect bên trong hàm updater của setState.
+  const tasksRef = useRef<Task[]>(tasks);
+  tasksRef.current = tasks;
+  // HƯỚNG B: ghi nhận thời điểm vừa save 1 task để các nguồn reload (Realtime,
+  // hl-tasks-updated, polling) không ghi đè bản đã lưu mới hơn bằng dữ liệu cũ.
+  const recentTaskSaves = useRef(new Map<string, number>());
+  // Gộp kết quả tải từ server với bản local vừa save (trong cửa sổ 5s) để tránh
+  // mất trạng thái "Hoàn thành nhiệm vụ" do race giữa save và reload.
+  const applyTasksWithLocalOverrides = useCallback((serverTasks: Task[]) => {
+    const now = Date.now();
+    const merged: Task[] = serverTasks.map(t => {
+      const savedAt = recentTaskSaves.current.get(t.id);
+      if (savedAt && now - savedAt < 5000) {
+        const local = tasksRef.current.find(x => x.id === t.id);
+        if (local) return local;
+      }
+      return t;
+    });
+    // Giữ cả task local vừa save nhưng chưa kịp xuất hiện trên server (save chưa commit).
+    recentTaskSaves.current.forEach((savedAt, tid) => {
+      if (now - savedAt < 5000 && !merged.some(t => t.id === tid)) {
+        const local = tasksRef.current.find(x => x.id === tid);
+        if (local) merged.push(local);
+      }
+    });
+    setTasks(merged);
+  }, [setTasks]);
+
+  // ── Resolver deep link công việc ────────────────────────────────────────
+  // Thông báo đẩy có thể mang `taskId` (chuẩn) hoặc chỉ có `taskCode`
+  // (`subTaskCode`, VD 'CV-001') với các thông báo cũ. Đợi `tasks` tải xong
+  // rồi tra ra ID thật để bung modal chi tiết.
+  useEffect(() => {
+    if (!pendingTaskLink) return;
+    if (tasks.length === 0) return; // chưa tải xong → chờ effect chạy lại
+
+    const { taskId, taskCode } = pendingTaskLink;
+    const task =
+      (taskId && tasks.find(t => t.id === taskId)) ||
+      (taskCode && tasks.find(t => t.code === taskCode)) ||
+      // Thông báo cũ có thể nhét MÃ vào ô taskId (hoặc ngược lại) → thử chéo
+      (taskId && tasks.find(t => t.code === taskId)) ||
+      (taskCode && tasks.find(t => t.id === taskCode)) ||
+      null;
+
+    if (task) {
+      setDeepLinkTaskId(task.id);
+    } else {
+      addToast({
+        title: '🔍 Không mở được chi tiết',
+        message: `Không tìm thấy công việc ${taskId || taskCode} (có thể đã bị xoá hoặc bạn không có quyền xem).`,
+        type: 'warning',
+      });
+    }
+    setPendingTaskLink(null);
+  }, [pendingTaskLink, tasks, addToast]);
+
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  // Tổng hợp Công Tác Phí (dùng cho panel CTP trong Tổng Quan)
+  const [ctpSummary, setCtpSummary] = useState<any[]>([]);
+  // Đơn nghỉ phép (dùng để cộng vào badge "Việc của tôi" – nhánh Công việc phải duyệt)
+  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
+  const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
 
   // Trạng thái đồng bộ & nạp dữ liệu mẫu lên Firestore hoanglongerpdb
   const [isDbSeeding, setIsDbSeeding] = useState(false);
@@ -932,12 +1167,10 @@ export default function App() {
       await dbService.bootstrapFirstTime(true);
       
       // Load lại toàn bộ danh sách thực tế từ Live database
+      // ensureAdminAndPasswords chuẩn hoá luôn tài khoản admin (mật khẩu cố định "admin")
+      // để tránh tình trạng đăng nhập lúc được lúc không (xem ghi chú ở Tier 2 poll).
       const emps = await dbService.employees.list();
-      const mappedEmps = emps.map(emp => ({
-        ...emp,
-        username: emp.username || generateUsername(emp.name),
-        password: emp.password || hashPasswordSync('123')
-      }));
+      const mappedEmps = ensureAdminAndPasswords(emps);
       setEmployees(mappedEmps);
 
       const activeSessionStr = sessionStorage.getItem('hl_erp_active_session') || localStorage.getItem('hl_erp_active_session');
@@ -947,7 +1180,7 @@ export default function App() {
           const foundUser = mappedEmps.find(e => e.id === parsedSession.id || e.username === parsedSession.username);
           if (foundUser) {
             setCurrentUser(foundUser);
-            sessionStorage.setItem('hl_erp_active_session', JSON.stringify(foundUser));
+            sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(foundUser)));
           } else if (mappedEmps.length > 0) {
             setCurrentUser(mappedEmps[0]);
           }
@@ -977,6 +1210,12 @@ export default function App() {
       const qtes = await dbService.quotes.list();
       setQuotes(qtes);
 
+      const sOrders = await dbService.salesOrders.list();
+      setSalesOrders(sOrders);
+
+      const pOrders = await dbService.purchaseOrders.list();
+      setPurchaseOrders(pOrders);
+
       setDbSeedSuccess("Đồng bộ & Nạp dữ liệu mẫu lên database hoanglongerpdb thành công!");
       setTimeout(() => setDbSeedSuccess(null), 5000);
     } catch (err: any) {
@@ -990,26 +1229,9 @@ export default function App() {
   // ========== CÁC TRẠNG THÁI FORM CHO MODULE CÀI ĐẶT TÙY BIẾN =========
   const [subSettingsTab, setSubSettingsTab] = useState<'business' | 'shift' | 'display' | 'supabase'>('business');
 
-  const [hrmConfig, setHrmConfig] = useState(() => ({
-    morningIn: '07:30',
-    morningOut: '11:30',
-    afternoonIn: '13:00',
-    afternoonOut: '17:00',
-    overtimeIn: '17:45',
-    overtimeOut: '20:45',
-    gpsRadiusAllowed: 50,
-    antiFakeCam: true,
-    punchOpenBeforeMinutes: 15,
-    punchCloseAfterMinutes: 15,
-    punchOutOpenBeforeMinutes: 15,
-    punchOutCloseAfterMinutes: 15,
-    otPunchOpenBeforeMinutes: 15,
-    otPunchCloseAfterMinutes: 15,
-    otPunchOutOpenBeforeMinutes: 15,
-    otPunchOutCloseAfterMinutes: 15,
-    allowedLateMinutes: 15,
-    weekendDays: [0] as number[],
-  }));
+  const [hrmConfig, setHrmConfig] = useState(() => DEFAULT_SYSTEM_CONFIG);
+
+  // Điều chỉnh hiển thị (Display Settings)
 
   // ─── Helper tính toán phút từ chuỗi "HH:MM" ───
   const timeToMinutes = (timeStr: string): number => {
@@ -1037,37 +1259,18 @@ export default function App() {
     };
   };
 
-  // Thêm người dùng mới
-  const [newEmpName, setNewEmpName] = useState('');
-  const [newEmpEmail, setNewEmpEmail] = useState('');
-  const [newEmpPhone, setNewEmpPhone] = useState('');
-  const [newEmpDept, setNewEmpDept] = useState('Phòng Dự Án - Xây Dựng');
-  const [newEmpRole, setNewEmpRole] = useState<string>('engineer');
-  const [newEmpUsername, setNewEmpUsername] = useState('');
-  const [newEmpPassword, setNewEmpPassword] = useState('123');
-  const [newEmpRoleGroupId, setNewEmpRoleGroupId] = useState<string>('role_office');
+  // Thêm người dùng mới — form đã xóa, tạo tài khoản qua HRM
 
-  // Đọc danh sách Role Groups từ localStorage hoặc Supabase cache để render dropdown
+  // Đọc danh sách Role Groups từ in-memory cache (đã load từ Supabase)
   const readHrmRoleGroups = (): { id: string; name: string }[] => {
     try {
-      // Ưu tiên cache từ Supabase
-      const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-      if (supCached) {
-        const parsed = JSON.parse(supCached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((r: any) => ({ id: r.id, name: r.name }));
-        }
-      }
-      // Fallback
-      const saved = localStorage.getItem('hl_hrm_roles_v2');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((r: any) => ({ id: r.id, name: r.name }));
-        }
+      const groups = loadHrmRoleGroups();
+      if (Array.isArray(groups) && groups.length > 0) {
+        return groups.map((r: any) => ({ id: r.id, name: r.name }));
       }
     } catch {}
     return [
+      { id: 'role_superadmin', name: 'Siêu Admin (Super Admin)' },
       { id: 'role_admin', name: 'Ban Giám Đốc (Admin)' },
       { id: 'role_accounting', name: 'Kế toán viên' },
       { id: 'role_office', name: 'Nhân viên Văn phòng' },
@@ -1079,11 +1282,6 @@ export default function App() {
   const [hrmRoleGroups, setHrmRoleGroups] = useState<{ id: string; name: string }[]>(() => readHrmRoleGroups());
 
   // Điều chỉnh hiển thị
-  const [editLogoText, setEditLogoText] = useState(displaySettings.logoText);
-  const [editBrandName, setEditBrandName] = useState(displaySettings.brandName);
-  const [editBrandSlogan, setEditBrandSlogan] = useState(displaySettings.brandSlogan);
-  const [editDashboardTitle, setEditDashboardTitle] = useState(displaySettings.dashboardTitle);
-  const [editMotivationQuote, setEditMotivationQuote] = useState(displaySettings.motivationQuote);
 
   // Hồ sơ doanh nghiệp
   const [editCorpName, setEditCorpName] = useState(businessInfo.companyName);
@@ -1147,15 +1345,11 @@ export default function App() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    setEditLogoText(displaySettings.logoText);
-    setEditBrandName(displaySettings.brandName);
-    setEditBrandSlogan(displaySettings.brandSlogan);
-    setEditDashboardTitle(displaySettings.dashboardTitle);
-    setEditMotivationQuote(displaySettings.motivationQuote);
-  }, [displaySettings]);
 
+  const prevBusinessInfoRef = useRef(businessInfo);
   useEffect(() => {
+    if (JSON.stringify(businessInfo) === JSON.stringify(prevBusinessInfoRef.current)) return;
+    prevBusinessInfoRef.current = businessInfo;
     setEditCorpName(businessInfo.companyName);
     setEditCorpTax(businessInfo.taxCode);
     setEditCorpRep(businessInfo.representative);
@@ -1176,12 +1370,14 @@ export default function App() {
         if (typeof customEv.detail === 'string') {
           setActiveTab(customEv.detail);
         } else if (typeof customEv.detail === 'object') {
-          const { tab, projectId, customerId, financeSubTab, financeDuLieuTab } = customEv.detail;
+          const { tab, projectId, customerId, financeSubTab, financeDuLieuTab, quotesSubTab, docType } = customEv.detail;
           if (tab) setActiveTab(tab);
           if (projectId) setPreselectedProjectId(projectId);
           if (customerId) setPreselectedCustomerId(customerId);
           if (financeSubTab) setFinanceSubTab(financeSubTab);
           if (financeDuLieuTab) setFinanceDuLieuTab(financeDuLieuTab);
+          setPreselectedQuotesSubTab(quotesSubTab || null);
+          setPreselectedDocType(docType || null);
         }
       }
     };
@@ -1192,12 +1388,31 @@ export default function App() {
   // Sync projects from Supabase when updated elsewhere
   useEffect(() => {
     const handleProjectsUpdated = async () => {
+      console.log('[SYNC Projects] 🔔 Nhận sự kiện hl-projects-updated');
+      // Đọc ngay từ localStorage để đồng bộ tức thì (vd: duyệt báo giá → Công nợ Thu)
+      try {
+        const localData = localStorage.getItem('hl_erp_projects');
+        if (localData) {
+          const localProjs = JSON.parse(localData);
+          const filteredLocal = localProjs.filter((p: any) => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+          const approvedLocal = filteredLocal.filter((p: any) => p.baoGiaFile?.isApproved === true);
+          console.log(`[SYNC Projects] 📦 localStorage: ${filteredLocal.length} dự án, ${approvedLocal.length} đã duyệt BG`,
+            approvedLocal.map((p: any) => ({ id: p.id, name: p.name, totalAmount: p.baoGiaFile?.totalAmount })));
+          setProjects(filteredLocal);
+        } else {
+          console.log('[SYNC Projects] ⚠️ Không tìm thấy hl_erp_projects trong localStorage');
+        }
+      } catch {}
+      // Sau đó đồng bộ từ DB để có dữ liệu mới nhất
       try {
         const projs = await dbService.projects.list();
         const filteredProjs = projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất'));
+        const approvedProjs = filteredProjs.filter(p => p.baoGiaFile?.isApproved === true);
+        console.log(`[SYNC Projects] ☁️ Supabase: ${filteredProjs.length} dự án, ${approvedProjs.length} đã duyệt BG`,
+          approvedProjs.map((p: any) => ({ id: p.id, name: p.name, totalAmount: p.baoGiaFile?.totalAmount, 'baoGiaFile?': !!p.baoGiaFile })));
         setProjects(filteredProjs);
       } catch (err) {
-        console.error("Lỗi đồng bộ dự án:", err);
+        console.error("[SYNC Projects] Lỗi đồng bộ dự án:", err);
       }
     };
     window.addEventListener('hl-projects-updated', handleProjectsUpdated);
@@ -1209,7 +1424,8 @@ export default function App() {
     const handleTasksUpdated = async () => {
       try {
         const tsks = await dbService.tasks.list();
-        setTasks(tsks);
+        // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu.
+        applyTasksWithLocalOverrides(tsks);
       } catch (err) {
         console.error("Lỗi đồng bộ công việc:", err);
       }
@@ -1246,39 +1462,233 @@ export default function App() {
     return () => window.removeEventListener('hl-payments-updated', handlePaymentsUpdated);
   }, []);
 
-  // ─── Supabase Realtime: lắng nghe thay đổi projects, tasks, payments, receipts, subcontractorAdvances, attendance ───
+  // Sync đơn nghỉ phép (dùng cho badge "Việc của tôi") khi mount và khi có thay đổi
+  useEffect(() => {
+    const loadLeaves = async () => {
+      try {
+        const data = await dbService.hrmLeaves.list();
+        setLeaves(data || []);
+      } catch (err) {
+        console.error("Lỗi đồng bộ đơn nghỉ phép:", err);
+      }
+    };
+    loadLeaves();
+    window.addEventListener('hl-hrm-leaves-updated', loadLeaves);
+    return () => window.removeEventListener('hl-hrm-leaves-updated', loadLeaves);
+  }, []);
+
+  // Điều hướng mở thẳng 1 hội thoại (ví dụ nhóm chat dự án) từ bất kỳ component
+  // con nào qua CustomEvent 'hl-open-conversation' { conversationId }.
+  useEffect(() => {
+    const handleOpenConversation = (e: Event) => {
+      const convId = (e as CustomEvent).detail?.conversationId;
+      if (!convId) return;
+      setInitialConvId(convId);
+      setActiveTab('messages');
+    };
+    window.addEventListener('hl-open-conversation', handleOpenConversation);
+    return () => window.removeEventListener('hl-open-conversation', handleOpenConversation);
+  }, []);
+
+  // Deep link từ tin nhắn xét duyệt (leave/payment/advance) → mở tab Công việc
+  // ở bảng "Công việc phải duyệt" để người dùng thao tác duyệt/từ chối ngay.
+  // travel_expense → mở tab Nhân Sự → Công Tác Phí (nơi kế toán duyệt/từ chối CTP).
+  useEffect(() => {
+    const handleOpenApproval = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      const kind = d?.kind as string;
+      const id = d?.id as string;
+      if (!kind || !id) return;
+      if (kind === 'travel_expense') {
+        setHrSubTab('trips');
+        setActiveTab('employees');
+        return;
+      }
+      setApprovalDeepLink({ kind, id });
+      setActiveTab('tasks');
+    };
+    window.addEventListener('hl-open-approval', handleOpenApproval);
+    return () => window.removeEventListener('hl-open-approval', handleOpenApproval);
+  }, [setActiveTab]);
+
+  // Deep link từ tin nhắn thông báo công việc (task/mission) → mở tab Công việc
+  // và bung modal chi tiết của công việc được giao (hl-open-task do MessagesView dispatch).
+  useEffect(() => {
+    const handleOpenTask = (e: Event) => {
+      const taskId = (e as CustomEvent).detail?.taskId;
+      if (!taskId) return;
+      setDeepLinkTaskId(taskId);
+      setActiveTab('tasks');
+    };
+    window.addEventListener('hl-open-task', handleOpenTask);
+    return () => window.removeEventListener('hl-open-task', handleOpenTask);
+  }, [setActiveTab]);
+
+  // Sync subcontractor advances from Supabase when updated elsewhere
+  useEffect(() => {
+    const handleAdvancesUpdated = async () => {
+      try {
+        const list = await dbService.subcontractorAdvances.list();
+        setSubcontractorAdvances(list || []);
+      } catch (err) {
+        console.error("Lỗi đồng bộ đề xuất thu chi:", err);
+      }
+    };
+    window.addEventListener('hl-subcontractor-advances-updated', handleAdvancesUpdated);
+    return () => window.removeEventListener('hl-subcontractor-advances-updated', handleAdvancesUpdated);
+  }, []);
+
+  // ─── Supabase Realtime: lắng nghe thay đổi bảng (primary sync, polling chỉ là backup) ───
+  // G2: nếu client chưa sẵn sàng lúc mount (env rỗng + localStorage trống, user cấu hình
+  // Supabase trong cùng phiên) → chờ event hl-supabase-client-ready rồi re-run effect.
+  // Khi client ĐƯỢC tạo MỚI (initializeSupabase chạy lại), channel cũ gắn với instance cũ
+  // sẽ chết → phải resubscribe. Dep [realtimeRetry] đảm bảo cleanup channel cũ trước.
+  const [realtimeRetry, setRealtimeRetry] = useState(0);
+  // Đếm số lần reconnect liên tiếp do lỗi (KHÔNG phải state — nằm ngoài effect
+  // để backoff tăng dần qua nhiều lần resubscribe; reset về 0 khi 1 lần
+  // SUBSCRIBED thành công. Dùng để giãn cách các lần tự động kết nối lại khi
+  // kênh Realtime lỗi liên tục, tránh dội tin nhắn (đã từng vượt hạn mức
+  // Realtime message của Supabase — xem ghi chú POLLED_LOW_CHURN_MS bên dưới).
+  const realtimeReconnectAttempts = useRef(0);
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) {
-      console.warn('[Realtime] Supabase not available, skipping realtime subscription');
-      return;
+      console.warn('[Realtime] Supabase not available yet, waiting for hl-supabase-client-ready');
+      const onReady = () => {
+        console.log('[Realtime] Client ready — (re)subscribing');
+        setRealtimeRetry(n => n + 1);
+      };
+      window.addEventListener('hl-supabase-client-ready', onReady);
+      return () => window.removeEventListener('hl-supabase-client-ready', onReady);
     }
 
-    const fetchProjects = async (payload?: any) => {
+    // ─── Coalescer: gom burst realtime event trong 3s thành 1 lần chạy ──────
+    // Vấn đề: 1 thao tác của user A (vd lưu task) sinh N event (tasks + projects +
+    // kanban...), và M tab đang mở đều nhận → M×N lần refetch full bảng. Với 25
+    // user online thì tải nhân bản theo cả 2 chiều → cháy CPU/egress Supabase.
+    // Giải pháp: mỗi "job" (1 bảng) chỉ được lên lịch 1 lần; nếu có event mới trong
+    // cửa sổ 3s thì job đang chờ gộp thêm rồi CHẠY 1 LẦN duy nhất.
+    const COALESCE_MS = 3000;
+    const pendingJobs = new Map<string, { timer: any; run: () => void }>();
+    const scheduleCoalesced = (key: string, run: () => void) => {
+      if (pendingJobs.has(key)) return; // đã có job chờ cho key này → bỏ qua
+      const entry = {
+        timer: setTimeout(() => {
+          pendingJobs.delete(key);
+          try { run(); } catch (e) { console.error(`[Realtime] coalesced job ${key} error:`, e); }
+        }, COALESCE_MS),
+        run,
+      };
+      pendingJobs.set(key, entry);
+    };
+    // Cleanup mọi timer còn treo khi effect teardown (resubscribe/unmount)
+    const flushPendingJobs = () => {
+      pendingJobs.forEach(j => clearTimeout(j.timer));
+      pendingJobs.clear();
+    };
+
+    // ─── Patch TẠI CHỖ từ payload realtime (không cần refetch full bảng) ────
+    // INSERT/UPDATE: payload.new chứa ĐỦ dòng mới → upsert vào state + cache.
+    // DELETE: payload.old.id → xóa khỏi state + cache.
+    // Trả về true nếu đã vá xong (không cần refetch), false nếu payload thiếu
+    // dữ liệu (REPLICA IDENTITY FULL chưa bật cho DELETE...) → caller fallback refetch.
+    const patchStateRow = (
+      setter: React.Dispatch<React.SetStateAction<any[]>>,
+      tableName: string,
+      payload: any,
+      transform?: (row: any) => any,
+    ): boolean => {
+      const eventType = payload?.eventType;
+      if (!eventType || eventType === '*') return false;
+      if (eventType === 'DELETE') {
+        const delId = payload?.old?.id;
+        if (!delId) return false; // không biết id nào bị xóa → phải refetch
+        setter(prev => prev.filter((r: any) => r.id !== delId));
+        // Vô hiệu cache để polling/mở tab không trả lại dòng đã xóa.
+        try { invalidateCache(tableName); } catch {}
+        return true;
+      }
+      const rawNew = payload?.new;
+      if (!rawNew || !rawNew.id) return false;
+      const row = transform ? transform(rawNew) : rawNew;
+      setter(prev => {
+        const idx = prev.findIndex((r: any) => r.id === row.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          // Merge thay vì ghi đè hoàn toàn: giữ lại các field mà bản ghi
+          // realtime KHÔNG mang theo (vd `tasks.missions` — cột cũ không còn
+          // được ghi mới, xem dbService.tasks; nếu ghi đè cả object sẽ vô
+          // tình xoá/làm cũ missions đang hiển thị đúng mỗi khi có 1 field
+          // KHÁC của task đổi ở tab khác). Với các bảng khác, row luôn đủ
+          // field nên merge cho kết quả giống hệt ghi đè — an toàn.
+          copy[idx] = { ...copy[idx], ...row };
+          return copy;
+        }
+        return [row, ...prev];
+      });
+      // Vô hiệu cache dbService để lần list() kế tiếp (polling/mở tab) fetch mới,
+      // không trả dữ liệu cũ ghi đè mất dòng vừa vá.
+      try { invalidateCache(tableName); } catch {}
+      return true;
+    };
+
+    // Filter loại "Dự án độc lập" dùng chung cho projects (state App không chứa chúng)
+    const isStandaloneProject = (p: any) =>
+      p && (p.name?.startsWith('Dự án độc lập - ')
+        ? !!p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')
+        : false);
+
+    // ── Full refetch (chạy qua coalescer — tối đa 1 lần / 3s / bảng) ─────────
+    const fetchProjects = async () => {
       try {
-        console.log('[Realtime] 🔔 projects event received:', payload ? { event: payload.eventType, table: payload.table } : '(manual)');
+        invalidateCache('projects');
         const projs = await dbService.projects.list();
         console.log('[Realtime] 📦 projects fetched:', projs.length, 'rows');
-        setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
+        setProjects(projs.filter(p => !isStandaloneProject(p)));
       } catch (e) { console.error('Realtime projects sync error:', e); }
     };
-    const fetchTasks = async (payload?: any) => {
+    const fetchTasks = async () => {
       try {
-        console.log('[Realtime] 🔔 tasks event:', payload ? { event: payload.eventType } : '(manual)');
-        setTasks(await dbService.tasks.list());
+        invalidateCache('tasks');
+        const list = await dbService.tasks.list();
+        // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu (vd mission vừa hoàn thành).
+        applyTasksWithLocalOverrides(list);
       } catch (e) { console.error('Realtime tasks sync error:', e); }
     };
-    const fetchPayments = async (payload?: any) => {
+    const fetchPayments = async () => {
       try {
-        console.log('[Realtime] 🔔 payments event:', payload ? { event: payload.eventType } : '(manual)');
+        invalidateCache('payments');
         setPayments(await dbService.payments.list());
       } catch (e) { console.error('Realtime payments sync error:', e); }
     };
-    const fetchReceipts = async (payload?: any) => {
+    const fetchReceipts = async () => {
       try {
-        console.log('[Realtime] 🔔 receipts event:', payload ? { event: payload.eventType } : '(manual)');
+        invalidateCache('receipts');
         setReceipts(await dbService.receipts.list());
       } catch (e) { console.error('Realtime receipts sync error:', e); }
+    };
+    // task_missions (nhiệm vụ con, bảng riêng — xem dbService.taskMissions):
+    // payload mang task_id của dòng vừa đổi → chỉ nạp lại missions của ĐÚNG
+    // task đó rồi vá vào state (không refetch toàn bộ bảng tasks). Coalesce
+    // theo TỪNG task_id để nhiều thay đổi liên tiếp trên các task khác nhau
+    // trong cùng cửa sổ 3s không bị gộp nhầm/mất id.
+    const fireTaskMissionsEvent = (payload?: any) => {
+      const taskId = payload?.new?.task_id || payload?.old?.task_id;
+      if (!taskId) {
+        // Không rõ task nào đổi (vd gọi thủ công, không có payload) → an toàn
+        // nhất là refetch lại toàn bộ tasks (đã gồm missions mới, xem dbService.tasks.list()).
+        scheduleCoalesced('task_missions:*', () => { fetchTasks(); });
+        return;
+      }
+      scheduleCoalesced(`task_missions:${taskId}`, () => {
+        (async () => {
+          try {
+            invalidateCache('task_missions');
+            const missions = await dbService.taskMissions.listByTask(taskId);
+            setTasks(prev => prev.map(t => t.id === taskId ? { ...t, missions } : t));
+          } catch (e) { console.error('Realtime task_missions sync error:', e); }
+        })();
+      });
     };
     const fireAdvancesEvent = (payload?: any) => {
       console.log('[Realtime] 🔔 subcontractor_advances event:', payload ? { event: payload.eventType } : '(manual)');
@@ -1287,107 +1697,527 @@ export default function App() {
     const fireAttendanceEvent = async (payload?: any) => {
       console.log('[Realtime] 🔔 attendance_records event:', payload ? { event: payload.eventType } : '(manual)');
       try {
-        const attendanceList = await dbService.attendance.list();
+        // Ưu tiên: cập nhật TẠI CHỖ bằng dòng thay đổi từ realtime (payload.new / payload.old).
+        // KHÔNG tải lại bảng → loại bỏ hoàn toàn bầy đàn tái tải khi 25 user chấm công cùng lúc.
+        if (payload && payload.eventType) {
+          window.dispatchEvent(new CustomEvent('hl-attendance-realtime', { detail: payload }));
+          return;
+        }
+        // Fallback (chỉ khi gọi manual, không có payload realtime): tải THÁNG HIỆN TẠI.
+        invalidateCache('attendance_records');
+        const { start, end } = currentMonthRange();
+        const attendanceList = await dbService.attendance.listForRange(start, end);
         window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: attendanceList }));
       } catch (e) { console.error('Realtime attendance sync error:', e); }
     };
+    const fetchQuotes = async () => {
+      try { invalidateCache('quotes'); setQuotes(await dbService.quotes.list()); } catch {}
+    };
+    const fetchCustomers = async () => {
+      try { invalidateCache('customers'); setCustomers(await dbService.customers.list()); } catch {}
+    };
+
+    // ─── Handlers cho các bảng phụ (fire custom events để component lắng nghe) ──
+    // Bọc qua coalescer: burst N event cùng bảng → component con chỉ refetch 1 lần.
+    // LUÔN invalidateCache(key) trước khi dispatch: trước đây hàm này chỉ bắn sự
+    // kiện DOM, không hề xoá cache dbService._queryCache — nên component nghe sự
+    // kiện rồi gọi lại dbService.X.list() vẫn nhận đúng mảng cache CŨ trong bộ
+    // nhớ (querySupabase trả cache ngay nếu còn, không gọi Supabase). Bug này
+    // giống hệt lỗi "polling Tier 1 vô tác dụng" đã sửa ở tasks/projects/quotes/
+    // customers — ở đây ảnh hưởng tới toàn bộ 21 bảng "ít đổi" (Hồ Sơ Thầu Phụ,
+    // Quản Lý Thầu Phụ, Công Nợ Trả/Thu, Phân Quyền Vai Trò...) lẫn vài bảng vẫn
+    // còn Realtime dùng chung hàm này (inventory/warehouse_logs/catalog).
+    const coalescedEvent = (key: string, eventName: string, extraKeys?: string[]) => () => {
+      scheduleCoalesced(`event:${key}`, () => {
+        try {
+          invalidateCache(key);
+          extraKeys?.forEach(k => invalidateCache(k));
+        } catch {}
+        try { window.dispatchEvent(new CustomEvent(eventName)); } catch {}
+      });
+    };
+    // 'hl-suppliers-updated' được dùng chung cho CẢ suppliers (Nhà Cung Cấp) VÀ
+    // accounting_subcontractors (Thầu Phụ) — xem dbService.ts accountingSubcontractors
+    // .save()/.delete() cũng bắn đúng event này — nên phải invalidate cả 2 bảng.
+    const fireSuppliersEvent = coalescedEvent('suppliers', 'hl-suppliers-updated', ['accounting_subcontractors']);
+    const fireInventoryEvent = coalescedEvent('inventory', 'hl-inventory-updated');
+    const fireWarehouseLogsEvent = coalescedEvent('warehouse_logs', 'hl-warehouse-logs-updated');
+    const fireWarehouseDataEvent = coalescedEvent('warehouse_data', 'hl-warehouse-data-updated');
+    const fireArchivedQuotesEvent = coalescedEvent('archived_quotes', 'hl-archived-quotes-updated');
+    const firePaymentsUpdatedEvent = coalescedEvent('payments', 'hl-payments-updated');
+    const fireTaskPermissionsEvent = coalescedEvent('hrm_task_permissions', 'hl-task-permissions-updated');
+    const fireHrmRoleGroupsEvent = coalescedEvent('hrm_role_groups', 'hl-hrm-role-groups-updated');
+    const fireEmployeesEvent = () => {
+      scheduleCoalesced('event:employees', async () => {
+        try {
+          invalidateCache('employees');
+          const emps = await dbService.employees.list();
+          window.dispatchEvent(new CustomEvent('hl-employees-updated', { detail: { employees: emps } }));
+        } catch {}
+      });
+    };
+    const fireConfigEvent = async () => {
+      try {
+        // CHẶN VÒNG LẶP REALTIME: chỉ setState nếu NỘI DUNG khác hẳn state hiện tại.
+        // Không chặn thì event → setState(object mới) → effect save → INSERT →
+        // event mới → mọi tab lặp vô hạn (đã gây >100K INSERT business_profile).
+        const profile = await dbService.businessProfile.get();
+        if (profile) {
+          setBusinessInfo(prev => stableStr(prev) === stableStr(profile) ? prev : profile);
+        }
+        const config = await dbService.shiftConfig.get();
+        if (config) {
+          setHrmConfig(prev => {
+            const next = { ...DEFAULT_SYSTEM_CONFIG, ...config };
+            if (stableStr(prev) === stableStr(next)) return prev;
+            // Trước đây chỉ setState nội bộ của App.tsx — các component tự tải
+            // 1 bản shiftConfig RIÊNG (ví dụ DashboardOverview.tsx, không nhận
+            // qua props) sẽ không bao giờ biết cấu hình đổi từ tab khác. Bắn
+            // đúng event mà nơi tự lưu cấu hình (cùng tab) cũng đang bắn, để
+            // dùng chung 1 con đường cập nhật.
+            try { window.dispatchEvent(new CustomEvent('hl_system_settings_updated')); } catch {}
+            return next;
+          });
+        }
+      } catch {}
+    };
+
+    // ─── Handlers cho bảng còn thiếu (HRM, accounting, etc.) ──
+    // Nhóm 1: sales_orders / purchase_orders — App sở hữu state → refetch trực tiếp
+    // (không dispatch event vì không component nào khác cần; giữ sync live giữa 2 tab).
+    const fetchSalesOrders = async () => {
+      try {
+        setSalesOrders((await dbService.salesOrders.list()).map(normalizeOrderItems));
+      } catch (e) { console.error('Realtime sales_orders sync error:', e); }
+    };
+    const fetchPurchaseOrders = async () => {
+      try {
+        setPurchaseOrders((await dbService.purchaseOrders.list()).map(normalizeOrderItems));
+      } catch (e) { console.error('Realtime purchase_orders sync error:', e); }
+    };
+    const fireHrmApprovalConfigEvent = coalescedEvent('hrm_approval_config', 'hl-hrm-approval-config-updated');
+    const fireHrmLeavesEvent = coalescedEvent('hrm_leaves', 'hl-hrm-leaves-updated');
+    const fireHrmPayrollRecordsEvent = coalescedEvent('hrm_payroll_records', 'hl-hrm-payroll-records-updated');
+    const fireHrmEmployeeErrorsEvent = coalescedEvent('hrm_employee_errors', 'hl-hrm-employee-errors-updated');
+    const fireHrmHolidaysEvent = coalescedEvent('hrm_holidays', 'hl-hrm-holidays-updated');
+    const fireHrmTripsEvent = coalescedEvent('hrm_trips', 'hl-hrm-trips-updated');
+    const fireHrmTravelExpensesEvent = coalescedEvent('hrm_travel_expenses', 'hl-hrm-travel-expenses-updated');
+    const fireHrmPerformanceCriteriaEvent = coalescedEvent('hrm_performance_criteria', 'hl-hrm-performance-criteria-updated');
+    const fireHrmSalarySalesEvent = coalescedEvent('hrm_salary_scales', 'hl-hrm-salary-scales-updated');
+    const fireKanbanColumnsEvent = coalescedEvent('kanban_columns', 'hl-kanban-columns-updated');
+    const fireMaterialProposalsEvent = coalescedEvent('material_proposals', 'hl-material-proposals-updated');
+    // Sửa key cache đúng tên bảng 'purchase_orders' (trước đây sai thành
+    // 'purchase_orders_event') — hiện chưa gây bug vì purchaseOrders.list()
+    // luôn forceFresh:true cứng, nhưng nếu sau này bỏ forceFresh thì key sai
+    // sẽ khiến invalidateCache không có tác dụng, gây stale data.
+    const firePurchaseOrdersEvent = coalescedEvent('purchase_orders', 'hl-purchase-orders-updated');
+    const fireProjectPermissionsEvent = coalescedEvent('project_permissions', 'hl-project-permissions-updated');
+    const fireAccountingLiabilitiesEvent = coalescedEvent('accounting_liabilities', 'hl-accounting-liabilities-updated');
+    const fireAccountingReceivablesEvent = coalescedEvent('accounting_receivables', 'hl-accounting-receivables-updated');
+    const fireAccountingSubContractsEvent = coalescedEvent('accounting_sub_contracts', 'hl-accounting-sub-contracts-updated');
+    const fireHrmLeaveCoefficientsEvent = coalescedEvent('hrm_leave_coefficients', 'hl-hrm-leave-coefficients-updated');
+    // Định mức công tác phí (Nhân sự) — trước đây không nằm trong Realtime lẫn
+    // danh sách polling nào, hoàn toàn "mồ côi".
+    const fireTravelNormsEvent = coalescedEvent('travel_norms', 'hl-travel-norms-updated');
+    // Số dư đầu kỳ Quỹ Tiền Mặt (bảng đơn/singleton) — trước đây không nằm trong
+    // Realtime lẫn danh sách polling nào, chỉ tự cập nhật khi CHÍNH tab đó tự lưu.
+    const fireCashFundConfigEvent = coalescedEvent('cash_fund_config', 'hl-cash-fund-config-updated');
+    // Danh mục sản phẩm kế toán (Tài Chính - Kế Toán) — cũng không nằm trong
+    // Realtime lẫn danh sách polling nào trước đây.
+    const fireAccountingProductCatalogEvent = coalescedEvent('accounting_product_catalog', 'hl-accounting-product-catalog-updated');
+
+    // ─── Bọc handler realtime: patch tại chỗ trước, refetch coalesced sau ────
+    // Chiến lược 2 lớp cho bảng có state ở App:
+    //   Lớp 1 (ngay, 0 request): INSERT/UPDATE/DELETE → vá state từ payload.
+    //     UI cập nhật tức thì, không tốn băng thông.
+    //   Lớp 2 (coalesced 3s): lên lịch full-refetch để tự sửa sai số (payload
+    //     thiếu cột do REPLICA IDENTITY, cache lệch...). Nhiều event cùng bảng
+    //     trong 3s chỉ sinh ĐÚNG 1 lần refetch → tải trọng không còn nhân bản.
+    const REFETCHERS: Record<string, () => void> = {};
+    const scheduleRefetch = (key: string, tableName: string) => {
+      scheduleCoalesced(`refetch:${key}`, () => {
+        invalidateCache(tableName);
+        REFETCHERS[key]?.();
+      });
+    };
+    const withPatchAndCoalesce = (
+      key: string,
+      tableName: string,
+      setter: React.Dispatch<React.SetStateAction<any[]>>,
+      transform?: (row: any) => any,
+      exclude?: (r: any) => boolean,
+    ) => (payload?: any) => {
+      if (payload?.eventType && patchStateRow(setter, tableName, payload, transform)) {
+        // Đã vá state từ payload. Với projects cần áp thêm bộ lọc loại trừ:
+        if (exclude) {
+          setter(prev => prev.filter(r => !exclude(r)));
+        }
+        scheduleRefetch(key, tableName);
+        return;
+      }
+      // Payload không dùng được (manual call / thiếu dữ liệu) → refetch coalesced luôn.
+      scheduleRefetch(key, tableName);
+    };
+
+    // Đăng ký hàm refetch cho coalescer (các hàm đã định nghĩa phía trên)
+    Object.assign(REFETCHERS, {
+      projects: fetchProjects,
+      tasks: fetchTasks,
+      payments: fetchPayments,
+      receipts: fetchReceipts,
+      quotes: fetchQuotes,
+      customers: fetchCustomers,
+      sales_orders: fetchSalesOrders,
+      purchase_orders: fetchPurchaseOrders,
+    });
 
     console.log('[Realtime] Creating channel...');
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // Đóng kênh CHỦ ĐỘNG (cleanup effect khi unmount/resubscribe theo ý mình,
+    // React StrictMode double-invoke effect lúc dev...) cũng bắn callback
+    // status 'CLOSED' giống hệt lúc kênh chết bất thường — PHẢI phân biệt 2
+    // trường hợp này, nếu không mọi lần cleanup bình thường sẽ bị hiểu nhầm
+    // thành "mất kết nối" và tự resubscribe, tạo vòng lặp đóng/mở vô tận.
+    let intentionalClose = false;
     const channel = sb
       .channel('app-realtime-sync-v2')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, fetchProjects)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, fetchTasks)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' }, fetchReceipts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
+      // ── Core tables (state setters) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' },
+        withPatchAndCoalesce('projects', 'projects', setProjects as any,
+          rowToCamel, isStandaloneProject))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
+        withPatchAndCoalesce('tasks', 'tasks', setTasks as any, (row) => {
+          // Cột tasks.missions cũ không còn được ghi mới (đã tách sang bảng
+          // task_missions) — LOẠI hẳn key này khỏi bản vá realtime để merge ở
+          // patchStateRow() giữ nguyên `.missions` đang đúng trong state hiện
+          // tại, không bị đè bằng giá trị cũ/rỗng đóng băng trong cột đó.
+          const { missions, ...rest } = rowToCamel(row);
+          return rest;
+        }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_missions' }, fireTaskMissionsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload) => {
+        withPatchAndCoalesce('payments', 'payments', setPayments as any, rowToCamel)(payload);
+        // Trước đây bảng payments chỉ patch state RIÊNG của App.tsx, không bắn
+        // event DOM nào — các component tự tải 1 bản `payments` RIÊNG (không
+        // nhận qua props, ví dụ TaskManagement.tsx tính badge "Công việc phải
+        // duyệt") sẽ không bao giờ biết có phiếu chi mới/đổi trạng thái từ tab
+        // khác. Bắn thêm 'hl-payments-updated' (đã coalesce sẵn) để các nơi đó
+        // nghe được, giống cách purchase_orders đã làm.
+        firePaymentsUpdatedEvent();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' },
+        withPatchAndCoalesce('receipts', 'receipts', setReceipts as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' },
+        withPatchAndCoalesce('quotes', 'quotes', setQuotes as any, rowToCamel))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' },
+        withPatchAndCoalesce('customers', 'customers', setCustomers as any, rowToCamel))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, fireAttendanceEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
+      // ── Supporting tables (fire events) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fireInventoryEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs' }, fireWarehouseLogsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_product_catalog' }, fireWarehouseDataEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_product_catalog' }, fireWarehouseDataEvent)
+      // suppliers/accounting_subcontractors/archived_quotes: đã bỏ khỏi realtime
+      // — xem POLLED_LOW_CHURN_MS bên dưới.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, fireEmployeesEvent)
+      // hrm_task_permissions/hrm_role_groups/business_profile/shift_config: đã
+      // bỏ khỏi realtime — xem POLLED_LOW_CHURN_MS bên dưới.
+      // ── Orders (critical - realtime for instant updates) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' },
+        withPatchAndCoalesce('sales_orders', 'sales_orders', setSalesOrders as any,
+          (row) => normalizeOrderItems(rowToCamel(row))))
+      // ── HRM Configuration & Payroll ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
+      // hrm_approval_config/hrm_payroll_records/hrm_employee_errors/hrm_trips/
+      // hrm_travel_expenses/hrm_leave_coefficients/hrm_holidays/hrm_performance_criteria/
+      // hrm_salary_scales/kanban_columns/project_permissions: đã bỏ khỏi realtime
+      // — xem POLLED_LOW_CHURN_MS bên dưới.
+      // ── Accounting (Tài Chính - Kế Toán: tab Công Nợ Thu/Trả, Quỹ Tiền Mặt) ──
+      // BẬT LẠI realtime cho 4 bảng này theo yêu cầu — trước đây đã gỡ khỏi
+      // realtime (kèm gỡ khỏi publication supabase_realtime phía server, xem
+      // migration 20260826d) vì tài khoản Supabase vượt hạn mức "Tin nhắn thời
+      // gian thực" (117%/tháng). Bật lại CÓ RỦI RO lặp lại sự cố đó — chỉ bật
+      // đúng 4 bảng cốt lõi của Công Nợ Thu/Trả/Quỹ Tiền Mặt (không bật lại cả
+      // 21 bảng đã gỡ) để giảm rủi ro. Cần chạy kèm migration
+      // 20260909_reenable_realtime_finance_tables.sql (thêm lại vào publication
+      // phía server) — KHÔNG có tác dụng nếu chỉ sửa code mà không chạy SQL đó.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts' }, fireAccountingSubContractsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_fund_config' }, fireCashFundConfigEvent)
+      // ── Material Proposals (Đề xuất vật tư) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'material_proposals' }, fireMaterialProposalsEvent)
+      // ── Purchase Orders (đơn hàng mua — dispatch event cho MaterialCoordination sync cross-tab) ──
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, (payload) => {
+        withPatchAndCoalesce('purchase_orders', 'purchase_orders', setPurchaseOrders as any,
+          (row) => normalizeOrderItems(rowToCamel(row)))(payload);
+        firePurchaseOrdersEvent();
+      })
       .subscribe((status: string, err: any) => {
-        console.log('[Realtime] Status:', status, err ? `Error: ${err.message}` : '');
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Channel ready. Listening for changes on: projects, tasks, payments, receipts, subcontractor_advances, attendance_records');
+          console.log('[Realtime] ✅ Channel ready. Listening for ~18 tables (17 bảng ít đổi còn lại vẫn polling 5 phút)');
+          realtimeReconnectAttempts.current = 0;
+          // Hủy lịch reconnect còn treo (nếu có CLOSED/lỗi thoáng qua trước đó
+          // rồi tự phục hồi thành SUBSCRIBED) — tránh resubscribe thừa sau 3s.
+          if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          if (status === 'CLOSED' && intentionalClose) {
+            // Đóng do chính cleanup effect gọi (unmount/resubscribe chủ động) — không phải sự cố.
+            console.log('[Realtime] Channel closed (chủ động, không cần reconnect).');
+            return;
+          }
+          // Trước đây chỉ log — kênh chết (tab để lâu/máy ngủ/đổi mạng) sẽ KHÔNG
+          // BAO GIỜ tự kết nối lại, khiến tab kẹt vĩnh viễn ở dữ liệu cũ (cache
+          // dbService.ts không còn ai invalidate vì không còn event nào tới).
+          // Tự resubscribe với backoff tăng dần (3s/6s/12s/24s, tối đa 30s) để
+          // không dội tin nhắn nếu Supabase đang gặp sự cố kéo dài.
+          if (err) console.error('[Realtime] ❌ Connection issue:', status, err);
+          else console.log('[Realtime] Channel closed unexpectedly:', status);
+          if (reconnectTimer) clearTimeout(reconnectTimer); // tránh chồng timer nếu lỗi bắn liên tiếp
+          const attempt = realtimeReconnectAttempts.current + 1;
+          realtimeReconnectAttempts.current = attempt;
+          const delay = Math.min(3000 * 2 ** (attempt - 1), 30000);
+          console.log(`[Realtime] 🔄 Sẽ tự kết nối lại sau ${delay / 1000}s (lần ${attempt})...`);
+          reconnectTimer = setTimeout(() => setRealtimeRetry(n => n + 1), delay);
         }
       });
 
-    console.log('[Realtime] ✅ Subscribed');
-    return () => { sb.removeChannel(channel); };
-  }, []);
-
-  // ─── Polling: tự động fetch quotes mỗi 30 giây ──────────────────────────
-  useEffect(() => {
-    const fetchQuotesPolling = async () => {
-      try {
-        const qtes = await dbService.quotes.list();
-        setQuotes(qtes);
-      } catch (e) { console.error('Polling quotes error:', e); }
+    // ─── Bảng ít thay đổi: làm mới định kỳ thay vì Realtime ──────────────
+    // Các bảng này (cấu hình hệ thống/nhân sự/phân quyền + công nợ/danh mục
+    // không phải nơi nhiều người cùng thao tác đồng thời) hầu như không đổi
+    // trong ngày làm việc bình thường, nhưng vẫn tính phí "Tin nhắn thời
+    // gian thực" của Supabase MỖI LẦN đổi × MỖI tab đang mở — với ~25 nhân
+    // viên mở app cả ngày, việc giữ Realtime cho các bảng này góp phần lớn
+    // vào việc vượt hạn mức 5 triệu tin nhắn/tháng dù bản thân bảng ít đổi.
+    // Đổi sang polling mỗi 5 phút: dùng lại ĐÚNG các hàm fire*Event/refetch
+    // đã có (cùng logic dispatch event / setState), chỉ khác nơi gọi.
+    const POLLED_LOW_CHURN_MS = 5 * 60 * 1000; // 5 phút
+    const pollLowChurnTables = () => {
+      // Đợt 1 (cấu hình hệ thống/nhân sự/phân quyền)
+      fireTaskPermissionsEvent();
+      fireHrmRoleGroupsEvent();
+      fireConfigEvent();
+      fireHrmHolidaysEvent();
+      fireHrmPerformanceCriteriaEvent();
+      fireHrmSalarySalesEvent();
+      fireKanbanColumnsEvent();
+      fireProjectPermissionsEvent();
+      fireHrmLeaveCoefficientsEvent();
+      fireTravelNormsEvent();
+      // Đợt 2 (công nợ/hợp đồng/danh mục — không cần tức thời)
+      fireHrmApprovalConfigEvent();
+      fireHrmEmployeeErrorsEvent();
+      fireHrmTripsEvent();
+      fireHrmTravelExpensesEvent();
+      fireHrmPayrollRecordsEvent();
+      // accounting_liabilities/accounting_receivables/accounting_sub_contracts/
+      // cash_fund_config: đã CHUYỂN LẠI sang Realtime (channel ở trên) theo yêu
+      // cầu Công Nợ Thu/Trả/Quỹ Tiền Mặt cập nhật tức thời — không poll trùng
+      // ở đây nữa (xem ghi chú tại nơi .on('postgres_changes', ...) đăng ký).
+      fireArchivedQuotesEvent();
+      fireSuppliersEvent();
+      fireAccountingProductCatalogEvent();
     };
+    const lowChurnInterval = setInterval(pollLowChurnTables, POLLED_LOW_CHURN_MS);
 
-    // Fetch ngay lập tức khi mount
-    fetchQuotesPolling();
-
-    // Fallback mỗi 120 giây (Realtime là primary, polling chỉ là backup)
-    const interval = setInterval(fetchQuotesPolling, 120000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ─── Polling: tự động fetch customers mỗi 30 giây ──────────────────────
-  useEffect(() => {
-    const fetchCustomersPolling = async () => {
-      try {
-        const custs = await dbService.customers.list();
-        setCustomers(custs);
-      } catch (e) { console.error('Polling customers error:', e); }
+    // ─── Tab quay lại foreground: kênh WebSocket có thể đã "chết êm" trong lúc
+    // tab bị ẩn/máy ngủ (không bắn CHANNEL_ERROR/CLOSED, chỉ lặng lẽ ngừng nhận
+    // sự kiện) — biểu hiện đúng như báo cáo: 1 tab để lâu hiển thị Kanban thiếu
+    // công việc mới nhất mà tab khác/bản deploy khác đã thấy. Khi tab active
+    // trở lại: nếu kênh KHÔNG ở trạng thái 'joined' thì resubscribe; đồng thời
+    // luôn ép tải lại các bảng hay bị ảnh hưởng nhất (tasks/projects) để tự vá
+    // ngay cả khi không phát hiện được trạng thái kênh.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if ((channel as any).state && (channel as any).state !== 'joined') {
+        console.log('[Realtime] 👁️ Tab active trở lại, kênh không ở trạng thái joined — resubscribe.');
+        setRealtimeRetry(n => n + 1);
+        return;
+      }
+      fetchTasks();
+      fetchProjects();
     };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    fetchCustomersPolling();
-    const interval = setInterval(fetchCustomersPolling, 120000);
-    return () => clearInterval(interval);
+    return () => {
+      console.log('[Realtime] Cleaning up channel...');
+      intentionalClose = true;
+      flushPendingJobs();
+      clearInterval(lowChurnInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      sb.removeChannel(channel);
+    };
+  }, [realtimeRetry]);
+
+  // ─── Tổng hợp Công Tác Phí cho Tổng Quan (panel CTP của tôi) ─────────────
+  // Load từ hrm_travel_expenses + lắng nghe sự kiện làm mới (realtime postgres_changes
+  // cũng fire 'hl-hrm-travel-expenses-updated' ở fireHrmTravelExpensesEvent).
+  useEffect(() => {
+    const loadCtpSummary = async () => {
+      try {
+        const data = await dbService.hrmTravelExpenses.list();
+        const seen = new Map<string, any>();
+        (data || []).forEach((item: any) => {
+          const key = item?.rowId || item?.id;
+          if (key) seen.set(key, item);
+        });
+        setCtpSummary(Array.from(seen.values()));
+      } catch (e) {
+        console.warn('[TravelExpense][App] Lỗi tải tổng hợp CTP:', e?.message || e);
+      }
+    };
+    loadCtpSummary();
+    const handler = () => loadCtpSummary();
+    window.addEventListener('hl-hrm-travel-expenses-updated', handler);
+    return () => window.removeEventListener('hl-hrm-travel-expenses-updated', handler);
   }, []);
 
-  // ─── Polling: tự động fetch projects mỗi 30 giây (fallback cho Realtime) ──
+  // ─── Outbox chấm công: đồng bộ TOÀN CỤC (cấp App) ─────────────────────────
+  // Quan trọng: logic outbox trước đây nằm trong DashboardOverview → CHỈ chạy khi
+  // user đang ở tab Tổng Quan. Nếu user chấm xong rồi tắt app, mở lại ở tab KHÁC
+  // (activeTab lưu trong sessionStorage), DashboardOverview không mount → outbox
+  // nằm im trong localStorage, lượt chấm chưa lên DB.
+  // Đưa sync lên cấp App (luôn mount) → đảm bảo lượt chấm trong outbox được đẩy
+  // lên DB mỗi khi app mở, bất kể user đang ở tab nào. Sau khi sync, dispatch
+  // 'hl-outbox-synced' để Dashboard (nếu đang mở) cập nhật badge/pending.
   useEffect(() => {
-    const fetchProjectsPolling = async () => {
+    let cancelled = false;
+    let retryTimer: any = null;
+    const trySync = async () => {
+      if (cancelled) return;
+      const pendingBefore = outboxPendingCount();
+      if (pendingBefore === 0) return; // không có gì → không tốn request
+      const summary = await syncAttendanceOutbox((rec, slot) =>
+        dbService.attendance.save(rec, slot)
+      );
+      if (cancelled) return;
+      if (summary.dropped > 0) {
+        addToast({
+          title: '⚠️ Cần liên hệ Admin',
+          message: `${summary.dropped} bản ghi chấm công không thể đồng bộ sau nhiều lần thử. Vui lòng báo Admin.`,
+          type: 'error',
+          duration: 8000,
+        });
+      }
+      // Báo Dashboard cập nhật badge "chờ đồng bộ" / xóa cờ pending trên dòng.
+      window.dispatchEvent(new CustomEvent('hl-outbox-synced', { detail: summary }));
+    };
+    trySync();
+    window.addEventListener('online', trySync);
+    const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
+    document.addEventListener('visibilitychange', onVis);
+    // Thử lại định kỳ (20s) để lượt chấm nằm trong outbox (do lỗi mạng lúc 25 user
+    // cùng chấm, hoặc user tắt app rồi mở lại) vẫn được đẩy lên DB.
+    retryTimer = setInterval(() => { if (!cancelled) trySync(); }, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(retryTimer);
+      window.removeEventListener('online', trySync);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
+  // ─── Polling Tier 1 (300s): dữ liệu thay đổi vừa phải, fallback cho Realtime ──
+  useEffect(() => {
+    // Lần chạy poll() ĐẦU TIÊN xảy ra ngay khi App mount — trùng thời điểm mọi
+    // màn hình (Lưu Trữ Hồ Sơ, Kanban Dự Án...) cũng đang tự tải dữ liệu lần đầu
+    // của riêng chúng. Các sự kiện "hl-*-updated" bắn ra ở lượt đầu này khiến
+    // những màn hình đó tải lại TOÀN BỘ danh sách lần thứ 2 gần như ngay lập
+    // tức, gây cảm giác danh sách "nháy" (render lại giữa chừng) và load chậm.
+    // Bỏ qua việc bắn sự kiện ở lượt poll đầu tiên — dữ liệu quotes/customers/
+    // projects/tasks của App.tsx vẫn được làm mới bình thường (an toàn), chỉ
+    // các listener phụ thuộc sự kiện mới bỏ qua lượt đầu vì chúng đã tự tải rồi.
+    let isFirstRun = true;
+    const poll = async () => {
+      // ÉP tải mới (invalidate trước khi list()) — đây là lưới an toàn CUỐI CÙNG
+      // khi kênh Realtime đã chết êm (tab để lâu/máy ngủ/đổi mạng, không có sự
+      // kiện nào tới nữa để tự invalidate cache). Trước đây poll() chỉ gọi
+      // list() suông, nên nếu cache trong dbService.ts chưa được ai invalidate,
+      // nó trả lại đúng mảng cũ trong bộ nhớ — poll() thành vô tác dụng, khiến
+      // tab kẹt vĩnh viễn ở dữ liệu cũ (vd Kanban thiếu công việc mới nhất).
+      try { invalidateCache('quotes'); setQuotes(await dbService.quotes.list()); } catch {}
+      try { invalidateCache('customers'); setCustomers(await dbService.customers.list()); } catch {}
       try {
+        invalidateCache('projects');
         const projs = await dbService.projects.list();
         setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
-      } catch (e) { console.error('Polling projects error:', e); }
+      } catch {}
+      try { invalidateCache('tasks'); setTasks(await dbService.tasks.list()); } catch {}
+      if (!isFirstRun) {
+        try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-task-permissions-updated')); } catch {}
+        import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()).catch(() => {});
+      }
+      isFirstRun = false;
     };
-
-    fetchProjectsPolling();
-    const interval = setInterval(fetchProjectsPolling, 120000);
+    poll();
+    const interval = setInterval(poll, 300000);
     return () => clearInterval(interval);
   }, []);
 
-  // ─── Polling: suppliers, inventory, warehouse_logs, archived_quotes,
-  //     hrm_role_groups, business_profile, shift_config, employees mỗi 30 giây ─
+  // ─── Polling Tier 2 (600s): dữ liệu hiếm thay đổi (profile, config, employees, roles) ──
   useEffect(() => {
-    const fireEvents = () => {
-      try {
-        window.dispatchEvent(new CustomEvent('hl-suppliers-updated'));
-        window.dispatchEvent(new CustomEvent('hl-inventory-updated'));
-        window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated'));
-        window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
-        window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
-        window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
-      } catch {}
-    };
-    const fetchConfigPolling = async () => {
+    const poll = async () => {
       try {
         const profile = await dbService.businessProfile.get();
         if (profile) {
           setBusinessInfo(profile);
-          localStorage.setItem('hl_business_info', JSON.stringify(profile));
         }
+      } catch {}
+      try {
         const config = await dbService.shiftConfig.get();
-        if (config) setHrmConfig(config);
-        const emps = await dbService.employees.list();
-        setEmployees(emps);
-      } catch (e) { console.error('Polling config error:', e); }
+        if (config) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...config }));
+      } catch {}
+      // ensureAdminAndPasswords ép mật khẩu tài khoản admin về "admin" (thiết kế cố ý —
+      // xem ADMIN_EMPLOYEE) — nếu setEmployees thẳng dữ liệu thô từ Supabase ở đây, tài
+      // khoản admin sẽ mang mật khẩu (hash) thật đang lưu trong DB, khiến việc đăng nhập
+      // lúc dùng được "admin", lúc phải dùng mật khẩu đã lưu tùy theo lần poll nào chạy
+      // sau cùng. Luôn chuẩn hoá qua ensureAdminAndPasswords để hành vi nhất quán.
+      try { setEmployees(ensureAdminAndPasswords(await dbService.employees.list())); } catch {}
+      try {
+        const cloudRoles = await dbService.hrmRoleGroups.list();
+        if (cloudRoles && cloudRoles.length > 0) {
+          // Luôn merge role_superadmin vào cache
+          if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
+            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: ['emp_admin', 'NV_ADMIN', 'admin'], permissions: {} });
+          }
+          setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
+          setRoleGroupsCache(cloudRoles);
+        }
+      } catch {}
+      try {
+        const cloudApproval = await dbService.hrmApprovalConfig.list();
+        if (cloudApproval && cloudApproval.length > 0) {
+          setApprovalConfigCache(cloudApproval);
+        }
+      } catch {}
     };
-
-    fireEvents();
-    fetchConfigPolling();
-    const interval = setInterval(() => { fireEvents(); fetchConfigPolling(); }, 120000);
+    poll();
+    const interval = setInterval(poll, 600000);
     return () => clearInterval(interval);
+  }, []);
+
+  // ─── Event: cho phép component khác trigger đồng bộ tasks thủ công ──────
+  useEffect(() => {
+    const handleTasksRefreshRequest = async () => {
+      try {
+        const taskList = await dbService.tasks.list();
+        // HƯỚNG B: không để reload cũ ghi đè task vừa được lưu.
+        applyTasksWithLocalOverrides(taskList);
+      } catch (e) { console.error('Tasks refresh error:', e); }
+    };
+    window.addEventListener('hl-tasks-refresh', handleTasksRefreshRequest);
+    // Lắng nghe cả sự kiện từ Supabase Realtime (nếu có)
+    window.addEventListener('hl-tasks-updated', handleTasksRefreshRequest);
+    return () => {
+      window.removeEventListener('hl-tasks-refresh', handleTasksRefreshRequest);
+      window.removeEventListener('hl-tasks-updated', handleTasksRefreshRequest);
+    };
   }, []);
 
   // Sync role permissions when updated from HRM
@@ -1413,11 +2243,12 @@ export default function App() {
       try {
         const cloudRoles = await dbService.hrmRoleGroups.list();
         if (cloudRoles && cloudRoles.length > 0) {
+          // Luôn merge role_superadmin vào cache (bảo vệ khỏi DB chưa có)
+          if (!cloudRoles.some((r: any) => r.id === 'role_superadmin')) {
+            cloudRoles.unshift({ id: 'role_superadmin', name: 'Siêu Admin (Super Admin)', memberIds: ['emp_admin', 'NV_ADMIN', 'admin'], permissions: {} });
+          }
           setHrmRoleGroups(cloudRoles.map((r: any) => ({ id: r.id, name: r.name })));
-          // Cập nhật cache localStorage để các component khác dùng
-          const updated = JSON.stringify(cloudRoles);
-          localStorage.setItem('hl_cached_hrm_role_groups', updated);
-          localStorage.setItem('hl_hrm_roles_v2', updated);
+          setRoleGroupsCache(cloudRoles);
         }
       } catch {
         // Fallback về localStorage nếu Supabase lỗi
@@ -1427,7 +2258,21 @@ export default function App() {
     const handleEmployeesUpdated = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
-        setEmployees(prev => customEvent.detail.employees || customEvent.detail);
+        const incoming = customEvent.detail.employees || customEvent.detail;
+        // Deduplicate by name: keep entry with username/hasSystemAccount if duplicate exists
+        const deduped = incoming.filter((emp: Employee, idx: number, arr: Employee[]) => {
+          const firstIdx = arr.findIndex(e => e.name.toLowerCase() === emp.name.toLowerCase());
+          if (firstIdx === idx) return true;
+          // Duplicate found, keep the one with account (username + hasSystemAccount)
+          const first = arr[firstIdx];
+          const hasAccount = (emp.username || emp.hasSystemAccount);
+          const firstHasAccount = (first.username || first.hasSystemAccount);
+          return hasAccount && !firstHasAccount;
+        });
+        // Chuẩn hoá lại tài khoản admin (mật khẩu cố định "admin") trước khi setState —
+        // dữ liệu tới từ event Realtime là bản thô từ Supabase, nếu set thẳng sẽ ghi đè
+        // mật khẩu admin bằng giá trị thật trong DB (xem ghi chú tại Tier 2 poll ở trên).
+        setEmployees(ensureAdminAndPasswords(deduped));
       }
     };
     window.addEventListener('hl-task-permissions-updated', handleTaskPermUpdated);
@@ -1471,12 +2316,12 @@ export default function App() {
     }
 
     if (autoLogin) {
-      localStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+      localStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
     } else {
       localStorage.removeItem('hl_erp_active_session');
     }
-    
-    sessionStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+
+    sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
     
     addToast({
       title: 'Đăng nhập thành công',
@@ -1518,16 +2363,19 @@ export default function App() {
   };
 
   // HANDLERS DỰ ÁN
-  const handleAddProject = (newProj: Project) => {
+  const handleAddProject = async (newProj: Project) => {
     setProjects([newProj, ...projects]);
-    dbService.projects.save(newProj).catch(err => {
+    try {
+      await dbService.projects.save(newProj);
+      window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+    } catch (err) {
       console.error('Lỗi lưu project lên Supabase:', err);
       addToast({
         title: '⚠️ Lưu dự án thất bại',
         message: `Không thể đồng bộ "${newProj.name}" lên đám mây: ${err.message}`,
         type: 'error'
       });
-    });
+    }
 
     // Phát thông báo Toast nổi
     addToast({
@@ -1561,32 +2409,43 @@ export default function App() {
     }
   };
 
-  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
-    setProjects(prevProjects => {
-      const updated = prevProjects.map(p => {
-        if (p.id === id) {
-          const finalStatus = updates.status !== undefined ? updates.status : p.status;
-          const finalProgress = updates.progress !== undefined ? updates.progress : p.progress;
-          const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
-          const nextp = {
-            ...p,
-            ...updates,
-            ...(isCompleted && !updates.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
-          };
-          
-          // Trigger the Firestore save as a side-effect outside state rendering if possible, 
-          // but to be safe and compatible, we run it immediately on the constructed nextp
-          setTimeout(() => {
-            dbService.projects.save(nextp).catch(err => {
-              console.error("Lỗi khi lưu cập nhật dự án:", err);
-            });
-          }, 0);
-          
-          return nextp;
-        }
-        return p;
+  const handleUpdateProject = (id: string, updates: Partial<Project>): Promise<void> => {
+    return new Promise<void>((resolve, reject) => {
+      setProjects(prevProjects => {
+        const updated = prevProjects.map(p => {
+          if (p.id === id) {
+            const finalStatus = updates.status !== undefined ? updates.status : p.status;
+            const finalProgress = updates.progress !== undefined ? updates.progress : p.progress;
+            const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
+            // Chỉ ép về col_done khi dự án VỪA hoàn thành MÀ chưa nằm ở cột nào
+            // (cả trong update lẫn trong dữ liệu hiện tại). Nếu dự án đã có cột
+            // (ví dụ cột đã cấu hình "chuyển cột khi hoàn thành"), TUYỆT ĐỐI không
+            // ghi đè — nếu không mỗi lần cập nhật/save sẽ kéo thẻ về col_done gây
+            // hiện tượng "chạy lung tung", không theo đúng cấu hình.
+            const nextp = {
+              ...p,
+              ...updates,
+              ...(isCompleted && !updates.kanbanColumnId && !p.kanbanColumnId ? { kanbanColumnId: 'col_done' } : {})
+            };
+
+            // Trigger the Firestore save as a side-effect outside state rendering if possible,
+            // but to be safe and compatible, we run it immediately on the constructed nextp
+            setTimeout(() => {
+              dbService.projects.save(nextp).then(() => {
+                window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+                resolve();
+              }).catch(err => {
+                console.error("Lỗi khi lưu cập nhật dự án:", err);
+                reject(err);
+              });
+            }, 0);
+
+            return nextp;
+          }
+          return p;
+        });
+        return updated;
       });
-      return updated;
     });
   };
 
@@ -1607,394 +2466,232 @@ export default function App() {
     }
   };
 
-  const handleDeleteProject = (id: string) => {
-    // 1. Cập nhật state dự án dùng functional update để tránh stale closure
-    setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
-    
-    // 2. Cập nhật state công việc dùng functional update, đồng thời xóa các tài liệu tương ứng trong Firebase
-    setTasks(prevTasks => {
-      const associatedTasks = prevTasks.filter(t => t.projectId === id);
-      const associatedTaskIds = associatedTasks.map(t => t.id);
-      
-      if (associatedTaskIds.length > 0) {
-        dbService.tasks.deleteMultiple(associatedTaskIds).catch(err => {
-          console.error("Lỗi khi xóa các công việc con liên quan đến dự án:", err);
-        });
-      }
-      
-      return prevTasks.filter(t => t.projectId !== id);
-    });
+  /**
+   * XÓA DỰ ÁN — cuốn sạch mọi dữ liệu phát sinh trên Supabase.
+   *
+   * Toàn bộ việc dọn database do dbService.projects.deleteCascade() lo:
+   * Công Việc, Nhiệm Vụ, Nhóm chat + tin nhắn, Ghi nhận vi phạm, Công tác phí,
+   * Báo giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, HĐ Thầu, Công Nợ, Đề Xuất,
+   * Phiếu Thu, Phiếu Chi... Ở đây chỉ đồng bộ lại state và báo kết quả.
+   */
+  const handleDeleteProject = async (id: string) => {
+    const projectName = projects.find(p => p.id === id)?.name || id;
 
-    // 3. Xóa dự án trong Firebase
-    dbService.projects.delete(id).catch(err => {
-      console.error("Lỗi khi xóa dự án:", err);
-    });
+    // 1. Gỡ khỏi giao diện ngay (optimistic) để thao tác thấy tức thì
+    setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
+    setTasks(prevTasks => prevTasks.filter(t => t.projectId !== id));
+
+    try {
+      // 2. Dọn sạch database — con trước, cha sau
+      const report = await dbService.projects.deleteCascade(id);
+
+      // 3. Báo cho mọi màn hình đang mở tự làm mới danh sách
+      [
+        'hl-projects-updated',
+        'hl-tasks-updated',
+        'hl-archived-quotes-updated',
+        'hl-subcontractor-advances-updated',
+        'hl-accounting-receivables-updated',
+        'hl-conversations-updated',
+      ].forEach(evt => window.dispatchEvent(new CustomEvent(evt)));
+
+      addToast({
+        title: '🗑️ Đã xóa dự án',
+        message: report.total > 0
+          ? `Dự án "${projectName}" và ${report.total} bản ghi liên quan đã bị xóa vĩnh viễn.`
+          : `Dự án "${projectName}" đã bị xóa vĩnh viễn.`,
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('Lỗi khi xóa dự án:', err);
+      addToast({
+        title: '❌ Xóa dự án thất bại',
+        message: `Không thể xóa "${projectName}": ${err instanceof Error ? err.message : String(err)}. Danh sách sẽ được tải lại.`,
+        type: 'error'
+      });
+      // Khôi phục state từ server để giao diện không lệch với database
+      try {
+        const [freshProjects, freshTasks] = await Promise.all([
+          dbService.projects.list(),
+          dbService.tasks.list(),
+        ]);
+        setProjects(freshProjects);
+        setTasks(freshTasks);
+      } catch (reloadErr) {
+        console.error('Không tải lại được dữ liệu sau khi xóa dự án thất bại:', reloadErr);
+      }
+    }
   };
 
   // HANDLERS CÔNG VIỆC
-  const handleAddTask = (newTask: Task) => {
+  const handleAddTask = async (newTask: Task): Promise<void> => {
     setTasks(prev => [newTask, ...prev]);
-    dbService.tasks.save(newTask).catch(err => {
-      console.error("Lỗi khi thêm công việc mới:", err);
-    });
-
-    // Auto-create task chat group
-    try {
-      if (!currentUser) return;
-      const project = projects.find(p => p.id === newTask.projectId);
-      const memberIds = Array.from(new Set([
-        newTask.assignerId,
-        newTask.assigneeId,
-        ...(newTask.involvedEmployeeIds || []),
-        ...(newTask.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]),
-        project?.pmId,
-        ...(project?.involvedEmployeeIds || []),
-        currentUser?.id
-      ].filter((id): id is string => Boolean(id))));
-
-      if (!currentUser) return;
-      createGroupConversation(
-        `${project?.name?.substring(0, 30)} - ${newTask.name.substring(0, 30)}`,
-        memberIds,
-        currentUser.id,
-        newTask.id,
-        newTask.projectId
-      );
-    } catch (e) { console.error('Auto-create chat group failed:', e); }
+    await dbService.tasks.save(newTask);
+    // Task mới có thể kèm sẵn missions (vd sub-task tự động sinh từ mẫu ở
+    // ProjectKanbanBoard) — tasks.save() không còn ghi cột missions cũ nữa,
+    // nên phải lưu riêng từng mission sang bảng task_missions. An toàn vì
+    // task_id vừa tạo chưa có dòng nào tồn tại (không có gì để ghi đè).
+    if (newTask.missions && newTask.missions.length > 0) {
+      await Promise.all(newTask.missions.map(m => dbService.taskMissions.save(newTask.id, m)));
+    }
+    window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
   };
 
-  const handleUpdateTask = (id: string, updates: Partial<Task>) => {
-    setTasks(prev => {
-      const idx = prev.findIndex(t => t.id === id);
-      if (idx !== -1) {
-        const oldTask = prev[idx];
-        const changedTask = { ...oldTask, ...updates };
+  // Hàng đợi lưu công việc theo TỪNG task id — chống mất dữ liệu khi 2 lệnh cập
+  // nhật cùng 1 task (VD: 2 nhiệm vụ trong "missions" được xác nhận liên tiếp
+  // thật nhanh) chạy gần như đồng thời. Vì "missions" được lưu là 1 mảng jsonb
+  // duy nhất (ghi đè toàn bộ khi save), nếu lệnh thứ 2 tính toán dựa trên
+  // `tasksRef.current` CHƯA kịp cập nhật bởi lệnh thứ 1 (tasksRef chỉ đồng bộ
+  // lại vào lần re-render kế tiếp, không đồng bộ ngay khi setState được gọi),
+  // nó sẽ ghi đè mất thay đổi của lệnh thứ 1. Xếp hàng theo id đảm bảo lệnh
+  // sau luôn đọc bản đã-được-lệnh-trước cập nhật.
+  const taskUpdateQueues = useRef(new Map<string, Promise<boolean>>());
 
-        // A. THÔNG BÁO TIN NHẮN MỚI TRONG CÔNG VIỆC CON (HỘI THOẠI)
-        if (updates.comments && updates.comments.length > (oldTask.comments?.length || 0)) {
-          const newComment = updates.comments[updates.comments.length - 1];
-          // Thông báo cho người nhận (nếu người nhận không phải là chính người gửi)
-          const recipientIds: string[] = [];
-          if (newComment.senderId !== oldTask.assigneeId) recipientIds.push(oldTask.assigneeId);
-          if (newComment.senderId !== oldTask.assignerId) recipientIds.push(oldTask.assignerId);
-          if (oldTask.involvedEmployeeIds) {
-            oldTask.involvedEmployeeIds.forEach(ieId => {
-              if (ieId !== newComment.senderId && !recipientIds.includes(ieId)) {
-                recipientIds.push(ieId);
-              }
-            });
-          }
-
-          recipientIds.forEach(recId => {
-            const rec = employees.find(e => e.id === recId);
-            if (rec) {
-              setTimeout(() => {
-                addNotification({
-                  recipientId: recId,
-                  senderId: newComment.senderId,
-                  senderName: newComment.senderName,
-                  senderAvatar: newComment.senderName.substring(0, 2).toUpperCase(),
-                  category: 'chat',
-                  title: `💬 Tin nhắn mới từ ${newComment.senderName}`,
-                  content: `[Công việc con ${oldTask.code}]: "${newComment.content}"`,
-                  detailedContent: `Nội dung cuộc hội thoại trong công việc con "${oldTask.name}" (${oldTask.code}):\n\nNgười gửi: ${newComment.senderName} (${newComment.senderRole})\nThời gian: ${new Date(newComment.createdAt).toLocaleString('vi-VN')}\n\nTin nhắn: "${newComment.content}"`,
-                  subTaskCode: oldTask.code
-                });
-              }, 10);
-            }
-          });
-        }
-
-        // B. THÔNG BÁO THÔNG TIN TRONG CÔNG VIỆC CON CÓ LIÊN QUAN (TRẠNG THÁI, TIẾN ĐỘ)
-        if (updates.status && updates.status !== oldTask.status) {
-          const statusMap: Record<string, string> = { todo: 'Chưa làm', in_progress: 'Đang làm', review: 'Đợi duyệt', completed: 'Hoàn thành' };
-          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId, ...(oldTask.involvedEmployeeIds || [])]))
-            .filter(recId => recId !== currentUser?.id);
-
-          recipientIds.forEach(recId => {
-            setTimeout(() => {
-              if (!currentUser) return;
-              addNotification({
-                recipientId: recId,
-                senderId: currentUser.id,
-                senderName: currentUser.name,
-                senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-                category: 'tasks',
-                title: `📋 Cập nhật công việc con`,
-                content: `Trạng thái công việc "${oldTask.name}" đổi thành: ${statusMap[updates.status || ''] || updates.status}`,
-                detailedContent: `Mã công việc: ${oldTask.code}\nTên công việc: ${oldTask.name}\nPhòng ban: ${oldTask.department}\nHạn hoàn thành: ${oldTask.deadline}\n\nNgười cập nhật: ${currentUser.name}\nTrạng thái mới: ${statusMap[updates.status || ''] || updates.status}\nTiến độ hiện tại: ${changedTask.completionRate}%`,
-                subTaskCode: oldTask.code
-              });
-            }, 10);
-          });
-        }
-
-        if (updates.completionRate !== undefined && updates.completionRate !== oldTask.completionRate) {
-          const recipientIds = Array.from(new Set([oldTask.assigneeId, oldTask.assignerId, ...(oldTask.involvedEmployeeIds || [])]))
-            .filter(recId => recId !== currentUser?.id);
-
-          recipientIds.forEach(recId => {
-            setTimeout(() => {
-              if (!currentUser) return;
-              addNotification({
-                recipientId: recId,
-                senderId: currentUser.id,
-                senderName: currentUser.name,
-                senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-                category: 'tasks',
-                title: `📈 Cập nhật tiến độ`,
-                content: `Tiến độ việc "${oldTask.name}" tăng lên ${updates.completionRate}%`,
-                detailedContent: `Mã công việc: ${oldTask.code}\nTên công việc: ${oldTask.name}\nTiến độ cũ: ${oldTask.completionRate}%\nTiến độ mới: ${updates.completionRate}%\n\nNgười cập nhật: ${currentUser.name}`,
-                subTaskCode: oldTask.code
-              });
-            }, 10);
-          });
-        }
-
-        // Phát hiện hoàn thành công việc để bắn Toast nổi
-        const wasCompleted = oldTask.status === 'completed' || oldTask.completionRate === 100;
-        const isNowCompleted = changedTask.status === 'completed' || changedTask.completionRate === 100;
-        if (!wasCompleted && isNowCompleted) {
-          addToast({
-            title: '✅ Hoàn thành công việc',
-            message: `Công việc "${changedTask.name}" đã cán đích và hoàn thành xuất sắc!`,
-            type: 'success'
-          });
-        }
-
-        dbService.tasks.save(changedTask).catch(err => {
-          console.error("Lỗi khi cập nhật công việc:", err);
-        });
-
-        // TỰ ĐỘNG CHUYỂN CỘT KHI HOÀN THÀNH:
-        const projectId = changedTask.projectId;
-        if (projectId) {
-          const updatedTasks = prev.map(t => t.id === id ? changedTask : t);
-          const projTasks = updatedTasks.filter(t => t.projectId === projectId);
-          if (projTasks.length > 0) {
-            const allCompleted = projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
-            if (allCompleted) {
-              // Wait a brief moment to avoid state updates collision or race conditions
-              setTimeout(() => {
-                const proj = projects.find(p => p.id === projectId);
-                if (proj) {
-                  // Determine sector and loading key
-                  const sector = proj.type === 'furniture' ? 'furniture' : proj.type === 'construction' ? 'construction' : 'mechanical';
-                  const storageKey = `hl_kanban_cols_${sector}`;
-                  const saved = localStorage.getItem(storageKey);
-                  let columnsList: any[] = [];
-                  if (saved) {
-                    try {
-                      columnsList = JSON.parse(saved);
-                    } catch (e) {}
-                  }
-                  if (!columnsList || columnsList.length === 0) {
-                    columnsList = [
-                      { id: 'col_design', name: 'YÊU CẦU THIẾT KẾ', color: 'bg-indigo-650', iconColor: 'text-indigo-400', automation: { type: 'auto_progress', param: 10 } },
-                      { id: 'col_bid', name: 'ĐẤU THẦU', color: 'bg-sky-600', iconColor: 'text-sky-450', automation: { type: 'auto_pm', param: 'emp_3' } },
-                      { id: 'col_waiting', name: 'CHỜ KẾT QUẢ', color: 'bg-blue-700', iconColor: 'text-blue-450', automation: { type: 'none' } },
-                      { id: 'col_active', name: 'GIỚI ĐOẠN THI CÔNG', color: 'bg-amber-500', iconColor: 'text-amber-400', automation: { type: 'auto_progress', param: 40 } },
-                      { id: 'col_accept', name: 'NGHIỆM THU', color: 'bg-emerald-600', iconColor: 'text-emerald-450', automation: { type: 'auto_approval', param: 'director' } },
-                      { id: 'col_fix', name: 'XỬ LÝ - KHẮC PHỤC', color: 'bg-purple-600', iconColor: 'text-purple-400', automation: { type: 'auto_progress', param: 90 } },
-                      { id: 'col_done', name: 'HOÀN THÀNH', color: 'bg-pink-600', iconColor: 'text-pink-400', automation: { type: 'auto_complete' } },
-                    ];
-                  }
-
-                  const getProjColumnId = (p: Project): string => {
-                    if ((p as any).kanbanColumnId) {
-                      if (columnsList.some(c => c.id === (p as any).kanbanColumnId)) {
-                        return (p as any).kanbanColumnId;
-                      }
-                    }
-                    if (p.status === 'completed') return 'col_done';
-                    if (p.status === 'new') return 'col_design';
-                    if (p.progress >= 90) return 'col_fix';
-                    if (p.progress >= 70) return 'col_accept';
-                    if (p.progress > 0) return 'col_active';
-                    return 'col_design';
-                  };
-
-                  const currentColId = getProjColumnId(proj);
-                  const currentColObj = columnsList.find(c => c.id === currentColId);
-                  const targetColId = currentColObj?.automation?.statusUpdate;
-
-                  if (targetColId && targetColId !== currentColId) {
-                    const targetColObj = columnsList.find(c => c.id === targetColId);
-                    const updates: Partial<Project> = {
-                      kanbanColumnId: targetColId,
-                    };
-
-                    const generatedTasks: Task[] = [];
-
-                    if (targetColObj?.automation) {
-                      const rule = targetColObj.automation;
-
-                      // 1. PM assignment
-                      if (rule.assignId) {
-                        updates.pmId = rule.assignId;
-                      }
-
-                      // 2. Status update
-                      if (rule.statusUpdate && rule.statusUpdate !== 'col_done' && !columnsList.some((c: any) => c.id === rule.statusUpdate)) {
-                        updates.status = rule.statusUpdate as any;
-                      }
-
-                      // 2.2 Text styling
-                      if (rule.textStyleStyleItalic !== undefined) updates.styleItalic = rule.textStyleStyleItalic;
-                      if (rule.textStyleStyleBold !== undefined) updates.styleBold = rule.textStyleStyleBold;
-                      if (rule.textStyleStyleStrike !== undefined) updates.styleStrike = rule.textStyleStyleStrike;
-                      if (rule.textStyleStyleColor !== undefined) updates.styleColor = rule.textStyleStyleColor;
-
-                      // 6. Subtasks creation
-                      const tasksToAdd: string[] = [];
-                      if (rule.subtaskTitles && rule.subtaskTitles.length > 0) {
-                        rule.subtaskTitles.forEach((title: string) => {
-                          if (title && title.trim()) {
-                            tasksToAdd.push(title.trim());
-                          }
-                        });
-                      } else if (rule.subtaskTitle && rule.subtaskTitle.trim()) {
-                        tasksToAdd.push(rule.subtaskTitle.trim());
-                      }
-
-                      if (tasksToAdd.length > 0) {
-                        const nowTimestamp = Date.now();
-                        tasksToAdd.forEach((title, idx) => {
-                          const newTaskId = `task_auto_${nowTimestamp}_${idx}`;
-                          const dayOffset = rule.dueDateDaysOffset || 7;
-                          const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
-                          
-                          const assigneeId = subtaskAuto.assignId || rule.assignId || proj.pmId || 'emp_3';
-                          const involvedEmployeeIds = Array.from(new Set([
-                            ...(proj.involvedEmployeeIds || []),
-                            ...(rule.involvedId ? [rule.involvedId] : []),
-                            ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-                            ...(subtaskAuto.involvedEmployeeIds || [])
-                          ]));
-
-                          const approvals = subtaskAuto.isApprovalEnabled !== false && subtaskAuto.approvalRole && subtaskAuto.approvalRole !== 'none' ? [{
-                            id: `app_sub_auto_${nowTimestamp}_${idx}`,
-                            levelName: `Quy trình duyệt: ${subtaskAuto.approvalRole === 'director' ? 'Giám Đốc (Trương Hữu Long)' : subtaskAuto.approvalRole === 'accountant' ? 'Kế Toán trưởng (Lê Thị Mai)' : 'PM chuyên trách'}`,
-                            approverId: subtaskAuto.approvalRole === 'director' ? 'emp_1' : subtaskAuto.approvalRole === 'accountant' ? 'emp_2' : (proj.pmId || 'emp_3'),
-                            status: 'pending' as const
-                          }] : undefined;
-
-                          const autoTask: Task = {
-                            id: newTaskId,
-                            code: `CV-AUTO-${Math.floor(Math.random() * 900) + 100}`,
-                            projectId: projectId,
-                            columnId: targetColId,
-                            name: title,
-                            description: `Công việc con được tạo tự động bởi quy trình khi di chuyển vào phân đoạn ${targetColObj.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-                            assignerId: 'system',
-                            assigneeId: assigneeId,
-                            involvedEmployeeIds: involvedEmployeeIds,
-                            department: 'Thi công',
-                            deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                            priority: 'medium',
-                            status: 'todo',
-                            completionRate: 0,
-                            notes: 'Nhiệm vụ tự trị Hoàng Long vách mộc',
-                            workLogs: [
-                              {
-                                id: `wl_auto_${nowTimestamp}`,
-                                actorId: 'system',
-                                actorName: 'Hệ thống tự động',
-                                action: 'Cấp phát nhiệm vụ tự động',
-                                timestamp: new Date().toISOString().split('T')[0],
-                                notes: `Khởi tạo công việc từ quy trình tự động phân đoạn ${targetColObj.name}.`
-                              }
-                            ],
-                            styleItalic: subtaskAuto.textStyleStyleItalic,
-                            styleBold: subtaskAuto.textStyleStyleBold,
-                            styleStrike: subtaskAuto.textStyleStyleStrike,
-                            styleColor: subtaskAuto.textStyleStyleColor,
-                            checklistTexts: subtaskAuto.checklistTexts || [],
-                            approvals: approvals,
-                            isApprovalEnabled: subtaskAuto.isApprovalEnabled !== false,
-                            isApprovalRequired: subtaskAuto.isApprovalRequired !== false,
-                            isDocGenerationEnabled: subtaskAuto.isDocGenerationEnabled !== false,
-                            isCostEnabled: subtaskAuto.isCostEnabled !== false,
-                            isMaterialEnabled: subtaskAuto.isMaterialEnabled !== false
-                          };
-
-                          generatedTasks.push(autoTask);
-
-                          // Thiết kế Hồ sơ
-                          if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
-                            const docTitle = subtaskAuto.docTitle || `Hồ sơ ${subtaskAuto.docTemplateId === 'quotation' ? 'Báo giá thầu' : subtaskAuto.docTemplateId === 'contract' ? 'Hợp đồng kinh tế' : subtaskAuto.docTemplateId === 'acceptance' ? 'Biên bản nghiệm thu' : 'Biên bản thanh lý'}`;
-                            const subtaskDoc: ProjectDoc = {
-                              id: `doc_sub_auto_${nowTimestamp}_${idx}`,
-                              type: subtaskAuto.docTemplateId as any,
-                              name: docTitle,
-                              code: `HS-AUTO-${Math.floor(Math.random() * 900) + 100}`,
-                              createdAt: new Date().toISOString().split('T')[0],
-                              status: 'draft',
-                              templateName: 'Hồ sơ thiết lập tự động từ công việc con',
-                              customFields: [
-                                { label: 'Công việc liên kết', value: title }
-                              ]
-                            };
-                            if (!updates.documents) {
-                              updates.documents = [...(proj.documents || [])];
-                            }
-                            updates.documents.push(subtaskDoc);
-                          }
-                        });
-                      }
-                    }
-
-                    const nextp = {
-                      ...proj,
-                      ...updates,
-                    };
-
-                    // 1. Save updated project to DB
-                    dbService.projects.save(nextp).catch(err => {
-                      console.error("Lỗi khi lưu tự động cập nhật dự án:", err);
-                    });
-
-                    // 2. Set Projects State
-                    setProjects(prevProjects => prevProjects.map(p => p.id === proj.id ? nextp : p));
-
-                    // 3. Save tasks securely to prevent duplicates
-                    if (generatedTasks.length > 0) {
-                      setTasks(prevTasks => {
-                        // De-duplicate guard to strictly ensure no identical todo task name on the target column
-                        const nonDuplicateGenerated = generatedTasks.filter(gt => 
-                          !prevTasks.some(pt => pt.projectId === projectId && pt.name === gt.name && pt.columnId === targetColId && pt.status === 'todo')
-                        );
-
-                        nonDuplicateGenerated.forEach(task => {
-                          dbService.tasks.save(task).catch(err => {
-                            console.error("Lỗi khi lưu tự động tạo công việc từ quy trình:", err);
-                          });
-                        });
-
-                        return [...nonDuplicateGenerated, ...prevTasks];
-                      });
-                    }
-
-                    const targetColName = targetColObj?.name || targetColId;
-                    setTimeout(() => {
-                      alert(`[Quy trình Tự động]: Toàn bộ công việc con (${projTasks.length}/${projTasks.length} việc con) đã hoàn thành.\nHệ thống tự động chuyển dự án [${proj.name}] từ cột [${currentColObj?.name || currentColId}] sang cột phân đoạn mới [${targetColName}] thành công!\nCác quy tắc tự động (quy trình phê duyệt, cán bộ PM phụ trách, định dạng phông chữ, thêm công việc con mới...) của phân đoạn mới [${targetColName}] đã được kích hoạt và áp dụng đầy đủ.`);
-                    }, 50);
-                  }
-                }
-              }, 500);
-            }
-          }
-        }
-
-        return prev.map(t => t.id === id ? changedTask : t);
+  const handleUpdateTask = (id: string, updates: TaskUpdatePayload): Promise<boolean> => {
+    const prevInQueue = taskUpdateQueues.current.get(id) || Promise.resolve(true);
+    const queued = prevInQueue.then(() => performUpdateTask(id, updates));
+    taskUpdateQueues.current.set(id, queued);
+    queued.finally(() => {
+      // Chỉ xóa khỏi hàng đợi nếu không có lệnh mới nào được thêm vào sau đó.
+      if (taskUpdateQueues.current.get(id) === queued) {
+        taskUpdateQueues.current.delete(id);
       }
-      return prev;
+    });
+    return queued;
+  };
+
+  // Chỉ UPSERT những mission có mặt trong `newMissions` (thêm mới/thay đổi so với
+  // bản client này biết) vào bảng task_missions riêng — KHÔNG còn suy luận "mission
+  // vắng mặt trong mảng mới = đã bị xóa" như trước. Lý do đổi (sự cố thực tế
+  // 2026-08-31): TaskDetailModal ở khoảng 15 chỗ đều tự dựng `missions` bằng cách đọc
+  // `selectedTask.missions` (prop, lấy từ `tasks` state) rồi gửi lại NGUYÊN MẢNG — nếu
+  // Realtime của client đó bị rớt ngầm một lúc (đã có sự cố tương tự, xem
+  // "tự phục hồi kênh Realtime"), mảng này có thể THIẾU 1 mission mà người khác vừa
+  // hoàn thành ở nơi khác. Với cách suy luận cũ, mission đó bị hiểu nhầm là "đã xóa"
+  // và bị xóa THẬT khỏi task_missions — dù chỉ do dữ liệu cục bộ bị cũ, không ai chủ
+  // động xóa. Nay muốn xóa hẳn 1 mission phải khai báo TƯỜNG MINH qua deletedMissionIds
+  // (xem 2 nút "Xóa Nhiệm Vụ" trong TaskDetailModal.tsx) — an toàn cả khi `newMissions`
+  // là bản cũ/thiếu sót, vì phần thiếu chỉ đơn giản không bị đụng tới.
+  const syncMissionsDiff = (
+    taskId: string,
+    oldMissions: any[] | undefined,
+    newMissions: any[] | undefined,
+    deletedMissionIds?: string[],
+  ): Promise<any> => {
+    if (newMissions === undefined && (!deletedMissionIds || deletedMissionIds.length === 0)) {
+      return Promise.resolve();
+    }
+    const oldById = new Map((oldMissions || []).map((m: any) => [m.id, m]));
+    const toSave = (newMissions || []).filter((m: any) => {
+      const old = oldById.get(m.id);
+      return !old || stableStr(old) !== stableStr(m);
+    });
+    // Chỉ xóa đúng những id được yêu cầu tường minh, và chỉ khi mission đó thực sự
+    // đang tồn tại trong bản CŨ mà client này biết (tránh xóa nhầm id không hợp lệ).
+    const toDelete = (deletedMissionIds || []).filter(mid => oldById.has(mid));
+    return Promise.all([
+      ...toSave.map((m: any) => dbService.taskMissions.save(taskId, m)),
+      ...toDelete.map((mid: string) => dbService.taskMissions.delete(taskId, mid))
+    ]);
+  };
+
+  const performUpdateTask = (id: string, rawUpdates: TaskUpdatePayload): Promise<boolean> => {
+    // `deletedMissionIds` chỉ là tín hiệu điều khiển syncMissionsDiff — KHÔNG phải cột
+    // thật của bảng tasks, phải tách ra trước khi ghép vào Task/gửi cho dbService.tasks.save().
+    const { deletedMissionIds, ...updates } = rawUpdates;
+    // Tìm task từ state hiện tại (ref) — không chạy side-effect bên trong updater.
+    const oldTask = tasksRef.current.find(t => t.id === id);
+    const baseTask = oldTask;
+    const changedTask: Task = baseTask
+      ? { ...baseTask, ...updates }
+      : { id, ...(updates as Task) };
+
+    // ── Side-effect thông báo (tin nhắn, trạng thái, tiến độ, toast) ────────
+    // Được chạy sau khi đã xác định task gốc (nếu có trong state) để tránh bắn
+    // thông báo cho dữ liệu chưa được server xác nhận.
+    const runTaskNotifications = (oldT: Task | undefined, newT: Task) => {
+      if (!oldT) return;
+
+      // ── Lõi Thông báo hệ thống ĐÃ BỊ XÓA ──
+      // Các nhắc comment/trạng thái/tiến độ cũ tạo bản ghi `notifications` đã
+      // được loại bỏ (xem plan phần D). Hội thoại công việc & luồng duyệt giờ
+      // đi qua chat (chatStore.addMessage). Giữ lại duy nhất toast hoàn thành.
+
+      // PHÁT HIỆN HOÀN THÀNH CÔNG VIỆC → BẮN TOAST NỔI
+      const wasCompleted = oldT.status === 'completed' || oldT.completionRate === 100;
+      const isNowCompleted = newT.status === 'completed' || newT.completionRate === 100;
+      if (!wasCompleted && isNowCompleted) {
+        addToast({
+          title: '✅ Hoàn thành công việc',
+          message: `Công việc "${newT.name}" đã cán đích và hoàn thành xuất sắc!`,
+          type: 'success'
+        });
+      }
+    };
+
+    // Optimistic cập nhật state — nhưng nếu task chưa có trong state thì không
+    // tự chèn (tránh giả lập dữ liệu chưa được server xác nhận).
+    if (baseTask) {
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    }
+
+    // Ghi nhận thời điểm save để các nguồn reload không ghi đè bản mới (Hướng B).
+    recentTaskSaves.current.set(id, Date.now());
+
+    // Nếu task đã có trong state → save trực tiếp lên Supabase và trả về kết quả.
+    if (baseTask) {
+      return Promise.all([
+        dbService.tasks.save(changedTask),
+        syncMissionsDiff(id, baseTask.missions, updates.missions, deletedMissionIds)
+      ]).then(() => {
+        runTaskNotifications(baseTask, changedTask);
+        window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+        return true;
+      }).catch(err => {
+        console.error("Lỗi khi cập nhật công việc:", err);
+        // Save thất bại → bỏ marker chống-ghi-đè và hoàn nguyên UI về bản trước.
+        recentTaskSaves.current.delete(id);
+        setTasks(prev => prev.map(t => t.id === id ? baseTask : t));
+        return false;
+      });
+    }
+
+    // HƯỚNG A: task không còn trong state (bị reload thay thế) → lấy bản mới từ
+    // server, merge updates, save. Không im lặng bỏ qua như trước.
+    return dbService.tasks.list().then(serverTasks => {
+      const serverTask = serverTasks.find(t => t.id === id);
+      const target = serverTask ? { ...serverTask, ...updates } : changedTask;
+      return Promise.all([
+        dbService.tasks.save(target),
+        syncMissionsDiff(id, serverTask?.missions, updates.missions, deletedMissionIds)
+      ]).then(() => {
+        runTaskNotifications(serverTask, target);
+        window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+        // Cập nhật state với bản đã save — giữ bản này làm bản gốc.
+        recentTaskSaves.current.delete(id);
+        setTasks(prev => {
+          const has = prev.some(t => t.id === id);
+          if (has) return prev.map(t => t.id === id ? target : t);
+          return [...prev, target];
+        });
+        return true;
+      }).catch(err => {
+        console.error("Lỗi khi cập nhật công việc (không có trong state):", err);
+        // Save thất bại → bỏ marker chống-ghi-đè để reload không giữ bản local sai.
+        recentTaskSaves.current.delete(id);
+        return false;
+      });
+    }).catch(err => {
+      console.error("Lỗi khi tải công việc để cập nhật:", err);
+      return false;
     });
   };
 
   const handleDeleteTask = (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    dbService.tasks.delete(id).catch(err => {
+    dbService.tasks.delete(id).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+    }).catch(err => {
       console.error("Lỗi khi xóa công việc:", err);
     });
 
@@ -2006,7 +2703,9 @@ export default function App() {
 
   const handleDeleteMultipleTasks = (ids: string[]) => {
     setTasks(prev => prev.filter(t => !ids.includes(t.id)));
-    dbService.tasks.deleteMultiple(ids).catch(err => {
+    dbService.tasks.deleteMultiple(ids).then(() => {
+      window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
+    }).catch(err => {
       console.error("Lỗi khi dọn dẹp các công việc:", err);
     });
 
@@ -2017,21 +2716,77 @@ export default function App() {
   };
 
   // HANDLERS TÀI CHÍNH
-  const handleAddReceipt = (newRec: Receipt) => {
-    setReceipts([newRec, ...receipts]);
-    dbService.receipts.save(newRec);
-    
+  const handleAddReceipt = async (newRec: Receipt) => {
+    setReceipts(prev => [newRec, ...prev]);
+    try {
+      await dbService.receipts.save(newRec);
+    } catch (err) {
+      console.error('[App] Lỗi lưu phiếu thu lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu phiếu thu ${newRec.code} lên server.`, type: 'error' });
+    }
+
     // Nếu có dự án kết nối, tăng nhẹ tiến trình ngẫu nhiên
     if (newRec.projectId) {
-      const updatedProjs = projects.map(p => {
+      setProjects(prev => prev.map(p => {
         if (p.id === newRec.projectId) {
           const nextp = { ...p, progress: Math.min(p.progress + 5, 100) };
-          dbService.projects.save(nextp);
+          dbService.projects.save(nextp).catch(e => console.error('[App] Lỗi lưu tiến trình project:', e));
           return nextp;
         }
         return p;
-      });
-      setProjects(updatedProjs);
+      }));
+    }
+  };
+
+  // HANDLERS ĐƠN HÀNG BÁN
+  /**
+   * Lưu đơn hàng bán MỚI. Dùng create() (insert) thay vì save() (upsert) để
+   * đơn mới không bao giờ ghi đè đơn cũ khi mã bị trùng — tầng DB sẽ tự cấp
+   * lại mã. Trả về đơn đã lưu (id có thể khác mã dự kiến), hoặc null nếu lỗi.
+   */
+  const handleAddSalesOrder = async (order: SalesOrder): Promise<SalesOrder | null> => {
+    try {
+      const saved = await dbService.salesOrders.create(order) as SalesOrder;
+      setSalesOrders(prev => [saved, ...prev]);
+      return saved;
+    } catch (err) {
+      console.error('[App] Lỗi lưu đơn hàng bán lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu đơn hàng ${order.id} lên server.`, type: 'error' });
+      return null;
+    }
+  };
+
+  const handleDeleteSalesOrder = async (id: string) => {
+    setSalesOrders(prev => prev.filter(o => o.id !== id));
+    try {
+      await dbService.salesOrders.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa đơn hàng bán trên Supabase:', err);
+    }
+  };
+
+  // HANDLERS ĐƠN MUA HÀNG
+  /** Xem chú thích ở handleAddSalesOrder — cùng cơ chế chống ghi đè. */
+  const handleAddPurchaseOrder = async (order: PurchaseOrder): Promise<PurchaseOrder | null> => {
+    console.log('[App] Tạo đơn mua hàng:', order.id);
+    try {
+      const saved = await dbService.purchaseOrders.create(order) as PurchaseOrder;
+      console.log('[App] Lưu đơn mua hàng thành công:', saved.id);
+      setPurchaseOrders(prev => [saved, ...prev]);
+      return saved;
+    } catch (err) {
+      console.error('[App] Lỗi lưu đơn mua hàng lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu đơn mua ${order.id} lên server. Dữ liệu chỉ tạm thời trên trình duyệt.`, type: 'error' });
+      return null;
+    }
+  };
+
+  const handleDeletePurchaseOrder = async (id: string) => {
+    setPurchaseOrders(prev => prev.filter(o => o.id !== id));
+    try {
+      await dbService.purchaseOrders.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa đơn mua hàng trên Supabase:', err);
     }
   };
 
@@ -2050,22 +2805,102 @@ export default function App() {
     dbService.customers.delete(id);
   };
 
-  const handleAddPayment = (newPay: Payment) => {
+  const handleAddPayment = async (newPay: Payment) => {
     setPayments([newPay, ...payments]);
-    dbService.payments.save(newPay);
+    try {
+      await dbService.payments.save(newPay);
+    } catch (err) {
+      console.error('[App] Lỗi lưu phiếu chi lên Supabase:', err);
+      addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu phiếu chi ${newPay.code} lên server.`, type: 'error' });
+    }
+    // Đồng bộ Công nợ Trả thầu phụ (menu Quản Lý Thầu Phụ) khi có phiếu chi mới
+    window.dispatchEvent(new CustomEvent('hl-payments-updated'));
   };
 
-  const handleDeleteReceipt = (id: string) => {
+  const handleDeleteReceipt = async (id: string) => {
     setReceipts(prev => prev.filter(r => r.id !== id));
-    dbService.receipts.delete(id).catch(err => console.error("Lỗi xóa phiếu thu:", err));
+    try {
+      await dbService.receipts.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa phiếu thu trên Supabase:', err);
+    }
+    // Thông báo FinanceManagement dọn dẹp Công Nợ Thu tự động mồ côi
+    window.dispatchEvent(new CustomEvent('hl-receipt-deleted'));
   };
 
-  const handleDeletePayment = (id: string) => {
+  const handleDeletePayment = async (id: string) => {
+    // Tìm phiếu TRƯỚC khi filter khỏi state — cần amount/purchaseOrderId/status
+    // để revert công nợ đối xứng với phần CỘNG ở handleApprovePayment bên dưới.
+    const targetPayment = payments.find(p => p.id === id);
     setPayments(prev => prev.filter(p => p.id !== id));
-    dbService.payments.delete(id).catch(err => console.error("Lỗi xóa phiếu chi:", err));
+    try {
+      await dbService.payments.delete(id);
+    } catch (err) {
+      console.error('[App] Lỗi xóa phiếu chi trên Supabase:', err);
+    }
+
+    // 💳 Trả lại công nợ đơn hàng & Công nợ Trả nếu phiếu chi bị xóa ĐÃ DUYỆT và có
+    // thanh toán 1 đơn hàng — nếu không, đơn hàng/công nợ NCC vẫn hiện như đã được
+    // trả dù phiếu chứng minh việc đó đã bị xóa (xem handleApprovePayment ở dưới,
+    // nơi 2 số liệu này được CỘNG khi duyệt — ở đây làm ngược lại: TRỪ khi xóa).
+    if (targetPayment && targetPayment.status === 'approved' && targetPayment.purchaseOrderId) {
+      const order = purchaseOrders.find(o => o.id === targetPayment.purchaseOrderId);
+      if (order) {
+        const newPaid = Math.max(0, (order.thanhToanThucTe || 0) - (targetPayment.amount || 0));
+        const newCongNo = Math.max(0, (order.tongTien || 0) - newPaid);
+        const updatedOrder: any = {
+          ...order,
+          thanhToanThucTe: newPaid,
+          congNo: newCongNo,
+          // Chỉ hạ trạng thái 'completed' do chính khoản thanh toán này gây ra;
+          // không đụng tới các trạng thái khác đơn hàng đang có.
+          status: (newCongNo > 0 && order.status === 'completed') ? 'confirmed' : order.status,
+        };
+        setPurchaseOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        try {
+          await dbService.purchaseOrders.save(updatedOrder);
+        } catch (err) {
+          console.error('[App] Lỗi trả lại công nợ đơn hàng:', err);
+        }
+        // Trả lại Công nợ Trả (accounting_liabilities) theo nhà cung cấp
+        try {
+          const liabs: any[] = await dbService.accountingLiabilities.list();
+          const liab = liabs.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === order.supplierName);
+          if (liab) {
+            const newPaidL = Math.max(0, (liab.paid || 0) - (targetPayment.amount || 0));
+            const updatedLiab = { ...liab, paid: newPaidL, remaining: (liab.value || 0) - newPaidL };
+            await dbService.accountingLiabilities.save(updatedLiab);
+            window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
+          }
+        } catch (err) {
+          console.error('[App] Lỗi trả lại công nợ phải trả:', err);
+        }
+      }
+    }
+    // Đồng bộ Công nợ Trả thầu phụ (menu Quản Lý Thầu Phụ) khi phiếu chi bị xóa
+    window.dispatchEvent(new CustomEvent('hl-payments-updated'));
   };
 
-  const handleApprovePayment = (id: string, status: 'approved' | 'rejected') => {
+  const handleUpdateReceipt = async (updated: Receipt) => {
+    setReceipts(prev => prev.map(r => r.id === updated.id ? updated : r));
+    try {
+      await dbService.receipts.save(updated);
+    } catch (err) {
+      console.error('[App] Lỗi cập nhật phiếu thu trên Supabase:', err);
+    }
+  };
+
+  const handleUpdatePayment = async (updated: Payment) => {
+    setPayments(prev => prev.map(p => p.id === updated.id ? updated : p));
+    try {
+      await dbService.payments.save(updated);
+      window.dispatchEvent(new CustomEvent('hl-payments-updated'));
+    } catch (err) {
+      console.error('[App] Lỗi cập nhật phiếu chi trên Supabase:', err);
+    }
+  };
+
+  const handleApprovePayment = async (id: string, status: 'approved' | 'rejected') => {
     const targetPayment = payments.find(p => p.id === id);
     const updated = payments.map(p => p.id === id ? { ...p, status } : p);
     setPayments(updated);
@@ -2073,24 +2908,58 @@ export default function App() {
     if (targetPayment) {
       dbService.payments.save({ ...targetPayment, status });
 
-      // Phát thông báo trạng thái phê duyệt cho người đề xuất
-      const proposerEmployee = employees.find(e => e.name === targetPayment.proposer);
-      const recipientId = proposerEmployee ? proposerEmployee.id : 'emp_1';
-      if (!currentUser) return;
-      setTimeout(() => {
-        addNotification({
-          recipientId,
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
+      const proposerEmployee = findEmployeeByName(employees, targetPayment.proposer);
+      if (currentUser && proposerEmployee && currentUser.id !== proposerEmployee.id) {
+        sendApprovalDirectMessage({
           senderId: currentUser.id,
           senderName: currentUser.name,
-          senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-          category: 'finance',
-          title: status === 'approved' ? '✅ Phê duyệt thanh toán thành công' : '❌ Từ chối phê duyệt thanh toán',
-          content: `Yêu cầu thanh toán ${targetPayment.code} (${targetPayment.recipient}) đã được ${status === 'approved' ? 'duyệt chi' : 'từ chối'}.`,
-          detailedContent: `Mã phiếu: ${targetPayment.code}\nNội dung chi chiết đề xuất thanh toán:\n\nHạng mục: ${targetPayment.recipient}\nSố tiền: ${targetPayment.amount.toLocaleString('vi-VN')} đ\nNgười đề xuất: ${targetPayment.proposer}\nNgười xét duyệt: ${currentUser.name}\n\nTrạng thái mới: ${status === 'approved' ? 'ĐÃ PHÊ DUYỆT & ĐÃ CHI' : 'BỊ TỪ CHỐI DUYỆT'}`,
-          subTaskCode: 'CV-GEN'
+          senderRole: currentUser.role,
+          recipientId: proposerEmployee.id,
+          recipientName: proposerEmployee.name || targetPayment.proposer,
+          content: status === 'approved'
+            ? `✅ Đã duyệt phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'payment', id: targetPayment.id },
         });
-      }, 10);
+      }
+
+      // 💳 Giảm công nợ đơn hàng & Công nợ Trả khi phiếu chi thanh toán đơn hàng được duyệt
+      if (status === 'approved' && targetPayment.purchaseOrderId) {
+        const order = purchaseOrders.find(o => o.id === targetPayment.purchaseOrderId);
+        if (order) {
+          const newPaid = (order.thanhToanThucTe || 0) + (targetPayment.amount || 0);
+          const newCongNo = Math.max(0, (order.tongTien || 0) - newPaid);
+          const updatedOrder: any = {
+            ...order,
+            thanhToanThucTe: newPaid,
+            congNo: newCongNo,
+            status: newCongNo <= 0 ? 'completed' : (order.status || 'confirmed'),
+          };
+          setPurchaseOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+          try {
+            await dbService.purchaseOrders.save(updatedOrder);
+          } catch (err) {
+            console.error('[App] Lỗi cập nhật công nợ đơn hàng:', err);
+          }
+          // Giảm Công nợ Trả (accounting_liabilities) theo nhà cung cấp
+          try {
+            const liabs: any[] = await dbService.accountingLiabilities.list();
+            const liab = liabs.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === order.supplierName);
+            if (liab) {
+              const newPaidL = (liab.paid || 0) + (targetPayment.amount || 0);
+              const updatedLiab = { ...liab, paid: newPaidL, remaining: (liab.value || 0) - newPaidL };
+              await dbService.accountingLiabilities.save(updatedLiab);
+              window.dispatchEvent(new CustomEvent('hl-accounting-liabilities-updated'));
+            }
+          } catch (err) {
+            console.error('[App] Lỗi cập nhật công nợ phải trả:', err);
+          }
+        }
+      }
     }
+    // Đồng bộ Công nợ Trả thầu phụ (menu Quản Lý Thầu Phụ) khi phiếu chi đổi trạng thái
+    window.dispatchEvent(new CustomEvent('hl-payments-updated'));
   };
 
   // HANDLERS BÁO GIÁ
@@ -2158,7 +3027,18 @@ export default function App() {
 
     setQuotes([newQuote, ...quotes]);
     dbService.quotes.save(newQuote);
-    
+
+    // Đồng bộ vào bảng archived_quotes (Lưu trữ hồ sơ) để Menu Hồ Sơ Dự Án đọc trạng thái theo dự án.
+    // (Đảm bảo hồ sơ luôn tồn tại với projectId + sector dù luồng lưu ở estimator có sai khác)
+    try {
+      const aqSector = newQuote.code?.startsWith('BGXD-') ? 'construction'
+        : newQuote.code?.startsWith('BGME-') ? 'mechanical' : 'furniture';
+      dbService.archivedQuotes.save({ ...newQuote, sector: aqSector })
+        .catch((e: any) => console.warn('Lưu archived_quotes thất bại:', e));
+    } catch (e) {
+      console.warn('Lưu archived_quotes thất bại:', e);
+    }
+
     // Tự sinh dự án tương ứng và trả file/hồ sơ về dự án
     if (newQuote.projectId) {
       const updatedProjs = projects.map(p => {
@@ -2214,33 +3094,34 @@ export default function App() {
       return q;
     });
     setQuotes(updated);
-
-    // Notification logic
-    const statusTexts: Record<string, string> = { draft: 'Nháp', sent: 'Đã gửi', approved: 'Đã phê duyệt', rejected: 'Bị từ chối' };
-    const quote = quotes.find(q => q.id === quoteId);
-    if (quote) {
-      const associatedProject = projects.find(p => p.id === quote.projectId);
-      const recipientId = associatedProject ? associatedProject.pmId : 'emp_1';
-      if (!currentUser) return;
-      setTimeout(() => {
-        addNotification({
-          recipientId,
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderAvatar: currentUser.name.substring(0, 2).toUpperCase(),
-          category: 'projects',
-          title: status === 'approved' ? '🎯 Báo giá được phê duyệt' : '⚠️ Báo giá bị cập nhật trạng thái',
-          content: `Báo giá ${quote.code} (${quote.customerName || 'Khách hàng'}) đã được ${statusTexts[status] || status}.`,
-          detailedContent: `Báo giá: ${quote.code}\nKhách hàng: ${quote.customerName || 'N/A'}\nTrạng thái mới: ${statusTexts[status] || status}\nDự án liên đới: ${quote.projectName || 'N/A'}\n\nNgười phê duyệt: ${currentUser.name}\nHạn mức đầu tư: ${quote.nganSachNoiThat?.toLocaleString('vi-VN') || 0} đ`,
-          subTaskCode: 'CV-GEN'
-        });
-      }, 10);
-    }
+    // Lõi Thông báo hệ thống đã bị xóa (phần D) — không còn gửi notification
+    // khi cập nhật trạng thái báo giá nữa.
   };
+
+  // Ánh xạ parent-child cho sidebar: nếu có quyền cha → tự động có quyền con
+  // (dùng dấu gạch ngang vì getAllowedTabsFromRoleGroups đã convert _ → -)
+  const parentChildrenMap: Record<string, string[]> = {
+    'project-office': ['projects-construction', 'projects-furniture', 'projects-mechanical'],
+    'hr-office': ['employees', 'hr-data'],
+    'accounting-office': ['finance', 'finance-data'],
+    'warehouse-office': ['material-coordination', 'warehouse-suppliers', 'warehouse-management', 'warehouse-data'],
+    'subcontractor-office': ['subcontractor-management'],
+    'library-office': ['quotes-construction', 'quotes', 'quotes-mechanical', 'quotes-subcontractor'],
+    'system-office': ['settings-accounts', 'settings-roles', 'settings', 'display-settings'],
+    'director-office': ['director-dashboard'],
+  };
+
+  // Ánh xạ ngược: con → cha
+  const childParentMap: Record<string, string> = {};
+  for (const [parent, children] of Object.entries(parentChildrenMap)) {
+    children.forEach(child => { childParentMap[child] = parent; });
+  }
 
   const isAccessible = (tab: string): boolean => {
     if (!currentUser) return false;
     if (currentUser.username === 'admin') return true;
+    // Super admin bypass — query trực tiếp Supabase DB (không dùng localStorage)
+    if (isSuperAdmin) return true;
 
     // ── Nguồn sự thật chính: HRM Role Groups (hl_cached_hrm_role_groups / hl_hrm_roles_v2) ──
     const isAdminGroup = isUserInRoleGroup(currentUser.id, 'role_admin');
@@ -2248,67 +3129,46 @@ export default function App() {
     const allowedFromGroups = getAllowedTabsFromRoleGroups(currentUser);
 
     // Fallback: dùng legacy role field nếu Role Groups chưa có cấu hình
-    let allowed: string[] = allowedFromGroups;
-    if (!allowed || allowed.length === 0) {
+    let allowedSet = new Set(allowedFromGroups);
+    if (!allowedFromGroups || allowedFromGroups.length === 0) {
       const role = currentUser.role;
       const legacy = role ? rolePermissions[role] : undefined;
       if (legacy && legacy.length > 0) {
-        allowed = legacy;
+        legacy.forEach(t => allowedSet.add(t));
       }
     }
 
     // Các tab lõi (core) luôn hiển thị với mọi người dùng đã đăng nhập
-    // (Tin nhắn là tính năng liên lạc bắt buộc, không nằm trong ma trận phân quyền module)
     const coreTabs = ['dashboard', 'tasks', 'messages'];
-    allowed = Array.from(new Set([...coreTabs, ...(allowed || [])]));
+    coreTabs.forEach(t => allowedSet.add(t));
+
+    // ─── Logic kế thừa parent → child ───────────────────────────────────
+    // Nếu có quyền cha → tự động thêm tất cả quyền con
+    for (const [parent, children] of Object.entries(parentChildrenMap)) {
+      if (allowedSet.has(parent)) {
+        children.forEach(child => allowedSet.add(child));
+      }
+    }
+    // Nếu có quyền con → tự động thêm quyền cha (để sidebar hiển thị nhóm cha)
+    for (const childStr of Array.from(allowedSet)) {
+      const parentStr = childParentMap[childStr];
+      if (parentStr) {
+        allowedSet.add(parentStr);
+      }
+    }
 
     // Fail-safe: nếu chưa cấu hình → không có quyền (ẩn menu)
-    if (!allowed || allowed.length === 0) return false;
+    if (allowedSet.size === 0) return false;
 
     // Giám đốc luôn giữ quyền Cài đặt hệ thống để không tự khóa mình ra ngoài
-    if (isAdminGroup && (tab === 'settings' || tab === 'settings-accounts' || tab === 'settings-roles')) return true;
+    if (isAdminGroup && (tab === 'settings' || tab === 'settings-accounts' || tab === 'settings-roles' || tab === 'display-settings')) return true;
 
     // Các tab thuộc phòng giám đốc chỉ có Giám đốc được xem
     if (tab.startsWith('director-') && tab !== 'director-office' && tab !== 'director-dashboard') {
       return isAdminGroup;
     }
 
-    // Map các trường hợp đặc thù liên kết giữa tab tổng và các tab con để tương thích ngược
-    if (tab === 'projects') {
-      return allowed.includes('project-office') ||
-             allowed.includes('projects-construction') ||
-             allowed.includes('projects-furniture') ||
-             allowed.includes('projects-mechanical');
-    }
-    if (tab === 'material-coordination') {
-      return allowed.includes('material-coordination') || allowed.includes('finance');
-    }
-    if (tab === 'warehouse-suppliers') {
-      return allowed.includes('warehouse-suppliers') || allowed.includes('finance');
-    }
-    if (tab === 'warehouse-management') {
-      return allowed.includes('warehouse-management') || allowed.includes('finance');
-    }
-    if (tab === 'subcontractor-management') {
-      return allowed.includes('subcontractor-management') || allowed.includes('finance') || allowed.includes('quotes');
-    }
-    if (tab === 'quotes-construction') {
-      return allowed.includes('quotes-construction') || allowed.includes('quotes');
-    }
-    if (tab === 'quotes-mechanical') {
-      return allowed.includes('quotes-mechanical') || allowed.includes('quotes');
-    }
-    if (tab === 'quotes-subcontractor') {
-      return allowed.includes('quotes-subcontractor') || allowed.includes('quotes');
-    }
-    if (tab === 'settings-accounts') {
-      return allowed.includes('settings-accounts') || allowed.includes('settings');
-    }
-    if (tab === 'settings-roles') {
-      return allowed.includes('settings-roles') || allowed.includes('settings');
-    }
-
-    return allowed.includes(tab);
+    return allowedSet.has(tab);
   };
 
   // Tự động điều hướng về 'dashboard' nếu tab hiện tại không có quyền truy cập
@@ -2318,39 +3178,87 @@ export default function App() {
     }
   }, [currentUser, activeTab, rolePermissions]);
 
-  const myUncompletedCount = tasks.filter(t => {
-    // Guard: only run when currentUser exists
-    if (!currentUser) return false;
-    // 1. Công việc được giao chưa hoàn thành
-    const isAssignee = (t.assigneeId === currentUser?.id || t.assigneeId === currentUser?.name) && t.status !== 'completed';
-    
-    // 2. Công việc phải duyệt chưa hoàn thành (đang chờ duyệt, tôi là người giao việc hoặc có vai trò duyệt)
-    const isToReview = t.status === 'reviewing' && (
-      t.assignerId === currentUser?.id ||
-      t.assignerId === currentUser?.name ||
-      t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name)
+  // Badge "Việc của tôi" = TỔNG badge của 3 tab trong trang Công việc (đồng bộ với
+  // TaskManagement): (1) Công việc được giao, (2) Nhiệm vụ được giao, (3) Công việc phải duyệt.
+  const myUncompletedCount = (() => {
+    if (!currentUser) return 0;
+
+    // 1. Công việc được giao chưa hoàn thành (bao gồm cả việc có nhiệm vụ user là Phụ trách chính)
+    const assignedUncompletedCount = tasks.filter(t => {
+      const hasMainAssigneeMission = t.missions?.some(m => m.mainAssigneeId === currentUser.id);
+      const isAssignee = t.assigneeId === currentUser.id || t.assigneeId === currentUser.name || hasMainAssigneeMission;
+      return isAssignee && t.status !== 'completed';
+    }).length;
+
+    // 2. Nhiệm vụ được giao chưa hoàn thành (user là Phụ trách chính / Nhân sự tham gia)
+    const relatedUncompletedCount = tasks.reduce((count, task) =>
+      count + (task.missions || []).filter(m =>
+        m.status !== 'completed' &&
+        (m.mainAssigneeId === currentUser.id || (m.memberIds || []).includes(currentUser.id))
+      ).length
+    , 0);
+
+    // 3. Công việc phải duyệt chưa hoàn thành (kèm đơn nghỉ phép & thu chi đang chờ duyệt)
+    const toReviewTasksCount = tasks.filter(t =>
+      t.status === 'reviewing' &&
+      (t.assignerId === currentUser.id ||
+       t.assignerId === currentUser.name ||
+       t.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    ).length;
+    // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt
+    // (đồng bộ với TaskManagement myPendingLeaves: lọc theo ID lẫn tên, kể cả chuỗi duyệt approvals)
+    const myPendingLeaves = leaves.filter(l =>
+      l.status === 'pending' &&
+      (l.approverId === currentUser.id ||
+       l.approverName === currentUser.name ||
+       l.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
     );
+    // Đề xuất tài chính chờ duyệt (đồng bộ TaskManagement myPendingPayments/myPendingAdvances):
+    // chỉ định làm người duyệt, hoặc thuộc nhóm Kế toán / Giám đốc → xem toàn bộ.
+    const isFinanceApprover = isUserInRoleGroup(currentUser.id, 'role_accounting') || isUserInRoleGroup(currentUser.id, 'role_admin');
+    const myPendingPayments = payments.filter(p =>
+      p.status === 'pending' &&
+      (isFinanceApprover ||
+       p.proposer === currentUser.name ||
+       p.recipient === currentUser.name ||
+       p.approver === currentUser.name ||
+       (p.approver && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
+       p.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    );
+    const myPendingAdvances = subcontractorAdvances.filter(a =>
+      a.status === 'pending_approval' &&
+      (isFinanceApprover ||
+       a.approver === currentUser.id ||
+       (a.approverName && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
+       a.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+    );
+    // Công tác phí chờ duyệt (đồng bộ TaskManagement myPendingTravelExpenses):
+    // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.
+    const canApproveTravelExpense = isUserInRoleGroup(currentUser.id, 'role_accounting') ||
+      (getConfiguredApprover('travel_expense')?.id === currentUser.id);
+    const myPendingTravelExpenses = ctpSummary.filter((t: any) => t.status === 'pending' && canApproveTravelExpense);
+    const toReviewUncompletedCount = toReviewTasksCount
+      + myPendingLeaves.length
+      + myPendingPayments.length
+      + myPendingAdvances.length
+      + myPendingTravelExpenses.length;
 
-    // 3. Công việc liên quan chưa hoàn thành
-    let isRelated = false;
-    if (t.status !== 'completed') {
-      const isAssignerGeneric = t.assignerId === currentUser?.id || 
-                                 t.assignerId === currentUser?.name ||
-                                 t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
-      if (!isAssignee && !isAssignerGeneric) {
-        const projectOfTask = projects.find(p => p.id === t.projectId);
-        const isProjectInvolved = projectOfTask?.involvedEmployeeIds?.includes(currentUser!.id);
-        const isTaskInvolved = t.involvedEmployeeIds?.includes(currentUser!.id) || t.involvedEmployeeIds?.includes(currentUser!.name);
-        isRelated = !!(isProjectInvolved || isTaskInvolved);
-      }
-    }
-
-    return isAssignee || isToReview || isRelated;
-  }).length;
+    return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
+  })();
 
   if (!currentUser) {
+    if (isInitializing || employees.length === 0) {
+      return (
+        <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
+            <p className="text-sm text-slate-400 font-medium">Đang tải dữ liệu...</p>
+          </div>
+        </div>
+      );
+    }
     return (
-      <Login 
+      <Login
         brandName={displaySettings.brandName}
         brandSlogan={displaySettings.brandSlogan}
         logoText={displaySettings.logoText}
@@ -2361,13 +3269,25 @@ export default function App() {
     );
   }
 
+  // Splash screen cho giao diện chính: auto-login xong nhưng data chưa load xong
+  if (isInitializing) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
+          <p className="text-sm text-slate-400 font-medium">Đang tải dữ liệu...</p>
+        </div>
+      </div>
+    );
+  }
+
   const currentFont = displaySettings.fontFamily || 'Inter';
 
   return (
     <AuthProvider employees={employees} addToast={addToast}>
-      <NotificationProvider employees={employees} currentUser={currentUser}>
+      <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
         <div
-          className="flex h-screen w-screen bg-slate-950 overflow-hidden text-slate-200 font-sans transition-all duration-200"
+          className="flex min-h-screen w-full lg:h-screen lg:w-screen bg-slate-950 lg:overflow-hidden text-slate-200 font-sans transition-all duration-200"
           style={{ fontFamily: currentFont }}
           id="erp_container"
         >
@@ -2451,9 +3371,11 @@ export default function App() {
                       <MessageSquare className={`w-5 h-5 shrink-0 transition duration-75 ${activeTab === 'messages' ? 'text-emerald-600' : 'text-gray-500 group-hover:text-gray-900'}`} />
                       <span className="flex-1 ms-3 text-left whitespace-nowrap truncate">Tin nhắn</span>
                       {(() => {
-                        const unreadCount = notifications.filter(n => n.recipientId === currentUser?.id && !n.read).length;
-                        return unreadCount > 0 ? (
-                          <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium text-white bg-rose-600 rounded-full">{unreadCount}</span>
+                        const conversations = getConversations();
+                        const userConvs = getUserConversations(conversations, currentUser?.id ?? '');
+                        const chatUnreadCount = userConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+                        return chatUnreadCount > 0 ? (
+                          <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium text-white bg-rose-600 rounded-full">{chatUnreadCount > 99 ? '99+' : chatUnreadCount}</span>
                         ) : null;
                       })()}
                     </button>
@@ -2482,7 +3404,7 @@ export default function App() {
                         <li>
                           <button
                             onClick={() => {
-                              const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor' };
+                              const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor', summary: 'director-summary' };
                               setActiveTab(subTabMap[directorSubDept] || 'director-projects');
                               if (mobileMenuOpen) setMobileMenuOpen(false);
                             }}
@@ -2631,17 +3553,17 @@ export default function App() {
                             </button>
                           </li>
                         )}
-                        {isAccessible('warehouse-suppliers') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('warehouse-suppliers'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-suppliers' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Nhà cung cấp vật tư
-                            </button>
-                          </li>
-                        )}
                         {isAccessible('warehouse-management') && (
                           <li>
                             <button onClick={() => { setActiveTab('warehouse-management'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-management' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
                               Quản lý tồn kho
+                            </button>
+                          </li>
+                        )}
+                        {isAccessible('warehouse-data') && (
+                          <li>
+                            <button onClick={() => { setActiveTab('warehouse-data'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-data' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+                              Dữ Liệu Kho
                             </button>
                           </li>
                         )}
@@ -2764,6 +3686,12 @@ export default function App() {
                       <Sliders className="w-5 h-5 shrink-0 text-violet-500 mr-2 transition duration-75" />
                       Cài Đặt Hệ Thống
                     </button>
+                    {isAccessible('display-settings') && (
+                      <button onClick={() => { setActiveTab('display-settings'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center px-2 py-2 mt-1 rounded-lg cursor-pointer transition-colors ${activeTab === 'display-settings' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+                        <Palette className="w-5 h-5 shrink-0 text-fuchsia-500 mr-2 transition duration-75" />
+                        Cấu Hình Giao Diện
+                      </button>
+                    )}
                   </li>
                 )}
               </ul>
@@ -2774,15 +3702,17 @@ export default function App() {
               <span className="text-[9px] text-gray-400 block font-semibold mb-1">Cán bộ: {currentUser.name}</span>
               <div className="text-2xl font-black font-sans leading-none text-gray-900">{currentTime || '12:00 PM'}</div>
               <div className="text-[9px] text-gray-400 mt-1.5 leading-normal">{displaySettings.motivationQuote}</div>
+              {/* Mã build ngắn (ngày + commit) — theo dõi bản đang chạy sau mỗi lần deploy */}
+              <div className="text-[8px] text-gray-300 mt-1 font-mono">v{import.meta.env.VITE_BUILD_DATE} · {import.meta.env.VITE_BUILD_COMMIT}</div>
             </div>
           </div>
         </aside>
 
-      {/* TẤM LÒNG PHẦN KIẾM CHỦ (NỘI DUNG CHÍNH BÊN PHẢI) */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
-        
-        {/* HEADER TOP-BAR */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 py-3 flex justify-between items-center shrink-0 shadow-lg" id="top_header_bar">
+      {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
+      <div className="flex-1 flex flex-col min-w-0 lg:overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
+
+        {/* HEADER TOP-BAR - Tall header with 39px top padding to avoid iPhone Dynamic Island. Content/scontrols aligned at bottom via items-end */}
+        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[50px] pb-[10px] flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button
@@ -2797,22 +3727,23 @@ export default function App() {
             <span className="text-sm md:text-base font-extrabold text-slate-100 tracking-tight font-sans truncate max-w-[150px] sm:max-w-xs md:max-w-none">
               {activeTab === 'dashboard' && displaySettings.dashboardTitle}
               {activeTab === 'projects' && 'Quản Lý Mốc Thi Công'}
-              {activeTab === 'projects-construction' && 'Phân Hệ Dự Án XÂY DỰNG'}
-              {activeTab === 'projects-furniture' && 'Phân Hệ Dự Án NỘI THẤT'}
-              {activeTab === 'projects-mechanical' && 'Phân Hệ Dự Án CƠ KHÍ & GIA CÔNG'}
-              {activeTab === 'tasks' && 'Điều Phối Việc Công Trường / Xưởng'}
+              {activeTab === 'projects-construction' && 'Dự Án Xây Dựng'}
+              {activeTab === 'projects-furniture' && 'Dự Án Nội Thất'}
+              {activeTab === 'projects-mechanical' && 'Dự Án Cơ Khí'}
+              {activeTab === 'tasks' && 'Việc Của Tôi'}
               {activeTab === 'quotes-construction' && 'Hồ Sơ Xây Dựng'}
               {activeTab === 'quotes' && 'Hồ Sơ Nội Thất'}
               {activeTab === 'quotes-mechanical' && 'Hồ Sơ Cơ Khí'}
               {activeTab === 'quotes-subcontractor' && 'Hồ Sơ Thầu Phụ'}
               {activeTab === 'subcontractor-management' && 'Quản Lý Thầu Phụ'}
-              {activeTab === 'finance' && 'Kế Toán Tổng Hợp & Sổ Sách'}
-              {activeTab === 'material-coordination' && 'Phân Hệ Điều Phối Vật Tư'}
+              {activeTab === 'finance' && 'Kế Toán - Tài Chính'}
+              {activeTab === 'material-coordination' && 'Quản Lý Vật Tư'}
               {activeTab === 'warehouse-suppliers' && 'Danh Mục Nhà Cung Cấp Vật Tư'}
-              {activeTab === 'warehouse-management' && 'Phân Hệ Quản Lý Tồn Kho & Sổ Kho'}
-              {activeTab === 'employees' && (hrSubTab === 'hr_data' ? 'Dữ Liệu Nhân Sự' : 'Danh Bạ Nhân Sự Nội Bộ')}
-              {activeTab === 'settings' && '⚙️ Trung Tâm Thiết Lập Hệ Thống & Tùy Biến'}
-              {activeTab === 'messages' && '💬 Tin Nhắn & Thông Báo Công Việc (Messenger)'}
+              {activeTab === 'warehouse-management' && 'Quản Lý Tồn Kho & Sổ Kho'}
+              {activeTab === 'warehouse-data' && 'Dữ Liệu Kho — Danh Mục Mua & Bán'}
+              {activeTab === 'employees' && (hrSubTab === 'hr_data' ? 'Dữ Liệu Nhân Sự' : 'Danh Sách Nhân Sự')}
+              {activeTab === 'settings' && '⚙️ Cấu Hình Hệ Thống'}
+              {activeTab === 'messages' && '💬 Tin Nhắn'}
               {activeTab.startsWith('director-') && '🛡️ PHÒNG GIÁM ĐỐC - BẢNG ĐIỀU HÀNH TỔNG HỢP'}
             </span>
           </div>
@@ -2825,323 +3756,56 @@ export default function App() {
               </div>
             )}
 
-            {/* THÔNG BÁO TIN NHẮN MỚI (CHUÔNG THÔNG BÁO) */}
+            {/* CHUÔNG 🔔 → LỐI TẮT VÀO TIN NHẮN (badge = tổng tin chat chưa đọc) */}
             {(() => {
-              const userNotifications = notifications.filter(n => n.recipientId === currentUser?.id);
-              const unreadCount = userNotifications.filter(n => !n.read).length;
-
-              // Helper sinh màu avatar và fallback tên (giống MessagesView)
-              const avatarColors = ['#6366F1','#EF4444','#10B981','#F59E0B','#A855F7','#3B82F6','#14B8A6','#F97316','#334155'];
-              const getAvatarColor = (name: string) => {
-                let hash = 0;
-                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-                return avatarColors[Math.abs(hash) % avatarColors.length];
-              };
-              const getAvatarFallback = (name: string) => {
-                if (!name) return '??';
-                const words = name.trim().split(/\s+/);
-                if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
-                return (words[0].charAt(0) + words[words.length - 1].charAt(0)).toUpperCase();
-              };
-              const formatTime = (iso: string) => {
-                try {
-                  const d = new Date(iso); const now = new Date();
-                  const diffMs = now.getTime() - d.getTime();
-                  if (diffMs < 60000) return 'Vừa xong';
-                  const diffMins = Math.floor(diffMs / 60000);
-                  if (diffMins < 60) return `${diffMins} phút`;
-                  const diffHours = Math.floor(diffMins / 60);
-                  if (diffHours < 24) return `${diffHours} giờ`;
-                  return d.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit' });
-                } catch { return ''; }
-              };
-
-              // Badge counts cho 4 tab bộ lọc
-              const notifAllCount = notifications.filter(n => n.recipientId === currentUser?.id && !n.read).length;
-              const notifPersonalCount = notifications.filter(n => n.recipientId === currentUser?.id && n.category === 'chat' && !n.read).length;
-              const notifGroupCount = notifications.filter(n => n.recipientId === currentUser?.id && n.category !== 'chat' && !n.read).length;
-
-              const popoverTabs: Array<{id: typeof popoverFilter, label: string, icon: any, count: number}> = [
-                { id: 'all', label: 'Tất cả', icon: MessageSquare, count: notifAllCount },
-                { id: 'personal', label: 'Cá nhân', icon: User, count: notifPersonalCount },
-                { id: 'group', label: 'Nhóm', icon: Users, count: notifGroupCount },
-                { id: 'notifications', label: 'Thông báo', icon: Bell, count: notifAllCount },
-              ];
+              const chatConvs = getUserConversations(getConversations(), currentUser?.id ?? '');
+              const chatUnreadCount = chatConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
               return (
-                <div className="relative" id="notification_bell_root">
+                <div className="flex items-center gap-2">
+                  {/* Nút quay lại (back) — thay thế cử chỉ vuốt về tab trước trên mobile */}
                   <button
-                    onClick={() => setShowNotificationsPanel(!showNotificationsPanel)}
-                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors relative flex items-center justify-center h-8.5 w-8.5"
-                    title="Thông báo tin nhắn phòng ban & công việc"
-                    id="notification_bell_btn"
+                    onClick={() => {
+                      setTabHistory(prev => {
+                        if (prev.length === 0) return prev;
+                        const last = prev[prev.length - 1];
+                        setActiveTabState(last);
+                        return prev.slice(0, -1);
+                      });
+                    }}
+                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors flex items-center justify-center h-8.5 w-8.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Quay lại trang trước"
+                    id="back_nav_btn"
+                    disabled={tabHistory.length === 0}
                   >
-                    <Bell className="w-4 h-4 text-emerald-400" />
-                    {showBadgeCounts && unreadCount > 0 ? (
-                      <span className="absolute -top-1 -right-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-rose-600 text-[9px] font-black text-white ring-1 ring-rose-500 animate-pulse">
-                        {unreadCount}
-                      </span>
-                    ) : null}
+                    <ArrowLeft className="w-4 h-4 text-emerald-400" />
                   </button>
 
-                  {showNotificationsPanel && (
-                    <div
-                      className="absolute right-0 mt-3 w-[92vw] sm:w-[460px] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4.5 z-50 text-slate-200 font-sans top-full flex flex-col gap-3.5 ring-1 ring-slate-800"
-                      id="notification_popover"
-                      onClick={(e) => e.stopPropagation()}
+                  {/* Nút reload trang */}
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors flex items-center justify-center h-8.5 w-8.5"
+                    title="Tải lại trang"
+                    id="reload_page_btn"
+                  >
+                    <RefreshCw className="w-4 h-4 text-emerald-400" />
+                  </button>
+
+                  <div className="relative" id="notification_bell_root">
+                    <button
+                      onClick={() => { setActiveTab('messages'); if (mobileMenuOpen) setMobileMenuOpen(false); }}
+                      className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors relative flex items-center justify-center h-8.5 w-8.5"
+                      title="Tin nhắn"
+                      id="notification_bell_btn"
                     >
-                      {/* Header */}
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-emerald-500/10 rounded-lg">
-                            <Bell className="w-4 h-4 text-emerald-400" />
-                          </div>
-                          <div>
-                            <span className="font-extrabold text-sm text-white block">Thông báo & Tin nhắn</span>
-                            <span className="text-[10px] text-slate-500 font-medium">Được đồng bộ theo thời gian thực</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {/* Nút ẩn/hiện badge */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const next = !showBadgeCounts;
-                              setShowBadgeCounts(next);
-                              localStorage.setItem('hl_show_badge_counts', next ? 'true' : 'false');
-                            }}
-                            className={`p-1.5 rounded-lg cursor-pointer transition-all ${
-                              showBadgeCounts ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-600 bg-slate-850'
-                            }`}
-                            title={showBadgeCounts ? 'Ẩn số chưa đọc' : 'Hiện số chưa đọc'}
-                          >
-                            {showBadgeCounts ? '🔔' : '🔕'}
-                          </button>
-                          {userNotifications.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = notifications.map(n => n.recipientId === currentUser.id ? { ...n, read: true } : n);
-                                setNotifications(updated);
-                              }}
-                              className="text-[10px] bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
-                            >
-                              Đọc tất cả
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const remainder = notifications.filter(n => n.recipientId !== currentUser.id);
-                              setNotifications(remainder);
-                            }}
-                            className="text-[10px] bg-rose-950/40 hover:bg-rose-900/45 text-rose-400 border border-rose-900/30 font-extrabold px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
-                          >
-                            Xóa tất cả
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 4 tab bộ lọc — kiểu tab gạch chân ngang (Flowbite) */}
-                      <ul className="flex flex-nowrap -mb-px text-sm font-medium text-center">
-                        {popoverTabs.map(tab => {
-                          const isActive = popoverFilter === tab.id;
-                          return (
-                            <li key={tab.id} className="flex-1 min-w-0">
-                              <button
-                                type="button"
-                                onClick={() => setPopoverFilter(tab.id)}
-                                className={`w-full inline-flex items-center justify-center px-2 py-3 border-b-2 rounded-t-lg cursor-pointer transition-colors group relative ${
-                                  isActive
-                                    ? 'text-emerald-400 border-emerald-400'
-                                    : 'text-slate-400 border-transparent hover:text-emerald-400 hover:border-emerald-400/50'
-                                }`}
-                                aria-current={isActive ? 'page' : undefined}
-                              >
-                                {showBadgeCounts && tab.count > 0 && (
-                                  <span className="me-1.5 bg-rose-500 text-white text-[8px] font-bold min-w-[14px] h-3.5 px-1 flex items-center justify-center rounded-full">
-                                    {tab.count > 99 ? '99+' : tab.count}
-                                  </span>
-                                )}
-                                <span className="truncate">{tab.label}</span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-
-                      {/* Danh sách hội thoại + thông báo đã lọc */}
-                      <div className="max-h-[360px] overflow-y-auto pr-1 scrollbar-thin">
-                        {(() => {
-                          // Lấy conversations của user
-                          const allConvs = getUserConversations(getConversations(), currentUser?.id || '');
-
-                          // Lọc theo popoverFilter
-                          let displayItems: Array<{type: 'conv'; conv: Conversation} | {type: 'notif'; notif: AppNotification}> = [];
-
-                          if (popoverFilter === 'personal' || popoverFilter === 'all') {
-                            const personalConvs = allConvs.filter(c => c.type === 'personal');
-                            personalConvs.forEach(conv => displayItems.push({ type: 'conv', conv }));
-                          }
-                          if (popoverFilter === 'group' || popoverFilter === 'all') {
-                            const groupConvs = allConvs.filter(c => c.type === 'group' || c.type === 'task');
-                            groupConvs.forEach(conv => displayItems.push({ type: 'conv', conv }));
-                          }
-                          if (popoverFilter === 'notifications' || popoverFilter === 'all') {
-                            // Dedup thông báo theo nội dung + người gửi để tránh trùng lặp
-                            const seen = new Set<string>();
-                            userNotifications.forEach(n => {
-                              const dedupKey = `${n.senderId}_${n.title}_${n.content}`;
-                              if (!seen.has(dedupKey)) {
-                                seen.add(dedupKey);
-                                displayItems.push({ type: 'notif', notif: n });
-                              }
-                            });
-                          }
-
-                          // Sắp xếp: chưa đọc trước, sau đó mới nhất
-                          displayItems.sort((a, b) => {
-                            const aUnread = a.type === 'conv' ? (a.conv.unreadCount || 0) : (!a.notif.read ? 1 : 0);
-                            const bUnread = b.type === 'conv' ? (b.conv.unreadCount || 0) : (!b.notif.read ? 1 : 0);
-                            if (aUnread > 0 && bUnread === 0) return -1;
-                            if (aUnread === 0 && bUnread > 0) return 1;
-                            const aTime = a.type === 'conv' ? (a.conv.lastMessageAt || a.conv.createdAt) : a.notif.createdAt;
-                            const bTime = b.type === 'conv' ? (b.conv.lastMessageAt || b.conv.createdAt) : b.notif.createdAt;
-                            return bTime.localeCompare(aTime);
-                          });
-
-                          if (displayItems.length === 0) {
-                            return (
-                              <div className="py-10 text-center text-slate-500 space-y-2">
-                                <MessageSquare className="w-8 h-8 mx-auto text-slate-700 opacity-60" />
-                                <p className="text-xs font-semibold">Không có mục nào phù hợp.</p>
-                              </div>
-                            );
-                          }
-
-                          return displayItems.map(item => {
-                            if (item.type === 'conv') {
-                              const conv = item.conv;
-                              const isGroup = conv.type === 'group' || conv.type === 'task';
-                              const unread = conv.unreadCount || 0;
-                              const otherId = conv.participantIds.find(id => id !== currentUser?.id);
-                              const otherEmp = otherId ? employees.find(e => e.id === otherId) : null;
-                              const displayName = isGroup ? conv.name : (otherEmp?.name || 'Người dùng');
-                              const avatarText = isGroup ? (conv.avatar || getAvatarFallback(conv.name)) : (otherEmp ? getAvatarFallback(otherEmp.name) : '??');
-                              const avatarColor = conv.color || (otherEmp ? getAvatarColor(otherEmp.name) : '#6366F1');
-
-                              return (
-                                <div
-                                  key={`conv_${conv.id}`}
-                                  onClick={() => {
-                                    // Mở thẳng vào hội thoại này trong Messenger
-                                    setInitialConvId(conv.id);
-                                    setMessengerInitialTab('all');
-                                    setShowNotificationsPanel(false);
-                                    setActiveTab('messages');
-                                    if (mobileMenuOpen) setMobileMenuOpen(false);
-                                  }}
-                                  className={`flex items-center gap-3 px-2.5 py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
-                                    unread > 0
-                                      ? 'bg-emerald-500/5 border-l-emerald-500 hover:bg-slate-800/60'
-                                      : 'border-l-transparent hover:bg-slate-800/60'
-                                  }`}
-                                >
-                                  <div className="relative shrink-0">
-                                    <div className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-xs shadow-md text-white"
-                                      style={{ backgroundColor: avatarColor }}>
-                                      {avatarText}
-                                    </div>
-                                    {!isGroup && <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-slate-900"></span>}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-semibold text-[13px] truncate ${unread > 0 ? 'text-white' : 'text-slate-300'}`}>
-                                        {displayName}
-                                      </span>
-                                      {conv.lastMessageAt && (
-                                        <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">{formatTime(conv.lastMessageAt)}</span>
-                                      )}
-                                    </div>
-                                    <p className="text-[11px] text-slate-500 mt-0.5 truncate">
-                                      {isGroup ? 'Nhóm' : (otherEmp?.department || 'Nhân viên')}
-                                    </p>
-                                  </div>
-                                  {unread > 0 && (
-                                    <span className="bg-indigo-500 text-white text-[9px] font-bold min-w-[18px] h-4 flex items-center justify-center rounded-full px-1 shrink-0">
-                                      {unread}
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            } else {
-                              const notif = item.notif;
-                              const isUnread = !notif.read;
-                              const senderName = notif.senderName || 'Hệ Thống';
-                              const avatarText = notif.senderAvatar || getAvatarFallback(senderName);
-
-                              return (
-                                <div
-                                  key={notif.id}
-                                  onClick={() => {
-                                    const updated = notifications.map(n => n.id === notif.id ? { ...n, read: true } : n);
-                                    setNotifications(updated);
-                                    setShowNotificationsPanel(false);
-                                    setActiveTab('messages');
-                                    if (mobileMenuOpen) setMobileMenuOpen(false);
-                                    if (notif.conversationId) {
-                                      // Có hội thoại → mở thẳng vào chi tiết hội thoại đó
-                                      setInitialConvId(notif.conversationId);
-                                    } else {
-                                      // Thông báo hệ thống → mở tab Thông báo & chi tiết thông báo này
-                                      setMessengerInitialTab('notifications');
-                                      setInitialNotificationId(notif.id);
-                                    }
-                                  }}
-                                  className={`flex items-center gap-3 px-2.5 py-2.5 cursor-pointer transition-all border-l-[3px] mt-1 first:mt-0 rounded-r-xl ${
-                                    isUnread
-                                      ? 'bg-emerald-500/5 border-l-emerald-500 hover:bg-slate-800/60'
-                                      : 'border-l-transparent hover:bg-slate-800/60'
-                                  }`}
-                                >
-                                  <div className="relative shrink-0">
-                                    <div className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-xs shadow-md text-white"
-                                      style={{ backgroundColor: getAvatarColor(senderName) }}>
-                                      {avatarText}
-                                    </div>
-                                    {notif.category && (
-                                      <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[7px] border-2 border-slate-900"
-                                        style={{
-                                          backgroundColor: notif.category === 'chat' ? '#6366F1' : notif.category === 'attendance' ? '#F59E0B' : notif.category === 'finance' ? '#10B981' : '#3B82F6'
-                                        }}>
-                                        {notif.category === 'chat' ? '💬' : notif.category === 'attendance' ? '⏰' : notif.category === 'finance' ? '💰' : '📋'}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-semibold text-[13px] truncate ${isUnread ? 'text-white' : 'text-slate-300'}`}>
-                                        {senderName}
-                                      </span>
-                                      <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
-                                        {formatTime(notif.createdAt)}
-                                      </span>
-                                    </div>
-                                    <p className={`text-[12px] mt-0.5 truncate leading-tight ${isUnread ? 'text-white font-semibold' : 'text-slate-400'}`}>
-                                      {notif.title || notif.content}
-                                    </p>
-                                  </div>
-                                  {isUnread && (
-                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                                  )}
-                                </div>
-                              );
-                            }
-                          });
-                        })()}
-                      </div>
-                    </div>
-                  )}
+                      <Bell className="w-4 h-4 text-emerald-400" />
+                      {showBadgeCounts && chatUnreadCount > 0 ? (
+                        <span className="absolute -top-1 -right-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-rose-600 text-[9px] font-black text-white ring-1 ring-rose-500 animate-pulse">
+                          {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  </div>
                 </div>
               );
             })()}
@@ -3169,7 +3833,7 @@ export default function App() {
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 mt-2 w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
+                <div className="absolute right-0 top-full mt-1 w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
                   <button
                     type="button"
                     onClick={() => { setShowUserMenu(false); setShowProfileModal(true); }}
@@ -3180,7 +3844,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setShowUserMenu(false); setActiveTab('settings'); setSubSettingsTab('display'); }}
+                    onClick={() => { setShowUserMenu(false); setActiveTab('display-settings'); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-indigo-400 hover:bg-indigo-950/40 cursor-pointer transition-colors"
                   >
                     <Palette className="w-4 h-4 shrink-0" />
@@ -3202,7 +3866,10 @@ export default function App() {
         </header>
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
-        <main className="flex-1 p-4 sm:p-6 overflow-y-auto" id="main_content_scroller">
+        <main
+          className="flex-1 p-3 sm:p-6 lg:overflow-y-auto"
+          id="main_content_scroller"
+        >
           {!isAccessible(activeTab) ? (
             <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center space-y-4 animate-fadeIn" id="access_denied_pane">
               <div className="w-20 h-20 rounded-full bg-rose-950/40 border border-rose-800/60 flex items-center justify-center">
@@ -3227,7 +3894,7 @@ export default function App() {
           <>
           {/* TAB 1: DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <DashboardOverview 
+            <DashboardOverview
               projects={projects}
               tasks={tasks}
               receipts={receipts}
@@ -3239,6 +3906,7 @@ export default function App() {
               onApprovePayment={handleApprovePayment}
               onAddTask={handleAddTask}
               onAddPayment={handleAddPayment}
+              travelExpensesSummary={ctpSummary}
             />
           )}
 
@@ -3260,7 +3928,7 @@ export default function App() {
 
           {/* TAB 2.1: PHÒNG DỰ ÁN - XÂY DỰNG */}
           {activeTab === 'projects-construction' && (
-            <ProjectKanbanBoard 
+            <ProjectKanbanBoard
               sector="construction"
               projects={projects}
               customers={customers}
@@ -3285,7 +3953,7 @@ export default function App() {
 
           {/* TAB 2.2: PHÒNG DỰ ÁN - NỘI THẤT */}
           {activeTab === 'projects-furniture' && (
-            <ProjectKanbanBoard 
+            <ProjectKanbanBoard
               sector="furniture"
               projects={projects}
               customers={customers}
@@ -3310,7 +3978,7 @@ export default function App() {
 
           {/* TAB 2.3: PHÒNG DỰ ÁN - CƠ KHÍ */}
           {activeTab === 'projects-mechanical' && (
-            <ProjectKanbanBoard 
+            <ProjectKanbanBoard
               sector="mechanical"
               projects={projects}
               customers={customers}
@@ -3333,9 +4001,11 @@ export default function App() {
             />
           )}
 
-          {/* TAB 3: CÔNG VIỆC */}
-          {activeTab === 'tasks' && (
-            <TaskManagement 
+          {/* TAB 3: CÔNG VIỆC — giữ mounted sau lần đầu vào tab (ẩn qua CSS
+              thay vì unmount) để không mất state/tính toán lại mỗi lần quay lại. */}
+          {hasVisitedTasks && (
+            <div style={{ display: activeTab === 'tasks' ? undefined : 'none' }}>
+            <TaskManagement
               tasks={tasks}
               projects={projects}
               employees={employees}
@@ -3349,12 +4019,22 @@ export default function App() {
               quotes={quotes}
               onRedirectToQuote={handleRedirectToQuote}
               onRedirectToSubcontractor={handleRedirectToSubcontractor}
+              onRedirectToHrLeaves={() => { setActiveTab('employees'); setHrSubTab('leaves'); }}
+              onOpenFinanceVoucher={openFinanceVoucher}
+              subcontractorAdvances={subcontractorAdvances}
+              initialTaskId={deepLinkTaskId ?? undefined}
+              onInitialTaskOpened={() => setDeepLinkTaskId(null)}
+              initialTaskScope={approvalDeepLink ? 'toreview' : undefined}
+              onInitialTaskScopeOpened={() => setApprovalDeepLink(null)}
             />
+            </div>
           )}
 
-          {/* TAB 4: HỆ THỐNG BÁO GIÁ ĐA LĨNH VỰC TÍCH HỢP */}
-          {['quotes', 'quotes-construction', 'quotes-mechanical', 'quotes-subcontractor'].includes(activeTab) && (
-            <QuotationSystem 
+          {/* TAB 4: HỆ THỐNG BÁO GIÁ ĐA LĨNH VỰC TÍCH HỢP — giữ mounted sau lần
+              đầu vào bất kỳ tab con nào (ẩn qua CSS thay vì unmount). */}
+          {hasVisitedQuotes && (
+            <div style={{ display: QUOTES_TABS.includes(activeTab) ? undefined : 'none' }}>
+            <QuotationSystem
               quotes={quotes}
               customers={customers}
               projects={projects}
@@ -3362,31 +4042,40 @@ export default function App() {
               onUpdateQuoteStatus={handleUpdateQuoteStatus}
               preselectedCustomerId={preselectedCustomerId}
               preselectedProjectId={preselectedProjectId}
+              initialSubTab={preselectedQuotesSubTab || undefined}
+              preselectedDocType={preselectedDocType || undefined}
               currentUser={currentUser}
               initialTab={
-                activeTab === 'quotes-construction' 
-                  ? 'construction' 
-                  : activeTab === 'quotes-mechanical' 
-                  ? 'mechanical' 
+                activeTab === 'quotes-construction'
+                  ? 'construction'
+                  : activeTab === 'quotes-mechanical'
+                  ? 'mechanical'
                   : activeTab === 'quotes-subcontractor'
                   ? 'subcontractor'
                   : 'furniture'
               }
             />
+            </div>
           )}
 
-          {/* TAB: QUẢN LÝ THẦU PHỤ (RIÊNG BIỆT) */}
-          {activeTab === 'subcontractor-management' && (
+          {/* TAB: QUẢN LÝ THẦU PHỤ (RIÊNG BIỆT) — giữ mounted sau lần đầu vào tab
+              (ẩn qua CSS thay vì unmount) để không mất cache useMemo/fetch phụ
+              (subcontractorLiabilities, archived quotes...) mỗi lần quay lại. */}
+          {hasVisitedSubcontractorManagement && (
+            <div style={{ display: activeTab === 'subcontractor-management' ? undefined : 'none' }}>
             <SubcontractorManagement
               currentUser={currentUser}
               canEdit={isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical')}
               canDelete={isUserInRoleGroup(currentUser?.id, 'role_admin')}
               viewContractId={localStorage.getItem('hl_view_contract_id') || undefined}
             />
+            </div>
           )}
 
-          {/* TAB 5: TÀI CHÍNH */}
-          {activeTab === 'finance' && (
+          {/* TAB 5: TÀI CHÍNH — giữ mounted sau lần đầu vào tab (ẩn qua CSS thay
+              vì unmount) để không mất cache useMemo/fetch phụ mỗi lần quay lại. */}
+          {hasVisitedFinance && (
+            <div style={{ display: activeTab === 'finance' ? undefined : 'none' }}>
             <FinanceManagement
               receipts={receipts}
               payments={payments}
@@ -3394,6 +4083,9 @@ export default function App() {
               customers={customers}
               currentUser={currentUser}
               employees={employees}
+              salesOrders={salesOrders}
+              suppliers={suppliers}
+              purchaseOrders={purchaseOrders}
               onAddReceipt={handleAddReceipt}
               onAddPayment={handleAddPayment}
               onApprovePayment={handleApprovePayment}
@@ -3401,26 +4093,48 @@ export default function App() {
               onDeleteCustomer={handleDeleteCustomer}
               onDeleteReceipt={handleDeleteReceipt}
               onDeletePayment={handleDeletePayment}
+              onUpdateReceipt={handleUpdateReceipt}
+              onUpdatePayment={handleUpdatePayment}
+              onAddSalesOrder={handleAddSalesOrder}
+              onDeleteSalesOrder={handleDeleteSalesOrder}
+              onAddPurchaseOrder={handleAddPurchaseOrder}
+              onDeletePurchaseOrder={handleDeletePurchaseOrder}
+              tasks={tasks}
               initialSubTab={financeSubTab}
               initialDuLieuTab={financeDuLieuTab}
+              initialProposalId={financeInitialProposalId}
+              onInitialProposalConsumed={() => setFinanceInitialProposalId(null)}
+              onOpenMaterialProposal={openMaterialProposal}
+              systemConfig={hrmConfig}
+              subcontractorAdvances={subcontractorAdvances}
+              setSubcontractorAdvances={setSubcontractorAdvances}
             />
+            </div>
           )}
 
-          {/* TAB 5.5: ĐIỀU PHỐI VẬT TƯ */}
-          {activeTab === 'material-coordination' && (
-            <MaterialCoordination 
+          {/* TAB 5.5: ĐIỀU PHỐI VẬT TƯ — giữ mounted sau lần đầu vào tab (ẩn qua
+              CSS thay vì unmount) để không mất state/tính toán lại mỗi lần quay lại. */}
+          {hasVisitedMaterialCoordination && (
+            <div style={{ display: activeTab === 'material-coordination' ? undefined : 'none' }}>
+            <MaterialCoordination
               projects={projects}
               employees={employees}
               onUpdateProject={handleUpdateProject}
               onUpdateMultipleProjects={handleUpdateMultipleProjects}
               currentUser={currentUser}
               customers={customers}
+              initialProposalId={materialInitialProposalId}
+              onInitialProposalConsumed={() => setMaterialInitialProposalId(null)}
             />
+            </div>
           )}
 
-          {/* TAB 5.6: DANH MỤC NHÀ CUNG CẤP KHO */}
-          {activeTab === 'warehouse-suppliers' && (
+          {/* TAB 5.6: DANH MỤC NHÀ CUNG CẤP KHO — giữ mounted sau lần đầu vào tab
+              (ẩn qua CSS thay vì unmount) để không phải fetch/tính lại mỗi lần quay lại. */}
+          {hasVisitedWarehouseSuppliers && (
+            <div style={{ display: activeTab === 'warehouse-suppliers' ? undefined : 'none' }}>
             <WarehouseSuppliers />
+            </div>
           )}
 
           {/* TAB 5.7: QUẢN LÝ KHO */}
@@ -3428,13 +4142,20 @@ export default function App() {
             <WarehouseManagement />
           )}
 
+          {/* TAB 5.8: DỮ LIỆU KHO (Danh mục MUA / BÁN) */}
+          {activeTab === 'warehouse-data' && (
+            <WarehouseDataManagement />
+          )}
+
           {/* TAB 6: NHÂN SỰ */}
           {activeTab === 'employees' && (
-            <HumanResourcesManagement 
-              currentUser={currentUser} 
-              projects={projects} 
-              customers={customers} 
+            <HumanResourcesManagement
+              currentUser={currentUser}
+              projects={projects}
+              customers={customers}
+              tasks={tasks}
               defaultSubTab={hrSubTab}
+              systemConfig={hrmConfig}
             />
           )}
 
@@ -3445,18 +4166,19 @@ export default function App() {
                 <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-3">
                   <Lock className={`w-4 h-4 ${accentTextClass}`} />
                   <h3 className="text-sm font-black text-white uppercase tracking-wider font-mono">
-                    🔐 Phân quyền và Vai trò người dùng (MISA-Inspired)
+                    🔐 Phân quyền và Vai trò người dùng
                   </h3>
                 </div>
                 <p className="text-[11px] text-slate-400 mb-4 leading-relaxed">
                   Thiết lập các quyền thao tác (Xem, Thêm, Sửa, Xóa) chi tiết cho từng vai trò và phòng ban được đồng bộ trực tiếp từ phân hệ Quản trị Nhân sự (HRM). Thay đổi quyền hạn tại đây sẽ áp dụng ngay lập tức cho toàn bộ người dùng trong hệ thống.
                 </p>
-                <HumanResourcesManagement 
-                  currentUser={currentUser} 
-                  projects={projects} 
-                  customers={customers} 
-                  defaultSubTab="roles" 
+                <HumanResourcesManagement
+                  currentUser={currentUser}
+                  projects={projects}
+                  customers={customers}
+                  defaultSubTab="roles"
                   hideSidebar={true}
+                  systemConfig={hrmConfig}
                 />
               </div>
             </div>
@@ -3466,181 +4188,7 @@ export default function App() {
           {activeTab === 'settings-accounts' && (
             <div className="space-y-6 max-w-5xl mx-auto animate-fadeIn" id="view_accounts_settings_pane">
               
-              {/* form thêm người dùng */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
-                <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-4">
-                  <UserPlus className={`w-4 h-4 ${accentTextClass}`} />
-                  <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                    👤 Thêm tài khoản người dùng mới
-                  </h3>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ position: 'relative', zIndex: 10 }}>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Họ và Tên Nhân Sự *</label>
-                    <input
-                      type="text"
-                      value={newEmpName}
-                      onChange={(e) => {
-                        try {
-                          const name = e.target.value;
-                          setNewEmpName(name);
-                          setNewEmpUsername(generateUsernameWithPhone(name, newEmpPhone));
-                        } catch (err) {
-                          console.error('Error updating name:', err);
-                        }
-                      }}
-                      placeholder="Ví dụ: Hoàng Văn Định"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none focus:border-slate-700 pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Phòng Ban / Tổ Nhóm Công Tác</label>
-                    <input
-                      type="text"
-                      value={newEmpDept}
-                      onChange={(e) => {
-                        try { setNewEmpDept(e.target.value); } catch (err) { console.error('Error updating dept:', err); }
-                      }}
-                      placeholder="Ví dụ: Tổ Mộc số 3, Ban Chỉ Huy"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số Điện Thoại Di Động</label>
-                    <input
-                      type="text"
-                      value={newEmpPhone}
-                      onChange={(e) => {
-                        try {
-                          const phone = e.target.value;
-                          setNewEmpPhone(phone);
-                          setNewEmpUsername(generateUsernameWithPhone(newEmpName, phone));
-                        } catch (err) { console.error('Error updating phone:', err); }
-                      }}
-                      placeholder="0912345xxx"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Tên Đăng Nhập (Username) *</label>
-                    <input
-                      type="text"
-                      value={newEmpUsername}
-                      onChange={(e) => {
-                        try { setNewEmpUsername(e.target.value.toLowerCase().trim()); } catch (err) { console.error('Error updating username:', err); }
-                      }}
-                      placeholder="ndlong"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-emerald-400 font-mono font-bold outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Mật Khẩu *</label>
-                    <input
-                      type="text"
-                      value={newEmpPassword}
-                      onChange={(e) => {
-                        try { setNewEmpPassword(e.target.value); } catch (err) { console.error('Error updating password:', err); }
-                      }}
-                      placeholder="123"
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 px-3 text-xs text-white outline-none pointer-events-auto"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Nhóm Vai Trò (Phân Quyền) *</label>
-                    <select
-                      value={newEmpRoleGroupId}
-                      onChange={(e) => {
-                        try { setNewEmpRoleGroupId(e.target.value); } catch (err) { console.error('Error updating role group:', err); }
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white outline-none text-xs pointer-events-auto"
-                    >
-                      {hrmRoleGroups.map(g => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
-                      ))}
-                    </select>
-                    <p className="text-[9px] text-slate-500 mt-1">Nhân viên sẽ được gán vào nhóm này để nhận quyền module tương ứng</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!newEmpName.trim()) {
-                        alert('Vui lòng điền họ và tên nhân sự thiết lập!');
-                        return;
-                      }
-                      const usernameToUse = newEmpUsername.trim() || generateUsernameWithPhone(newEmpName, newEmpPhone);
-                      const newId = `emp_${Date.now()}`;
-
-                      // Tạo đối tượng nhân viên mới
-                      const created: Employee = {
-                        id: newId,
-                        name: newEmpName.trim(),
-                        role: 'engineer', // Legacy field — fallback nếu Role Groups rỗng
-                        roleGroupIds: [newEmpRoleGroupId], // Nguồn sự thật chính cho phân quyền menu
-                        email: `${usernameToUse}@hoanglonglamdong.vn`,
-                        phone: newEmpPhone.trim() || '09xxxxxxxx',
-                        department: newEmpDept.trim() || 'Phòng Ban Liên Quan',
-                        username: usernameToUse,
-                        password: hashPasswordSync(newEmpPassword || '123')
-                      };
-
-                      // Thêm employee vào Role Group đã chọn (Supabase là nguồn sự thật)
-                      try {
-                        const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-                        const hrmRolesList = cached ? JSON.parse(cached) : [];
-                        if (Array.isArray(hrmRolesList)) {
-                          const targetRole = hrmRolesList.find((r: any) => r.id === newEmpRoleGroupId);
-                          if (targetRole) {
-                            targetRole.memberIds = targetRole.memberIds || [];
-                            targetRole.memberIds.push(newId);
-                            // Ghi cache localStorage (2 keys để tương thích reader cũ)
-                            const updated = JSON.stringify(hrmRolesList);
-                            localStorage.setItem('hl_cached_hrm_role_groups', updated);
-                            localStorage.setItem('hl_hrm_roles_v2', updated);
-                            // Sync lên Supabase (nguồn sự thật)
-                            dbService.hrmRoleGroups.save({
-                              id: targetRole.id,
-                              name: targetRole.name,
-                              description: targetRole.description || '',
-                              permissions: targetRole.permissions || {},
-                              memberIds: targetRole.memberIds || [],
-                            }).catch(() => {});
-                          }
-                        }
-                      } catch (e) {
-                        console.error("Lỗi khi thêm nhân viên vào Role Group:", e);
-                      }
-
-                      const updatedList = [...employees, created];
-                      setEmployees(updatedList);
-                      dbService.employees.save(created);
-                      
-                      // Reset local inputs
-                      setNewEmpName('');
-                      setNewEmpUsername('');
-                      setNewEmpPassword('123');
-                      setNewEmpPhone('');
-                      setNewEmpDept('Phòng Dự Án - Xây Dựng');
-                      setNewEmpRole('engineer');
-                      setNewEmpRoleGroupId('role_office');
-
-                      alert(`🎉 Thêm tài khoản người dùng "${created.name}" (${created.username}) thành công!`);
-                    }}
-                    className={`px-5 py-2 text-xs font-black rounded-lg flex items-center gap-1 cursor-pointer transition-all ${accentBgClass}`}
-                  >
-                    <Plus className="w-4 h-4 cursor-pointer" />
-                    Thêm Tài Khoản
-                  </button>
-                </div>
-              </div>
+              {/* Form thêm người dùng đã bị xóa — tạo tài khoản thực hiện qua Hồ sơ Nhân viên trong HRM */}
 
               {/* bảng người dùng */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
@@ -3648,7 +4196,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <Users className={`w-4 h-4 ${accentTextClass}`} />
                     <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                      👤 Danh Sách Tài Khoản Hệ Thống ({employees.length})
+                      👤 Danh Sách Tài Khoản Hệ Thống ({employees.filter(e => e.username && e.password).length})
                     </h3>
                   </div>
                 </div>
@@ -3666,13 +4214,13 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {employees.map((emp) => (
+                      {employees.filter(e => e.username && e.password).map((emp) => (
                         <tr key={emp.id} className="border-b border-slate-800/60 hover:bg-slate-850/30 transition-colors">
                           <td className="py-2.5 px-3">
                             <div className="font-bold text-slate-100 flex items-center gap-1.5">
                               {emp.name}
                               {emp.id === currentUser.id && (
-                                <span className="px-1 py-0.2 bg-emerald-500/20 text-emerald-400 rounded text-[9px] font-mono">Hiện Tại</span>
+                                <span className="px-1 py-0.2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[9px] font-mono">Hiện Tại</span>
                               )}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono">{emp.phone}</div>
@@ -3684,7 +4232,7 @@ export default function App() {
                             ***
                           </td>
                           <td className="py-2.5 px-3 font-medium">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200">
                               {getEmployeePermissionGroupName(emp)}
                             </span>
                           </td>
@@ -3696,13 +4244,20 @@ export default function App() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const filtered = employees.filter(e => e.id !== emp.id);
-                                    setEmployees(filtered);
-                                    dbService.employees.delete(emp.id);
+                                    // "Xóa tài khoản" ở đây chỉ thu hồi quyền đăng nhập — xóa rỗng
+                                    // username/password (+ hasSystemAccount) — KHÔNG xóa hồ sơ nhân
+                                    // sự. Trước đây bấm Xóa sẽ xóa luôn cả bản ghi Employee (mất toàn
+                                    // bộ dữ liệu HR của nhân viên đó), không đúng ý nghĩa "xóa tài khoản".
+                                    const clearedFields = { username: '', password: '', hasSystemAccount: false };
+                                    setEmployees(employees.map(e => e.id === emp.id ? { ...e, ...clearedFields } : e));
+                                    dbService.employees.save({ id: emp.id, ...clearedFields }).catch(err =>
+                                      console.warn('Xóa tài khoản đăng nhập trên Supabase thất bại:', err));
                                     setConfirmDeleteId(null);
+                                    // Notify HR UI to reset hasSystemAccount flag
+                                    window.dispatchEvent(new CustomEvent('hl-system-account-deleted', { detail: { empId: emp.id } }));
                                     addToast({
                                       title: 'Đã xóa tài khoản',
-                                      message: `Đã xóa tài khoản của nhân sự "${emp.name}" thành công.`,
+                                      message: `Đã xóa tài khoản đăng nhập của "${emp.name}". Hồ sơ nhân sự vẫn được giữ nguyên.`,
                                       type: 'success'
                                     });
                                   }}
@@ -3739,7 +4294,7 @@ export default function App() {
                                       });
                                       return;
                                     }
-                                    if (employees.length <= 1) {
+                                    if (employees.filter(e => e.username && e.password).length <= 1) {
                                       addToast({
                                         title: 'Không thể thực hiện',
                                         message: 'Hệ thống cần ít nhất một tài khoản hoạt động.',
@@ -3749,7 +4304,7 @@ export default function App() {
                                     }
                                     setConfirmDeleteId(emp.id);
                                   }}
-                                  className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 p-1 px-2 rounded-md transition-all cursor-pointer font-black font-mono text-[10px]"
+                                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 p-1 px-2 rounded-md transition-all cursor-pointer font-black font-mono text-[10px]"
                                 >
                                   🗑️ XÓA
                                 </button>
@@ -3763,6 +4318,13 @@ export default function App() {
                 </div>
               </div>
 
+            </div>
+          )}
+
+          {/* TAB: CẤU HÌNH GIAO DIỆN (TÁCH RIÊNG) */}
+          {activeTab === 'display-settings' && (
+            <div className="space-y-6 animate-fadeIn p-4 md:p-6">
+              <DisplaySettingsPage />
             </div>
           )}
 
@@ -3801,209 +4363,9 @@ export default function App() {
                 </button>
               </div>
 
-              {/* PHẦN 2: CÀI ĐẶT HIỂN THỊ */}
-              {subSettingsTab === 'display' && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg max-w-4xl space-y-6" id="view_display_settings_pane">
                   
-                  <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-                    <Palette className={`w-4 h-4 ${accentTextClass}`} />
-                    <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                      Cấu hình Giao Diện, Sắc Màu Chủ Đạo & Phông Chữ Hệ Thống
-                    </h3>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-2">
-                    {/* CHỌN TONE MÀU & FONT */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4">
-
-                      {/* 🎨 CHỌN MÀU SẮC CHỦ ĐẠO */}
-                      <div className="pt-3.5 border-t border-slate-900">
-                        <label className="block text-[11px] text-slate-300 font-black uppercase font-mono mb-2">
-                          🎨 TÔNG MÀU CHỦ ĐẠO HỆ THỐNG
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { key: 'emerald', label: 'Emerald Green', desc: 'Lâm Đồng', style: 'bg-emerald-500' },
-                            { key: 'sky', label: 'Sky Blue', desc: 'Mây Đà Lạt', style: 'bg-sky-500' },
-                            { key: 'indigo', label: 'Marine Blue', desc: 'Xanh thẳm', style: 'bg-indigo-500' },
-                            { key: 'amber', label: 'Mộc Amber', desc: 'Vân gỗ sồi', style: 'bg-amber-500' },
-                            { key: 'rose', label: 'Rose Gold', desc: 'Ấm áp', style: 'bg-rose-500' },
-                            { key: 'violet', label: 'Amethyst', desc: 'Thủy chung', style: 'bg-violet-500' }
-                          ].map((clProps) => (
-                            <button
-                              key={clProps.key}
-                              type="button"
-                              onClick={() => {
-                                setDisplaySettings({
-                                  ...displaySettings,
-                                  primaryAccent: clProps.key as any
-                                });
-                              }}
-                              className={`p-2 rounded-lg border text-center transition-all cursor-pointer group flex flex-col items-center justify-center ${
-                                displaySettings.primaryAccent === clProps.key
-                                  ? 'bg-slate-900 border-slate-500 text-white shadow font-bold scale-101'
-                                  : 'bg-slate-950/60 border-slate-850 hover:bg-slate-900 text-slate-400'
-                              }`}
-                            >
-                              <span className={`w-3.5 h-3.5 rounded-full ${clProps.style} mb-1.5 ring-2 ring-slate-950 block`}></span>
-                              <span className="text-[9.5px] font-black tracking-wide block leading-tight">{clProps.label}</span>
-                              <span className="text-[7.5px] text-slate-500 block">{clProps.desc}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* ✍️ CHỌN FONT CHỮ */}
-                      <div className="pt-3.5 border-t border-slate-900">
-                        <label className="block text-[11px] text-slate-300 font-black uppercase font-mono mb-2">
-                          ✍️ CHỌN PHÔNG CHỮ ĐỒNG NHẤT (GOOGLE FONTS VIỆT)
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { key: 'Inter', label: '1. Inter', desc: 'Sắc nét, đa năng' },
-                            { key: 'Roboto', label: '2. Roboto', desc: 'Hiện đại, dễ nhìn' },
-                            { key: 'Be Vietnam Pro', label: '3. Be Vietnam Pro', desc: 'Thiết kế cho tiếng Việt' },
-                            { key: 'Nunito', label: '4. Nunito', desc: 'Tròn trịa, thanh tao' },
-                            { key: 'Lora', label: '5. Lora (Serif)', desc: 'Có chân, chữ sách' },
-                            { key: 'Fira Sans', label: '6. Fira Sans', desc: 'Rõ ràng, chuyên nghiệp' }
-                          ].map((fontOpt) => (
-                            <button
-                              key={fontOpt.key}
-                              type="button"
-                              onClick={() => {
-                                setDisplaySettings({
-                                  ...displaySettings,
-                                  fontFamily: fontOpt.key
-                                });
-                              }}
-                              className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                                (displaySettings.fontFamily || 'Inter') === fontOpt.key
-                                  ? 'bg-slate-900 border-slate-500 text-white shadow font-bold scale-101'
-                                  : 'bg-slate-950/60 border-slate-850 hover:bg-slate-900 text-slate-400'
-                              }`}
-                              style={{ fontFamily: fontOpt.key }}
-                            >
-                              <span className="text-[10px] font-bold block">{fontOpt.label}</span>
-                              <span className="text-[7.5px] text-slate-500 block leading-tight">{fontOpt.desc}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                    </div>
-
-                    {/* chỉnh sửa text thương hiệu */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-4">
-                      <label className="block text-[11px] text-slate-300 font-black uppercase font-mono">
-                        📝 Thay Đổi Danh Xưng & Khẩu Hiệu Bảng Biển
-                      </label>
-
-                      <div className="space-y-3">
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Viết Tắt Logo (2 Ký Tự)</label>
-                          <input
-                            type="text"
-                            maxLength={3}
-                            value={editLogoText}
-                            onChange={(e) => setEditLogoText(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full font-mono font-bold outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Tên Thương Hiệu Chính (Sidebar)</label>
-                          <input
-                            type="text"
-                            value={editBrandName}
-                            onChange={(e) => setEditBrandName(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Slogan Thương Hiệu Kèm Theo</label>
-                          <input
-                            type="text"
-                            value={editBrandSlogan}
-                            onChange={(e) => setEditBrandSlogan(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full outline-none"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Khẩu Hiện Động Có Sức Truyền Cảm Hứng (Chân Sidebar)</label>
-                          <textarea
-                            value={editMotivationQuote}
-                            onChange={(e) => setEditMotivationQuote(e.target.value)}
-                            rows={2}
-                            className="bg-slate-900 border border-slate-805 text-xs text-slate-300 rounded p-1.5 px-2.5 w-full outline-none resize-none font-semibold leading-normal"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase">Tiêu Đề Trang Tổng Quan (Dashboard Title Banner)</label>
-                          <input
-                            type="text"
-                            value={editDashboardTitle}
-                            onChange={(e) => setEditDashboardTitle(e.target.value)}
-                            className="bg-slate-900 border border-slate-800 text-xs text-white rounded p-1.5 px-2.5 w-full outline-none"
-                          />
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-
-                  {/* ACTION SAVE */}
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-800 bg-slate-950/20 p-4 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm('Bạn có muốn khôi phục hiển thị và câu từ về định danh gốc của Hoàng Long ERP không?')) {
-                          const original = {
-                            primaryAccent: 'emerald',
-                            logoText: 'HL',
-                            brandName: 'Hoàng Long',
-                            brandSlogan: 'Lâm Đồng ERP',
-                            dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
-                            motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
-                            fontFamily: 'Inter'
-                          };
-                          setDisplaySettings(original as any);
-                          localStorage.setItem('hl_display_settings', JSON.stringify(original));
-                          alert('🌈 Trả về các thông số hiển thị mặc định của Hoàng Long ERP thành công!');
-                        }
-                      }}
-                      className="text-xs text-slate-500 hover:text-rose-500 font-bold transition-all bg-slate-100 border border-slate-200 p-2 px-4 rounded-xl"
-                    >
-                      🔄 TRẢ VỀ ĐỊNH DANH MẶC ĐỊNH
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const payload = {
-                          primaryAccent: displaySettings.primaryAccent,
-                          logoText: editLogoText.trim() || 'HL',
-                          brandName: editBrandName.trim() || 'Hoàng Long',
-                          brandSlogan: editBrandSlogan.trim() || 'Lâm Đồng ERP',
-                          dashboardTitle: editDashboardTitle.trim() || 'Hệ Thống Chỉ Số Doanh Nghiệp',
-                          motivationQuote: editMotivationQuote.trim() || '"May mắn đứng về phía người dám đương đầu."',
-                          fontFamily: displaySettings.fontFamily || 'Inter'
-                        };
-                        setDisplaySettings(payload as any);
-                        localStorage.setItem('hl_display_settings', JSON.stringify(payload));
-                        alert('💾 Đã áp dụng & lưu cấu hình toàn bộ các câu chữ thương hiệu và tone màu mới!');
-                      }}
-                      className={`px-6 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer shadow-md ${accentBgClass}`}
-                    >
-                      💾 LƯU CẤU HÌNH HIỂN THỊ
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* PHẦN 3: CÀI ĐẶT THÔNG TIN DOANH NGHIỆP */}
+                            {/* PHẦN 3: CÀI ĐẶT THÔNG TIN DOANH NGHIỆP */}
               {subSettingsTab === 'business' && (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg max-w-4xl space-y-6" id="view_business_info_pane">
                   
@@ -4093,16 +4455,6 @@ export default function App() {
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="block text-[10px] text-slate-400 font-bold mb-1">CÁC CHI NHÁNH / VP ĐẠI DIỆN KHÁC (ĐÀ LẠT V.V)</label>
-                      <input
-                        type="text"
-                        value="45 Hùng Vương, Phường 9, TP. Đà Lạt & Đường tránh Quốc Lộ 20, Xã Lộc Châu, TP. Bảo Lộc"
-                        disabled
-                        className="w-full bg-slate-955 border border-slate-800 opacity-60 rounded p-1.5 px-3 text-xs text-slate-400 outline-none"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
                       <label className="block text-[10px] text-slate-400 font-bold mb-1">THÔNG TIN KHAI THÁC & TÀI KHOẢN NGÂN HÀNG CHÍNH</label>
                       <input
                         type="text"
@@ -4137,7 +4489,7 @@ export default function App() {
                   <div className="flex justify-end pt-4 border-t border-slate-800">
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         const updated = {
                           companyName: editCorpName.trim() || 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
                           taxCode: editCorpTax.trim() || '5801456789',
@@ -4151,8 +4503,18 @@ export default function App() {
                           scale: editCorpScale.trim() || 'Hơn 150 kỹ sư & thợ lành nghề'
                         };
                         setBusinessInfo(updated);
-                        localStorage.setItem('hl_business_info', JSON.stringify(updated));
-                        alert('🏢 Đã lưu hồ sơ cập nhật thông tin doanh nghiệp thành công! Dữ liệu này sẽ làm căn mẫu thông tin cho mọi kết xuất văn bản của hệ thống.');
+                        // Trước đây bấm nút này luôn hiện alert "thành công" ngay lập tức dù
+                        // dbService.businessProfile.save() (chạy ngầm qua useEffect theo dõi
+                        // businessInfo) thất bại (VD: Supabase chưa cấu hình, lỗi RLS...) —
+                        // người dùng tưởng đã lưu nhưng dữ liệu không hề lên server, rồi bị
+                        // ghi đè lại giá trị cũ ở lần poll đồng bộ 600s kế tiếp. Gọi trực tiếp
+                        // và chờ kết quả thật ở đây để báo đúng thành công/thất bại.
+                        try {
+                          await dbService.businessProfile.save(updated);
+                          addToast({ title: '🏢 Đã lưu', message: 'Đã cập nhật hồ sơ doanh nghiệp thành công! Dữ liệu này sẽ làm căn mẫu thông tin cho mọi kết xuất văn bản của hệ thống.', type: 'success' });
+                        } catch (e) {
+                          addToast({ title: '⛔ Lưu thất bại', message: 'Không thể lưu hồ sơ doanh nghiệp lên hệ thống. Vui lòng kiểm tra kết nối Supabase và thử lại.', type: 'error' });
+                        }
                       }}
                       className={`px-6 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer shadow-md ${accentBgClass}`}
                     >
@@ -4287,7 +4649,7 @@ export default function App() {
                         closeAfter: hrmConfig.punchCloseAfterMinutes,
                         outOpenBefore: hrmConfig.punchOutOpenBeforeMinutes,
                         outCloseAfter: hrmConfig.punchOutCloseAfterMinutes,
-                        allowLate: hrmConfig.allowedLateMinutes,
+                        allowLate: hrmConfig.allowedLateMorning,
                         showLate: true,
                       },
                       {
@@ -4300,7 +4662,7 @@ export default function App() {
                         closeAfter: hrmConfig.punchCloseAfterMinutes,
                         outOpenBefore: hrmConfig.punchOutOpenBeforeMinutes,
                         outCloseAfter: hrmConfig.punchOutCloseAfterMinutes,
-                        allowLate: hrmConfig.allowedLateMinutes,
+                        allowLate: hrmConfig.allowedLateAfternoon,
                         showLate: true,
                       },
                       {
@@ -4319,6 +4681,9 @@ export default function App() {
                     ].map((shift) => {
                       const inWin = getSlotWindow(shift.inTime || '00:00', Number(shift.openBefore ?? 0), Number(shift.closeAfter ?? 0));
                       const outWin = getSlotWindow(shift.outTime || '00:00', Number(shift.outOpenBefore ?? 0), Number(shift.outCloseAfter ?? 0));
+                      // Trường dung sai "Cho phép đi muộn" tách riêng theo ca (migration 036)
+                      const lateField: 'allowedLateMorning' | 'allowedLateAfternoon' =
+                        shift.key === 'morning' ? 'allowedLateMorning' : 'allowedLateAfternoon';
 
                       return (
                         <div key={shift.key} className={`bg-slate-900/40 p-4 rounded-xl border ${shift.accent} space-y-4`}>
@@ -4373,15 +4738,15 @@ export default function App() {
                                   onChange={(e) => {
                                     const rawVal = e.target.value;
                                     const val = rawVal === '' ? 15 : Math.max(0, parseInt(rawVal, 10));
-                                    const updated = { ...hrmConfig, allowedLateMinutes: val };
+                                    const updated = { ...hrmConfig, [lateField]: val };
                                     setHrmConfig(updated);
                                     dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                     window.dispatchEvent(new Event('storage'));
                                     window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
                                   }}
                                   onBlur={() => {
-                                    if (hrmConfig.allowedLateMinutes === undefined || hrmConfig.allowedLateMinutes === null) {
-                                      const updated = { ...hrmConfig, allowedLateMinutes: 15 };
+                                    if ((hrmConfig as any)[lateField] === undefined || (hrmConfig as any)[lateField] === null) {
+                                      const updated = { ...hrmConfig, [lateField]: 15 };
                                       setHrmConfig(updated);
                                       dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
                                       window.dispatchEvent(new Event('storage'));
@@ -4434,6 +4799,73 @@ export default function App() {
                             })}
                           </tbody>
                         </table>
+                      </div>
+                    </div>
+
+                    {/* ───────── Tự động chấm công (Auto Attendance) ───────── */}
+                    <div className="pt-2 border-t border-slate-850">
+                      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                        <Calendar className={`w-4 h-4 ${accentTextClass}`} />
+                        <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
+                          TỰ ĐỘNG CHẤM CÔNG (AUTO ATTENDANCE)
+                        </h3>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/60 border border-slate-850 rounded-lg p-3 mt-3">
+                        Hệ thống sẽ tự động tạo các bản ghi chấm công (time-in/time-out) cho nhân viên dựa trên cấu hình ca và số ngày quy định. Điều này hữu ích cho việc chấm công hàng loạt hoặc cho các trường hợp đặc biệt.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số ngày tự động chấm công trước ngày hiện tại</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            value={hrmConfig.autoAttendanceDays}
+                            onChange={(e) => {
+                              const updated = { ...hrmConfig, autoAttendanceDays: parseInt(e.target.value) || 7 };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Ví dụ: 7 = tự động chấm công cho 7 ngày trước (mặc định)</p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Ngày bắt đầu áp dụng tự động chấm công</label>
+                          <input
+                            type="date"
+                            value={(typeof hrmConfig.autoAttendanceStartDate === 'string' ? hrmConfig.autoAttendanceStartDate : (hrmConfig.autoAttendanceStartDate || new Date().toISOString().split('T')[0]))}
+                            onChange={(e) => {
+                              const updated = { ...hrmConfig, autoAttendanceStartDate: e.target.value };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Hệ thống sẽ chỉ tự động chấm công từ ngày này trở đi</p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số lần đi muộn cho phép (trong tháng)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={hrmConfig.allowedLateCount}
+                            onChange={(e) => {
+                              const updated = { ...hrmConfig, allowedLateCount: parseInt(e.target.value) || 0 };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Nếu số ngày đi muộn trong tháng vượt quá giá trị này, hệ thống tự ghi vi phạm "Đi muộn" (crit_A_3) vào bảng Hiệu suất.</p>
+                        </div>
                       </div>
                     </div>
 
@@ -4500,6 +4932,9 @@ export default function App() {
                             otPunchOpenBeforeMinutes: 15, otPunchCloseAfterMinutes: 15,
                             otPunchOutOpenBeforeMinutes: 15, otPunchOutCloseAfterMinutes: 15,
                             allowedLateMinutes: 15,
+                            allowedLateCount: 3,
+                            allowedLateMorning: 15,
+                            allowedLateAfternoon: 15,
                           };
                           setHrmConfig(updated);
                           dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
@@ -4764,7 +5199,8 @@ export default function App() {
                   hr: 'director-hr',
                   accounting: 'director-finance',
                   warehouse: 'director-warehouse',
-                  subcontractor: 'director-subcontractor'
+                  subcontractor: 'director-subcontractor',
+                  summary: 'director-summary'
                 };
                 setActiveTab(tabMap[sub]);
               }}
@@ -4776,21 +5212,25 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'messages' && (
+          {/* TAB: TIN NHẮN — giữ mounted sau lần đầu vào tab (ẩn qua CSS thay
+              vì unmount) để không mất state cục bộ (hội thoại đang chọn, vị trí
+              cuộn, ô tìm kiếm...) và không phải tạo lại channel realtime mỗi
+              lần quay lại tab. */}
+          {hasVisitedMessages && (
+            <div style={{ display: activeTab === 'messages' ? undefined : 'none' }}>
             <MessagesView
               currentUser={currentUser!}
               employees={employees}
-              notifications={notifications}
-              onUpdateNotifications={(updated) => setNotifications(updated)}
-              initialPaneTab={messengerInitialTab}
+              tasks={tasks}
+              onNavigateTab={(tab) => setActiveTab(tab)}
               initialConversationId={initialConvId ?? undefined}
-              initialNotificationId={initialNotificationId}
               showBadgeCounts={showBadgeCounts}
               onToggleBadgeCounts={(next) => {
                 setShowBadgeCounts(next);
                 localStorage.setItem('hl_show_badge_counts', next ? 'true' : 'false');
               }}
             />
+            </div>
           )}
 
           </>
@@ -4864,4 +5304,4 @@ export default function App() {
       </NotificationProvider>
     </AuthProvider>
   );
-}
+} // Close AppContent function

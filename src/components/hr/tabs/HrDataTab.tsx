@@ -16,6 +16,8 @@ import {
   Sliders,
   Download,
   Upload,
+  Clock,
+  Pencil,
 } from 'lucide-react';
 import {
   Holiday,
@@ -36,6 +38,7 @@ interface HrDataTabProps {
   setHolidaySearchQuery: (v: string) => void;
   setShowHolidayModal: (v: boolean) => void;
   handleDeleteHoliday: (id: string) => void;
+  onEditHoliday: (item: Holiday) => void;
 
   leaveCoefficients: LeaveCoefficient[];
   setLeaveCoefficients: React.Dispatch<React.SetStateAction<LeaveCoefficient[]>>;
@@ -94,6 +97,9 @@ interface HrDataTabProps {
   handleEditTravelNormClick: (norm: any) => void;
   handleDeleteTravelNorm: (id: string) => void;
   setTravelNorms: React.Dispatch<React.SetStateAction<TravelAllowanceNorm[]>>;
+
+  attendanceInitDate: Date;
+  setAttendanceInitDate: (v: Date) => void;
 }
 
 export default function HrDataTab(props: HrDataTabProps) {
@@ -107,6 +113,7 @@ export default function HrDataTab(props: HrDataTabProps) {
     setHolidaySearchQuery,
     setShowHolidayModal,
     handleDeleteHoliday,
+    onEditHoliday,
 
     leaveCoefficients,
     setLeaveCoefficients,
@@ -165,6 +172,9 @@ export default function HrDataTab(props: HrDataTabProps) {
     handleEditTravelNormClick,
     handleDeleteTravelNorm,
     setTravelNorms,
+
+    attendanceInitDate,
+    setAttendanceInitDate,
   } = props;
 
   // ── Multi-row selection state ──
@@ -263,16 +273,19 @@ export default function HrDataTab(props: HrDataTabProps) {
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
-          const wb = XLSX.read(ev.target?.result, { type: 'binary' });
+          const data = ev.target?.result;
+          if (!data) { reject(new Error('Không đọc được dữ liệu file')); return; }
+          const wb = XLSX.read(data, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
           resolve(rows);
         } catch (err) {
+          console.error('[Import Excel] Lỗi parse:', err);
           reject(err);
         }
       };
       reader.onerror = () => reject(new Error('Không thể đọc file'));
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
     });
   };
 
@@ -307,6 +320,18 @@ export default function HrDataTab(props: HrDataTabProps) {
   };
 
   // ── 1. Holidays ──
+  // Quy đổi "dd/mm/yyyy" -> timestamp để sắp xếp tăng dần theo ngày (không phải
+  // theo chuỗi ký tự, vì "2/9" sẽ đứng trước "10/2" nếu so sánh chuỗi thô).
+  // Trả về Infinity cho giá trị không đúng định dạng để đẩy xuống cuối danh sách
+  // thay vì làm vỡ thứ tự hoặc crash.
+  const parseHolidayDate = (dateStr: string): number => {
+    const parts = (dateStr || '').split('/');
+    if (parts.length !== 3) return Infinity;
+    const [day, month, year] = parts.map(Number);
+    if (!day || !month || !year) return Infinity;
+    return new Date(year, month - 1, day).getTime();
+  };
+
   const handleExportHolidays = () => {
     const data = holidays.map(h => ({
       'Mã NL': h.id,
@@ -571,7 +596,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="criteria_tab_trigger"
                       >
                         <Building className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'criteria' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>🎯 Tiêu Chí Hiệu Suất</span>
+                        <span>Tiêu Chí Hiệu Suất</span>
                       </button>
                     </li>
                     <li>
@@ -583,7 +608,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="salary_scales_tab_trigger"
                       >
                         <Award className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'salary_scales' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>📈 Hệ Thống Bậc Lương</span>
+                        <span>Hệ Thống Bậc Lương</span>
                       </button>
                     </li>
                     <li>
@@ -595,7 +620,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="insurance_tab_trigger"
                       >
                         <FileSpreadsheet className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'insurance' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>🛡️ BHXH & Thuế</span>
+                        <span>BHXH & Thuế</span>
                       </button>
                     </li>
                     <li>
@@ -607,7 +632,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         id="travel_norms_tab_trigger"
                       >
                         <MapPin className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'travel_norms' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>💼 Định mức công tác phí</span>
+                        <span>Định mức công tác phí</span>
                       </button>
                     </li>
                   </ul>
@@ -656,7 +681,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         />
                         <button
                           onClick={() => setShowHolidayModal(true)}
-                          className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
+                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20"
                           id="add_holiday_btn"
                         >
                           <Plus className="w-4 h-4" />
@@ -703,6 +728,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                                 const query = holidaySearchQuery.toLowerCase();
                                 return h.name.toLowerCase().includes(query) || h.date.includes(query) || h.id.toLowerCase().includes(query);
                               })
+                              .sort((a, b) => parseHolidayDate(a.date) - parseHolidayDate(b.date))
                               .map((item) => (
                                 <tr key={item.id} className={`hover:bg-slate-800/30 transition-colors ${hrSelectedRows.has(item.id) ? 'bg-amber-500/10' : ''}`}>
                                   <td className="py-3 px-2 text-center">
@@ -717,14 +743,24 @@ export default function HrDataTab(props: HrDataTabProps) {
                                   <td className="py-3 px-4 text-slate-205 font-mono font-bold">{item.date}</td>
                                   <td className="py-3 px-4 text-white text-[11.5px]">{item.name}</td>
                                   <td className="py-3 px-4 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteHoliday(item.id)}
-                                      className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors cursor-pointer"
-                                      title="Xóa ngày nghỉ"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => onEditHoliday(item)}
+                                        className="text-slate-500 hover:text-amber-400 p-1.5 rounded transition-colors cursor-pointer"
+                                        title="Sửa ngày nghỉ"
+                                      >
+                                        <Pencil className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteHoliday(item.id)}
+                                        className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors cursor-pointer"
+                                        title="Xóa ngày nghỉ"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))}
@@ -805,7 +841,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         />
                         <button
                           onClick={() => setShowCoefModal(true)}
-                          className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
+                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20"
                           id="add_coef_btn"
                         >
                           <Plus className="w-4 h-4" />
@@ -993,7 +1029,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                             setNewCritCategory('readiness');
                             setShowCriteriaModal(true);
                           }}
-                          className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
+                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20"
                           id="add_criterion_btn"
                         >
                           <Plus className="w-4 h-4" />
@@ -1075,13 +1111,13 @@ export default function HrDataTab(props: HrDataTabProps) {
 
                               return filtered.map((crit, idx) => {
                                 let catLabel = "Tác phong & Chuyên cần";
-                                let catBg = "bg-purple-950/40 text-purple-400 border-purple-500/20";
+                                let catBg = "bg-purple-50 text-purple-700 border-purple-200";
                                 if (crit.category === 'progress') {
                                   catLabel = "Hiệu suất & Tiến độ";
-                                  catBg = "bg-sky-900/40 text-sky-400 border-sky-500/20";
+                                  catBg = "bg-sky-50 text-sky-700 border-sky-200";
                                 } else if (crit.category === 'reporting') {
                                   catLabel = "Báo cáo & Đạo đức";
-                                  catBg = "bg-emerald-950/40 text-emerald-400 border-emerald-500/20";
+                                  catBg = "bg-emerald-50 text-emerald-700 border-emerald-200";
                                 }
 
                                 return (
@@ -1198,7 +1234,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                         <button
                           type="button"
                           onClick={handleAddNewSalaryScaleClick}
-                          className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg animate-pulse"
+                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20 animate-pulse"
                         >
                           <Plus className="w-4 h-4" />
                           <span>Thêm Bậc Lương mới</span>
@@ -1483,7 +1519,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                   {/* Summary Cards Row */}
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
 
-                    <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 rounded-2xl border border-slate-800/80 shadow-md flex items-center justify-between">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Đã có Số sổ BHXH</span>
                         <div className="text-xl font-black text-emerald-400 flex items-baseline gap-1.5">
@@ -1499,7 +1535,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                       </div>
                     </div>
 
-                    <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 rounded-2xl border border-slate-800/80 shadow-md flex items-center justify-between">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Mức Thù Lao BHXH</span>
                         <div className="text-xl font-black text-teal-400">
@@ -1512,7 +1548,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                       </div>
                     </div>
 
-                    <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 rounded-2xl border border-slate-800/80 shadow-md flex items-center justify-between">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Tiền Trích Đóng (10.5%)</span>
                         <div className="text-xl font-black text-sky-400">
@@ -1525,7 +1561,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                       </div>
                     </div>
 
-                    <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 rounded-2xl border border-slate-800/80 shadow-md flex items-center justify-between">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Chưa Đăng Ký BHXH</span>
                         <div className="text-xl font-black text-rose-400 flex items-baseline gap-1.5">
@@ -1707,11 +1743,11 @@ export default function HrDataTab(props: HrDataTabProps) {
                                   </td>
                                   <td className="p-3 text-center">
                                     {emp.bhxhBookNo && emp.bhxhBookNo.trim() !== '' ? (
-                                      <span className="bg-emerald-950/50 border border-emerald-500/20 text-emerald-400 font-mono font-extrabold text-[11px] px-2.5 py-1 rounded-lg">
+                                      <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono font-extrabold text-[11px] px-2.5 py-1 rounded-lg">
                                         {emp.bhxhBookNo}
                                       </span>
                                     ) : (
-                                      <span className="bg-rose-955/20 border border-rose-500/10 text-rose-400 font-bold text-[10px] px-2 py-0.5 rounded-md italic">
+                                      <span className="bg-rose-50 border border-rose-200 text-rose-700 font-bold text-[10px] px-2 py-0.5 rounded-md italic">
                                         Chưa đăng ký sổ
                                       </span>
                                     )}
@@ -1785,11 +1821,11 @@ export default function HrDataTab(props: HrDataTabProps) {
                 {/* Header bar of the tab inside */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60 shadow-lg">
                   <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-orange-500/10 border border-orange-500/20 rounded-xl">
-                      <MapPin className="w-5 h-5 text-orange-400" />
+                    <div className="p-2.5 bg-orange-50 border border-orange-200 rounded-xl">
+                      <MapPin className="w-5 h-5 text-orange-600" />
                     </div>
                     <div>
-                      <span className="text-[10px] bg-orange-500/15 text-orange-400 font-extrabold font-mono px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-wider">PHỤ LỤC 02</span>
+                      <span className="text-[10px] bg-orange-50 text-orange-700 font-extrabold font-mono px-2 py-0.5 rounded border border-orange-200 uppercase tracking-wider">PHỤ LỤC 02</span>
                       <h3 className="text-sm font-extrabold text-white mt-1">BẢNG ĐỊNH MỨC TÍNH TIỀN CÔNG TÁC PHÍ 2026</h3>
                       <p className="text-[10px] text-slate-400 mt-0.5">Ban hành kèm theo Quy chế điều hành tài chính, tác nghiệp ngày 31/03/2026</p>
                     </div>
@@ -1833,7 +1869,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                     <button
                       type="button"
                       onClick={handleAddTravelNormClick}
-                      className="bg-orange-600 hover:bg-orange-550 text-white font-bold text-[11px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-lg shadow-orange-950/20 active:scale-95 duration-100 cursor-pointer animate-none"
+                      className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-orange-500/20 active:scale-95 duration-100 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Thêm định mức mới</span>
@@ -1946,6 +1982,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 </div>
               </div>
             )}
+
               </div>
   );
 }

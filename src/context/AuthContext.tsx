@@ -1,7 +1,14 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import { Employee, HrmRoleGroup } from '../types';
 import { dbService } from '../lib/dbService';
-import { generateUsername } from './SettingsContext';
+import { generateUsername, loadHrmRoleGroups } from './SettingsContext';
+
+/** Bỏ password khỏi user object — KHÔNG lưu password hash vào storage */
+const stripPassword = (emp: any) => {
+  if (!emp) return emp;
+  const { password, ...safe } = emp;
+  return safe;
+};
 
 // ─── Context Type ─────────────────────────────────────────────────────────────
 
@@ -22,42 +29,35 @@ const ADMIN_EMPLOYEE: Employee = {
   id: 'emp_admin',
   name: 'Administrator',
   role: 'director',
-  roleGroupIds: ['role_admin'],
+  roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
   email: 'admin@hoanglong.vn',
   phone: '0000000000',
   department: 'Ban Giám Đốc',
   username: 'admin',
-  password: 'admin'
+  password: 'admin',
+  status: 'working',
+  hasSystemAccount: true
 };
 
 export function ensureAdminAndPasswords(emps: Employee[]): Employee[] {
   const mapped: Employee[] = emps.map(emp => {
     if (emp.username === 'admin' || emp.id === 'emp_admin') {
-      return { ...emp, username: 'admin', password: 'admin', role: 'director' as const, roleGroupIds: ['role_admin'] };
+      // KHÔNG ép password về 'admin' — mật khẩu phải lấy đúng theo dữ liệu đang lưu
+      // trên Supabase, chỉ dùng 'admin' làm giá trị khởi tạo khi chưa có mật khẩu nào.
+      return { ...emp, username: 'admin', password: emp.password || 'admin', role: 'director' as const, roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'], hasSystemAccount: true };
     }
     // Backfill roleGroupIds từ memberIds của Role Groups (tương thích dữ liệu cũ)
     let roleGroupIds = emp.roleGroupIds;
     if (!roleGroupIds || roleGroupIds.length === 0) {
       try {
-        // Đọc từ cache của dbService trước (nếu có)
-        const cached = localStorage.getItem('hl_cached_hrm_role_groups');
-        let groups: any[] = [];
-        if (cached) {
-          groups = JSON.parse(cached);
-        }
-        if (!Array.isArray(groups) || groups.length === 0) {
-          const saved = localStorage.getItem('hl_hrm_roles_v2');
-          if (saved) {
-            groups = JSON.parse(saved);
-          }
-        }
+        // Đọc từ in-memory cache (đã load từ Supabase)
+        const groups = loadHrmRoleGroups();
         if (Array.isArray(groups)) {
           roleGroupIds = groups
             .filter(g => g.memberIds?.includes(emp.id))
             .map((g: any) => g.id);
         }
       } catch { /* ignore */ }
-      // Fallback cuối cùng: nếu vẫn rỗng, giữ nguyên legacy role để isAccessible fallback hoạt động
     }
     return {
       ...emp,
@@ -105,7 +105,7 @@ export function AuthProvider({
   // Update session storage whenever currentUser changes
   useEffect(() => {
     if (currentUser) {
-      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(currentUser));
+      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(currentUser)));
     } else {
       sessionStorage.removeItem('hl_erp_active_session');
     }
@@ -116,10 +116,10 @@ export function AuthProvider({
     (loggedInUser: Employee, remember: boolean, autoLogin: boolean) => {
       setCurrentUser(loggedInUser);
 
+      // Chỉ lưu username — KHÔNG lưu password
       if (remember) {
         const creds = {
-          username: loggedInUser.username || generateUsername(loggedInUser.name),
-          password: loggedInUser.password || '123'
+          username: loggedInUser.username || generateUsername(loggedInUser.name)
         };
         localStorage.setItem('hl_erp_remembered_credentials', JSON.stringify(creds));
       } else {
@@ -127,12 +127,12 @@ export function AuthProvider({
       }
 
       if (autoLogin) {
-        localStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+        localStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
       } else {
         localStorage.removeItem('hl_erp_active_session');
       }
 
-      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(loggedInUser));
+      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(loggedInUser)));
 
       addToast({
         title: 'Đăng nhập thành công',
@@ -159,11 +159,11 @@ export function AuthProvider({
   const handleUpdateProfile = useCallback(
     async (updatedUser: Employee): Promise<void> => {
       setCurrentUser(updatedUser);
-      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(updatedUser));
+      sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(updatedUser)));
 
       const savedSession = localStorage.getItem('hl_erp_active_session');
       if (savedSession) {
-        localStorage.setItem('hl_erp_active_session', JSON.stringify(updatedUser));
+        localStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(updatedUser)));
       }
 
       // Update remembered credentials if applicable

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { useNotification } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
 import { INITIAL_PRODUCTS } from './ProductCatalogTable';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle, Download, Share2 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -306,6 +307,8 @@ interface ConstructionEstimatorProps {
   setCustomerPhone?: (val: string) => void;
   customerAddress?: string;
   setCustomerAddress?: (val: string) => void;
+  customerRepresentative?: string;
+  setCustomerRepresentative?: (val: string) => void;
   hideMetadataHeader?: boolean;
 
   // Saved & Lock control props
@@ -353,11 +356,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     showTemplateOnly = false
   } = props;
 
-  // Read house estimate prices reactively (from prop or localStorage)
+  // Read house estimate prices reactively (from prop, fallback default)
   const houseEstimatePrices = React.useMemo<HouseEstimatePrice[]>(() => {
     if (propsHouseEstimatePrices) return propsHouseEstimatePrices;
-    const local = localStorage.getItem('house_estimate_prices');
-    return local ? (JSON.parse(local) as HouseEstimatePrice[]) : HOUSE_ESTIMATE_PRICES;
+    return HOUSE_ESTIMATE_PRICES;
   }, [propsHouseEstimatePrices]);
   // Config tỉ lệ % đặc thù xây dựng thô
   const [config, setConfig] = useState<QuoteConfig>({
@@ -367,7 +369,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     generalPercent: 8,   // Chi phí quản lý & vận hành giàn giáo
     profitPercent: 12,   // Lợi nhuận thầu định mức
     wastagePercent: 10,  // Hao hụt hao phí vật tư gạch đá cát xi măng
-    vatPercent: 8,       // Mặc định VAT 8%
+    vatPercent: 0,       // VAT đã loại bỏ theo yêu cầu
   });
 
   const [showConfig, setShowConfig] = useState(false);
@@ -437,6 +439,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const customerPhone = props.customerPhone !== undefined ? props.customerPhone : localCustomerPhone;
   const setCustomerPhone = props.setCustomerPhone || setLocalCustomerPhone;
 
+  // Người đại diện của khách hàng — hiển thị trong Báo Giá và dùng làm tên ký ở khối
+  // chữ ký Bên A trong Hợp Đồng/Nghiệm Thu/Thanh Lý (xem ContractDocument.tsx...).
+  // Prop-lifted giống customerName: khi hideMetadataHeader=true, QuotationSystem.tsx
+  // nâng state này lên cấp cha để dùng chung header Dự Án/Khách Hàng.
+  const [localCustomerRepresentative, setLocalCustomerRepresentative] = useState('');
+  const customerRepresentative = props.customerRepresentative !== undefined ? props.customerRepresentative : localCustomerRepresentative;
+  const setCustomerRepresentative = props.setCustomerRepresentative || setLocalCustomerRepresentative;
+
   // Trạng thái cho bộ tìm kiếm dự án nhanh (searchable dropdown)
   const [isProjDropdownOpen, setIsProjDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -454,6 +464,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -494,7 +505,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -514,6 +526,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
@@ -521,17 +534,17 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   }, [selectedProjectId, projects, customers]);
 
   const [quoteNotes, setQuoteNotes] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState(() => localStorage.getItem('hl_construction_payment_terms') || sessionStorage.getItem('hl_construction_payment_terms') || DEFAULT_CONS_PAYMENT_TERMS);
+  const [paymentTerms, setPaymentTerms] = useState(() => sessionStorage.getItem('hl_construction_payment_terms') || DEFAULT_CONS_PAYMENT_TERMS);
 
-  const [companyLogoImg, setCompanyLogoImg] = useState(() => localStorage.getItem('hl_construction_company_logo') || sessionStorage.getItem('hl_construction_company_logo') || '');
-  const [companyLogoText, setCompanyLogoText] = useState(() => localStorage.getItem('hl_construction_company_name') || sessionStorage.getItem('hl_construction_company_name') || 'HOANG LONG');
-  const [companySlogan, setCompanySlogan] = useState(() => localStorage.getItem('hl_construction_company_slogan') || sessionStorage.getItem('hl_construction_company_slogan') || 'Construction - Furniture - Doors');
-  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => localStorage.getItem('hl_construction_company_address') || sessionStorage.getItem('hl_construction_company_address') || '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>');
-  const [companyContactInfo, setCompanyContactInfo] = useState(() => localStorage.getItem('hl_construction_company_contact') || sessionStorage.getItem('hl_construction_company_contact') || '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>');
+  const [companyLogoImg, setCompanyLogoImg] = useState(() => sessionStorage.getItem('hl_construction_company_logo') || '');
+  const [companyLogoText, setCompanyLogoText] = useState(() => sessionStorage.getItem('hl_construction_company_name') || 'HOANG LONG');
+  const [companySlogan, setCompanySlogan] = useState(() => sessionStorage.getItem('hl_construction_company_slogan') || 'Construction - Furniture - Doors');
+  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => sessionStorage.getItem('hl_construction_company_address') || '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>');
+  const [companyContactInfo, setCompanyContactInfo] = useState(() => sessionStorage.getItem('hl_construction_company_contact') || '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>');
 
-  const [contractTemplate, setContractTemplate] = useState(() => localStorage.getItem('hl_construction_contract_template') || DEFAULT_CONS_CONTRACT_TEMPLATE);
-  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => localStorage.getItem('hl_construction_acceptance_template') || DEFAULT_CONS_ACCEPTANCE_TEMPLATE);
-  const [liquidationTemplate, setLiquidationTemplate] = useState(() => localStorage.getItem('hl_construction_liquidation_template') || DEFAULT_CONS_LIQUIDATION_TEMPLATE);
+  const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_CONS_CONTRACT_TEMPLATE);
+  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_CONS_ACCEPTANCE_TEMPLATE);
+  const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_CONS_LIQUIDATION_TEMPLATE);
   const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
@@ -549,22 +562,12 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         defaultData.companyAddressInfo = companyAddressInfo;
         defaultData.companyContactInfo = companyContactInfo;
         defaultData.paymentTerms = paymentTerms;
-        
-        localStorage.setItem('hl_construction_default_logo', companyLogoImg);
-        localStorage.setItem('hl_construction_default_company_name', companyLogoText);
-        localStorage.setItem('hl_construction_default_company_slogan', companySlogan);
-        localStorage.setItem('hl_construction_default_company_address', companyAddressInfo);
-        localStorage.setItem('hl_construction_default_company_contact', companyContactInfo);
-        localStorage.setItem('hl_construction_default_payment_terms', paymentTerms);
       } else if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_construction_default_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_construction_default_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_construction_default_liquidation_template', liquidationTemplate);
       }
       
       await dbService.quotationConfigs.save('construction_default', defaultData);
@@ -598,13 +601,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       const defaultData = await dbService.quotationConfigs.get('construction_default');
       
       if (activeTemplateTab === 'quote') {
-        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_construction_default_logo') ?? '';
-        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_construction_default_company_name') ?? 'HOANG LONG';
-        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_construction_default_company_slogan') ?? 'Construction - Furniture - Doors';
-        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_construction_default_company_address') ?? '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>';
-        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_construction_default_company_contact') ?? '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>';
-        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_construction_default_payment_terms') ?? DEFAULT_CONS_PAYMENT_TERMS;
-        
+        const logo = defaultData?.companyLogoImg ?? '';
+        const name = defaultData?.companyLogoText ?? 'HOANG LONG';
+        const slogan = defaultData?.companySlogan ?? 'Construction - Furniture - Doors';
+        const address = defaultData?.companyAddressInfo ?? '<p>📍 <strong>Trụ sở chính:</strong> Hẻm 24 Ngô Quyền, Phường 6, TP. Đà Lạt, Lâm Đồng</p><p>🏢 <strong>Chi nhánh xưởng:</strong> Phi Nôm, Hiệp Thạnh, Đức Trọng, Lâm Đồng</p>';
+        const contact = defaultData?.companyContactInfo ?? '<p>📞 <strong>Hotline:</strong> 0979.201.899</p><p>✉️ <strong>Email:</strong> hoanglongdoors@gmail.com</p><p>🌐 <strong>Website:</strong> hoanglongdoors.com</p>';
+        const terms = defaultData?.paymentTerms ?? DEFAULT_CONS_PAYMENT_TERMS;
+
         setCompanyLogoImg(logo);
         setCompanyLogoText(name);
         setCompanySlogan(slogan);
@@ -612,13 +615,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         setCompanyContactInfo(contact);
         setPaymentTerms(terms);
       } else if (activeTemplateTab === 'contract') {
-        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_construction_default_contract_template') ?? DEFAULT_CONS_CONTRACT_TEMPLATE;
+        const template = defaultData?.contractTemplate ?? DEFAULT_CONS_CONTRACT_TEMPLATE;
         setContractTemplate(template);
       } else if (activeTemplateTab === 'acceptance') {
-        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_construction_default_acceptance_template') ?? DEFAULT_CONS_ACCEPTANCE_TEMPLATE;
+        const template = defaultData?.acceptanceTemplate ?? DEFAULT_CONS_ACCEPTANCE_TEMPLATE;
         setAcceptanceTemplate(template);
       } else if (activeTemplateTab === 'liquidation') {
-        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_construction_default_liquidation_template') ?? DEFAULT_CONS_LIQUIDATION_TEMPLATE;
+        const template = defaultData?.liquidationTemplate ?? DEFAULT_CONS_LIQUIDATION_TEMPLATE;
         setLiquidationTemplate(template);
       }
       
@@ -733,17 +736,6 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     sessionStorage.setItem('hl_construction_company_slogan', companySlogan);
     sessionStorage.setItem('hl_construction_company_address', companyAddressInfo);
     sessionStorage.setItem('hl_construction_company_contact', companyContactInfo);
-
-    localStorage.setItem('hl_construction_company_logo', companyLogoImg);
-    localStorage.setItem('hl_construction_company_name', companyLogoText);
-    localStorage.setItem('hl_construction_company_slogan', companySlogan);
-    localStorage.setItem('hl_construction_company_address', companyAddressInfo);
-    localStorage.setItem('hl_construction_company_contact', companyContactInfo);
-    localStorage.setItem('hl_construction_payment_terms', paymentTerms);
-
-    localStorage.setItem('hl_construction_contract_template', contractTemplate);
-    localStorage.setItem('hl_construction_acceptance_template', acceptanceTemplate);
-    localStorage.setItem('hl_construction_liquidation_template', liquidationTemplate);
   }, [selectedHouseType, chieuDai, chieuRong, soTang, donGiaKhaiToan, nganSachNoiThat, quoteItems, quoteNotes, paymentTerms, config, companyLogoImg, companyLogoText, companySlogan, companyAddressInfo, companyContactInfo, contractTemplate, acceptanceTemplate, liquidationTemplate]);
 
   const [dbLoading, setDbLoading] = useState(false);
@@ -756,8 +748,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     const fetchDbConfig = async () => {
       setDbLoading(true);
       try {
-        // Load from 'construction_default' (matches the save key in handleSetAsDefault)
-        const dbConfig = await dbService.quotationConfigs.get('construction_default');
+        // Load từ key 'construction' — phải khớp với key mà nút "Lưu" chính dùng để ghi
+        // (trước đây đọc nhầm 'construction_default' — là key riêng chỉ dùng cho 2 nút
+        // "Đặt làm mặc định"/"Khôi phục mặc định" — khiến thay đổi lưu xong bị "biến mất" khi mở lại)
+        const dbConfig = await dbService.quotationConfigs.get('construction');
         if (dbConfig) {
           if (dbConfig.companyLogoImg !== undefined) setCompanyLogoImg(dbConfig.companyLogoImg);
           if (dbConfig.companyLogoText !== undefined) setCompanyLogoText(dbConfig.companyLogoText);
@@ -790,12 +784,24 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
       if (loadedQuote.notes) setQuoteNotes(loadedQuote.notes);
       if (loadedQuote.paymentTerms) setPaymentTerms(loadedQuote.paymentTerms);
-      if (loadedQuote.config) setConfig(loadedQuote.config);
+      if (loadedQuote.config) {
+        setConfig(loadedQuote.config);
+        // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+        // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config.customerRepresentative || fallbackCust?.representative || '');
+      }
       if (loadedQuote.companyLogoImg !== undefined) setCompanyLogoImg(loadedQuote.companyLogoImg || '');
       if (loadedQuote.companyLogoText) setCompanyLogoText(loadedQuote.companyLogoText);
       if (loadedQuote.companySlogan) setCompanySlogan(loadedQuote.companySlogan);
       if (loadedQuote.companyAddressInfo) setCompanyAddressInfo(loadedQuote.companyAddressInfo);
       if (loadedQuote.companyContactInfo) setCompanyContactInfo(loadedQuote.companyContactInfo);
+    } else {
+      // "Lập mới": customerName/Phone/Address được reset bởi handleStartNewQuote ở
+      // QuotationSystem.tsx (props lifted), nhưng customerRepresentative là state cục
+      // bộ của component này nên phải tự xóa ở đây — nếu không sẽ dính "Người đại diện"
+      // của hồ sơ vừa xem trước đó sang hồ sơ mới đang lập.
+      setCustomerRepresentative('');
     }
   }, [loadedQuote]);
 
@@ -916,6 +922,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
   // --- HỆ THỐNG THÊM SẢN PHẨM TỪ DANH MỤC TIÊU CHUẨN XÂY DỰNG ---
   const [catalogProducts, setCatalogProducts] = useState<ProductCatalogItem[]>([]);
+  const [allProductPrices, setAllProductPrices] = useState<any[]>([]);
+  const [allProductMaterials, setAllProductMaterials] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<ProductCatalogItem | null>(null);
   const [selectedPriceOption, setSelectedPriceOption] = useState<string>('');
@@ -924,6 +932,158 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [searchCategoryQuery, setSearchCategoryQuery] = useState<string>('');
   const [searchProductQuery, setSearchProductQuery] = useState<string>('');
   const { addToast } = useNotification();
+
+  // Tải động html2canvas/jsPDF — dùng lại đúng cách export PDF đã ổn định của
+  // Đơn Mua Hàng (MaterialCoordination.tsx): gọi html2canvas trực tiếp rồi tự
+  // ghép ảnh vào jsPDF (tự chia trang nếu nội dung dài hơn 1 trang A4), KHÔNG
+  // dùng html2pdf.js (thư viện đó gán nhầm property `container.height` thay vì
+  // `.style.height` khiến ảnh chụp ra trắng hoàn toàn — đã xác minh ở đó).
+  const loadHtml2Canvas = async () => {
+    const mod = await import('html2canvas-pro');
+    return (mod as any).default || mod;
+  };
+  const loadJsPdf = async () => {
+    const mod = await import('jspdf');
+    return (mod as any).jsPDF || (mod as any).default;
+  };
+
+  // html2canvas-pro chụp ở chế độ "màn hình" bình thường, KHÔNG kích hoạt
+  // được @media print — nên các lớp Tailwind "print:border-none /
+  // print:shadow-none / print:p-0" đã có sẵn trong QuotationTableSheet/
+  // ContractDocument/AcceptanceDocument/LiquidationDocument (dùng để bỏ
+  // khung viền xám + đổ bóng + đệm của khung card khi in thật qua trình
+  // duyệt) không có tác dụng khi xuất PDF qua html2canvas. Áp lại thủ công
+  // đúng hiệu ứng đó lên bản sao trước khi chụp.
+  const applyPrintVariantOverrides = (root: HTMLElement) => {
+    const all: HTMLElement[] = [root, ...Array.from(root.querySelectorAll('*'))] as HTMLElement[];
+    all.forEach((el) => {
+      const cls = el.className;
+      if (typeof cls !== 'string') return; // bỏ qua SVG (className là SVGAnimatedString)
+      if (cls.includes('print:border-none')) el.style.border = 'none';
+      if (cls.includes('print:shadow-none')) el.style.boxShadow = 'none';
+      if (cls.includes('print:p-0')) el.style.padding = '0';
+    });
+  };
+
+  // Dựng PDF từ đúng vùng nội dung đang hiển thị trong modal xem/in
+  // (#print-area-archive) — nhân bản (clone) ra 1 khung ẩn khổ A4 cố định
+  // trước khi chụp, vì vùng gốc trên màn hình bị giới hạn max-h-[70vh]
+  // overflow-y-auto (chỉ chụp được phần đang cuộn tới nếu chụp thẳng).
+  const generateArchivePdfBlob = async (): Promise<Blob> => {
+    const source = document.getElementById('print-area-archive');
+    if (!source) throw new Error('Không tìm thấy nội dung để xuất PDF.');
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.background = '#ffffff';
+    container.innerHTML = source.innerHTML;
+    // Bỏ các nút hành động/badge chỉ dành cho màn hình (không nằm trong bản in)
+    container.querySelectorAll('.print-hide, .no-print, [class*="print\\:hidden"]').forEach(el => el.remove());
+    applyPrintVariantOverrides(container);
+    document.body.appendChild(container);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 15, marginSide = 18;
+      const pageWidthMm = 210, pageHeightMm = 297;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      // Danh sách các điểm "cắt an toàn" — ngay dưới đáy mỗi dòng bảng (<tr>) —
+      // quy đổi sang toạ độ pixel của canvas (nhân với scale:2 lúc chụp phía
+      // trên). Trước đây cắt trang theo đúng bội số pageHeightPx một cách mù
+      // quáng, có thể cắt ngang giữa 1 dòng đang chứa ghi chú nhiều dòng, làm
+      // nửa trên/dưới của dòng đó tách rời sang 2 trang khác nhau.
+      const containerRect = container.getBoundingClientRect();
+      const safeBreaksPx = Array.from(container.querySelectorAll('tr'))
+        .map((el) => Math.round((el.getBoundingClientRect().bottom - containerRect.top) * 2))
+        .filter((v) => v > 0 && v < canvas.height)
+        .sort((a, b) => a - b);
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const idealEnd = Math.min(renderedPx + pageHeightPx, canvas.height);
+        // Nếu chưa phải trang cuối, dò lùi tới điểm cắt an toàn gần nhất
+        // (đáy 1 dòng bảng hoàn chỉnh) thay vì cắt cứng theo pixel.
+        let sliceEnd = idealEnd;
+        if (idealEnd < canvas.height) {
+          const minAdvance = renderedPx + Math.min(60, pageHeightPx * 0.15);
+          const candidate = safeBreaksPx.filter((b) => b > minAdvance && b <= idealEnd).pop();
+          if (candidate) sliceEnd = candidate;
+        }
+        const sliceHeightPx = sliceEnd - renderedPx;
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Tải PDF hồ sơ về máy — không qua hộp thoại Share của hệ điều hành (Windows
+  // Share không có lựa chọn "Lưu về máy" trực tiếp).
+  const downloadArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `HoSo_${quote.code || quote.id}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: '✅ Đã tải PDF', message: `Đã tải "HoSo_${quote.code || quote.id}.pdf" về thư mục Tải xuống.`, type: 'success' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF.', type: 'error' });
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF hồ sơ (thay vì chỉ chia sẻ link)
+  const shareArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const file = new File([blob], `HoSo_${quote.code || quote.id}.pdf`, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Hồ sơ ${quote.code || quote.id}`, text: `Hồ sơ ${quote.code || quote.id}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: 'ℹ️ Đã tải PDF', message: 'Đã tải file PDF hồ sơ về máy để gửi thủ công.', type: 'info' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF để chia sẻ.', type: 'warning' });
+    }
+  };
+
   const [customMaterial, setCustomMaterial] = useState<string>('');
   
   const [isCatDropdownOpen, setIsCatDropdownOpen] = useState(false);
@@ -935,39 +1095,46 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [customProductOtherQty, setCustomProductOtherQty] = useState<number>(1);
   const [customProductOtherUnitPrice, setCustomProductOtherUnitPrice] = useState<number>(1000000);
 
-  // Nạp danh mục sản phẩm lĩnh vực Xây dựng
+  // Nạp danh mục sản phẩm lĩnh vực Xây dựng (từ Supabase)
   useEffect(() => {
-    const saved = localStorage.getItem('hl_acc_products');
-    let loadedProducts = [];
-    if (saved) {
-      try {
-        loadedProducts = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    
-    if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
-      loadedProducts = INITIAL_PRODUCTS;
-      localStorage.setItem('hl_acc_products', JSON.stringify(INITIAL_PRODUCTS));
-    } else {
-      // Merge defaults if missing
-      const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
-      const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
-      if (!hasConst || !hasMech) {
-        const merged = [...loadedProducts];
-        INITIAL_PRODUCTS.forEach(item => {
-          if (!merged.some(m => m.id === item.id)) {
-            merged.push(item);
+    let loadedProducts: any[] = [];
+    dbService.accountingProductCatalog.list()
+      .then(cloudProducts => {
+        if (cloudProducts && cloudProducts.length > 0) {
+          loadedProducts = cloudProducts;
+        }
+      })
+      .catch(err => console.warn('Lỗi tải danh mục sản phẩm từ Supabase:', err))
+      .finally(() => {
+        if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
+          loadedProducts = INITIAL_PRODUCTS;
+        } else {
+          // Merge defaults if missing
+          const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
+          const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
+          if (!hasConst || !hasMech) {
+            const merged = [...loadedProducts];
+            INITIAL_PRODUCTS.forEach(item => {
+              if (!merged.some(m => m.id === item.id)) {
+                merged.push(item);
+              }
+            });
+            loadedProducts = merged;
           }
-        });
-        localStorage.setItem('hl_acc_products', JSON.stringify(merged));
-        loadedProducts = merged;
-      }
-    }
-    
-    const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Xây dựng');
-    setCatalogProducts(domainProducts);
+        }
+        const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Xây dựng');
+        setCatalogProducts(domainProducts);
+      });
+  }, []);
+
+  // Nạp giá & chất liệu theo sản phẩm từ Supabase
+  useEffect(() => {
+    dbService.productPrices.list()
+      .then(list => { if (Array.isArray(list)) setAllProductPrices(list); })
+      .catch(err => console.warn('Lỗi tải giá sản phẩm từ Supabase:', err));
+    dbService.productMaterials.list()
+      .then(list => { if (Array.isArray(list)) setAllProductMaterials(list); })
+      .catch(err => console.warn('Lỗi tải chất liệu sản phẩm từ Supabase:', err));
   }, []);
 
   const categories = Array.from(new Set(catalogProducts.map(p => p.danhMuc as string).filter(Boolean)));
@@ -983,27 +1150,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   // Get all active linked prices for selectedProduct
   const getProductLinkedPrices = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (!savedPrices) return [];
-      const allPrices = JSON.parse(savedPrices);
-      return allPrices.filter((pr: any) => pr.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductPrices.filter((pr: any) => pr.productId === selectedProduct.id);
   };
 
   // Get all active linked materials for selectedProduct
   const getProductLinkedMaterials = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (!savedMaterials) return [];
-      const allMaterials = JSON.parse(savedMaterials);
-      return allMaterials.filter((m: any) => m.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductMaterials.filter((m: any) => m.productId === selectedProduct.id);
   };
 
   useEffect(() => {
@@ -1012,17 +1165,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       const defaultProd = probables[0];
       setSelectedProduct(defaultProd);
       
-      let subPrices: any[] = [];
-      try {
-        const savedPrices = localStorage.getItem('hl_acc_product_prices');
-        if (savedPrices) {
-          const allPrices = JSON.parse(savedPrices);
-          subPrices = allPrices.filter((pr: any) => pr.productId === defaultProd.id);
-        }
-      } catch (err) {
-        console.error("Error loading product prices:", err);
-      }
-      
+      const subPrices = allProductPrices.filter((pr: any) => pr.productId === defaultProd.id);
+
       if (subPrices.length > 0) {
         setSelectedPriceOption(subPrices[0].tenGia);
         setChosenPrice(subPrices[0].donGia);
@@ -1031,16 +1175,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         setChosenPrice(0);
       }
 
-      let subMats: any[] = [];
-      try {
-        const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-        if (savedMaterials) {
-          const allMaterials = JSON.parse(savedMaterials);
-          subMats = allMaterials.filter((m: any) => m.productId === defaultProd.id);
-        }
-      } catch (err) {
-        console.error("Error loading product materials:", err);
-      }
+      const subMats = allProductMaterials.filter((m: any) => m.productId === defaultProd.id);
 
       if (subMats.length > 0) {
         setSelectedMaterialOption(subMats[0].tenChatLieu);
@@ -1055,23 +1190,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setChosenPrice(0);
       setSelectedMaterialOption('');
     }
-  }, [selectedCategory, catalogProducts]);
+  }, [selectedCategory, catalogProducts, allProductPrices, allProductMaterials]);
 
   const handleProductSelect = (prod: any) => {
     setSelectedProduct(prod);
     setIsProdDropdownOpen(false);
-    
-    let subPrices: any[] = [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        subPrices = allPrices.filter((pr: any) => pr.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    
+
+    const subPrices = allProductPrices.filter((pr: any) => pr.productId === prod.id);
+
     if (subPrices.length > 0) {
       setSelectedPriceOption(subPrices[0].tenGia);
       setChosenPrice(subPrices[0].donGia);
@@ -1080,16 +1206,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setChosenPrice(0);
     }
 
-    let subMats: any[] = [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (savedMaterials) {
-        const allMaterials = JSON.parse(savedMaterials);
-        subMats = allMaterials.filter((m: any) => m.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const subMats = allProductMaterials.filter((m: any) => m.productId === prod.id);
 
     if (subMats.length > 0) {
       setSelectedMaterialOption(subMats[0].tenChatLieu);
@@ -1104,18 +1221,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     setSelectedPriceOption(option);
     if (!selectedProduct) return;
     if (option === 'Tự chọn') return;
-    
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        const match = allPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
-        if (match) {
-          setChosenPrice(match.donGia);
-        }
-      }
-    } catch (e) {
-      console.error(e);
+
+    const match = allProductPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
+    if (match) {
+      setChosenPrice(match.donGia);
     }
   };
 
@@ -1220,7 +1329,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     setCustomProductOtherUnitPrice(1000000);
   };
 
-  const handleSendToProject = () => {
+  const handleSendToProject = async () => {
     if (!selectedProjectId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn hoặc liên kết dự án trước khi gửi báo giá!', type: 'warning' });
       return;
@@ -1242,14 +1351,11 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     const itemCode = `BGXD-HL-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const pdfName = `Bao_gia_Xay_dung_${(customerName || 'Khach_hang').trim().replace(/\s+/g, '_')}.pdf`;
 
-    const rawTasks = localStorage.getItem('hl_erp_tasks');
     let currentTasks: any[] = [];
-    if (rawTasks) {
-      try {
-        currentTasks = JSON.parse(rawTasks);
-      } catch (e) {
-        console.error("Lỗi đọc tasks từ localStorage:", e);
-      }
+    try {
+      currentTasks = await dbService.tasks.list();
+    } catch (e) {
+      console.error("Lỗi đọc tasks từ Supabase:", e);
     }
 
     let taskUpdatedCount = 0;
@@ -1303,7 +1409,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
           size: `${Math.round(110 + Math.random() * 30)} KB`,
           createdAt: new Date().toLocaleDateString('vi-VN'),
           totalAmount: totalQuoteAmount,
-          discountPercent: config.discountPercent,
+          discountPercent: 0,
           items: quoteItems,
           customerName: customerName || 'Khách hàng',
           customerPhone: customerPhone || 'Chưa cung cấp',
@@ -1316,7 +1422,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
           companyAddressInfo: companyAddressInfo,
           companyContactInfo: companyContactInfo,
           code: itemCode,
-          content: `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc\n\nBẢNG BÁO GIÁ CHI TIẾT THI CÔNG XÂY DỰNG NĂM 2026\n--------------------------------------\nSố báo giá: ${itemCode}\nKhách hàng: ${customerName || 'Khách hàng'}\nSố điện thoại: ${customerPhone || 'Không có'}\nĐịa chỉ: ${customerAddress || 'Không có'}\nDự án liên kết: ${p.name}\n\nDANH SÁCH HẠNG MỤC CÔNG TÁC SƠ BỘ:\n${quoteItems.map((item, index) => `${index + 1}. ${item.productName} - Số lượng: ${item.qty} - Thành tiền: ${item.totalPrice.toLocaleString('vi-VN')} đ`).join('\n')}\n\n--------------------------------------\nTỔNG CỘNG CHƯA CHIẾT KHẤU: ${subtotal.toLocaleString('vi-VN')} đ\nCHIẾT KHẤU GIẢM GIÁ (${config.discountPercent}%): -${discountVal.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ THÔ: ${totalQuoteAmount.toLocaleString('vi-VN')} đ\nVAT (${vatPercent}%): ${vatAmount.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ TOÀN BỘ (ĐÃ BAO GỒM VAT): ${totalWithVat.toLocaleString('vi-VN')} đ\n\nNơi nhận: Khách hàng\nĐại diện bàn giao báo giá.`
+          content: `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc\n\nBẢNG BÁO GIÁ CHI TIẾT THI CÔNG XÂY DỰNG NĂM 2026\n--------------------------------------\nSố báo giá: ${itemCode}\nKhách hàng: ${customerName || 'Khách hàng'}\nSố điện thoại: ${customerPhone || 'Không có'}\nĐịa chỉ: ${customerAddress || 'Không có'}\nDự án liên kết: ${p.name}\n\nDANH SÁCH HẠNG MỤC CÔNG TÁC SƠ BỘ:\n${quoteItems.map((item, index) => `${index + 1}. ${item.productName} - Số lượng: ${item.qty} - Thành tiền: ${item.totalPrice.toLocaleString('vi-VN')} đ`).join('\n')}\n\n--------------------------------------\nTỔNG CỘNG GIÁ TRỊ HẠNG MỤC: ${subtotal.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ TOÀN BỘ: ${totalWithVat.toLocaleString('vi-VN')} đ\n\nNơi nhận: Khách hàng\nĐại diện bàn giao báo giá.`
         };
 
         dbService.projects.save({
@@ -1332,11 +1438,9 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       return p;
     });
 
-    localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjects));
     window.dispatchEvent(new CustomEvent('hl-projects-updated'));
 
     if (taskUpdatedCount > 0) {
-      localStorage.setItem('hl_erp_tasks', JSON.stringify(updatedTasks));
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
 
       updatedTasks.forEach(t => {
@@ -1370,12 +1474,13 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   };
 
   // Tổng cộng hóa đơn
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ — thành tiền = tổng tiền gốc.
   const subtotal = quoteItems.reduce((acc, i) => acc + i.totalPrice, 0);
-  const discountVal = subtotal * (config.discountPercent / 100);
-  const totalQuoteAmount = subtotal - discountVal;
-  const vatPercent = config.vatPercent !== undefined ? config.vatPercent : 8;
-  const vatAmount = totalQuoteAmount * (vatPercent / 100);
-  const totalWithVat = totalQuoteAmount + vatAmount;
+  const discountVal = 0;
+  const totalQuoteAmount = subtotal;
+  const vatPercent = 0;
+  const vatAmount = 0;
+  const totalWithVat = subtotal;
 
   const handleSaveQuote = async () => {
     if (!loadedQuote && selectedProjectId) {
@@ -1419,7 +1524,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         tongDienTichXayDung: chieuDai * chieuRong * soTang,
         date: new Date().toISOString().split('T')[0],
         items: quoteItems,
-        config: config,
+        config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
         status: 'draft',
         notes: quoteNotes,
         paymentTerms: paymentTerms,
@@ -1743,6 +1848,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   onChange={(html) => setContractTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="indigo"
+                  // Phóng khung soạn thảo lên xấp xỉ 1 trang A4 (~1123px cao ở 96dpi,
+                  // theo đúng quy ước A4=794px bề ngang đã dùng khi xuất PDF ở nơi
+                  // khác trong file này) để dễ theo dõi toàn bộ mẫu hợp đồng dài.
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 self-start">
@@ -1825,6 +1934,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   onChange={(html) => setAcceptanceTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="indigo"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 self-start">
@@ -1887,6 +1997,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   onChange={(html) => setLiquidationTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="indigo"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 self-start">
@@ -2026,7 +2137,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   return (
     <div className="space-y-6 text-left" id="const_quote_estimator_panel">
       {feedback && (
-        <div className="bg-emerald-50 border border-emerald-250 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="const_estimator_feedback">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="const_estimator_feedback">
           <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500"></div>
           <span className="pl-2">{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="text-emerald-600 font-black hover:text-emerald-950 px-2 cursor-pointer transition-colors">✕</button>
@@ -2220,7 +2331,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                               onClick={() => handleSelectCustomer(c)}
                               className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
                                 selectedCustomerId === c.id 
-                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-250 font-bold' 
+                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold' 
                                   : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                               }`}
                             >
@@ -2247,6 +2358,20 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   </div>
                 </div>
 
+                {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                    Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                    Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                  <input
+                    type="text"
+                    value={customerRepresentative}
+                    onChange={(e) => setCustomerRepresentative(e.target.value)}
+                    className="w-full bg-white text-slate-800 border border-slate-200 rounded-lg p-2.5 outline-none font-semibold text-xs focus:border-indigo-500 transition-all shadow-sm"
+                    placeholder="Mặc định theo Tên khách hàng"
+                  />
+                </div>
+
                 {/* Số điện thoại */}
                 <div>
                   <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Số điện thoại <span className="text-rose-500 font-bold">*</span></label>
@@ -2271,101 +2396,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   />
                 </div>
 
-                {/* Chiết khấu (%) */}
-                <div>
-                  <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                    <span>Chiết khấu thầu (%)</span>
-                    <span className="text-indigo-600 font-black text-[8px] bg-indigo-50 px-1 hover:bg-indigo-100 rounded border border-indigo-200 flex items-center gap-0.5">
-                      % GIẢM
-                    </span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={config.discountPercent}
-                    onChange={(e) => {
-                      const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                      handleConfigChange('discountPercent', val);
-                    }}
-                    className="w-full bg-white rounded-lg p-2.5 border border-slate-200 text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-xs font-semibold transition-all font-mono"
-                    placeholder="Nhập % chiết khấu..."
-                  />
-                </div>
-
-                {/* Thuế VAT (%) */}
-                <div>
-                  <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                    <span>Thuế VAT (%)</span>
-                    <span className="text-indigo-600 font-black text-[8px] bg-indigo-50 px-1 hover:bg-indigo-100 rounded border border-indigo-200 flex items-center gap-0.5">
-                      % VAT
-                    </span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={config.vatPercent !== undefined ? config.vatPercent : 8}
-                    onChange={(e) => {
-                      const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                      handleConfigChange('vatPercent', val);
-                    }}
-                    className="w-full bg-white rounded-lg p-2.5 border border-slate-200 text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-xs font-semibold transition-all font-mono"
-                    placeholder="Nhập % thuế VAT..."
-                  />
-                </div>
               </div>
-            ) : (
-              <div className="flex flex-col sm:flex-row justify-end items-center gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs w-full">
-                <div className="w-full sm:w-[180px] text-left">
-                  <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                    <span>Chiết khấu thầu (%)</span>
-                    <span className="text-indigo-600 font-black text-[8px] bg-indigo-50 px-1 hover:bg-indigo-100 rounded border border-indigo-200 flex items-center gap-0.5">
-                      % GIẢM
-                    </span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={config.discountPercent}
-                    onChange={(e) => {
-                      const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                      handleConfigChange('discountPercent', val);
-                    }}
-                    className="w-full bg-white rounded-lg p-2.5 border border-slate-200 text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-xs font-semibold transition-all font-mono"
-                    placeholder="Nhập % chiết khấu..."
-                  />
-                </div>
-
-                <div className="w-full sm:w-[180px] text-left">
-                  <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                    <span>Thuế VAT (%)</span>
-                    <span className="text-indigo-600 font-black text-[8px] bg-indigo-50 px-1 hover:bg-indigo-100 rounded border border-indigo-200 flex items-center gap-0.5">
-                      % VAT
-                    </span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={config.vatPercent !== undefined ? config.vatPercent : 8}
-                    onChange={(e) => {
-                      const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                      handleConfigChange('vatPercent', val);
-                    }}
-                    className="w-full bg-white rounded-lg p-2.5 border border-slate-200 text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-xs font-semibold transition-all font-mono"
-                    placeholder="Nhập % thuế VAT..."
-                  />
-                </div>
-              </div>
-            )}
+            ) : null}
 
             {/* THÊM CÔNG TÁC XÂY DỰNG FORM */}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40">
               
               {/* Header của form */}
-              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-205 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-200">
                     <Calculator className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
@@ -2479,7 +2517,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                                 placeholder="Gõ tìm nhanh loại nhà..."
                                 className="w-full bg-slate-50 text-slate-800 border border-slate-200 rounded-md pl-7 pr-2.5 py-1 text-[11px] outline-none focus:border-indigo-500 font-medium placeholder-slate-400"
                               />
-                              <Search className="w-3 h-3 text-slate-405 absolute left-2 top-2" />
+                              <Search className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
                             </div>
                             <div className="space-y-0.5">
                               {houseEstimatePrices
@@ -2515,7 +2553,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                     {/* Diện tích thi công mỗi tầng & Tổng diện tích sàn */}
                     <div className="grid grid-cols-2 gap-3.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                       <div>
-                        <span className="block text-[9px] uppercase tracking-wider text-slate-505 font-extrabold text-left">Diện tích sàn mỗi tầng</span>
+                        <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-extrabold text-left">Diện tích sàn mỗi tầng</span>
                         <div className="text-sm font-extrabold text-emerald-600 font-mono mt-0.5">
                           {(chieuDai * chieuRong).toFixed(2)} <span className="text-[10px] font-normal text-slate-500">m²</span>
                         </div>
@@ -2688,7 +2726,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                           setSearchProductQuery('');
                         }}
                         className={`w-full bg-white text-slate-800 border rounded-xl p-3 text-xs text-left transition-all flex items-center justify-between cursor-pointer focus:ring-1 focus:ring-indigo-500/20 ${
-                          selectedCategory ? 'border-slate-200 hover:border-slate-355' : 'border-slate-150 opacity-50 cursor-not-allowed'
+                          selectedCategory ? 'border-slate-200 hover:border-slate-350' : 'border-slate-200 opacity-50 cursor-not-allowed'
                         }`}
                         disabled={!selectedCategory}
                       >
@@ -3135,19 +3173,10 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
             <div className="grid grid-cols-2 text-xs text-slate-600 gap-y-1.5">
               <span>Hợp tổng thô hạng mục:</span>
               <span className="text-right font-mono font-bold text-slate-800">{subtotal.toLocaleString('vi-VN')} đ</span>
-              
-              <span>Chiết khấu thầu thô ({config.discountPercent}%):</span>
-              <span className="text-right font-mono font-bold text-rose-600">-{discountVal.toLocaleString('vi-VN')} đ</span>
-              
-              <span>Tổng giá trị thô:</span>
-              <span className="text-right font-mono font-semibold text-slate-700">{totalQuoteAmount.toLocaleString('vi-VN')} đ</span>
-
-              <span>Thuế VAT ({vatPercent}%):</span>
-              <span className="text-right font-mono font-bold text-indigo-550">+{vatAmount.toLocaleString('vi-VN')} đ</span>
 
               <div className="col-span-2 border-t border-slate-100 my-1.5"></div>
-              
-              <span className="text-sm font-bold text-slate-805">TỔNG GIÁ TRỊ TOÀN BỘ (ĐÃ CÓ VAT):</span>
+
+              <span className="text-sm font-bold text-slate-800">TỔNG GIÁ TRỊ TOÀN BỘ:</span>
               <span className="text-right text-base font-extrabold text-indigo-600 font-mono">{totalWithVat.toLocaleString('vi-VN')} đ</span>
             </div>
 
@@ -3223,7 +3252,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                     tongDienTichXayDung: chieuDai * chieuRong * soTang,
                     date: new Date().toISOString().split('T')[0],
                     items: quoteItems,
-                    config: config,
+                    config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
                     notes: quoteNotes,
                     paymentTerms: paymentTerms,
                     customerName: customerName,
@@ -3251,13 +3280,16 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
         </div>
 
-        {/* Dynamic Preview Modal */}
-        {savedQuoteForPreview && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text">
-            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden">
-              <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between">
+        {/* Dynamic Preview Modal — dùng React Portal render thẳng vào document.body, tách
+            hoàn toàn khỏi cây component của ứng dụng. Nếu để lồng sâu như cũ, khi nội dung
+            dài nhiều trang, các thẻ cha (fixed, flex, overflow...) sẽ khiến Chrome tính sai
+            vị trí và in đè chữ lên nhau ở các trang sau. */}
+        {savedQuoteForPreview && createPortal(
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text print-portal-backdrop">
+            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 print-portal-card">
+              <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between print-hide">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-250">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-200">
                     <FileText className="w-4 h-4 text-[#4f46e5]" />
                   </div>
                   <div>
@@ -3267,23 +3299,96 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                     <p className="text-[10px] text-slate-500 font-medium">Biên bản dự toán tạo lập tự động - HOANG LONG ERP</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => setSavedQuoteForPreview(null)}
                   className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs"
                 >
                   ✕
                 </button>
               </div>
-              <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
+              <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto" id="print-area-archive">
+                {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ ứng dụng (#root), chỉ chừa lại
+                    đúng modal đã tách portal này để nội dung chảy tự nhiên qua nhiều trang
+                    mà không bị lỗi in đè chữ. */}
+                <style>{`
+                  @media print {
+                    #root {
+                      display: none !important;
+                    }
+                    .print-portal-backdrop {
+                      position: static !important;
+                      display: block !important;
+                      background: none !important;
+                      padding: 0 !important;
+                    }
+                    .print-portal-card {
+                      max-width: 100% !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                      border-radius: 0 !important;
+                      overflow: visible !important;
+                    }
+                    #print-area-archive {
+                      max-height: none !important;
+                      overflow: visible !important;
+                      padding: 0 !important;
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                       khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                       nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                    #print-area-archive * {
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    .print-hide {
+                      display: none !important;
+                    }
+                    /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                       panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                       hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                       của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                       duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                       cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                       hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                       khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                    #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                    #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                    #print-area-archive .md\\:text-right { text-align: right !important; }
+                    #print-area-archive .md\\:text-left { text-align: left !important; }
+                    #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                    #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                    #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                    #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+                  }
+                `}</style>
                 <QuotationTableSheet quoteData={savedQuoteForPreview} />
               </div>
-              <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5">
+              <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5 print-hide">
                 <button
                   type="button"
                   onClick={() => setSavedQuoteForPreview(null)}
                   className="px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-extrabold text-xs rounded-xl cursor-pointer"
                 >
                   Thoát
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadArchivePdf(savedQuoteForPreview)}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                  title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Tải PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shareArchivePdf(savedQuoteForPreview)}
+                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  Chia Sẻ
                 </button>
                 <button
                   type="button"
@@ -3297,14 +3402,15 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
       {showExistsAlert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 animate-none">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
               <h4 className="font-extrabold text-base uppercase text-white tracking-wide">
@@ -3327,7 +3433,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
       {showQuickCreateCust && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[220] p-4 text-left font-sans">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden p-6 animate-in fade-in zoom-in-95 duration-200">
             <h4 className="font-extrabold text-sm uppercase text-slate-900 tracking-wider mb-4 flex items-center gap-1">
               <span>➕ Tạo Khách Hàng Thầu Nhanh</span>
             </h4>
@@ -3338,7 +3444,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   type="text"
                   value={quickCustName}
                   onChange={(e) => setQuickCustName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-505 font-medium text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 font-medium text-slate-900"
                   placeholder="Nhập tên khách hàng..."
                 />
               </div>
@@ -3348,7 +3454,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   type="text"
                   value={quickCustPhone}
                   onChange={(e) => setQuickCustPhone(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-505 font-medium text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 font-medium text-slate-900"
                   placeholder="Nhập số điện thoại..."
                 />
               </div>
@@ -3358,7 +3464,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   type="text"
                   value={quickCustAddress}
                   onChange={(e) => setQuickCustAddress(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-505 font-medium text-slate-900"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 font-medium text-slate-900"
                   placeholder="Nhập địa chỉ..."
                 />
               </div>

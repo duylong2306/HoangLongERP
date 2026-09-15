@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { sanitizeHTML } from '../lib/sanitize';
-import { FileText, Printer, Download, ClipboardList, FileSignature, FileCheck, Coins, CheckCircle2 } from 'lucide-react';
+import { FileText, Printer, Download, ClipboardList, FileSignature, FileCheck, Coins, CheckCircle2, XCircle } from 'lucide-react';
 import ContractDocument from './ContractDocument';
 import AcceptanceDocument from './AcceptanceDocument';
 import LiquidationDocument from './LiquidationDocument';
 import FinalQuoteDocument from './FinalQuoteDocument';
-import { dbService } from '../lib/dbService';
+import { dbService, invalidateCache } from '../lib/dbService';
+import { useNotification } from '../context';
 
 // Helper function to read Vietnamese numbers aloud in text format
 export function docSoTiengViet(number: number): string {
@@ -71,6 +72,7 @@ interface QuotationTableSheetProps {
   quoteData: {
     name?: string;
     code?: string;
+    customerId?: string;
     customerName?: string;
     customerPhone?: string;
     customerAddress?: string;
@@ -106,9 +108,11 @@ interface QuotationTableSheetProps {
     estimatorMode?: string;
   };
   initialTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  onApproved?: (updated: any) => void;
 }
 
-export default function QuotationTableSheet({ quoteData, initialTab }: QuotationTableSheetProps) {
+export default function QuotationTableSheet({ quoteData, initialTab, onApproved }: QuotationTableSheetProps) {
+  const { addToast } = useNotification();
   // If items list is missing, we try to create an item list from fallback or text content parsed
   let items = quoteData.items || [];
   
@@ -166,84 +170,185 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
   }
 
   // Financial values
-  const totalAmount = quoteData.totalAmount || items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-  const discountPercent = quoteData.discountPercent || 0;
-  
-  // Calculate Subtotal back from totalAmount and discount
-  // totalAmount = subtotal * (1 - discountPercent/100)
-  const subtotalBeforeDiscount = discountPercent > 0 
-    ? Math.round(totalAmount / (1 - discountPercent / 100))
-    : items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    
-  const discountValue = subtotalBeforeDiscount * (discountPercent / 100);
-  const subtotalAfterDiscount = subtotalBeforeDiscount - discountValue;
-  const sheetVatPercent = quoteData.config?.vatPercent !== undefined ? quoteData.config.vatPercent : 8;
-  const vatAmount = Math.round(subtotalAfterDiscount * (sheetVatPercent / 100)); // Dynamic VAT
-  const grandTotal = subtotalAfterDiscount + vatAmount;
+  const itemsTotal = items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ Xây dựng / Nội thất / Cơ khí.
+  // Thành tiền = tổng tiền gốc (tổng các hạng mục), không cộng VAT, không trừ chiết khấu.
+  const totalAmount = quoteData.totalAmount || itemsTotal;
+  const discountPercent = 0;
+  const grandTotal = totalAmount;
 
   const [isApproved, setIsApproved] = useState<boolean>(() => {
     return !!(quoteData as any).isApproved;
   });
+  const [unapproving, setUnapproving] = useState(false);
+
+  // Thông tin doanh nghiệp hiển thị ở header Báo Giá — lấy đúng theo hồ sơ đã lưu
+  // tại "Cài Đặt Hệ Thống > Thông Tin Doanh Nghiệp" (bảng business_profile) thay
+  // vì hard-code cứng tên/địa chỉ/SĐT cũ trong JSX bên dưới.
+  const [businessInfo, setBusinessInfo] = useState<any>(null);
+  useEffect(() => {
+    dbService.businessProfile.get().then(setBusinessInfo).catch(() => {});
+  }, []);
 
   const handleApproveQuote = async () => {
     try {
+      const approvedAt = new Date().toLocaleString('vi-VN');
+      const approvedBy = 'Trương Hữu Long (Giám Đốc)';
+
+      // 1. Ghi trạng thái duyệt xuống DB (archived_quotes)
       if ((quoteData as any).id) {
-        await dbService.updateQuoteDocHtml((quoteData as any).id, { isApproved: true });
-        (quoteData as any).isApproved = true;
+        await dbService.updateQuoteDocHtml((quoteData as any).id, {
+          isApproved: true,
+          approvedAt,
+          approvedBy
+        });
       }
 
-      const saved = localStorage.getItem('hl_erp_projects');
-      if (saved) {
-        const projs = JSON.parse(saved);
-        let found = false;
-        const updatedProjs = projs.map((p: any) => {
-          const isMatch = 
-            (p.baoGiaFile?.code && quoteData.code && p.baoGiaFile.code === quoteData.code) ||
-            (p.id && (quoteData as any).projectId && p.id === (quoteData as any).projectId) ||
-            (p.name && quoteData.projectName && p.name === quoteData.projectName);
-          
-          if (isMatch) {
-            found = true;
-            return {
-              ...p,
-              baoGiaFile: {
-                ...p.baoGiaFile,
-                name: p.baoGiaFile?.name || `${quoteData.code || 'BAO_GIA'}.pdf`,
-                size: p.baoGiaFile?.size || '1.2 MB',
-                createdAt: p.baoGiaFile?.createdAt || quoteData.createdAt || new Date().toLocaleDateString('vi-VN'),
-                totalAmount: p.baoGiaFile?.totalAmount || quoteData.totalAmount || totalAmount || 0,
-                discountPercent: p.baoGiaFile?.discountPercent !== undefined ? p.baoGiaFile.discountPercent : (quoteData.config?.discountPercent || discountPercent || 0),
-                items: p.baoGiaFile?.items || quoteData.items || items || [],
-                content: p.baoGiaFile?.content || quoteData.content || '',
-                isApproved: true,
-                approvedAt: new Date().toLocaleString('vi-VN'),
-                approvedBy: 'Trương Hữu Long (Giám Đốc)'
-              }
-            };
-          }
-          return p;
-        });
+      // 2. Luôn cập nhật giao diện (không phụ thuộc vào việc có liên kết dự án hay không)
+      (quoteData as any).isApproved = true;
+      setIsApproved(true);
 
-        if (found) {
-          localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjs));
-          setIsApproved(true);
-          
-          const matchedProj = updatedProjs.find((p: any) => 
-            (p.baoGiaFile?.code && quoteData.code && p.baoGiaFile.code === quoteData.code) ||
-            (p.id && (quoteData as any).projectId && p.id === (quoteData as any).projectId) ||
-            (p.name && quoteData.projectName && p.name === quoteData.projectName)
-          );
+      // 3. Báo component cha cập nhật danh sách & badge trạng thái
+      if (onApproved) {
+        onApproved({ ...quoteData, isApproved: true, approvedAt, approvedBy });
+      }
+
+      // 4. Đồng bộ trạng thái duyệt vào dự án trên Supabase (bỏ localStorage hoàn toàn)
+      console.log('[DEBUG Duyệt BG] quoteData:', {
+        id: (quoteData as any).id,
+        code: quoteData.code,
+        projectId: (quoteData as any).projectId,
+        projectName: quoteData.projectName,
+        totalAmount: quoteData.totalAmount,
+      });
+
+      // Helper: tạo object baoGiaFile cập nhật
+      const buildUpdatedBaoGiaFile = (existingBaoGia: any) => ({
+        ...(existingBaoGia || {}),
+        name: existingBaoGia?.name || `${quoteData.code || 'BAO_GIA'}.pdf`,
+        size: existingBaoGia?.size || '1.2 MB',
+        createdAt: existingBaoGia?.createdAt || quoteData.createdAt || new Date().toLocaleDateString('vi-VN'),
+        totalAmount: existingBaoGia?.totalAmount || quoteData.totalAmount || totalAmount || 0,
+        discountPercent: existingBaoGia?.discountPercent !== undefined ? existingBaoGia.discountPercent : (quoteData.config?.discountPercent || discountPercent || 0),
+        items: existingBaoGia?.items || quoteData.items || items || [],
+        content: existingBaoGia?.content || quoteData.content || '',
+        isApproved: true,
+        approvedAt,
+        approvedBy
+      });
+
+      const projectId = (quoteData as any).projectId;
+      const projectName = quoteData.projectName;
+      const baoGiaCode = quoteData.code;
+
+      if (projectId || projectName || baoGiaCode) {
+        try {
+          // Fetch projects từ Supabase
+          const allProjs = await dbService.projects.list();
+          console.log(`[DEBUG Duyệt BG] Supabase: ${allProjs.length} dự án`);
+
+          const matchedProj = allProjs.find((p: any) => {
+            if (projectId && p.id === projectId) return true;
+            if (baoGiaCode && p.baoGiaFile?.code === baoGiaCode) return true;
+            if (projectName && p.name === projectName) return true;
+            return false;
+          });
+
           if (matchedProj) {
-            await dbService.projects.save(matchedProj).catch(err => {
-              console.error("Lỗi đồng bộ duyệt báo giá lên Firestore:", err);
+            console.log(`[DEBUG Duyệt BG] ✅ Tìm thấy dự án "${matchedProj.name}" (id=${matchedProj.id})`);
+
+            const updatedProj = {
+              ...matchedProj,
+              baoGiaFile: buildUpdatedBaoGiaFile(matchedProj.baoGiaFile)
+            };
+
+            console.log('[DEBUG Duyệt BG] 🔄 Đồng bộ dự án lên Supabase...', {
+              id: updatedProj.id,
+              name: updatedProj.name,
+              'baoGiaFile?.isApproved': updatedProj.baoGiaFile?.isApproved,
+              'baoGiaFile?.totalAmount': updatedProj.baoGiaFile?.totalAmount,
             });
+
+            await dbService.projects.save(updatedProj).catch(err => {
+              console.error("Lỗi đồng bộ duyệt báo giá lên Supabase:", err);
+            });
+            console.log('[DEBUG Duyệt BG] ✅ Đã đồng bộ dự án lên Supabase thành công');
+
+            // ─── 4b. Lưu Công nợ Thu vào accounting_receivables ───
+            const projectId = matchedProj.id;
+            const sectorLabel = quoteData.sector === 'construction' ? 'Xây dựng'
+              : quoteData.sector === 'mechanical' ? 'Cơ khí' : 'Nội thất';
+            try {
+              // Invalidate cache rồi query để tìm record auto cũ theo projectId
+              invalidateCache('accounting_receivables');
+              const existingRecs = await dbService.accountingReceivables.list();
+              const existingAuto = existingRecs.find((r: any) => r.projectId === projectId && r.isAuto === true);
+              const recPayload: any = {
+                projectName: quoteData.projectName || '',
+                investor: quoteData.customerName || '',
+                // Gắn customerId để dòng Công nợ Thu tự sinh này gom đúng nhóm
+                // với khách hàng (tránh tách thành dòng riêng theo tên trong
+                // Công nợ Thu — xem sự cố Nguyễn Thị Xuân Quỳnh 2026-08-23).
+                customerId: quoteData.customerId || undefined,
+                field: sectorLabel,
+                contractValue: grandTotal,
+                collected: 0,
+                remaining: grandTotal,
+                notes: '',
+                isAuto: true,
+                projectId,
+              };
+              if (existingAuto) {
+                recPayload.id = existingAuto.id;
+              } else {
+                recPayload.id = crypto.randomUUID();
+              }
+              await dbService.accountingReceivables.save(recPayload);
+              console.log('[DEBUG Duyệt BG] ✅ Đã lưu Công nợ Thu vào accounting_receivables:', { id: recPayload.id, projectName: quoteData.projectName, contractValue: grandTotal });
+            } catch (err) {
+              console.error('[DEBUG Duyệt BG] ❌ Lỗi lưu Công nợ Thu:', err);
+            }
+
+            setIsApproved(true);
+            console.log('[DEBUG Duyệt BG] 🚀 Phát sự kiện hl-projects-updated');
+            window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+          } else {
+            console.warn('[DEBUG Duyệt BG] ❌ KHÔNG tìm thấy dự án phù hợp trên Supabase!');
+            console.warn('[DEBUG Duyệt BG] Thông tin:', { projectId, projectName, baoGiaCode });
           }
-          
-          window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+        } catch (e) {
+          console.error('[DEBUG Duyệt BG] Lỗi khi cập nhật dự án trên Supabase:', e);
         }
+      } else {
+        console.warn('[DEBUG Duyệt BG] ⚠️ Không có projectId/projectName/baoGiaCode → không đồng bộ vào dự án');
       }
     } catch (e) {
       console.error("Lỗi khi duyệt báo giá:", e);
+    }
+  };
+
+  // Hủy phê duyệt: mở khóa lại để sửa Báo Giá khi cần điều chỉnh số liệu/hạng mục.
+  // Chỉ đổi cờ isApproved — không đụng tới items/nội dung đã lưu. Không cần trừ lại
+  // Công Nợ Thu ở đây vì Công Nợ Thu hiện được tính động theo Hợp Đồng đã duyệt
+  // (contractApproved), không còn phụ thuộc trạng thái duyệt của Báo Giá.
+  const handleUnapproveQuote = async () => {
+    if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Báo Giá?\nSau khi sửa xong cần Duyệt Báo Giá lại từ đầu.')) return;
+    try {
+      setUnapproving(true);
+      if ((quoteData as any).id) {
+        await dbService.updateQuoteDocHtml((quoteData as any).id, { isApproved: false });
+      }
+      (quoteData as any).isApproved = false;
+      setIsApproved(false);
+      if (onApproved) {
+        onApproved({ ...quoteData, isApproved: false });
+      }
+      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Báo Giá đã được mở khóa để chỉnh sửa.', type: 'info' });
+    } catch (e) {
+      console.error('Lỗi khi hủy phê duyệt báo giá:', e);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi hủy phê duyệt. Vui lòng thử lại!', type: 'error' });
+    } finally {
+      setUnapproving(false);
     }
   };
 
@@ -350,13 +455,26 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
 
             {quoteData.selectedHouseType && subQuoteTab === 'takeoff' ? (
               <div className="bg-white p-3 md:p-8 rounded-2xl shadow-sm border border-slate-250 select-text font-serif text-slate-900 leading-normal max-w-5xl mx-auto my-1 relative print:border-none print:shadow-none print:p-0">
-                {/* Print Trigger Button */}
-                <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print">
+                {/* Print Trigger Button — nằm trong luồng bố cục bình thường (không absolute) để
+                    không đè lên tên doanh nghiệp thật (dài, có thể xuống 2 dòng) lấy từ Cài Đặt
+                    Hệ Thống — trước đây định vị "absolute top-6" chỉ vừa mắt với "HOANG LONG" ngắn. */}
+                <div className="flex items-center justify-end gap-2 mb-3 print:hidden no-print">
                   {isApproved ? (
-                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Đã Duyệt
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Đã Duyệt
+                      </span>
+                      <button
+                        onClick={handleUnapproveQuote}
+                        disabled={unapproving}
+                        title="Hủy phê duyệt để mở khóa chỉnh sửa"
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Hủy phê duyệt
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={handleApproveQuote}
@@ -375,9 +493,11 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                   </button>
                 </div>
 
+                {/* Chỉ hiện trên màn hình khi đang xem/chỉnh sửa — KHÔNG in ra bản in/PDF
+                    (print:hidden, khớp với logic loại bỏ phần tử của generateArchivePdfBlob()). */}
                 {isApproved && (
-                  <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500 animate-pulse" />
+                  <div className="absolute top-20 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
                     ĐÃ PHÊ DUYỆT
                   </div>
                 )}
@@ -393,18 +513,18 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                       </svg>
                     </div>
                     <div>
-                      <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">HOANG LONG</h1>
-                      <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">Construction - Furniture - Doors</p>
+                      <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">{businessInfo?.companyName || 'HOANG LONG'}</h1>
+                      <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">{businessInfo?.businessSector || 'Construction - Furniture - Doors'}</p>
                       <div className="text-[9px] text-slate-500 font-sans mt-1">
-                        <p className="m-0">📍 Địa điểm kinh doanh: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
-                        <p className="m-0">🏠 Địa chỉ: 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>
+                        <p className="m-0">📍 Địa chỉ: {businessInfo?.address || 'Đang cập nhật'}</p>
+                        <p className="m-0">🧾 MST: {businessInfo?.taxCode || 'Đang cập nhật'}</p>
                       </div>
                     </div>
                   </div>
                   <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
-                    <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> 0966 545 959 - 0374 883 979</p>
-                    <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> hoanglongld.com@gmail.com</p>
-                    <p className="m-0"><span className="font-bold text-slate-700">🌐 Web:</span> hoanglongld.com</p>
+                    <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo?.phone || 'Đang cập nhật'}</p>
+                    <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo?.email || 'Đang cập nhật'}</p>
+                    <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo?.representative || 'Đang cập nhật'}</p>
                   </div>
                 </div>
 
@@ -426,6 +546,12 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                       <span className="font-bold text-slate-700 w-24 shrink-0">Khách hàng:</span>
                       <span className="text-slate-800 font-semibold border-b border-dotted border-slate-300 grow pb-0.5">{quoteData.customerName || 'Chị Ngân Nguyễn'}</span>
                     </div>
+                    {quoteData.config?.customerRepresentative && (
+                      <div className="flex items-baseline">
+                        <span className="font-bold text-slate-700 w-24 shrink-0">Người đại diện:</span>
+                        <span className="text-slate-800 font-semibold border-b border-dotted border-slate-300 grow pb-0.5">{quoteData.config.customerRepresentative}</span>
+                      </div>
+                    )}
                     <div className="flex items-baseline">
                       <span className="font-bold text-slate-700 w-24 shrink-0">Địa chỉ:</span>
                       <span className="text-slate-800 border-b border-dotted border-slate-300 grow pb-0.5 leading-relaxed">{quoteData.customerAddress || 'Lâm Đồng'}</span>
@@ -577,7 +703,7 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                     </div>
                     <div className="pt-2">
                       <span className="font-black text-slate-800 text-xs underline decoration-dotted tracking-wider font-sans">
-                        {quoteData.customerName || 'Ngon Nguyễn'}
+                        {quoteData.config?.customerRepresentative || quoteData.customerName || 'Ngon Nguyễn'}
                       </span>
                     </div>
                   </div>
@@ -587,13 +713,27 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
               <FinalQuoteDocument quoteData={quoteData} />
             ) : (
               <div className="bg-white p-3 md:p-8 rounded-2xl shadow-sm border border-slate-250 select-text font-serif text-slate-900 leading-normal max-w-4xl mx-auto my-1 relative print:border-none print:shadow-none print:p-0">
-                {/* Print Trigger & Approval Buttons (Visible only on UI screen, hidden during printing) */}
-                <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print">
+                {/* Print Trigger & Approval Buttons (Visible only on UI screen, hidden during printing).
+                    Nằm trong luồng bố cục bình thường (không absolute) để không đè lên tên doanh
+                    nghiệp thật (dài, có thể xuống 2 dòng) lấy từ Cài Đặt Hệ Thống — trước đây định
+                    vị "absolute top-6" chỉ vừa mắt với chữ "HOANG LONG" ngắn hard-code cũ. */}
+                <div className="flex items-center justify-end gap-2 mb-3 print:hidden no-print">
                   {isApproved ? (
-                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Đã Duyệt
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Đã Duyệt
+                      </span>
+                      <button
+                        onClick={handleUnapproveQuote}
+                        disabled={unapproving}
+                        title="Hủy phê duyệt để mở khóa chỉnh sửa"
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Hủy phê duyệt
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={handleApproveQuote}
@@ -608,13 +748,15 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                     className="px-3.5 py-1.5 bg-[#00a651] text-white hover:bg-[#008f45] transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
                   >
                     <Printer className="w-3.5 h-3.5" />
-                    In Báo Giá
+                    In Hồ Sơ
                   </button>
                 </div>
 
+                {/* Chỉ hiện trên màn hình khi đang xem/chỉnh sửa — KHÔNG in ra bản in/PDF
+                    (print:hidden, khớp với logic loại bỏ phần tử của generateArchivePdfBlob()). */}
                 {isApproved && (
-                  <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500 animate-pulse" />
+                  <div className="absolute top-20 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
                     ĐÃ PHÊ DUYỆT
                   </div>
                 )}
@@ -642,14 +784,22 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
           )}
           <div>
             <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">
-              {quoteData.companyLogoText !== undefined && quoteData.companyLogoText !== '' ? quoteData.companyLogoText : "HOANG LONG"}
+              {businessInfo?.companyName || (quoteData.companyLogoText !== undefined && quoteData.companyLogoText !== '' ? quoteData.companyLogoText : "HOANG LONG")}
             </h1>
             <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">
-              {quoteData.companySlogan !== undefined && quoteData.companySlogan !== '' ? quoteData.companySlogan : "Construction - Furniture - Doors"}
+              {businessInfo?.businessSector || (quoteData.companySlogan !== undefined && quoteData.companySlogan !== '' ? quoteData.companySlogan : "Construction - Furniture - Doors")}
             </p>
-            {quoteData.companyAddressInfo ? (
-              <div 
-                className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5" 
+            {/* Ưu tiên hồ sơ doanh nghiệp lấy từ "Cài Đặt Hệ Thống" (business_profile) —
+                chỉ dùng nội dung tùy chỉnh riêng theo từng báo giá (companyAddressInfo)
+                khi CHƯA tải được hồ sơ chung, tránh hiển thị địa chỉ/SĐT cũ đã lỗi thời. */}
+            {businessInfo ? (
+              <div className="text-[9px] text-slate-500 font-sans mt-1">
+                <p className="m-0">📍 Địa chỉ: {businessInfo.address || 'Đang cập nhật'}</p>
+                <p className="m-0">🧾 MST: {businessInfo.taxCode || 'Đang cập nhật'}</p>
+              </div>
+            ) : quoteData.companyAddressInfo ? (
+              <div
+                className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5"
                 dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyAddressInfo) }}
               />
             ) : (
@@ -661,9 +811,15 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
           </div>
         </div>
 
-        {quoteData.companyContactInfo ? (
-          <div 
-            className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1 text-left md:text-right" 
+        {businessInfo ? (
+          <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
+            <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo.phone || 'Đang cập nhật'}</p>
+            <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo.email || 'Đang cập nhật'}</p>
+            <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo.representative || 'Đang cập nhật'}</p>
+          </div>
+        ) : quoteData.companyContactInfo ? (
+          <div
+            className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1 text-left md:text-right"
             dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyContactInfo) }}
           />
         ) : (
@@ -697,6 +853,12 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
             <span className="font-bold text-slate-700 w-24 shrink-0">Khách hàng:</span>
             <span className="text-slate-800 font-semibold border-b border-dotted border-slate-300 grow pb-0.5">{quoteData.customerName || 'Chị Ngân Nguyễn'}</span>
           </div>
+          {quoteData.config?.customerRepresentative && (
+            <div className="flex items-baseline">
+              <span className="font-bold text-slate-700 w-24 shrink-0">Người đại diện:</span>
+              <span className="text-slate-800 font-semibold border-b border-dotted border-slate-300 grow pb-0.5">{quoteData.config.customerRepresentative}</span>
+            </div>
+          )}
           <div className="flex items-baseline">
             <span className="font-bold text-slate-700 w-24 shrink-0">Địa chỉ:</span>
             <span className="text-slate-800 border-b border-dotted border-slate-300 grow pb-0.5 leading-relaxed">{quoteData.customerAddress || 'Lâm Đồng'}</span>
@@ -820,36 +982,36 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
           <thead>
             {quoteData.selectedHouseType ? (
               <tr className="bg-[#00a651] text-white text-[11px] font-bold uppercase tracking-wider text-center">
-                <th className="py-3 px-2 border border-slate-200 text-center w-10">STT</th>
-                <th className="py-3 px-3 border border-slate-200 text-left w-1/3">Dòng công tác xây thô & hoàn thiện</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-24">Tỷ lệ (%)</th>
-                <th className="py-3 px-3 border border-slate-200 text-left">Định lượng vật liệu & Ghi chú</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-24">Khối lượng</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-20">Đơn vị</th>
-                <th className="py-3 px-3 border border-slate-250 text-right w-28">Đơn giá</th>
-                <th className="py-3 px-3 border border-slate-250 text-right w-36">Thành tiền (đồng)</th>
+                <th className="py-3 px-2 border border-black text-center w-10">STT</th>
+                <th className="py-3 px-3 border border-black text-left w-1/3">Dòng công tác xây thô & hoàn thiện</th>
+                <th className="py-3 px-2 border border-black text-center w-24">Tỷ lệ (%)</th>
+                <th className="py-3 px-3 border border-black text-left">Định lượng vật liệu & Ghi chú</th>
+                <th className="py-3 px-2 border border-black text-center w-24">Khối lượng</th>
+                <th className="py-3 px-2 border border-black text-center w-20">Đơn vị</th>
+                <th className="py-3 px-3 border border-black text-right w-28">Đơn giá</th>
+                <th className="py-3 px-3 border border-black text-right w-36">Thành tiền (đồng)</th>
               </tr>
             ) : quoteData.sector === 'mechanical' ? (
               <tr className="bg-[#00a651] text-white text-[11px] font-bold uppercase tracking-wider text-center">
-                <th className="py-3 px-2 border border-slate-200 text-center w-10">STT</th>
-                <th className="py-3 px-3 border border-slate-200 text-left w-1/4">Chi tiết sản phẩm & thông số kỹ thuật</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-28">Kích thước (Ngang x Cao)</th>
-                <th className="py-3 px-3 border border-slate-200 text-left">Hệ nhôm / Màu sắc / Loại kính / Phụ kiện đi kèm</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">Đvt</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">SL</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-24">Đơn giá định mức</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-28">Thành tiền thực tế</th>
+                <th className="py-3 px-2 border border-black text-center w-10">STT</th>
+                <th className="py-3 px-3 border border-black text-left w-1/4">Chi tiết sản phẩm & thông số kỹ thuật</th>
+                <th className="py-3 px-2 border border-black text-center w-28">Kích thước (Ngang x Cao)</th>
+                <th className="py-3 px-3 border border-black text-left">Hệ nhôm / Màu sắc / Loại kính / Phụ kiện đi kèm</th>
+                <th className="py-3 px-2 border border-black text-center w-12">Đvt</th>
+                <th className="py-3 px-2 border border-black text-center w-12">SL</th>
+                <th className="py-3 px-3 border border-black text-right w-24">Đơn giá định mức</th>
+                <th className="py-3 px-3 border border-black text-right w-28">Thành tiền thực tế</th>
               </tr>
             ) : (
               <tr className="bg-[#00a651] text-white text-[11px] font-bold uppercase tracking-wider text-center">
-                <th className="py-3 px-2 border border-slate-200 text-center w-10">STT</th>
-                <th className="py-3 px-3 border border-slate-200 text-center w-1/4">Tên sản phẩm</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-18">Hình ảnh</th>
-                <th className="py-3 px-3 border border-slate-200 text-center">Thông số kỹ thuật / Vật liệu cấu tạo</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">Đvt</th>
-                <th className="py-3 px-2 border border-slate-200 text-center w-12">SL</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-24">Đơn giá</th>
-                <th className="py-3 px-3 border border-slate-200 text-right w-28">Thành tiền</th>
+                <th className="py-3 px-2 border border-black text-center w-10">STT</th>
+                <th className="py-3 px-3 border border-black text-center w-1/4">Tên sản phẩm</th>
+                <th className="py-3 px-2 border border-black text-center w-18">Hình ảnh</th>
+                <th className="py-3 px-3 border border-black text-center">Thông số kỹ thuật / Vật liệu cấu tạo</th>
+                <th className="py-3 px-2 border border-black text-center w-12">Đvt</th>
+                <th className="py-3 px-2 border border-black text-center w-12">SL</th>
+                <th className="py-3 px-3 border border-black text-right w-24">Đơn giá</th>
+                <th className="py-3 px-3 border border-black text-right w-28">Thành tiền</th>
               </tr>
             )}
           </thead>
@@ -866,68 +1028,73 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                   {quoteData.selectedHouseType ? (
                     <>
                       {/* STT */}
-                      <td className="p-3 border border-slate-200 text-center font-bold text-slate-500">
+                      <td className="p-3 border border-black text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
-                      
+
                       {/* Dòng công tác */}
-                      <td className="p-3 border border-slate-200 font-bold text-slate-900 leading-normal text-left">
+                      <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
                         {item.productName}
                       </td>
-                      
+
                       {/* Tỷ lệ % */}
-                      <td className="p-3 border border-slate-200 text-center font-extrabold text-[#1e3a8a] bg-slate-50/50 font-mono">
+                      <td className="p-3 border border-black text-center font-extrabold text-[#1e3a8a] bg-slate-50/50 font-mono">
                         {item.ratioPercent || 'định mức'}
                       </td>
-                      
+
                       {/* Định lượng vật liệu & Ghi chú */}
-                      <td className="p-3 border border-slate-200 text-slate-700 leading-relaxed text-left text-[11px]">
+                      <td className="p-3 border border-black text-slate-700 leading-relaxed text-left text-[11px]">
                         <div>{item.notes || item.material || 'Xây cát đá mác xi măng liên quan'}</div>
                       </td>
-                      
+
                       {/* Khối lượng */}
-                      <td className="p-3 border border-slate-200 text-center font-black text-slate-900 font-mono">
+                      <td className="p-3 border border-black text-center font-black text-slate-900 font-mono">
                         {item.qty}
                       </td>
-                      
+
                       {/* Đơn vị */}
-                      <td className="p-3 border border-slate-200 text-center text-slate-650 font-medium font-sans">
+                      <td className="p-3 border border-black text-center text-slate-650 font-medium font-sans">
                         {item.unit || 'Gói'}
                       </td>
-                      
+
                       {/* Đơn giá */}
-                      <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
+                      <td className="p-3 border border-black text-right font-semibold text-slate-700 font-mono">
                         {unitPriceVal.toLocaleString('vi-VN')}
                       </td>
-                      
+
                       {/* Thành tiền (đồng) */}
-                      <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
+                      <td className="p-3 border border-black text-right font-black text-[#00a651] font-mono">
                         {totalPriceVal.toLocaleString('vi-VN')}
                       </td>
                     </>
                   ) : quoteData.sector === 'mechanical' ? (
                     <>
                       {/* STT */}
-                      <td className="p-3 border border-slate-200 text-center font-bold text-slate-500">
+                      <td className="p-3 border border-black text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
-                      
+
                       {/* Chi tiết sản phẩm */}
-                      <td className="p-3 border border-slate-200 font-bold text-slate-900 leading-normal text-left">
+                      <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
                         {item.productName || item.name}
                       </td>
-                      
+
                       {/* Kích thước */}
-                      <td className="p-3 border border-slate-200 text-center font-mono text-slate-700 font-semibold">
+                      <td className="p-3 border border-black text-center font-mono text-slate-700 font-semibold">
                         {item.ngang || item.width ? `${item.ngang || item.width}m x ${item.cao || item.height}m` : 'Theo thực tế'}
                       </td>
-                      
+
                       {/* Thông số kỹ thuật / Phụ kiện */}
-                      <td className="p-3 border border-slate-200 text-slate-700 leading-relaxed text-left text-[11px]">
+                      <td className="p-3 border border-black text-slate-700 leading-relaxed text-left text-[11px]">
                         {item.pricingMethod === 'custom' ? (
                           <div className="space-y-1">
                             <span className="font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px] uppercase">Dự toán phôi</span>
                             <p className="m-0 text-slate-600 font-medium">Bản mã gia cường dày: {(item.weightKg || 0).toLocaleString('vi-VN')} kg phôi sắt</p>
+                          </div>
+                        ) : item.quyCach ? (
+                          <div className="space-y-0.5 font-medium text-slate-800">
+                            <div className="whitespace-pre-line">📐 Quy cách: {item.quyCach}</div>
+                            {item.notes && <div className="text-rose-600 italic font-semibold mt-1">📍 Ghi chú: {item.notes}</div>}
                           </div>
                         ) : (
                           <div className="space-y-0.5 font-medium text-slate-800">
@@ -939,48 +1106,56 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                           </div>
                         )}
                       </td>
-                      
+
                       {/* Đvt */}
-                      <td className="p-3 border border-slate-200 text-center text-slate-650">
+                      <td className="p-3 border border-black text-center text-slate-650">
                         {item.unit || 'm²'}
                       </td>
-                      
+
                       {/* SL */}
-                      <td className="p-3 border border-slate-200 text-center font-black text-slate-900">
-                        {item.qty}
+                      <td className="p-3 border border-black text-center font-black text-slate-900">
+                        {Number(item.qty) % 1 === 0 ? item.qty : Number(item.qty).toFixed(3)}
                       </td>
-                      
+
                       {/* Đơn giá */}
-                      <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
-                        {unitPriceVal.toLocaleString('vi-VN')}
+                      <td className="p-3 border border-black text-right font-semibold text-slate-700 font-mono">
+                        {Number(unitPriceVal) % 1 === 0 ? unitPriceVal.toLocaleString('vi-VN') : Number(unitPriceVal).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                       </td>
-                      
+
                       {/* Thành tiền */}
-                      <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
-                        {totalPriceVal.toLocaleString('vi-VN')}
+                      <td className="p-3 border border-black text-right font-black text-[#00a651] font-mono">
+                        {Number(totalPriceVal) % 1 === 0 ? totalPriceVal.toLocaleString('vi-VN') : Number(totalPriceVal).toLocaleString('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                       </td>
                     </>
                   ) : (
                     <>
                       {/* STT */}
-                      <td className="p-3 border border-slate-200 text-center font-bold text-slate-500">
+                      <td className="p-3 border border-black text-center font-bold text-slate-500">
                         {idx + 1}
                       </td>
-                      
+
                       {/* Tên sản phẩm */}
-                      <td className="p-3 border border-slate-200 font-bold text-slate-900 leading-normal text-left">
+                      <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
                         {item.productName}
                       </td>
-                      
+
                       {/* Hình ảnh */}
-                      <td className="p-2 border border-slate-200 text-center text-[10px] text-slate-400 italic">
-                        <span className="inline-block px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-bold border border-slate-200">
-                          Mẫu thiết kế
-                        </span>
+                      <td className="p-2 border border-black text-center text-[10px] text-slate-400 italic">
+                        {item.images && item.images.length > 0 ? (
+                          <img
+                            src={item.images[0]}
+                            alt={item.productName}
+                            className="w-14 h-14 object-cover rounded-lg border border-slate-200 shadow-sm mx-auto"
+                          />
+                        ) : (
+                          <span className="inline-block px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-bold border border-slate-200">
+                            Mẫu thiết kế
+                          </span>
+                        )}
                       </td>
-                      
+
                       {/* Thông số kỹ thuật */}
-                      <td className="p-3 border border-slate-200 text-slate-700 leading-relaxed text-left text-[11px] whitespace-pre-line space-y-1">
+                      <td className="p-3 border border-black text-slate-700 leading-relaxed text-left text-[11px] whitespace-pre-line space-y-1">
                         <div className="font-semibold text-slate-800">
                           {item.material || item.lowerCabinetMaterial || item.upperCabinetMaterial || 'Gỗ công nghiệp MDF chống ẩm nhập khẩu chuẩn hãng'}
                         </div>
@@ -1000,22 +1175,22 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
                       </td>
                       
                       {/* Đvt */}
-                      <td className="p-3 border border-slate-200 text-center text-slate-600 font-medium">
+                      <td className="p-3 border border-black text-center text-slate-600 font-medium">
                         {unitVal}
                       </td>
-                      
+
                       {/* Số lượng */}
-                      <td className="p-3 border border-slate-200 text-center font-black text-slate-900">
+                      <td className="p-3 border border-black text-center font-black text-slate-900">
                         {item.qty}
                       </td>
-                      
+
                       {/* Đơn giá */}
-                      <td className="p-3 border border-slate-200 text-right font-semibold text-slate-700 font-mono">
+                      <td className="p-3 border border-black text-right font-semibold text-slate-700 font-mono">
                         {unitPriceVal.toLocaleString('vi-VN')}
                       </td>
-                      
+
                       {/* Thành tiền */}
-                      <td className="p-3 border border-slate-200 text-right font-black text-[#00a651] font-mono">
+                      <td className="p-3 border border-black text-right font-black text-[#00a651] font-mono">
                         {totalPriceVal.toLocaleString('vi-VN')}
                       </td>
                     </>
@@ -1025,56 +1200,12 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
             })}
 
             {/* FINANCIAL SUMMARY TOTALS */}
-            {/* 1. Subtotal trước chiết khấu */}
-            {discountPercent > 0 && (
-              <tr className="bg-slate-50 font-bold">
-                <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right uppercase tracking-wider text-[10px] text-slate-500">
-                  Cộng gộp (Chưa chiết khấu):
-                </td>
-                <td className="py-2.5 px-3 border border-slate-200 text-right font-bold text-slate-600 font-mono">
-                  {subtotalBeforeDiscount.toLocaleString('vi-VN')} đ
-                </td>
-              </tr>
-            )}
-
-            {/* 2. Chiết khấu giảm giá */}
-            {discountPercent > 0 && (
-              <tr className="bg-slate-50 font-bold">
-                <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right uppercase tracking-wider text-[10px] text-rose-650">
-                  Chiết khấu giảm giá ({discountPercent}%):
-                </td>
-                <td className="py-2.5 px-3 border border-slate-200 text-right font-black text-rose-600 font-mono">
-                  -{discountValue.toLocaleString('vi-VN')} đ
-                </td>
-              </tr>
-            )}
-
-            {/* 3. Cộng tiền trước VAT (CỘNG) */}
-            <tr className="bg-[#00a651] text-white font-bold uppercase text-[11px] tracking-wider text-center">
-              <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right">
-                CỘNG (Hạng mục thi công đã chiết khấu):
-              </td>
-              <td className="py-2.5 px-3 border border-slate-200 text-right font-black font-mono">
-                {subtotalAfterDiscount.toLocaleString('vi-VN')} đ
-              </td>
-            </tr>
-
-            {/* 4. VAT */}
-            <tr className="bg-[#00a651] text-white font-bold uppercase text-[11px] tracking-wider text-center bg-opacity-90">
-              <td colSpan={7} className="py-2.5 px-4 border border-slate-200 text-right">
-                THUẾ GIÁ TRỊ GIA TĂNG (VAT {sheetVatPercent}%):
-              </td>
-              <td className="py-2.5 px-3 border border-slate-200 text-right font-black font-mono">
-                {vatAmount.toLocaleString('vi-VN')} đ
-              </td>
-            </tr>
-
-            {/* 5. TỔNG CỘNG THANH TOÁN */}
+            {/* TỔNG CỘNG THANH TOÁN (đã loại bỏ chiết khấu thầu & thuế VAT) */}
             <tr className="bg-[#00a651] text-white font-black uppercase text-[12px] tracking-widest text-center">
-              <td colSpan={7} className="py-3 px-4 border border-slate-200 text-right">
+              <td colSpan={7} className="py-3 px-4 border border-black text-right">
                 TỔNG CỘNG GIÁ TRỊ QUYẾT TOÁN THANH TOÁN:
               </td>
-              <td className="py-3 px-3 border border-slate-200 text-right font-extrabold font-mono text-white text-sm">
+              <td className="py-3 px-3 border border-black text-right font-extrabold font-mono text-white text-sm">
                 {grandTotal.toLocaleString('vi-VN')} đ
               </td>
             </tr>
@@ -1163,7 +1294,7 @@ export default function QuotationTableSheet({ quoteData, initialTab }: Quotation
           </div>
           <div className="pt-2">
             <span className="font-black text-slate-800 text-xs underline decoration-dotted tracking-wider">
-              {quoteData.customerName || 'Ngon Nguyễn'}
+              {quoteData.config?.customerRepresentative || quoteData.customerName || 'Ngon Nguyễn'}
             </span>
           </div>
         </div>

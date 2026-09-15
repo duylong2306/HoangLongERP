@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { useNotification } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
 import { INITIAL_PRODUCTS } from './ProductCatalogTable';
-import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Edit, Save, Check } from 'lucide-react';
+import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Edit, Save, Check, Upload, X, Image as ImageIcon, Download, Share2 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
@@ -39,6 +40,7 @@ export const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><
   <li>Họ và tên: {{TEN_KHACH_HANG}}</li>
   <li>Địa chỉ: {{DIA_CHI_KHACH_HANG}}</li>
   <li>Điện thoại: {{DIEN_THOAI_KHACH_HANG}}</li>
+  <li>Đại diện: {{DAI_DIEN_KHACH_HANG}}</li>
 </ul>
 
 <p><strong>Bên B: Đơn vị thi công nội thất</strong></p>
@@ -72,7 +74,6 @@ export const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><
 <p>{{BANG_CHI_TIET_BÁO_GIÁ}}</p>
 <p>Tổng giá trị hợp đồng: <strong>{{TONG_CONG}}</strong> VND</p>
 <p>Viết bằng chữ: <em>{{TONG_CONG_CHU}}</em></p>
-<p>Đơn giá chưa bao gồm thuế VAT</p>
 
 <p><strong>Điều 4. Cách thức thanh toán hợp đồng thi công nội thất theo từng giai đoạn (tiền mặt hoặc chuyển khoản)</strong></p>
 <p>Khi hợp đồng được ký kết, để đảm bảo vốn sản xuất, Bên A ứng trước cho Bên B 50% kinh phí trên tổng giá trị hợp đồng</p>
@@ -244,6 +245,158 @@ export default function CabinetEstimator({
   showTemplateOnly = false
 }: CabinetEstimatorProps) {
   const { addToast } = useNotification();
+
+  // Tải động html2canvas/jsPDF — dùng lại đúng cách export PDF đã ổn định của
+  // Đơn Mua Hàng (MaterialCoordination.tsx): gọi html2canvas trực tiếp rồi tự
+  // ghép ảnh vào jsPDF (tự chia trang nếu nội dung dài hơn 1 trang A4), KHÔNG
+  // dùng html2pdf.js (thư viện đó gán nhầm property `container.height` thay vì
+  // `.style.height` khiến ảnh chụp ra trắng hoàn toàn — đã xác minh ở đó).
+  const loadHtml2Canvas = async () => {
+    const mod = await import('html2canvas-pro');
+    return (mod as any).default || mod;
+  };
+  const loadJsPdf = async () => {
+    const mod = await import('jspdf');
+    return (mod as any).jsPDF || (mod as any).default;
+  };
+
+  // html2canvas-pro chụp ở chế độ "màn hình" bình thường, KHÔNG kích hoạt
+  // được @media print — nên các lớp Tailwind "print:border-none /
+  // print:shadow-none / print:p-0" đã có sẵn trong QuotationTableSheet/
+  // ContractDocument/AcceptanceDocument/LiquidationDocument (dùng để bỏ
+  // khung viền xám + đổ bóng + đệm của khung card khi in thật qua trình
+  // duyệt) không có tác dụng khi xuất PDF qua html2canvas. Áp lại thủ công
+  // đúng hiệu ứng đó lên bản sao trước khi chụp.
+  const applyPrintVariantOverrides = (root: HTMLElement) => {
+    const all: HTMLElement[] = [root, ...Array.from(root.querySelectorAll('*'))] as HTMLElement[];
+    all.forEach((el) => {
+      const cls = el.className;
+      if (typeof cls !== 'string') return; // bỏ qua SVG (className là SVGAnimatedString)
+      if (cls.includes('print:border-none')) el.style.border = 'none';
+      if (cls.includes('print:shadow-none')) el.style.boxShadow = 'none';
+      if (cls.includes('print:p-0')) el.style.padding = '0';
+    });
+  };
+
+  // Dựng PDF từ đúng vùng nội dung đang hiển thị trong modal xem/in
+  // (#print-area-archive) — nhân bản (clone) ra 1 khung ẩn khổ A4 cố định
+  // trước khi chụp, vì vùng gốc trên màn hình bị giới hạn max-h-[70vh]
+  // overflow-y-auto (chỉ chụp được phần đang cuộn tới nếu chụp thẳng).
+  const generateArchivePdfBlob = async (): Promise<Blob> => {
+    const source = document.getElementById('print-area-archive');
+    if (!source) throw new Error('Không tìm thấy nội dung để xuất PDF.');
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.background = '#ffffff';
+    container.innerHTML = source.innerHTML;
+    // Bỏ các nút hành động/badge chỉ dành cho màn hình (không nằm trong bản in)
+    container.querySelectorAll('.print-hide, .no-print, [class*="print\\:hidden"]').forEach(el => el.remove());
+    applyPrintVariantOverrides(container);
+    document.body.appendChild(container);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2Canvas(), loadJsPdf()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 15, marginSide = 18;
+      const pageWidthMm = 210, pageHeightMm = 297;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      // Danh sách các điểm "cắt an toàn" — ngay dưới đáy mỗi dòng bảng (<tr>) —
+      // quy đổi sang toạ độ pixel của canvas (nhân với scale:2 lúc chụp phía
+      // trên). Trước đây cắt trang theo đúng bội số pageHeightPx một cách mù
+      // quáng, có thể cắt ngang giữa 1 dòng đang chứa ghi chú nhiều dòng, làm
+      // nửa trên/dưới của dòng đó tách rời sang 2 trang khác nhau.
+      const containerRect = container.getBoundingClientRect();
+      const safeBreaksPx = Array.from(container.querySelectorAll('tr'))
+        .map((el) => Math.round((el.getBoundingClientRect().bottom - containerRect.top) * 2))
+        .filter((v) => v > 0 && v < canvas.height)
+        .sort((a, b) => a - b);
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const idealEnd = Math.min(renderedPx + pageHeightPx, canvas.height);
+        // Nếu chưa phải trang cuối, dò lùi tới điểm cắt an toàn gần nhất
+        // (đáy 1 dòng bảng hoàn chỉnh) thay vì cắt cứng theo pixel.
+        let sliceEnd = idealEnd;
+        if (idealEnd < canvas.height) {
+          const minAdvance = renderedPx + Math.min(60, pageHeightPx * 0.15);
+          const candidate = safeBreaksPx.filter((b) => b > minAdvance && b <= idealEnd).pop();
+          if (candidate) sliceEnd = candidate;
+        }
+        const sliceHeightPx = sliceEnd - renderedPx;
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Tải PDF hồ sơ về máy — không qua hộp thoại Share của hệ điều hành (Windows
+  // Share không có lựa chọn "Lưu về máy" trực tiếp).
+  const downloadArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `HoSo_${quote.code || quote.id}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: '✅ Đã tải PDF', message: `Đã tải "HoSo_${quote.code || quote.id}.pdf" về thư mục Tải xuống.`, type: 'success' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF.', type: 'error' });
+    }
+  };
+
+  // Chia sẻ trực tiếp file PDF hồ sơ (thay vì chỉ chia sẻ link)
+  const shareArchivePdf = async (quote: any) => {
+    try {
+      const blob = await generateArchivePdfBlob();
+      const file = new File([blob], `HoSo_${quote.code || quote.id}.pdf`, { type: 'application/pdf' });
+      const navAny: any = navigator;
+      if (navAny.canShare && navAny.canShare({ files: [file] })) {
+        try {
+          await navAny.share({ files: [file], title: `Hồ sơ ${quote.code || quote.id}`, text: `Hồ sơ ${quote.code || quote.id}` });
+          return;
+        } catch (e) { /* người dùng huỷ → fallback tải về */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = file.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      addToast({ title: 'ℹ️ Đã tải PDF', message: 'Đã tải file PDF hồ sơ về máy để gửi thủ công.', type: 'info' });
+    } catch (e) {
+      addToast({ title: '❌ Lỗi', message: 'Không thể tạo file PDF để chia sẻ.', type: 'warning' });
+    }
+  };
+
   // Config tỉ lệ %
   const [config, setConfig] = useState<QuoteConfig>(DEFAULT_QUOTE_CONFIG);
   const [showConfig, setShowConfig] = useState(false);
@@ -298,6 +451,9 @@ export default function CabinetEstimator({
   const [customerName, setCustomerName] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // Người đại diện của khách hàng — hiển thị trong Báo Giá và dùng làm tên ký ở khối
+  // chữ ký Bên A trong Hợp Đồng/Nghiệm Thu/Thanh Lý (xem ContractDocument.tsx...).
+  const [customerRepresentative, setCustomerRepresentative] = useState('');
 
   // Trạng thái cho bộ tìm kiếm dự án nhanh (searchable dropdown)
   const [isProjDropdownOpen, setIsProjDropdownOpen] = useState(false);
@@ -316,6 +472,7 @@ export default function CabinetEstimator({
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -356,7 +513,8 @@ export default function CabinetEstimator({
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -376,23 +534,24 @@ export default function CabinetEstimator({
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
     }
   }, [selectedProjectId, projects, customers]);
   const [quoteNotes, setQuoteNotes] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState(() => localStorage.getItem('hl_cabinet_payment_terms') || DEFAULT_FURN_PAYMENT_TERMS);
+  const [paymentTerms, setPaymentTerms] = useState(() => DEFAULT_FURN_PAYMENT_TERMS);
 
-  const [companyLogoImg, setCompanyLogoImg] = useState(() => localStorage.getItem('hl_cabinet_company_logo') || '');
-  const [companyLogoText, setCompanyLogoText] = useState(() => localStorage.getItem('hl_cabinet_company_name') || 'HOANG LONG');
-  const [companySlogan, setCompanySlogan] = useState(() => localStorage.getItem('hl_cabinet_company_slogan') || 'Construction - Furniture - Doors');
-  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => localStorage.getItem('hl_cabinet_company_address') || `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
-  const [companyContactInfo, setCompanyContactInfo] = useState(() => localStorage.getItem('hl_cabinet_company_contact') || `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
+  const [companyLogoImg, setCompanyLogoImg] = useState(() => '');
+  const [companyLogoText, setCompanyLogoText] = useState(() => 'HOANG LONG');
+  const [companySlogan, setCompanySlogan] = useState(() => 'Construction - Furniture - Doors');
+  const [companyAddressInfo, setCompanyAddressInfo] = useState(() => `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`);
+  const [companyContactInfo, setCompanyContactInfo] = useState(() => `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
 
-  const [contractTemplate, setContractTemplate] = useState(() => localStorage.getItem('hl_cabinet_contract_template') || DEFAULT_FURN_CONTRACT_TEMPLATE);
-  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => localStorage.getItem('hl_cabinet_acceptance_template') || DEFAULT_FURN_ACCEPTANCE_TEMPLATE);
-  const [liquidationTemplate, setLiquidationTemplate] = useState(() => localStorage.getItem('hl_cabinet_liquidation_template') || DEFAULT_FURN_LIQUIDATION_TEMPLATE);
+  const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_FURN_CONTRACT_TEMPLATE);
+  const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_FURN_ACCEPTANCE_TEMPLATE);
+  const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_FURN_LIQUIDATION_TEMPLATE);
   const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
@@ -409,24 +568,14 @@ export default function CabinetEstimator({
         defaultData.companyAddressInfo = companyAddressInfo;
         defaultData.companyContactInfo = companyContactInfo;
         defaultData.paymentTerms = paymentTerms;
-        
-        localStorage.setItem('hl_cabinet_default_logo', companyLogoImg);
-        localStorage.setItem('hl_cabinet_default_company_name', companyLogoText);
-        localStorage.setItem('hl_cabinet_default_company_slogan', companySlogan);
-        localStorage.setItem('hl_cabinet_default_company_address', companyAddressInfo);
-        localStorage.setItem('hl_cabinet_default_company_contact', companyContactInfo);
-        localStorage.setItem('hl_cabinet_default_payment_terms', paymentTerms);
       } else if (activeTemplateTab === 'contract') {
         defaultData.contractTemplate = contractTemplate;
-        localStorage.setItem('hl_cabinet_default_contract_template', contractTemplate);
       } else if (activeTemplateTab === 'acceptance') {
         defaultData.acceptanceTemplate = acceptanceTemplate;
-        localStorage.setItem('hl_cabinet_default_acceptance_template', acceptanceTemplate);
       } else if (activeTemplateTab === 'liquidation') {
         defaultData.liquidationTemplate = liquidationTemplate;
-        localStorage.setItem('hl_cabinet_default_liquidation_template', liquidationTemplate);
       }
-      
+
       await dbService.quotationConfigs.save('furniture_default', defaultData);
       
       setFeedback({
@@ -457,13 +606,13 @@ export default function CabinetEstimator({
       const defaultData = await dbService.quotationConfigs.get('furniture_default');
       
       if (activeTemplateTab === 'quote') {
-        const logo = defaultData?.companyLogoImg ?? localStorage.getItem('hl_cabinet_default_logo') ?? '';
-        const name = defaultData?.companyLogoText ?? localStorage.getItem('hl_cabinet_default_company_name') ?? 'HOANG LONG';
-        const slogan = defaultData?.companySlogan ?? localStorage.getItem('hl_cabinet_default_company_slogan') ?? 'Construction - Furniture - Doors';
-        const address = defaultData?.companyAddressInfo ?? localStorage.getItem('hl_cabinet_default_company_address') ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
-        const contact = defaultData?.companyContactInfo ?? localStorage.getItem('hl_cabinet_default_company_contact') ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
-        const terms = defaultData?.paymentTerms ?? localStorage.getItem('hl_cabinet_default_payment_terms') ?? DEFAULT_FURN_PAYMENT_TERMS;
-        
+        const logo = defaultData?.companyLogoImg ?? '';
+        const name = defaultData?.companyLogoText ?? 'HOANG LONG';
+        const slogan = defaultData?.companySlogan ?? 'Construction - Furniture - Doors';
+        const address = defaultData?.companyAddressInfo ?? `<p>📍 <strong>Địa điểm kinh doanh:</strong> Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>\n<p>🏠 <strong>Địa chỉ:</strong> 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>`;
+        const contact = defaultData?.companyContactInfo ?? `<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`;
+        const terms = defaultData?.paymentTerms ?? DEFAULT_FURN_PAYMENT_TERMS;
+
         setCompanyLogoImg(logo);
         setCompanyLogoText(name);
         setCompanySlogan(slogan);
@@ -471,13 +620,13 @@ export default function CabinetEstimator({
         setCompanyContactInfo(contact);
         setPaymentTerms(terms);
       } else if (activeTemplateTab === 'contract') {
-        const template = defaultData?.contractTemplate ?? localStorage.getItem('hl_cabinet_default_contract_template') ?? DEFAULT_FURN_CONTRACT_TEMPLATE;
+        const template = defaultData?.contractTemplate ?? DEFAULT_FURN_CONTRACT_TEMPLATE;
         setContractTemplate(template);
       } else if (activeTemplateTab === 'acceptance') {
-        const template = defaultData?.acceptanceTemplate ?? localStorage.getItem('hl_cabinet_default_acceptance_template') ?? DEFAULT_FURN_ACCEPTANCE_TEMPLATE;
+        const template = defaultData?.acceptanceTemplate ?? DEFAULT_FURN_ACCEPTANCE_TEMPLATE;
         setAcceptanceTemplate(template);
       } else if (activeTemplateTab === 'liquidation') {
-        const template = defaultData?.liquidationTemplate ?? localStorage.getItem('hl_cabinet_default_liquidation_template') ?? DEFAULT_FURN_LIQUIDATION_TEMPLATE;
+        const template = defaultData?.liquidationTemplate ?? DEFAULT_FURN_LIQUIDATION_TEMPLATE;
         setLiquidationTemplate(template);
       }
       
@@ -520,19 +669,6 @@ export default function CabinetEstimator({
     }
   };
 
-  // Auto-persist template changes to localStorage
-  useEffect(() => {
-    localStorage.setItem('hl_cabinet_company_logo', companyLogoImg);
-    localStorage.setItem('hl_cabinet_company_name', companyLogoText);
-    localStorage.setItem('hl_cabinet_company_slogan', companySlogan);
-    localStorage.setItem('hl_cabinet_company_address', companyAddressInfo);
-    localStorage.setItem('hl_cabinet_company_contact', companyContactInfo);
-    localStorage.setItem('hl_cabinet_payment_terms', paymentTerms);
-    localStorage.setItem('hl_cabinet_contract_template', contractTemplate);
-    localStorage.setItem('hl_cabinet_acceptance_template', acceptanceTemplate);
-    localStorage.setItem('hl_cabinet_liquidation_template', liquidationTemplate);
-  }, [companyLogoImg, companyLogoText, companySlogan, companyAddressInfo, companyContactInfo, paymentTerms, contractTemplate, acceptanceTemplate, liquidationTemplate]);
-
   const [dbLoading, setDbLoading] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
   const [dbSaveSuccess, setDbSaveSuccess] = useState(false);
@@ -570,7 +706,13 @@ export default function CabinetEstimator({
   useEffect(() => {
     if (loadedQuote && loadedQuote.sector === 'furniture') {
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
-      if (loadedQuote.config) setConfig(loadedQuote.config);
+      if (loadedQuote.config) {
+        setConfig(loadedQuote.config);
+        // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+        // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config.customerRepresentative || fallbackCust?.representative || '');
+      }
       if (loadedQuote.notes) setQuoteNotes(loadedQuote.notes);
       if (loadedQuote.paymentTerms) setPaymentTerms(loadedQuote.paymentTerms);
       if (loadedQuote.customerId) setSelectedCustomerId(loadedQuote.customerId);
@@ -596,13 +738,18 @@ export default function CabinetEstimator({
   useEffect(() => {
     if (!loadedQuote && !isCabinetSaved) {
       setQuoteItems([]);
-      setSelectedCustomerId('');
-      setSelectedProjectId('');
-      setProjectName('');
-      setCustomerName('');
-      setCustomerAddress('');
-      setCustomerPhone('');
       setQuoteNotes('');
+      // Giữ lại dự án/khách hàng đã được điều hướng sẵn từ Công việc (trường hợp "Báo Giá (Chưa Lập)")
+      // để không ghi đè lên lựa chọn dự án được truyền vào qua preselectedProjectId.
+      if (!preselectedProjectId) {
+        setSelectedCustomerId('');
+        setSelectedProjectId('');
+        setProjectName('');
+        setCustomerName('');
+        setCustomerAddress('');
+        setCustomerPhone('');
+        setCustomerRepresentative('');
+      }
       setPaymentTerms(`<p><strong>1. Thời gian thực hiện:</strong> 10-12 ngày.</p>
 <p><strong>2. Bảo hành:</strong> Bảo hành 1 năm. Lỗi phụ kiện thay mới.</p>
 <p><strong>3. Thanh toán:</strong></p>
@@ -622,10 +769,12 @@ export default function CabinetEstimator({
       setCompanyContactInfo(`<p>📞 <strong>Hotline:</strong> 0966 545 959 - 0374 883 979</p>\n<p>✉ <strong>Email:</strong> hoanglongld.com@gmail.com</p>\n<p>🌐 <strong>Web:</strong> hoanglongld.com</p>`);
       setIsSentToProject(false);
     }
-  }, [loadedQuote, isCabinetSaved]);
+  }, [loadedQuote, isCabinetSaved, preselectedProjectId]);
 
   // --- HỆ THỐNG THÊM SẢN PHẨM TỪ DANH MỤC TIÊU CHUẨN ---
   const [catalogProducts, setCatalogProducts] = useState<ProductCatalogItem[]>([]);
+  const [allProductPrices, setAllProductPrices] = useState<any[]>([]);
+  const [allProductMaterials, setAllProductMaterials] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<ProductCatalogItem | null>(null);
   const [selectedPriceOption, setSelectedPriceOption] = useState<string>('');
@@ -634,7 +783,16 @@ export default function CabinetEstimator({
   const [searchCategoryQuery, setSearchCategoryQuery] = useState<string>('');
   const [searchProductQuery, setSearchProductQuery] = useState<string>('');
   const [customMaterial, setCustomMaterial] = useState<string>('');
-  
+
+  // Hình ảnh minh họa cho dòng sản phẩm đang soạn (BƯỚC 1) — chỉ 1 ảnh/dòng
+  const [draftProductImage, setDraftProductImage] = useState<string | null>(null);
+  const [isUploadingDraftImage, setIsUploadingDraftImage] = useState(false);
+  const draftImageInputRef = useRef<HTMLInputElement>(null);
+  // Trạng thái sửa từng dòng sản phẩm đã thêm
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<'catalog' | 'other' | null>(null);
+  const skipCategoryResetRef = useRef(false);
+
   const [isCatDropdownOpen, setIsCatDropdownOpen] = useState(false);
   const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
 
@@ -644,40 +802,48 @@ export default function CabinetEstimator({
   const [customProductOtherQty, setCustomProductOtherQty] = useState<number | string>('');
   const [customProductOtherUnitPrice, setCustomProductOtherUnitPrice] = useState<number | string>('');
   const [customProductOtherMaterial, setCustomProductOtherMaterial] = useState<string>('');
+  const [customProductOtherUnit, setCustomProductOtherUnit] = useState<string>('bộ');
 
-  // Nạp danh mục sản phẩm lĩnh vực Nội thất
+  // Nạp danh mục sản phẩm lĩnh vực Nội thất (từ Supabase)
   useEffect(() => {
-    const saved = localStorage.getItem('hl_acc_products');
-    let loadedProducts = [];
-    if (saved) {
-      try {
-        loadedProducts = JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    
-    if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
-      loadedProducts = INITIAL_PRODUCTS;
-      localStorage.setItem('hl_acc_products', JSON.stringify(INITIAL_PRODUCTS));
-    } else {
-      // Merge defaults if missing
-      const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
-      const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
-      if (!hasConst || !hasMech) {
-        const merged = [...loadedProducts];
-        INITIAL_PRODUCTS.forEach(item => {
-          if (!merged.some(m => m.id === item.id)) {
-            merged.push(item);
+    let loadedProducts: any[] = [];
+    dbService.accountingProductCatalog.list()
+      .then(cloudProducts => {
+        if (cloudProducts && cloudProducts.length > 0) {
+          loadedProducts = cloudProducts;
+        }
+      })
+      .catch(err => console.warn('Lỗi tải danh mục sản phẩm từ Supabase:', err))
+      .finally(() => {
+        if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
+          loadedProducts = INITIAL_PRODUCTS;
+        } else {
+          // Merge defaults if missing
+          const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
+          const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
+          if (!hasConst || !hasMech) {
+            const merged = [...loadedProducts];
+            INITIAL_PRODUCTS.forEach(item => {
+              if (!merged.some(m => m.id === item.id)) {
+                merged.push(item);
+              }
+            });
+            loadedProducts = merged;
           }
-        });
-        localStorage.setItem('hl_acc_products', JSON.stringify(merged));
-        loadedProducts = merged;
-      }
-    }
-    
-    const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Nội thất');
-    setCatalogProducts(domainProducts);
+        }
+        const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Nội thất');
+        setCatalogProducts(domainProducts);
+      });
+  }, []);
+
+  // Nạp giá & chất liệu theo sản phẩm từ Supabase
+  useEffect(() => {
+    dbService.productPrices.list()
+      .then(list => { if (Array.isArray(list)) setAllProductPrices(list); })
+      .catch(err => console.warn('Lỗi tải giá sản phẩm từ Supabase:', err));
+    dbService.productMaterials.list()
+      .then(list => { if (Array.isArray(list)) setAllProductMaterials(list); })
+      .catch(err => console.warn('Lỗi tải chất liệu sản phẩm từ Supabase:', err));
   }, []);
 
   const categories = Array.from(new Set(catalogProducts.map(p => p.danhMuc as string).filter(Boolean)));
@@ -688,56 +854,60 @@ export default function CabinetEstimator({
     // Để trống toàn bộ giá trị đầu vào mặc định, không tự động chọn danh mục đầu tiên
   }, [catalogProducts]);
 
-  // Get all active linked prices for selectedProduct
-  const getProductLinkedPrices = () => {
-    if (!selectedProduct) return [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (!savedPrices) return [];
-      const allPrices = JSON.parse(savedPrices);
-      return allPrices.filter((pr: any) => pr.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
+  // Lấy các mức giá liên kết cho 1 sản phẩm (từ bảng đơn giá hoặc từ chính bản ghi sản phẩm).
+  // Fallback từ chính bản ghi sản phẩm giúp mọi người được phân quyền trong Nhóm Vai Trò
+  // đều nhìn thấy giá trị trong "Phương án giá liên kết phát hiện" dù bảng đơn giá chưa kịp đồng bộ.
+  const getPricesForProduct = (prod: any): any[] => {
+    if (!prod) return [];
+    const linked = allProductPrices.filter((pr: any) => pr.productId === prod.id);
+    if (linked.length > 0) return linked;
+    const derived: any[] = [];
+    if (prod.donGiaThaiLan != null && prod.donGiaThaiLan !== '') {
+      derived.push({ id: `PR_${prod.id}_TL`, productId: prod.id, tenGia: 'Thái Lan', donGia: Number(prod.donGiaThaiLan), ghiChu: 'Giá vật liệu gỗ Thái Lan' });
     }
+    if (prod.donGiaAnCuong != null && prod.donGiaAnCuong !== '') {
+      derived.push({ id: `PR_${prod.id}_AC`, productId: prod.id, tenGia: 'An Cường', donGia: Number(prod.donGiaAnCuong), ghiChu: 'Giá vật liệu gỗ An Cường' });
+    }
+    if (prod.donGiaPlywood != null && prod.donGiaPlywood !== '') {
+      derived.push({ id: `PR_${prod.id}_PW`, productId: prod.id, tenGia: 'Plywood', donGia: Number(prod.donGiaPlywood), ghiChu: 'Giá vật liệu gỗ Plywood' });
+    }
+    // Sản phẩm từ bảng accounting_product_catalog chỉ có một mức giá "don_gia"
+    if (prod.donGia != null && prod.donGia !== '' && derived.length === 0) {
+      derived.push({ id: `PR_${prod.id}_NYT`, productId: prod.id, tenGia: 'Giá niêm yết', donGia: Number(prod.donGia), ghiChu: 'Đơn giá niêm yết trong danh mục' });
+    }
+    return derived;
   };
+
+  // Get all active linked prices for selectedProduct
+  const getProductLinkedPrices = () => getPricesForProduct(selectedProduct);
 
   // Get all active linked materials for selectedProduct
   const getProductLinkedMaterials = () => {
     if (!selectedProduct) return [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (!savedMaterials) return [];
-      const allMaterials = JSON.parse(savedMaterials);
-      return allMaterials.filter((m: any) => m.productId === selectedProduct.id);
-    } catch (e) {
-      return [];
-    }
+    return allProductMaterials.filter((m: any) => m.productId === selectedProduct.id);
   };
 
   useEffect(() => {
+    // Khi đang sửa một dòng, không xóa toàn bộ giá trị khi đổi danh mục
+    if (skipCategoryResetRef.current) {
+      skipCategoryResetRef.current = false;
+      return;
+    }
     // Không tự chọn sản phẩm đầu tiên khi đổi danh mục để trống các ô nhập liệu theo yêu cầu
     setSelectedProduct(null);
     setCustomMaterial('');
     setChosenPrice('');
     setSelectedMaterialOption('');
     setSelectedPriceOption('');
+    setDraftProductImage(null);
   }, [selectedCategory, catalogProducts]);
 
   const handleProductSelect = (prod: any) => {
     setSelectedProduct(prod);
     setIsProdDropdownOpen(false);
-    
-    let subPrices: any[] = [];
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        subPrices = allPrices.filter((pr: any) => pr.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    
+
+    const subPrices = getPricesForProduct(prod);
+
     if (subPrices.length > 0) {
       setSelectedPriceOption(subPrices[0].tenGia);
       setChosenPrice(subPrices[0].donGia);
@@ -746,16 +916,7 @@ export default function CabinetEstimator({
       setChosenPrice(0);
     }
 
-    let subMats: any[] = [];
-    try {
-      const savedMaterials = localStorage.getItem('hl_acc_product_materials');
-      if (savedMaterials) {
-        const allMaterials = JSON.parse(savedMaterials);
-        subMats = allMaterials.filter((m: any) => m.productId === prod.id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const subMats = allProductMaterials.filter((m: any) => m.productId === prod.id);
 
     if (subMats.length > 0) {
       setSelectedMaterialOption(subMats[0].tenChatLieu);
@@ -770,18 +931,11 @@ export default function CabinetEstimator({
     setSelectedPriceOption(option);
     if (!selectedProduct) return;
     if (option === 'Tự chọn') return;
-    
-    try {
-      const savedPrices = localStorage.getItem('hl_acc_product_prices');
-      if (savedPrices) {
-        const allPrices = JSON.parse(savedPrices);
-        const match = allPrices.find((pr: any) => pr.productId === selectedProduct.id && pr.tenGia === option);
-        if (match) {
-          setChosenPrice(match.donGia);
-        }
-      }
-    } catch (e) {
-      console.error(e);
+
+    // Dùng cùng nguồn hiển thị với danh sách phương án để mọi người được phân quyền đều thấy giá
+    const match = getPricesForProduct(selectedProduct).find((pr: any) => pr.tenGia === option);
+    if (match) {
+      setChosenPrice(match.donGia);
     }
   };
 
@@ -791,35 +945,68 @@ export default function CabinetEstimator({
     setCustomMaterial(option);
   };
 
+  // Chuẩn hóa số lượng nhập vào: cho phép số thập phân, làm tròn 3 chữ số
+  const normalizeQty = (raw: number | string | undefined): number => {
+    if (raw === undefined || raw === null || raw === '') return 0;
+    const num = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/,/g, '.'));
+    if (isNaN(num)) return 0;
+    return Math.round(num * 1000) / 1000;
+  };
+
   const handleAddProductToQuote = () => {
     if (!selectedProduct) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn sản phẩm trước!', type: 'warning' });
       return;
     }
-    
-    const specQty = typeof productQty === 'number' ? productQty : parseInt(productQty as any) || 1;
-    const specPrice = typeof chosenPrice === 'number' ? chosenPrice : parseInt(chosenPrice as any) || 0;
 
-    const newItem: QuoteItem = {
-      id: `qi_prod_${Date.now()}`,
-      productGroup: 'custom',
-      productName: selectedProduct.tenSanPham,
-      qty: specQty,
-      material: customMaterial,
-      unit: selectedProduct.donVi || 'Chiếc',
-      unitPrice: specPrice,
-      pricingMethod: 'quick',
-      totalPrice: specQty * specPrice
-    };
-    
-    setQuoteItems(prev => [...prev, newItem]);
-    setProductQty('');
-    
-    setFeedback({
-      message: `Đã thêm sản phẩm "${selectedProduct.tenSanPham}" vào báo giá thành công!`,
-      type: 'success'
-    });
+    const specQty = normalizeQty(productQty) || 1;
+    const specPrice = typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0;
+    const specImages = draftProductImage ? [draftProductImage] : undefined;
+
+    if (editingItemId) {
+      // ── CẬP NHẬT DÒNG ĐANG SỬA ──
+      setQuoteItems(prev => prev.map(item => item.id === editingItemId ? {
+        ...item,
+        productName: selectedProduct.tenSanPham,
+        qty: specQty,
+        material: customMaterial,
+        unit: selectedProduct.donVi || item.unit || 'Chiếc',
+        unitPrice: specPrice,
+        totalPrice: specQty * specPrice,
+        images: specImages,
+      } : item));
+      setFeedback({
+        message: `Đã cập nhật dòng "${selectedProduct.tenSanPham}" trong báo giá thành công!`,
+        type: 'success'
+      });
+    } else {
+      // ── THÊM MỚI ──
+      const newItem: QuoteItem = {
+        id: `qi_prod_${Date.now()}`,
+        productGroup: 'custom',
+        productName: selectedProduct.tenSanPham,
+        qty: specQty,
+        material: customMaterial,
+        unit: selectedProduct.donVi || 'Chiếc',
+        unitPrice: specPrice,
+        pricingMethod: 'quick',
+        totalPrice: specQty * specPrice,
+        images: specImages
+      };
+      setQuoteItems(prev => [...prev, newItem]);
+      setFeedback({
+        message: `Đã thêm sản phẩm "${selectedProduct.tenSanPham}" vào báo giá thành công!`,
+        type: 'success'
+      });
+    }
     setTimeout(() => setFeedback(null), 3000);
+
+    // Reset form
+    skipCategoryResetRef.current = false;
+    setProductQty('');
+    setDraftProductImage(null);
+    setEditingItemId(null);
+    setEditingSource(null);
   };
   // -----------------------------------------------------
 
@@ -965,43 +1152,165 @@ export default function CabinetEstimator({
     setQuoteItems(quoteItems.filter(item => item.id !== id));
   };
 
+  // ── Tải ảnh minh họa cho dòng sản phẩm đang soạn (tối đa 1 ảnh) ──
+  const handleDraftImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '⚠️ Không hợp lệ', message: 'Chỉ hỗ trợ file ảnh (JPG, PNG, GIF).', type: 'warning' });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) { // 10MB
+      addToast({ title: '⚠️ Quá lớn', message: 'Kích thước ảnh không được vượt quá 10MB.', type: 'warning' });
+      return;
+    }
+
+    setIsUploadingDraftImage(true);
+    dbService.uploadQuoteImage(`quote_item_${Date.now()}`, file)
+      .then(({ url, stored }) => {
+        setDraftProductImage(url); // luôn set ảnh (lên cloud hoặc base64 cục bộ)
+        if (stored === 'local') {
+          addToast({ title: '⚠️ Lưu cục bộ', message: 'Đã thêm hình ảnh nhưng Supabase chưa có bucket "quote-images". Chạy migration 025 trong SQL Editor để lưu ảnh lên cloud.', type: 'warning', duration: 7000 });
+        } else {
+          addToast({ title: '✅ Đã tải ảnh', message: 'Đã thêm hình ảnh cho dòng sản phẩm.', type: 'success' });
+        }
+      })
+      .catch((err) => {
+        console.warn('Upload ảnh dòng sản phẩm thất bại:', err);
+        addToast({ title: '⛔ Lỗi', message: 'Không thể tải ảnh lên, vui lòng thử lại.', type: 'error' });
+      })
+      .finally(() => setIsUploadingDraftImage(false));
+  };
+
+  // ── SỬA TỪNG DÒNG SẢN PHẨM ĐÃ THÊM ──
+  const handleEditItem = (item: QuoteItem, source: 'catalog' | 'other') => {
+    if (isLocked) return;
+    setEditingItemId(item.id);
+    setEditingSource(source);
+    if (source === 'other') {
+      setAddMethod('other');
+      setCustomProductOtherName(item.productName);
+      setCustomProductOtherQty(item.qty);
+      setCustomProductOtherUnitPrice(item.unitPrice ?? Math.round((item.totalPrice || 0) / (item.qty || 1)));
+      setCustomProductOtherMaterial((item.material && item.material !== 'Tự chọn theo ý khách') ? item.material : '');
+      setCustomProductOtherUnit(item.unit || 'bộ');
+      setDraftProductImage(item.images?.[0] || null);
+    } else {
+      // Tìm sản phẩm trong danh mục theo tên
+      const prod = catalogProducts.find(p => p.tenSanPham === item.productName) || null;
+      setAddMethod('catalog');
+      skipCategoryResetRef.current = true;
+      setSelectedCategory(prod ? prod.danhMuc : (selectedCategory || ''));
+      setSelectedProduct(prod);
+      if (prod) {
+        const subPrices = getPricesForProduct(prod);
+        const priceMatch = subPrices.find(p => p.donGia === item.unitPrice);
+        if (priceMatch) {
+          setSelectedPriceOption(priceMatch.tenGia);
+          setChosenPrice(priceMatch.donGia);
+        } else {
+          setSelectedPriceOption('Tự chọn');
+          setChosenPrice(item.unitPrice ?? 0);
+        }
+        setCustomMaterial(item.material || prod.chatLieu || '');
+        setSelectedMaterialOption(item.material || 'Tự nhập');
+      }
+      setProductQty(item.qty);
+      setDraftProductImage(item.images?.[0] || null);
+    }
+    // Cuộn lên form để thấy dữ liệu đang sửa
+    const formEl = document.getElementById('cabinet-product-add-form');
+    if (formEl) formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleCancelEditItem = () => {
+    skipCategoryResetRef.current = false;
+    setEditingItemId(null);
+    setEditingSource(null);
+    setDraftProductImage(null);
+    setSelectedProduct(null);
+    setSelectedCategory('');
+    setProductQty('');
+    setCustomMaterial('');
+    setSelectedMaterialOption('');
+    setSelectedPriceOption('');
+    setChosenPrice('');
+  };
+
   const handleAddCustomOtherProduct = () => {
     if (!customProductOtherName.trim()) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập tên sản phẩm!', type: 'warning' });
       return;
     }
 
-    const newItem: any = {
-      id: `item_custom_${Date.now()}`,
-      productName: customProductOtherName.trim(),
-      productType: 'Sản phẩm khác',
-      calcMethod: 'Đơn chiếc / Khác',
-      qty: customProductOtherQty,
-      unit: 'bộ',
-      unitPrice: customProductOtherUnitPrice,
-      totalPrice: Number(customProductOtherQty) * Number(customProductOtherUnitPrice),
-      material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
-      notes: ''
-    };
+    const specQty = normalizeQty(customProductOtherQty) || 1;
+    const specPrice = typeof customProductOtherUnitPrice === 'number'
+      ? customProductOtherUnitPrice
+      : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0;
+    const specImages = draftProductImage ? [draftProductImage] : undefined;
 
-    setQuoteItems([...quoteItems, newItem]);
-    
+    if (editingItemId && editingSource === 'other') {
+      // ── CẬP NHẬT DÒNG SẢN PHẨM KHÁC ĐANG SỬA ──
+      setQuoteItems(prev => prev.map(item => item.id === editingItemId ? {
+        ...item,
+        productName: customProductOtherName.trim(),
+        qty: specQty,
+        unit: customProductOtherUnit.trim() || 'bộ',
+        unitPrice: specPrice,
+        totalPrice: specQty * specPrice,
+        material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
+        images: specImages,
+      } : item));
+      setFeedback({
+        message: `Đã cập nhật dòng "${customProductOtherName.trim()}" trong báo giá thành công!`,
+        type: 'success'
+      });
+    } else {
+      // ── THÊM MỚI SẢN PHẨM KHÁC ──
+      const newItem: any = {
+        id: `item_custom_${Date.now()}`,
+        productName: customProductOtherName.trim(),
+        productType: 'Sản phẩm khác',
+        calcMethod: 'Đơn chiếc / Khác',
+        qty: specQty,
+        unit: customProductOtherUnit.trim() || 'bộ',
+        unitPrice: specPrice,
+        totalPrice: specQty * specPrice,
+        material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
+        notes: '',
+        images: specImages
+      };
+      setQuoteItems(prev => [...prev, newItem]);
+      setFeedback({
+        message: `Đã thêm sản phẩm "${customProductOtherName.trim()}" vào báo giá thành công!`,
+        type: 'success'
+      });
+    }
+    setTimeout(() => setFeedback(null), 3000);
+
     // reset inputs
+    skipCategoryResetRef.current = false;
     setCustomProductOtherName('');
     setCustomProductOtherQty(1);
     setCustomProductOtherUnitPrice(1000000);
     setCustomProductOtherMaterial('Tự chọn theo ý khách');
+    setCustomProductOtherUnit('bộ');
+    setDraftProductImage(null);
+    setEditingItemId(null);
+    setEditingSource(null);
   };
 
   // Tổng cộng hóa đơn
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ — thành tiền = tổng tiền gốc.
   const subtotal = quoteItems.reduce((acc, i) => acc + i.totalPrice, 0);
-  const discountVal = subtotal * (config.discountPercent / 100);
-  const totalQuoteAmount = subtotal - discountVal;
-  const vatPercent = config.vatPercent !== undefined ? config.vatPercent : 8;
-  const vatAmount = totalQuoteAmount * (vatPercent / 100);
-  const totalWithVat = totalQuoteAmount + vatAmount;
+  const discountVal = 0;
+  const totalQuoteAmount = subtotal;
+  const vatPercent = 0;
+  const vatAmount = 0;
+  const totalWithVat = subtotal;
 
-  const handleSendToProject = () => {
+  const handleSendToProject = async () => {
     if (!selectedProjectId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng chọn hoặc liên kết dự án ở phía trên trước khi gửi báo giá!', type: 'warning' });
       return;
@@ -1023,15 +1332,12 @@ export default function CabinetEstimator({
     const itemCode = `BG-HL-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const pdfName = `Bao_gia_Noi_that_${(customerName || 'Khach_hang').trim().replace(/\s+/g, '_')}.pdf`;
 
-    // Sync child tasks in local storage
-    const rawTasks = localStorage.getItem('hl_erp_tasks');
+    // Sync child tasks (nguồn: Supabase)
     let currentTasks: any[] = [];
-    if (rawTasks) {
-      try {
-        currentTasks = JSON.parse(rawTasks);
-      } catch (e) {
-        console.error("Lỗi đọc tasks từ localStorage:", e);
-      }
+    try {
+      currentTasks = await dbService.tasks.list();
+    } catch (e) {
+      console.error("Lỗi đọc tasks từ Supabase:", e);
     }
 
     let taskUpdatedCount = 0;
@@ -1085,7 +1391,7 @@ export default function CabinetEstimator({
           size: `${Math.round(110 + Math.random() * 30)} KB`,
           createdAt: new Date().toLocaleDateString('vi-VN'),
           totalAmount: totalQuoteAmount,
-          discountPercent: config.discountPercent,
+          discountPercent: 0,
           items: quoteItems,
           customerName: customerName || 'Khách hàng',
           customerPhone: customerPhone || 'Chưa cung cấp',
@@ -1093,7 +1399,7 @@ export default function CabinetEstimator({
           paymentTerms: paymentTerms,
           quoteNotes: quoteNotes,
           code: itemCode,
-          content: `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc\n\nBẢNG BÁO GIÁ CHI TIẾT NỘI THẤT NĂM 2026\n--------------------------------------\nSố báo giá: ${itemCode}\nKhách hàng: ${customerName || 'Khách hàng'}\nSố điện thoại: ${customerPhone || 'Không có'}\nĐịa chỉ: ${customerAddress || 'Không có'}\nDự án liên kết: ${p.name}\n\nDANH SÁCH HẠNG MỤC SẢN PHẨM SƠ BỘ:\n${quoteItems.map((item, index) => `${index + 1}. ${item.productName} - Số lượng: ${item.qty} - Thành tiền: ${item.totalPrice.toLocaleString('vi-VN')} đ`).join('\n')}\n\n--------------------------------------\nTỔNG CỘNG CHƯA CHIẾT KHẤU: ${subtotal.toLocaleString('vi-VN')} đ\nCHIẾT KHẤU GIẢM GIÁ (${config.discountPercent}%): -${discountVal.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ THÔ: ${totalQuoteAmount.toLocaleString('vi-VN')} đ\nVAT (${vatPercent}%): ${vatAmount.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ TOÀN BỘ (ĐÃ BAO GỒM VAT): ${totalWithVat.toLocaleString('vi-VN')} đ\n\nNơi nhận: Khách hàng\nĐại diện bàn giao báo giá.`
+          content: `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc\n\nBẢNG BÁO GIÁ CHI TIẾT NỘI THẤT NĂM 2026\n--------------------------------------\nSố báo giá: ${itemCode}\nKhách hàng: ${customerName || 'Khách hàng'}\nSố điện thoại: ${customerPhone || 'Không có'}\nĐịa chỉ: ${customerAddress || 'Không có'}\nDự án liên kết: ${p.name}\n\nDANH SÁCH HẠNG MỤC SẢN PHẨM SƠ BỘ:\n${quoteItems.map((item, index) => `${index + 1}. ${item.productName} - Số lượng: ${item.qty} - Thành tiền: ${item.totalPrice.toLocaleString('vi-VN')} đ`).join('\n')}\n\n--------------------------------------\nTỔNG CỘNG GIÁ TRỊ HẠNG MỤC: ${subtotal.toLocaleString('vi-VN')} đ\nTỔNG GIÁ TRỊ TOÀN BỘ: ${totalWithVat.toLocaleString('vi-VN')} đ\n\nNơi nhận: Khách hàng\nĐại diện bàn giao báo giá.`
         };
 
         // Fire and forget dbService save
@@ -1110,11 +1416,9 @@ export default function CabinetEstimator({
       return p;
     });
 
-    localStorage.setItem('hl_erp_projects', JSON.stringify(updatedProjects));
     window.dispatchEvent(new CustomEvent('hl-projects-updated'));
 
     if (taskUpdatedCount > 0) {
-      localStorage.setItem('hl_erp_tasks', JSON.stringify(updatedTasks));
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
 
       // Fire and forget matched tasks dbService save
@@ -1188,7 +1492,7 @@ export default function CabinetEstimator({
         projectName: projectName.trim(),
         date: new Date().toISOString().split('T')[0],
         items: quoteItems,
-        config: config,
+        config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
         status: 'draft',
         notes: quoteNotes,
         paymentTerms: paymentTerms,
@@ -1328,7 +1632,7 @@ export default function CabinetEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30 cursor-pointer active:scale-95'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 cursor-pointer active:scale-95'
               }`}
             >
               ⭐ Đặt làm mặc định
@@ -1340,7 +1644,7 @@ export default function CabinetEstimator({
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm border ${
                 dbSaving || !isTemplateEditable
                   ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 cursor-pointer active:scale-95'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 cursor-pointer active:scale-95'
               }`}
             >
               🔄 Khôi phục mặc định
@@ -1393,7 +1697,7 @@ export default function CabinetEstimator({
                       />
                       <label 
                         htmlFor={isTemplateEditable ? "company-logo-input-cabinet-tmpl" : undefined}
-                        className={`px-4 py-2 bg-amber-600/10 text-amber-400 hover:bg-amber-600/20 border border-amber-500/30 rounded-xl text-xs font-bold cursor-pointer transition-all duration-200 ${
+                        className={`px-4 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 rounded-xl text-xs font-bold cursor-pointer transition-all duration-200 ${
                           !isTemplateEditable ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
                         }`}
                       >
@@ -1404,7 +1708,7 @@ export default function CabinetEstimator({
                           type="button"
                           disabled={!isTemplateEditable}
                           onClick={() => setCompanyLogoImg('')}
-                          className={`px-4 py-2 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             !isTemplateEditable ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''
                           }`}
                         >
@@ -1505,6 +1809,9 @@ export default function CabinetEstimator({
                   onChange={(html) => setContractTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="orange"
+                  // Phóng khung soạn thảo lên xấp xỉ 1 trang A4 (~1123px cao ở 96dpi)
+                  // để dễ theo dõi toàn bộ mẫu hợp đồng dài thay vì khung nhỏ mặc định.
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 self-start">
@@ -1591,6 +1898,7 @@ export default function CabinetEstimator({
                   onChange={(html) => setAcceptanceTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="orange"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 self-start">
@@ -1657,6 +1965,7 @@ export default function CabinetEstimator({
                   onChange={(html) => setLiquidationTemplate(html)}
                   disabled={!isTemplateEditable}
                   themeColor="orange"
+                  editorHeightClassName="min-h-[1123px] max-h-none prose max-w-none text-left"
                 />
               </div>
               <div className="col-span-12 lg:col-span-4 bg-slate-950/40 border border-slate-800 rounded-xl p-4 self-start">
@@ -1720,7 +2029,7 @@ export default function CabinetEstimator({
               className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
                 isTemplateEditable 
                   ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
-                  : 'bg-amber-600/15 text-amber-400 hover:bg-amber-600/25 border border-amber-500/30'
+                  : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
               }`}
             >
               {isTemplateEditable ? '🔒 Khóa' : '✍️ Chỉnh sửa'}
@@ -1762,8 +2071,8 @@ export default function CabinetEstimator({
         </div>
 
         {dbSaveSuccess && (
-          <div className="bg-emerald-950/20 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl text-xs flex items-center gap-3 animate-fadeIn">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
             <div>
               <span className="font-bold">Lưu thành công:</span> Cấu hình mẫu hồ sơ và báo giá Nội thất đã được lưu vào hệ thống cơ sở dữ liệu đám mây và đồng bộ hóa thành công trên toàn ứng dụng!
             </div>
@@ -1776,7 +2085,7 @@ export default function CabinetEstimator({
   return (
     <div className="space-y-6 text-left" id="quote_estimator_panel">
       {feedback && (
-        <div className="bg-emerald-50 border border-emerald-250 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="estimator_feedback">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs font-semibold flex items-center justify-between shadow-md relative overflow-hidden" id="estimator_feedback">
           <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500"></div>
           <span className="pl-2">{feedback.message}</span>
           <button onClick={() => setFeedback(null)} className="text-emerald-600 font-black hover:text-emerald-950 px-2 cursor-pointer transition-colors">✕</button>
@@ -1790,9 +2099,10 @@ export default function CabinetEstimator({
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-2 gap-2">
               <span className="font-extrabold text-slate-900 text-sm tracking-wide">BẢNG BÁO GIÁ</span>
             </div>
+            
 
             {/* Thông tin metadata của Báo giá */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs text-left">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs text-left">
               {/* Dự án (searchable custom selection) */}
               <div className="relative">
                 <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Dự Án <span className="text-rose-500 font-bold">*</span></label>
@@ -1821,7 +2131,7 @@ export default function CabinetEstimator({
 
                 {/* Dropdown Popup Panel */}
                 {isProjDropdownOpen && (
-                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-scaleIn">
+                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
                     {/* Search Field inside */}
                     <div className="relative mb-2">
                       <input
@@ -1941,7 +2251,7 @@ export default function CabinetEstimator({
 
                 {/* Dropdown list of customers */}
                 {isCustDropdownOpen && (
-                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-scaleIn">
+                  <div className="absolute left-0 mt-1.5 w-72 md:w-80 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 z-55 max-h-72 overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
                     <div className="relative mb-2">
                       <input
                         type="text"
@@ -1976,7 +2286,7 @@ export default function CabinetEstimator({
                             onClick={() => handleSelectCustomer(c)}
                             className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
                               selectedCustomerId === c.id 
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-250 font-bold' 
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold' 
                                 : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                             }`}
                           >
@@ -2005,6 +2315,21 @@ export default function CabinetEstimator({
                 )}
               </div>
 
+              {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                  Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                  Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+              <div>
+                <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                <input
+                  type="text"
+                  value={customerRepresentative}
+                  disabled={isLocked}
+                  onChange={(e) => setCustomerRepresentative(e.target.value)}
+                  className="w-full bg-white text-slate-800 border border-slate-200 rounded-lg p-2.5 outline-none font-semibold text-xs focus:border-emerald-500 transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-550 disabled:cursor-not-allowed"
+                  placeholder="Mặc định theo Tên khách hàng"
+                />
+              </div>
+
               {/* Số điện thoại */}
               <div>
                 <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Số điện thoại <span className="text-rose-500 font-bold">*</span></label>
@@ -2030,82 +2355,45 @@ export default function CabinetEstimator({
               </div>
             </div>
 
-            {/* Chiết khấu và VAT */}
-            <div className="flex flex-col sm:flex-row justify-end items-center gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs w-full">
-              {/* Chiết khấu (%) */}
-              <div className="w-full sm:w-[180px] text-left">
-                <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                  <span>Chiết khấu (%)</span>
-                  <span className="text-emerald-650 font-black text-[8px] bg-emerald-50 px-1 hover:bg-emerald-100 rounded border border-emerald-200 flex items-center gap-0.5">
-                    % GIẢM
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={config.discountPercent}
-                  disabled={isLocked}
-                  onChange={(e) => {
-                    const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                    handleConfigChange('discountPercent', val);
-                  }}
-                  className={`w-full rounded-lg p-2.5 border text-slate-900 outline-none text-xs font-semibold transition-all font-mono ${
-                    isLocked ? 'bg-slate-50 border-slate-200 text-slate-550 cursor-not-allowed border-dashed' : 'bg-white border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-                  }`}
-                  placeholder="Nhập % chiết khấu..."
-                />
-              </div>
-
-              {/* Thuế VAT (%) */}
-              <div className="w-full sm:w-[180px] text-left">
-                <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1 flex items-center justify-between">
-                  <span>Thuế VAT (%)</span>
-                  <span className="text-emerald-650 font-black text-[8px] bg-emerald-50 px-1 hover:bg-emerald-100 rounded border border-emerald-200 flex items-center gap-0.5">
-                    % VAT
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={config.vatPercent !== undefined ? config.vatPercent : 8}
-                  disabled={isLocked}
-                  onChange={(e) => {
-                    const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                    handleConfigChange('vatPercent', val);
-                  }}
-                  className={`w-full rounded-lg p-2.5 border text-slate-900 outline-none text-xs font-semibold transition-all font-mono ${
-                    isLocked ? 'bg-slate-50 border-slate-200 text-slate-550 cursor-not-allowed border-dashed' : 'bg-white border-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-                  }`}
-                  placeholder="Nhập % VAT..."
-                />
-              </div>
-            </div>
-
             {/* THÊM SẢN PHẨM FORM */}
             {!isLocked && (
-              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40">
-              
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-6 relative z-40" id="cabinet-product-add-form">
+
               {/* Header của form */}
-              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-205 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="bg-slate-100 px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-lg bg-orange-50 flex items-center justify-center border border-orange-200">
                     <Calculator className="w-3.5 h-3.5 text-orange-600 animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-xs text-slate-900 uppercase tracking-wider">
+                    <h3 className="font-extrabold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-2">
                       Thêm sản phẩm báo giá
+                      {editingItemId && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-black text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5 normal-case tracking-normal">
+                          <Edit className="w-3 h-3" /> ĐANG SỬA DÒNG #{quoteItems.findIndex(i => i.id === editingItemId) + 1}
+                        </span>
+                      )}
                     </h3>
-                    <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Bổ sung danh mục sản phẩm tiêu chuẩn hoặc nhập sản phẩm khác bên ngoài</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5 font-medium">
+                      {editingItemId ? 'Điều chỉnh nội dung dòng sản phẩm rồi bấm "Cập nhật" để áp dụng.' : 'Bổ sung danh mục sản phẩm tiêu chuẩn hoặc nhập sản phẩm khác bên ngoài'}
+                    </p>
                   </div>
+                  {editingItemId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditItem}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-white border border-slate-300 hover:border-slate-400 rounded-lg px-2.5 py-1.5 transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" /> Hủy sửa
+                    </button>
+                  )}
                 </div>
 
                 {/* Tab switchers in header */}
                 <div className="flex bg-slate-200/80 rounded-lg p-0.5 border border-slate-300">
                   <button
                     type="button"
-                    onClick={() => setAddMethod('catalog')}
+                    onClick={() => { if (editingItemId && editingSource !== 'catalog') handleCancelEditItem(); setAddMethod('catalog'); }}
                     className={`px-3 py-1.5 text-[10.5px] font-bold transition-all rounded cursor-pointer flex items-center gap-1.5 ${
                       addMethod === 'catalog'
                         ? 'bg-orange-600 text-white shadow-md font-extrabold'
@@ -2116,7 +2404,7 @@ export default function CabinetEstimator({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAddMethod('other')}
+                    onClick={() => { if (editingItemId && editingSource !== 'other') handleCancelEditItem(); setAddMethod('other'); }}
                     className={`px-3 py-1.5 text-[10.5px] font-bold transition-all rounded cursor-pointer flex items-center gap-1.5 ${
                       addMethod === 'other'
                         ? 'bg-orange-600 text-white shadow-md font-extrabold'
@@ -2199,7 +2487,7 @@ export default function CabinetEstimator({
                     </div>
 
                     {/* Sản phẩm */}
-                    <div className="relative md:col-span-12 lg:col-span-5 text-left font-sans">
+                    <div className="relative md:col-span-7 text-left font-sans">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
                         Sản phẩm {isProdDropdownOpen ? "(Đang tìm)" : ""}
@@ -2212,7 +2500,7 @@ export default function CabinetEstimator({
                           setSearchProductQuery('');
                         }}
                         className={`w-full bg-white text-slate-800 border rounded-xl p-3 text-xs text-left transition-all flex items-center justify-between cursor-pointer focus:ring-1 focus:ring-orange-500/20 ${
-                          selectedCategory ? 'border-slate-200 hover:border-slate-350' : 'border-slate-150 opacity-50 cursor-not-allowed'
+                          selectedCategory ? 'border-slate-200 hover:border-slate-350' : 'border-slate-200 opacity-50 cursor-not-allowed'
                         }`}
                         disabled={!selectedCategory}
                       >
@@ -2259,30 +2547,101 @@ export default function CabinetEstimator({
                       )}
                     </div>
 
-                    {/* Đơn vị vị tính & Định lượng */}
-                    <div className="md:col-span-2 grid grid-cols-2 gap-2 text-left">
-                      <div>
-                        <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate">
-                          Đơn Vị
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={selectedProduct ? selectedProduct.donVi : "---"}
-                          className="w-full bg-slate-50 text-slate-500 border border-slate-200 rounded-xl p-3 text-xs font-bold text-center outline-none select-none cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate">
-                          Số lượng
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={productQty}
-                          onChange={(e) => setProductQty(e.target.value)}
-                          className="w-full bg-white text-slate-905 border border-slate-200 rounded-xl p-3 text-xs font-bold font-mono outline-none focus:border-orange-500 text-center"
-                        />
+                    {/* Đơn vị tính */}
+                    <div className="md:col-span-2 text-left">
+                      <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate">
+                        Đơn Vị
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={selectedProduct ? selectedProduct.donVi : "---"}
+                        className="w-full bg-slate-50 text-slate-500 border border-slate-200 rounded-xl p-3 text-xs font-bold text-center outline-none select-none cursor-not-allowed"
+                      />
+                    </div>
+
+                    {/* Số lượng */}
+                    <div className="md:col-span-2 text-left">
+                      <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5 truncate" title="Cho phép nhập số thập phân, làm tròn 3 chữ số">
+                        Số lượng
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.001"
+                        inputMode="decimal"
+                        value={productQty}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '.');
+                          const num = parseFloat(raw);
+                          setProductQty(isNaN(num) ? raw : Math.round(num * 1000) / 1000);
+                        }}
+                        className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl p-3 text-xs font-bold font-mono outline-none focus:border-orange-500 text-center"
+                        placeholder="VD: 3,555"
+                      />
+                    </div>
+
+                    {/* Hình ảnh minh họa cho dòng sản phẩm (1 ảnh) */}
+                    <div className="md:col-span-8">
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+                            <label className="text-slate-600 font-bold uppercase tracking-wider text-[9px]">
+                              Hình ảnh minh họa dòng sản phẩm (1 ảnh)
+                            </label>
+                          </div>
+                          {!draftProductImage && (
+                            <button
+                              type="button"
+                              onClick={() => draftImageInputRef.current?.click()}
+                              disabled={isUploadingDraftImage}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Upload className="w-3 h-3" />
+                              {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                            </button>
+                          )}
+                          <input
+                            ref={draftImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleDraftImageUpload}
+                            className="hidden"
+                          />
+                        </div>
+                        {draftProductImage ? (
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              <img
+                                src={draftProductImage}
+                                alt="Ảnh dòng sản phẩm"
+                                className="w-20 h-20 object-cover rounded-lg border border-slate-200 shadow-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setDraftProductImage(null)}
+                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                                title="Gỡ ảnh"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => draftImageInputRef.current?.click()}
+                              disabled={isUploadingDraftImage}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                            >
+                              <Upload className="w-3 h-3" />
+                              {isUploadingDraftImage ? 'Đang tải...' : 'Thay ảnh khác'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-400 italic">
+                            💡 Hình ảnh này sẽ hiển thị trên dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2468,25 +2827,25 @@ export default function CabinetEstimator({
                         Đang soạn: <span className="font-extrabold text-orange-600">{selectedProduct.tenSanPham}</span> ({selectedProduct.id})
                       </div>
                       <div className="text-[11px] text-slate-600 font-medium font-sans">
-                        Phương án: <span className="font-bold text-slate-800">{selectedPriceOption}</span> — Đơn giá: <span className="font-extrabold font-mono text-slate-900">{(typeof chosenPrice === 'number' ? chosenPrice : parseInt(chosenPrice) || 0).toLocaleString('vi-VN')} đ/{selectedProduct.donVi}</span> x <span className="font-extrabold font-mono text-slate-900">{productQty || 0}</span>
+                        Phương án: <span className="font-bold text-slate-800">{selectedPriceOption}</span> — Đơn giá: <span className="font-extrabold font-mono text-slate-900">{(typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0).toLocaleString('vi-VN')} đ/{selectedProduct.donVi}</span> x <span className="font-extrabold font-mono text-slate-900">{productQty || 0}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
                       <div className="text-center sm:text-right">
                         <div className="text-[9px] uppercase font-bold tracking-widest text-slate-500">TỔNG KHỐI LƯỢNG SƠ BỘ</div>
                         <div className="text-lg font-black font-mono text-orange-600 tracking-tight">
-                          {((typeof chosenPrice === 'number' ? chosenPrice : parseInt(chosenPrice) || 0) * (typeof productQty === 'number' ? productQty : parseInt(productQty) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
+                          {(normalizeQty(productQty) * (typeof chosenPrice === 'number' ? chosenPrice : parseFloat(String(chosenPrice).replace(/,/g, '.')) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
                         </div>
                       </div>
-                      
+
                       <button
                         type="button"
                         onClick={handleAddProductToQuote}
                         className="w-full sm:w-auto bg-orange-600 hover:bg-orange-550 active:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg hover:shadow-orange-700/20"
                       >
                         <Plus className="w-4 h-4 shrink-0" />
-                        Thêm sản phẩm
+                        {editingItemId ? 'Cập nhật dòng' : 'Thêm sản phẩm'}
                       </button>
                     </div>
                   </div>
@@ -2495,14 +2854,14 @@ export default function CabinetEstimator({
               </div>
               ) : (
                 /* NHẬP SẢN PHẨM KHÁC FORM BODY */
-                <div className="p-5 space-y-5 animate-scaleIn text-left">
+                <div className="p-5 space-y-5 animate-in fade-in zoom-in-95 duration-200 text-left">
                   <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500">
                     BẢNG ĐĂNG KÝ HẠNG MỤC PHỤ TRỢ NGOÀI DANH MỤC
                   </span>
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                     {/* Tên sản phẩm */}
-                    <div className="md:col-span-4">
+                    <div className="md:col-span-3">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
                         Tên sản phẩm khác <span className="text-rose-500 font-extrabold">*</span>
                       </label>
@@ -2516,7 +2875,7 @@ export default function CabinetEstimator({
                     </div>
 
                     {/* Chất liệu */}
-                    <div className="md:col-span-4">
+                    <div className="md:col-span-3">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
                         Chất liệu
                       </label>
@@ -2529,6 +2888,20 @@ export default function CabinetEstimator({
                       />
                     </div>
 
+                    {/* Đơn vị tính */}
+                    <div className="md:col-span-2">
+                      <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
+                        Đơn vị tính
+                      </label>
+                      <input
+                        type="text"
+                        value={customProductOtherUnit}
+                        onChange={(e) => setCustomProductOtherUnit(e.target.value)}
+                        className="w-full bg-white text-slate-950 border border-slate-200 rounded-xl p-3 text-xs focus:border-orange-500 outline-none font-semibold transition-all placeholder-slate-400"
+                        placeholder="Ví dụ: bộ, m2, cái..."
+                      />
+                    </div>
+
                     {/* Số lượng */}
                     <div className="md:col-span-2">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
@@ -2536,10 +2909,17 @@ export default function CabinetEstimator({
                       </label>
                       <input
                         type="number"
-                        min="1"
+                        min="0"
+                        step="0.001"
+                        inputMode="decimal"
                         value={customProductOtherQty}
-                        onChange={(e) => setCustomProductOtherQty(e.target.value)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '.');
+                          const num = parseFloat(raw);
+                          setCustomProductOtherQty(isNaN(num) ? raw : Math.round(num * 1000) / 1000);
+                        }}
                         className="w-full bg-white text-slate-950 border border-slate-200 rounded-xl p-3 text-xs focus:border-orange-500 outline-none font-bold font-mono transition-all text-center"
+                        placeholder="VD: 2,342"
                       />
                     </div>
 
@@ -2559,6 +2939,64 @@ export default function CabinetEstimator({
                     </div>
                   </div>
 
+                  {/* Hình ảnh minh họa dòng sản phẩm (1 ảnh) */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+                        <label className="text-slate-600 font-bold uppercase tracking-wider text-[9px]">
+                          Hình ảnh minh họa dòng sản phẩm (1 ảnh)
+                        </label>
+                      </div>
+                      {!draftProductImage && (
+                        <button
+                          type="button"
+                          onClick={() => draftImageInputRef.current?.click()}
+                          disabled={isUploadingDraftImage}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-600 hover:bg-orange-550 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          {isUploadingDraftImage ? 'Đang tải...' : 'Tải ảnh lên'}
+                        </button>
+                      )}
+                      <input
+                        ref={draftImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleDraftImageUpload}
+                        className="hidden"
+                      />
+                    </div>
+                    {draftProductImage ? (
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <img src={draftProductImage} alt="Ảnh dòng sản phẩm" className="w-20 h-20 object-cover rounded-lg border border-slate-200 shadow-sm" />
+                          <button
+                            type="button"
+                            onClick={() => setDraftProductImage(null)}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-700"
+                            title="Gỡ ảnh"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => draftImageInputRef.current?.click()}
+                          disabled={isUploadingDraftImage}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-[10px] rounded-lg cursor-pointer transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          {isUploadingDraftImage ? 'Đang tải...' : 'Thay ảnh khác'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 italic">
+                        💡 Hình ảnh này sẽ hiển thị trên dòng sản phẩm trong danh sách chi tiết và khi in báo giá.
+                      </div>
+                    )}
+                  </div>
+
                   {/* Summary row */}
                   <div className="bg-orange-50 border border-orange-200/60 rounded-2xl p-4.5 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="space-y-1 text-center md:text-left">
@@ -2569,25 +3007,25 @@ export default function CabinetEstimator({
                         Chất liệu: <span className="font-extrabold text-slate-600">{customProductOtherMaterial || 'Tự chọn theo ý khách'}</span>
                       </div>
                       <div className="text-[11px] text-slate-600 font-medium">
-                        Tổng tạm tính: <span className="font-extrabold font-mono text-slate-900">{(typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseInt(customProductOtherUnitPrice) || 0).toLocaleString('vi-VN')} đ</span> x <span className="font-extrabold font-mono text-slate-900">{customProductOtherQty || 0}</span>
+                        Tổng tạm tính: <span className="font-extrabold font-mono text-slate-900">{(typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0).toLocaleString('vi-VN')} đ</span> x <span className="font-extrabold font-mono text-slate-900">{customProductOtherQty || 0}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
                       <div className="text-center sm:text-right">
                         <div className="text-[9px] uppercase font-bold tracking-widest text-slate-500">TỔNG KHỐI LƯỢNG SƠ BỘ</div>
                         <div className="text-lg font-black font-mono text-orange-600 tracking-tight">
-                          {((typeof customProductOtherQty === 'number' ? customProductOtherQty : parseInt(customProductOtherQty) || 0) * (typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseInt(customProductOtherUnitPrice) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
+                          {(normalizeQty(customProductOtherQty) * (typeof customProductOtherUnitPrice === 'number' ? customProductOtherUnitPrice : parseFloat(String(customProductOtherUnitPrice).replace(/,/g, '.')) || 0)).toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
                         </div>
                       </div>
-                      
+
                       <button
                         type="button"
                         onClick={handleAddCustomOtherProduct}
                         className="w-full sm:w-auto bg-orange-600 hover:bg-orange-550 active:bg-orange-700 text-white font-extrabold py-3 px-6 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg hover:shadow-orange-700/20"
                       >
                         <Plus className="w-4 h-4 shrink-0" />
-                        Thêm sản phẩm
+                        {editingItemId && editingSource === 'other' ? 'Cập nhật dòng' : 'Thêm sản phẩm'}
                       </button>
                     </div>
                   </div>
@@ -2603,18 +3041,19 @@ export default function CabinetEstimator({
                   <tr>
                     <th className="px-3 py-2.5 text-center w-12 text-slate-700">STT</th>
                     <th className="px-3 py-2 text-slate-700">Tên sản phẩm</th>
+                    <th className="px-3 py-2 text-center w-20 text-slate-700">Hình ảnh</th>
                     <th className="px-3 py-2 text-slate-700">Chất liệu</th>
                     <th className="px-3 py-2 text-center text-slate-700">Số lượng</th>
                     <th className="px-3 py-2 text-center text-slate-700">Đơn vị</th>
                     <th className="px-3 py-2 text-right text-slate-700">Đơn giá</th>
                     <th className="px-3 py-2 text-right text-slate-700">Thành tiền</th>
-                    <th className="px-3 py-2 text-center w-10"></th>
+                    <th className="px-3 py-2 text-center w-20"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {quoteItems.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-slate-400 font-medium italic">
+                      <td colSpan={9} className="text-center py-8 text-slate-400 font-medium italic">
                         Chưa có sản phẩm nào trong báo giá này. Hãy chọn và thêm từ khung phía trên.
                       </td>
                     </tr>
@@ -2623,30 +3062,61 @@ export default function CabinetEstimator({
                       const unitVal = item.unit || 'm';
                       const defaultMat = item.material || 'Gỗ MDF An Cường chống ẩm';
                       const uPrice = item.unitPrice || 0;
+                      const itemImages = item.images || [];
                       return (
-                        <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                          <td className="px-3 py-2.5 text-center text-slate-500 font-semibold">{idx + 1}</td>
+                        <tr
+                          key={item.id}
+                          className={`border-b border-slate-100 transition-colors ${editingItemId === item.id ? 'bg-amber-50/70 hover:bg-amber-50' : 'hover:bg-slate-50'}`}
+                        >
+                          <td className="px-3 py-2.5 text-center text-slate-500 font-semibold">
+                            {editingItemId === item.id && <span className="text-amber-600">✏️</span>} {idx + 1}
+                          </td>
                           <td className="px-3 py-2.5">
                             <div className="font-semibold text-slate-900">{item.productName}</div>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {itemImages.length > 0 ? (
+                              <img
+                                src={itemImages[0]}
+                                alt={item.productName}
+                                className="w-11 h-11 object-cover rounded-lg border border-slate-200 shadow-sm mx-auto"
+                              />
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 rounded text-slate-400 font-bold border border-slate-200 text-[9px]">
+                                Chưa có
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-slate-600 max-w-[200px] truncate" title={defaultMat}>
                             {defaultMat}
                           </td>
-                          <td className="px-3 py-2.5 text-center font-bold text-slate-900">{item.qty}</td>
+                          <td className="px-3 py-2.5 text-center font-bold text-slate-900 font-mono">{item.qty}</td>
                           <td className="px-3 py-2.5 text-center text-slate-500">{unitVal}</td>
                           <td className="px-3 py-2.5 text-right text-slate-600 font-mono">{(uPrice).toLocaleString('vi-VN')} đ</td>
                           <td className="px-3 py-2.5 text-right font-extrabold text-emerald-600 font-mono">{(item.totalPrice).toLocaleString('vi-VN')} đ</td>
                           <td className="px-3 py-2.5 text-center">
-                            <button
-                              onClick={() => !isLocked && handleRemoveItem(item.id)}
-                              disabled={isLocked}
-                              className={`text-rose-500 hover:text-rose-600 p-1 transition-colors ${
-                                isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
-                              }`}
-                              title={isLocked ? 'Không thể xóa khi hồ sơ đang bị khóa' : 'Xóa dòng này'}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => !isLocked && handleEditItem(item, (item as any).productType === 'Sản phẩm khác' ? 'other' : 'catalog')}
+                                disabled={isLocked}
+                                className={`text-sky-600 hover:text-sky-700 hover:bg-sky-50 p-1 rounded transition-colors ${
+                                  isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
+                                }`}
+                                title={isLocked ? 'Không thể sửa khi hồ sơ đang bị khóa' : 'Sửa dòng này'}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => !isLocked && handleRemoveItem(item.id)}
+                                disabled={isLocked}
+                                className={`text-rose-500 hover:text-rose-600 hover:bg-rose-50 p-1 rounded transition-colors ${
+                                  isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'
+                                }`}
+                                title={isLocked ? 'Không thể xóa khi hồ sơ đang bị khóa' : 'Xóa dòng này'}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2662,19 +3132,10 @@ export default function CabinetEstimator({
             <div className="grid grid-cols-2 text-xs text-slate-600 gap-y-1.5">
               <span>Hạng tổng thô các mục:</span>
               <span className="text-right font-mono font-bold text-slate-800">{subtotal.toLocaleString('vi-VN')} đ</span>
-              
-              <span>Tổng Chiết Khấu ({config.discountPercent}%):</span>
-              <span className="text-right font-mono font-bold text-rose-600">-{discountVal.toLocaleString('vi-VN')} đ</span>
-              
-              <span>Tổng giá trị thô:</span>
-              <span className="text-right font-mono font-semibold text-slate-700">{totalQuoteAmount.toLocaleString('vi-VN')} đ</span>
-
-              <span>Thuế VAT ({vatPercent}%):</span>
-              <span className="text-right font-mono font-bold text-emerald-650">+{vatAmount.toLocaleString('vi-VN')} đ</span>
 
               <div className="col-span-2 border-t border-slate-100 my-1.5"></div>
-              
-              <span className="text-sm font-bold text-slate-800">TỔNG GIÁ TRỊ TOÀN BỘ (ĐÃ CÓ VAT):</span>
+
+              <span className="text-sm font-bold text-slate-800">TỔNG GIÁ TRỊ TOÀN BỘ:</span>
               <span className="text-right text-base font-extrabold text-emerald-600 font-mono">{totalWithVat.toLocaleString('vi-VN')} đ</span>
             </div>
 
@@ -2742,7 +3203,7 @@ export default function CabinetEstimator({
                     projectName: projectName.trim(),
                     date: new Date().toISOString().split('T')[0],
                     items: quoteItems,
-                    config: config,
+                    config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
                     status: 'draft' as const,
                     notes: quoteNotes,
                     paymentTerms: paymentTerms,
@@ -2774,13 +3235,14 @@ export default function CabinetEstimator({
 
         </div>
 
-        {/* Dynamic Preview Modal */}
-        {savedQuoteForPreview && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text">
-            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden">
-              <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between">
+        {/* Dynamic Preview Modal — dùng React Portal render thẳng vào document.body, tách
+            hoàn toàn khỏi cây component của ứng dụng để tránh lỗi in đè chữ ở các trang sau. */}
+        {savedQuoteForPreview && createPortal(
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text print-portal-backdrop">
+            <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 print-portal-card">
+              <div className="bg-slate-50 px-6 py-4.5 border-b border-slate-200 flex items-center justify-between print-hide">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-250">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-200">
                     <FileText className="w-4 h-4 text-[#00a651]" />
                   </div>
                   <div>
@@ -2790,17 +3252,73 @@ export default function CabinetEstimator({
                     <p className="text-[10px] text-slate-500 font-medium">Báo giá vừa tạo - HOANG LONG ERP</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => setSavedQuoteForPreview(null)}
                   className="text-slate-400 hover:text-slate-800 font-black cursor-pointer bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded-full flex items-center justify-center transition-colors text-xs"
                 >
                   ✕
                 </button>
               </div>
-              <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto">
+              <div className="p-4 md:p-6 bg-slate-100 max-h-[70vh] overflow-y-auto" id="print-area-archive">
+                {/* CSS chỉ dành riêng cho khi in: ẩn toàn bộ ứng dụng (#root), chỉ chừa lại
+                    đúng modal đã tách portal này để nội dung chảy tự nhiên qua nhiều trang
+                    mà không bị lỗi in đè chữ. */}
+                <style>{`
+                  @media print {
+                    #root {
+                      display: none !important;
+                    }
+                    .print-portal-backdrop {
+                      position: static !important;
+                      display: block !important;
+                      background: none !important;
+                      padding: 0 !important;
+                    }
+                    .print-portal-card {
+                      max-width: 100% !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                      border-radius: 0 !important;
+                      overflow: visible !important;
+                    }
+                    #print-area-archive {
+                      max-height: none !important;
+                      overflow: visible !important;
+                      padding: 0 !important;
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                       khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                       nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                    #print-area-archive * {
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    .print-hide {
+                      display: none !important;
+                    }
+                    /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                       panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                       hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                       của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                       duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                       cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                       hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                       khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                    #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                    #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                    #print-area-archive .md\\:text-right { text-align: right !important; }
+                    #print-area-archive .md\\:text-left { text-align: left !important; }
+                    #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                    #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                    #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                    #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+                  }
+                `}</style>
                 <QuotationTableSheet quoteData={savedQuoteForPreview} />
               </div>
-              <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5">
+              <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-2.5 print-hide">
                 <button
                   type="button"
                   onClick={() => setSavedQuoteForPreview(null)}
@@ -2810,24 +3328,42 @@ export default function CabinetEstimator({
                 </button>
                 <button
                   type="button"
+                  onClick={() => downloadArchivePdf(savedQuoteForPreview)}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                  title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Tải PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shareArchivePdf(savedQuoteForPreview)}
+                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  Chia Sẻ
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     window.print();
                   }}
                   className="px-5 py-2.5 bg-[#00a651] hover:bg-[#008f45] text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  In Báo Giá
+                  In Hồ Sơ
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
       {showExistsAlert && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4 animate-scaleIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 text-slate-100 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-amber-500" />
               </div>
               <h4 className="font-extrabold text-base uppercase text-white tracking-wide">
@@ -2850,7 +3386,7 @@ export default function CabinetEstimator({
 
       {showQuickCreateCust && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[220] p-4 text-left font-sans">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden animate-scaleIn p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6">
             <h4 className="font-extrabold text-sm uppercase text-slate-900 tracking-wider mb-4 flex items-center gap-1">
               <span>➕ Tạo Khách Hàng Nhanh</span>
             </h4>

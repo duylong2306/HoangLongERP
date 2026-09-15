@@ -3,6 +3,7 @@ import { Plus, X, Check } from 'lucide-react';
 import { Project, Customer, Employee, Task, ProjectDoc } from '../types';
 import { KanbanColumn } from './ProjectKanbanBoard';
 import { QuickAddCustomerModal } from './QuickAddCustomerModal';
+import { generateProjectId } from '../lib/projectId';
 
 interface ProjectCreationModalProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ interface ProjectCreationModalProps {
   employees: Employee[];
   customers: Customer[];
   onAddTask: (task: Task) => void;
-  onAddProject: (project: Project) => void;
+  onAddProject: (project: Project) => Promise<void> | void;
   onAddCustomer: (customer: Customer) => void;
 }
 
@@ -23,8 +24,11 @@ const getAbbrev = (nameStr: string): string => {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
-  const words = norm.trim().split(/\s+/).filter(Boolean);
-  return words.map(w => w[0].toUpperCase()).join('');
+  // Bỏ các "từ" chỉ toàn ký tự đặc biệt (vd: "-") và bỏ dấu ngoặc/ký tự đặc biệt
+  // đứng đầu mỗi từ (vd: "(Minh" → lấy "M" thay vì "("), tránh mã sinh ra dính
+  // dấu ngoặc/gạch ngang xấu như "AH-PHT(H".
+  const words = norm.trim().split(/\s+/).filter(w => /[a-zA-Z0-9]/.test(w));
+  return words.map(w => (w.match(/[a-zA-Z0-9]/) as RegExpMatchArray)[0].toUpperCase()).join('');
 };
 
 export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
@@ -73,7 +77,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProjName.trim()) return;
 
@@ -90,7 +94,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
     }
 
     const customProject: Project = {
-      id: `proj_${Date.now()}`,
+      id: generateProjectId(newProjType),
       code,
       name: newProjName.trim(),
       customerId: newProjCustomer,
@@ -111,6 +115,10 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
     };
     (customProject as any).kanbanColumnId = newProjColumnId;
 
+    // Danh sách task tự động sẽ được tạo — chỉ lưu SAU khi dự án cha đã
+    // commit lên Supabase (tránh vi phạm FK tasks_project_id_fkey).
+    const autoTasks: Task[] = [];
+
     // 2. Run target column automation rules when initializing
     const targetCol = columns.find(c => c.id === newProjColumnId);
     let ruleLogs: string[] = [];
@@ -122,13 +130,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
         customProject.pmId = rule.assignId;
         const empName = employees.find(e => e.id === rule.assignId)?.name || 'Trưởng Dự Án mới';
         ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
-      }
-
-      // rule 2: Status update
-      if (rule.statusUpdate) {
-        customProject.status = rule.statusUpdate as any;
-        const statusLabel = rule.statusUpdate === 'active' ? 'Đang thực hiện' : rule.statusUpdate === 'completed' ? 'Hoàn thành' : rule.statusUpdate === 'suspended' ? 'Tạm khiển' : rule.statusUpdate;
-        ruleLogs.push(`Chuyển trạng thái dự án sang: ${statusLabel}`);
       }
 
       // rule 2.2: Style and formatting
@@ -165,12 +166,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
           const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
           
           const assigneeId = subtaskAuto.assignId || rule.assignId || customProject.pmId || 'emp_3';
-          const involvedEmployeeIds = Array.from(new Set([
-            ...(customProject.involvedEmployeeIds || []),
-            ...(rule.involvedId ? [rule.involvedId] : []),
-            ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-            ...(subtaskAuto.involvedEmployeeIds || [])
-          ]));
 
           // Send approval request
           let approvals = undefined;
@@ -194,9 +189,8 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
             columnId: targetCol.id,
             name: title,
             description: `Công việc con được tạo tự động bởi quy trình khi khởi tạo vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-            assignerId: 'system',
+            assignerId: customProject.pmId || 'emp_3',
             assigneeId: assigneeId,
-            involvedEmployeeIds: involvedEmployeeIds,
             department: 'Thi công',
             deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             priority: 'medium',
@@ -226,7 +220,9 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
             isMaterialEnabled: subtaskAuto.isMaterialEnabled === true,
             isSubcontractorEnabled: subtaskAuto.isSubcontractorEnabled === true
           };
-          onAddTask(autoTask);
+          // Thu tạm task tự động — chưa lưu ngay. Phải đợi dự án cha
+          // được commit lên Supabase (FK tasks_project_id_fkey) rồi mới lưu.
+          autoTasks.push(autoTask);
 
           // Auto Document Generation
           if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
@@ -262,17 +258,6 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
         ruleLogs.push(`Thêm mục checklist yêu cầu: ${rule.checklistText}`);
       }
 
-      // rule 9: Add involved person
-      const ruleInvolvedIds = rule.involvedEmployeeIds || (rule.involvedId ? [rule.involvedId] : []);
-      if (ruleInvolvedIds.length > 0) {
-        const currentInvolved = customProject.involvedEmployeeIds || [];
-        const addedIds = ruleInvolvedIds.filter(id => !currentInvolved.includes(id));
-        if (addedIds.length > 0) {
-          customProject.involvedEmployeeIds = [...currentInvolved, ...addedIds];
-          const names = addedIds.filter(Boolean).map(id => employees.find(e => e.id === id)?.name || 'Người hỗ trợ').join(', ');
-          ruleLogs.push(`Thêm cộng sự hỗ trợ liên quan: ${names}`);
-        }
-      }
     }
 
     const ruleLogged = ruleLogs.join('. ') || '';
@@ -291,7 +276,13 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({
     };
     customProject.documents = [autoComment];
 
-    onAddProject(customProject);
+    // 1) Lưu dự án cha lên Supabase và đợi commit xong (để có bản ghi
+    //    projects tồn tại trước khi task con trỏ FK tới).
+    await onAddProject(customProject);
+
+    // 2) Sau khi dự án đã có trên Supabase, mới tạo các task tự động.
+    autoTasks.forEach(t => onAddTask(t));
+
     onClose();
   };
 

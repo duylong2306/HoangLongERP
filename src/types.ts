@@ -1,4 +1,50 @@
-﻿export interface Employee {
+﻿export interface SystemConfig {
+  morningIn: string;
+  morningOut: string;
+  afternoonIn: string;
+  afternoonOut: string;
+  overtimeIn: string;
+  overtimeOut: string;
+  autoAttendanceDays: number;
+  autoAttendanceStartDate: string | Date;
+  allowedLateMinutes: number;
+  allowedLateCount: number;
+  allowedLateMorning?: number;    // Dung sai đi muộn ca Sáng (phút)
+  allowedLateAfternoon?: number;  // Dung sai đi muộn ca Chiều (phút)
+  otMultiplier: number;
+  gpsRadiusAllowed: number;
+  weekendDays: number[];
+  punchOpenBeforeMinutes?: number;
+  punchCloseAfterMinutes?: number;
+  punchOutOpenBeforeMinutes?: number;
+  punchOutCloseAfterMinutes?: number;
+  otPunchOpenBeforeMinutes?: number;
+  otPunchCloseAfterMinutes?: number;
+  otPunchOutOpenBeforeMinutes?: number;
+  otPunchOutCloseAfterMinutes?: number;
+  antiFakeCam?: boolean; // Thêm vào SystemConfig
+  directorBaseSalary?: number; // Thêm vào SystemConfig
+  pmBaseSalary?: number; // Thêm vào SystemConfig
+  accountantBaseSalary?: number; // Thêm vào SystemConfig
+  staffBaseSalary?: number; // Thêm vào SystemConfig
+  constructionSites: string[];
+  companyProfile?: CompanyProfile; // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
+}
+
+// ─── Company Profile (Hồ sơ Thông tin doanh nghiệp) ──────────────────────────
+export interface CompanyProfile {
+  companyName: string;   // Tên doanh nghiệp
+  taxCode: string;       // Mã số thuế (MST)
+  address: string;       // Địa chỉ trụ sở
+  phone: string;         // Điện thoại
+  email: string;         // Email
+  representative: string;// Người đại diện
+  website?: string;      // Website (tùy chọn)
+  bankName?: string;     // Tên ngân hàng (tùy chọn)
+  bankAccount?: string;  // Số tài khoản (tùy chọn)
+}
+
+export interface Employee {
   id: string;
   name: string;
   email: string;
@@ -24,7 +70,7 @@
   startDate?: string;
   contractType?: string;
   contractDurationMonths?: number;
-  status?: 'working' | 'leave' | 'retired';
+  status?: 'working' | 'leave' | 'retired' | 'director_board';
   phepNam?: number;
   docsCount?: number;
   education?: string;
@@ -49,10 +95,12 @@ export interface Customer {
   representative?: string; // Người đại diện (Nếu là Tổ chức)
   taxOrIdNumber?: string; // MST/CMND (kiểu số)
   notes?: string; // Ghi chú
+  openingDebt?: number; // Công nợ đầu kỳ
+  balanceBasis?: 'opening' | 'contract'; // Căn cứ tính Còn phải thu ở mức Chủ đầu tư: 'opening' = Công Nợ Đầu Kỳ, 'contract' = Giá Trị HĐ
 }
 
 export type ProjectType = 'construction' | 'furniture' | 'mechanical' | 'general';
-export type ProjectStatus = 'new' | 'processing' | 'paused' | 'completed' | 'cancelled';
+export type ProjectStatus = 'new' | 'processing' | 'paused' | 'maintenance' | 'completed' | 'cancelled';
 
 export interface ProjectDocCustomField {
   label: string; // Nhãn tùy chỉnh (vd: "Chất liệu chính", "Điều khoản tạm ứng")
@@ -70,11 +118,11 @@ export interface ProjectDoc {
   templateName: string; // Tên mẫu văn bản áp dụng
   customFields?: ProjectDocCustomField[];
   content?: string; // Nội dung văn bản tùy chỉnh đầy đủ
-  materials?: { 
-    id: string; 
-    name: string; 
-    qty: number; 
-    unit: string; 
+  materials?: {
+    id: string;
+    name: string;
+    qty: number;
+    unit: string;
     spec: string;
     note?: string; // Ghi chú
     supplierId?: string; // Nhà cung cấp ID
@@ -113,7 +161,6 @@ export interface Project {
   notes?: string;
   image?: string;
   documents?: ProjectDoc[]; // Bộ tài liệu hồ sơ dự án gồm: Báo giá, Hợp đồng, Nghiệm thu, Thanh lý
-  involvedEmployeeIds?: string[]; // Người liên quan/hỗ trợ của dự án
   kanbanColumnId?: string;
   styleItalic?: boolean;
   styleBold?: boolean;
@@ -125,7 +172,7 @@ export interface Project {
     size: string;
     createdAt: string;
     totalAmount: number;
-    discountPercent: number;
+    discountPercent?: number;
     items?: any[];
     content?: string;
     isApproved?: boolean;
@@ -161,11 +208,15 @@ export interface HrmRoleGroup {
 
 export interface HrmApprovalConfig {
   id: string;
-  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance';
+  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal' | 'payroll';
   documentTypeLabel: string;
   approverId: string;
   approverName: string;
   approverPosition?: string;
+  // Người quyết toán (kế toán thực hiện lập phiếu chi / quyết toán) — cấu hình trong Quyền Phê Duyệt
+  settlerId?: string;
+  settlerName?: string;
+  settlerPosition?: string;
   canApprove: boolean;
 }
 
@@ -215,7 +266,6 @@ export interface Task {
   completionRate: number;
   notes?: string;
   attachmentName?: string;
-  involvedEmployeeIds?: string[]; // Danh sách nhiều người liên quan
   approvals?: ApprovalStep[]; // Quy trình duyệt nhiều cấp
   workLogs?: TaskWorkLog[]; // Lịch trình/Quá trình thao tác
   comments?: TaskComment[]; // Bình luận trực tiếp
@@ -254,17 +304,47 @@ export interface Task {
   missions?: SubTaskMission[];
 }
 
+// Payload cho onUpdateTask khi cập nhật có liên quan tới missions. `missions` (nếu có)
+// chỉ cần chứa các mission THAY ĐỔI/THÊM MỚI — không cần đủ toàn bộ mảng — vì
+// syncMissionsDiff() ở App.tsx chỉ UPSERT những gì có mặt trong đây, KHÔNG còn suy luận
+// "vắng mặt = đã xóa" (lỗi cũ: mảng UI cầm bị cũ hơn server do Realtime rớt ngầm một lúc
+// sẽ xóa nhầm mission người khác vừa hoàn thành — xem sự cố "Thi công sắt tại công trình"
+// 2026-08-31). Muốn xóa hẳn 1 mission phải khai báo rõ id trong deletedMissionIds.
+export type TaskUpdatePayload = Partial<Task> & { deletedMissionIds?: string[] };
+
+/**
+ * Bản mẫu (template) của một NHIỆM VỤ CHI TIẾT — dùng để cấu hình trước các
+ * nhiệm vụ trong 3 cửa sổ (Tạo thẻ việc con, Sửa công việc con, Cấu hình Quy
+ * trình tự động công việc con). Khi công việc con được tạo/auto-tạo, các template
+ * này được chuyển thành `SubTaskMission` thật trong `Task.missions`.
+ */
+export interface SubTaskMissionTemplate {
+  id: string;
+  name: string;
+  deadline?: string;      // tùy chọn, rỗng = thừa hưởng hạn của công việc con
+  mainAssigneeId?: string;
+  memberIds?: string[];
+}
+
 export interface SubTaskMission {
   id: string;
   name: string;
   memberIds: string[]; // Danh sách thành viên tham gia nhiệm vụ (avatar)
   mainAssigneeId?: string; // Người phụ trách chính nhiệm vụ
-  status: 'todo' | 'completed';
+  // 'todo' = Chưa làm (mới khởi tạo), 'doing' = Đang làm (Phụ trách đã Nhận NV),
+  // 'completed' = Hoàn thành (đã Xác nhận hoàn thành)
+  status: 'todo' | 'doing' | 'completed';
   workReports: string; // Báo cáo công việc đã làm (bắt buộc)
   evidence: string; // Bằng chứng công việc hoàn thành (bắt buộc)
+  reportImages?: string[]; // Hình ảnh báo cáo (bắt buộc) — URL từ Supabase Storage hoặc data URL dự phòng
   completedAt?: string;
   createdAt?: string;
   deadline?: string;
+  // Đầu mục kiểm soát kỹ thuật (Checklist) — chuyển từ cấp Công Việc (Task.checklistTexts/
+  // completedChecklistTexts, vốn không có nơi nào cho người dùng tự thêm) xuống cấp Nhiệm Vụ,
+  // cho phép thêm ngay khi khởi tạo nhiệm vụ (xem form "Tạo nhiệm vụ", TaskDetailModal.tsx).
+  checklistTexts?: string[];
+  completedChecklistTexts?: string[];
   travelAllowances?: {
     id: string;
     memberId: string;
@@ -275,6 +355,7 @@ export interface SubTaskMission {
     unitPrice: number;
     amount: number;
     notes?: string;
+    rowId?: string; // UUID khóa chính trong bảng hrm_travel_expenses (upsert idempotent)
   }[];
 }
 
@@ -287,25 +368,49 @@ export interface Receipt {
   amount: number;
   paymentMethod: 'cash' | 'transfer';
   notes: string;
-  collector: string;
+  collector: string;          // Tên người thu (hiển thị)
+  collectorId?: string;       // Mã nhân viên người thu (FK → Employee, lưu id chuẩn hóa)
   attachmentName?: string;
+  salesOrderId?: string;   // Liên kết với đơn hàng bán
+  loaiThu?: 'du_an' | 'ban_hang' | 'de_xuat'; // Phân loại phiếu thu
+  receiptAt?: string;       // Thời gian lập phiếu thu (ISO string)
+  source?: 'manual' | 'import' | 'auto'; // 'manual' = tạo thủ công từ "Lập phiếu thu mới", 'import' = nhập từ Excel
 }
 
 export interface Payment {
   id: string;
   code: string;
   date: string;
+  paymentAt?: string;      // Thời gian lập phiếu chi tùy chỉnh (ISO string)
   recipient: string; // Nhà cung cấp / nhân viên / thầu phụ
   projectId?: string;
-  category: 'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance';
+  // 'cash_fund' = phiếu chi NẠP tiền vào Quỹ tiền mặt (không phát sinh công nợ, không gắn purchaseOrderId)
+  category: 'material' | 'labor' | 'shipping' | 'machinery' | 'general' | 'other' | 'subcontractor_advance' | 'site_expense' | 'salary' | 'supplier_payment' | 'salary_advance' | 'cash_fund';
   amount: number;
-  paymentMethod: 'cash' | 'transfer';
+  // 'cash_fund' = khoản chi này được RÚT/lấy từ Quỹ tiền mặt (áp dụng cho mọi category, không riêng category='cash_fund')
+  paymentMethod: 'cash' | 'transfer' | 'cash_fund';
   notes: string;
   proposer: string;
   approver: string;
   status: 'pending' | 'approved' | 'rejected';
   attachmentName?: string;
+  // Base64 data URLs của sao kê / biên lai đính kèm phiếu chi — dbService.payments.list()
+  // (đường tải chính, kể cả RPC load_all_core_data) KHÔNG còn trả field này mặc định
+  // (quá nặng — hàng trăm KB/phiếu × hàng nghìn phiếu). Chỉ có giá trị thật khi tải qua
+  // dbService.payments.getFull(id)/getImages(id), hoặc khi 1 record được Realtime patch
+  // (postgres_changes gửi nguyên row, không qua select() nên vẫn có images). Ở mọi nơi
+  // khác, dùng `imageCount` để biết SỐ LƯỢNG ảnh mà không cần tải ảnh thật.
+  images?: string[];
+  imageCount?: number; // Số lượng ảnh đính kèm — luôn có giá trị đúng từ payments.list(), kể cả khi `images` chưa tải.
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
+  purchaseOrderId?: string;  // FK → PurchaseOrder (liên kết phiếu chi thanh toán đơn hàng)
+  subcontractorId?: string;  // FK → Thầu Phụ (liên kết thanh toán với Công nợ Trả thầu phụ)
+  relatedAdvanceId?: string; // FK → SubcontractorAdvanceProposal (phiếu chi tất toán đề xuất tạm ứng)
+  employeeId?: string;       // Mã nhân viên (cho ứng lương salary_advance — đồng bộ Tạm ứng vào bảng lương CHÍNH XÁC theo mã, không ghép theo tên)
+  supplierId?: string;       // Mã nhà cung cấp (FK → Supplier/NCC, thay cho recipient tên khi category = supplier_payment)
+  proposerId?: string;       // Mã nhân viên người lập/đề xuất (FK → Employee, thay cho proposer tên)
+  approverId?: string;       // Mã nhân viên người duyệt (FK → Employee, thay cho approver tên)
+  source?: 'manual' | 'import' | 'auto'; // 'manual' = tạo thủ công từ "Tạo đề xuất chi mới", 'import' = nhập từ Excel
 }
 
 export interface ProjectContract {
@@ -350,6 +455,10 @@ export interface QuoteConfig {
   profitPercent: number;    // Lợi nhuận %
   wastagePercent: number;   // Hao hụt %
   vatPercent: number;       // % Thuế VAT
+  // Người đại diện khách hàng (Bên A) trong Hợp đồng/Nghiệm thu/Thanh lý — đọc bởi
+  // ContractDocument.tsx/AcceptanceDocument.tsx/LiquidationDocument.tsx cho cả placeholder
+  // {{DAI_DIEN_KHACH_HANG}} lẫn khối chữ ký; mặc định lấy theo Tên khách hàng nếu bỏ trống.
+  customerRepresentative?: string;
 }
 
 export interface QuoteItem {
@@ -362,12 +471,12 @@ export interface QuoteItem {
   unit?: string; // Đơn vị tính của sản phẩm
   unitPrice?: number; // Đơn giá được áp dụng cho sản phẩm
   ratioPercent?: string; // Tỷ lệ % đặc thù xây dựng hoặc khái toán
-  
+
   // Các thông số kích thước, chung
   width?: number; // mét hoặc mm tùy chế độ, ta chuẩn hóa theo mét (m) dải bếp hay tủ quần áo
   height?: number;
   depth?: number;
-  
+
   // Tủ bếp
   lowerCabinetLength?: number; // mét dài tủ dưới
   upperCabinetLength?: number; // mét dài tủ trên
@@ -380,14 +489,14 @@ export interface QuoteItem {
 
   // Chế độ báo giá: 'quick' (mét dài) hoặc 'detail' (theo vật tư)
   pricingMethod: 'quick' | 'detail';
-  
+
   // Chi tiết tính giá
   lowerCabinetUnitPrice?: number;
   upperCabinetUnitPrice?: number;
   stoneUnitPrice?: number;
   glassUnitPrice?: number;
   accessoryCost?: number;
-  
+
   // Tính toán chi tiết (cho pricingMethod = 'detail')
   boardPanelsQty?: number; // số tấm ván
   boardPanelUnitPrice?: number;
@@ -397,6 +506,8 @@ export interface QuoteItem {
   wastageCost?: number;
 
   totalPrice: number;
+  // Hình ảnh minh họa sản phẩm - thêm vào theo yêu cầu
+  images?: string[];   // Mảng URL hình ảnh minh họa cho sản phẩm này
 }
 
 export interface Quote {
@@ -438,6 +549,9 @@ export interface Quote {
   contractTemplate?: string;
   acceptanceTemplate?: string;
   liquidationTemplate?: string;
+  // Hình ảnh minh họa cho báo giá - thêm vào theo yêu cầu
+  images?: string[];   // Mảng URL hình ảnh minh họa cho báo giá (kích thước chung)
+  thumbnail?: string;  // URL ảnh thu nhỏ
   // Optional subcontractor-contract fields (used by SubcontractorEstimator)
   subcontractorId?: string;
   subcontractorName?: string;
@@ -475,26 +589,6 @@ export interface Quote {
   mucPhatToiDa?: number;
 }
 
-export interface AppNotification {
-  id: string;          // Mã tin nhắn
-  recipientId: string; // ID Người nhận
-  recipientName: string; // Người nhận (User)
-  department: string;  // Phòng Ban
-  content: string;     // Nội dung thông báo
-  subTaskCode: string; // Mã Công Việc con
-  createdAt: string;   // Ngày tạo
-  read: boolean;       // Đã đọc hay chưa
-  senderId?: string;   // ID Người gửi
-  senderName?: string; // Tên người gửi
-  senderAvatar?: string; // Ký tự đại diện hoặc mã màu avatar
-  category?: 'tasks' | 'projects' | 'employees' | 'finance' | 'warehouse' | 'subcontractor' | 'attendance' | 'approval' | 'chat' | 'hr'; // Phân loại
-  title?: string;       // Tiêu đề thông báo
-  detailedContent?: string; // Nội dung đầy đủ chi tiết
-  attachments?: ChatAttachment[]; // File đính kèm tin nhắn
-  conversationId?: string; // ID hội thoại (dùng cho category chat để điều hướng)
-  taskId?: string; // ID công việc liên quan
-}
-
 export interface ChatAttachment {
   id: string;
   type: 'image' | 'file' | 'camera';
@@ -528,6 +622,9 @@ export interface ProductCatalogItem {
   donGiaThaiLan?: number | null; // Đơn giá Thái Lan (đ)
   donGiaAnCuong?: number | null; // Đơn giá An Cường (đ)
   donGiaPlywood?: number | null; // Đơn giá gỗ Plywood (đ)
+  // Hình ảnh sản phẩm - thêm vào theo yêu cầu
+  imageUrl?: string; // URL ảnh chính của sản phẩm
+  galleryImages?: string[]; // Mảng URL ảnh thư viện của sản phẩm
 }
 
 export interface ProductPriceItem {
@@ -543,6 +640,101 @@ export interface ProductMaterialItem {
   productId: string; // Liên kết với ProductCatalogItem.id (Foreign Key)
   tenChatLieu: string; // Tên chất liệu
   ghiChu?: string; // Ghi chú chi tiết thêm
+}
+
+// ─── Accounting Product Catalog (Danh mục sản phẩm kế toán) ──────────────────
+export interface AccountingProductItem {
+  id: string;           // Mã SP — khóa chính tự sinh, vd: "SP001"
+  tenSanPham: string;   // Tên sản phẩm
+  donGia: number;       // Đơn giá (đ)
+  donViTinh?: string;   // Đơn vị tính (vd: Cái, Mét, KG, Bộ...)
+}
+
+// ─── Sales Order (Đơn hàng bán) ──────────────────────────────────────────────
+export interface SalesOrderItem {
+  stt: number;          // Số thứ tự
+  productId: string;    // FK → AccountingProductItem.id
+  tenSanPham: string;   // Snapshot tên SP
+  donViTinh: string;    // Đơn vị tính
+  soLuong: number;      // Số lượng
+  donGia: number;       // Đơn giá
+  thanhTien: number;    // = soLuong × donGia
+}
+
+export interface SalesOrder {
+  id: string;              // Mã đơn — DH-YYYYMMDD-XXXX
+  customerId: string;      // FK → Customer.id
+  customerName: string;    // Snapshot tên KH
+  customerPhone: string;   // Snapshot SĐT
+  customerAddress: string; // Snapshot địa chỉ
+  items: SalesOrderItem[]; // Chi tiết sản phẩm
+  tongTien: number;        // Tổng tiền đơn hàng
+  thanhToanThucTe: number; // Số tiền đã thanh toán
+  congNo: number;          // Công nợ = tongTien - thanhToanThucTe
+  status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
+  receiptId?: string;      // FK → Receipt (liên kết phiếu thu)
+  receiptAt?: string;      // Thời gian lập phiếu thu (ISO string)
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+// ─── Purchase Order (Đơn mua hàng) ─────────────────────────────────────────────
+export interface PurchaseOrderItem {
+  stt: number;          // Số thứ tự
+  productId: string;    // FK → AccountingProductItem.id
+  tenSanPham: string;   // Snapshot tên SP
+  donViTinh: string;    // Đơn vị tính
+  soLuong: number;      // Số lượng
+  donGia: number;       // Đơn giá
+  thanhTien: number;    // = soLuong × donGia
+}
+
+export interface PurchaseOrder {
+  id: string;               // Mã đơn — PO-YYYYMMDD-XXXX
+  supplierId: string;       // FK → Supplier.id
+  supplierName: string;     // Snapshot tên NCC
+  supplierPhone: string;    // Snapshot SĐT
+  supplierAddress: string;  // Snapshot địa chỉ
+  projectId?: string;        // FK → Project (để tổng hợp chi phí dự án)
+  projectName?: string;      // Snapshot tên dự án / công trình
+  items: PurchaseOrderItem[]; // Chi tiết sản phẩm
+  tongTien: number;         // Tổng tiền đơn hàng
+  thanhToanThucTe: number;  // Số tiền đã thanh toán
+  congNo: number;           // Công nợ = tongTien - thanhToanThucTe
+  status: 'draft' | 'confirmed' | 'completed' | 'cancelled';
+  paymentId?: string;       // FK → Payment (liên kết phiếu chi)
+  proposalId?: string;      // FK → material_proposals.id (nếu đơn tạo từ Đề Xuất Vật Tư)
+  proposalCode?: string;    // Mã đề xuất nguồn (hiển thị trong Chi tiết đơn hàng)
+  // Đơn nội bộ: vật tư lấy từ Kho có sẵn cho công trình (supplierId = WAREHOUSE_SOURCE_ID),
+  // không phát sinh công nợ NCC — chỉ ghi nhận để tổng hợp chi phí công trình.
+  fromWarehouse?: boolean;
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+// Sentinel supplierId đại diện nguồn "Kho có sẵn" (thay vì Nhà cung cấp thật) khi gán
+// nguồn vật tư cho 1 dòng đề xuất, hoặc đánh dấu 1 PurchaseOrder là đơn nội bộ xuất từ
+// kho cho công trình (không có công nợ). Dùng chung giữa MaterialCoordination và
+// FinanceManagement — định nghĩa 1 nơi duy nhất để tránh lệch giá trị.
+export const WAREHOUSE_SOURCE_ID = '__warehouse__';
+
+// Sentinel projectId đại diện đề xuất "Đề Xuất Kho" (mua hàng từ NCC để nhập kho,
+// không thuộc công trình nào — xem MaterialCoordination.tsx). Dùng chung với
+// FinanceManagement để nhận diện đơn hàng thuộc luồng nhập kho khi cần đồng bộ
+// ngược đơn giá vào Kho lúc sửa đơn giá ở tab Đơn Hàng.
+export const WAREHOUSE_PROJECT_ID = '__warehouse_restock__';
+
+// Số dư đầu kỳ Quỹ tiền mặt — bản ghi đơn (singleton). Số dư hiện tại được TÍNH từ
+// openingBalance + tổng các Payment (category='cash_fund' cộng, paymentMethod='cash_fund'
+// trừ) đã duyệt — không lưu số dư trực tiếp để tránh lệch dữ liệu.
+export interface CashFundConfig {
+  id: string;
+  openingBalance: number;
+  openingDate: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // ─── Archived Quote Types ─────────────────────────────────────────────────────
@@ -586,6 +778,9 @@ export interface ArchivedQuote {
   companySlogan?: string;
   companyAddressInfo?: string;
   companyContactInfo?: string;
+  // Hình ảnh minh họa cho báo giá - thêm vào theo yêu cầu
+  images?: string[];   // Mảng URL hình ảnh minh họa cho báo giá (kích thước chung)
+  thumbnail?: string;  // URL ảnh thu nhỏ
   // Optional metadata used by Kanban/archive views
   totalPrice?: number;
   _sectorType?: string;
@@ -629,6 +824,7 @@ export interface Supplier {
   phone: string;
   email: string;
   address: string;
+  company?: string;
   field: string;
   bankAccount: string;
   bankName: string;
@@ -670,6 +866,8 @@ export interface LeaveRequest {
   createdAt: string;
   submittedAt?: string;
   approverName?: string;
+  approverId?: string;
+  approverPosition?: string;
   isAttendanceCorrection?: boolean;
   shift?: 'morning' | 'afternoon';
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
@@ -693,6 +891,7 @@ export interface SupplierPartner {
   field: string; // Lĩnh Vực
   note: string; // Ghi chú
   debt?: number; // Công nợ
+  openingDebt?: number; // Công nợ đầu kỳ
   region?: string; // Legacy field
   bankNo?: string; // Interoperability with SubcontractorEstimator
 }
@@ -701,23 +900,37 @@ export interface SubcontractorAdvanceProposal {
   id: string; // Mã Đề Xuất (DX-YYYYMMDD-XXXX)
   subcontractorId: string;
   subcontractorName: string;
-  projectId: string;
+  // Optional: Chi Nhà Cung Cấp / Thanh Toán Công Nợ không gắn dự án cụ thể — để
+  // undefined (NULL), không phải '' (xem comment tại FinanceManagement.tsx nơi tạo proposal).
+  projectId?: string;
   projectName: string;
-  taskId: string;
+  // Tùy chọn: Đề Xuất Nhanh (không gắn với 1 công việc cụ thể) để trống — cột
+  // task_id có khóa ngoại tới tasks(id), '' không hợp lệ (chỉ NULL/undefined
+  // mới được FK bỏ qua). Xem FinanceManagement.tsx handleQuickProposalSubmit.
+  taskId?: string;
   taskName: string;
   amount: number; // Số Tiền Đề Xuất Tạm Ứng (VNĐ)
   reason: string; // Diễn Giải
   approver: string; // Người Xét Duyệt (Default: "Ban Giám Đốc")
   creator: string; // Người Lập Phiếu (Default: "Kế Toán")
-  status: 'pending_approval' | 'pending_payment' | 'rejected' | 'completed'; // Chờ Duyệt, Chờ Lập Phiếu, Từ Chối, Hoàn Thành
+  status: 'pending_approval' | 'pending_payment' | 'awaiting_voucher_update' | 'rejected' | 'completed'; // Chờ Duyệt, Chờ Lập Phiếu, Cập Nhật Chứng Từ, Từ Chối, Hoàn Thành
   date: string; // YYYY-MM-DD
   proposalDate?: string; // Ngày đề xuất
-  type?: 'subcontractor_advance' | 'project_expense_proposal';
+  type?: 'subcontractor_advance' | 'project_expense_proposal' | 'salary_advance' | 'supplier_payment_proposal' | 'cash_fund_deposit' | 'other_expense_proposal';
   creatorName?: string;
   approverName?: string;
   settlerId?: string;
   settlerName?: string;
-  expenseItems?: { id: string; item: string; amount: number; note: string }[];
+  paymentId?: string; // Mã phiếu chi đã lập (sinh khi Người quyết toán lập phiếu thành công)
+  approvedAmount?: number; // Số tiền duyệt chi (người xét duyệt nhập; Người lập phiếu dựa vào đây). Giữ amount làm Số tiền đề xuất tham chiếu lịch sử.
+  rejectedAt?: string; // ISO timestamp lúc bị Từ Chối (dùng để tự động xóa sau 30 ngày trong Thùng rác)
+  payCreatorId?: string;   // Người lập phiếu chi (Kế toán thực hiện "Lập Phiếu") — ghi nhận riêng
+  payCreatorName?: string; // Tên người lập phiếu chi
+  // projectId/projectName: công trình mà DÒNG chi tiêu này thuộc về — cho phép
+  // 1 đề xuất "Chi phí Công trình" gom nhiều khoản chi của CÙNG 1 người nhận
+  // (nhân viên) nhưng thuộc các công trình khác nhau, thay vì gán cứng đối
+  // tượng nhận = tên công trình (không hợp lý vì công trình không "nhận tiền").
+  expenseItems?: { id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[];
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
 }
 export interface Liability {
@@ -726,8 +939,18 @@ export interface Liability {
   category: 'Thầu Phụ' | 'Nhà Cung Cấp' | 'Khác';
   value: number;
   paid: number;
+  date?: string;           // Ngày phát sinh / ghi nhận công nợ (YYYY-MM-DD) — dùng cho lọc theo ngày
+  paidAt?: string;         // Thời gian thanh toán gần nhất (ISO string)
   remaining?: number;
   notes?: string;
+  salesOrderId?: string;   // Liên kết với đơn hàng bán
+  relatedAdvanceId?: string; // Liên kết với Đề xuất tạm ứng thầu phụ
+  subcontractorId?: string;  // Liên kết với thầu phụ
+  recordedPurchaseOrderIds?: string[]; // Các mã Đơn mua hàng (PO) đã ghi nhận vào công nợ này
+  isAuto?: boolean;          // Tạo tự động từ phiếu chi tạm ứng thầu phụ
+  isOpeningDebt?: boolean;   // Số dư đầu kỳ từ Công Nợ đầu kỳ (Khách Hàng / Thầu Phụ / NCC)
+  openingDebt?: number;      // Công nợ đầu kỳ (cột "Công Nợ Đầu Kỳ"; căn cứ tính Còn lại khi balanceBasis = 'opening')
+  balanceBasis?: 'opening' | 'contract'; // Căn cứ tính Còn lại: 'opening' = Công Nợ Đầu Kỳ, 'contract' = Giá Trị (VNĐ)
 }
 
 // ─── Chat Group Types ────────────────────────────────────────────────────────
@@ -757,7 +980,9 @@ export interface Conversation {
   createdBy: string;
   createdAt: string;
   lastMessageAt?: string;
-  unreadCount: number;
+  unreadCount: number; // Số tin chưa đọc của NGƯỜI DÙNG HIỆN TẠI (đã resolve từ unreadCounts theo currentUser)
+  unreadCounts?: Record<string, number>; // Map đầy đủ theo TỪNG userId — dùng nội bộ (chatStore.ts) khi ghi lên Supabase
+  lastMessage?: { content: string; senderId: string; senderName: string; createdAt: string; deleted?: boolean } | null;
   taskId?: string;
   projectId?: string;
   pinned?: boolean;
@@ -779,10 +1004,51 @@ export interface ChatMessage {
   deleted?: boolean;      // Đã xóa (soft delete)
   deletedAt?: string;     // Thời gian xóa
   pinned?: boolean;       // Đã ghim
+  readBy?: string[];      // Danh sách userId đã xem tin nhắn (chỉ ghi cho tin người khác gửi)
   replyTo?: {             // Trả lời tin nhắn nào
     id: string;
     senderName: string;
     content: string;
   };
+  mentions?: string[];    // Danh sách tên người được @tag
+  reactions?: {           // Phản ứng cảm xúc: mỗi emoji nhóm các user đã thả
+    emoji: string;
+    users: string[];      // Danh sách userId đã thả emoji này
+  }[];
+  relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission, leave, payment, advance, travel_expense)
+    type: 'task' | 'project' | 'mission' | 'leave' | 'payment' | 'advance' | 'travel_expense';
+    id: string;
+  };
 }
 
+export interface Toast {
+  id: string;
+  title: string;
+  message: string;
+  type?: 'success' | 'info' | 'warning' | 'error';
+  duration?: number;
+}
+
+export interface AppContentProps {
+  toasts: Toast[];
+  setToasts: React.Dispatch<React.SetStateAction<Toast[]>>;
+  addToast: (toast: Omit<Toast, 'id' | 'duration'>) => void;
+  removeToast: (id: string) => void;
+  employees: Employee[];
+  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  company?: string;
+  type?: 'individual' | 'organization'; // Loại khách hàng: Cá nhân / Tổ chức
+  representative?: string; // Người đại diện (Nếu là Tổ chức)
+  taxOrIdNumber?: string; // MST/CMND (kiểu số)
+  notes?: string; // Ghi chú
+  openingDebt?: number; // Công nợ đầu kỳ
+  balanceBasis?: 'opening' | 'contract'; // Căn cứ tính Còn phải thu ở mức Chủ đầu tư: 'opening' = Công Nợ Đầu Kỳ, 'contract' = Giá Trị HĐ
+}

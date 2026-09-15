@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote } from '../types';
-import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Project, ProjectStatus, Customer, Employee, Task, TaskUpdatePayload, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
+import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, ensureColumnsHaveAutomationDefaults, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
 import {
   Plus, Search, Edit2, Check, Settings, Play, ArrowRight, CheckSquare,
   User, Calendar, DollarSign, Image as ImageIcon, MessageSquare,
   Paperclip, Tag, Trash2, X, Send, AlertCircle, FileUp, Shield,
-  HelpCircle, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
+  HelpCircle, ChevronLeft, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
   Users, Mail, Percent, ListTodo, RotateCcw, Calculator, Sliders, Type, MoreVertical,
-  ZoomIn, ZoomOut
+  ZoomIn, ZoomOut, Lock
 } from 'lucide-react';
 // MODULE NHẬP (Imports)
 // -----------------------
@@ -23,52 +23,36 @@ import {
 // ../types                    → Các định nghĩa TypeScript: Project, Customer, Employee, Task, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote
 // ../lib/kanbanLogic          → getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS
 import TaskDetailModal from './TaskDetailModal';
-import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
+import { can as canProjectAction, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
 import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
+import { generateProjectId } from '../lib/projectId';
+import UserAvatar from './UserAvatar';
+import { sendGroupChatMessage, sendApprovalDirectMessage, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
-import { createGroupConversation, addMessage, getConversations } from '../lib/chatStore';
+import MissionConfigEditor from './MissionConfigEditor';
 
 export type { KanbanColumn } from '../lib/kanbanLogic';
 
-/**
- * Tự động gửi tin nhắn vào nhóm chat của công việc (conv_task_<taskId>).
- * Nếu nhóm chưa tồn tại thì tạo mới từ danh sách người liên quan.
- * (Dùng chung với TaskManagement để thay thế note workLogs bằng chat thật.)
- */
-function postTaskChat(
-  taskId: string,
-  senderId: string,
-  senderName: string,
-  senderRole: string,
-  content: string,
-  members: string[],
-  taskName?: string,
-  projectName?: string
-) {
-  const convId = `conv_task_${taskId}`;
-  const convs = getConversations();
-  const exists = convs.some(c => c.id === convId);
-  if (!exists && members.length > 0) {
-    createGroupConversation(
-      `${projectName ? projectName.substring(0, 30) + ' - ' : ''}${taskName ? taskName.substring(0, 30) : 'Công việc'}`,
-      Array.from(new Set(members.filter(Boolean))),
-      senderId,
-      taskId
-    );
-  }
-  addMessage({
-    conversationId: convId,
-    senderId,
-    senderName,
-    senderRole: (senderRole || 'member') as any,
-    content,
-    system: true
-  });
-}
+// Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
+const sectorArchiveTab = (type?: string): string =>
+  type === 'construction' ? 'quotes-construction'
+  : type === 'mechanical' ? 'quotes-mechanical'
+  : 'quotes'; // furniture / general / mặc định → Hồ Sơ Nội Thất
+
+// Quy trình tự động "Cập nhật trạng thái" — các trạng thái dự án mà quản trị
+// có thể chọn áp cho thẻ khi dự án được kéo vào một cột Kanban.
+const STATUS_SET_OPTIONS: { value: ProjectStatus; label: string }[] = [
+  { value: 'processing', label: 'Đang triển khai' },
+  { value: 'paused', label: 'Tạm ngưng' },
+  { value: 'completed', label: 'Hoàn thành' },
+  { value: 'maintenance', label: 'Đang Bảo Trì' },
+  { value: 'cancelled', label: 'Đã Hủy' },
+];
+const STATUS_SET_DEFAULT: ProjectStatus = 'processing';
 
 // PROPS (Interface) - Định nghĩa các props component nhận từ parent (App.tsx / SectorKanbanWrapper)
 // =================================================================================================
@@ -94,7 +78,7 @@ interface ProjectKanbanBoardProps {
   onUpdateProject: (id: string, updates: Partial<Project>) => void;
   onDeleteProject?: (id: string) => void;
   onAddTask: (newTask: Task) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  onUpdateTask: (id: string, updates: TaskUpdatePayload) => Promise<boolean> | void;
   onDeleteTask?: (id: string) => void;
   onDeleteMultipleTasks?: (ids: string[]) => void;
   onAddCustomer?: (newCust: Customer) => void;
@@ -126,6 +110,188 @@ export default function ProjectKanbanBoard({
   onRedirectToSubcontractor
 }: ProjectKanbanBoardProps) {
   const { addToast } = useNotification(); // Toast thông báo từ context
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN ───────────────────────────────────
+  // Hàm bọc quanh sendGroupChatMessage (lib/chatStore). Truyền sẵn MÃ NHÓM CHAT
+  // = `conv_project_<projectId>` để tin nhắn đến ĐÚNG nhóm chat dự án (nhóm này
+  // được tự động tạo khi khởi tạo dự án qua ensureProjectChatGroup).
+  // CÁCH DÙNG: notifyProjectChat('📌 nội dung tùy biến') — người gửi lấy từ currentUser.
+  // 🔧 FIX: Đảm bảo NHÓM CHAT DỰ ÁN tồn tại (cache + Supabase) VÀ user hiện tại là
+  // thành viên TRƯỚC KHI gửi. sendGroupChatMessage chỉ gửi khi conversation
+  // conv_project_<id> đã nằm trong cache, và MessagesView chỉ hiển thị nhóm có
+  // user là participant. Với dự án mà user KHÔNG phải PM (hoặc chưa bấm "Đồng bộ
+  // nhân sự"), conversation không được nạp vào cache → sendGroupChatMessage trả
+  // về null → tin nhắn bị bỏ qua SILENT. Gửi BÊN TRONG .then(ensureProjectChatGroup)
+  // để conversation đã upsert lên Supabase trước khi push message (tránh vi phạm FK).
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], extraMemberIds?: string[]) => {
+    const pid = selectedProject?.id;
+    if (!pid || !currentUser) return;
+    const convId = `conv_project_${pid}`;
+    ensureProjectChatGroup({
+      id: pid,
+      name: selectedProject?.name || '',
+      pmId: selectedProject?.pmId,
+    }).then(conv => {
+      if (!conv) return;
+      // extraMemberIds: cho phép caller truyền thêm ID (VD: PM MỚI vừa đổi) khi
+      // `selectedProject` (state cục bộ) có thể chưa phản ánh giá trị mới nhất
+      // tại thời điểm hàm này chạy — tránh gap "PM mới không được add ngay".
+      const memberIds = Array.from(new Set([
+        currentUser?.id,
+        selectedProject?.pmId,
+        ...(extraMemberIds || []),
+      ].filter(Boolean) as string[]));
+      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
+      sendGroupChatMessage({
+        conversationId: convId,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        content,
+        relatedEntity,
+      });
+    }).catch(() => {});
+  };
+
+  // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
+  // Wrapper: await onUpdateProject, nếu save thành công thì mới gửi tin nhắn.
+  const notifyProjectChatAfterSave = async (
+    savePromise: void | Promise<void>,
+    content: string,
+    relatedEntity?: ChatMessage['relatedEntity'],
+    extraMemberIds?: string[]
+  ): Promise<void> => {
+    try {
+      await savePromise;
+      if (selectedProject?.id) {
+        notifyProjectChat(content, relatedEntity, extraMemberIds);
+      }
+    } catch (err) {
+      console.error('Save failed, not sending chat message:', err);
+      throw err;
+    }
+  };
+
+  // ─── THÔNG BÁO CÔNG VIỆC TỰ ĐỘNG (automation Kanban) ────────────────────
+  // Automation không có "người giao chủ động" — người giao là PM dự án (assignerId).
+  // Khi rule sinh công việc con, gửi tin cá nhân cho người được giao (assigneeId)
+  // + thêm assigner & assignee vào nhóm chat dự án (membership = phân quyền mở nhóm).
+  const notifyAutoAssignedTask = (autoTask: Task, proj: { id: string; name: string; pmId?: string }) => {
+    const assigneeEmp = employees.find(e => e.id === autoTask.assigneeId);
+    // Người giao hệ thống = PM dự án (hoặc fallback). Tin gửi từ PM để người nhận biết ai giao.
+    const assignerId = autoTask.assignerId || proj.pmId || 'emp_3';
+    const assignerEmp = employees.find(e => e.id === assignerId);
+    if (assignerEmp && assigneeEmp && assignerEmp.id !== assigneeEmp.id) {
+      sendApprovalDirectMessage({
+        senderId: assignerEmp.id,
+        senderName: assignerEmp.name,
+        senderRole: assignerEmp.role,
+        recipientId: assigneeEmp.id,
+        recipientName: assigneeEmp.name,
+        content: `📌 Hệ thống (quy trình Kanban) đã GIAO cho bạn công việc "${autoTask.name}"${autoTask.deadline ? ` (Hạn: ${autoTask.deadline})` : ''}.`,
+        relatedEntity: { type: 'task', id: autoTask.id },
+      });
+    }
+    // 🧩 Nhắn thêm cho NGƯỜI PHỤ TRÁCH CHÍNH của từng nhiệm vụ con trong công việc.
+    // Bỏ qua nếu trùng với task assignee (người đó đã nhận tin giao công việc chứa mission)
+    // hoặc trùng với PM (người giao) — tránh spam trùng tin.
+    (autoTask.missions || []).forEach(mission => {
+      const mAssigneeId = mission.mainAssigneeId;
+      if (!mAssigneeId || mAssigneeId === assignerId || mAssigneeId === autoTask.assigneeId) return;
+      const mAssigneeEmp = employees.find(e => e.id === mAssigneeId);
+      if (!mAssigneeEmp) return;
+      sendApprovalDirectMessage({
+        senderId: assignerId,
+        senderName: assignerEmp?.name || 'Hệ thống',
+        senderRole: assignerEmp?.role,
+        recipientId: mAssigneeId,
+        recipientName: mAssigneeEmp.name,
+        content: `🧩 Hệ thống (quy trình Kanban) đã giao cho bạn Nhiệm Vụ "${mission.name}" trong công việc "${autoTask.name}"${mission.deadline ? ` (Hạn: ${mission.deadline})` : ''}.`,
+        relatedEntity: { type: 'task', id: autoTask.id },
+      });
+    });
+    // Thêm assigner, task assignee & mọi người phụ trách mission vào nhóm chat dự án
+    ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: proj.pmId })
+      .then(conv => {
+        if (!conv) return;
+        const members = Array.from(new Set([
+          assignerId,
+          autoTask.assigneeId,
+          ...(autoTask.missions || []).map(m => m.mainAssigneeId),
+        ].filter(Boolean) as string[]));
+        members.forEach(mid => addMemberToConversation(conv.id, mid));
+      })
+      .catch(() => {});
+  };
+
+  // ─── ĐỒNG BỘ NHÂN SỰ DỰ ÁN VÀO NHÓM CHAT ─────────────────────────────────
+  // Gom toàn bộ nhân sự đang tham gia dự án: Trưởng dự án (pmId), nhân sự trong
+  // từng Công Việc (người giao + phụ trách chính) và trong từng Nhiệm Vụ
+  // (phụ trách chính + thành viên). Mỗi user chỉ thêm 1 lần (Set khử trùng),
+  // rồi thêm vào nhóm chat dự án (conv_project_<id>). Hiển thị Toast kết quả.
+  const [isSyncingChatMembers, setIsSyncingChatMembers] = useState(false);
+  const handleSyncProjectMembersToChat = async () => {
+    if (!selectedProject?.id || isSyncingChatMembers) return;
+    setIsSyncingChatMembers(true);
+    try {
+      const memberIds = new Set<string>();
+      // 1. Trưởng dự án
+      if (selectedProject.pmId) memberIds.add(selectedProject.pmId);
+      // 2. Nhân sự trong toàn bộ Công Việc & Nhiệm Vụ của dự án
+      tasks
+        .filter(t => t.projectId === selectedProject.id)
+        .forEach(t => {
+          if (t.assigneeId) memberIds.add(t.assigneeId);
+          if (t.assignerId) memberIds.add(t.assignerId);
+          (t.missions || []).forEach(m => {
+            if (m.mainAssigneeId) memberIds.add(m.mainAssigneeId);
+            (m.memberIds || []).forEach(id => id && memberIds.add(id));
+          });
+        });
+
+      // Chỉ giữ lại các id là nhân viên hợp lệ
+      const validIds = Array.from(memberIds).filter(id => employees.some(e => e.id === id));
+
+      if (validIds.length === 0) {
+        addToast({
+          title: 'ℹ️ Chưa có nhân sự',
+          message: 'Dự án chưa có nhân sự nào trong công việc hoặc nhiệm vụ để đồng bộ.',
+          type: 'warning',
+        });
+        return;
+      }
+
+      // Đảm bảo nhóm chat dự án tồn tại, sau đó thêm từng thành viên (không trùng)
+      const convId = `conv_project_${selectedProject.id}`;
+      await ensureProjectChatGroup({ id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId });
+      for (const id of validIds) {
+        // addMemberToConversation tự bỏ qua nếu id đã có trong nhóm (không trùng)
+        await addMemberToConversation(convId, id);
+      }
+      // Đảm bảo người đang bấm nút cũng là thành viên để có thể mở/xem nhóm chat
+      if (currentUser?.id) {
+        await addMemberToConversation(convId, currentUser.id);
+      }
+
+      addToast({
+        title: '✅ Đồng bộ thành công',
+        message: `Đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`,
+        type: 'success',
+      });
+      notifyProjectChat(`👥 ${currentUser?.name || 'Hệ thống'} đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`, { type: 'project', id: selectedProject.id });
+
+      // Điều hướng về chi tiết tin nhắn của nhóm chat dự án vừa đồng bộ
+      window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
+    } catch (e: any) {
+      addToast({
+        title: '⚠️ Lỗi đồng bộ',
+        message: `Không thể đồng bộ nhân sự vào nhóm chat: ${e?.message || e}`,
+        type: 'error',
+      });
+    } finally {
+      setIsSyncingChatMembers(false);
+    }
+  };
 
   // ===========================================================================
   // SECTION: PHÂN QUYỀN NGƯỜI DÙNG (RBAC) — Quyền Dự Án
@@ -160,6 +326,8 @@ export default function ProjectKanbanBoard({
 
   // 1. Column configuration initialized in LocalStorage or defaults
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
+  // Force re-render khi phân quyền dự án đổi từ thiết bị khác (realtime)
+  const [forcePermVersion, setForcePermVersion] = useState(0);
   const [archivedQuotesList, setArchivedQuotesList] = useState<ArchivedQuote[]>([]);
   const [subcontractorContracts, setSubcontractorContracts] = useState<ArchivedQuote[]>([]);
 
@@ -181,8 +349,15 @@ export default function ProjectKanbanBoard({
     // ===========================================================================
     const fetchArchivedQuotes = async () => {
       try {
+        // LƯU Ý: dbService.archivedQuotes.list() KHÔNG truyền sector sẽ tải TOÀN
+        // BỘ bảng archived_quotes không lọc (mọi sector cộng dồn, gồm cả các cột
+        // HTML nặng contract_html/acceptance_html/...) — trước đây gọi thiếu
+        // tham số 'general' khiến mỗi lần tải hồ sơ tải trùng lặp gần như gấp đôi
+        // dữ liệu (đã tải theo sector ở 4 lệnh dưới, rồi tải lại y hệt không lọc
+        // ở đây), là nguyên nhân chính khiến "Trạng thái hồ sơ" trong Dự Án load
+        // rất chậm. Chỉ tải đúng nhóm sector='general' (hồ sơ không rõ lĩnh vực).
         const [generalList, constructionList, cabinetList, mechanicalList, subList] = await Promise.all([
-          dbService.archivedQuotes.list().catch(() => []),
+          dbService.archivedQuotes.list('general').catch(() => []),
           dbService.archivedConstructionQuotes.list().catch(() => []),
           dbService.archivedCabinetQuotes.list().catch(() => []),
           dbService.archivedMechanicalQuotes.list().catch(() => []),
@@ -227,22 +402,58 @@ export default function ProjectKanbanBoard({
       window.removeEventListener('hl-archived-mechanical-quotes-updated', handleArchivedUpdated);
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', handleArchivedUpdated);
     };
-  }, [projects]);
+    // KHÔNG phụ thuộc `projects` — fetchArchivedQuotes() không hề đọc biến này,
+    // nhưng vì `projects` đổi tham chiếu rất thường xuyên (mọi thao tác kéo thả
+    // Kanban, đổi trạng thái task, realtime patch...) nên trước đây effect này
+    // bị chạy lại (tải lại toàn bộ 5 danh sách hồ sơ) không cần thiết mỗi lần
+    // như vậy — đây là nguyên nhân chính khiến "Trạng thái hồ sơ" trong Dự Án
+    // load rất chậm/giật. Chỉ tải khi mount và khi có sự kiện cập nhật hồ sơ.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Load columns từ Supabase khi sector thay đổi
+  // Load columns từ Supabase khi sector thay đổi + lắng nghe realtime
   useEffect(() => {
     let active = true;
-    dbService.kanbanColumns.get(sector).then(data => {
-      if (!active) return;
-      if (data && data.columns && data.columns.length > 0) {
-        setColumns(data.columns);
-        setColumnWidth(data.columnWidth);
-      } else {
-        setColumns(getDefaultColumns());
-      }
-    }).catch(() => { if (active) setColumns(getDefaultColumns()); });
-    return () => { active = false; };
+    const fetchColumns = () => {
+      dbService.kanbanColumns.get(sector).then(data => {
+        if (!active) return;
+        if (data && data.columns && data.columns.length > 0) {
+          // Luôn đảm bảo 2 quy trình mặc định được kích hoạt trên mọi cột:
+          // "Cập nhật trạng thái" (mặc định "Đang triển khai") và "Kiểu văn bản"
+          // (mặc định In đậm, không đổi màu chữ) — kể cả cột lưu trước khi tính năng này có.
+          setColumns(ensureColumnsHaveAutomationDefaults(data.columns));
+          setColumnWidth(data.columnWidth);
+        } else {
+          setColumns(getDefaultColumns());
+        }
+      }).catch(() => { if (active) setColumns(getDefaultColumns()); });
+    };
+    fetchColumns();
+
+    // Lắng nghe realtime khi cột thay đổi từ trình duyệt khác
+    const handleColumnsRealtime = () => fetchColumns();
+    window.addEventListener('hl-kanban-columns-updated', handleColumnsRealtime);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-kanban-columns-updated', handleColumnsRealtime);
+    };
   }, [sector]);
+
+  // Lắng nghe realtime: refresh ma trận phân quyền dự án từ thiết bị khác
+  useEffect(() => {
+    let active = true;
+    const handleProjectPermissionsUpdated = async () => {
+      if (!active) return;
+      await syncProjectPermissionsFromDb();
+      // force re-render để can()/loadProjectPermissions() tính lại
+      setForcePermVersion(v => v + 1);
+    };
+    window.addEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    };
+  }, []);
 
   // ===========================================================================
   // saveColumns() - Lưu mảng columns vào state + Supabase
@@ -267,8 +478,9 @@ export default function ProjectKanbanBoard({
   const [editColRuleParam, setEditColRuleParam] = useState<string>('');
   const [showAutoWorkflowModal, setShowAutoWorkflowModal] = useState(false);
   const [activeWorkflowColId, setActiveWorkflowColId] = useState<string>('col_design');
+  const [openColMenuId, setOpenColMenuId] = useState<string | null>(null);
   const [selectedActionType, setSelectedActionType] = useState<
-    'assignee' | 'status' | 'approval' | 'subtask' | 'involved' | 'textStyle'
+    'assignee' | 'statusSet' | 'status' | 'approval' | 'subtask' | 'textStyle'
   >('assignee');
   const [activeSubtaskRuleIndex, setActiveSubtaskRuleIndex] = useState<number | null>(null);
 
@@ -301,6 +513,15 @@ export default function ProjectKanbanBoard({
 
   // Zoom level state for Kanban columns (loaded from Supabase in useEffect above)
   const [columnWidth, setColumnWidth] = useState<number>(280);
+
+  // ─── Phân trang: số trang + số dòng/trang cho từng cột Kanban Dự án ─────
+  const KANBAN_PAGE_SIZES = [5, 10, 15, 20, 30, 50] as const;
+  const [kbColPage, setKbColPage] = useState<Record<string, number>>({});
+  const [kbColPageSize, setKbColPageSize] = useState<Record<string, number>>({});
+  const getKbColPage = (id: string) => kbColPage[id] || 1;
+  const getKbColPageSize = (id: string) => kbColPageSize[id] || 5;
+  const kbColTotalPages = (id: string, count: number) => Math.max(1, Math.ceil(count / getKbColPageSize(id)));
+  const setKbColPageSafe = (id: string, p: number) => setKbColPage(prev => ({ ...prev, [id]: Math.max(1, p) }));
 
   useEffect(() => {
     const handleOutsideClick = () => {
@@ -346,13 +567,11 @@ export default function ProjectKanbanBoard({
       setCtCostProposalId(generatedId);
       
       const activeTask = tasks.find(t => t.id === connectedTaskId || t.id === overlayTaskId);
-      
-      const director = employees.find(e => e.role === 'director');
-      const pm = employees.find(e => e.role === 'pm');
-      const accountant = employees.find(e => e.role === 'accountant');
-      
-      setCtCostApproverId(activeTask?.costApproverId || director?.id || pm?.id || employees[0]?.id || '');
-      setCtCostSettlerId(activeTask?.costSettlerId || accountant?.id || director?.id || employees[0]?.id || '');
+
+      // Lấy đúng người xét duyệt / quyết toán từ cấu hình của công việc con.
+      // Nếu chưa cấu hình → để trống, bắt buộc chọn trước khi gửi đề xuất.
+      setCtCostApproverId(activeTask?.costApproverId || '');
+      setCtCostSettlerId(activeTask?.costSettlerId || '');
       setCtCostDescription('Đề xuất chi phí mua sắm lẻ phát sinh phục vụ thi công công trình');
       setCtCostProposalDate(new Date().toISOString().split('T')[0]);
     }
@@ -600,18 +819,11 @@ export default function ProjectKanbanBoard({
     const projectReceipts = receipts.filter(r => r.projectId === selectedProject.id);
     const totalReceived = projectReceipts.reduce((sum, r) => sum + (r.amount || 0), 0);
     
-    let grandTotal = 0;
-    if (latestArchivedQuote) {
-      const rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-      const discountPercent = latestArchivedQuote.discountPercent || 0;
-      const discountValue = rawTotal * (discountPercent / 100);
-      const subtotalAfterDiscount = rawTotal - discountValue;
-      const vatAmount = Math.round(subtotalAfterDiscount * 0.08);
-      grandTotal = subtotalAfterDiscount + vatAmount;
-    } else {
-      grandTotal = selectedProject.contractValue || editContractValue || 0;
-    }
-    
+    // Giá trị hợp đồng dùng để tính tiền tạm ứng/quyết toán: ƯU TIÊN tổng các Hợp
+    // Đồng đã duyệt (totalApprovedContractValue) — nguồn chính thức mới, thay cho
+    // báo giá (latestArchivedQuote) trước đây. Rơi về báo giá/nhập tay chỉ khi dự
+    // án CHƯA có hợp đồng nào được duyệt.
+    const grandTotal = totalApprovedContractValue || selectedProject.contractValue || editContractValue || 0;
     const remainingValue = Math.max(0, grandTotal - totalReceived);
     const amountToCollect = isFinal ? remainingValue : Math.round(remainingValue * 0.5);
     
@@ -641,7 +853,7 @@ export default function ProjectKanbanBoard({
     if (selectedProject) {
       setEditImage(selectedProject.image || '');
       setEditAddress(selectedProject.address || '');
-      setEditStartDate(selectedProject.startDate || '');
+      setEditStartDate(selectedProject.startDate ? selectedProject.startDate.split('T')[0] : '');
       setEditCardColor(selectedProject.cardColor || '');
       
       const savedDuration = (selectedProject as any).contractDuration;
@@ -664,15 +876,10 @@ export default function ProjectKanbanBoard({
           }
         }
       }
-      let finalVal = selectedProject.contractValue || 0;
-      if (latestArchivedQuote) {
-        const rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-        const discountPercent = latestArchivedQuote.discountPercent || 0;
-        const discountValue = rawTotal * (discountPercent / 100);
-        const subtotalAfterDiscount = rawTotal - discountValue;
-        const vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-        finalVal = subtotalAfterDiscount + vatAmount;
-      }
+      // Ưu tiên tổng Hợp Đồng đã duyệt (totalApprovedContractValue) — xem ghi chú
+      // ở handleCreateReceipt phía trên. Chỉ rơi về contractValue nhập tay khi
+      // chưa có hợp đồng nào được duyệt.
+      const finalVal = totalApprovedContractValue || selectedProject.contractValue || 0;
       setEditContractValue(finalVal);
       setEditCustomerId(selectedProject.customerId || '');
     }
@@ -686,9 +893,9 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   // handleSaveProjectDetails() → Lưu chi tiết dự án đã chỉnh sửa (callback onUpdateProject)
   // ===========================================================================
-  const handleSaveProjectDetails = () => {
+  const handleSaveProjectDetails = async () => {
     if (!selectedProject) return;
-    
+
     let calculatedEndStr = '';
     if (editStartDate && editDuration) {
       const dt = new Date(editStartDate);
@@ -700,19 +907,26 @@ export default function ProjectKanbanBoard({
       calculatedEndStr = selectedProject.endDate;
     }
 
-    updateProjectWithRule(selectedProject.id, {
-      image: editImage,
-      address: editAddress,
-      startDate: editStartDate,
-      endDate: calculatedEndStr,
-      contractDuration: editDuration || undefined,
-      contractValue: editContractValue,
-      customerId: editCustomerId,
-      cardColor: editCardColor || '',
-    } as any);
+    try {
+      await notifyProjectChatAfterSave(
+        onUpdateProject(selectedProject.id, {
+          image: editImage,
+          address: editAddress,
+          startDate: editStartDate,
+          endDate: calculatedEndStr,
+          contractDuration: editDuration || undefined,
+          contractValue: editContractValue,
+          customerId: editCustomerId,
+          cardColor: editCardColor || '',
+        } as any),
+        `💾 ${currentUser?.name || 'Người dùng'} đã cập nhật & lưu thông tin dự án "${selectedProject?.name || ''}".`
+      );
 
-    setIsEditingDetails(false);
-    addToast({ title: '✅ Thành công', message: '💾 Đã cập nhật và lưu trữ thông tin công trình thành công!', type: 'success' });
+      setIsEditingDetails(false);
+      addToast({ title: '✅ Thành công', message: '💾 Đã cập nhật và lưu trữ thông tin công trình thành công!', type: 'success' });
+    } catch (err) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu thông tin dự án. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+    }
   };
 
   // 3.5. States for project creation modal in Kanban
@@ -724,6 +938,7 @@ export default function ProjectKanbanBoard({
   );
   const [newProjValue, setNewProjValue] = useState(0); // Ẩn và mặc định là 0
   const [newProjPm, setNewProjPm] = useState('emp_3');
+  const [columnAssignableId, setColumnAssignableId] = useState<string>('');
   const [newProjAddress, setNewProjAddress] = useState('');
   const [newProjStart, setNewProjStart] = useState(''); // Mặc định để trống hoàn toàn
   const [newProjDuration, setNewProjDuration] = useState<number | ''>(''); // Hạn hợp đồng tính theo ngày
@@ -753,6 +968,19 @@ export default function ProjectKanbanBoard({
     }
   }, [newProjCustomer, customers, prevCustId]);
 
+  // Sync columnAssignableId và newProjPm khi modal mở hoặc cột thay đổi
+  useEffect(() => {
+    if (showAddProjectModal && newProjColumnId) {
+      const targetCol = columns.find(c => c.id === newProjColumnId);
+      const assignableId = targetCol?.automation?.assignId || '';
+      console.log('[ProjectKanban] Modal opened:', { newProjColumnId, targetCol: targetCol?.name, assignableId, newProjPm });
+      if (assignableId) {
+        setColumnAssignableId(assignableId);
+        setNewProjPm(assignableId);
+      }
+    }
+  }, [showAddProjectModal, newProjColumnId, columns]);
+
   // ===========================================================================
   // openAddProjectModal(colId?) → Mở modal thêm dự án, gán cột mặc định nếu có colId
   // ===========================================================================
@@ -765,12 +993,24 @@ export default function ProjectKanbanBoard({
       sector === 'furniture' ? 'furniture' : sector === 'mechanical' ? 'mechanical' : 'construction'
     );
     setNewProjValue(0); // Ẩn và mặc định 0
-    setNewProjPm(employees.filter(e => e.role === 'pm' || e.role === 'director')[0]?.id || 'emp_3');
+
+    const targetColId = colId || columns[0]?.id || 'col_design';
+    const targetCol = columns.find(c => c.id === targetColId);
+    const assignableId = targetCol?.automation?.assignId || '';
+
+    if (assignableId) {
+      setColumnAssignableId(assignableId);
+      setNewProjPm(assignableId);
+    } else {
+      setColumnAssignableId('');
+      setNewProjPm(employees.filter(e => e.role === 'pm' || e.role === 'director')[0]?.id || 'emp_3');
+    }
+
     setNewProjAddress(customers[0]?.address || '');
     setNewProjStart(''); // Mặc định để trống hoàn toàn
     setNewProjDuration(''); // Mặc định để trống
     setNewProjNotes('Tạo mới từ bảng Kanban.');
-    setNewProjColumnId(colId || columns[0]?.id || 'col_design');
+    setNewProjColumnId(targetColId);
     setShowAddProjectModal(true);
   };
 
@@ -782,8 +1022,10 @@ export default function ProjectKanbanBoard({
     if (!quickCustName) return;
 
     const abbrev = getAbbrev(quickCustName);
-    const orderIndex = customers.length + 1;
-    const generatedId = `KH_${abbrev}_${orderIndex}`;
+    // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
+    // trùng khi 2 người tạo khách gần như đồng thời, hoặc khi khách cũ đã bị
+    // xóa làm độ dài mảng tụt xuống rồi tái sử dụng lại đúng số thứ tự cũ.
+    const generatedId = `KH_${abbrev}_${Date.now()}`;
 
     const newCust: Customer = {
       id: generatedId,
@@ -828,9 +1070,47 @@ export default function ProjectKanbanBoard({
   // Find selected project
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
+  // BUG ĐÃ SỬA: trước đây tìm theo projectId mà KHÔNG lọc lĩnh vực (_sectorType), nên
+  // nếu dự án XÂY DỰNG chưa từng có Hồ Sơ Báo Giá Xây Dựng nào, .find() sẽ "vơ" luôn
+  // Hợp Đồng THẦU PHỤ (sector='subcontractor') cùng projectId làm "Giá trị Hợp đồng
+  // Đồng bộ từ báo giá" — hiển thị sai giá trị/trạng thái không liên quan đến dự án.
+  // Phải lọc đúng _sectorType khớp selectedProject.type, giống cách đã làm ở nơi khác
+  // (xem "Hồ sơ dự án" trong card công việc con, phía dưới trong file này).
   const latestArchivedQuote = selectedProject
-    ? (archivedQuotesList.find(q => q.projectId === selectedProject.id) || null)
+    ? (archivedQuotesList.find(q =>
+        q.projectId === selectedProject.id &&
+        (q._sectorType === selectedProject.type || (!q._sectorType && selectedProject.type === 'general'))
+      ) || null)
     : null;
+
+  // Giá trị Hợp Đồng của dự án — TÍNH ĐỘNG từ TẤT CẢ Hợp Đồng đã duyệt
+  // (contractApproved===true) cùng projectId, thay cho "lấy 1 báo giá bất kỳ"
+  // như latestArchivedQuote ở trên. 1 dự án có thể có NHIỀU hợp đồng theo từng
+  // giai đoạn — cộng dồn tất cả, không chỉ lấy 1. Duyệt/hủy phê duyệt Hợp Đồng ở
+  // ContractDocument.tsx bắn event 'hl-archived-quotes-updated' khiến
+  // archivedQuotesList tự tải lại, nên danh sách này tự cập nhật theo, không cần
+  // code cộng/trừ thủ công riêng.
+  // Lọc theo `sector` THẬT trên bản ghi (không dùng `_sectorType`): archivedQuotesList
+  // gộp 1 mảng KHÔNG lọc sector (generalList) + các mảng lọc riêng rồi dedupe theo id,
+  // giữ bản ghi xuất hiện TRƯỚC — luôn là bản từ generalList (tag "_sectorType: 'general'"),
+  // nên MỌI hồ sơ construction/furniture/mechanical đều bị gắn nhãn sai thành "general"
+  // ở đây (bug có sẵn, không phải do thay đổi này). Field `sector` gốc trên chính bản ghi
+  // thì luôn đúng bất kể bị dedupe từ list nào, nên dùng nó thay cho `_sectorType`.
+  const projectContractsAll = selectedProject
+    ? archivedQuotesList.filter((q: any) =>
+        q.projectId === selectedProject.id &&
+        q.sector !== 'subcontractor' &&
+        (q.sector === selectedProject.type || selectedProject.type === 'general')
+      )
+    : [];
+  const approvedProjectContracts = projectContractsAll.filter((q: any) => q.contractApproved === true);
+  // Giá trị 1 hợp đồng: totalAmount là field chính thức, nhưng nhiều hồ sơ CŨ (lập
+  // trước khi field này được ghi đều đặn) có totalAmount = null trong DB — rơi về
+  // contractValue rồi tổng items.totalPrice (đúng cách bảng "Lưu Trữ Hồ Sơ" tự
+  // tính cột "Tổng" cho các hồ sơ này) để không hiện sai thành 0đ.
+  const getContractFinalValue = (q: any): number =>
+    q.totalAmount || q.contractValue || (q.items || []).reduce((s: number, it: any) => s + (it.totalPrice || 0), 0) || 0;
+  const totalApprovedContractValue = approvedProjectContracts.reduce((s: number, q: any) => s + getContractFinalValue(q), 0);
 
   // Filter projects by this sector (construction, furniture, mechanical) and search state
   const sectorProjects = projects.filter(p => {
@@ -842,48 +1122,103 @@ export default function ProjectKanbanBoard({
     return typeMatch && textMatch && pmMatch;
   });
 
+  // Index hóa tasks/customers/employees TRƯỚC khi render thẻ dự án — tránh
+  // tasks.filter()/customers.find()/employees.find() quét lại TOÀN BỘ mảng (có
+  // thể hàng nghìn công việc/khách hàng/nhân sự toàn công ty) cho MỖI thẻ dự án
+  // hiển thị trong MỖI cột (O(dự án × công việc)). File này không dùng useMemo
+  // nào nên phần render chạy lại trên MỌI re-render (gõ tìm kiếm, mở menu "...",
+  // kéo thả...) — dùng Map tra cứu O(1) để phép tính chỉ còn O(N) mỗi render.
+  const tasksByProjectId = new Map<string, Task[]>();
+  tasks.forEach(t => {
+    if (!t.projectId) return;
+    const arr = tasksByProjectId.get(t.projectId);
+    if (arr) arr.push(t); else tasksByProjectId.set(t.projectId, [t]);
+  });
+  const customersById = new Map(customers.map(c => [c.id, c]));
+  const employeesById = new Map(employees.map(e => [e.id, e]));
+  const directorEmp = employees.find(e => e.role === 'director');
+
   // Get project columns configuration (Default mapping if columnId is absent in project object)
+
+  // Tìm cột "Hoàn thành" / "Done" theo cấu hình hiện tại — KHÔNG dùng ID cứng.
+  // Ưu tiên: cột có statusSet='completed' → cột tên chứa "HOÀN THÀNH" → col_done → cột cuối cùng.
+  const findDoneColumnId = useCallback((): string | undefined => {
+    const byStatus = columns.find(c => c.automation?.statusSet === 'completed');
+    if (byStatus) return byStatus.id;
+    const byName = columns.find(c => c.name.toUpperCase().includes('HOÀN THÀNH'));
+    if (byName) return byName.id;
+    if (columns.some(c => c.id === 'col_done')) return 'col_done';
+    return columns.length > 0 ? columns[columns.length - 1].id : undefined;
+  }, [columns]);
+
+  // Kiểm tra cột có tồn tại trong danh sách cột hiện tại
+  const hasColumn = useCallback((colId: string) => columns.some(c => c.id === colId), [columns]);
 
   // ===========================================================================
   // updateProjectWithRule() → Cập nhật Project kèm kích hoạt automation của cột
   // Tự động: chuyển cột, tạo subtask, gán PM, phê duyệt, log comment vào Documents
   // Đây là hàm lõi điều phối các rule của KanbanColumn.automation
   // ===========================================================================
-  const updateProjectWithRule = (projectId: string, updates: Partial<Project>, updatedTasksList?: Task[]) => {
+  const updateProjectWithRule = async (projectId: string, updates: Partial<Project>, updatedTasksList?: Task[]) => {
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
 
+    // 📣 Thông báo THAY ĐỔI TRƯỞNG DỰ ÁN vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
+    if (updates.pmId && updates.pmId !== proj.pmId) {
+      const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mớí';
+      await notifyProjectChatAfterSave(
+        onUpdateProject(projectId, { ...updates, pmId: updates.pmId }),
+        `👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`,
+        undefined,
+        // ⚠️ FIX: notifyProjectChat mặc định lấy pmId từ `selectedProject` (state cục
+        // bộ) — biến này CHƯA chắc đã re-render với PM mới ngay trong lần gọi này,
+        // nên truyền thẳng `updates.pmId` để PM mới được add vào nhóm ngay lập tức.
+        [updates.pmId]
+      );
+      // Return early since we've already called onUpdateProject with the PM change
+      return;
+    }
+
     const finalStatus = updates.status !== undefined ? updates.status : proj.status;
     const finalProgress = updates.progress !== undefined ? updates.progress : proj.progress;
-    const isCompleted = (finalStatus === 'completed') || (finalProgress === 100);
-    
-    let targetColId = updates.kanbanColumnId || getProjectColumnId(proj, columns);
+    const wasCompleted = (proj.status === 'completed') || (proj.progress === 100);
+    const isNowCompleted = (finalStatus === 'completed') || (finalProgress === 100);
+    // CHỈ tự động chuyển cột khi dự án VỪA chuyển sang trạng thái hoàn thành
+    // (transition false -> true). Không áp dụng cho dự án đã hoàn thành từ trước,
+    // nếu không mỗi lần cập nhật / lưu chi tiết / kéo thả, thẻ lại bị ép về cột
+    // hoàn thành gây hiện tượng "chạy lung tung", không theo đúng cấu hình.
+    const justCompleted = !wasCompleted && isNowCompleted;
 
-    if (isCompleted) {
-      const currentColId = updates.kanbanColumnId || getProjectColumnId(proj, columns);
-      const currentCol = columns.find(c => c.id === currentColId);
+    // Cột HIỆN TẠI của dự án (trước khi cập nhật) — là gốc để tính quy tắc
+    // "chuyển cột khi hoàn thành". Phải lấy từ vị trí thực của dự án, KHÔNG dùng
+    // updates.kanbanColumnId (đó là cột đích được truyền vào, không phải cột gốc).
+    const originalColId = getProjectColumnId(proj, columns);
+    // Cột được yêu cầu chuyển tới (nếu caller truyền vào, ví dụ checkAutoMoveProject)
+    const requestedColId = updates.kanbanColumnId;
+
+    let targetColId = requestedColId || originalColId;
+
+    if (justCompleted) {
+      const currentCol = columns.find(c => c.id === originalColId);
+      // CHỈ tự động chuyển khi cột HIỆN TẠI thực sự được bật "Chuyển cột khi hoàn thành"
+      // (có statusUpdate hợp lệ). Nếu cột không bật feature này → KHÔNG ép chuyển,
+      // để project yên vị ở cột hiện tại. Tránh hiện tượng "nhảy lung tung" khi user
+      // chưa/không cấu hình auto-move.
       if (currentCol?.automation?.statusUpdate) {
-        const autoTargetId = currentCol.automation.statusUpdate;
-        if (autoTargetId && autoTargetId !== currentColId) {
+        const autoTargetId = currentCol.automation.statusUpdate as string;
+        if (autoTargetId && autoTargetId !== originalColId && hasColumn(autoTargetId)) {
           targetColId = autoTargetId;
           updates.kanbanColumnId = autoTargetId;
         }
-      } else {
-        if (currentColId !== 'col_done') {
-          targetColId = 'col_done';
-          updates.kanbanColumnId = 'col_done';
-        }
       }
     }
-
-    const originalColId = getProjectColumnId(proj, columns);
     if (updates.kanbanColumnId || targetColId !== originalColId) {
       const finalTargetColId = updates.kanbanColumnId || targetColId;
       const targetCol = columns.find(c => c.id === finalTargetColId);
       if (targetCol && finalTargetColId !== originalColId) {
         // Validation check for blocking tasks: Đang làm (doing), Chờ duyệt (reviewing), Trễ hạn (overdue)
         const projTasks = (updatedTasksList || tasks).filter(t => t.projectId === projectId);
-        const blockingTasks = projTasks.filter(t => 
+        const blockingTasks = projTasks.filter(t =>
           t.status === 'doing' || t.status === 'reviewing' || t.status === 'overdue'
         );
 
@@ -896,7 +1231,7 @@ export default function ProjectKanbanBoard({
           return;
         }
 
-        // Auto-delete todo tasks ("Chưa làm")
+        // Auto-delete todo tasks ("Chưa làm") - pass task IDs to parent callback
         const todoTasks = projTasks.filter(t => t.status === 'todo');
         if (todoTasks.length > 0) {
           const todoIds = todoTasks.map(t => t.id);
@@ -920,21 +1255,26 @@ export default function ProjectKanbanBoard({
             ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
           }
 
-          // 2. Chuyển trạng thái công việc
-          if (rule.statusUpdate) {
-            updates.status = rule.statusUpdate as any;
-            const statusLabel = rule.statusUpdate === 'active' ? 'Đang thực hiện' : rule.statusUpdate === 'completed' ? 'Hoàn thành' : rule.statusUpdate === 'suspended' ? 'Tạm khiển' : rule.statusUpdate;
-            ruleLogs.push(`Chuyển trạng thái dự án sang: ${statusLabel}`);
+          // 1.1 Quy trình tự động "Cập nhật trạng thái" — LUÔN kích hoạt trên mọi cột.
+          // Cập nhật project.status theo giá trị được cấu hình; nếu cột chưa cấu hình
+          // thì dùng mặc định "Đang triển khai" (processing).
+          const statusToSet = rule.statusSet || STATUS_SET_DEFAULT;
+          updates.status = statusToSet;
+          const stLabel = STATUS_SET_OPTIONS.find(o => o.value === statusToSet)?.label || String(statusToSet);
+          ruleLogs.push(`Cập nhật trạng thái dự án: ${stLabel}`);
+          // Đồng bộ: trạng thái Hoàn thành cũng đồng nghĩa với 100% tiến độ — để thẻ và
+          // chỉ số tiến độ nhất quán.
+          if (statusToSet === 'completed') {
+            updates.progress = 100;
           }
 
-          // 2.2 Kiểu văn bản (In đậm, in nghiêng, gạch giữa, màu chữ)
-          if (rule.textStyleStyleItalic !== undefined || rule.textStyleStyleBold !== undefined || rule.textStyleStyleStrike !== undefined || rule.textStyleStyleColor !== undefined) {
-            updates.styleItalic = rule.textStyleStyleItalic;
-            updates.styleBold = rule.textStyleStyleBold;
-            updates.styleStrike = rule.textStyleStyleStrike;
-            updates.styleColor = rule.textStyleStyleColor;
-            ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
-          }
+          // 2.2 Quy trình tự động "Kiểu văn bản" — LUÔN kích hoạt trên mọi cột.
+          // Mặc định: In đậm (Bold), không đổi màu chữ.
+          updates.styleItalic = rule.textStyleStyleItalic;
+          updates.styleBold = rule.textStyleStyleBold !== undefined ? rule.textStyleStyleBold : true;
+          updates.styleStrike = rule.textStyleStyleStrike;
+          updates.styleColor = rule.textStyleStyleColor || '';
+          ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
 
           // 3. Gửi yêu cầu phê duyệt
           if (rule.approvalRole && rule.approvalRole !== 'none') {
@@ -961,12 +1301,6 @@ export default function ProjectKanbanBoard({
               const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
               
               const assigneeId = subtaskAuto.assignId || rule.assignId || proj.pmId || 'emp_3';
-              const involvedEmployeeIds = Array.from(new Set([
-                ...(proj.involvedEmployeeIds || []),
-                ...(rule.involvedId ? [rule.involvedId] : []),
-                ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-                ...(subtaskAuto.involvedEmployeeIds || [])
-              ]));
 
               // Send approval request
               let approvals = undefined;
@@ -990,9 +1324,8 @@ export default function ProjectKanbanBoard({
                 columnId: targetCol.id,
                 name: title,
                 description: `Công việc con được tạo tự động bởi quy trình khi di chuyển vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-                assignerId: 'system',
+                assignerId: proj.pmId || 'emp_3',
                 assigneeId: assigneeId,
-                involvedEmployeeIds: involvedEmployeeIds,
                 department: 'Thi công',
                 deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                 priority: 'medium',
@@ -1004,6 +1337,7 @@ export default function ProjectKanbanBoard({
                 styleStrike: subtaskAuto.textStyleStyleStrike,
                 styleColor: subtaskAuto.textStyleStyleColor,
                 checklistTexts: subtaskAuto.checklistTexts || [],
+                missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t: SubTaskMissionTemplate, i: number) => templateToMission(t, i)) : undefined,
                 approvals: approvals,
                 isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                 isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -1020,6 +1354,8 @@ export default function ProjectKanbanBoard({
                 subcontractorSettlerId: subtaskAuto.subcontractorSettlerId
               };
               onAddTask(autoTask);
+              // 📩 Thông báo công việc được giao tự động (quy trình Kanban) → tin cá nhân người được giao
+              notifyAutoAssignedTask(autoTask, proj);
 
               // Thiết kế Hồ sơ
               if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
@@ -1053,18 +1389,6 @@ export default function ProjectKanbanBoard({
             }
           } else if (rule.checklistText) {
             ruleLogs.push(`Thêm mục checklist yêu cầu: ${rule.checklistText}`);
-          }
-
-          // 9. Thêm người liên quan (Cộng sự bám sát)
-          const ruleInvolvedIds = rule.involvedEmployeeIds || (rule.involvedId ? [rule.involvedId] : []);
-          if (ruleInvolvedIds.length > 0) {
-            const currentInvolved = proj.involvedEmployeeIds || [];
-            const addedIds = ruleInvolvedIds.filter(id => !currentInvolved.includes(id));
-            if (addedIds.length > 0) {
-              updates.involvedEmployeeIds = [...currentInvolved, ...addedIds];
-              const names = addedIds.filter(Boolean).map(id => employees.find(e => e.id === id)?.name || 'Người hỗ trợ').join(', ');
-              ruleLogs.push(`Thêm cộng sự hỗ trợ liên quan: ${names}`);
-            }
           }
 
           // Fallback log
@@ -1111,15 +1435,156 @@ export default function ProjectKanbanBoard({
         }
       }
     }
-    onUpdateProject(projectId, updates);
+    await onUpdateProject(projectId, updates);
+
+    // 📣 Automation cột (rule.assignId / auto_pm) có thể đã đổi PM (updates.pmId)
+    // ngay trong khối automation phía trên — khác nhánh đổi PM THỦ CÔNG ở đầu hàm
+    // (đã return sớm và tự thông báo), nhánh automation này rơi thẳng xuống đây
+    // nên trước đây KHÔNG gửi thông báo/không add PM mới vào nhóm chat dự án.
+    // Dùng trực tiếp `proj` (không phải notifyProjectChat/selectedProject) vì rule
+    // này có thể chạy trên bất kỳ project nào đang kéo-thả trên Kanban, không chỉ
+    // project đang mở chi tiết.
+    if (updates.pmId && updates.pmId !== proj.pmId) {
+      const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mới';
+      const newPmId = updates.pmId;
+      ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: newPmId })
+        .then(conv => {
+          if (!conv) return;
+          addMemberToConversation(conv.id, newPmId);
+          sendGroupChatMessage({
+            conversationId: conv.id,
+            senderId: currentUser?.id || 'system',
+            senderName: currentUser?.name || 'Hệ thống',
+            senderRole: currentUser?.role,
+            content: `👤 Hệ thống (quy trình Kanban) đã tự động chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`,
+          });
+        })
+        .catch(() => {});
+    }
+
+    // ── Chain auto-move: Sau khi project di chuyển thành công sang cột mới,
+    // clear marker autoMovedDoneRef để lần complete tiếp theo tại cột MỚI
+    // có thể trigger auto-move tiếp (chain multi-step: A → B → C).
+    // Chỉ clear khi cột đích có statusUpdate (tức có bước tiếp theo trong chain).
+    if (updates.kanbanColumnId && updates.kanbanColumnId !== originalColId) {
+      const targetStillHasChain = columns.find(c => c.id === updates.kanbanColumnId)?.automation?.statusUpdate;
+      if (targetStillHasChain) {
+        autoMovedDoneRef.current.delete(projectId);
+      }
+    }
   };
+
+  // ===========================================================================
+  // checkAutoMoveProject() → Kiểm tra và thực hiện auto-move project khi tất cả task hoàn thành
+  // Được gọi từ useEffect khi tasks thay đổi
+  // ===========================================================================
+  // Lưu trạng thái "tất cả công việc con đã hoàn thành" + cột hiện tại của mỗi dự án
+  // ở lần chạy trước (dùng để phát hiện transition false -> true).
+  const prevAllCompletedRef = useRef<Map<string, boolean>>(new Map());
+  const prevColumnIdRef = useRef<Map<string, string>>(new Map());
+  // Đánh dấu dự án ĐÃ được tự động chuyển cột khi hoàn thành. Quan trọng: marker
+  // này "dính" (sticky) — KHÔNG bị xoá khi công việc con bị tạo/mở lại (ví dụ cột
+  // đích có tự động thêm công việc con, làm allCompleted tạm thời = false). Nhờ vậy
+  // triệt tiêu hoàn toàn vòng lặp "nhảy qua lại" giữa các cột (cột cấu hình <-> col_done)
+  // khi cấu hình tạo thành vòng lặp hoặc do tự động thêm công việc con. Chỉ bị xoá khi
+  // người dùng KÉO THẺ thủ công (moveProjectToColumn).
+  const autoMovedDoneRef = useRef<Set<string>>(new Set());
+
+  const checkAutoMoveProject = useCallback(async (projectId: string) => {
+    const proj = projects.find(p => p.id === projectId);
+    if (!proj) return;
+
+    // KHÔNG reject project không có task — project không có task cũng cần được
+    // hiển thị đúng cột (ví dụ: vừa tạo xong, task chưa thêm).
+    const projTasks = tasks.filter(t => t.projectId === projectId);
+
+    // Check if all tasks are completed (project 0 task → coi như "chưa hoàn thành",
+    // KHÔNG trigger auto-move — tránh project nhảy vô cột done ngay khi tạo).
+    const allCompleted = projTasks.length > 0
+      && projTasks.every(t => t.status === 'completed' || t.completionRate === 100);
+    const wasCompleted = prevAllCompletedRef.current.get(projectId) ?? false;
+    prevAllCompletedRef.current.set(projectId, allCompleted);
+    if (!allCompleted) return;
+
+    // Đã tự động chuyển rồi (sticky) → không chuyển nữa, dù công việc con có được
+    // tạo/mở lại gây false->true giả. Đây là chốt chặn vòng lặp "chạy lung tung".
+    if (autoMovedDoneRef.current.has(projectId)) return;
+    // Đã ở trạng thái hoàn thành từ trước → không tự động chuyển nữa (tránh nhảy cột).
+    if (wasCompleted) return;
+
+    // Trigger auto-move using the existing updateProjectWithRule logic
+    const currentColId = getProjectColumnId(proj, columns);
+    const currentCol = columns.find(c => c.id === currentColId);
+
+    let targetColId: string | undefined;
+    // CHỈ auto-move khi cột hiện tại được bật "Chuyển cột khi hoàn thành"
+    // (có statusUpdate hợp lệ). Nếu không → KHÔNG tự chuyển, để project ở nguyên vị trí.
+    if (currentCol?.automation?.statusUpdate) {
+      const cand = currentCol.automation.statusUpdate;
+      if (cand && cand !== currentColId && hasColumn(cand)) {
+        targetColId = cand;
+      }
+    }
+
+    // CHỈ gọi updateProjectWithRule khi targetColId hợp lệ (tồn tại trong columns)
+    if (targetColId && hasColumn(targetColId)) {
+      autoMovedDoneRef.current.add(projectId);
+      await updateProjectWithRule(projectId, { kanbanColumnId: targetColId }, tasks);
+    }
+  }, [projects, tasks, columns, getProjectColumnId, updateProjectWithRule, findDoneColumnId, hasColumn]);
+
+  // ===========================================================================
+  // Auto-move check when tasks change
+  // ===========================================================================
+  useEffect(() => {
+    if (!tasks || tasks.length === 0) return;
+
+    // Ghi nhận trạng thái "đã hoàn thành" cho các dự án chưa được theo dõi
+    // (ví dụ: dự án đã hoàn thành từ trước khi vừa tải trang, hoặc dự án mới tạo).
+    // Việc này giúp không tự động đẩy thẻ đã hoàn thành từ trước về col_done ngay
+    // khi mở trang, đồng thời không cản trở tự động chuyển khi công việc thực sự
+    // chuyển từ "chưa xong" sang "đã xong" trong phiên làm việc.
+    projects.forEach(p => {
+      const pts = tasks.filter(t => t.projectId === p.id);
+      const currentAllDone = pts.length > 0
+        ? pts.every(t => t.status === 'completed' || t.completionRate === 100)
+        : false;
+      const currentColId = getProjectColumnId(p, columns);
+      const prevColId = prevColumnIdRef.current.get(p.id);
+
+      if (!prevAllCompletedRef.current.has(p.id)) {
+        // Lần đầu thấy project — ghi nhận state hiện tại
+        prevAllCompletedRef.current.set(p.id, currentAllDone);
+        prevColumnIdRef.current.set(p.id, currentColId);
+      } else if (prevColId && prevColId !== currentColId) {
+        // ── Chain support: Project DI CHUYỂN CỘT (do auto-move ở bước trước).
+        // Reset wasCompleted = false để checkAutoMoveProject có thể trigger
+        // auto-move tiếp ở cột mới (chain multi-step: A → B → C).
+        prevAllCompletedRef.current.set(p.id, false);
+        prevColumnIdRef.current.set(p.id, currentColId);
+      } else {
+        // Cập nhật column tracking khi project di chuyển thủ công
+        prevColumnIdRef.current.set(p.id, currentColId);
+      }
+    });
+
+    // Check each project in this sector for auto-move conditions
+    const projectsInSector = projects.filter(p => p.type === sector || (p as any).sector === sector);
+    projectsInSector.forEach(proj => {
+      // Small delay to avoid race conditions with rapid task updates
+      setTimeout(() => {
+        checkAutoMoveProject(proj.id);
+      }, 100);
+    });
+  }, [tasks, checkAutoMoveProject, projects, sector]);
 
   // ===========================================================================
   // localUpdateTask() → Cập nhật Task qua callback onUpdateTask rồi đồng bộ local state tasks
   // ===========================================================================
-  const localUpdateTask = (taskId: string, taskUpdates: Partial<Task>) => {
+  const localUpdateTask = (taskId: string, taskUpdates: TaskUpdatePayload) => {
     // Call original prop - automation is now handled centrally in App.tsx
-    onUpdateTask(taskId, taskUpdates);
+    // Trả về promise (nếu có) để TaskDetailModal biết kết quả lưu thành công hay không.
+    return onUpdateTask(taskId, taskUpdates);
   };
 
   // Drag operations
@@ -1155,8 +1620,11 @@ export default function ProjectKanbanBoard({
 
   // Moving logic that delegates to the centralized update function
   // moveProjectToColumn() → Di chuyển project sang column (gọi updateProjectWithRule với kanbanColumnId)
-  const moveProjectToColumn = (projectId: string, columnId: string) => {
-    updateProjectWithRule(projectId, { kanbanColumnId: columnId });
+  const moveProjectToColumn = async (projectId: string, columnId: string) => {
+    // Thao tác thủ công → xoá marker auto-move để lần hoàn thành sau (nếu có)
+    // vẫn có thể tự động chuyển tiếp theo cấu hình.
+    autoMovedDoneRef.current.delete(projectId);
+    await updateProjectWithRule(projectId, { kanbanColumnId: columnId });
   };
 
   // Open Column Editing dialogue
@@ -1205,18 +1673,19 @@ export default function ProjectKanbanBoard({
   };
 
   // saveColumnSettings() → Lưu cài đặt cột đang edit (dùng các reducer từ kanbanLogic)
-  const saveColumnSettings = () => {
-    if (!editingColumnId || !editColName.trim()) return;
+  // Nhận giá trị trực tiếp từ modal để tránh race condition với React setState
+  const saveColumnSettings = (edits: { name: string; color: string; ruleType: string; ruleParam: string }) => {
+    if (!editingColumnId || !edits.name.trim()) return;
 
     const updated = columns.map(c => {
       if (c.id === editingColumnId) {
         return {
           ...c,
-          name: editColName.toUpperCase(),
-          color: editColColor,
+          name: edits.name.toUpperCase(),
+          color: edits.color,
           automation: {
-            type: editColRuleType as any,
-            param: editColRuleType === 'auto_progress' ? Number(editColRuleParam) : editColRuleParam
+            type: edits.ruleType as any,
+            param: edits.ruleType === 'auto_progress' ? Number(edits.ruleParam) : edits.ruleParam
           }
         };
       }
@@ -1243,11 +1712,33 @@ export default function ProjectKanbanBoard({
   };
 
   // deleteColumn(id) → Xóa cột (dùng deleteColumnReducer), lưu và reset state edit
+  //
+  // Quyết định nghiệp vụ (2026-08-26): vị trí cột của dự án CHỈ do kanbanColumnId
+  // quyết định (kéo thả thủ công / quy tắc "Chuyển cột khi hoàn thành") — không
+  // còn cơ chế "đoán lại" theo % tiến độ/trạng thái. Vì vậy nếu xóa 1 cột còn
+  // đang chứa dự án, kanbanColumnId của các dự án đó sẽ treo (trỏ tới cột không
+  // còn tồn tại) và tự động rơi về cột đầu tiên — KHÔNG đúng ý người phụ trách,
+  // đây chính là nguồn gốc "nhảy cột lung tung" trước đây. Nên CHẶN xóa hẳn khi
+  // cột còn dự án, bắt người dùng tự kéo hết dự án sang cột khác trước.
   const deleteColumn = (id: string) => {
     const colName = columns.find(c => c.id === id)?.name || '';
+    // Đếm trên TOÀN BỘ dự án của sector này (không lọc theo ô tìm kiếm/PM đang
+    // chọn trên UI) để không bỏ sót dự án nào đang thực sự nằm trong cột.
+    const projectsInColumn = projects.filter(p => {
+      const typeMatch = p.type === sector || (sector === 'construction' && p.type === 'general');
+      return typeMatch && getProjectColumnId(p, columns) === id;
+    });
+    if (projectsInColumn.length > 0) {
+      addToast({
+        title: '⚠️ Không thể xóa cột',
+        message: `Cột [${colName}] vẫn còn ${projectsInColumn.length} dự án: ${projectsInColumn.map(p => p.name).join(', ')}. Vui lòng kéo hết các dự án này sang cột khác trước khi xóa.`,
+        type: 'error'
+      });
+      return;
+    }
     setConfirmDialog({
       title: 'Xóa cột phân đoạn',
-      message: `Bạn có chắc chắn muốn xóa cột phân đoạn [${colName}] này? Các công trình thuộc cột này sẽ tự động chuyển về cột mặc định đầu tiên.`,
+      message: `Bạn có chắc chắn muốn xóa cột phân đoạn [${colName}] này? Cột này hiện không còn dự án nào.`,
       onConfirm: () => {
         saveColumns(columns.filter(c => c.id !== id));
       },
@@ -1265,13 +1756,10 @@ export default function ProjectKanbanBoard({
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
+    return `${year}-${month}-${day}`;
   });
   const [subTaskPriority, setSubTaskPriority] = useState<TaskPriority>('medium');
   const [showSubtaskForm, setShowSubtaskForm] = useState(false);
-  const [subTaskInvolved, setSubTaskInvolved] = useState<string[]>([]);
   const [subTaskIsApprovalEnabled, setSubTaskIsApprovalEnabled] = useState(false);
   const [subTaskIsCostEnabled, setSubTaskIsCostEnabled] = useState(false);
   const [subTaskIsMaterialEnabled, setSubTaskIsMaterialEnabled] = useState(false);
@@ -1286,8 +1774,28 @@ export default function ProjectKanbanBoard({
   const [subTaskMaterialCoordinatorId, setSubTaskMaterialCoordinatorId] = useState('');
   const [subTaskSubcontractorApproverId, setSubTaskSubcontractorApproverId] = useState('');
   const [subTaskSubcontractorSettlerId, setSubTaskSubcontractorSettlerId] = useState('');
+  // Subcontractors from Supabase (accounting_subcontractors table)
+  const [subcontractors, setSubcontractors] = useState<Supplier[]>([]);
+
+  useEffect(() => {
+    const loadSubcontractors = async () => {
+      try {
+        const data = await dbService.accountingSubcontractors.list();
+        setSubcontractors(data);
+      } catch (e) {
+        console.error("Lỗi load thầu phụ từ Supabase:", e);
+      }
+    };
+    loadSubcontractors();
+    const handleSync = () => loadSubcontractors();
+    window.addEventListener('hl-suppliers-updated', handleSync);
+    return () => window.removeEventListener('hl-suppliers-updated', handleSync);
+  }, []);
+
   // Đầu mục đo kiểm / Checklist kỹ thuật (công việc con)
   const [subTaskChecklistTexts, setSubTaskChecklistTexts] = useState<string[]>([]);
+  // NHIỆM VỤ CHI TIẾT cấu hình trước (công việc con mới)
+  const [subTaskMissionConfigs, setSubTaskMissionConfigs] = useState<SubTaskMissionTemplate[]>([]);
 
   // Additional subtask form states for synchronized linkage
   const [subTaskAssignerId, setSubTaskAssignerId] = useState(currentUser?.id || '');
@@ -1314,9 +1822,10 @@ export default function ProjectKanbanBoard({
   const [editSubSubcontractorSettlerId, setEditSubSubcontractorSettlerId] = useState('');
   const [editSubSubcontractorId, setEditSubSubcontractorId] = useState('');
   const [editSubSubcontractorName, setEditSubSubcontractorName] = useState('');
-  const [editSubInvolved, setEditSubInvolved] = useState<string[]>([]);
   // Đầu mục đo kiểm / Checklist kỹ thuật (sửa công việc con)
   const [editSubChecklistTexts, setEditSubChecklistTexts] = useState<string[]>([]);
+  // NHIỆM VỤ CHI TIẾT cấu hình trước (sửa công việc con)
+  const [editSubMissionConfigs, setEditSubMissionConfigs] = useState<SubTaskMissionTemplate[]>([]);
   
   // Track open menu for subtask cards
   const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
@@ -1324,10 +1833,32 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   // CÁC HÀM QUẢN LÝ CÔNG VIỆC CON (Subtask)
   // ===========================================================================
+
+  // templateToMission() → Chuyển NHIỆM VỤ CHI TIẾT cấu hình trước thành
+  // SubTaskMission thật (status 'todo', chưa có báo cáo/bằng chứng).
+  // `idx` (thứ tự trong danh sách cấu hình) được dùng để làm createdAt tăng dần,
+  // sao cho khi hiển thị trong công việc con (sắp xếp mới nhất → cũ nhất) thì
+  // nhiệm vụ được cấu hình sau cùng nằm trên cùng — giống logic tạo nhiệm vụ thủ công.
+  // Người Phụ trách chính cũng được tính là Nhân sự tham gia thực hiện (memberIds),
+  // để không phải gán tên 2 lần khi thêm công tác phí.
+  const templateToMission = (t: SubTaskMissionTemplate, idx: number = 0): SubTaskMission => ({
+    id: `mission_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    name: t.name,
+    memberIds: t.mainAssigneeId
+      ? Array.from(new Set([...(t.memberIds || []), t.mainAssigneeId]))
+      : (t.memberIds || []),
+    mainAssigneeId: t.mainAssigneeId,
+    status: 'todo',
+    workReports: '',
+    evidence: '',
+    createdAt: new Date(Date.now() + idx).toISOString(),
+    deadline: t.deadline || undefined,
+  });
+
   const handleStartEditSubTask = (task: Task) => {
     setEditingSubTask(task);
     setEditSubName(task.name);
-    setEditSubDeadline(task.deadline || '');
+    setEditSubDeadline(task.deadline ? task.deadline.split('T')[0] : '');
     setEditSubPriority(task.priority || 'medium');
     setEditSubAssignerId(task.assignerId || '');
     setEditSubAssigneeId(task.assigneeId || '');
@@ -1338,7 +1869,6 @@ export default function ProjectKanbanBoard({
     setEditSubSubcontractorEnabled(!!task.isSubcontractorEnabled);
     setEditSubSubcontractorId(task.subcontractorId || '');
     setEditSubSubcontractorName(task.subcontractorName || '');
-    setEditSubInvolved(task.involvedEmployeeIds || []);
     setEditSubDefaultApproverId(task.defaultApproverId || '');
     setEditSubCostApproverId(task.costApproverId || '');
     setEditSubCostSettlerId(task.costSettlerId || '');
@@ -1347,6 +1877,13 @@ export default function ProjectKanbanBoard({
     setEditSubSubcontractorApproverId(task.subcontractorApproverId || '');
     setEditSubSubcontractorSettlerId(task.subcontractorSettlerId || '');
     setEditSubChecklistTexts(task.checklistTexts || []);
+    setEditSubMissionConfigs((task.missions || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      deadline: m.deadline ? m.deadline.split('T')[0] : m.deadline,
+      mainAssigneeId: m.mainAssigneeId,
+      memberIds: m.memberIds || [],
+    })));
     setOpenMenuTaskId(null);
   };
 
@@ -1376,42 +1913,12 @@ export default function ProjectKanbanBoard({
       addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Quy trình Phê duyệt, vui lòng chọn Người phê duyệt mặc định.', type: 'error' });
       return;
     }
-    // Conditional validation for cost
-    if (editSubIsCostEnabled) {
-      if (!editSubCostApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!editSubCostSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-    // Conditional validation for subcontractor
-    if (editSubSubcontractorEnabled) {
-      if (!editSubSubcontractorId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Thầu Phụ từ Dữ Liệu Kế Toán.', type: 'error' });
-        return;
-      }
-      if (!editSubSubcontractorApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!editSubSubcontractorSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-
-    const finalInvolved = editSubInvolved.filter(id => id !== editSubAssigneeId);
-    
     const updates: Partial<Task> = {
       name: editSubName,
       deadline: editSubDeadline,
       priority: 'medium', // Default priority since field was removed
       assignerId: editSubAssignerId,
       assigneeId: editSubAssigneeId,
-      involvedEmployeeIds: finalInvolved,
       isApprovalEnabled: editSubIsApprovalEnabled,
       isApprovalRequired: editSubIsApprovalEnabled,
       isCostEnabled: editSubIsCostEnabled,
@@ -1430,12 +1937,58 @@ export default function ProjectKanbanBoard({
       checklistTexts: editSubChecklistTexts.length > 0 ? [...editSubChecklistTexts] : undefined,
     };
 
+    // NHIỆM VỤ CHI TIẾT: merge giữ tiến độ nếu có cấu hình, KHÔNG xóa nhiệm vụ thật nếu config rỗng
+    if (editSubMissionConfigs.length > 0) {
+      const existingMissions = editingSubTask.missions || [];
+      const mergedMissions = editSubMissionConfigs.map(cfg => {
+        const existing = existingMissions.find(m => m.id === cfg.id || m.name === cfg.name);
+        if (existing) {
+          const mergedMainAssigneeId = cfg.mainAssigneeId ?? existing.mainAssigneeId;
+          const mergedMemberIds = cfg.memberIds ?? existing.memberIds ?? [];
+          return {
+            ...existing,
+            name: cfg.name,
+            deadline: cfg.deadline || existing.deadline,
+            mainAssigneeId: mergedMainAssigneeId,
+            // Phụ trách chính cũng tính là Nhân sự tham gia thực hiện (memberIds)
+            memberIds: mergedMainAssigneeId
+              ? Array.from(new Set([...mergedMemberIds, mergedMainAssigneeId]))
+              : mergedMemberIds,
+          };
+        }
+        return templateToMission(cfg);
+      });
+      updates.missions = mergedMissions;
+    }
+
     onUpdateTask(editingSubTask.id, updates);
+
+    // 👥 Thêm người giao/người thi hành chính (có thể vừa bị ĐỔI) và Phụ trách
+    // chính + Nhân sự tham gia của các Nhiệm vụ (có thể vừa được gán) vào nhóm
+    // chat dự án — nếu không, người mới lần đầu được gán qua form "Sửa công
+    // việc con" sẽ không thấy nhóm chat dự án dù được nhắc tên trong tin nhắn.
+    if (selectedProject) {
+      const missionMemberIds = (updates.missions || []).flatMap(m => [m.mainAssigneeId, ...(m.memberIds || [])]);
+      const memberIds = Array.from(new Set([
+        editSubAssignerId,
+        editSubAssigneeId,
+        currentUser?.id,
+        ...missionMemberIds,
+      ].filter(Boolean) as string[]));
+      ensureProjectChatGroup({ id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId })
+        .then(conv => {
+          if (!conv) return;
+          memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
+        })
+        .catch(() => {});
+      notifyProjectChat(`✏️ ${currentUser?.name || 'Người dùng'} đã cập nhật công việc con "${editSubName}".`, { type: 'task', id: editingSubTask.id });
+    }
+
     setEditingSubTask(null);
   };
 
   // handleAddSubTask() → Thêm subtask mới vào dự án (callback onAddTask)
-  const handleAddSubTask = () => {
+  const handleAddSubTask = async () => {
     if (!selectedProject || !subTaskName.trim()) return;
 
     // Validate required fields
@@ -1456,40 +2009,10 @@ export default function ProjectKanbanBoard({
       addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Quy trình Phê duyệt, vui lòng chọn Người phê duyệt mặc định.', type: 'error' });
       return;
     }
-    // Conditional validation for cost
-    if (subTaskIsCostEnabled) {
-      if (!subTaskCostApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!subTaskCostSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-    // Conditional validation for subcontractor
-    if (subTaskSubcontractorEnabled) {
-      if (!subTaskSubcontractorId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Thầu Phụ từ Dữ Liệu Kế Toán.', type: 'error' });
-        return;
-      }
-      if (!subTaskSubcontractorApproverId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-        return;
-      }
-      if (!subTaskSubcontractorSettlerId) {
-        addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-        return;
-      }
-    }
-
     // Create a real Task in global state matching the design
     const codeNum = tasks.length + 1;
     const paddingCode = codeNum < 10 ? `00${codeNum}` : codeNum < 100 ? `0${codeNum}` : `${codeNum}`;
     
-    // Filter out assignee if they are somehow added in the involved list
-    const finalInvolved = subTaskInvolved.filter(id => id !== subTaskAssigneeId);
-
     const childTask: Task = {
       id: `task_child_${Date.now()}`,
       code: `CV-${paddingCode}`,
@@ -1508,7 +2031,6 @@ export default function ProjectKanbanBoard({
       completionRate: 0,
       
       // Configuration for automations
-      involvedEmployeeIds: finalInvolved,
       isApprovalEnabled: subTaskIsApprovalEnabled,
       isApprovalRequired: subTaskIsApprovalEnabled,
       isCostEnabled: subTaskIsCostEnabled,
@@ -1525,6 +2047,7 @@ export default function ProjectKanbanBoard({
       subcontractorApproverId: subTaskSubcontractorApproverId || undefined,
       subcontractorSettlerId: subTaskSubcontractorSettlerId || undefined,
       checklistTexts: subTaskChecklistTexts.length > 0 ? [...subTaskChecklistTexts] : undefined,
+      missions: subTaskMissionConfigs.length > 0 ? subTaskMissionConfigs.map((t, i) => templateToMission(t, i)) : undefined,
 
       // 1. DỮ LIỆU ĐỒNG BỘ: QUY TRÌNH DUYỆT NHIỀU CẤP ("VÕ VĂN NAM -> PHẠM ANH TUẤN -> TRƯƠNG HỮU LONG")
       approvals: [
@@ -1548,7 +2071,7 @@ export default function ProjectKanbanBoard({
         }
       ],
 
-      // 2. DỮ LIỆU ĐỒNG BỘ: NHẬT KÝ KHAI TẠO đã được thay thế bằng chat (postTaskChat) ở dưới.
+      // 2. DỮ LIỆU ĐỒNG BỘ: NHẬT KÝ KHAI TẠO (không còn gửi thông báo vào nhóm chat công việc).
 
       // 3. ĐỀ XUẤT TÀI CHÍNH: để trống, người dùng tự tạo khi cần
       advanceRequests: [],
@@ -1557,26 +2080,42 @@ export default function ProjectKanbanBoard({
       timeLogs: []
     };
 
-    onAddTask(childTask);
+    try {
+      await onAddTask(childTask);
+      // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage) - CHỈ SAU KHI SAVE THÀNH CÔNG
+      notifyProjectChat(`📝 ${currentUser?.name || 'Người dùng'} đã khởi tạo Công Việc Con "${childTask.name}" cho dự án "${selectedProject?.name || ''}".`, { type: 'task', id: childTask.id });
 
-    // 🤖 Auto-post to task chat group (người gửi = người thao tác)
-    const members: string[] = [
-      currentUser?.id,
-      childTask.assignerId,
-      childTask.assigneeId,
-      ...(childTask.involvedEmployeeIds || []),
-      selectedProject.pmId
-    ].filter((v): v is string => Boolean(v));
-    postTaskChat(
-      childTask.id,
-      currentUser?.id || 'emp_1',
-      currentUser?.name || 'Người dùng',
-      currentUser?.role || 'member',
-      `🆕 ${currentUser?.name || 'Người dùng'} đã tạo công việc con: "${subTaskName}" cho dự án "${selectedProject.name}".`,
-      members,
-      subTaskName,
-      selectedProject.name
-    );
+      // 📩 Thông báo GIAO VIỆC CON → HỘI THOẠI CÁ NHÂN người được giao (người thi hành chính).
+      // Người nhận việc có thể CHƯA có trong nhóm chat dự án → nhắn riêng 1-1 để họ
+      // thấy tin + badge đỏ ngay, không phụ thuộc đã được đồng bộ vào nhóm hay chưa.
+      const assigneeEmp = employees.find(e => e.id === subTaskAssigneeId);
+      if (currentUser?.id && subTaskAssigneeId && currentUser.id !== subTaskAssigneeId && assigneeEmp) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: subTaskAssigneeId,
+          recipientName: assigneeEmp.name,
+          content: `📌 ${currentUser.name} đã GIAO cho bạn công việc con "${subTaskName}" thuộc dự án "${selectedProject?.name || ''}"${subTaskDeadline ? ` (Hạn: ${subTaskDeadline})` : ''}.`,
+          relatedEntity: { type: 'task', id: childTask.id },
+        });
+      }
+      // 👥 Thêm người giao (assigner), người được giao (assignee) và người đang tạo vào
+      // nhóm chat dự án để họ mở được nhóm qua deep-link "💬 Nhóm dự án" trên tin nhắn
+      // giao việc (membership = phân quyền của hệ chat).
+      if (selectedProject) {
+        ensureProjectChatGroup({ id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId })
+          .then(conv => {
+            if (!conv) return;
+            const members = Array.from(new Set([subTaskAssignerId, subTaskAssigneeId, currentUser?.id].filter(Boolean) as string[]));
+            members.forEach(mid => addMemberToConversation(conv.id, mid));
+          })
+          .catch(() => {});
+      }
+    } catch (err) {
+      addToast({ title: '❌ Lưu thất bại', message: 'Không thể tạo công việc con. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
+      return;
+    }
 
     // Mở ngay lập tức giao diện chi tiết công việc của công việc con vừa được tạo
     setOverlayTaskId(childTask.id);
@@ -1585,7 +2124,6 @@ export default function ProjectKanbanBoard({
     setSubTaskName('');
     setSubTaskAssignerId(currentUser?.id || '');
     setSubTaskAssigneeId('emp_4');
-    setSubTaskInvolved([]);
     setSubTaskIsApprovalEnabled(false);
     setSubTaskIsCostEnabled(false);
     setSubTaskIsMaterialEnabled(false);
@@ -1601,6 +2139,7 @@ export default function ProjectKanbanBoard({
     setSubTaskSubcontractorApproverId('');
     setSubTaskSubcontractorSettlerId('');
     setSubTaskChecklistTexts([]);
+    setSubTaskMissionConfigs([]);
     setShowSubtaskForm(false);
   };
 
@@ -1651,6 +2190,74 @@ export default function ProjectKanbanBoard({
   // 4. Modal Workflow Automation (Cài đặt tự động hóa cho cột)
   // 5. Modal xem trước Báo giá PDF (downloadedQuoteModal)
   // ===========================================================================
+
+  // ─── Thanh phân trang tối (dùng chung cho các cột Kanban) ────────────────
+  // Luôn nằm gọn trong cột: nút "+" (Thêm dự án) đặt cùng hàng với "Số dòng:"
+  // (căn phải); khi cột hẹp (columnWidth < 240px) điều hướng trang xuống hàng riêng.
+  const KbPaginationBar = ({ page, totalPages, pageSize, onPage, onPageSize, total, onAdd }: {
+    page: number; totalPages: number; pageSize: number;
+    onPage: (p: number) => void; onPageSize: (s: number) => void; total: number; onAdd: () => void;
+  }) => {
+    const compact = columnWidth < 240;
+    const pageText = total > 0 ? `${page}/${totalPages}` : '0';
+    const navBtn = `flex items-center justify-center shrink-0 rounded border border-slate-200 bg-white text-slate-500 hover:text-slate-900 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
+    const addBtn = `flex items-center justify-center shrink-0 rounded border border-slate-200 bg-white text-slate-500 hover:text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50 cursor-pointer transition-all ${compact ? 'w-6 h-5' : 'p-1'}`;
+    const navGroup = (
+      <div className={`flex items-center min-w-0 gap-1 ${compact ? 'justify-center' : ''}`}>
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onPage(page - 1)}
+          className={navBtn}
+        >
+          <ChevronLeft className="w-3 h-3" />
+        </button>
+        <span className="text-[9px] font-mono font-bold text-slate-500 whitespace-nowrap shrink-0" title={total > 0 ? `Trang ${page}/${totalPages}` : '0 dự án'}>
+          {pageText}
+        </span>
+        <button
+          type="button"
+          disabled={page >= totalPages}
+          onClick={() => onPage(page + 1)}
+          className={navBtn}
+        >
+          <ChevronRight className="w-3 h-3" />
+        </button>
+      </div>
+    );
+    return (
+      <div className={`border-t border-slate-200/80 bg-white/60 shrink-0 w-full min-w-0 pt-1.5 pb-2 ${compact ? 'space-y-1 px-2' : 'px-2.5'}`}>
+        {/* Hàng 1: Số dòng (trái) + Nút thêm "+" (phải, cùng hàng với Số dòng) */}
+        <div className="flex items-center justify-between gap-1 min-w-0 w-full">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wide shrink-0">Số dòng: </span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSize(Number(e.target.value))}
+              title="Số dòng hiển thị trên 1 trang"
+              className="bg-white border border-slate-200 rounded px-1 py-0.5 text-[9px] font-bold text-slate-600 outline-none cursor-pointer shrink-0"
+            >
+              {KANBAN_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {!compact && navGroup}
+            <button
+              type="button"
+              onClick={onAdd}
+              title="Thêm trực tiếp vào cột"
+              className={addBtn}
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        {/* Hàng 2 (chỉ khi cột hẹp): điều hướng trang căn giữa */}
+        {compact && navGroup}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4 text-xs font-sans text-slate-300" id={`board_${sector}`}>
       {/* 1. TOP HEADER & SEARCH SEARCH BOX WITH FILTER */}
@@ -1813,7 +2420,7 @@ export default function ProjectKanbanBoard({
               }
 
               const customProject: Project = {
-                id: `proj_${Date.now()}`,
+                id: generateProjectId(newProjType),
                 code,
                 name: newProjName.trim(),
                 customerId: newProjCustomer,
@@ -1847,21 +2454,12 @@ export default function ProjectKanbanBoard({
                   ruleLogs.push(`Giao cho PM phụ trách mới: ${empName}`);
                 }
 
-                // rule 2: Status update
-                if (rule.statusUpdate) {
-                  customProject.status = rule.statusUpdate as any;
-                  const statusLabel = rule.statusUpdate === 'active' ? 'Đang thực hiện' : rule.statusUpdate === 'completed' ? 'Hoàn thành' : rule.statusUpdate === 'suspended' ? 'Tạm khiển' : rule.statusUpdate;
-                  ruleLogs.push(`Chuyển trạng thái dự án sang: ${statusLabel}`);
-                }
-
-                // rule 2.2: Kiểu văn bản (In đậm, in nghiêng, gạch giữa, màu chữ)
-                if (rule.textStyleStyleItalic !== undefined || rule.textStyleStyleBold !== undefined || rule.textStyleStyleStrike !== undefined || rule.textStyleStyleColor !== undefined) {
-                  customProject.styleItalic = rule.textStyleStyleItalic;
-                  customProject.styleBold = rule.textStyleStyleBold;
-                  customProject.styleStrike = rule.textStyleStyleStrike;
-                  customProject.styleColor = rule.textStyleStyleColor;
-                  ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
-                }
+                // rule 2.2: Quy trình "Kiểu văn bản" — LUÔN kích hoạt (mặc định In đậm, không đổi màu chữ)
+                customProject.styleItalic = rule.textStyleStyleItalic;
+                customProject.styleBold = rule.textStyleStyleBold !== undefined ? rule.textStyleStyleBold : true;
+                customProject.styleStrike = rule.textStyleStyleStrike;
+                customProject.styleColor = rule.textStyleStyleColor || '';
+                ruleLogs.push(`Tự động định dạng kiểu chữ & màu sắc cho công trình`);
 
                 // rule 3: Approval request
                 if (rule.approvalRole && rule.approvalRole !== 'none') {
@@ -1888,12 +2486,6 @@ export default function ProjectKanbanBoard({
                     const subtaskAuto = (rule.subtaskAutomations && rule.subtaskAutomations[idx]) ? rule.subtaskAutomations[idx] : {};
                     
                     const assigneeId = subtaskAuto.assignId || rule.assignId || customProject.pmId || 'emp_3';
-                    const involvedEmployeeIds = Array.from(new Set([
-                      ...(customProject.involvedEmployeeIds || []),
-                      ...(rule.involvedId ? [rule.involvedId] : []),
-                      ...(subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []),
-                      ...(subtaskAuto.involvedEmployeeIds || [])
-                    ]));
 
                     // Send approval request
                     let approvals = undefined;
@@ -1917,9 +2509,8 @@ export default function ProjectKanbanBoard({
                       columnId: targetCol.id,
                       name: title,
                       description: `Công việc con được tạo tự động bởi quy trình khi khởi tạo vào phân đoạn ${targetCol.name}. ${subtaskAuto.docTitle ? 'Yêu cầu lập hồ sơ thiết kế kèm theo.' : ''}`,
-                      assignerId: 'system',
+                      assignerId: customProject.pmId || 'emp_3',
                       assigneeId: assigneeId,
-                      involvedEmployeeIds: involvedEmployeeIds,
                       department: 'Thi công',
                       deadline: new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                       priority: 'medium',
@@ -1931,6 +2522,7 @@ export default function ProjectKanbanBoard({
                       styleStrike: subtaskAuto.textStyleStyleStrike,
                       styleColor: subtaskAuto.textStyleStyleColor,
                       checklistTexts: subtaskAuto.checklistTexts || [],
+                      missions: subtaskAuto.subTaskMissions ? subtaskAuto.subTaskMissions.map((t: SubTaskMissionTemplate, i: number) => templateToMission(t, i)) : undefined,
                       approvals: approvals,
                       isApprovalEnabled: subtaskAuto.isApprovalEnabled === true,
                       isApprovalRequired: subtaskAuto.isApprovalRequired === true,
@@ -1940,6 +2532,8 @@ export default function ProjectKanbanBoard({
                       isSubcontractorEnabled: subtaskAuto.isSubcontractorEnabled === true
                     };
                     onAddTask(autoTask);
+                    // 📩 Thông báo công việc được giao tự động (quy trình Kanban) → tin cá nhân người được giao
+                    notifyAutoAssignedTask(autoTask, customProject);
 
                     // Thiết kế Hồ sơ
                     if (subtaskAuto.docTemplateId && subtaskAuto.docTemplateId !== 'none') {
@@ -1975,17 +2569,6 @@ export default function ProjectKanbanBoard({
                   ruleLogs.push(`Thêm mục checklist yêu cầu: ${rule.checklistText}`);
                 }
 
-                // rule 9: Add involved person (Cộng sự bám sát)
-                const ruleInvolvedIds = rule.involvedEmployeeIds || (rule.involvedId ? [rule.involvedId] : []);
-                if (ruleInvolvedIds.length > 0) {
-                  const currentInvolved = customProject.involvedEmployeeIds || [];
-                  const addedIds = ruleInvolvedIds.filter(id => !currentInvolved.includes(id));
-                  if (addedIds.length > 0) {
-                    customProject.involvedEmployeeIds = [...currentInvolved, ...addedIds];
-                    const names = addedIds.filter(Boolean).map(id => employees.find(e => e.id === id)?.name || 'Người hỗ trợ').join(', ');
-                    ruleLogs.push(`Thêm cộng sự hỗ trợ liên quan: ${names}`);
-                  }
-                }
               }
 
               const ruleLogged = ruleLogs.join('. ') || '';
@@ -2007,23 +2590,27 @@ export default function ProjectKanbanBoard({
               onAddProject(customProject);
               setSearchTerm('');
               setSelectedPmId('all');
+              setColumnAssignableId('');
               setShowAddProjectModal(false);
             }} 
-            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 text-xs shadow-2xl animate-scaleIn text-slate-200"
+            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 text-xs shadow-2xl animate-in fade-in zoom-in-95 duration-200 text-slate-200"
           >
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-                  <Plus className="w-4 h-4 text-emerald-400" />
+                <div className="p-1.5 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <Plus className="w-4 h-4 text-emerald-600" />
                 </div>
                 <div>
                   <h3 className="font-extrabold text-white text-sm">Khởi tạo Hồ sơ Dự án mới</h3>
                   <p className="text-[10px] text-slate-500">Thiết lập chi tiết dự án trước khi đưa vào dải Kanban</p>
                 </div>
               </div>
-              <button 
-                type="button" 
-                onClick={() => setShowAddProjectModal(false)} 
+              <button
+                type="button"
+                onClick={() => {
+                  setColumnAssignableId('');
+                  setShowAddProjectModal(false);
+                }}
                 className="text-slate-500 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-slate-800 transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -2063,7 +2650,7 @@ export default function ProjectKanbanBoard({
                     <button
                       type="button"
                       onClick={() => setShowQuickCustModal(true)}
-                      className="text-emerald-400 hover:text-emerald-350 font-bold text-[10px] flex items-center gap-0.5 transition-colors cursor-pointer"
+                      className="text-emerald-400 hover:text-emerald-300 font-bold text-[10px] flex items-center gap-0.5 transition-colors cursor-pointer"
                     >
                       <span>➕ Thêm nhanh</span>
                     </button>
@@ -2117,18 +2704,36 @@ export default function ProjectKanbanBoard({
                 </div>
 
                 <div>
-                  <label className="block text-slate-350 font-bold mb-1 col-span-1">PM chuyên trách phụ trách <span className="text-rose-500 font-extrabold">*</span></label>
-                  <select
-                    required
-                    value={newProjPm}
-                    onChange={(e) => setNewProjPm(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none cursor-pointer focus:border-emerald-500 transition-colors text-[11px]"
-                  >
-                    <option value="">-- Chọn PM phụ trách --</option>
-                    {employees.filter(emp => emp.role === 'pm' || emp.role === 'director').map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.name}</option>
-                    ))}
-                  </select>
+                  <label className="block text-slate-350 font-bold mb-1 col-span-1">
+                    Trưởng dự án <span className="text-rose-500 font-extrabold">*</span>
+                    {columnAssignableId && <span className="text-amber-500 text-[10px] ml-1">(Cột Kanban chỉ định)</span>}
+                  </label>
+                  {(() => {
+                    console.log('[ProjectKanban] Render PM field:', { columnAssignableId, newProjPm, pmName: employees.find(e => e.id === newProjPm)?.name });
+                    if (columnAssignableId) {
+                      return (
+                        <div className="w-full bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-amber-700 outline-none text-[11px] font-semibold flex items-center gap-2">
+                          <div className="w-4 h-4 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center flex-shrink-0">
+                            <span className="text-[8px]">✓</span>
+                          </div>
+                          <span>{employees.find(e => e.id === newProjPm)?.name || 'Không xác định'}</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <select
+                        required
+                        value={newProjPm}
+                        onChange={(e) => setNewProjPm(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none cursor-pointer focus:border-emerald-500 transition-colors text-[11px]"
+                      >
+                        <option value="">-- Chọn Trưởng dự án --</option>
+                        {employees.filter(emp => emp.role === 'pm' || emp.role === 'director').map(emp => (
+                          <option key={emp.id} value={emp.id}>{emp.name}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -2201,7 +2806,10 @@ export default function ProjectKanbanBoard({
             <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => setShowAddProjectModal(false)}
+                onClick={() => {
+                  setColumnAssignableId('');
+                  setShowAddProjectModal(false);
+                }}
                 className="bg-slate-800 hover:bg-slate-755 text-slate-300 font-extrabold text-[11px] px-4 py-2 rounded-lg cursor-pointer transition-colors"
               >
                 Hủy bỏ
@@ -2221,7 +2829,7 @@ export default function ProjectKanbanBoard({
       {/* QUICK ADD CUSTOMER MODAL OVERLAY */}
       {showQuickCustModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-[60] p-4 font-sans text-slate-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-xs text-left animate-scaleIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-xs text-left animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-orange-500" />
@@ -2242,7 +2850,7 @@ export default function ProjectKanbanBoard({
                 <input
                   type="text"
                   disabled
-                  value={quickCustName ? `KH_${getAbbrev(quickCustName)}_${customers.length + 1}` : 'KH_[Tên viết tắt]_[STT]'}
+                  value={quickCustName ? `KH_${getAbbrev(quickCustName)}_...` : 'KH_[Tên viết tắt]_[Mã duy nhất]'}
                   className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-orange-400 font-mono font-bold cursor-not-allowed outline-none"
                 />
               </div>
@@ -2307,7 +2915,7 @@ export default function ProjectKanbanBoard({
                   placeholder="Địa chỉ liên hệ nhà thô..."
                   value={quickCustAddress}
                   onChange={(e) => setQuickCustAddress(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-855 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500"
+                  className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500"
                 />
               </div>
 
@@ -2360,11 +2968,7 @@ export default function ProjectKanbanBoard({
         <ColumnSettingsModal
           column={columns.find(c => c.id === editingColumnId)!}
           onSave={(edits) => {
-            setEditColName(edits.name);
-            setEditColColor(edits.color);
-            setEditColRuleType(edits.ruleType);
-            setEditColRuleParam(edits.ruleParam);
-            saveColumnSettings();
+            saveColumnSettings(edits);
           }}
           onDelete={(id) => deleteColumn(id)}
           onClose={() => setEditingColumnId(null)}
@@ -2384,16 +2988,20 @@ export default function ProjectKanbanBoard({
           {columns.map((col) => {
             // Find projects mapped to this column
             const colProjects = sectorProjects.filter(p => getProjectColumnId(p, columns) === col.id);
+            const kbSize = getKbColPageSize(col.id);
+            const kbTotal = kbColTotalPages(col.id, colProjects.length);
+            const kbPageClamped = Math.min(getKbColPage(col.id), kbTotal);
+            const pagedColProjects = colProjects.slice((kbPageClamped - 1) * kbSize, kbPageClamped * kbSize);
             const styles = getColumnStyleDetails(col.color);
 
             // Check if column has any active automation rule
             const hasActiveAutomation = [
               col.automation?.assignId,
+              col.automation?.statusSet,
               col.automation?.statusUpdate,
               (col.automation?.textStyleStyleItalic || col.automation?.textStyleStyleBold || col.automation?.textStyleStyleStrike || col.automation?.textStyleStyleColor),
               col.automation?.approvalRole && col.automation.approvalRole !== 'none',
-              col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t)),
-              col.automation?.involvedId || (col.automation?.involvedEmployeeIds && col.automation.involvedEmployeeIds.length > 0)
+              col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t))
             ].some(Boolean);
 
             return (
@@ -2401,85 +3009,105 @@ export default function ProjectKanbanBoard({
                 key={col.id}
                 onDrop={(e) => handleDrop(e, col.id)}
                 onDragOver={handleDragOver}
-                className={`kanban-column flex-1 bg-slate-900/45 border-t-4 ${styles.borderTop} border-x border-b ${styles.borderCol} rounded-2xl p-3.5 flex flex-col justify-between min-h-[75vh] h-auto space-y-3 shrink-0 transition-all duration-300 hover:bg-slate-900/60`}
+                className={`kanban-column flex-1 bg-white/50 border ${styles.borderCol} rounded-2xl sm:rounded-3xl overflow-hidden shadow-lg sm:shadow-2xl flex flex-col justify-between min-h-[75vh] h-auto shrink-0 relative transition-all duration-300 hover:shadow-xl hover:shadow-slate-100`}
                 style={{ minWidth: `${columnWidth}px`, maxWidth: `${columnWidth}px` }}
               >
                 {/* Column Header */}
-                <div className="flex items-center justify-between border-b border-slate-850/60 pb-3 shrink-0">
+                <div className={`p-3 sm:p-4 border-b border-slate-200/80 flex items-center justify-between shrink-0 ${styles.bg}`}>
                   <div className="flex items-center gap-2 overflow-hidden">
                     {hasActiveAutomation && (
                       <span title="Đã kích hoạt quy trình tự động">
                         <Zap className="w-3.5 h-3.5 text-emerald-500 hover:text-emerald-400 animate-pulse shrink-0 select-none" />
                       </span>
                     )}
-                    <h4 className={`font-black text-[11.5px] ${styles.text} tracking-wider truncate uppercase flex items-center gap-1.5`}>
+                    <h4 className={`font-extrabold text-[11.5px] sm:text-[12.5px] ${styles.text} tracking-wider truncate uppercase`}>
                       {col.name}
-                      <span className={`px-1.5 py-0.5 text-[9px] rounded-md font-extrabold ml-1 leading-none ${styles.badge}`}>
-                        {colProjects.length}
-                      </span>
                     </h4>
+                    <span className={`text-[11px] font-mono font-black px-2.5 py-0.5 rounded-full ${styles.text} bg-white/80 border border-slate-200/80 shrink-0`}>
+                      {colProjects.length}
+                    </span>
                   </div>
 
-                  {/* Column actions group */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  {/* Column actions: gom 3 thao tác vào nút menu "..." */}
+                  <div className="relative shrink-0">
                     <button
-                      onClick={() => {
-                        if (!canEditColumn) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA cấu hình cột ở phân hệ này.', type: 'error' });
-                          return;
-                        }
-                        openEditColumn(col);
-                      }}
-                      className={`p-1 rounded transition-colors ${canEditColumn ? 'hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
-                      title="Đổi tên & cấu hình cột phân đoạn này"
+                      onClick={() => setOpenColMenuId(openColMenuId === col.id ? null : col.id)}
+                      className={`p-1 rounded transition-colors ${openColMenuId === col.id ? 'bg-slate-200 text-slate-900' : 'hover:bg-slate-200 text-slate-500 hover:text-slate-900 cursor-pointer'}`}
+                      title="Thao tác cột phân đoạn"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <MoreVertical className="w-4 h-4" />
                     </button>
-                    <button
-                      onClick={() => {
-                        if (!canConfigureColumnAutomation) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền CẤU HÌNH quy trình tự động ở phân hệ này.', type: 'error' });
-                          return;
-                        }
-                        setActiveWorkflowColId(col.id);
-                        setShowAutoWorkflowModal(true);
-                      }}
-                      className={`p-1 rounded transition-colors ${canConfigureColumnAutomation ? 'hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
-                      title="Cấu hình quy trình tự động cho phân đoạn này"
-                    >
-                      <Settings className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!canDeleteColumn) {
-                          addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA cột phân đoạn ở phân hệ này.', type: 'error' });
-                          return;
-                        }
-                        deleteColumn(col.id);
-                      }}
-                      className={`p-1 rounded transition-colors ${canDeleteColumn ? 'hover:bg-red-500/15 text-slate-400 hover:text-red-400 cursor-pointer' : 'text-slate-600 cursor-not-allowed'}`}
-                      title="Xóa cột phân đoạn này"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    {openColMenuId === col.id && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setOpenColMenuId(null)} />
+                        {/* Menu xổ SANG PHẢI (left-0), nền trắng, bóng đổ, bo góc 12px */}
+                        <div className="absolute left-0 top-full mt-1.5 z-40 w-52 rounded-xl bg-white shadow-xl ring-1 ring-black/5 border border-slate-200 py-1.5 text-left">
+                          <button
+                            onClick={() => {
+                              setOpenColMenuId(null);
+                              if (!canEditColumn) {
+                                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA cấu hình cột ở phân hệ này.', type: 'error' });
+                                return;
+                              }
+                              openEditColumn(col);
+                            }}
+                            className={`flex items-center gap-2.5 w-full px-3.5 py-2 text-xs transition-colors ${canEditColumn ? 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
+                          >
+                            <Edit2 className="w-3.5 h-3.5 text-indigo-500" />
+                            <span className="font-semibold">Đổi tên & cấu hình</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setOpenColMenuId(null);
+                              if (!canConfigureColumnAutomation) {
+                                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền CẤU HÌNH quy trình tự động ở phân hệ này.', type: 'error' });
+                                return;
+                              }
+                              setActiveWorkflowColId(col.id);
+                              setShowAutoWorkflowModal(true);
+                            }}
+                            className={`flex items-center gap-2.5 w-full px-3.5 py-2 text-xs transition-colors ${canConfigureColumnAutomation ? 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
+                          >
+                            <Settings className="w-3.5 h-3.5 text-indigo-500" />
+                            <span className="font-semibold">Cấu hình tự động</span>
+                          </button>
+                          <div className="my-1 border-t border-slate-200" />
+                          <button
+                            onClick={() => {
+                              setOpenColMenuId(null);
+                              if (!canDeleteColumn) {
+                                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA cột phân đoạn ở phân hệ này.', type: 'error' });
+                                return;
+                              }
+                              deleteColumn(col.id);
+                            }}
+                            className={`flex items-center gap-2.5 w-full px-3.5 py-2 text-xs transition-colors ${canDeleteColumn ? 'text-red-600 hover:bg-red-50 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
+                          >
+                            <X className="w-3.5 h-3.5 text-red-500" />
+                            <span className="font-semibold">Xóa cột phân đoạn</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 {/* Cards Container without scroll */}
-                <div className="flex-1 space-y-3 pr-1 pt-1" id={`cards_scroller_${col.id}`}>
+                <div className="flex-1 p-3.5 space-y-3.5" id={`cards_scroller_${col.id}`}>
                   {colProjects.length === 0 ? (
-                    <div className="h-28 border border-dashed border-slate-850 rounded-xl flex flex-col items-center justify-center text-slate-600 gap-1 select-none">
+                    <div className="h-28 border border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 gap-1 select-none">
                       <Briefcase className="w-5 h-5 opacity-40" />
-                      <span className="text-[10px]">Kéo công trình thả vào đây</span>
+                      <span className="text-[10px] text-slate-500">Kéo công trình thả vào đây</span>
                     </div>
                   ) : (
-                    colProjects.map((p) => {
-                      const custName = customers.find(c => c.id === p.customerId)?.name || 'Vãng lai';
-                      const pmName = employees.find(e => e.id === p.pmId)?.name || 'Chưa gán';
-                      const directorName = employees.find(e => e.role === 'director')?.name || 'Trương Hữu Long';
+                    pagedColProjects.map((p) => {
+                      const custName = customersById.get(p.customerId)?.name || 'Vãng lai';
+                      const pmName = employeesById.get(p.pmId)?.name || 'Chưa gán';
+                      const directorName = directorEmp?.name || 'Trương Hữu Long';
                       // Count tasks (completion)
-                      const projTasks = tasks.filter(t => t.projectId === p.id);
+                      const projTasks = tasksByProjectId.get(p.id) || [];
                       const doneTasks = projTasks.filter(t => t.status === 'completed');
+                      const isSelected = selectedProjectId === p.id;
 
                       return (
                         <div
@@ -2487,51 +3115,59 @@ export default function ProjectKanbanBoard({
                           draggable
                           onDragStart={(e) => handleDragStart(e, p.id)}
                           onClick={() => setSelectedProjectId(p.id)}
-                          className="bg-slate-950 border border-slate-850 hover:border-emerald-500/50 rounded-xl p-2.5 cursor-pointer shadow-md transition-all hover:shadow-lg relative group overflow-hidden active:scale-95"
+                          className={`border rounded-xl p-2.5 cursor-pointer transition-all duration-200 relative group overflow-hidden ${
+                            isSelected ? 'bg-white border-amber-500/60 shadow-md ring-1 ring-amber-500/20' : 'bg-white border-slate-200 hover:border-amber-300 hover:bg-amber-50/40 hover:shadow-md'
+                          }`}
                         >
                           {/* Accent left border based on stats or custom selected color */}
                           <div className={`absolute left-0 top-0 bottom-0 w-1 ${
                             p.cardColor ? p.cardColor : (
                               p.status === 'completed' ? 'bg-emerald-500' :
+                              p.status === 'maintenance' ? 'bg-orange-500' :
                               p.status === 'paused' ? 'bg-amber-500' : 'bg-sky-500'
                             )
                           }`}></div>
 
-                          {/* Giá trị số nhỏ góc trên bên phải của thẻ công việc */}
-                          <div className="absolute top-2 right-2 flex items-center gap-1 bg-slate-900/80 border border-slate-800/60 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold select-none">
-                            <CheckSquare className={`w-2.5 h-2.5 ${doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-500' : 'text-slate-500'}`} />
-                            <span className={doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-400' : 'text-slate-300'}>
-                              {doneTasks.length}/{projTasks.length}
+                          {/* Mã dự án (trái) + Giá trị số công việc đã xong (phải) */}
+                          <div className="flex items-center justify-between text-[9px] mb-1.5">
+                            <span className={`font-mono font-extrabold px-1.5 py-0.5 rounded truncate max-w-[100px] ${styles.badge}`} title={p.code || p.name}>
+                              {p.code || '—'}
                             </span>
+                            <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold select-none shrink-0">
+                              <CheckSquare className={`w-2.5 h-2.5 ${doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-600' : 'text-slate-400'}`} />
+                              <span className={doneTasks.length === projTasks.length && projTasks.length > 0 ? 'text-emerald-700' : 'text-slate-500'}>
+                                {doneTasks.length}/{projTasks.length}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="space-y-1.5">
                             {/* Tên Dự Án */}
-                            <h5 
-                              className={`text-[11px] line-clamp-2 leading-tight group-hover:text-emerald-350 transition-colors pr-8 ${
-                                p.styleBold !== false ? 'font-bold' : 'font-normal'
+                            <h5
+                              className={`text-[11.5px] line-clamp-2 leading-snug transition-colors ${
+                                p.styleBold !== false ? 'font-extrabold' : 'font-normal'
                               } ${
                                 p.styleItalic ? 'italic' : ''
                               } ${
                                 p.styleStrike ? 'line-through' : ''
                               }   ${
-                                p.styleColor || 'text-white'
+                                p.styleColor || (isSelected ? 'text-amber-600' : 'text-slate-800 group-hover:text-amber-600')
                               }`}
                             >
                               {p.name}
                             </h5>
 
-                            {/* Tên khách hàng tô màu xanh lá, không đề mục */}
-                            <div className="text-emerald-400 font-bold text-[9.5px] truncate uppercase tracking-wider pr-8">
+                            {/* Tên khách hàng — badge pastel */}
+                            <span className="inline-block text-emerald-700 bg-emerald-50 border border-emerald-200 font-bold text-[9px] truncate uppercase tracking-wider px-1.5 py-0.5 rounded-full max-w-full">
                               {custName}
-                            </div>
+                            </span>
 
                             {/* Thông tin dự án */}
-                            <div className="space-y-1 text-[9.5px] text-slate-400 border-t border-slate-900/80 pt-1.5">
+                            <div className="space-y-1 text-[9.5px] text-slate-500 border-t border-slate-100 pt-1.5">
                               {/* Người chịu trách nhiệm (TRƯỞNG DỰ ÁN) */}
                               <div className="flex items-center gap-1 min-w-0">
-                                <User className="w-3 h-3 text-slate-500 shrink-0 select-none" />
-                                <span className="text-slate-300 font-semibold truncate flex-1">PM: {pmName}</span>
+                                <User className="w-3 h-3 text-slate-400 shrink-0 select-none" />
+                                <span className="text-slate-600 font-semibold truncate flex-1">PM: {pmName}</span>
                               </div>
                             </div>
                           </div>
@@ -2541,16 +3177,15 @@ export default function ProjectKanbanBoard({
                   )}
                 </div>
 
-                {/* Footer simple add card quick trigger */}
-                <div className="shrink-0 pt-1.5 border-t border-slate-850">
-                  <button
-                    onClick={() => openAddProjectModal(col.id)}
-                    className="w-full bg-slate-950/40 hover:bg-slate-950 border border-slate-850 text-slate-400 hover:text-white px-2 py-1.5 rounded-lg flex items-center justify-center gap-1 font-bold text-[10px] cursor-pointer transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Thêm trực tiếp vào cột
-                  </button>
-                </div>
+                <KbPaginationBar
+                  page={kbPageClamped}
+                  totalPages={kbTotal}
+                  pageSize={kbSize}
+                  total={colProjects.length}
+                  onPage={(p) => setKbColPageSafe(col.id, p)}
+                  onPageSize={(s) => { setKbColPageSize(prev => ({ ...prev, [col.id]: s })); setKbColPageSafe(col.id, 1); }}
+                  onAdd={() => openAddProjectModal(col.id)}
+                />
               </div>
             );
           })}
@@ -2577,7 +3212,7 @@ export default function ProjectKanbanBoard({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-[10px] text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900/30">
+                    <span className="font-mono font-bold text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                       {selectedProject.code}
                     </span>
                     <span className="font-bold text-[9.5px] uppercase tracking-wider text-slate-400">
@@ -2616,7 +3251,6 @@ export default function ProjectKanbanBoard({
                           progress: selectedProject.progress,
                           notes: selectedProject.notes,
                           documents: selectedProject.documents || [],
-                          involvedEmployeeIds: selectedProject.involvedEmployeeIds || [],
                         },
                         tasks: projTasks.map(t => ({
                           id: t.id,
@@ -2668,9 +3302,9 @@ export default function ProjectKanbanBoard({
                       addToast({ title: '❌ Lỗi', message: 'Đã xảy ra lỗi khi đóng gói dữ liệu công trình.', type: 'error' });
                     }
                   }}
-                  className="p-1 px-3 bg-teal-950/40 hover:bg-teal-900/50 text-teal-400 hover:text-teal-300 rounded-lg border border-teal-900/40 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  className="p-1 px-3 bg-teal-50 hover:bg-teal-100 text-teal-700 hover:text-teal-800 rounded-lg border border-teal-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
                 >
-                  <Save className="w-4 h-4 text-teal-400" />
+                  <Save className="w-4 h-4 text-teal-700" />
                   Tải Dự Án
                 </button>
 
@@ -2678,63 +3312,55 @@ export default function ProjectKanbanBoard({
                   <>
                     <button
                       onClick={() => setIsConfirmingDelete(true)}
-                      className="p-1 px-3 bg-red-950/40 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg border border-red-900/40 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      className="p-1 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 rounded-lg border border-rose-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
                     >
-                      <Trash2 className="w-4 h-4 text-red-400" />
+                      <Trash2 className="w-4 h-4 text-rose-700" />
                       Xóa dự án
                     </button>
 
                     {isConfirmingDelete && (() => {
+                      // Không còn chặn xóa khi dự án vẫn còn công việc (kể cả công việc
+                      // đã hoàn thành). Xóa dự án sẽ cuốn sạch mọi dữ liệu phát sinh
+                      // trên Supabase — xem dbService.projects.deleteCascade().
                       const projectTaskCount = tasks.filter(t => t.projectId === selectedProject.id).length;
-                      const hasTasks = projectTaskCount > 0;
                       return (
                         <div
                           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-xs p-4"
                           onClick={() => setIsConfirmingDelete(false)}
                         >
                           <div
-                            className="bg-slate-900 border border-red-800 p-4 rounded-xl shadow-2xl w-80 max-w-[90vw] animate-scaleIn text-left"
+                            className="bg-slate-900 border border-rose-300 p-4 rounded-xl shadow-2xl w-80 max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 text-left"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {hasTasks ? (
-                              <>
-                                <p className="text-red-400 font-bold text-[10.5px] leading-relaxed font-sans">
-                                  ⛔ Không thể xóa dự án "{selectedProject.name}" vì vẫn còn <strong>{projectTaskCount}</strong> công việc trong danh sách. Vui lòng xóa hết toàn bộ công việc trước khi xóa dự án.
-                                </p>
-                                <div className="flex justify-end mt-3">
-                                  <button
-                                    onClick={() => setIsConfirmingDelete(false)}
-                                    className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-[10px] py-1.5 px-4 rounded-lg cursor-pointer transition-colors text-center font-sans"
-                                  >
-                                    Đã hiểu
-                                  </button>
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-red-400 font-bold text-[10.5px] leading-relaxed font-sans">
-                                  ⚠️ Cảnh báo: Bạn có chắc chắn muốn xóa dự án này? Toàn bộ hồ sơ liên hợp, thẻ thông tin và các nhiệm vụ, công việc thi công trực thuộc dự án sẽ bị xóa vĩnh viễn và không thể khôi phục!
-                                </p>
-                                <div className="flex gap-2 mt-3">
-                                  <button
-                                    onClick={() => {
-                                      onDeleteProject(selectedProject.id);
-                                      setSelectedProjectId(null);
-                                      setIsConfirmingDelete(false);
-                                    }}
-                                    className="flex-1 bg-red-600 hover:bg-red-500 text-white font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
-                                  >
-                                    Xóa vĩnh viễn
-                                  </button>
-                                  <button
-                                    onClick={() => setIsConfirmingDelete(false)}
-                                    className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
-                                  >
-                                    Hủy bỏ
-                                  </button>
-                                </div>
-                              </>
-                            )}
+                            <p className="text-rose-700 font-bold text-[10.5px] leading-relaxed font-sans">
+                              ⚠️ Cảnh báo: Bạn có chắc chắn muốn xóa dự án "{selectedProject.name}"?
+                              {projectTaskCount > 0 && (
+                                <> Kèm theo <strong>{projectTaskCount}</strong> công việc trực thuộc (cả công việc đã hoàn thành).</>
+                              )}
+                            </p>
+                            <p className="text-slate-400 font-semibold text-[10px] leading-relaxed font-sans mt-2">
+                              Toàn bộ dữ liệu phát sinh sẽ bị xóa vĩnh viễn khỏi cơ sở dữ liệu và không thể khôi phục:
+                              Công việc, Nhiệm vụ, Nhóm chat, Ghi nhận vi phạm, Công tác phí, Báo giá, Hợp đồng,
+                              Nghiệm thu, Thanh lý, HĐ thầu, Công nợ, Đề xuất, Phiếu thu, Phiếu chi.
+                            </p>
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                onClick={() => {
+                                  onDeleteProject(selectedProject.id);
+                                  setSelectedProjectId(null);
+                                  setIsConfirmingDelete(false);
+                                }}
+                                className="flex-1 bg-red-600 hover:bg-red-500 text-white font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
+                              >
+                                Xóa vĩnh viễn
+                              </button>
+                              <button
+                                onClick={() => setIsConfirmingDelete(false)}
+                                className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold text-[10px] py-1.5 rounded-lg cursor-pointer transition-colors text-center font-sans"
+                              >
+                                Hủy bỏ
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -2869,57 +3495,36 @@ export default function ProjectKanbanBoard({
                         const projectReceipts = receipts.filter(r => r.projectId === selectedProject.id);
                         const totalReceived = projectReceipts.reduce((sum, r) => sum + (r.amount || 0), 0);
 
-                        let grandTotal = 0;
-                        let rawTotal = 0;
-                        let discountPercent = 0;
-                        let discountValue = 0;
-                        let vatAmount = 0;
-
-                        if (latestArchivedQuote) {
-                          rawTotal = latestArchivedQuote.totalAmount || latestArchivedQuote.totalPrice || latestArchivedQuote.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-                          discountPercent = latestArchivedQuote.discountPercent || 0;
-                          discountValue = rawTotal * (discountPercent / 100);
-                          const subtotalAfterDiscount = rawTotal - discountValue;
-                          vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-                          grandTotal = subtotalAfterDiscount + vatAmount;
-                        } else {
-                          grandTotal = selectedProject.contractValue || editContractValue || 0;
-                        }
+                        // Giá trị hợp đồng: TỔNG các Hợp Đồng ĐÃ DUYỆT của dự án (có thể nhiều
+                        // hợp đồng theo từng giai đoạn) — nguồn chính thức mới thay cho báo giá.
+                        const grandTotal = approvedProjectContracts.length > 0
+                          ? totalApprovedContractValue
+                          : (selectedProject.contractValue || editContractValue || 0);
 
                         const remainingValue = Math.max(0, grandTotal - totalReceived);
 
                         return (
                           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-center text-slate-800">
-                            {latestArchivedQuote ? (
+                            {approvedProjectContracts.length > 0 ? (
                               <>
                                 <div className="flex items-center justify-between mb-1.5">
                                   <span className="text-[9.5px] text-emerald-700 bg-emerald-50 border border-emerald-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded">
-                                    Đồng bộ từ báo giá
+                                    {approvedProjectContracts.length} hợp đồng đã duyệt
                                   </span>
-                                  {latestArchivedQuote.isApproved && (
-                                    <span className="text-[9.5px] text-sky-700 bg-sky-50 border border-sky-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded">
-                                      Đã phê duyệt
-                                    </span>
-                                  )}
                                 </div>
                                 <div className="text-emerald-700 font-mono text-2xl font-black tracking-tight mt-1">
-                                  {grandTotal.toLocaleString('vi-VN')} VNĐ
+                                  {totalApprovedContractValue.toLocaleString('vi-VN')} VNĐ
                                 </div>
-                                <div className="text-[10px] text-slate-500 mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2">
-                                  <div className="flex justify-between">
-                                    <span>Giá gốc thầu:</span>
-                                    <span className="font-mono text-slate-700 font-semibold">{rawTotal.toLocaleString('vi-VN')} đ</span>
-                                  </div>
-                                  {discountPercent > 0 && (
-                                    <div className="flex justify-between text-amber-650 font-medium">
-                                      <span>Chiết khấu ({discountPercent}%):</span>
-                                      <span className="font-mono">-{discountValue.toLocaleString('vi-VN')} đ</span>
+                                {/* Chi tiết từng Hợp Đồng đã duyệt — 1 dự án có thể nhiều giai đoạn */}
+                                <div className="space-y-1.5 mt-2 border-t border-slate-100 pt-2">
+                                  {approvedProjectContracts.map((q: any) => (
+                                    <div key={q.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                      <span className="text-[10px] text-slate-600 font-mono font-bold truncate">{q.code || q.id}</span>
+                                      <span className="text-[10px] font-mono font-black text-emerald-700 shrink-0 ml-2">
+                                        {getContractFinalValue(q).toLocaleString('vi-VN')} đ
+                                      </span>
                                     </div>
-                                  )}
-                                  <div className="flex justify-between">
-                                    <span>Thuế VAT (8%):</span>
-                                    <span className="font-mono text-slate-700 font-semibold">+{vatAmount.toLocaleString('vi-VN')} đ</span>
-                                  </div>
+                                  ))}
                                 </div>
                               </>
                             ) : (
@@ -2942,7 +3547,7 @@ export default function ProjectKanbanBoard({
                                 ) : (
                                   <div className="flex flex-col justify-center">
                                     <div className="text-[9.5px] text-slate-400 uppercase font-black tracking-wider mb-1">
-                                      Giá trị tạm tính (Chưa có báo giá)
+                                      Giá trị tạm tính (Chưa có Hợp Đồng nào được duyệt)
                                     </div>
                                     <div className="text-slate-800 font-mono text-lg font-black tracking-tight">
                                       {grandTotal.toLocaleString('vi-VN')} VNĐ
@@ -2986,6 +3591,63 @@ export default function ProjectKanbanBoard({
                               </button>
                             </div>
                           </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Tổng giá trị HĐ Thầu Phụ + danh sách chi tiết từng thầu phụ của dự án này */}
+                    <div className="col-span-2 bg-slate-900/40 border border-slate-850/60 p-4 rounded-xl space-y-3">
+                      <span className="text-slate-400 font-bold block text-[10.5px] uppercase tracking-wider">
+                        🤝 Tổng giá trị HĐ Thầu Phụ
+                      </span>
+                      {(() => {
+                        // Mỗi thầu phụ chỉ lấy 1 HĐ MỚI NHẤT trong dự án này (nếu thầu phụ có nhiều
+                        // HĐ do lập lại/điều chỉnh) — tránh cộng trùng khi tính tổng giá trị.
+                        const projectSubContracts = subcontractorContracts.filter(q => q.projectId === selectedProject.id);
+                        const latestBySub = [...new Map(
+                          projectSubContracts.map(q => [q.subcontractorId || q.id, q])
+                        ).values()];
+                        const totalSubValue = latestBySub.reduce((sum, q) => sum + (q.contractValue || q.totalAmount || 0), 0);
+
+                        if (latestBySub.length === 0) {
+                          return (
+                            <div className="text-[10.5px] text-slate-500 italic bg-slate-950/60 border border-dashed border-slate-800 rounded-lg p-3 text-center">
+                              Dự án này chưa có Hợp Đồng Thầu Phụ nào.
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <>
+                            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-slate-800">
+                              <div className="text-[9.5px] text-orange-700 bg-orange-50 border border-orange-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded w-fit mb-1.5">
+                                {latestBySub.length} thầu phụ
+                              </div>
+                              <div className="text-orange-700 font-mono text-2xl font-black tracking-tight">
+                                {totalSubValue.toLocaleString('vi-VN')} VNĐ
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {latestBySub.map((q) => {
+                                const statusNormalized = (q.status || '').trim().toLowerCase();
+                                const isApproved = q.isApproved === true || statusNormalized === 'hoàn thành';
+                                return (
+                                  <div key={q.id} className="flex items-center justify-between bg-slate-950/60 border border-slate-850 rounded-lg px-3 py-2">
+                                    <div className="min-w-0">
+                                      <div className="text-[11px] text-slate-200 font-bold truncate">{q.subcontractorName || 'Thầu phụ vãng lai'}</div>
+                                      <div className={`text-[9px] font-bold mt-0.5 ${isApproved ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                        {isApproved ? 'Đã Duyệt' : 'Chưa Duyệt'}
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] font-mono font-black text-orange-300 shrink-0 ml-2">
+                                      {(q.contractValue || q.totalAmount || 0).toLocaleString('vi-VN')} đ
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
                         );
                       })()}
                     </div>
@@ -3086,25 +3748,20 @@ export default function ProjectKanbanBoard({
                         <div className="bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-800 transition-colors">
                           {(() => {
                             const pm = employees.find(e => e.id === selectedProject.pmId);
-                            const name = pm ? pm.name : 'Chưa gán';
-                            const parts = name.split(' ');
-                            const initials = parts.length >= 2
-                              ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                              : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                             return (
                               <>
                                 {/* Interactive Avatar (Clicking triggers employee select via select overlay) */}
                                 <div className="relative shrink-0 w-11 h-11">
-                                  <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-650 flex items-center justify-center font-bold text-slate-950 text-sm shadow-md border border-emerald-400/20 group-hover:scale-105 transition-all">
-                                    {initials}
-                                  </div>
+                                  <UserAvatar employee={pm || null} size="lg" className="shadow-md" />
                                   <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-emerald-400 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
                                     ⚙️
                                   </span>
                                   {/* Transparent select over avatar for easy click trigger */}
                                   <select
                                     value={selectedProject.pmId || ''}
-                                    onChange={(e) => updateProjectWithRule(selectedProject.id, { pmId: e.target.value })}
+                                    onChange={(e) => {
+                                      updateProjectWithRule(selectedProject.id, { pmId: e.target.value });
+                                    }}
                                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
                                     title="Nhấp vào avatar để thay đổi Trưởng Dự Án chuyên trách"
                                   >
@@ -3122,7 +3779,9 @@ export default function ProjectKanbanBoard({
                                   <div className="relative">
                                     <select
                                       value={selectedProject.pmId || ''}
-                                      onChange={(e) => updateProjectWithRule(selectedProject.id, { pmId: e.target.value })}
+                                      onChange={(e) => {
+                                        updateProjectWithRule(selectedProject.id, { pmId: e.target.value });
+                                      }}
                                       className="bg-transparent text-slate-200 font-bold text-xs border-none outline-none focus:ring-0 p-0 hover:text-emerald-400 transition-colors cursor-pointer w-full"
                                     >
                                       <option value="" disabled className="bg-slate-950 text-slate-400">-- Chưa gán --</option>
@@ -3142,80 +3801,38 @@ export default function ProjectKanbanBoard({
                           })()}
                         </div>
 
-                        {/* 2. NGƯỜI LIÊN QUAN / HỖ TRỢ */}
-                        <div className="bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex flex-col justify-between hover:border-slate-800 transition-colors">
-                          <div>
-                            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">NGƯỜI LIÊN QUAN & HỖ TRỢ</span>
-                            
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {/* List support member avatars */}
-                              {(!selectedProject.involvedEmployeeIds || selectedProject.involvedEmployeeIds.length === 0) ? (
-                                <span className="text-slate-600 text-[10px] italic py-1 block">Chưa có người hỗ trợ...</span>
-                              ) : (
-                                selectedProject.involvedEmployeeIds.map(empId => {
-                                  const emp = employees.find(e => e.id === empId);
-                                  if (!emp) return null;
-                                  
-                                  const parts = emp.name.split(' ');
-                                  const initials = parts.length >= 2
-                                    ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                    : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                                    
-                                  return (
-                                    <div key={empId} className="relative group/member shrink-0">
-                                      {/* Interactive avatar that deletes on click */}
-                                      <div 
-                                        className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-white text-[10px] shadow border border-sky-450/10 cursor-pointer transition-transform hover:scale-105"
-                                        title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                        onClick={() => {
-                                          const current = selectedProject.involvedEmployeeIds || [];
-                                          updateProjectWithRule(selectedProject.id, { involvedEmployeeIds: current.filter(id => id !== empId) });
-                                        }}
-                                      >
-                                        {initials}
-                                        {/* Action indicator over face */}
-                                        <div className="absolute inset-0 bg-rose-950/80 rounded-full flex items-center justify-center text-rose-400 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                          ✕
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })
-                              )}
-
-                              {/* Plus visual as an interactive creator */}
-                              <div className="relative shrink-0">
-                                <div className="w-8 h-8 rounded-full border border-dashed border-slate-700 hover:border-emerald-500/70 bg-slate-950/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                                  <Plus className="w-3.5 h-3.5" />
-                                </div>
-                                <select
-                                  value=""
-                                  onChange={(e) => {
-                                    const empId = e.target.value;
-                                    if (empId) {
-                                      const current = selectedProject.involvedEmployeeIds || [];
-                                      if (!current.includes(empId)) {
-                                        updateProjectWithRule(selectedProject.id, { involvedEmployeeIds: [...current, empId] });
-                                      }
-                                    }
-                                  }}
-                                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                                  title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                                >
-                                  <option value="">-- Thêm người --</option>
-                                  {employees
-                                    .filter(emp => emp.id !== selectedProject.pmId && !(selectedProject.involvedEmployeeIds || []).includes(emp.id))
-                                    .map(emp => (
-                                      <option key={emp.id} value={emp.id}>
-                                        {emp.name} ({emp.department})
-                                      </option>
-                                    ))
-                                  }
-                                </select>
-                              </div>
+                        {/* 2. NÚT ĐỒNG BỘ NHÂN SỰ VÀO NHÓM CHAT */}
+                        <button
+                          type="button"
+                          onClick={handleSyncProjectMembersToChat}
+                          disabled={isSyncingChatMembers}
+                          title="Thêm toàn bộ nhân sự trong công việc và nhiệm vụ của dự án vào nhóm chat (mỗi người 1 lần)"
+                          className={`bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative transition-colors text-left ${
+                            isSyncingChatMembers
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'hover:border-sky-500/40 hover:bg-slate-900 cursor-pointer group'
+                          }`}
+                        >
+                          <div className="relative shrink-0 w-11 h-11">
+                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-slate-950 shadow-md border border-sky-400/20 group-hover:scale-105 transition-all">
+                              {isSyncingChatMembers
+                                ? <RotateCcw className="w-5 h-5 animate-spin" />
+                                : <MessageSquare className="w-5 h-5" />}
                             </div>
+                            <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-sky-400 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
+                              <Users className="w-2.5 h-2.5" />
+                            </span>
                           </div>
-                        </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Nhóm chat dự án</span>
+                            <span className="text-slate-200 font-bold text-xs block group-hover:text-sky-400 transition-colors">
+                              {isSyncingChatMembers ? 'Đang đồng bộ...' : 'Đồng Bộ Nhân Sự Vào Nhóm Chát'}
+                            </span>
+                            <span className="block text-[9.5px] text-slate-400 font-mono truncate">
+                              Thêm nhân sự công việc & nhiệm vụ
+                            </span>
+                          </div>
+                        </button>
 
                       </div>
                     </div>
@@ -3239,7 +3856,7 @@ export default function ProjectKanbanBoard({
                     <div className="flex justify-between items-center border-b border-slate-800 pb-2.5 shrink-0">
                       <div className="flex items-center gap-1.5">
                         <CheckSquare className="w-5 h-5 text-emerald-400" />
-                        <span className="font-extrabold text-[11px] uppercase tracking-wider text-slate-150">
+                        <span className="font-extrabold text-[11px] uppercase tracking-wider text-slate-100">
                           DANH SÁCH CÔNG VIỆC
                         </span>
                       </div>
@@ -3262,7 +3879,7 @@ export default function ProjectKanbanBoard({
                     {/* Form to add subtask — hiển thị dạng hộp thoại (modal) nằm trên cùng */}
                     {showSubtaskForm && (
                       <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-[300] p-4 animate-fade-in" onClick={() => setShowSubtaskForm(false)}>
-                        <div className="bg-slate-950 rounded-xl border border-emerald-500/30 shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden text-left" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-slate-950 rounded-xl border border-emerald-200 shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden text-left animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                         <div className="font-bold text-[10.5px] text-white uppercase flex items-center gap-1 text-emerald-400 shrink-0 p-4 pb-3 border-b border-slate-800">
                           <Zap className="w-3.5 h-3.5" />
                           Tạo thẻ việc con chi tiết
@@ -3400,23 +4017,21 @@ export default function ProjectKanbanBoard({
                                   {subTaskIsCostEnabled && (
                                     <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                       <div className="space-y-1">
-                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                         <SearchableEmployeeSelect
                                           value={subTaskCostApproverId || ''}
                                           onChange={(val) => setSubTaskCostApproverId(val || '')}
                                           employees={employees}
                                           placeholder="-- Mặc định (Giám đốc / PM) --"
-                                          required
                                         />
                                       </div>
                                       <div className="space-y-1">
-                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                         <SearchableEmployeeSelect
                                           value={subTaskCostSettlerId || ''}
                                           onChange={(val) => setSubTaskCostSettlerId(val || '')}
                                           employees={employees}
                                           placeholder="-- Mặc định (Kế toán) --"
-                                          required
                                         />
                                       </div>
                                     </div>
@@ -3509,20 +4124,15 @@ export default function ProjectKanbanBoard({
                                   </div>
                                   {subTaskSubcontractorEnabled && (
                                     <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                                      {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                                      {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                                       <div>
-                                        <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                                        <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                                         <select
                                           value={subTaskSubcontractorId || ''}
                                           onChange={(e) => {
                                             const subId = e.target.value;
                                             setSubTaskSubcontractorId(subId);
-                                            const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                            let suppliers = [];
-                                            if (savedSuppliers) {
-                                              try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                            }
-                                            const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                            const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                             if (matched) {
                                               setSubTaskSubcontractorName(matched.name);
                                             } else {
@@ -3537,52 +4147,35 @@ export default function ProjectKanbanBoard({
                                               }
                                             }
                                           }}
-                                          required
                                           className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                                         >
                                           <option value="">-- Chọn đối tác thầu phụ --</option>
-                                          {(() => {
-                                            const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                            let suppliers = [];
-                                            if (savedSuppliers) {
-                                              try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                            }
-                                            if (suppliers.length === 0) {
-                                              suppliers = [
-                                                { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                                { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                                { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                              ];
-                                            }
-                                            return suppliers.map((sup: any) => (
-                                              <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                                {sup.name} ({sup.code || sup.id})
-                                              </option>
-                                            ));
-                                          })()}
+                                          {subcontractors.map((sup: any) => (
+                                            <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                              {sup.name} ({sup.code || sup.id})
+                                            </option>
+                                          ))}
                                         </select>
                                       </div>
 
                                       {/* Approver & Settler dropdowns (theo mẫu popup) */}
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <div className="space-y-1">
-                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                           <SearchableEmployeeSelect
                                             value={subTaskSubcontractorApproverId || ''}
                                             onChange={(val) => setSubTaskSubcontractorApproverId(val || '')}
                                             employees={employees}
                                             placeholder="-- Mặc định (Giám đốc) --"
-                                            required
                                           />
                                         </div>
                                         <div className="space-y-1">
-                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                          <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                           <SearchableEmployeeSelect
                                             value={subTaskSubcontractorSettlerId || ''}
                                             onChange={(val) => setSubTaskSubcontractorSettlerId(val || '')}
                                             employees={employees}
                                             placeholder="-- Mặc định (Kế toán) --"
-                                            required
                                           />
                                         </div>
                                       </div>
@@ -3679,6 +4272,14 @@ export default function ProjectKanbanBoard({
                               </button>
                             </div>
                           </div>
+
+                          {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+                          <MissionConfigEditor
+                            value={subTaskMissionConfigs}
+                            onChange={setSubTaskMissionConfigs}
+                            employees={employees}
+                            defaultDeadlineHint={subTaskDeadline}
+                          />
 
                           {/* End scrollable form content */}
                           </div>
@@ -3984,165 +4585,149 @@ export default function ProjectKanbanBoard({
                                             const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
                                             const hasQuoteFile = latestArchivedQuote;
 
-                                            if (hasQuoteFile) {
+                                            // Tính trạng thái hồ sơ (luôn tính, kể cả khi chưa có báo giá)
                                               let quoteStatusText = "Chưa Lập";
-                                              let quoteStatusColor = "text-slate-500 bg-white/5";
+                                              let quoteStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (latestArchivedQuote.isApproved) {
                                                   quoteStatusText = "Đã Duyệt";
-                                                  quoteStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                  quoteStatusColor = "text-emerald-700 bg-emerald-50";
                                                 } else {
                                                   quoteStatusText = "Chờ Duyệt";
-                                                  quoteStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  quoteStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
                                               let contractStatusText = "Chưa Lập";
-                                              let contractStatusColor = "text-slate-500 bg-white/5";
+                                              let contractStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (!latestArchivedQuote.isApproved) {
                                                   contractStatusText = "Chờ Duyệt";
-                                                  contractStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  contractStatusColor = "text-amber-700 bg-amber-50";
                                                 } else if (latestArchivedQuote.contractHtml) {
                                                   if (latestArchivedQuote.contractApproved) {
                                                     contractStatusText = "Đã Duyệt";
-                                                    contractStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                    contractStatusColor = "text-emerald-700 bg-emerald-50";
                                                   } else {
                                                     contractStatusText = "Chờ Duyệt";
-                                                    contractStatusColor = "text-amber-400 bg-amber-950/20";
+                                                    contractStatusColor = "text-amber-700 bg-amber-50";
                                                   }
+                                                } else {
+                                                  // BG đã duyệt nhưng HĐ chưa lưu/tạo → vẫn "Chờ Duyệt", không phải "Chưa Lập"
+                                                  contractStatusText = "Chờ Duyệt";
+                                                  contractStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
                                               let acceptanceStatusText = "Chưa Lập";
-                                              let acceptanceStatusColor = "text-slate-500 bg-white/5";
+                                              let acceptanceStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (!latestArchivedQuote.isApproved) {
                                                   acceptanceStatusText = "Chờ Duyệt";
-                                                  acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  acceptanceStatusColor = "text-amber-700 bg-amber-50";
                                                 } else if (latestArchivedQuote.acceptanceHtml) {
                                                   if (latestArchivedQuote.acceptanceApproved) {
                                                     acceptanceStatusText = "Đã Duyệt";
-                                                    acceptanceStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                    acceptanceStatusColor = "text-emerald-700 bg-emerald-50";
                                                   } else {
                                                     acceptanceStatusText = "Chờ Duyệt";
-                                                    acceptanceStatusColor = "text-amber-400 bg-amber-950/20";
+                                                    acceptanceStatusColor = "text-amber-700 bg-amber-50";
                                                   }
+                                                } else {
+                                                  // BG đã duyệt nhưng NT chưa lưu/tạo → vẫn "Chờ Duyệt"
+                                                  acceptanceStatusText = "Chờ Duyệt";
+                                                  acceptanceStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
                                               let liquidationStatusText = "Chưa Lập";
-                                              let liquidationStatusColor = "text-slate-500 bg-white/5";
+                                              let liquidationStatusColor = "text-slate-600 bg-slate-50";
                                               if (hasQuoteFile) {
                                                 if (!latestArchivedQuote.isApproved) {
                                                   liquidationStatusText = "Chờ Duyệt";
-                                                  liquidationStatusColor = "text-amber-400 bg-amber-950/20";
+                                                  liquidationStatusColor = "text-amber-700 bg-amber-50";
                                                 } else if (latestArchivedQuote.liquidationHtml) {
                                                   if (latestArchivedQuote.liquidationApproved) {
                                                     liquidationStatusText = "Đã Duyệt";
-                                                    liquidationStatusColor = "text-emerald-400 bg-emerald-950/20";
+                                                    liquidationStatusColor = "text-emerald-700 bg-emerald-50";
                                                   } else {
                                                     liquidationStatusText = "Chờ Duyệt";
-                                                    liquidationStatusColor = "text-amber-400 bg-amber-950/20";
+                                                    liquidationStatusColor = "text-amber-700 bg-amber-50";
                                                   }
+                                                } else {
+                                                  // BG đã duyệt nhưng TL chưa lưu/tạo → vẫn "Chờ Duyệt"
+                                                  liquidationStatusText = "Chờ Duyệt";
+                                                  liquidationStatusColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
+
+                                              // Khi Báo Giá chưa lập → khóa HĐ / Nghiệm thu / Thanh lý
+                                              const quoteLocked = quoteStatusText === 'Chưa Lập';
+                                              const goArchive = () => {
+                                                window.dispatchEvent(new CustomEvent('hl-switch-tab', {
+                                                  detail: {
+                                                    tab: sectorArchiveTab(selectedProject.type),
+                                                    projectId: selectedProject.id,
+                                                    customerId: selectedProject.customerId,
+                                                  },
+                                                }));
+                                                setActivePopover(null);
+                                              };
 
                                               return (
                                                 <>
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('quote');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
+                                                    onClick={goArchive}
                                                     className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <FileText className="w-3.5 h-3.5 text-indigo-400" />
                                                       <span>Báo Giá</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${quoteStatusColor}`}>{quoteStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${quoteStatusColor}`}>{quoteStatusText}</span>
                                                   </button>
 
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('contract');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
-                                                    className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                                                    onClick={goArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-rose-400 hover:bg-rose-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <Briefcase className="w-3.5 h-3.5 text-rose-400" />
                                                       <span>Hợp Đồng</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${contractStatusColor}`}>{contractStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${contractStatusColor}`}>{contractStatusText}</span>
                                                   </button>
 
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('acceptance');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
-                                                    className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-emerald-400 hover:bg-emerald-500/10 cursor-pointer"
+                                                    onClick={goArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-emerald-400 hover:bg-emerald-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                                                       <span>Nghiệm Thu</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${acceptanceStatusColor}`}>{acceptanceStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${acceptanceStatusColor}`}>{acceptanceStatusText}</span>
                                                   </button>
 
                                                   <button
                                                     type="button"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setActivePopover(null);
-                                                      setDownloadedQuoteActiveTab('liquidation');
-                                                      setDownloadedQuoteModal(hasQuoteFile);
-                                                    }}
-                                                    className="w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                                                    onClick={goArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-amber-400 hover:bg-amber-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                                                   >
                                                     <div className="flex items-center gap-1.5">
                                                       <Award className="w-3.5 h-3.5 text-amber-400" />
                                                       <span>Thanh Lý</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${liquidationStatusColor}`}>{liquidationStatusText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${liquidationStatusColor}`}>{liquidationStatusText}</span>
                                                   </button>
                                                 </>
                                               );
-                                            } else {
-                                              const isDocGenerationEnabled = task.status !== 'completed';
-                                              return (
-                                                <button
-                                                  type="button"
-                                                  disabled={!isDocGenerationEnabled}
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setActivePopover(null);
-                                                    if (isDocGenerationEnabled && onRedirectToQuote) {
-                                                      onRedirectToQuote(task.projectId!);
-                                                    }
-                                                  }}
-                                                  className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-colors ${
-                                                    isDocGenerationEnabled 
-                                                      ? 'text-indigo-400 hover:bg-indigo-500/10 cursor-pointer' 
-                                                      : 'text-slate-600 cursor-not-allowed'
-                                                  }`}
-                                                >
-                                                  <FileText className="w-3.5 h-3.5 text-indigo-400" />
-                                                  <span>Khai Báo Giá (Chưa lập)</span>
-                                                </button>
-                                              );
-                                            }
                                           })()}
                                         </div>
                                        </>
@@ -4199,15 +4784,15 @@ export default function ProjectKanbanBoard({
                                               );
 
                                               let contractStateText = "Chưa Lập";
-                                              let contractStateColor = "text-rose-400 bg-rose-950/20";
+                                              let contractStateColor = "text-rose-700 bg-rose-50";
 
                                               if (matchedContract) {
                                                 if (isApproved) {
                                                   contractStateText = "Đã Duyệt";
-                                                  contractStateColor = "text-emerald-400 bg-emerald-950/20";
+                                                  contractStateColor = "text-emerald-700 bg-emerald-50";
                                                 } else {
                                                   contractStateText = "Chưa Duyệt";
-                                                  contractStateColor = "text-amber-400 bg-amber-950/20";
+                                                  contractStateColor = "text-amber-700 bg-amber-50";
                                                 }
                                               }
 
@@ -4221,10 +4806,19 @@ export default function ProjectKanbanBoard({
                                                       
                                                       if (matchedContract) {
                                                         // Đã có HĐ → App.tsx sẽ redirect tới Lưu Trữ Hồ Sơ Thầu Phụ (Đường 2)
+                                                        // Xóa hl_preselected_task_id còn sót lại từ lần bấm "Lập HĐ mới" trước đó
+                                                        // (nếu không xóa, dự án nhiều thầu phụ có thể lẫn dữ liệu công việc cũ).
+                                                        localStorage.removeItem('hl_preselected_task_id');
                                                         localStorage.setItem('hl_view_contract_id', matchedContract.id);
                                                       } else {
                                                         // Chưa có HĐ → set task ID để form Lập HĐ tự điền sẵn
+                                                        // Xóa hl_view_contract_id còn sót lại từ lần xem HĐ khác trước đó — nếu
+                                                        // không, QuotationSystem sẽ tự nạp nhầm hợp đồng cũ (kể cả đã duyệt)
+                                                        // vào form đang lập cho thầu phụ mới, khiến hợp đồng mới bị khóa do
+                                                        // "dính" trạng thái Đã Duyệt của hợp đồng thầu phụ trước.
+                                                        localStorage.removeItem('hl_view_contract_id');
                                                         localStorage.setItem('hl_preselected_task_id', task.id);
+                                                        window.dispatchEvent(new CustomEvent('hl-subcontractor-new-contract-requested', { detail: { taskId: task.id } }));
                                                       }
 
                                                       if (onRedirectToSubcontractor) {
@@ -4237,7 +4831,7 @@ export default function ProjectKanbanBoard({
                                                       <Briefcase className="w-3.5 h-3.5 text-orange-400" />
                                                       <span>HĐ Giao Khoán</span>
                                                     </div>
-                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-white/5 ${contractStateColor}`}>{contractStateText}</span>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${contractStateColor}`}>{contractStateText}</span>
                                                   </button>
 
                                                   {isApproved && (
@@ -4289,13 +4883,12 @@ export default function ProjectKanbanBoard({
                                 <div className="relative">
                                   <button
                                     type="button"
-                                    disabled={task.status === 'completed'}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setOpenMenuTaskId(openMenuTaskId === task.id ? null : task.id);
                                     }}
-                                    className="p-1 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-900/40 text-slate-400 hover:text-slate-300 disabled:text-slate-600 rounded border border-slate-800 disabled:border-slate-850 transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center"
-                                    title={task.status === 'completed' ? "Công việc đã hoàn thành (Khóa thao tác)" : "Thao tác"}
+                                    className="p-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-300 rounded border border-slate-800 transition duration-150 cursor-pointer flex items-center justify-center"
+                                    title="Thao tác"
                                   >
                                     <MoreVertical className="w-3.5 h-3.5" />
                                   </button>
@@ -4382,13 +4975,16 @@ export default function ProjectKanbanBoard({
       {/* 2.5 WORKFLOW AUTOMATION MODAL */}
       {showAutoWorkflowModal && (() => {
         const activeCol = columns.find(c => c.id === activeWorkflowColId);
-        const isActionActive = activeCol?.automation 
-          ? (selectedActionType === 'assignee' ? !!activeCol.automation.assignId
+        // Quy trình "Cập nhật trạng thái" (statusSet) và "Kiểu văn bản" (textStyle)
+        // LUÔN kích hoạt trên mọi cột — không cho phép tắt (luôn trả true) để đúng
+        // yêu cầu "mặc định luôn bật".
+        const alwaysOnAutomation = selectedActionType === 'statusSet' || selectedActionType === 'textStyle';
+        const isActionActive = activeCol?.automation
+          ? (alwaysOnAutomation ? true
+            : selectedActionType === 'assignee' ? !!activeCol.automation.assignId
             : selectedActionType === 'status' ? !!activeCol.automation.statusUpdate
             : selectedActionType === 'approval' ? (!!activeCol.automation.approvalRole && activeCol.automation.approvalRole !== 'none')
             : selectedActionType === 'subtask' ? (!!activeCol.automation.subtaskTitle || (activeCol.automation.subtaskTitles && activeCol.automation.subtaskTitles.some(t => !!t)))
-            : selectedActionType === 'involved' ? (!!activeCol.automation.involvedId || (activeCol.automation.involvedEmployeeIds && activeCol.automation.involvedEmployeeIds.length > 0))
-            : selectedActionType === 'textStyle' ? (activeCol.automation.textStyleStyleItalic !== undefined || activeCol.automation.textStyleStyleBold !== undefined || activeCol.automation.textStyleStyleStrike !== undefined || activeCol.automation.textStyleStyleColor !== undefined)
             : false)
           : false;
 
@@ -4402,6 +4998,15 @@ export default function ProjectKanbanBoard({
             iconColor: 'text-sky-450 text-sky-450',
             isActive: (auto: any) => !!auto?.assignId,
           },
+          statusSet: {
+            title: 'Cập nhật trạng thái',
+            description: 'Tự động đổi trạng thái dự án khi kéo thẻ vào cột.',
+            helpText: 'Dự án sẽ tự động cập nhật trạng thái (Đang triển khai / Tạm ngưng / Hoàn thành / Đang Bảo Trì / Đã Hủy) khi thẻ công trình được kéo vào phân đoạn này. Quy trình này LUÔN được kích hoạt trên mọi cột với giá trị mặc định "Đang triển khai" — bạn chỉ việc chọn giá trị phù hợp cho từng cột.',
+            icon: ListTodo,
+            iconBg: 'bg-orange-500/10 border border-orange-500/30',
+            iconColor: 'text-orange-400',
+            isActive: (auto: any) => !!auto?.statusSet,
+          },
           status: {
             title: 'Chuyển cột khi hoàn thành',
             description: 'Tự động chuyển dự án sang phân đoạn khác khi hoàn thành.',
@@ -4414,10 +5019,10 @@ export default function ProjectKanbanBoard({
           textStyle: {
             title: 'Kiểu văn bản',
             description: 'Tự động cập nhật định dạng chữ của thẻ Dự Án.',
-            helpText: 'Dự án sẽ tự động thay đổi kiểu chữ (in nghiêng, in đậm, gạch giữa) và màu sắc của thẻ khi di chuyển vào phân đoạn này.',
+            helpText: 'Dự án sẽ tự động thay đổi kiểu chữ (in đậm, in nghiêng, gạch giữa) và màu sắc của thẻ khi di chuyển vào phân đoạn này. Quy trình này LUÔN kích hoạt trên mọi cột — mặc định In đậm và không thay đổi màu chữ; bạn chỉ việc điều chỉnh thêm định dạng cho từng cột.',
             icon: Type,
             iconBg: 'bg-violet-500/10 border border-violet-500/30',
-            iconColor: 'text-violet-450 text-violet-400',
+            iconColor: 'text-violet-400',
             isActive: (auto: any) => auto?.textStyleStyleItalic !== undefined || auto?.textStyleStyleBold !== undefined || auto?.textStyleStyleStrike !== undefined || auto?.textStyleStyleColor !== undefined,
           },
           approval: {
@@ -4438,15 +5043,6 @@ export default function ProjectKanbanBoard({
             iconColor: 'text-pink-400',
             isActive: (auto: any) => !!auto?.subtaskTitle || (auto?.subtaskTitles && auto.subtaskTitles.some((t: any) => !!t)),
           },
-          involved: {
-            title: 'Thêm người liên quan',
-            description: 'Chỉ định cộng sự, thiết kế giám bám sát.',
-            helpText: 'Tự động liên kết thêm thành viên hỗ trợ chuyên biệt vào danh sách đồng tham gia dự án.',
-            icon: Users,
-            iconBg: 'bg-green-500/10 border border-green-500/30',
-            iconColor: 'text-green-400',
-            isActive: (auto: any) => !!auto?.involvedId || (auto?.involvedEmployeeIds && auto.involvedEmployeeIds.length > 0),
-          },
         };
 
         const handleToggleAction = () => {
@@ -4455,6 +5051,23 @@ export default function ProjectKanbanBoard({
           if (!col) return;
 
           const updates: Partial<NonNullable<KanbanColumn['automation']>> = {};
+
+          // 2 quy trình mặc định ("Cập nhật trạng thái" & "Kiểu văn bản") không bao giờ
+          // tắt — chỉ cập nhật giá trị theo cấu hình hiện tại.
+          if (alwaysOnAutomation) {
+            const currentAuto = activeCol?.automation || { type: 'none' as const };
+            if (selectedActionType === 'statusSet') {
+              updateColAutomation(activeWorkflowColId, { statusSet: currentAuto.statusSet || STATUS_SET_DEFAULT });
+            } else {
+              updateColAutomation(activeWorkflowColId, {
+                textStyleStyleBold: currentAuto.textStyleStyleBold !== undefined ? currentAuto.textStyleStyleBold : true,
+                textStyleStyleItalic: currentAuto.textStyleStyleItalic,
+                textStyleStyleStrike: currentAuto.textStyleStyleStrike,
+                textStyleStyleColor: currentAuto.textStyleStyleColor || '',
+              });
+            }
+            return;
+          }
 
           if (isActionActive) {
             // Deactivate
@@ -4465,33 +5078,14 @@ export default function ProjectKanbanBoard({
               updates.subtaskTitle = undefined;
               updates.subtaskTitles = undefined;
             }
-            else if (selectedActionType === 'involved') {
-              updates.involvedId = undefined;
-              updates.involvedEmployeeIds = [];
-            }
-            else if (selectedActionType === 'textStyle') {
-              updates.textStyleStyleItalic = undefined;
-              updates.textStyleStyleBold = undefined;
-              updates.textStyleStyleStrike = undefined;
-              updates.textStyleStyleColor = undefined;
-            }
           } else {
             // Activate with default value
             if (selectedActionType === 'assignee') updates.assignId = employees[0]?.id || 'emp_3';
-            else if (selectedActionType === 'status') updates.statusUpdate = 'col_done';
+            else if (selectedActionType === 'status') updates.statusUpdate = findDoneColumnId() || columns[columns.length - 1]?.id || 'col_done';
             else if (selectedActionType === 'approval') updates.approvalRole = 'director';
             else if (selectedActionType === 'subtask') {
               updates.subtaskTitle = 'Khảo sát hiện trạng công xưởng thực tế';
               updates.subtaskTitles = ['Khảo sát hiện trạng công xưởng thực tế'];
-            }
-            else if (selectedActionType === 'involved') {
-              const defaultEmpId = employees[1]?.id || 'emp_4';
-              updates.involvedId = defaultEmpId;
-              updates.involvedEmployeeIds = [defaultEmpId];
-            }
-            else if (selectedActionType === 'textStyle') {
-              updates.textStyleStyleBold = true;
-              updates.textStyleStyleColor = 'text-red-500';
             }
           }
 
@@ -4543,6 +5137,25 @@ export default function ProjectKanbanBoard({
                   </select>
                   <p className="text-[10px] text-slate-500">
                     PM chịu quyền điều động xe, thợ cơ động gỗ gia công thực hiện bàn giao chi phối.
+                  </p>
+                </div>
+              );
+
+            case 'statusSet':
+              return (
+                <div className="space-y-2 text-left">
+                  <label className="block text-slate-350 font-bold mb-1">Trạng thái dự án được cập nhật khi kéo thẻ vào cột</label>
+                  <select
+                    value={auto.statusSet || STATUS_SET_DEFAULT}
+                    onChange={(e) => updateColAutomation(activeWorkflowColId, { statusSet: e.target.value as ProjectStatus })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none cursor-pointer text-[11px]"
+                  >
+                    {STATUS_SET_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    Khi thẻ dự án được kéo vào cột này, hệ thống sẽ tự động cập nhật trạng thái dự án thành <strong className="text-slate-300">{STATUS_SET_OPTIONS.find(o => o.value === (auto.statusSet || STATUS_SET_DEFAULT))?.label}</strong>.
                   </p>
                 </div>
               );
@@ -4652,7 +5265,7 @@ export default function ProjectKanbanBoard({
 
               return (
                 <div className="space-y-3 text-left">
-                  <div className="flex justify-between items-center bg-slate-950/40 p-2 rounded-lg border border-slate-805">
+                  <div className="flex justify-between items-center bg-slate-950/40 p-2 rounded-lg border border-slate-800">
                     <span className="text-slate-350 font-bold text-xs uppercase tracking-wider">
                       Danh sách công việc con ({subtasks.length} công việc)
                     </span>
@@ -4711,9 +5324,7 @@ export default function ProjectKanbanBoard({
 
                           {/* Preview Badges for Configured Automation Details */}
                           {(() => {
-                            const selectedInvolvedIds = subtaskAuto.involvedEmployeeIds || (subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []);
                             const hasAssignee = !!subtaskAuto.assignId;
-                            const hasInvolved = selectedInvolvedIds.length > 0;
                             const hasApproval = subtaskAuto.isApprovalEnabled === true;
                             const hasCost = subtaskAuto.isCostEnabled === true;
                             const hasMaterial = subtaskAuto.isMaterialEnabled === true;
@@ -4721,47 +5332,42 @@ export default function ProjectKanbanBoard({
                             const hasSubcontractor = subtaskAuto.isSubcontractorEnabled === true;
                             const hasCheck = subtaskAuto.checklistTexts && subtaskAuto.checklistTexts.length > 0;
 
-                            if (!hasAssignee && !hasInvolved && !hasApproval && !hasCost && !hasMaterial && !hasDocs && !hasSubcontractor && !hasCheck) return null;
+                            if (!hasAssignee && !hasApproval && !hasCost && !hasMaterial && !hasDocs && !hasSubcontractor && !hasCheck) return null;
 
                             return (
                               <div className="flex flex-wrap gap-1.5 items-center px-7 text-[9.5px] text-slate-400 select-none pb-1">
                                 {hasAssignee && (
-                                  <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     👤 Thợ: {employees.find(e => e.id === subtaskAuto.assignId)?.name || 'Mặc định'}
                                   </span>
                                 )}
-                                {hasInvolved && (
-                                  <span className="bg-sky-950/40 text-sky-400 border border-sky-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-0.5">
-                                    👥 +{selectedInvolvedIds.length} Phụ Trách Nhiệm Vụ hỗ trợ
-                                  </span>
-                                )}
                                 {hasApproval && (
-                                  <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 animate-pulse">
+                                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 animate-pulse">
                                     🛡️ {subtaskAuto.isApprovalRequired === true ? 'Phê duyệt bắt buộc' : 'Có phê duyệt'}
                                   </span>
                                 )}
                                 {hasCost && (
-                                  <span className="bg-indigo-950/40 text-teal-400 border border-teal-905/30 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     💵 Nhận chi phí
                                   </span>
                                 )}
                                 {hasMaterial && (
-                                  <span className="bg-amber-955/35 text-amber-400 border border-amber-900/30 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     ⚡ Nhận vật tư
                                   </span>
                                 )}
                                 {hasDocs && (
-                                  <span className="bg-rose-950/40 text-rose-455 border border-rose-900/40 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 font-mono">
+                                  <span className="text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1 font-mono">
                                     📄 Có hồ sơ
                                   </span>
                                 )}
                                 {hasSubcontractor && (
-                                  <span className="bg-orange-950/40 text-orange-400 border border-orange-900/45 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
+                                  <span className="text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
                                     🔗 Thầu phụ
                                   </span>
                                 )}
                                 {hasCheck && (
-                                  <span className="bg-slate-800 text-slate-350 px-2 py-0.5 rounded font-extrabold">
+                                  <span className="text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded font-extrabold">
                                     ✓ {subtaskAuto.checklistTexts.length} bước đo kiểm
                                   </span>
                                 )}
@@ -4785,7 +5391,7 @@ export default function ProjectKanbanBoard({
                         onClick={() => setActiveSubtaskRuleIndex(null)}
                       >
                         <div 
-                          className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden transform transition-all duration-300 scale-100"
+                          className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {/* Modal Header */}
@@ -4817,22 +5423,15 @@ export default function ProjectKanbanBoard({
                             {/* Layout 2 cột giống Nhân sự công triển */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                               {/* 1. Giao cho người thực hiện (Sử dụng cấu trúc avatar & select đè lên giống PM chính) */}
-                              <div className="bg-slate-900 border border-slate-805/60 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-700 transition-colors">
+                              <div className="bg-slate-900 border border-slate-800/60 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-700 transition-colors">
                                 {(() => {
                                   const assignedEmp = employees.find(e => e.id === subtaskAuto.assignId);
-                                  const name = assignedEmp ? assignedEmp.name : 'Chưa gán (Bấm để gán)';
-                                  const parts = name.split(' ');
-                                  const initials = parts.length >= 2
-                                    ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                    : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                                   return (
                                     <>
                                       {/* Avatar tròn tương tác */}
                                       <div className="relative shrink-0 w-11 h-11">
-                                        <div className={`w-11 h-11 rounded-full bg-gradient-to-br ${assignedEmp ? 'from-indigo-500 to-purple-600' : 'from-slate-700 to-slate-800'} flex items-center justify-center font-bold text-white text-sm shadow-md border border-white/5 group-hover:scale-105 transition-all`}>
-                                          {initials}
-                                        </div>
-                                        <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-indigo-450 border border-slate-805 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
+                                        <UserAvatar employee={assignedEmp || null} size="lg" className={`shadow-md ${assignedEmp ? '' : 'opacity-50'}`} />
+                                        <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-indigo-450 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">
                                           ⚙️
                                         </span>
                                         {/* Select ẩn đè lên avatar */}
@@ -4868,88 +5467,6 @@ export default function ProjectKanbanBoard({
                                 })()}
                               </div>
 
-                              {/* 2. Người liên quan & Hỗ trợ */}
-                              <div className="bg-slate-900 border border-slate-805/60 p-3 rounded-xl flex flex-col justify-between hover:border-slate-700 transition-colors text-left min-h-[72px]">
-                                <div>
-                                  <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">NGƯỜI LIÊN QUAN & HỖ TRỢ</span>
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    {(() => {
-                                      const currentInvolved = subtaskAuto.involvedEmployeeIds || (subtaskAuto.involvedId ? [subtaskAuto.involvedId] : []);
-                                      return (
-                                        <>
-                                          {currentInvolved.length === 0 ? (
-                                            <span className="text-slate-650 text-[10px] italic py-1 block">Chưa gán người hỗ trợ...</span>
-                                          ) : (
-                                            currentInvolved.map((empId: string) => {
-                                              const emp = employees.find(e => e.id === empId);
-                                              if (!emp) return null;
-                                              const parts = emp.name.split(' ');
-                                              const initials = parts.length >= 2
-                                                ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                                                : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                                              return (
-                                                <div key={empId} className="relative group/member shrink-0">
-                                                  <div 
-                                                    className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-indigo-650 flex items-center justify-center font-bold text-white text-[10px] shadow border border-sky-450/10 cursor-pointer transition-transform hover:scale-105"
-                                                    title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                                    onClick={() => {
-                                                      const nextInvolved = currentInvolved.filter((id: string) => id !== empId);
-                                                      updateSubtaskAutomation(index, {
-                                                        involvedEmployeeIds: nextInvolved,
-                                                        involvedId: nextInvolved[0] || undefined
-                                                      });
-                                                    }}
-                                                  >
-                                                    {initials}
-                                                    <div className="absolute inset-0 bg-rose-950/80 rounded-full flex items-center justify-center text-rose-450 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                                      ✕
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                              );
-                                            })
-                                          )}
-
-                                          {/* Plus visual as an interactive creator */}
-                                          <div className="relative shrink-0">
-                                            <div className="w-8 h-8 rounded-full border border-dashed border-slate-705 hover:border-emerald-500/70 bg-slate-950/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                                              <Plus className="w-3.5 h-3.5" />
-                                            </div>
-                                            <select
-                                              value=""
-                                              onChange={(e) => {
-                                                const empId = e.target.value;
-                                                if (empId) {
-                                                  const nextInvolved = [...currentInvolved];
-                                                  if (!nextInvolved.includes(empId)) {
-                                                    const updated = [...nextInvolved, empId];
-                                                    updateSubtaskAutomation(index, {
-                                                      involvedEmployeeIds: updated,
-                                                      involvedId: updated[0] || undefined
-                                                    });
-                                                  }
-                                                }
-                                              }}
-                                              className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                                              title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                                            >
-                                              <option value="">-- Thêm người hỗ trợ --</option>
-                                              {employees
-                                                .filter(emp => emp.id !== subtaskAuto.assignId && !currentInvolved.includes(emp.id))
-                                                .map(emp => (
-                                                  <option key={emp.id} value={emp.id}>
-                                                    {emp.name} ({emp.department})
-                                                  </option>
-                                                ))
-                                              }
-                                            </select>
-                                          </div>
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                              </div>
                             </div>
 
                             {/* Gửi yêu cầu phê duyệt */}
@@ -5028,23 +5545,21 @@ export default function ProjectKanbanBoard({
                               {subtaskAuto.isCostEnabled === true && (
                                 <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div className="space-y-1">
-                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                     <SearchableEmployeeSelect
                                       value={subtaskAuto.costApproverId || ''}
                                       onChange={(val) => updateSubtaskAutomation(index, { costApproverId: val || undefined })}
                                       employees={employees}
                                       placeholder="-- Mặc định (Giám đốc / PM) --"
-                                      required
                                     />
                                   </div>
                                   <div className="space-y-1">
-                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                    <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                     <SearchableEmployeeSelect
                                       value={subtaskAuto.costSettlerId || ''}
                                       onChange={(val) => updateSubtaskAutomation(index, { costSettlerId: val || undefined })}
                                       employees={employees}
                                       placeholder="-- Mặc định (Kế toán) --"
-                                      required
                                     />
                                   </div>
                                 </div>
@@ -5143,20 +5658,15 @@ export default function ProjectKanbanBoard({
                               </div>
                               {subtaskAuto.isSubcontractorEnabled === true && (
                                 <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                                  {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                                  {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                                   <div>
-                                    <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                                    <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                                     <select
                                       value={subtaskAuto.subcontractorId || ''}
                                       onChange={(e) => {
                                         const subId = e.target.value;
                                         updateSubtaskAutomation(index, { subcontractorId: subId || undefined });
-                                        const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                        let suppliers = [];
-                                        if (savedSuppliers) {
-                                          try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                        }
-                                        const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                        const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                         if (matched) {
                                           updateSubtaskAutomation(index, { subcontractorName: matched.name });
                                         } else {
@@ -5171,52 +5681,35 @@ export default function ProjectKanbanBoard({
                                           }
                                         }
                                       }}
-                                      required
                                       className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                                     >
                                       <option value="">-- Chọn đối tác thầu phụ --</option>
-                                      {(() => {
-                                        const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                        let suppliers = [];
-                                        if (savedSuppliers) {
-                                          try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                        }
-                                        if (suppliers.length === 0) {
-                                          suppliers = [
-                                            { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                            { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                            { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                          ];
-                                        }
-                                        return suppliers.map((sup: any) => (
-                                          <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                            {sup.name} ({sup.code || sup.id})
-                                          </option>
-                                        ));
-                                      })()}
+                                      {subcontractors.map((sup: any) => (
+                                        <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                          {sup.name} ({sup.code || sup.id})
+                                        </option>
+                                      ))}
                                     </select>
                                   </div>
 
                                   {/* Approver & Settler dropdowns (theo mẫu popup) */}
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="space-y-1">
-                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                                       <SearchableEmployeeSelect
                                         value={subtaskAuto.subcontractorApproverId || ''}
                                         onChange={(val) => updateSubtaskAutomation(index, { subcontractorApproverId: val || undefined })}
                                         employees={employees}
                                         placeholder="-- Mặc định (Giám đốc) --"
-                                        required
                                       />
                                     </div>
                                     <div className="space-y-1">
-                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                                      <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                                       <SearchableEmployeeSelect
                                         value={subtaskAuto.subcontractorSettlerId || ''}
                                         onChange={(val) => updateSubtaskAutomation(index, { subcontractorSettlerId: val || undefined })}
                                         employees={employees}
                                         placeholder="-- Mặc định (Kế toán) --"
-                                        required
                                       />
                                     </div>
                                   </div>
@@ -5310,6 +5803,13 @@ export default function ProjectKanbanBoard({
                                 </button>
                               </div>
                             </div>
+
+                            {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+                            <MissionConfigEditor
+                              value={subtaskAuto.subTaskMissions || []}
+                              onChange={(next) => updateSubtaskAutomation(index, { subTaskMissions: next })}
+                              employees={employees}
+                            />
                           </div>
 
                           {/* Modal Footer */}
@@ -5321,30 +5821,6 @@ export default function ProjectKanbanBoard({
                                 if (subtaskAuto.isApprovalEnabled === true && !subtaskAuto.defaultApproverId) {
                                   addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Quy trình Phê duyệt, vui lòng chọn Người phê duyệt mặc định.', type: 'error' });
                                   return;
-                                }
-                                if (subtaskAuto.isCostEnabled === true) {
-                                  if (!subtaskAuto.costApproverId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-                                    return;
-                                  }
-                                  if (!subtaskAuto.costSettlerId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Đề xuất chi phí, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-                                    return;
-                                  }
-                                }
-                                if (subtaskAuto.isSubcontractorEnabled === true) {
-                                  if (!subtaskAuto.subcontractorId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Thầu Phụ từ Dữ Liệu Kế Toán.', type: 'error' });
-                                    return;
-                                  }
-                                  if (!subtaskAuto.subcontractorApproverId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người xét duyệt mặc định.', type: 'error' });
-                                    return;
-                                  }
-                                  if (!subtaskAuto.subcontractorSettlerId) {
-                                    addToast({ title: '⛔ Thiếu thông tin', message: 'Khi bật Cấu hình Liên kết Thầu phụ, vui lòng chọn Người quyết toán mặc định.', type: 'error' });
-                                    return;
-                                  }
                                 }
                                 setActiveSubtaskRuleIndex(null);
                               }}
@@ -5366,94 +5842,6 @@ export default function ProjectKanbanBoard({
 
 
 
-            case 'involved': {
-              const currentInvolved = auto?.involvedEmployeeIds || (auto?.involvedId ? [auto.involvedId] : []);
-              return (
-                <div className="space-y-4 text-left">
-                  <span className="block text-slate-300 font-bold text-xs uppercase tracking-wider">Cộng sự bám sát thi công phụ</span>
-                  
-                  <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl flex flex-col justify-between hover:border-slate-700 transition-colors text-left min-h-[72px]">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider mb-2">DANH SÁCH CỘNG SỰ BÁM SÁT ({currentInvolved.length})</span>
-                      
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {currentInvolved.length === 0 ? (
-                          <span className="text-slate-600 text-[10px] italic py-1 block">Chưa gán người hỗ trợ...</span>
-                        ) : (
-                          currentInvolved.map((empId: string) => {
-                            const emp = employees.find(e => e.id === empId);
-                            if (!emp) return null;
-                            
-                            const parts = emp.name.split(' ');
-                            const initials = parts.length >= 2
-                              ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-                              : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
-                              
-                            return (
-                              <div key={empId} className="relative group/member shrink-0">
-                                {/* Interactive avatar that deletes on click */}
-                                <div 
-                                  className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-[10px] shadow border border-white/10 cursor-pointer transition-transform hover:scale-105"
-                                  title={`${emp.name} (${emp.department}) - Nhấp để xóa gỡ`}
-                                  onClick={() => {
-                                    const nextInvolved = currentInvolved.filter((id: string) => id !== empId);
-                                    updateColAutomation(activeWorkflowColId, {
-                                      involvedEmployeeIds: nextInvolved,
-                                      involvedId: nextInvolved[0] || undefined
-                                    });
-                                  }}
-                                >
-                                  {initials}
-                                  {/* Action indicator over face */}
-                                  <div className="absolute inset-0 bg-rose-950/80 rounded-full flex items-center justify-center text-rose-450 font-extrabold text-[8px] opacity-0 group-hover/member:opacity-100 transition-opacity">
-                                    ✕
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-
-                        {/* Plus visual as an interactive creator */}
-                        <div className="relative shrink-0">
-                          <div className="w-8 h-8 rounded-full border border-dashed border-slate-705 hover:border-emerald-500/70 bg-slate-900/50 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer text-xs">
-                            <Plus className="w-3.5 h-3.5" />
-                          </div>
-                          <select
-                            value=""
-                            onChange={(e) => {
-                              const empId = e.target.value;
-                              if (empId) {
-                                const nextInvolved = [...currentInvolved];
-                                if (!nextInvolved.includes(empId)) {
-                                  const updated = [...nextInvolved, empId];
-                                  updateColAutomation(activeWorkflowColId, {
-                                    involvedEmployeeIds: updated,
-                                    involvedId: updated[0] || undefined
-                                  });
-                                }
-                              }
-                            }}
-                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
-                            title="Nhấp để thêm người hỗ trợ vào danh sách liên quan"
-                          >
-                            <option value="">-- Thêm người hỗ trợ --</option>
-                            {employees
-                              .filter(emp => emp.id !== auto?.assignId && !currentInvolved.includes(emp.id))
-                              .map(emp => (
-                                <option key={emp.id} value={emp.id}>
-                                  {emp.name} ({emp.department})
-                                </option>
-                              ))
-                            }
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
 
             case 'textStyle':
               return (
@@ -5464,14 +5852,17 @@ export default function ProjectKanbanBoard({
                     <div className="space-y-2.5">
                       <label className="block text-xs uppercase tracking-wider font-extrabold text-slate-400">Định dạng kiểu chữ (Đa tùy chọn)</label>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <label className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 p-3 rounded-lg cursor-pointer hover:border-slate-700 select-none transition-colors">
+                        {/* In Đậm là mặc định LUÔN bật — không cho phép tắt */}
+                        <label className="flex items-center gap-2.5 bg-slate-950 border border-slate-700/80 p-3 rounded-lg select-none transition-colors cursor-not-allowed opacity-90">
                           <input
                             type="checkbox"
-                            checked={!!auto.textStyleStyleBold}
-                            onChange={(e) => updateColAutomation(activeWorkflowColId, { textStyleStyleBold: e.target.checked })}
-                            className="w-4 h-4 text-indigo-600 border-slate-700 bg-slate-900 rounded focus:ring-indigo-500 cursor-pointer"
+                            checked
+                            readOnly
+                            disabled
+                            className="w-4 h-4 text-indigo-600 border-slate-700 bg-slate-900 rounded focus:ring-indigo-500 cursor-not-allowed"
                           />
                           <span className="font-bold text-[11px] text-white">In Đậm (Bold)</span>
+                          <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1 py-0.5 rounded">Mặc định</span>
                         </label>
 
                         <label className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 p-3 rounded-lg cursor-pointer hover:border-slate-700 select-none transition-colors">
@@ -5527,7 +5918,7 @@ export default function ProjectKanbanBoard({
         return (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex justify-end z-50 animate-fade-in" onClick={() => setShowAutoWorkflowModal(false)}>
             <div 
-              className="w-full max-w-[1536px] bg-slate-900 border-l border-slate-805 h-full flex flex-col text-slate-300 shadow-2xl overflow-hidden animate-slideLeft" 
+              className="w-full max-w-[1536px] bg-slate-900 border-l border-slate-800 h-full flex flex-col text-slate-300 shadow-2xl overflow-hidden animate-slideLeft" 
               onClick={(e) => e.stopPropagation()}
             >
               
@@ -5555,7 +5946,7 @@ export default function ProjectKanbanBoard({
               </div>
 
               {/* Column horizontal selector bar */}
-              <div className="bg-slate-900 px-4 py-2 border-b border-slate-805 flex flex-wrap gap-1.5 shrink-0 select-none">
+              <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 flex flex-wrap gap-1.5 shrink-0 select-none">
                 {columns.map(col => {
                   const isActive = col.id === activeWorkflowColId;
                   const count = [
@@ -5564,8 +5955,7 @@ export default function ProjectKanbanBoard({
                     (col.automation?.textStyleStyleItalic || col.automation?.textStyleStyleBold || col.automation?.textStyleStyleStrike || col.automation?.textStyleStyleColor),
                     col.automation?.approvalRole && col.automation.approvalRole !== 'none',
                     col.automation?.subtaskTitle || (col.automation?.subtaskTitles && col.automation.subtaskTitles.some(t => !!t)),
-                    col.automation?.checklistText || (col.automation?.checklistTexts && col.automation.checklistTexts.some(t => !!t)),
-                    col.automation?.involvedId || (col.automation?.involvedEmployeeIds && col.automation.involvedEmployeeIds.length > 0)
+                    col.automation?.checklistText || (col.automation?.checklistTexts && col.automation.checklistTexts.some(t => !!t))
                   ].filter(Boolean).length;
 
                   return (
@@ -5670,7 +6060,7 @@ export default function ProjectKanbanBoard({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {activeState ? (
+                          {(activeState || key === 'statusSet' || key === 'textStyle') ? (
                             <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                               Bật
@@ -5714,26 +6104,40 @@ export default function ProjectKanbanBoard({
 
                       {/* Config Area */}
                       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-4 shadow-sm">
-                        <div className="flex items-center justify-between border-b border-slate-801 pb-3 border-slate-800">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                           <div>
-                            <span className="font-extrabold text-slate-200 block text-[11px]">Trạng thái tự động hóa</span>
-                            <span className="text-[9px] text-slate-500 block mt-0.5">Bật hoặc tắt hành động quy trình này</span>
+                            <span className="font-extrabold text-slate-200 block text-[11px]">
+                              {alwaysOnAutomation ? 'Quy trình luôn kích hoạt' : 'Trạng thái tự động hóa'}
+                            </span>
+                            <span className="text-[9px] text-slate-500 block mt-0.5">
+                              {alwaysOnAutomation
+                                ? `${actionsConfig[selectedActionType].title} luôn bật trên mọi cột — không thể tắt.`
+                                : 'Bật hoặc tắt hành động quy trình này'}
+                            </span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className={`text-[10px] font-black tracking-wide ${isActionActive ? 'text-emerald-400' : 'text-slate-500'}`}>
-                              {isActionActive ? 'ĐANG KÍCH HOẠT' : 'CHƯA ÁP DỤNG'}
+                              {alwaysOnAutomation
+                                ? 'LUÔN KÍCH HOẠT'
+                                : (isActionActive ? 'ĐANG KÍCH HOẠT' : 'CHƯA ÁP DỤNG')}
                             </span>
-                            <button
-                              type="button"
-                              onClick={handleToggleAction}
-                              className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer relative duration-150 ${
-                                isActionActive ? 'bg-emerald-500' : 'bg-slate-800 border border-slate-755 border-slate-850'
-                              }`}
-                            >
-                              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-150 ${
-                                isActionActive ? 'translate-x-4' : 'translate-x-0'
-                              }`} />
-                            </button>
+                            {alwaysOnAutomation ? (
+                              <div className="w-9 h-5 rounded-full p-0.5 relative bg-emerald-500 opacity-80 cursor-not-allowed">
+                                <div className="bg-white w-4 h-4 rounded-full shadow-md translate-x-4" />
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={handleToggleAction}
+                                className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer relative duration-150 ${
+                                  isActionActive ? 'bg-emerald-500' : 'bg-slate-800 border border-slate-755 border-slate-850'
+                                }`}
+                              >
+                                <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-150 ${
+                                  isActionActive ? 'translate-x-4' : 'translate-x-0'
+                                }`} />
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -5782,7 +6186,7 @@ export default function ProjectKanbanBoard({
               </div>
 
               {/* Modal Footer */}
-              <div className="bg-slate-950 p-4 border-t border-slate-805 flex justify-between items-center shrink-0">
+              <div className="bg-slate-950 p-4 border-t border-slate-800 flex justify-between items-center shrink-0">
                 <p className="text-[10px] text-slate-500 max-w-lg leading-relaxed">
                   * Quy trình tự trị Hoàng Long được lưu cục bộ và an toàn. Khi di chuyển thẻ, hệ thống sẽ tự sinh bản vẽ con, đổi quản lý, cập nhật trạng thái liên hợp ngay lập tức.
                 </p>
@@ -5969,9 +6373,9 @@ export default function ProjectKanbanBoard({
       {/* Custom Confirmation Modal */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[300] p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 text-slate-200 shadow-2xl overflow-hidden animate-scaleIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 text-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-start gap-4">
-              <div className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 shrink-0 mt-0.5">
+              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-full text-rose-600 shrink-0 mt-0.5">
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div className="space-y-1">
@@ -6012,7 +6416,7 @@ export default function ProjectKanbanBoard({
       {/* Sub-task Edit Modal */}
       {editingSubTask && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[200] p-4 animate-fadeIn overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-5 md:p-6 text-slate-200 shadow-2xl space-y-4 animate-scaleIn my-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-5 md:p-6 text-slate-200 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 my-8">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <CheckSquare className="w-5 h-5 text-emerald-400" />
@@ -6063,7 +6467,7 @@ export default function ProjectKanbanBoard({
                     value={editSubAssignerId}
                     required
                     onChange={(e) => setEditSubAssignerId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-250 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
                   >
                     <option value="">-- Chọn --</option>
                     {employees.map(emp => (
@@ -6077,7 +6481,7 @@ export default function ProjectKanbanBoard({
                     value={editSubAssigneeId}
                     required
                     onChange={(e) => setEditSubAssigneeId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-250 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 outline-none text-[11.5px] focus:border-emerald-500 font-medium"
                   >
                     <option value="">-- Chọn thợ mộc/cơ khí --</option>
                     {employees.map(emp => (
@@ -6167,23 +6571,21 @@ export default function ProjectKanbanBoard({
                       {editSubIsCostEnabled && (
                         <div className="mt-2.5 pt-2.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                             <SearchableEmployeeSelect
                               value={editSubCostApproverId || ''}
                               onChange={(val) => setEditSubCostApproverId(val || '')}
                               employees={employees}
                               placeholder="-- Mặc định (Giám đốc / PM) --"
-                              required
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                            <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                             <SearchableEmployeeSelect
                               value={editSubCostSettlerId || ''}
                               onChange={(val) => setEditSubCostSettlerId(val || '')}
                               employees={employees}
                               placeholder="-- Mặc định (Kế toán) --"
-                              required
                             />
                           </div>
                         </div>
@@ -6276,20 +6678,15 @@ export default function ProjectKanbanBoard({
                       </div>
                       {editSubSubcontractorEnabled && (
                         <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-3">
-                          {/* Dropdown chọn thầu phụ từ localStorage (giữ logic cũ) */}
+                          {/* Dropdown chọn thầu phụ từ Supabase (accounting_subcontractors table) */}
                           <div>
-                            <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán <span className="text-rose-400">*</span>:</label>
+                            <label className="block text-orange-400 font-bold text-[9px] uppercase tracking-wider mb-1">Chọn Thầu Phụ từ Dữ Liệu Kế Toán:</label>
                             <select
                               value={editSubSubcontractorId || ''}
                               onChange={(e) => {
                                 const subId = e.target.value;
                                 setEditSubSubcontractorId(subId);
-                                const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                let suppliers = [];
-                                if (savedSuppliers) {
-                                  try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                }
-                                const matched = suppliers.find((s: any) => s.id === subId || s.code === subId);
+                                const matched = subcontractors.find((s: any) => s.id === subId || s.code === subId);
                                 if (matched) {
                                   setEditSubSubcontractorName(matched.name);
                                 } else {
@@ -6304,52 +6701,35 @@ export default function ProjectKanbanBoard({
                                   }
                                 }
                               }}
-                              required
                               className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 outline-none text-[10px] focus:border-orange-500 font-medium"
                             >
                               <option value="">-- Chọn đối tác thầu phụ --</option>
-                              {(() => {
-                                const savedSuppliers = localStorage.getItem('hl_acc_suppliers');
-                                let suppliers = [];
-                                if (savedSuppliers) {
-                                  try { suppliers = JSON.parse(savedSuppliers); } catch(err) {}
-                                }
-                                if (suppliers.length === 0) {
-                                  suppliers = [
-                                    { code: 'NTN_2', name: 'Thép tiền chế Nam Trung Nam' },
-                                    { code: 'XD_1', name: 'Tổ thợ hồ móng Ba Bảo Lộc' },
-                                    { code: 'KM_3', name: 'Thợ kính Kim Minh' }
-                                  ];
-                                }
-                                return suppliers.map((sup: any) => (
-                                  <option key={sup.code || sup.id} value={sup.code || sup.id}>
-                                    {sup.name} ({sup.code || sup.id})
-                                  </option>
-                                ));
-                              })()}
+                              {subcontractors.map((sup: any) => (
+                                <option key={sup.code || sup.id} value={sup.code || sup.id}>
+                                  {sup.name} ({sup.code || sup.id})
+                                </option>
+                              ))}
                             </select>
                           </div>
 
                           {/* Approver & Settler dropdowns (theo mẫu popup) */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1">
-                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người xét duyệt mặc định:</label>
                               <SearchableEmployeeSelect
                                 value={editSubSubcontractorApproverId || ''}
                                 onChange={(val) => setEditSubSubcontractorApproverId(val || '')}
                                 employees={employees}
                                 placeholder="-- Mặc định (Giám đốc) --"
-                                required
                               />
                             </div>
                             <div className="space-y-1">
-                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định <span className="text-rose-400">*</span>:</label>
+                              <label className="block text-[9px] font-black text-rose-400 uppercase tracking-wider">Người quyết toán mặc định:</label>
                               <SearchableEmployeeSelect
                                 value={editSubSubcontractorSettlerId || ''}
                                 onChange={(val) => setEditSubSubcontractorSettlerId(val || '')}
                                 employees={employees}
                                 placeholder="-- Mặc định (Kế toán) --"
-                                required
                               />
                             </div>
                           </div>
@@ -6446,6 +6826,13 @@ export default function ProjectKanbanBoard({
                   </div>
                 </div>
               </div>
+
+              {/* NHIỆM VỤ CHI TIẾT cấu hình trước */}
+              <MissionConfigEditor
+                value={editSubMissionConfigs}
+                onChange={setEditSubMissionConfigs}
+                employees={employees}
+              />
             </div>
 
             <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
@@ -6476,7 +6863,7 @@ export default function ProjectKanbanBoard({
       {/* Tải Báo giá PDF Modal */}
       {downloadedQuoteModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[220] p-4 animate-fadeIn select-text">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-scaleIn text-left">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl text-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-left">
             
             {/* Header of Popup */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">

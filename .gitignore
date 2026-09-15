@@ -23,8 +23,7 @@ DashboardOverview_original.tsx
 *.bak
 
 # Claude local settings (per-machine)
-.claude/settings.local.json
-.claude/memory/
+.claude/
 src/components/.claude/settings.local.json
 
 # AI Studio generated

@@ -3,6 +3,7 @@ import { dbService } from '../lib/dbService';
 import { Employee, Quote, Project, ArchivedQuote, ProjectType } from '../types';
 import { useNotification } from '../context';
 import { isUserInRoleGroup } from '../context';
+import { generateProjectId } from '../lib/projectId';
 
 /** Map a quote sector to a project type */
 function sectorToProjectType(sector?: string): ProjectType {
@@ -83,7 +84,7 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
     }
 
     try {
-      const generatedProjId = selectedQuote.projectId || `proj_${Date.now()}`;
+      const generatedProjId = selectedQuote.projectId || generateProjectId(sectorToProjectType(selectedQuote?.sector));
       const generatedCode = `DA-${selectedQuote.sector === 'furniture' ? 'NT' : selectedQuote.sector === 'construction' ? 'XD' : 'CK'}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 101)}`;
 
       const newProjPayload: Project = {
@@ -100,7 +101,6 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
         status: 'new',
         progress: 0,
         kanbanColumnId: quickProjKanbanColId,
-        involvedEmployeeIds: ['emp_3', 'emp_1'],
         baoGiaFile: {
           name: `${selectedQuote.code || 'BAO_GIA'}.pdf`,
           size: '1.2 MB',
@@ -339,7 +339,7 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
                 <th className="px-4 py-3.5">Khách Hàng</th>
                 <th className="px-4 py-3.5">Dự Án Liên Kết</th>
                 <th className="px-4 py-3.5">Ngày Lập</th>
-                <th className="px-4 py-3.5 text-right">Tổng Tiền (Gồm VAT)</th>
+                <th className="px-4 py-3.5 text-right">Tổng Tiền</th>
                 <th className="px-4 py-3.5 text-center">Hành Động</th>
               </tr>
             </thead>
@@ -348,9 +348,9 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
                 const badge = getSectorLabel(item.sector);
                 const linkedProj = projectsList.find(p => p.id === item.projectId);
                 
-                // Calculate total including VAT (or fall back to totalAmount)
+                // Tổng tiền (không tính VAT)
                 const originalTotal = item.totalAmount || 0;
-                const grandTotal = originalTotal * 1.08; // Include VAT just in case
+                const grandTotal = originalTotal;
 
                 return (
                   <tr 

@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal } from '../types';
+import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
-import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover } from '../context';
-import { dbService } from '../lib/dbService';
+import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, useNotification } from '../context';
+import { dbService, mapAttendanceRow, todayString } from '../lib/dbService';
+import {
+  enqueuePunch,
+  removePunch,
+  pendingCount as outboxPendingCount,
+  getPendingPunches,
+  burnTimestampToPhoto,
+} from '../lib/attendanceOutbox';
+import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
+import { sendApprovalDirectMessage, findEmployeeByName, maybeSendAttendanceChatMessage } from '../lib/chatStore';
+import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
+import PunchMediaList from './hr/PunchMediaList';
+import { DEFAULT_SYSTEM_CONFIG } from '../data';
 import { 
   CheckSquare, 
   Clock, 
@@ -23,7 +35,6 @@ import {
   X,
   Briefcase,
   Zap,
-  Check,
   AlertCircle,
   CalendarCheck,
   Settings,
@@ -46,6 +57,7 @@ interface DashboardProps {
   onApprovePayment?: (id: string, status: 'approved' | 'rejected') => void;
   onAddTask?: (newTask: Task) => void;
   onAddPayment?: (newPay: Payment) => void;
+  travelExpensesSummary?: any[];
 }
 
 export default function DashboardOverview({
@@ -60,17 +72,27 @@ export default function DashboardOverview({
   onApprovePayment,
   onAddTask,
   onAddPayment,
+  travelExpensesSummary = [],
 }: DashboardProps) {
 
+
   // --- PHẦN 1: BỘ LỌC CÔNG VIỆC THEO USER ĐANG ĐĂNG NHẬP (& PHÂN QUYỀN TRUY CẬP) ---
-  const getTodayString = () => {
+  const { addToast } = useNotification();
+
+  const getTodayString = useCallback(() => {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const r = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${r}`;
-  };
+  }, []);
+
   const [todayVal, setTodayVal] = useState(getTodayString());
+
+  // Update todayVal when getTodayString changes (e.g. at midnight)
+  useEffect(() => {
+    setTodayVal(getTodayString());
+  }, [getTodayString]);
 
   // 1.1 Công việc cần duyệt (Tasks needing approval)
   // Director & Accountant có thể duyệt tất cả Reviewing tasks hoặc pending approvals.
@@ -95,19 +117,19 @@ export default function DashboardOverview({
   // 1.2 Công việc cần làm (My Tasks to do)
   const myTasks = tasks.filter(t => {
     const isAssignee = t.assigneeId === currentUser.id;
-    const isInvolved = t.involvedEmployeeIds?.includes(currentUser.id);
+    const isMissionMember = t.missions?.some(m => m.mainAssigneeId === currentUser.id || (m.memberIds || []).includes(currentUser.id));
     const isNotCompleted = t.status !== 'completed';
-    return (isAssignee || isInvolved) && isNotCompleted;
+    return (isAssignee || isMissionMember) && isNotCompleted;
   });
 
   // 1.3 Công việc quá hạn (Overdue tasks)
   const myOverdueTasks = tasks.filter(t => {
     const isAssignee = t.assigneeId === currentUser.id;
-    const isInvolved = t.involvedEmployeeIds?.includes(currentUser.id);
+    const isMissionMember = t.missions?.some(m => m.mainAssigneeId === currentUser.id || (m.memberIds || []).includes(currentUser.id));
     const isCompleted = t.status === 'completed';
     const isOverdueStatus = t.status === 'overdue';
     const isPastDeadline = t.deadline < todayVal;
-    return (isAssignee || isInvolved) && !isCompleted && (isOverdueStatus || isPastDeadline);
+    return (isAssignee || isMissionMember) && !isCompleted && (isOverdueStatus || isPastDeadline);
   });
 
 
@@ -193,6 +215,27 @@ export default function DashboardOverview({
   const [advAmount, setAdvAmount] = useState('');
   const [advReason, setAdvReason] = useState('');
   const [advType, setAdvType] = useState<'advance' | 'reimbursement'>('advance');
+
+  // --- LỌC TRẠNG THÁI CÔNG TÁC PHÍ (Tổng Quan) ---
+  const [ctpStatusFilter, setCtpStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
+  // CTP hiển thị trong Tổng Quan: CHỈ công tác phí do NGƯỜI KHỞI TẠO
+  // (creatorId/creatorName) gửi — để họ theo dõi trạng thái xét duyệt.
+  // Người duyệt sẽ xử lý ở tab Công tác phí (Nhân sự) hoặc cột Kế toán
+  // (Công việc phải duyệt — Việc của tôi), không duyệt trên Tổng Quan nữa.
+  const ctpList = React.useMemo(() => {
+    const list = (travelExpensesSummary || []).filter((item: any) => {
+      const creatorId = item.creatorId || item.employeeId || item.empId;
+      const creatorMatch = creatorId ? creatorId === currentUser?.id : item.employeeName === currentUser?.name;
+      return !!creatorMatch;
+    });
+    if (ctpStatusFilter === 'all') return list;
+    return list.filter((item: any) => {
+      const st = item.status as CTPStatus;
+      if (ctpStatusFilter === 'approved') return st === 'approved' || st === 'completed';
+      return st === ctpStatusFilter;
+    });
+  }, [travelExpensesSummary, ctpStatusFilter, currentUser]);
 
   // --- ACTIONS XỬ LÝ (INTERACTIVE APPROVALS) ---
   const handleApproveTaskItem = (taskId: string, actionStatus: 'completed' | 'doing' | 'todo') => {
@@ -313,49 +356,8 @@ export default function DashboardOverview({
 
 
   // --- PHẦN 3: HỆ THỐNG CHẤM CÔNG BIOMETRIC FACEID & GPS ---
-  interface SystemConfig {
-    morningIn: string; morningOut: string; afternoonIn: string; afternoonOut: string;
-    overtimeIn: string; overtimeOut: string;
-    gpsRadiusAllowed: number; antiFakeCam: boolean; otMultiplier: number;
-    directorBaseSalary: number; pmBaseSalary: number; accountantBaseSalary: number; staffBaseSalary: number;
-    punchOpenBeforeMinutes: number; punchCloseAfterMinutes: number;
-    punchOutOpenBeforeMinutes: number; punchOutCloseAfterMinutes: number;
-    otPunchOpenBeforeMinutes: number; otPunchCloseAfterMinutes: number;
-    otPunchOutOpenBeforeMinutes: number; otPunchOutCloseAfterMinutes: number;
-    allowedLateMinutes: number; weekendDays: number[];
-    constructionSites: string[];
-  }
-  const [config, setConfig] = useState<SystemConfig>({
-    morningIn: '07:30',
-    morningOut: '11:30',
-    afternoonIn: '13:00',
-    afternoonOut: '17:00',
-    overtimeIn: '17:45',
-    overtimeOut: '20:45',
-    gpsRadiusAllowed: 50,
-    antiFakeCam: true,
-    otMultiplier: 1.5,
-    directorBaseSalary: 45000000,
-    pmBaseSalary: 22000000,
-    accountantBaseSalary: 18000000,
-    staffBaseSalary: 14000000,
-    punchOpenBeforeMinutes: 30,
-    punchCloseAfterMinutes: 30,
-    punchOutOpenBeforeMinutes: 30,
-    punchOutCloseAfterMinutes: 30,
-    otPunchOpenBeforeMinutes: 30,
-    otPunchCloseAfterMinutes: 30,
-    otPunchOutOpenBeforeMinutes: 30,
-    otPunchOutCloseAfterMinutes: 30,
-    allowedLateMinutes: 15,
-    weekendDays: [0],
-    constructionSites: [
-      'Công trình Blue Sky',
-      'Xưởng mộc Hoàng Long',
-      'Bộ phận văn phòng chính',
-      'Biệt thự SS400 Cát Lái'
-    ]
-  });
+  // Placeholder - SystemConfig is now imported from types.ts
+  const [config, setConfig] = useState<SystemConfig>(DEFAULT_SYSTEM_CONFIG);
 
   // Load config từ Supabase khi mount
   useEffect(() => {
@@ -377,61 +379,147 @@ export default function DashboardOverview({
     };
   }, []);
 
-  const [attendanceList, setAttendanceList] = useState<any[]>(() => {
-    const wiped = localStorage.getItem('hl_hrm_attendance_force_wiped_v7');
-    if (!wiped) {
-      localStorage.removeItem('hl_hrm_attendance_v3');
-      localStorage.setItem('hl_hrm_attendance_force_wiped_v7', 'true');
-      return [];
+  // Helper: chuẩn hóa giá trị thời gian (xử lý object timestamp cũ)
+  const normalizeTime = (v: any): string => {
+    if (!v || v === '--:--' || v === '') return '--:--';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && v.time) return v.time;
+    return String(v);
+  };
+  const normalizeRecord = (r: any) => {
+    const { _serverTime, ...rest } = r; // Loại bỏ _serverTime object (dữ liệu thời gian server)
+    return {
+      ...rest,
+      timeInS: normalizeTime(rest.timeInS),
+      timeOutS: normalizeTime(rest.timeOutS),
+      timeInC: normalizeTime(rest.timeInC),
+      timeOutC: normalizeTime(rest.timeOutC),
+      timeInOT: normalizeTime(rest.timeInOT),
+      timeOutOT: normalizeTime(rest.timeOutOT),
+    };
+  };
+
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+
+  // Flag: true khi update đến từ cloud (Realtime/mount load), false khi từ user action
+  const isSyncingFromCloud = useRef(false);
+
+  // Debounce guard để ngăn chặn double-submit khi user click nhanh nút chấm công
+  const punchDebounceRef = useRef<Set<string>>(new Set());
+
+  // Loại bỏ bản ghi auto-generated trùng lặp (cùng empId + ngày, bỏ AT-AUTO-* khi có bản ghi thật)
+  // VÀ gộp nhiều bản ghi thật thành 1 bản ghi duy nhất (merge tất cả fields)
+  const dedupAttendance = (list: any[]): any[] => {
+    const groups = new Map<string, any[]>();
+    for (const log of list) {
+      const key = `${log.empId}|${log.date}`;
+      const arr = groups.get(key);
+      if (arr) arr.push(log);
+      else groups.set(key, [log]);
     }
-    const saved = localStorage.getItem('hl_hrm_attendance_v3');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.warn("Error parsing saved attendance data in dashboard overview", e);
+    const deduped: any[] = [];
+    for (const logs of groups.values()) {
+      if (logs.length === 1) { deduped.push(logs[0]); continue; }
+      const real = logs.filter((l: any) => !l.id?.startsWith('AT-AUTO-'));
+      if (real.length > 0) {
+        // Gộp nhiều bản ghi thật thành 1: lấy bản ghi mới nhất (theo id timestamp) làm base,
+        // sau đó merge tất cả fields có dữ liệu từ các bản ghi khác
+        const sorted = [...real].sort((a, b) => {
+          // Ưu tiên bản ghi có id chứa timestamp lớn hơn (mới hơn)
+          const aTs = a.id?.split('-').pop() || '';
+          const bTs = b.id?.split('-').pop() || '';
+          return bTs.localeCompare(aTs);
+        });
+        const merged = { ...sorted[0] };
+        for (const log of sorted.slice(1)) {
+          // Merge các field time, photo, location, coords, notes
+          ['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT',
+           'photoIn', 'photoOut', 'locationIn', 'locationOut', 'coordsIn', 'coordsOut',
+           'method', 'status', 'otHours', 'notes'].forEach(key => {
+            if (log[key] && log[key] !== '--:--' && log[key] !== '' && (!merged[key] || merged[key] === '--:--' || merged[key] === '')) {
+              merged[key] = log[key];
+            }
+          });
+          // Ảnh/tọa độ theo từng lượt: gộp theo slot (bản base thắng ở slot nó đã có)
+          merged.punchMeta = mergePunchMeta(log.punchMeta, merged.punchMeta);
+          // Giữ isLocked = true nếu có bản ghi nào locked
+          if (log.isLocked) merged.isLocked = true;
+        }
+        deduped.push(merged);
+        // Xóa bản ghi auto-generated trùng trên Supabase (fire-and-forget)
+        logs.filter((l: any) => l.id?.startsWith('AT-AUTO-')).forEach((l: any) =>
+          dbService.attendance.delete(l.id).catch(() => {})
+        );
+        // Xóa các bản ghi thật trùng lặp cũ trên Supabase (chỉ giữ merged)
+        sorted.slice(1).forEach((l: any) =>
+          dbService.attendance.delete(l.id).catch(() => {})
+        );
+      } else {
+        deduped.push(logs[logs.length - 1]);
       }
     }
-    return [];
-  });
+    return deduped;
+  };
 
-  // Load attendance from Supabase on mount (dbService.attendance.list hits Supabase first)
+  // Load attendance from Supabase on mount.
+  // Chỉ tải THÁNG HIỆN TẠI (thay vì toàn bộ lịch sử) để tránh lag khi nhiều user mở app — lịch
+  // điểm danh chỉ cần dữ liệu trong tháng, báo cáo lịch sử nằm ở module Nhân sự.
   useEffect(() => {
     let mounted = true;
-    dbService.attendance.list()
+    const ym = todayVal.slice(0, 7); // 'YYYY-MM'
+    // Chỉ tải dòng của đúng user đang đăng nhập (empId) → mỗi tab không download
+    // toàn bộ chấm công của 25 user. Giảm ~25x băng thông khi nhiều người mở app.
+    dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`, empId)
       .then(list => {
         if (mounted && Array.isArray(list) && list.length > 0) {
-          setAttendanceList(list);
+          isSyncingFromCloud.current = true;
+          setAttendanceList(dedupAttendance(list).map(normalizeRecord));
+          requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
         }
       })
       .catch(err => console.warn('Lỗi khi tải chấm công từ Supabase:', err));
     return () => { mounted = false; };
   }, []);
 
-  // Persist attendanceList changes to both dbService.attendance (Supabase+cache) and localStorage
+  // ─── Outbox: cập nhật UI từ sync TOÀN CỤC (thực hiện ở cấp App) ───────────
+  // Việc ĐẨY dữ liệu lên DB giờ do App đảm nhiệm (chạy mọi khi app mở, bất kể tab)
+  // để lượt chấm không bị kẹt trong localStorage khi user tắt app rồi mở lại ở
+  // tab khác. Dashboard chỉ lắng nghe 'hl-outbox-synced' (do App dispatch) để cập
+  // nhật badge "chờ đồng bộ" + xóa cờ pending trên dòng, cùng toast "Đã đồng bộ".
   useEffect(() => {
-    if (!attendanceList || attendanceList.length === 0) return;
-    localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(attendanceList));
-    // Non-blocking save each record to Supabase (debounce via last-write-wins on next effect)
-    attendanceList.forEach((rec, i) => {
-      if (i === attendanceList.length - 1) {
-        dbService.attendance.save(rec).catch(err =>
-          console.warn('Lỗi khi lưu chấm công lên Supabase:', err));
+    const refreshPending = () => setPendingSync(outboxPendingCount());
+    const onSynced = (e: Event) => {
+      const summary = (e as CustomEvent).detail;
+      refreshPending();
+      // Xóa cờ chờ trên UI sau khi đã đồng bộ xong ít nhất 1 bản ghi
+      if (summary?.synced > 0) {
+        setAttendanceList(list => list.map(l => (l.syncPending ? { ...l, syncPending: false } : l)));
+        addToast({
+          title: '✅ Đã đồng bộ',
+          message: `Đồng bộ thành công ${summary.synced} bản ghi chấm công đang chờ.`,
+          type: 'success',
+        });
       }
-    });
-  }, [attendanceList]);
+    };
+    refreshPending();
+    window.addEventListener('hl-outbox-synced', onSynced);
+    return () => {
+      window.removeEventListener('hl-outbox-synced', onSynced);
+    };
+  }, []);
 
   const [selectedDayDetail, setSelectedDayDetail] = useState<{ date: string; log: any; holidayName?: string } | null>(null);
 
-  // Listen for real-time changes to the attendance logs from the HRM module
+  // Listen for real-time changes to the attendance logs (chỉ update UI, KHÔNG save lại Supabase — tránh vòng lặp Realtime)
   useEffect(() => {
     const handleSync = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
-        setAttendanceList(customEvent.detail.attendance || customEvent.detail);
-        // Persist synced data to Supabase
-        const list = customEvent.detail.attendance || customEvent.detail;
-        dbService.attendance.save(list[list.length - 1]).catch(() => {});
+        isSyncingFromCloud.current = true;
+        const rawList = customEvent.detail.attendance || customEvent.detail;
+        // Normalize time fields (phòng trường hợp data từ HRM chứa object timestamp thay vì string)
+        setAttendanceList(Array.isArray(rawList) ? dedupAttendance(rawList).map(normalizeRecord) : []);
+        requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
       }
     };
     window.addEventListener('hl-attendance-updated', handleSync);
@@ -442,12 +530,85 @@ export default function DashboardOverview({
     };
   }, []);
 
-  // Dispatch changes made dynamically within the Dashboard module to the HRM module
+  // Realtime tăng dần (P1): cập nhật TẠI CHỖ 1 dòng từ payload realtime thay vì tải lại toàn bộ.
+  // Đây là chìa khóa giải quyết lag giờ điểm danh — mỗi lượt chấm chỉ sửa 1 dòng trên state cục bộ,
+  // không phát sinh truy vấn Supabase nào.
   useEffect(() => {
+    const handleRealtime = (e: Event) => {
+      const p = (e as CustomEvent).detail;
+      if (!p || !p.eventType) return;
+      // Dashboard CHỈ hiển thị chấm công của user đang đăng nhập → chỉ xử lý các
+      // dòng thuộc empId hiện tại. Bỏ qua dòng của user khác để state không phình to
+      // khi 25 user cùng chấm (mỗi realtime event của họ không đẩy vào list của ta).
+      // empId rỗng (chưa gắn hồ sơ) → chấp nhận mọi dòng để không mất realtime.
+      if (empId) {
+        const rowEmpId = p.new?.emp_id || p.old?.emp_id || p.new?.empId || p.old?.empId;
+        if (rowEmpId && rowEmpId !== empId) return;
+      }
+      isSyncingFromCloud.current = true;
+      setAttendanceList(prev => {
+        if (p.eventType === 'DELETE') {
+          const id = p.old?.id;
+          return id ? prev.filter(r => r.id !== id) : prev;
+        }
+        // INSERT / UPDATE / ERROR: ghi đè (upsert) theo id để tương thích với dòng mapped.
+        const mapped = mapAttendanceRow(p.new);
+        const idx = prev.findIndex(r => r.id === mapped.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = mapped;
+          return copy;
+        }
+        return [mapped, ...prev];
+      });
+      requestAnimationFrame(() => { isSyncingFromCloud.current = false; });
+    };
+    window.addEventListener('hl-attendance-realtime', handleRealtime);
+    return () => window.removeEventListener('hl-attendance-realtime', handleRealtime);
+  }, []);
+
+  // Mạng lưới an toàn (P1): định kỳ tải lại THÁNG HIỆN TẠI để tự sửa (reconcile)
+  // các dòng bị lỡ realtime do mất kết nối/restart kênh. Chỉ tải 1 tháng (không
+  // phải toàn bộ lịch sử) và tần suất thấp (2 phút) nên tải trọng không đáng kể so
+  // với luồng điểm danh — đồng thời tái dùng event hl-attendance-updated để ghi đè list.
+  useEffect(() => {
+    const reloadMonth = async () => {
+      // CHỈ đồng bộ khi tab đang hiển thị: 25 user mở app nhưng để background thì
+      // không cần tải → tránh 25 tab gọi Supabase vô ích khi user không nhìn.
+      if (document.visibilityState !== 'visible') return;
+      // Đang có lượt chấm chờ đồng bộ (outbox) → state local ĐANG TRƯỚC DB.
+      // Bỏ qua reconcile để không ghi đè mất lượt chấm vừa bấm (nút sẽ hiện lại
+      // "VÀO/RA" gây hiểu nhầm). Khi outbox rỗng, reconcile tự chạy lại bình thường.
+      if (outboxPendingCount() > 0) return;
+      const ym = todayString().slice(0, 7); // 'YYYY-MM'
+      try {
+        // Chỉ tải lại dòng của mình (empId) để đồng bộ nền không kéo theo dữ liệu
+        // của 25 user khác mỗi 2 phút.
+        const list = await dbService.attendance.listForRange(`${ym}-01`, `${ym}-31`, empId);
+        window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: list }));
+      } catch { /* thất bại êm — lần sau thử lại */ }
+    };
+    // Jitter ngẫu nhiên 0–20s: 25 tab không đồng loạt gọi Supabase tại cùng 1 phút
+    // → dàn đều tải trọng, tránh spike khi nhiều user mở app cùng lúc.
+    const jitter = Math.floor(Math.random() * 20000);
+    const initialTimer = setTimeout(reloadMonth, jitter);
+    const id = setInterval(reloadMonth, 120000);
+    // Khi tab chuyển từ background → foreground, đồng bộ ngay (bù cho lúc bị bỏ qua).
+    const onVisible = () => { if (document.visibilityState === 'visible') reloadMonth(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  // Dispatch changes made dynamically within the Dashboard module to the HRM module
+  /* useEffect(() => {
     if (attendanceList) {
       window.dispatchEvent(new CustomEvent('hl_attendance_changed_from_dashboard', { detail: attendanceList }));
     }
-  }, [attendanceList]);
+  }, [attendanceList]); */
 
   const timeToMinutes = (timeStr: string): number => {
     if (!timeStr) return 0;
@@ -469,26 +630,23 @@ export default function DashboardOverview({
       { name: 'Lê Thị Thảo', role: 'Kế Toán' }
     ];
     try {
-      const empDataStr = localStorage.getItem('hl_hrm_employees_v3');
-      if (empDataStr) {
-        const list = JSON.parse(empDataStr);
-        if (Array.isArray(list)) {
-          const filtered = list.filter((e: any) => {
-            const role = (e.position || '').toLowerCase();
-            return (
-              role.includes('giám đốc') ||
-              role.includes('quản') ||
-              role.includes('trưởng') ||
-              role.includes('kế toán') ||
-              ['Trương Hữu Long', 'Lê Thế Tiến', 'Lê Thị Thảo'].includes(e.name)
-            );
-          });
-          if (filtered.length > 0) {
-            return filtered.map((e: any) => ({
-              name: e.name,
-              role: e.position || 'Quản lý'
-            }));
-          }
+      const list = hrmEmployees;
+      if (Array.isArray(list)) {
+        const filtered = list.filter((e: any) => {
+          const role = (e.position || '').toLowerCase();
+          return (
+            role.includes('giám đốc') ||
+            role.includes('quản') ||
+            role.includes('trưởng') ||
+            role.includes('kế toán') ||
+            ['Trương Hữu Long', 'Lê Thế Tiến', 'Lê Thị Thảo'].includes(e.name)
+          );
+        });
+        if (filtered.length > 0) {
+          return filtered.map((e: any) => ({
+            name: e.name,
+            role: e.position || 'Quản lý'
+          }));
         }
       }
     } catch (err) {
@@ -497,6 +655,67 @@ export default function DashboardOverview({
     return defaultList;
   };
 
+  const LEAVE_SYMBOLS = ['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'];
+
+  /** Giờ hợp lệ dạng "HH:MM" (loại bỏ '--:--', rỗng, ký hiệu nghỉ, object server-time). */
+  const parsePunchMinutes = (raw: any): number | null => {
+    const v = normalizeTime(raw);
+    if (!v || v === '--:--' || LEAVE_SYMBOLS.includes(v)) return null;
+    if (!/^\d{1,2}:\d{2}$/.test(v)) return null;
+    const min = timeToMinutes(v);
+    return Number.isFinite(min) ? min : null;
+  };
+
+  /** Ngày nghỉ theo lịch (cuối tuần hoặc nghỉ lễ) — không áp định mức giờ ca chuẩn. */
+  const isCalendarRestDay = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    if ((config.weekendDays || [0]).includes(d.getDay())) return true;
+    // dashHolidays lưu ngày dạng "DD/MM/YYYY"
+    const [y, m, day] = dateStr.split('-');
+    const holidayKey = `${day}/${m}/${y}`;
+    return (dashHolidays || []).some((h: any) => h?.date === holidayKey);
+  };
+
+  /**
+   * Ca nào trong ngày được MIỄN tính đi muộn / về sớm:
+   *  - Đơn nghỉ phép đã duyệt (không có `shift` = nghỉ cả ngày)
+   *  - Đơn giải trình chấm công đã duyệt cho đúng ca đó
+   */
+  const getExcusedShifts = (log: any): { morning: boolean; afternoon: boolean } => {
+    const res = { morning: false, afternoon: false };
+    const dateStr = log?.date;
+    if (!dateStr) return res;
+    for (const l of dashLeaves || []) {
+      if (l?.status !== 'approved') continue;
+      const sameEmp = (l.empId && log.empId && l.empId === log.empId)
+        || (l.empName && log.empName && l.empName === log.empName);
+      if (!sameEmp) continue;
+      const inRange = l.fromDate && l.toDate
+        ? (dateStr >= l.fromDate && dateStr <= l.toDate)
+        : l.fromDate === dateStr;
+      if (!inRange) continue;
+      if (l.shift === 'morning') res.morning = true;
+      else if (l.shift === 'afternoon') res.afternoon = true;
+      else { res.morning = true; res.afternoon = true; }
+    }
+    return res;
+  };
+
+  /**
+   * Đếm số lần ĐI MUỘN / VỀ SỚM của một bản ghi chấm công.
+   *
+   * Các điểm đã sửa so với bản cũ:
+   *  1. VỀ SỚM có dung sai `punchOutOpenBeforeMinutes` (mặc định 15p) — trùng với
+   *     cửa sổ mà hệ thống CHO PHÉP chấm ra ca. Trước đây ra ca lúc 11:20 (hệ thống
+   *     mở cửa sổ chấm từ 11:15) vẫn bị tính là "về sớm" → con số luôn bị thổi phồng.
+   *  2. Bỏ qua ngày nghỉ tuần / nghỉ lễ: những ngày này không có định mức giờ ca,
+   *     ai đi làm bù/OT đều bị tính muộn oan.
+   *  3. Bỏ qua ca đã có đơn nghỉ phép hoặc đơn giải trình ĐƯỢC DUYỆT.
+   *  4. Chuẩn hóa giờ trước khi tính (bản ghi cũ có thể lưu object/JSON server-time),
+   *     tránh NaN âm thầm làm sai kết quả.
+   */
   const getLogAttendanceStats = (log: any) => {
     let lates = 0;
     let earlies = 0;
@@ -505,48 +724,57 @@ export default function DashboardOverview({
     let isLateAfternoon = false;
     let isEarlyAfternoon = false;
 
-    if (!log) return { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
+    const empty = { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
+    if (!log) return empty;
 
-    // Ignore leave days and off symbols
-    const isLeave = ['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS) || 
-                    log.status === 'excused' || 
-                    log.notes?.toLowerCase().includes('nghỉ') || 
+    // Ngày nghỉ phép / ký hiệu off → không tính vi phạm giờ giấc
+    const isLeave = LEAVE_SYMBOLS.includes(normalizeTime(log.timeInS)) ||
+                    log.status === 'excused' ||
+                    log.notes?.toLowerCase().includes('nghỉ') ||
                     log.notes?.toLowerCase().includes('off');
-    if (isLeave) return { lates, earlies, isLateMorning, isEarlyMorning, isLateAfternoon, isEarlyAfternoon };
+    if (isLeave) return empty;
 
-    const targetInS = timeToMinutes(config.morningIn || '07:30');
-    const targetOutS = timeToMinutes(config.morningOut || '11:30');
-    const targetInC = timeToMinutes(config.afternoonIn || '13:00');
-    const targetOutC = timeToMinutes(config.afternoonOut || '17:00');
-    const allowedLates = config.allowedLateMinutes ?? 15;
+    // Cuối tuần / nghỉ lễ: không có định mức giờ ca chuẩn để so sánh
+    if (isCalendarRestDay(log.date)) return empty;
+
+    const excused = getExcusedShifts(log);
+
+    const targetInS = timeToMinutes(config?.morningIn || '07:30');
+    const targetOutS = timeToMinutes(config?.morningOut || '11:30');
+    const targetInC = timeToMinutes(config?.afternoonIn || '13:00');
+    const targetOutC = timeToMinutes(config?.afternoonOut || '17:00');
+    // Dung sai "Cho phép đi muộn" tách riêng theo từng ca (migration 036):
+    //   - Ca Sáng  → allowedLateMorning
+    //   - Ca Chiều → allowedLateAfternoon
+    // `allowedLateMinutes` (global) chỉ còn là fallback.
+    const allowedLateMorning   = config?.allowedLateMorning   ?? config?.allowedLateMinutes ?? 15;
+    const allowedLateAfternoon = config?.allowedLateAfternoon ?? config?.allowedLateMinutes ?? 15;
+    // Dung sai về sớm = đúng bằng khoảng thời gian hệ thống mở cửa sổ chấm ra ca sớm
+    const allowedEarlies = config?.punchOutOpenBeforeMinutes ?? 15;
 
     // 1. Ca Sáng
-    if (log.timeInS && log.timeInS !== '--:--' && log.timeInS !== '' && !['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS)) {
-      const min = timeToMinutes(log.timeInS);
-      if (min > (targetInS + allowedLates)) {
+    if (!excused.morning) {
+      const inMin = parsePunchMinutes(log.timeInS);
+      if (inMin !== null && inMin > targetInS + allowedLateMorning) {
         lates++;
         isLateMorning = true;
       }
-    }
-    if (log.timeOutS && log.timeOutS !== '--:--' && log.timeOutS !== '') {
-      const min = timeToMinutes(log.timeOutS);
-      if (min < targetOutS) {
+      const outMin = parsePunchMinutes(log.timeOutS);
+      if (outMin !== null && outMin < targetOutS - allowedEarlies) {
         earlies++;
         isEarlyMorning = true;
       }
     }
 
     // 2. Ca Chiều
-    if (log.timeInC && log.timeInC !== '--:--' && log.timeInC !== '') {
-      const min = timeToMinutes(log.timeInC);
-      if (min > (targetInC + allowedLates)) {
+    if (!excused.afternoon) {
+      const inMin = parsePunchMinutes(log.timeInC);
+      if (inMin !== null && inMin > targetInC + allowedLateAfternoon) {
         lates++;
         isLateAfternoon = true;
       }
-    }
-    if (log.timeOutC && log.timeOutC !== '--:--' && log.timeOutC !== '') {
-      const min = timeToMinutes(log.timeOutC);
-      if (min < targetOutC) {
+      const outMin = parsePunchMinutes(log.timeOutC);
+      if (outMin !== null && outMin < targetOutC - allowedEarlies) {
         earlies++;
         isEarlyAfternoon = true;
       }
@@ -556,50 +784,43 @@ export default function DashboardOverview({
   };
 
 
-  const getEmployeeId = (name: string): string => {
-    const empDataStr = localStorage.getItem('hl_hrm_employees_v3');
-    if (empDataStr) {
-      try {
-        const list = JSON.parse(empDataStr);
-        const match = list.find((e: any) => e.name.toLowerCase() === name.toLowerCase());
-        if (match) return match.id;
-      } catch (e) {}
-    }
-    if (name.includes('Long')) return 'NV001';
-    if (name.includes('Anh') || name.includes('Mai') || name.includes('Ngọc')) return 'NV002';
-    if (name.includes('Sơn')) return 'NV019';
-    if (name.includes('Quân')) return 'NV005';
-    if (name.includes('Hà') || name.includes('Thảo')) return 'NV006';
-    if (name.includes('Tiến')) return 'NV003';
-    return 'NV999';
-  };
+  /**
+   * Mã nhân viên của người đang đăng nhập.
+   *
+   * ⚠️ TRƯỚC ĐÂY: hàm này đoán mã NV từ TÊN (localStorage `hl_hrm_employees_v3` rồi
+   * fallback sang chuỗi if/else `name.includes('Ngọc') → NV002` … `return 'NV999'`).
+   * Trên máy chưa có cache localStorage (đăng nhập lần đầu / xoá cache / máy khác),
+   * mọi người đều bị gán nhầm mã — phần lớn thành 'NV999' (mã KHÔNG tồn tại trong
+   * bảng employees). Bản ghi chấm công ghi lên Supabase với emp_id sai → tab
+   * "Chấm công ngày" (lọc theo nhân viên đang làm việc) loại bỏ hết các bản ghi đó.
+   *
+   * BÂY GIỜ: `currentUser` chính là bản ghi Employee lấy từ bảng `employees`
+   * (xem App.tsx – setCurrentUser(foundUser) từ danh sách employees), nên
+   * `currentUser.id` LUÔN là mã nhân viên chuẩn. Không đoán theo tên nữa.
+   */
+  const empId = currentUser?.id || '';
 
-  const empId = getEmployeeId(currentUser.name);
 
-  const [hrmEmployees, setHrmEmployees] = useState<any[]>(() => {
-    const saved = localStorage.getItem('hl_hrm_employees_v3');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [hrmEmployees, setHrmEmployees] = useState<any[]>([]);
+
+  useEffect(() => {
+    dbService.employees.list()
+      .then(list => { if (Array.isArray(list)) setHrmEmployees(list); })
+      .catch(err => console.warn('Lỗi tải nhân viên từ Supabase:', err));
+  }, []);
 
   useEffect(() => {
     const handleSyncEmployees = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
         setHrmEmployees(customEvent.detail);
-      } else {
-        const saved = localStorage.getItem('hl_hrm_employees_v3');
-        if (saved) {
-          setHrmEmployees(JSON.parse(saved));
-        }
       }
     };
     window.addEventListener('hl_employees_changed_from_hrm', handleSyncEmployees);
     window.addEventListener('hl-employees-updated', handleSyncEmployees);
-    window.addEventListener('storage', handleSyncEmployees);
     return () => {
       window.removeEventListener('hl_employees_changed_from_hrm', handleSyncEmployees);
       window.removeEventListener('hl-employees-updated', handleSyncEmployees);
-      window.removeEventListener('storage', handleSyncEmployees);
     };
   }, []);
 
@@ -608,6 +829,38 @@ export default function DashboardOverview({
     if (match) return match;
     return null;
   };
+
+  const handleManualReset = () => {
+    if (!confirm('Bạn có chắc chắn muốn reset dữ liệu chấm công cho ngày hiện tại (' + todayVal + ')?')) return;
+
+    const updatedList = attendanceList.map((a: any) => {
+        if (a.date === todayVal) {
+             return {
+              ...a,
+              timeInS: '--:--',
+              timeOutS: '--:--',
+              timeInC: '--:--',
+              timeOutC: '--:--',
+              timeInOT: '--:--',
+              timeOutOT: '--:--',
+              status: 'valid',
+              otHours: 0,
+              notes: 'Reset thủ công ngày ' + todayVal
+            };
+        }
+        return a;
+    });
+    setAttendanceList(updatedList.map(normalizeRecord));
+
+    // Save to Supabase
+    const todayRecord = updatedList.find(r => r.date === todayVal);
+    if (todayRecord) {
+      dbService.attendance.save(todayRecord).catch(err =>
+        console.warn('Lỗi khi lưu reset chấm công lên Supabase:', err));
+    }
+
+    alert('Đã reset dữ liệu chấm công ngày ' + todayVal);
+  }
 
   // Digital clock
   const [digitalTime, setDigitalTime] = useState('');
@@ -626,14 +879,14 @@ export default function DashboardOverview({
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [getTodayString]);
 
   // Automatic 6 AM reset
-  useEffect(() => {
+  /* useEffect(() => {
     if (!digitalTime || !attendanceList || attendanceList.length === 0) return;
     const currTimeStr = digitalTime.substring(0, 5);
     const currMin = timeToMinutes(currTimeStr);
-    
+
     // 06:00 AM represented as 360 minutes from midnight
     if (currMin >= 360) {
       const lastResetDay = localStorage.getItem('hl_attendance_last_reset_day_v3');
@@ -648,7 +901,7 @@ export default function DashboardOverview({
                 const leavesList = JSON.parse(leavesSaved);
                 const approved = leavesList.find((l: any) => {
                   if (l.status !== 'approved') return false;
-                  if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') return false;
+                  if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return false;
                   const sameEmp = (l.empId && a.empId && l.empId === a.empId) || (l.empName && a.empName && l.empName === a.empName);
                   if (!sameEmp) return false;
                   return todayVal >= l.fromDate && todayVal <= l.toDate;
@@ -702,15 +955,14 @@ export default function DashboardOverview({
           return a;
         });
 
-        setAttendanceList(updatedList);
-        localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(updatedList));
+    setAttendanceList(updatedList.map(normalizeRecord));
         localStorage.setItem('hl_attendance_last_reset_day_v3', todayVal);
         console.log(`⏱️ Đã tự động reset điểm danh đầu ca mới 6 AM ngày ${todayVal}`);
       }
     }
-  }, [digitalTime, todayVal, attendanceList]);
+  }, [digitalTime, todayVal, attendanceList]); */
 
-  const [selectedSite, setSelectedSite] = useState(config.constructionSites[0] || 'Công trình Blue Sky');
+  const [selectedSite, setSelectedSite] = useState(config?.constructionSites?.[0] || 'Công trình Blue Sky');
   const [activePunchSlot, setActivePunchSlot] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [liveGpsCoords, setLiveGpsCoords] = useState<string>('');
@@ -718,6 +970,7 @@ export default function DashboardOverview({
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [gpsErrorMsg, setGpsErrorMsg] = useState<string>('');
   const [showPunchModal, setShowPunchModal] = useState(false);
+  const [pendingSync, setPendingSync] = useState<number>(() => outboxPendingCount());
   const [webcamActive, setWebcamActive] = useState(false);
   const [webcamError, setWebcamError] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -733,22 +986,44 @@ export default function DashboardOverview({
     'Nghỉ cưới'
   ]);
 
+  // Load coefficients and holidays for unified workday calculation (từ Supabase)
+  const [dashCoefficients, setDashCoefficients] = useState<any[]>([]);
+  const [dashHolidays, setDashHolidays] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadCoefficients = () => dbService.hrmLeaveCoefficients.list()
+      .then(list => { if (Array.isArray(list)) setDashCoefficients(list); })
+      .catch(err => console.warn('Lỗi tải hệ số nghỉ phép từ Supabase:', err));
+    const loadHolidays = () => dbService.hrmHolidays.list()
+      .then(list => { if (Array.isArray(list)) setDashHolidays(list); })
+      .catch(err => console.warn('Lỗi tải ngày lễ từ Supabase:', err));
+    loadCoefficients();
+    loadHolidays();
+    // Trước đây chỉ tải 1 lần lúc mount, không nghe sự kiện nào — 2 bảng này
+    // thuộc nhóm polling 5 phút ở App.tsx (đã bắn đúng 2 event dưới đây) nhưng
+    // Dashboard chưa từng lắng nghe, nên hệ số nghỉ phép/ngày lễ dùng để tính
+    // loại nghỉ phép trong modal xin nghỉ có thể cũ tới khi F5.
+    window.addEventListener('hl-hrm-leave-coefficients-updated', loadCoefficients);
+    window.addEventListener('hl-hrm-holidays-updated', loadHolidays);
+    return () => {
+      window.removeEventListener('hl-hrm-leave-coefficients-updated', loadCoefficients);
+      window.removeEventListener('hl-hrm-holidays-updated', loadHolidays);
+    };
+  }, []);
+
   useEffect(() => {
     if (leaveModalOpen) {
       try {
-        const saved = localStorage.getItem('hl_hrm_leave_coefs_v5');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const types = parsed
-              .filter((item: any) => item.isAuto === false)
-              .map((item: any) => item.type)
-              .filter(Boolean);
-            if (types.length > 0) {
-              setLeaveTypes(types);
-              if (!types.includes(leaveRequestType)) {
-                setLeaveRequestType(types[0]);
-              }
+        const parsed = dashCoefficients;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const types = parsed
+            .filter((item: any) => item.isAuto === false)
+            .map((item: any) => item.type)
+            .filter(Boolean);
+          if (types.length > 0) {
+            setLeaveTypes(types);
+            if (!types.includes(leaveRequestType)) {
+              setLeaveRequestType(types[0]);
             }
           }
         }
@@ -770,7 +1045,7 @@ export default function DashboardOverview({
         console.error('Error calculating initial dates:', e);
       }
     }
-  }, [leaveModalOpen, todayVal]);
+  }, [leaveModalOpen, todayVal, dashCoefficients]);
 
   const [leaveFrom, setLeaveFrom] = useState('2026-06-08');
   const [leaveTo, setLeaveTo] = useState('2026-06-09');
@@ -803,31 +1078,25 @@ export default function DashboardOverview({
   const [reportApprover, setReportApprover] = useState('');
   const [reportStatusText, setReportStatusText] = useState('');
   const [reportReason, setReportReason] = useState('');
-  const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | ''>('');
+  const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | 'Báo cáo lỗi hệ thống chấm công' | ''>('');
+  const [reportCategory, setReportCategory] = useState<'faulty' | 'missing' | ''>('');
   const [reportShift, setReportShift] = useState<'morning' | 'afternoon' | ''>('');
 
-  // Leaves list state
-  const [dashLeaves, setDashLeaves] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_leaves_v3');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [];
-  });
+  // Leaves list state (nguồn: Supabase)
+  const [dashLeaves, setDashLeaves] = useState<any[]>([]);
 
   const refreshDashLeaves = () => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_leaves_v3');
-      if (saved) {
-        setDashLeaves(JSON.parse(saved));
-      } else {
-        setDashLeaves([]);
-      }
-    } catch (e) {}
+    dbService.hrmLeaves.list()
+      .then(list => { if (Array.isArray(list)) setDashLeaves(list); })
+      .catch(err => console.warn('Lỗi tải đơn nghỉ phép từ Supabase:', err));
   };
 
-  // Listen for real-time leave updates
+  // Listen for real-time leave updates (HRM + Supabase realtime)
   useEffect(() => {
+    // Trước đây thiếu bước tải lúc mount — dashLeaves rỗng cho tới khi có sự
+    // kiện thay đổi hrm_leaves xảy ra trong phiên, khiến tính công/hiển thị
+    // trạng thái nghỉ trong lịch chấm công sai (coi ngày nghỉ đã duyệt là vắng).
+    refreshDashLeaves();
     const handleSyncLeaves = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
@@ -835,20 +1104,21 @@ export default function DashboardOverview({
       }
     };
     window.addEventListener('hl_leaves_changed_from_hrm', handleSyncLeaves);
-    return () => window.removeEventListener('hl_leaves_changed_from_hrm', handleSyncLeaves);
+    window.addEventListener('hl-hrm-leaves-updated', refreshDashLeaves);
+    return () => {
+      window.removeEventListener('hl_leaves_changed_from_hrm', handleSyncLeaves);
+      window.removeEventListener('hl-hrm-leaves-updated', refreshDashLeaves);
+    };
   }, []);
-
-  useEffect(() => {
-    if (dashLeaves) {
-      window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_dashboard', { detail: dashLeaves }));
-    }
-  }, [dashLeaves]);
 
   // Reset/initialize report states on day selection
   useEffect(() => {
     if (selectedDayDetail) {
       setShowReportForm(false);
       setReportReason('');
+      setReportType('');
+      setReportCategory('');
+      setReportShift('');
       
       const approvers = getApproversList();
       if (approvers.length > 0) {
@@ -962,19 +1232,6 @@ export default function DashboardOverview({
     accountingGroup.memberIds.forEach((memberId: string) => {
       // Tìm theo ID trực tiếp trong hrmEmployees
       let emp = hrmEmployees.find(e => e.id === memberId);
-      // Nếu không tìm thấy, thử tìm theo ID từ hl_erp_employees (emp_xxx) qua tên
-      if (!emp) {
-        const erpEmpsStr = localStorage.getItem('hl_erp_employees');
-        if (erpEmpsStr) {
-          try {
-            const erpEmps = JSON.parse(erpEmpsStr);
-            const erpEmp = erpEmps.find((e: any) => e.id === memberId);
-            if (erpEmp) {
-              emp = hrmEmployees.find(e => e.name.toLowerCase() === erpEmp.name.toLowerCase());
-            }
-          } catch (e) {}
-        }
-      }
       if (emp) {
         approvers.push(emp);
       }
@@ -1134,7 +1391,10 @@ export default function DashboardOverview({
   }, [showPunchModal]);
 
   const captureSelfieFromStream = (): string => {
-    if (videoRef.current && cameraStream) {
+    // Chỉ chụp khi camera thật đang chạy VÀ đã có frame (readyState >= 2 = HAVE_CURRENT_DATA).
+    // KHÔNG bao giờ trả về ảnh mẫu/ảnh giả — mọi ảnh lưu lên Supabase phải là ảnh
+    // người dùng chụp trực tiếp lúc điểm danh.
+    if (videoRef.current && cameraStream && videoRef.current.readyState >= 2) {
       try {
         const canvas = document.createElement('canvas');
         canvas.width = 300;
@@ -1145,36 +1405,59 @@ export default function DashboardOverview({
           return canvas.toDataURL('image/jpeg', 0.85);
         }
       } catch (e) {
-        console.error("Webcam capture error fallback to profile", e);
+        console.error("Webcam capture error", e);
       }
     }
-    
-    // Customized placeholder based on current user
-    if (currentUser.name?.toLowerCase().includes('long')) {
-      return 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?w=150&auto=format&fit=crop&q=80';
-    } else if (currentUser.name?.toLowerCase().includes('ngọc')) {
-      return currentUser.gender === 'Nữ' 
-        ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80'
-        : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80';
-    } else if (currentUser.name?.toLowerCase().includes('tiến')) {
-      return 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80';
-    } else if (currentUser.name?.toLowerCase().includes('ny')) {
-      return 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80';
-    }
-    return 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+    return '';
   };
 
   // Confirm Punching slot
-  const handleConfirmPunch = () => {
+  const handleConfirmPunch = async () => {
     if (!activePunchSlot) return;
 
-    // Time punch format e.g. "07:30"
-    const now = new Date();
-    const punchedTime = now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    // ─── GUARD 0: Bắt buộc có mã nhân viên hợp lệ ───
+    // Không cho ghi bản ghi chấm công "mồ côi" (emp_id rỗng hoặc không có trong bảng
+    // employees). Bản ghi như vậy vẫn nằm trên Supabase nhưng bị mọi màn hình nhân sự
+    // lọc bỏ → nhìn như mất dữ liệu.
+    if (!empId) {
+      stopCameraStream();
+      setShowPunchModal(false);
+      setActivePunchSlot(null);
+      addToast({
+        title: '⛔ Thiếu mã nhân viên',
+        message: 'Tài khoản đang đăng nhập chưa gắn với hồ sơ nhân viên. Vui lòng đăng nhập lại hoặc liên hệ quản trị để cập nhật hồ sơ trước khi chấm công.',
+        type: 'error',
+      });
+      return;
+    }
+
+    // Nhãn tiếng Việt cho từng slot điểm danh (hiển thị trong toast)
+    const slotLabelMap: Record<string, string> = {
+      timeInS: 'VÀO SÁNG',
+      timeOutS: 'RA SÁNG',
+      timeInC: 'VÀO CHIỀU',
+      timeOutC: 'RA CHIỀU',
+      timeInOT: 'VÀO TĂNG CA',
+      timeOutOT: 'RA TĂNG CA',
+    };
+    const slotLabel = slotLabelMap[activePunchSlot] || activePunchSlot.toUpperCase();
+
+    // ─── Lấy giờ server từ Supabase RPC (chống gian lận giờ client) ───
+    const serverTs = await dbService.fetchServerTimestamp();
+    const now = serverTs ? new Date(serverTs.datetime) : new Date();
+    const punchedTime = serverTs ? serverTs.time : now.toLocaleTimeString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    if (serverTs) {
+      console.log('[Punch] Dùng giờ server:', serverTs.datetime);
+    } else {
+      console.warn('[Punch] Fallback giờ client — không lấy được giờ server!');
+    }
 
     // Look for record for current user on 2026-06-06
     const updated = [...attendanceList];
-    let todayLog = updated.find(a => a.empName === currentUser.name && a.date === todayVal);
+    // QUAN TRỌNG: tìm theo empId + date (KHÔNG dùng empName).
+    // Tìm bằng empName dễ trượt (tên lệch chuẩn hóa / state chưa cập nhật) → tạo bản ghi mới
+    // có id khác → trùng lặp (2 bản ghi cùng empId + ngày). empId là khóa nghiệp vụ duy nhất.
+    let todayLog = updated.find(a => a.empId === empId && a.date === todayVal);
 
     const siteInfo = getSiteGpsInfo(selectedSite);
     const selfPhoto = captureSelfieFromStream();
@@ -1184,7 +1467,7 @@ export default function DashboardOverview({
       stopCameraStream();
       setShowPunchModal(false);
       setActivePunchSlot(null);
-      alert('🔒 Bản ghi chấm công ngày hôm nay đã được chốt (khóa). Vui lòng liên hệ HR/Admin nếu cần điều chỉnh.');
+      addToast({ title: '🔒 Bản ghi đã chốt', message: 'Bản ghi chấm công ngày hôm nay đã được khóa. Vui lòng liên hệ HR/Admin nếu cần điều chỉnh.', type: 'warning' });
       return;
     }
 
@@ -1195,7 +1478,7 @@ export default function DashboardOverview({
       stopCameraStream();
       setShowPunchModal(false);
       setActivePunchSlot(null);
-      alert(`⚠️ Bạn đã chấm ${activePunchSlot.toUpperCase()} lúc ${todayLog![activePunchSlot]} rồi. Không thể chấm lại slot này.`);
+      addToast({ title: '⚠️ Đã chấm rồi', message: `Bạn đã chấm [${slotLabel}] lúc ${todayLog![activePunchSlot]} rồi. Không thể chấm lại slot này.`, type: 'warning' });
       return;
     }
 
@@ -1206,7 +1489,7 @@ export default function DashboardOverview({
       stopCameraStream();
       setShowPunchModal(false);
       setActivePunchSlot(null);
-      alert(`⛔ Ngoài khung giờ cho phép chấm công [${activePunchSlot.toUpperCase()}]. Khung giờ: ${sessionGuardCheck.sessionStartStr} - ${sessionGuardCheck.sessionEndStr}.`);
+      addToast({ title: '⛔ Ngoài khung giờ', message: `Không thể chấm [${slotLabel}]. Khung giờ cho phép: ${sessionGuardCheck.sessionStartStr} - ${sessionGuardCheck.sessionEndStr}.`, type: 'warning' });
       return;
     }
 
@@ -1220,14 +1503,33 @@ export default function DashboardOverview({
         stopCameraStream();
         setShowPunchModal(false);
         setActivePunchSlot(null);
-        alert(`⚠️ Chưa chấm ${inSlot.toUpperCase()} (vào ca). Vui lòng chấm vào ca trước khi chấm ra ca.`);
+        addToast({ title: '⚠️ Chưa chấm vào ca', message: `Bạn chưa chấm [${slotLabelMap[inSlot] || inSlot.toUpperCase()}] (vào ca). Vui lòng chấm vào ca trước khi chấm ra ca.`, type: 'warning' });
         return;
       }
     }
 
+    // ─── GUARD 5: BẮT BUỘC có ảnh FaceID THẬT (chụp trực tiếp lúc điểm danh) ───
+    // Camera lỗi / chưa có frame → KHÔNG ghi nhận lượt chấm. Không bao giờ thay
+    // thế bằng ảnh mẫu/ảnh giả (nguồn gốc ảnh "AI sinh ra" trước đây).
+    if (!selfPhoto) {
+      stopCameraStream();
+      setShowPunchModal(false);
+      setActivePunchSlot(null);
+      addToast({
+        title: '📷 Chưa có ảnh FaceID',
+        message: 'Camera chưa chụp được ảnh khuôn mặt. Vui lòng cấp quyền truy cập camera, mở lại màn hình chấm công rồi bấm CHỤP ẢNH & CHẤM CÔNG. Mọi lượt chấm công bắt buộc có ảnh chụp trực tiếp lúc điểm danh.',
+        type: 'error',
+        duration: 8000,
+      });
+      return;
+    }
+
     if (!todayLog) {
       todayLog = {
-        id: `AT-${Date.now().toString().slice(-4)}`,
+        // id XÁC ĐỊNH từ empId + ngày → mọi lần chấm (sáng/chiều) của cùng 1 NV trong ngày
+        // đều trúng CÙNG dòng (upsert bởi id). Không còn id ngẫu nhiên → không sinh bản ghi trùng.
+        // (dbService.attendance.save cũng chuẩn hóa về đúng id này nên nhất quán đầu cuối.)
+        id: `AT-${empId}-${todayVal.replace(/-/g, '')}`,
         empId: empId,
         empName: currentUser.name,
         date: todayVal,
@@ -1247,6 +1549,7 @@ export default function DashboardOverview({
         coordsIn: '',
         locationOut: '',
         coordsOut: '',
+        punchMeta: {},
         isLocked: false
       };
       updated.unshift(todayLog);
@@ -1256,16 +1559,52 @@ export default function DashboardOverview({
     todayLog[activePunchSlot] = punchedTime;
     todayLog.method = `GPS/FaceID (${selectedSite})`;
 
-    // Check if slot name is an In slot or Out slot
+    // Đốt giờ chấm + công trình + GPS + tên NV vào ảnh selfie để tạo dấu vết audit
+    // (chống sửa giờ trong localStorage: ảnh vẫn giữ giờ gốc). Dùng giờ máy chủ nếu có.
+    const stampTime = serverTs ? serverTs.time : punchedTime;
+    const burnedPhoto = selfPhoto
+      ? await burnTimestampToPhoto(selfPhoto, {
+          time: stampTime,
+          site: selectedSite,
+          gps: liveGpsCoords || siteInfo.coords,
+          empName: currentUser.name,
+        })
+      : '';
+
+    // Upload ảnh đã đốt giờ lên Storage (bucket attendance-photos, migration 029)
+    // rồi lưu public URL vào DB thay vì base64 — giữ bảng attendance_records nhẹ
+    // (payload 1 tháng giảm từ MB xuống KB, đỡ nghẽn khi nhiều user mở app).
+    // Nếu upload thất bại (offline/mất mạng) → giữ nguyên base64 để outbox đẩy lên sau.
+    const storedPhoto = burnedPhoto
+      ? ((await dbService.uploadAttendancePhoto(burnedPhoto)) ?? burnedPhoto)
+      : '';
+
+    const punchLocation = liveGpsAddr || selectedSite;
+    const punchCoords = liveGpsCoords || siteInfo.coords;
+
+    // ─── Ghi ảnh + tọa độ RIÊNG cho lượt chấm này (không ghi đè lượt trước) ───
+    // Mỗi ngày có tới 6 lượt: Vào/Ra sáng, Vào/Ra chiều, Vào/Ra tăng ca. Trước đây
+    // tất cả lượt "Vào" dùng chung photoIn nên chấm Vào chiều xóa mất ảnh Vào sáng.
+    todayLog.punchMeta = mergePunchMeta(todayLog.punchMeta, {
+      [activePunchSlot]: {
+        photo: storedPhoto,
+        location: punchLocation,
+        coords: punchCoords,
+        at: punchedTime,
+      },
+    });
+
+    // Vẫn ghi cặp trường CŨ (lượt vào/ra gần nhất) để các màn hình chưa nâng cấp
+    // (tab Chấm công bên Nhân sự) tiếp tục hiển thị bình thường.
     const isInSlot = activePunchSlot.toLowerCase().includes('in');
     if (isInSlot) {
-      todayLog.photoIn = selfPhoto;
-      todayLog.locationIn = liveGpsAddr || selectedSite;
-      todayLog.coordsIn = liveGpsCoords || siteInfo.coords;
+      todayLog.photoIn = storedPhoto;
+      todayLog.locationIn = punchLocation;
+      todayLog.coordsIn = punchCoords;
     } else {
-      todayLog.photoOut = selfPhoto;
-      todayLog.locationOut = liveGpsAddr || selectedSite;
-      todayLog.coordsOut = liveGpsCoords || siteInfo.coords;
+      todayLog.photoOut = storedPhoto;
+      todayLog.locationOut = punchLocation;
+      todayLog.coordsOut = punchCoords;
     }
 
     // Check-in status setup
@@ -1274,9 +1613,10 @@ export default function DashboardOverview({
       const mm = now.getMinutes();
       const checkInMin = hh * 60 + mm;
       const limitMin = timeToMinutes(config.morningIn || '07:30');
-      const allowedLates = config.allowedLateMinutes ?? 15;
-      if (checkInMin > (limitMin + allowedLates)) {
+      const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+      if (checkInMin > (limitMin + allowedLateMorning)) {
         todayLog.status = 'late';
+        // Ghi phút muộn THỰC TẾ (không trừ dung sai) → khớp với badge "Muộn X'" trong chấm công ngày.
         todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút sáng. Địa điểm: ${selectedSite}`;
       } else {
         todayLog.status = 'valid';
@@ -1287,13 +1627,70 @@ export default function DashboardOverview({
       const mm = now.getMinutes();
       const checkInMin = hh * 60 + mm;
       const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-      const allowedLates = config.allowedLateMinutes ?? 15;
-      if (checkInMin > (limitMin + allowedLates)) {
+      const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+      if (checkInMin > (limitMin + allowedLateAfternoon)) {
         todayLog.status = 'late';
+        // Ghi phút muộn THỰC TẾ (không trừ dung sai) → khớp với badge "Muộn X'" trong chấm công ngày.
         todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút chiều. Địa điểm: ${selectedSite}`;
       } else {
         todayLog.status = 'valid';
         todayLog.notes = `Chấm công vào chiều chuẩn mực tại ${selectedSite}`;
+      }
+    }
+
+    // ─── Tự ghi vi phạm "Đi muộn" (crit_A_3) khi số ngày đi muộn trong tháng vượt ngưỡng ───
+    // Chỉ xét khi vừa chấm VÀO ca (timeInS / timeInC) và bản ghi bị flag là đi muộn.
+    // Vi phạm ghi 1 bản DUY NHẤT cho mỗi NV-tháng (id deterministic → không nhân đôi dù chấm lại).
+    if ((activePunchSlot === 'timeInS' || activePunchSlot === 'timeInC') && todayLog.status === 'late') {
+      const allowedLateCount = config.allowedLateCount ?? 3;
+      const monthKey = todayVal.substring(0, 7); // "2026-08"
+
+      // Xác định 1 bản ghi có phải "ngày đi muộn" không.
+      // Dùng CHUNG getLogAttendanceStats với bộ đếm hiển thị trên dashboard để 2 nơi
+      // không lệch nhau (cùng bỏ qua ngày nghỉ tuần/lễ, ngày phép, ca đã duyệt đơn).
+      const isLateDay = (log: any): boolean => {
+        if (!log) return false;
+        if (log.empId !== empId && log.empName !== currentUser.name) return false;
+        return getLogAttendanceStats(log).lates > 0;
+      };
+
+      // Đếm số ngày đi muộn RIÊNG BIỆT trong tháng hiện tại (1 ngày dù muộn 2 buổi vẫn tính 1 lần)
+      const lateDates = new Set<string>();
+      [...attendanceList, todayLog].forEach((log: any) => {
+        if (log.date && log.date.startsWith(monthKey) && isLateDay(log)) {
+          lateDates.add(log.date);
+        }
+      });
+      const lateCountInMonth = lateDates.size;
+
+      // Vượt ngưỡng → ghi vi phạm đi muộn vào Bảng Hiệu suất (hrm_employee_errors)
+      if (lateCountInMonth > allowedLateCount) {
+        const violationId = `err_late_${empId}_${monthKey}`;
+        const violation: any = {
+          id: violationId,
+          employeeId: empId,
+          employeeName: currentUser.name,
+          departmentCode: currentUser.department || 'A',
+          departmentName: currentUser.department || '',
+          criterionId: 'crit_A_3',
+          criterionContent: 'Đi muộn không chấp hành giờ giấc làm việc',
+          category: 'readiness',
+          date: todayVal,
+          notes: `Tự động ghi nhận: đi muộn ${lateCountInMonth} lần trong tháng ${monthKey} (ngưỡng cho phép: ${allowedLateCount}). Lần đi muộn gần nhất: ${punchedTime} (${slotLabel}).`,
+          images: [],
+          autoSource: `auto_late_${monthKey}_${empId}`
+        };
+        dbService.hrmEmployeeErrors.save(violation).catch(err =>
+          console.warn('Ghi vi phạm đi muộn lên Supabase thất bại:', err)
+        );
+        // Thông báo cho tab Hiệu suất refresh
+        try { window.dispatchEvent(new CustomEvent('hl-hrm-employee-errors-updated')); } catch {}
+        addToast({
+          title: '⚠️ Vi phạm đi muộn',
+          message: `Bạn đã đi muộn ${lateCountInMonth} ngày trong tháng ${monthKey} (vượt ngưỡng ${allowedLateCount}). Vi phạm đi muộn đã được ghi vào bảng Hiệu suất.`,
+          type: 'warning',
+          duration: 5000,
+        });
       }
     }
 
@@ -1312,15 +1709,50 @@ export default function DashboardOverview({
       } catch (err) {}
     }
 
-    // Save to local storage
-    localStorage.setItem('hl_hrm_attendance_v3', JSON.stringify(updated));
-    setAttendanceList(updated);
+    // Update local state for immediate UI feedback (loại bỏ _serverTime trước khi set state để tránh cache object)
+    const { _serverTime, syncPending, ...logForState } = todayLog;
+    setAttendanceList(updated.map(l => l.id === todayLog.id ? { ...logForState, syncPending: true } : l));
 
     // Stop camera and close
     stopCameraStream();
     setShowPunchModal(false);
     setActivePunchSlot(null);
-    alert(`🎉 Đã chấm công [${activePunchSlot.toUpperCase()}] thành công lúc ${punchedTime} tại ${selectedSite}!`);
+
+    // ─── Lưu lên Supabase, có Outbox dự phòng khi mất mạng/RLS ───
+    // Luôn đưa vào Outbox TRƯỚC khi thử đẩy, để không bao giờ mất dữ liệu chấm công
+    // nếu đẩy thất bại. Khi đẩy thành công sẽ xóa khỏi Outbox.
+    const opId = `${todayLog.id}:${activePunchSlot}:${Date.now()}`;
+    const recordToSave = { ...todayLog, _serverTime: serverTs };
+    enqueuePunch({ id: opId, record: recordToSave, punchSlot: activePunchSlot as any, serverTs, queuedAt: Date.now() });
+    setPendingSync(outboxPendingCount());
+
+    try {
+      await dbService.attendance.save(recordToSave, activePunchSlot as any);
+      removePunch(opId);
+      setPendingSync(outboxPendingCount());
+      addToast({
+        title: '✅ Điểm danh thành công',
+        message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime} tại ${selectedSite}.`,
+        type: 'success',
+      });
+      // 📣 Nhóm chat "Điểm danh": người chấm ĐẦU TIÊN trong ca kích hoạt Hệ
+      // Thống gửi tin nhắc vào nhóm (server-side atomic, chống race + ngày nghỉ).
+      maybeSendAttendanceChatMessage({
+        date: todayVal,
+        slot: activePunchSlot,
+        empId,
+        empName: currentUser.name,
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Lỗi không xác định';
+      console.error('Lỗi khi lưu chấm công lên Supabase (đã lưu tạm vào Outbox):', err);
+      addToast({
+        title: '⏳ Đã lưu tạm',
+        message: `Chấm [${slotLabel}] lúc ${punchedTime} chưa đẩy được lên hệ thống (${errMsg}). Đã lưu tạm và sẽ tự động đồng bộ khi có kết nối.`,
+        type: 'warning',
+        duration: 8000,
+      });
+    }
   };
 
   // Submit Leave Request
@@ -1391,13 +1823,6 @@ export default function DashboardOverview({
       console.error(e);
     }
 
-    // Read stored leaves
-    let currentLeaves: any[] = [];
-    const saved = localStorage.getItem('hl_hrm_leaves_v3');
-    if (saved) {
-      try { currentLeaves = JSON.parse(saved); } catch (e) {}
-    }
-
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const submittedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
@@ -1419,10 +1844,28 @@ export default function DashboardOverview({
       approverPosition: leaveApproverPosition || ''
     };
 
-    const updated = [newRequest, ...currentLeaves];
-    localStorage.setItem('hl_hrm_leaves_v3', JSON.stringify(updated));
-    refreshDashLeaves();
-    
+    // Lưu lên Supabase (nguồn duy nhất) + cập nhật state
+    dbService.hrmLeaves.save(newRequest)
+      .then(() => setDashLeaves(prev => [newRequest, ...(prev || [])]))
+      .catch(err => {
+        console.warn('Push đơn nghỉ phép lên Supabase thất bại:', err);
+        setDashLeaves(prev => [newRequest, ...(prev || [])]);
+      });
+
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (nhân viên → người duyệt)
+    const approverEmp = hrmEmployees.find((e: any) => e.id === newRequest.approverId) || findEmployeeByName(hrmEmployees, newRequest.approverName);
+    if (empId && approverEmp?.id && empId !== approverEmp.id) {
+      sendApprovalDirectMessage({
+        senderId: empId,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: approverEmp.id,
+        recipientName: approverEmp.name || newRequest.approverName,
+        content: `🔔 ${currentUser.name} đã gửi ĐƠN NGHỈ PHÉP "${newRequest.type}" từ ${newRequest.fromDate} đến ${newRequest.toDate} (${newRequest.daysCount} ngày). Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        relatedEntity: { type: 'leave', id: newRequest.id },
+      });
+    }
+
     setLeaveReasonText('');
     setLeaveModalOpen(false);
     alert(`📬 Đơn xin nghỉ phép đã được nộp sang HỆ THỐNG NHÂN SỰ thành công!\nNgười duyệt: ${(leaveApprover || 'Trương Hữu Long')}${leaveApproverPosition ? ` (${leaveApproverPosition})` : ''}\nTrạng thái: Đang chờ duyệt.`);
@@ -1436,15 +1879,23 @@ export default function DashboardOverview({
       return;
     }
 
-    let currentLeaves: any[] = [];
-    const saved = localStorage.getItem('hl_hrm_leaves_v3');
-    if (saved) {
-      try { currentLeaves = JSON.parse(saved); } catch (e) {}
-    }
-
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const submittedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+    // Người xét duyệt: nếu là "Lỗi hệ thống chấm công" thì dùng người duyệt
+    // Đơn Xin Nghỉ Phép (cấu hình Phân Quyền → Quyền Phê Duyệt), không cho sửa.
+    const configuredLeaveApprover = getConfiguredApprover('leave');
+    const useLockedApprover = isAttendanceReportType(reportType);
+    const finalApproverName = (useLockedApprover && configuredLeaveApprover)
+      ? configuredLeaveApprover.name
+      : (reportApprover || 'Trương Hữu Long');
+    const finalApproverId = (useLockedApprover && configuredLeaveApprover)
+      ? (configuredLeaveApprover.id || '')
+      : '';
+    const finalApproverPosition = (useLockedApprover && configuredLeaveApprover)
+      ? (configuredLeaveApprover.position || '')
+      : '';
 
     const newRequest = {
       id: `LR-${Date.now().toString().slice(-3)}`,
@@ -1459,19 +1910,39 @@ export default function DashboardOverview({
       status: 'pending',
       createdAt: todayVal,
       submittedAt: submittedAtStr,
-      approverName: reportApprover || 'Trương Hữu Long',
+      approverName: finalApproverName,
+      approverId: finalApproverId,
+      approverPosition: finalApproverPosition,
       isAttendanceCorrection: true
     };
 
-    const updated = [newRequest, ...currentLeaves];
-    localStorage.setItem('hl_hrm_leaves_v3', JSON.stringify(updated));
-    refreshDashLeaves();
+    // Lưu lên Supabase (nguồn duy nhất) + cập nhật state
+    dbService.hrmLeaves.save(newRequest)
+      .then(() => setDashLeaves(prev => [newRequest, ...(prev || [])]))
+      .catch(err => {
+        console.warn('Push báo cáo nghỉ ca lên Supabase thất bại:', err);
+        setDashLeaves(prev => [newRequest, ...(prev || [])]);
+      });
+
+    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (nhân viên → người duyệt)
+    const approverEmp = hrmEmployees.find((e: any) => e.id === finalApproverId) || findEmployeeByName(hrmEmployees, finalApproverName);
+    if (empId && approverEmp?.id && empId !== approverEmp.id) {
+      sendApprovalDirectMessage({
+        senderId: empId,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        recipientId: approverEmp.id,
+        recipientName: approverEmp.name || finalApproverName,
+        content: `🔔 ${currentUser.name} đã gửi BÁO CÁO CHẤM CÔNG "${newRequest.type}" (${newRequest.shift || ''}) ngày ${newRequest.fromDate}. Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        relatedEntity: { type: 'leave', id: newRequest.id },
+      });
+    }
 
     setShowReportForm(false);
     setReportReason('');
     setReportShift('');
     setReportType('');
-    alert(`Báo cáo đã được gửi tới ${reportApprover || 'Trương Hữu Long'}, trạng thái: Chờ duyệt`);
+    alert(`Báo cáo đã được gửi tới ${finalApproverName}, trạng thái: Chờ duyệt`);
   };
 
   // Submit Salary Advance
@@ -1511,10 +1982,12 @@ export default function DashboardOverview({
 
     // 1. Ghi nhận dữ liệu sang chi tiết lương (Hệ thống nhân sự)
     let currentPayroll: any[] = [];
-    const savedPayroll = localStorage.getItem('hl_hrm_payroll_v3');
-    if (savedPayroll) {
-      try { currentPayroll = JSON.parse(savedPayroll); } catch (err) {}
+    try {
+      currentPayroll = await dbService.hrmPayrollRecords.list();
+    } catch (err) {
+      console.warn('Lỗi tải bảng lương từ Supabase:', err);
     }
+    currentPayroll = currentPayroll || [];
 
     // Tìm xem đã có bản ghi bảng lương tháng của nhân sự này chưa
     let payrollItem = currentPayroll.find((p: any) => p.empName === currentUser.name && p.month === advancePeriod);
@@ -1543,7 +2016,9 @@ export default function DashboardOverview({
       currentPayroll.push(payrollItem);
     }
 
-    localStorage.setItem('hl_hrm_payroll_v3', JSON.stringify(currentPayroll));
+    // Lưu bảng lương lên Supabase
+    dbService.hrmPayrollRecords.save(payrollItem).catch(err =>
+      console.warn('Lỗi lưu bảng lương lên Supabase:', err));
 
     // 2. Tạo Đề Xuất Tạm Ứng Lương (SubcontractorAdvanceProposal) - Gửi sang Đề Xuất Thu Chi
     // Loại: project_expense_proposal (đề xuất chi phí dự án - ứng lương nhân sự)
@@ -1555,9 +2030,10 @@ export default function DashboardOverview({
       id: proposalId,
       subcontractorId: empId,
       subcontractorName: currentUser.name,
-      projectId: '', // Ứng lương nhân sự không gán dự án cụ thể
+      // projectId/taskId: KHÔNG gán '' — 2 cột này có khóa ngoại tới projects(id)/tasks(id),
+      // '' không khớp bản ghi nào nên bị Postgres từ chối (foreign key violation).
+      // Phải để undefined (NULL) khi ứng lương không gắn dự án/công việc cụ thể.
       projectName: 'Ứng Lương Nhân Sự',
-      taskId: '',
       taskName: `Ứng lương kỳ ${advancePeriod}`,
       amount: amount,
       reason: `Ứng lương kỳ ${advancePeriod}. Lý do: ${advanceReasonText || 'Chi tiêu cá nhân'}`,
@@ -1573,20 +2049,25 @@ export default function DashboardOverview({
     };
 
     try {
-      // Lưu vào IndexedDB qua dbService
+      // Lưu lên Supabase (nguồn duy nhất)
       await dbService.subcontractorAdvances.save(newProposal);
-
-      // Cập nhật localStorage để đồng bộ với FinanceManagement
-      let existingProposals: SubcontractorAdvanceProposal[] = [];
-      const savedProposals = localStorage.getItem('hl_subcontractor_advances');
-      if (savedProposals) {
-        try { existingProposals = JSON.parse(savedProposals); } catch (err) {}
-      }
-      existingProposals.unshift(newProposal); // Thêm lên đầu
-      localStorage.setItem('hl_subcontractor_advances', JSON.stringify(existingProposals));
 
       // Trigger custom event để các component khác (FinanceManagement) cập nhật
       window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: newProposal }));
+
+      // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN (người lập → người duyệt)
+      const approverEmp = hrmEmployees.find((e: any) => e.id === finalApproverId) || findEmployeeByName(hrmEmployees, finalApproverName);
+      if (empId && approverEmp?.id && empId !== approverEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: empId,
+          senderName: currentUser.name,
+          senderRole: currentUser.role,
+          recipientId: approverEmp.id,
+          recipientName: approverEmp.name || finalApproverName,
+          content: `🔔 ${currentUser.name} đã gửi ĐỀ XUẤT TẠM ỨNG LƯƠNG ${proposalId} (${newProposal.taskName}) ${amount.toLocaleString('vi-VN')}đ. Lý do: ${newProposal.reason}. Vui lòng xem xét.`,
+          relatedEntity: { type: 'advance', id: proposalId },
+        });
+      }
     } catch (err) {
       console.error('Lỗi khi lưu đề xuất tạm ứng lương:', err);
       alert('❌ Có lỗi xảy ra khi gửi đề xuất. Vui lòng thử lại!');
@@ -1598,28 +2079,16 @@ export default function DashboardOverview({
     setAdvanceApproverId('');
     setAdvanceModalOpen(false);
 
-    alert(`💰 Đã gửi Đề Xuất Tạm Ứng Lương thành công!\nMã đề xuất: ${proposalId}\nSố tiền: ${amount.toLocaleString('vi-VN')} đ\nNgười xét duyệt: ${finalApproverName}\nTrạng thái: Chờ duyệt\n\nNgười xét duyệt sẽ thấy đề xuất trong "Đề Xuất Thu Chi" và thực hiện duyệt để tạo Phiếu Chi Ứng Lương.`);
+    alert(`💰 Đã gửi Đề Xuất Tạm Ứng Lương thành công!\nMã đề xuất: ${proposalId}\nSố tiền: ${amount.toLocaleString('vi-VN')} đ\nNgười xét duyệt: ${finalApproverName}\nTrạng thái: Chờ duyệt\n\nNgười xét duyệt sẽ thấy đề xuất trong "Đề Xuất Chi" và thực hiện duyệt để tạo Phiếu Chi Ứng Lương.`);
   };
 
   // Calc aggregated values for current employee
-  const currentLogs = attendanceList.filter(a => a.empName === currentUser.name);
-
-  // Load coefficients and holidays for unified workday calculation
-  const dashCoefficients = (() => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_leave_coefs_v6');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [];
-  })();
-
-  const dashHolidays = (() => {
-    try {
-      const saved = localStorage.getItem('hl_hrm_holidays_v3');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [];
-  })();
+  // Lọc theo empId (khóa nghiệp vụ duy nhất), chỉ fallback sang empName cho bản ghi
+  // cũ chưa có empId. Lọc thuần theo tên dễ trượt khi tên lệch chuẩn hóa (dấu cách
+  // thừa, viết hoa/thường khác) → bảng thống kê hiện 0 dù vẫn có dữ liệu chấm công.
+  const currentLogs = attendanceList.filter(a =>
+    a.empId ? a.empId === empId : a.empName === currentUser.name
+  );
 
   const dashWeekendDays = config.weekendDays || [0];
 
@@ -1635,25 +2104,67 @@ export default function DashboardOverview({
 
   const countOvertimeHours = logsInMonth.reduce((sum, curr) => sum + (curr.otHours || 0), 0);
   const countOvertimeTimes = logsInMonth.filter(log => (log.otHours || 0) > 0).length;
-  const countLateArrive = logsInMonth.reduce((sum, log) => {
-    const stats = getLogAttendanceStats(log);
-    return sum + stats.lates + stats.earlies;
-  }, 0);
+  // Đi muộn / về sớm trong tháng: đếm theo LƯỢT (mỗi ca vi phạm là 1 lượt),
+  // tách riêng 2 loại để hiển thị chi tiết thay vì gộp thành 1 con số khó hiểu.
+  const monthLateEarly = logsInMonth.reduce(
+    (acc, log) => {
+      const stats = getLogAttendanceStats(log);
+      acc.lates += stats.lates;
+      acc.earlies += stats.earlies;
+      if (stats.lates > 0) acc.lateDays.add(log.date);
+      if (stats.earlies > 0) acc.earlyDays.add(log.date);
+      return acc;
+    },
+    { lates: 0, earlies: 0, lateDays: new Set<string>(), earlyDays: new Set<string>() }
+  );
+  const countLateArrive = monthLateEarly.lates + monthLateEarly.earlies;
 
   // Real salary multiplier
   const userBaseSalary = isAdmin
-    ? config.directorBaseSalary
+    ? (config.directorBaseSalary ?? 45000000)
     : currentUser?.role === 'pm'
-      ? config.pmBaseSalary
+      ? (config.pmBaseSalary ?? 22000000)
       : isAccountant
-        ? config.accountantBaseSalary
-        : config.staffBaseSalary;
-  const standardDailyRate = userBaseSalary / 26;
-  const calcEstimatedSalary = Math.round((standardDailyRate * countAccumulatedDays) + (countOvertimeHours * (userBaseSalary / 26 / 8) * config.otMultiplier));
+        ? (config.accountantBaseSalary ?? 18000000)
+        : (config.staffBaseSalary ?? 14000000);
+  const standardDailyRate = (userBaseSalary ?? 0) / 26;
+  const calcEstimatedSalary = Math.round(((standardDailyRate ?? 0) * countAccumulatedDays) + (countOvertimeHours * ((userBaseSalary ?? 0) / 26 / 8) * (config.otMultiplier ?? 1.5)));
 
   // Get current today slots
-  const userTodayLog = attendanceList.find(a => a.empName === currentUser.name && a.date === todayVal) || {
+  // QUAN TRỌNG: tìm theo empId (không dùng empName) để đồng bộ với logic chấm công
+  // (handleConfirmPunch) và currentLogs ở trên. Tìm theo tên dễ trượt nếu tên lệch
+  // chuẩn hóa → dòng "Hôm nay" hiển thị rỗng dù bản ghi thực sự tồn tại.
+  const userTodayLog = attendanceList.find(a =>
+    (a.empId ? a.empId === empId : a.empName === currentUser.name) && a.date === todayVal
+  ) || {
     timeInS: '--:--', timeOutS: '--:--', timeInC: '--:--', timeOutC: '--:--', timeInOT: '--:--', timeOutOT: '--:--'
+  };
+
+  /**
+   * Xác định 1 ca ĐÃ được chấm (local) chưa — kể cả khi CSDL chưa cập nhật kịp
+   * (lượt chấm đang nằm trong outbox chờ đồng bộ). Dùng để nút điểm danh KHÔNG
+   * hiện lại "VÀO/RA" gây hiểu nhầm "mình chưa điểm danh" trong lúc 25 user ồ ạt
+   * chấm và reload định kỳ (mỗi 2 phút) chưa kịp lấy dữ liệu mới từ server.
+   *
+   * Nguồn tra cứu (theo thứ tự ưu tiên):
+   *   1. State local (đã cập nhật ngay khi bấm) — có giờ chính xác.
+   *   2. Outbox (lượt đã bấm nhưng đang chờ đẩy lên DB) — có giờ đã chấm.
+   * → Tái dùng chính outbox làm "cờ đã điểm danh ca đó" lưu local, không cần
+   *   cấu trúc riêng. Trả về giờ chấm nếu đã chấm, ngược lại null.
+   */
+  const getLocalPunch = (slot: string): string | null => {
+    const localVal = userTodayLog[slot];
+    if (localVal && localVal !== '--:--' && localVal !== '') return localVal;
+    try {
+      const pending = getPendingPunches();
+      const op = pending.find(
+        o => o.record && o.record.empId === empId && o.record.date === todayVal && o.punchSlot === slot
+      );
+      if (op?.record?.[slot] && op.record[slot] !== '--:--' && op.record[slot] !== '') {
+        return op.record[slot];
+      }
+    } catch { /* ignore */ }
+    return null;
   };
 
   const isTimeBetween = (curr: number, start: number, end: number) => {
@@ -1735,6 +2246,7 @@ export default function DashboardOverview({
     // For checkout slots: time window must be open AND check-in must be completed
     const checkInVal = userTodayLog[s.checkInSlot];
     const checkInCompleted = checkInVal !== '--:--' && checkInVal !== '' && checkInVal !== undefined;
+
     return checkInCompleted;
   };
 
@@ -1779,55 +2291,142 @@ export default function DashboardOverview({
     }
   };
 
+  /**
+   * Tìm đơn giải trình chấm công của CHÍNH người đang đăng nhập cho 1 ngày + 1 ca.
+   *
+   * ⚠️ Trước đây hàm này KHÔNG lọc theo nhân viên → đơn của đồng nghiệp khác trùng
+   * ngày/ca cũng bị coi là đơn của mình, khiến nút "Báo cáo lý do" biến mất và hiện
+   * nhầm trạng thái "Đã duyệt". Nay lọc theo empId (fallback empName cho bản ghi cũ).
+   */
   const getSubReport = (date: string, shift: 'morning' | 'afternoon') => {
-    return (dashLeaves || []).find((l: any) => 
-      l.fromDate === date && 
-      l.shift === shift && 
-      (l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca')
-    );
+    return (dashLeaves || []).find((l: any) => {
+      if (l.fromDate !== date || l.shift !== shift) return false;
+      if (!isAttendanceReportType(l.type)) return false;
+      return l.empId ? l.empId === empId : l.empName === currentUser.name;
+    });
+  };
+
+  /**
+   * Phát hiện LỖI CHẤM CÔNG của 1 ngày để hiện cảnh báo trên lịch tháng.
+   *
+   * Coi là lỗi khi:
+   *   - "missing": cả ca không có lịch sử check-in nào (vắng mặt không rõ lý do)
+   *   - "faulty" : có chấm vào ca nhưng THIẾU chấm ra ca
+   *
+   * KHÔNG coi là lỗi (nên không cảnh báo):
+   *   - Ngày nghỉ tuần / nghỉ lễ, ngày trong tương lai
+   *   - Ca chưa kết thúc (hôm nay, ca chiều lúc 9h sáng thì chưa thể gọi là lỗi)
+   *   - Ngày nghỉ phép đã duyệt / bản ghi mang ký hiệu nghỉ / đã chốt công
+   *   - Ca ĐÃ GỬI báo cáo giải trình thành công (chờ duyệt hoặc đã duyệt)
+   *     → đúng yêu cầu "báo cáo thành công thì không hiển thị cảnh báo nữa".
+   *     Đơn bị TỪ CHỐI thì cảnh báo hiện lại để nhân viên báo cáo lần nữa.
+   */
+  const getDayAttendanceIssues = (dateStr: string, log: any) => {
+    const issues: { shift: 'morning' | 'afternoon'; kind: 'missing' | 'faulty'; label: string }[] = [];
+    if (!dateStr || dateStr > todayVal) return issues;
+    if (isCalendarRestDay(dateStr)) return issues;
+    if (log?.isLocked) return issues;
+
+    // Ngày TRƯỚC khi nhân viên vào làm thì không thể có chấm công → không cảnh báo.
+    // (Chỉ áp dụng khi hồ sơ lưu ngày vào làm đúng chuẩn YYYY-MM-DD.)
+    const startDate = getCurrentEmployeeProfile()?.startDate;
+    if (typeof startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startDate) && dateStr < startDate) {
+      return issues;
+    }
+
+    // Bản ghi mang ký hiệu nghỉ / được miễn → không phải lỗi chấm công
+    if (log) {
+      const symbol = normalizeTime(log.timeInS);
+      if (LEAVE_SYMBOLS.includes(symbol)) return issues;
+      if (log.status === 'excused') return issues;
+      if (log.notes?.toLowerCase().includes('nghỉ') || log.notes?.toLowerCase().includes('off')) return issues;
+    }
+
+    // Ca đã kết thúc chưa? (ngày quá khứ thì luôn rồi)
+    const shiftEnded = (shift: 'morning' | 'afternoon'): boolean => {
+      if (dateStr < todayVal) return true;
+      const endMin = timeToMinutes(
+        shift === 'morning' ? (config.morningOut || '11:30') : (config.afternoonOut || '17:00')
+      );
+      // Cộng thêm cửa sổ cho phép chấm ra muộn để không báo lỗi khi ca vừa kết thúc
+      return getCurrentMinute() >= endMin + (config.punchOutCloseAfterMinutes ?? 15);
+    };
+
+    const excused = getExcusedShifts({ ...(log || {}), date: dateStr, empId, empName: currentUser.name });
+
+    const shifts: { shift: 'morning' | 'afternoon'; inKey: string; outKey: string; name: string }[] = [
+      { shift: 'morning',   inKey: 'timeInS', outKey: 'timeOutS', name: 'Ca Sáng' },
+      { shift: 'afternoon', inKey: 'timeInC', outKey: 'timeOutC', name: 'Ca Chiều' },
+    ];
+
+    for (const s of shifts) {
+      if (!shiftEnded(s.shift)) continue;
+      if (excused[s.shift]) continue;
+
+      const hasIn = parsePunchMinutes(log?.[s.inKey]) !== null;
+      const hasOut = parsePunchMinutes(log?.[s.outKey]) !== null;
+      if (hasIn && hasOut) continue;
+
+      // Đã gửi báo cáo thành công (chờ duyệt / đã duyệt) → coi như đã xử lý
+      const report = getSubReport(dateStr, s.shift);
+      if (report && (report.status === 'pending' || report.status === 'approved')) continue;
+
+      if (hasIn && !hasOut) {
+        issues.push({ shift: s.shift, kind: 'faulty', label: `${s.name}: thiếu chấm RA ca` });
+      } else {
+        issues.push({ shift: s.shift, kind: 'missing', label: `${s.name}: không có lịch sử check-in` });
+      }
+    }
+
+    return issues;
   };
 
   const renderReportButtonAndStatus = (shift: 'morning' | 'afternoon', isFaulty: boolean, isMissing: boolean) => {
     if (!selectedDayDetail) return null;
-    if (selectedDayDetail.log.isLocked) return null;
-    if (selectedDayDetail.log.timeInS === 'OFF') return null;
-
-    const type = isFaulty ? ('Báo cáo lỗi chấm ra ca' as const) : ('Báo cáo nghỉ ca' as const);
-    const statusLabel = isFaulty 
-      ? `Thiếu điểm danh ra ca (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})` 
-      : `Vắng mặt / Không điểm danh (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`;
-    
     const subReport = getSubReport(selectedDayDetail.date, shift);
+    // Ngày đã chốt công: ẩn toàn bộ nếu KHÔNG có báo cáo liên quan. Nếu có báo cáo
+    // (đã duyệt/từ chối), vẫn hiển thị trạng thái để quản lý thấy rõ — không cho
+    // gửi hay "báo cáo lại" khi ngày đã khóa.
+    if (selectedDayDetail.log.isLocked && !subReport) return null;
+    if (selectedDayDetail.log.timeInS === 'OFF' && !subReport) return null;
+
+    const category: 'faulty' | 'missing' = isFaulty ? 'faulty' : 'missing';
+    const statusLabel = isFaulty
+      ? `Thiếu điểm danh ra ca (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`
+      : `Vắng mặt / Không điểm danh (${shift === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`;
+
 
     if (subReport) {
       if (subReport.status === 'pending') {
         return (
-          <span className="inline-flex bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
+          <span className="inline-flex bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
             ⏳ Chờ duyệt
           </span>
         );
       } else if (subReport.status === 'approved') {
         return (
-          <span className="inline-flex bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
+          <span className="inline-flex bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider">
             ✅ Đã duyệt
           </span>
         );
       } else if (subReport.status === 'rejected') {
         return (
           <div className="flex flex-col sm:flex-row items-center gap-1.5 shrink-0 mt-1">
-            <span className="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
+            <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
               ❌ Bị từ chối
             </span>
-            {isShiftEnded30Min(shift) ? (
-              <button
-                type="button"
-                onClick={() => handleTriggerReport(shift, type, statusLabel)}
-                className="bg-slate-800 hover:bg-slate-755 text-rose-405 border border-rose-500/20 px-2 py-0.5 rounded text-[9px] font-black cursor-pointer ml-1"
-              >
-                🔄 Báo cáo lại
-              </button>
-            ) : (
-              <span className="text-[8px] text-slate-500 italic block mt-0.5">🔒 Đợi ca kết thúc 30p</span>
+            {selectedDayDetail.log.isLocked ? null : (
+              isShiftEnded30Min(shift) ? (
+                <button
+                  type="button"
+                  onClick={() => handleTriggerReport(shift, category, statusLabel)}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded text-[9px] font-black cursor-pointer ml-1"
+                >
+                  🔄 Báo cáo lại
+                </button>
+              ) : (
+                <span className="text-[8px] text-slate-500 italic block mt-0.5">🔒 Đợi ca kết thúc 30p</span>
+              )
             )}
           </div>
         );
@@ -1839,7 +2438,7 @@ export default function DashboardOverview({
       return (
         <button
           type="button"
-          onClick={() => handleTriggerReport(shift, type, statusLabel)}
+          onClick={() => handleTriggerReport(shift, category, statusLabel)}
           className="bg-amber-600 hover:bg-amber-500 hover:text-white px-2.5 py-1 rounded transition-all active:scale-95 cursor-pointer flex items-center gap-1 text-[10px] font-black text-white"
         >
           📝 Báo cáo lý do
@@ -1854,9 +2453,12 @@ export default function DashboardOverview({
     }
   };
   
-  const handleTriggerReport = (shift: 'morning' | 'afternoon', type: 'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca', currentStatusText: string) => {
+  const handleTriggerReport = (shift: 'morning' | 'afternoon', category: 'faulty' | 'missing', currentStatusText: string) => {
     setReportShift(shift);
-    setReportType(type);
+    setReportCategory(category);
+    // Loại mặc định: lỗi chấm ra ca (faulty) hoặc nghỉ ca (missing).
+    // Với ca missing, người dùng có thể đổi sang "Báo cáo lỗi hệ thống chấm công" trong form.
+    setReportType(category === 'faulty' ? 'Báo cáo lỗi chấm ra ca' : 'Báo cáo nghỉ ca');
     setReportStatusText(currentStatusText);
     if (!reportApprover) {
       const approvers = getApproversList();
@@ -1926,6 +2528,9 @@ export default function DashboardOverview({
               {digitalDate || 'THỨ BẢY, 6 THÁNG 6'}
             </div>
           </div>
+
+          {/* Time-travel debug controls [REMOVED] */}
+
           {/* SLOTS CHẤM CÔNG THEO TỪNG CA (MỖI CA MỘT HÀNG GỌN GÀNG, TRỰC QUAN) */}
           <div className="space-y-4" id="shift-rows-container">
             
@@ -1934,24 +2539,27 @@ export default function DashboardOverview({
               {
                 key: 'morning', slotIn: 'timeInS', slotOut: 'timeOutS',
                 configIn: 'morningIn', configOut: 'morningOut',
-                icon: Sun, label: 'Ca Sáng (Ca 1)', color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
+                icon: Sun, label: 'Ca Sáng (Ca 1)', color: 'text-sky-700 bg-sky-50 border-sky-200',
               },
               {
                 key: 'afternoon', slotIn: 'timeInC', slotOut: 'timeOutC',
                 configIn: 'afternoonIn', configOut: 'afternoonOut',
-                icon: Compass, label: 'Ca Chiều (Ca 2)', color: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+                icon: Compass, label: 'Ca Chiều (Ca 2)', color: 'text-amber-700 bg-amber-50 border-amber-200',
               },
               {
                 key: 'overtime', slotIn: 'timeInOT', slotOut: 'timeOutOT',
                 configIn: 'overtimeIn', configOut: 'overtimeOut',
-                icon: Moon, label: 'Tăng ca tối (OT)', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+                icon: Moon, label: 'Tăng ca tối (OT)', color: 'text-purple-700 bg-purple-50 border-purple-200',
               },
             ].map((item) => {
               const { key, slotIn, slotOut, configIn, configOut, icon: Icon, label, color } = item;
               const inVal = userTodayLog[slotIn];
               const outVal = userTodayLog[slotOut];
-              const inCompleted = inVal !== '--:--' && inVal !== '';
-              const outCompleted = outVal !== '--:--' && outVal !== '';
+              // ĐÃ CHẤM ca này chưa? Ưu tiên state local, FALLBACK xuống outbox
+              // (lượt chấm đã bấm nhưng CSDL chưa cập nhật kịp) → vẫn coi là đã chấm
+              // để nút không hiện lại "VÀO/RA" gây hiểu nhầm. Xem getLocalPunch.
+              const inCompleted = !!getLocalPunch(slotIn);
+              const outCompleted = !!getLocalPunch(slotOut);
               const shiftActive = isShiftActive(key as any);
 
               // ─── Tính toán trạng thái nút theo khung giờ cấu hình ───
@@ -1968,7 +2576,7 @@ export default function DashboardOverview({
 
               if (!inCompleted) {
                 // Chưa vào ca → button VÀO
-                if (isSlotActive(slotIn)) {
+                if (isSlotActive(slotIn) || isSlotActive(slotOut)) {
                   // Trong khung giờ → cho phép chấm
                   btnLabel = key === 'overtime' ? '🌙 VÀO TĂNG CA' : `🟢 VÀO ${key === 'morning' ? 'SÁNG' : 'CHIỀU'}`;
                   btnSub = '🕐 Trong khung giờ';
@@ -2013,10 +2621,14 @@ export default function DashboardOverview({
                   isLockedState = true;
                 }
               } else {
-                // Cả vào + ra đều đã chấm
+                // Cả vào + ra đều đã chấm - chuẩn hóa thời gian hiển thị
+                // Ưu tiên giờ từ getLocalPunch (local hoặc outbox) để hiện đúng giờ
+                // kể cả khi attendanceList vừa bị reload ghi đè bằng dữ liệu cũ.
+                const displayIn = normalizeTime(getLocalPunch(slotIn) ?? inVal);
+                const displayOut = normalizeTime(getLocalPunch(slotOut) ?? outVal);
                 btnLabel = key === 'overtime'
-                  ? `✅ Tăng ca: ${inVal} → ${outVal}`
-                  : `✅ ${key === 'morning' ? 'Sáng' : 'Chiều'}: ${inVal} → ${outVal}`;
+                  ? `✅ Tăng ca: ${displayIn} → ${displayOut}`
+                  : `✅ ${key === 'morning' ? 'Sáng' : 'Chiều'}: ${displayIn} → ${displayOut}`;
                 btnSub = 'Đã chốt';
                 btnAction = '';
                 isDisabled = true;
@@ -2027,64 +2639,60 @@ export default function DashboardOverview({
               return (
                 <div
                   key={key}
-                  className={`rounded-2xl p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4 transition-all duration-300 border ${
+                  className={`rounded-2xl p-4 transition-all duration-300 border-2 ${
                     shiftActive
-                      ? 'bg-emerald-950/15 border-emerald-500/80 ring-2 ring-emerald-500/35 shadow-[0_0_15px_rgba(16,185,129,0.35)]'
-                      : 'bg-slate-900 border-slate-800/80 hover:border-slate-700/60'
+                      ? 'bg-white border-emerald-500 shadow-emerald-500/20 shadow-[0_0_20px_0_var(--tw-shadow-color)]'
+                      : 'bg-slate-100 border-transparent opacity-70'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center shrink-0`}>
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                          {label === 'Ca Sáng (Ca 1)' ? '🌅' : label === 'Ca Chiều (Ca 2)' ? '☀️' : '🌙'} {label}
-                        </span>
-                        {shiftActive && (
-                          <span className="bg-emerald-500 text-slate-950 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest flex items-center gap-1 animate-pulse">
-                            <span className="w-1 h-1 rounded-full bg-slate-950 animate-ping"></span>
-                            HIỆN TẠI
-                          </span>
-                        )}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center shrink-0`}>
+                        <Icon className="w-5 h-5" />
                       </div>
-                      <span className={`text-lg font-black font-mono block leading-none mt-1.5 ${
-                        key === 'morning' ? 'text-sky-400' : key === 'afternoon' ? 'text-amber-450' : 'text-purple-400'
-                      }`}>
-                        {(config as any)[configIn] || (key === 'morning' ? '07:30' : key === 'afternoon' ? '13:00' : '17:45')}
-                        {' — '}
-                        {(config as any)[configOut] || (key === 'morning' ? '11:30' : key === 'afternoon' ? '17:00' : '20:45')}
-                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] font-black uppercase tracking-wider ${shiftActive ? 'text-slate-700' : 'text-slate-500'}`}>
+                            {label === 'Ca Sáng (Ca 1)' ? '🌅' : label === 'Ca Chiều (Ca 2)' ? '☀️' : '🌙'} {label}
+                          </span>
+                          {shiftActive && (
+                            <span className="bg-emerald-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest flex items-center gap-1 animate-pulse">
+                              <span className="w-1 h-1 rounded-full bg-white/50 animate-ping"></span>
+                              HIỆN TẠI
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-lg font-black font-mono block leading-none mt-1.5 ${
+                          key === 'morning' ? (shiftActive ? 'text-sky-600' : 'text-sky-500/50') :
+                          key === 'afternoon' ? (shiftActive ? 'text-amber-600' : 'text-amber-500/50') :
+                          (shiftActive ? 'text-purple-600' : 'text-purple-500/50')
+                        }`}>
+                          {(config as any)[configIn] || (key === 'morning' ? '07:30' : key === 'afternoon' ? '13:00' : '17:45')}
+                          {' — '}
+                          {(config as any)[configOut] || (key === 'morning' ? '11:30' : key === 'afternoon' ? '17:00' : '20:45')}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* SINGLE CONTEXT-AWARE BUTTON */}
-                  <div className="sm:w-80 w-full shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (btnAction) handlePunchClick(btnAction);
-                      }}
-                      disabled={isDisabled}
-                      aria-disabled={isDisabled}
-                      className={`w-full py-3 px-4 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all group ${
-                        isDisabled
-                          ? 'bg-slate-950/50 border-slate-800 text-slate-500 cursor-not-allowed pointer-events-none select-none opacity-70'
-                          : shiftActive
-                            ? 'bg-slate-950 hover:bg-slate-850 border-slate-700 text-slate-200 cursor-pointer hover:scale-[1.01] active:scale-[0.99] hover:border-sky-500/40'
-                            : 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-pointer hover:text-slate-200 hover:border-amber-400/40 hover:bg-slate-900'
-                      }`}
-                    >
-                      <span className={`text-[11px] font-black uppercase tracking-wider ${
-                        isDisabled ? '' : 'group-hover:text-white'
-                      }`}>{btnLabel}</span>
-                      <span className={`text-[8px] font-bold ${
-                        isDisabled
-                          ? (isLockedState && btnSub.includes('Hết giờ') ? 'text-rose-500/70' : 'text-amber-500/70')
-                          : 'text-emerald-400/70'
-                      }`}>{btnSub}</span>
-                    </button>
+                     <div className="w-full sm:w-80 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (btnAction) handlePunchClick(btnAction);
+                        }}
+                        disabled={isDisabled}
+                        aria-disabled={isDisabled}
+                        className={`w-full py-3 px-4 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all group ${
+                          isDisabled
+                            ? (inCompleted && outCompleted)
+                               ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' // Punched
+                               : 'bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed' // Disabled
+                            : 'bg-emerald-500 hover:bg-emerald-600 border-emerald-600 text-white cursor-pointer shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-[0.98]' // Active
+                        }`}
+                      >
+                        <span className={`text-sm font-black uppercase tracking-wider`}>{btnLabel}</span>
+                        <span className={`text-[10px] font-bold ${isDisabled ? 'text-slate-500' : 'text-emerald-100'}`}>{btnSub}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2116,9 +2724,24 @@ export default function DashboardOverview({
                 <span className="text-sm font-black text-amber-400 font-mono">{countOvertimeHours}h ({countOvertimeTimes} lần)</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div
+                className="flex items-center justify-between"
+                title={
+                  countLateArrive === 0
+                    ? `Tháng ${currentMonthYear}: không có lượt vào muộn / về sớm nào.`
+                    : `Tháng ${currentMonthYear}: vào muộn ${monthLateEarly.lates} lượt (${monthLateEarly.lateDays.size} ngày), về sớm ${monthLateEarly.earlies} lượt (${monthLateEarly.earlyDays.size} ngày).\n` +
+                      `Dung sai: muộn Sáng ${config.allowedLateMorning ?? config.allowedLateMinutes ?? 15} phút, Chiều ${config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15} phút, sớm ${config.punchOutOpenBeforeMinutes ?? 15} phút. Không tính ngày nghỉ tuần/lễ và ca đã được duyệt đơn.`
+                }
+              >
                 <span className="text-xs text-slate-400 font-bold">VÀO MUỘN / VỀ SỚM</span>
-                <span className="text-sm font-black text-rose-400 font-mono">{countLateArrive} lần</span>
+                <span className={`text-sm font-black font-mono ${countLateArrive > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {countLateArrive} lần
+                  {countLateArrive > 0 && (
+                    <span className="text-[9px] text-slate-500 font-bold ml-1.5">
+                      ({monthLateEarly.lates} muộn / {monthLateEarly.earlies} sớm)
+                    </span>
+                  )}
+                </span>
               </div>
 
               <div className="flex items-center justify-between">
@@ -2178,8 +2801,8 @@ export default function DashboardOverview({
                       } else if (log.timeInS && log.timeInS !== '--:--' && log.timeInS !== '') {
                         const checkInMin = timeToMinutes(log.timeInS);
                         const limitMin = timeToMinutes(config.morningIn || '07:30');
-                        const allowedLates = config.allowedLateMinutes ?? 15;
-                        if (checkInMin > (limitMin + allowedLates)) {
+                        const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+                        if (checkInMin > (limitMin + allowedLateMorning)) {
                           dots.push({ color: 'bg-amber-500', label: 'Sáng: Muộn' });
                         } else {
                           dots.push({ color: 'bg-emerald-500', label: 'Sáng: Đúng giờ' });
@@ -2196,8 +2819,8 @@ export default function DashboardOverview({
                       } else if (log.timeInC && log.timeInC !== '--:--' && log.timeInC !== '') {
                         const checkInMin = timeToMinutes(log.timeInC);
                         const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                        const allowedLates = config.allowedLateMinutes ?? 15;
-                        if (checkInMin > (limitMin + allowedLates)) {
+                        const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+                        if (checkInMin > (limitMin + allowedLateAfternoon)) {
                           dots.push({ color: 'bg-amber-500', label: 'Chiều: Muộn' });
                         } else {
                           dots.push({ color: 'bg-emerald-500', label: 'Chiều: Đúng giờ' });
@@ -2230,8 +2853,7 @@ export default function DashboardOverview({
                     cells.push(<div key={`empty-${i}`} className="h-9 rounded bg-slate-950/20"></div>);
                   }
 
-                  const holidayListRaw = localStorage.getItem('hl_hrm_holidays_v3');
-                  const savedHolidays: { id: string; date: string; name: string }[] = holidayListRaw ? JSON.parse(holidayListRaw) : [];
+                  const savedHolidays: { id: string; date: string; name: string }[] = dashHolidays || [];
                   
                   for (let d = 1; d <= daysInM; d++) {
                     const formattedD = String(d).padStart(2, '0');
@@ -2247,16 +2869,16 @@ export default function DashboardOverview({
                     const weekdaysVN = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
                     const weekdayName = weekdaysVN[dObjCell.getDay()];
 
-                    let cellClass = isWeekendDay 
-                      ? "bg-rose-950/20 text-rose-300 border border-dashed border-rose-900/30 hover:bg-rose-950/25" 
+                    let cellClass = isWeekendDay
+                      ? "bg-rose-50 text-rose-600 border border-dashed border-rose-200 hover:bg-rose-100"
                       : "bg-slate-950/50 text-slate-500 hover:bg-slate-850/50";
                     let titleText = isWeekendDay ? `Ngày ${d}/${m}: ${weekdayName} (Ngày nghỉ tuần)` : `Ngày ${d}/${m}: Chưa có dữ liệu`;
                     
                     if (holidayMatch) {
-                      cellClass = "bg-amber-500/15 text-yellow-400 border border-amber-500/35 hover:bg-amber-500/25 font-bold";
+                      cellClass = "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-bold";
                       titleText = `Ngày ${d}/${m}: Nghỉ Lễ (${holidayMatch.name})`;
                       if (log && ((log.timeInOT && log.timeInOT !== '--:--') || (log.otHours && log.otHours > 0))) {
-                        cellClass = "bg-purple-500/20 text-purple-350 border border-purple-550/35 hover:bg-purple-500/30 font-bold";
+                        cellClass = "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 font-bold";
                         titleText = `Ngày ${d}/${m}: Đi làm Lễ OT (${holidayMatch.name}) - ${log.otHours || 0}h`;
                       }
                     } else if (log) {
@@ -2268,18 +2890,18 @@ export default function DashboardOverview({
                       
                       if (isLeaveDay) {
                         cellClass = isWeekendDay
-                          ? "bg-rose-900/25 text-rose-300 border border-rose-500/40 hover:bg-rose-900/30 font-bold"
-                          : "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25";
+                          ? "bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200 font-bold"
+                          : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100";
                         const sSymbol = log.leaveSymbol || (['PN', 'P', 'KP', 'NL', 'T', 'C', 'OFF'].includes(log.timeInS) ? log.timeInS : 'P');
                         titleText = `Ngày ${d}/${m}: Nghỉ phép được duyệt (${sSymbol})`;
                       } else if (hasOT) {
-                        cellClass = "bg-purple-500/15 text-purple-350 border border-purple-550/30 hover:bg-purple-500/25";
+                        cellClass = "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100";
                         titleText = `Ngày ${d}/${m}: Tăng ca OT (${log.otHours} giờ)`;
                       } else if (isLate) {
-                        cellClass = "bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25";
+                        cellClass = "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100";
                         titleText = `Ngày ${d}/${m}: Đi làm muộn`;
                       } else if (hasTimeIn) {
-                        cellClass = "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25";
+                        cellClass = "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100";
                         titleText = `Ngày ${d}/${m}: Đi làm đúng giờ`;
                       }
                     } else {
@@ -2288,22 +2910,22 @@ export default function DashboardOverview({
                       if (dateStr < todayVal) {
                         const isAWeekend = activeWeekends.includes(dayOfWeek);
                         if (!isAWeekend) {
-                          cellClass = "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 font-bold";
+                          cellClass = "bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200 font-bold";
                           titleText = `Ngày ${d}/${m}: Nghỉ không phép / Vắng mặt`;
                         } else {
-                          cellClass = "bg-rose-950/25 text-rose-400/90 border border-rose-800/40 hover:bg-rose-950/35 font-medium";
+                          cellClass = "bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 font-medium";
                           titleText = `Ngày ${d}/${m}: ${weekdayName} (Ngày nghỉ tuần)`;
                         }
                       } else if (dateStr === todayVal) {
                         const isAWeekend = activeWeekends.includes(dayOfWeek);
                         cellClass = isAWeekend
-                          ? "border-2 border-dashed border-rose-500 bg-rose-950/30 text-rose-405 font-black animate-pulse"
-                          : "border-2 border-dashed border-sky-500/50 bg-sky-950/20 text-sky-400 animate-pulse font-extrabold";
+                          ? "border-2 border-dashed border-rose-500 bg-rose-50 text-rose-700 font-black animate-pulse"
+                          : "border-2 border-dashed border-sky-500 bg-sky-50 text-sky-700 animate-pulse font-extrabold";
                         titleText = `Ngày ${d}/${m}: Hôm nay`;
                       } else {
                         const isAWeekend = activeWeekends.includes(dayOfWeek);
                         if (isAWeekend) {
-                          cellClass = "bg-rose-950/15 text-rose-400/60 border border-dashed border-rose-900/25 hover:bg-rose-950/20 font-medium";
+                          cellClass = "bg-rose-50/60 text-rose-400 border border-dashed border-rose-200 hover:bg-rose-50 font-medium";
                           titleText = `Ngày ${d}/${m}: ${weekdayName} (Ngày nghỉ tuần)`;
                         } else {
                           titleText = `Ngày ${d}/${m}: Tương lai`;
@@ -2312,29 +2934,72 @@ export default function DashboardOverview({
                     }
                     
                     const dayDots = getDayDots(dateStr, log);
-                    
-                    const isClickable = !!log;
+
+                    // ─── Cảnh báo lỗi chấm công (thiếu check-in / thiếu chấm ra ca) ───
+                    // Ẩn ngay khi ca đó đã gửi báo cáo giải trình thành công.
+                    const dayIssues = getDayAttendanceIssues(dateStr, log);
+                    const hasIssue = dayIssues.length > 0;
+                    if (hasIssue) {
+                      titleText += `\n⚠️ Lỗi chấm công:\n• ${dayIssues.map(i => i.label).join('\n• ')}\n→ Nhấp vào ngày để gửi báo cáo giải trình.`;
+                    }
+
+                    // Ngày có lỗi nhưng KHÔNG có bản ghi (vắng mặt hoàn toàn) vẫn phải mở
+                    // được modal, nếu không người dùng thấy cảnh báo mà không có cách xử lý.
+                    const isClickable = !!log || hasIssue;
                     const isToday = dateStr === todayVal;
-                    
+
                     cells.push(
                       <div
                         key={`day-${d}`}
                         onClick={() => {
                           if (log) {
-                            setSelectedDayDetail({ date: dateStr, log, holidayName: holidayMatch?.name });
+                            // Normalize time fields before passing to detail view
+                            const normalizedLog = normalizeRecord(log);
+                            setSelectedDayDetail({ date: dateStr, log: normalizedLog, holidayName: holidayMatch?.name });
+                          } else if (hasIssue) {
+                            // Bản ghi rỗng để modal hiển thị "Không có lịch sử check-in"
+                            // kèm nút báo cáo lý do cho cả 2 ca.
+                            setSelectedDayDetail({
+                              date: dateStr,
+                              log: {
+                                id: `AT-${empId}-${dateStr.replace(/-/g, '')}`,
+                                empId,
+                                empName: currentUser.name,
+                                date: dateStr,
+                                timeInS: '--:--', timeOutS: '--:--',
+                                timeInC: '--:--', timeOutC: '--:--',
+                                timeInOT: '--:--', timeOutOT: '--:--',
+                                status: 'invalid',
+                                otHours: 0,
+                                notes: 'Không có dữ liệu chấm công cho ngày này.',
+                                isLocked: false,
+                              },
+                              holidayName: holidayMatch?.name,
+                            });
                           }
                         }}
                         className={`h-12 flex flex-col items-center justify-between py-1 rounded text-[10px] font-mono transition-all relative ${cellClass} ${
-                          isClickable 
-                            ? 'cursor-pointer hover:bg-emerald-900/35 hover:scale-105 active:scale-95 duration-100 border-2 border-emerald-500/10' 
+                          isClickable
+                            ? 'cursor-pointer hover:bg-emerald-100 hover:scale-105 active:scale-95 duration-100 border-2 border-emerald-200'
                             : 'cursor-help'
                         } ${
+                          hasIssue ? 'ring-1 ring-amber-500/60' : ''
+                        } ${
                           isToday
-                            ? 'ring-2 ring-emerald-500 ring-offset-1 ring-offset-slate-900 shadow-[0_0_15px_rgba(16,185,129,0.75)] border-emerald-400/80 z-20 scale-102 font-black'
+                            ? 'ring-2 ring-emerald-500 ring-offset-1 ring-offset-white shadow-[0_0_15px_rgba(16,185,129,0.35)] border-emerald-400 z-20 scale-102 font-black'
                             : ''
                         }`}
-                        title={isClickable ? `${titleText} - Nhấp để xem chi tiết ca 1, ca 2, đi muộn, tăng ca` : titleText}
+                        title={isClickable ? `${titleText}\n— Nhấp để xem chi tiết ca 1, ca 2, đi muộn, tăng ca` : titleText}
                       >
+                        {hasIssue && (
+                          <span
+                            className="absolute -top-1 -left-1 z-30 flex items-center justify-center w-[13px] h-[13px] rounded-full bg-amber-500 text-slate-950 text-[8px] font-black shadow-md shadow-amber-500/40 animate-pulse"
+                            title={`Lỗi chấm công:\n• ${dayIssues.map(i => i.label).join('\n• ')}`}
+                            aria-label={`Ngày ${d} có lỗi chấm công chưa báo cáo`}
+                          >
+                            !
+                          </span>
+                        )}
                         {holidayMatch ? (
                           <span className="absolute top-0 right-0 text-[8px] text-amber-305 font-semibold bg-amber-950 px-0.5 rounded-bl border-b border-l border-amber-800/60 leading-none h-[11px] flex items-center uppercase tracking-tight z-10" title={`Nghỉ Lễ: ${holidayMatch.name}`}>
                             L
@@ -2381,12 +3046,48 @@ export default function DashboardOverview({
                 })()}
               </div>
 
-              <div className="mt-2 text-[9px] font-mono border-t border-slate-800/40 pt-2 shrink-0 flex items-center justify-center gap-1.5 text-emerald-400">
-                <span className="h-2 w-2 relative flex shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span className="font-bold">🟢 Click vào ô xanh lá (số công) để xem chi tiết ca 1, ca 2, đi muộn, tăng ca.</span>
+              <div className="mt-2 text-[9px] font-mono border-t border-slate-800/40 pt-2 shrink-0 space-y-1.5">
+                <div className="flex items-center justify-center gap-1.5 text-emerald-400">
+                  <span className="h-2 w-2 relative flex shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="font-bold">🟢 Click vào ô xanh lá (số công) để xem chi tiết ca 1, ca 2, đi muộn, tăng ca.</span>
+                </div>
+
+                {/* Chú thích + tổng hợp cảnh báo lỗi chấm công chưa báo cáo trong tháng */}
+                {(() => {
+                  const daysInMonth = new Date(
+                    parseInt(todayVal.split('-')[0], 10),
+                    parseInt(todayVal.split('-')[1], 10),
+                    0
+                  ).getDate();
+                  const [yy, mm] = todayVal.split('-');
+                  let errorDays = 0;
+                  for (let dd = 1; dd <= daysInMonth; dd++) {
+                    const ds = `${yy}-${mm}-${String(dd).padStart(2, '0')}`;
+                    if (ds > todayVal) break;
+                    const lg = currentLogs.find(a => a.date === ds);
+                    if (getDayAttendanceIssues(ds, lg).length > 0) errorDays++;
+                  }
+                  if (errorDays === 0) {
+                    return (
+                      <div className="flex items-center justify-center gap-1.5 text-emerald-500/80">
+                        <span className="font-bold">✅ Không có ngày nào bị lỗi chấm công trong tháng này.</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center justify-center gap-1.5 text-amber-400 text-center leading-relaxed">
+                      <span className="flex items-center justify-center w-[13px] h-[13px] rounded-full bg-amber-500 text-slate-950 text-[8px] font-black shrink-0">
+                        !
+                      </span>
+                      <span className="font-bold">
+                        {errorDays} ngày bị lỗi chấm công chưa báo cáo — nhấp vào ngày có dấu ! để gửi giải trình.
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -2434,6 +3135,95 @@ export default function DashboardOverview({
 
         </div>
 
+      </div>
+
+      {/* ─── CÔNG TÁC PHÍ CỦA TÔI (THEO DÕI XÉT DUYỆT) ───────────────────────── */}
+      <div className="bg-white border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.03)] rounded-2xl p-4 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-amber-500" />
+              Công Tác Phí Của Tôi
+            </h3>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Theo dõi trạng thái xét duyệt công tác phí của bạn.
+            </p>
+          </div>
+
+          {/* Bộ lọc trạng thái CTP */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {([
+              { key: 'all', label: 'Tất cả' },
+              { key: 'pending', label: '⏳ Chờ duyệt' },
+              { key: 'approved', label: '✅ Đã duyệt' },
+              { key: 'rejected', label: '❌ Từ chối' },
+            ] as const).map(f => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setCtpStatusFilter(f.key)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                  ctpStatusFilter === f.key
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {ctpList.length === 0 ? (
+          <div className="py-6 text-center text-slate-500 italic text-[11px]">
+            {ctpStatusFilter === 'all' ? 'Chưa có công tác phí nào.' : 'Không có công tác phí nào ở trạng thái này.'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px] border-collapse min-w-[720px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10px] text-slate-500 uppercase tracking-wider font-extrabold">
+                  <th className="py-2 px-2">Mã</th>
+                  <th className="py-2 px-2">Người Nhận</th>
+                  <th className="py-2 px-2">Nội Dung</th>
+                  <th className="py-2 px-2">Nhiệm Vụ</th>
+                  <th className="py-2 px-2">Trạng Thái</th>
+                  <th className="py-2 px-2 text-right">Số Tiền</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {ctpList.map((item: any, idx: number) => (
+                  <tr key={item.rowId || item.id || idx} className="hover:bg-slate-50 transition">
+                    <td className="py-2 px-2 font-mono font-bold text-amber-600">{item.code || item.id}</td>
+                    <td className="py-2 px-2 font-semibold text-slate-700">{item.employeeName}</td>
+                    <td className="py-2 px-2 text-slate-600 max-w-[180px] truncate" title={item.content}>{item.content}</td>
+                    <td className="py-2 px-2 text-slate-500 max-w-[160px] truncate" title={item.missionName}>{item.missionName}</td>
+                    <td className="py-2 px-2">
+                      {item.status === 'approved' || item.status === 'completed' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {ctpStatusLabel(item.status)}
+                        </span>
+                      ) : item.status === 'pending' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          {ctpStatusLabel(item.status)}
+                        </span>
+                      ) : item.status === 'rejected' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-red-50 text-red-600 border border-red-200">
+                          {ctpStatusLabel(item.status)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono font-extrabold text-slate-800">
+                      {Number(item.amount || 0).toLocaleString('vi-VN')} đ
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* MODAL CHI TIẾT CHẤM CÔNG CỦA NGÀY (KHI CLICK VÀO NGÀY CÓ LOG) */}
@@ -2484,19 +3274,23 @@ export default function DashboardOverview({
                   <span className="text-[10px] text-slate-400 font-mono">Định mức: {config.morningIn} - {config.morningOut}</span>
                 </div>
                 {(() => {
-                  if (selectedDayDetail.log.timeInS === 'OFF') {
+                  const log = selectedDayDetail.log;
+                  const timeInS = normalizeTime(log.timeInS);
+                  const timeOutS = normalizeTime(log.timeOutS);
+
+                  if (log.timeInS === 'OFF') {
                     return <div className="text-rose-455 font-bold text-center py-1">Đăng ký nghỉ phép / Off</div>;
                   }
 
-                  const hasInS = !(!selectedDayDetail.log.timeInS || selectedDayDetail.log.timeInS === '--:--' || selectedDayDetail.log.timeInS === '');
-                  const hasOutS = !(!selectedDayDetail.log.timeOutS || selectedDayDetail.log.timeOutS === '--:--' || selectedDayDetail.log.timeOutS === '');
+                  const hasInS = !(!log.timeInS || log.timeInS === '--:--' || log.timeInS === '');
+                  const hasOutS = !(!log.timeOutS || log.timeOutS === '--:--' || log.timeOutS === '');
 
                   const isMissingS = !hasInS && !hasOutS;
                   const isFaultyS = hasInS && !hasOutS;
 
                   if (isMissingS) {
                     return (
-                      <div className="flex flex-col items-center justify-center p-3 bg-red-950/10 border border-dashed border-red-900/20 rounded-xl space-y-2 py-2.5">
+                      <div className="flex flex-col items-center justify-center p-3 bg-red-50 border border-dashed border-red-200 rounded-xl space-y-2 py-2.5">
                         <span className="text-slate-500 italic text-[11px]">Không có lịch sử check-in Ca Sáng</span>
                         {renderReportButtonAndStatus('morning', false, true)}
                       </div>
@@ -2508,12 +3302,12 @@ export default function DashboardOverview({
                       <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono items-center">
                         <div>
                           <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                          <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInS}</strong>
+                          <strong className="text-white font-mono text-sm">{timeInS}</strong>
                           {(() => {
-                            const inMin = timeToMinutes(selectedDayDetail.log.timeInS);
+                            const inMin = timeToMinutes(timeInS);
                             const limitMin = timeToMinutes(config.morningIn || '07:30');
-                            const allowedLates = config.allowedLateMinutes ?? 15;
-                            return inMin > (limitMin + allowedLates) ? (
+                            const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+                            return inMin > (limitMin + allowedLateMorning) ? (
                               <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                             ) : (
                               <span className="text-emerald-450 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -2537,12 +3331,12 @@ export default function DashboardOverview({
                     <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono">
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInS}</strong>
+                        <strong className="text-white font-mono text-sm">{timeInS}</strong>
                         {(() => {
-                          const inMin = timeToMinutes(selectedDayDetail.log.timeInS);
+                          const inMin = timeToMinutes(timeInS);
                           const limitMin = timeToMinutes(config.morningIn || '07:30');
-                          const allowedLates = config.allowedLateMinutes ?? 15;
-                          return inMin > (limitMin + allowedLates) ? (
+                          const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
+                          return inMin > (limitMin + allowedLateMorning) ? (
                             <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                           ) : (
                             <span className="text-emerald-450 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -2551,7 +3345,7 @@ export default function DashboardOverview({
                       </div>
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeOutS || '--:--'}</strong>
+                        <strong className="text-white font-mono text-sm">{timeOutS || '--:--'}</strong>
                       </div>
                     </div>
                   );
@@ -2561,27 +3355,53 @@ export default function DashboardOverview({
                   <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 border-t border-slate-800/60 animate-fadeIn text-left mt-2">
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Loại đơn báo cáo</label>
-                      <input
-                        type="text"
-                        value={reportType}
-                        readOnly
-                        className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
-                      />
+                      {reportCategory === 'missing' ? (
+                        <select
+                          value={reportType}
+                          onChange={(e) => setReportType(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none font-extrabold cursor-pointer"
+                        >
+                          <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
+                          <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={reportType}
+                          readOnly
+                          className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
+                        />
+                      )}
                     </div>
-                    
+
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
-                      <select
-                        value={reportApprover}
-                        onChange={(e) => setReportApprover(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
-                      >
-                        {getApproversList().map((ap, idx) => (
-                          <option key={idx} value={ap.name} className="bg-slate-900">
-                            {ap.name} ({ap.role})
-                          </option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const configuredLeaveApprover = getConfiguredApprover('leave');
+                        const useLockedApprover = isAttendanceReportType(reportType);
+                        if (configuredLeaveApprover && useLockedApprover) {
+                          const approverPos = configuredLeaveApprover.position ? ` (${configuredLeaveApprover.position})` : '';
+                          return (
+                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
+                              <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
+                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <select
+                            value={reportApprover}
+                            onChange={(e) => setReportApprover(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
+                          >
+                            {getApproversList().map((ap, idx) => (
+                              <option key={idx} value={ap.name} className="bg-slate-900">
+                                {ap.name} ({ap.role})
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
 
                     <div>
@@ -2626,19 +3446,23 @@ export default function DashboardOverview({
                 </div>
                 
                 {(() => {
-                  if (selectedDayDetail.log.timeInS === 'OFF') {
+                  const log = selectedDayDetail.log;
+                  const timeInC = normalizeTime(log.timeInC);
+                  const timeOutC = normalizeTime(log.timeOutC);
+
+                  if (log.timeInS === 'OFF') {
                     return <div className="text-rose-455 font-bold text-center py-1">Đăng ký nghỉ phép / Off</div>;
                   }
 
-                  const hasInC = !(!selectedDayDetail.log.timeInC || selectedDayDetail.log.timeInC === '--:--' || selectedDayDetail.log.timeInC === '');
-                  const hasOutC = !(!selectedDayDetail.log.timeOutC || selectedDayDetail.log.timeOutC === '--:--' || selectedDayDetail.log.timeOutC === '');
+                  const hasInC = !(!log.timeInC || log.timeInC === '--:--' || log.timeInC === '');
+                  const hasOutC = !(!log.timeOutC || log.timeOutC === '--:--' || log.timeOutC === '');
 
                   const isMissingC = !hasInC && !hasOutC;
                   const isFaultyC = hasInC && !hasOutC;
 
                   if (isMissingC) {
                     return (
-                      <div className="flex flex-col items-center justify-center p-3 bg-red-950/10 border border-dashed border-red-900/20 rounded-xl space-y-2 py-2.5">
+                      <div className="flex flex-col items-center justify-center p-3 bg-red-50 border border-dashed border-red-200 rounded-xl space-y-2 py-2.5">
                         <span className="text-slate-505 italic text-[11px]">Không có lịch sử check-in Ca Chiều</span>
                         {renderReportButtonAndStatus('afternoon', false, true)}
                       </div>
@@ -2650,12 +3474,12 @@ export default function DashboardOverview({
                       <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono items-center">
                         <div>
                           <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                          <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInC}</strong>
+                          <strong className="text-white font-mono text-sm">{timeInC}</strong>
                           {(() => {
-                            const inMin = timeToMinutes(selectedDayDetail.log.timeInC);
+                            const inMin = timeToMinutes(timeInC);
                             const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                            const allowedLates = config.allowedLateMinutes ?? 15;
-                            return inMin > (limitMin + allowedLates) ? (
+                            const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+                            return inMin > (limitMin + allowedLateAfternoon) ? (
                               <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                             ) : (
                               <span className="text-emerald-455 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -2679,12 +3503,12 @@ export default function DashboardOverview({
                     <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono">
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeInC}</strong>
+                        <strong className="text-white font-mono text-sm">{timeInC}</strong>
                         {(() => {
-                          const inMin = timeToMinutes(selectedDayDetail.log.timeInC);
+                          const inMin = timeToMinutes(timeInC);
                           const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                          const allowedLates = config.allowedLateMinutes ?? 15;
-                          return inMin > (limitMin + allowedLates) ? (
+                          const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
+                          return inMin > (limitMin + allowedLateAfternoon) ? (
                             <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
                           ) : (
                             <span className="text-emerald-455 font-bold text-[9px] block">✅ Đúng giờ</span>
@@ -2693,7 +3517,7 @@ export default function DashboardOverview({
                       </div>
                       <div>
                         <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                        <strong className="text-white font-mono text-sm">{selectedDayDetail.log.timeOutC || '--:--'}</strong>
+                        <strong className="text-white font-mono text-sm">{timeOutC || '--:--'}</strong>
                       </div>
                     </div>
                   );
@@ -2703,27 +3527,53 @@ export default function DashboardOverview({
                   <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 border-t border-slate-800/60 animate-fadeIn text-left mt-2">
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Loại đơn báo cáo</label>
-                      <input
-                        type="text"
-                        value={reportType}
-                        readOnly
-                        className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
-                      />
+                      {reportCategory === 'missing' ? (
+                        <select
+                          value={reportType}
+                          onChange={(e) => setReportType(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none font-extrabold cursor-pointer"
+                        >
+                          <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
+                          <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={reportType}
+                          readOnly
+                          className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
+                        />
+                      )}
                     </div>
-                    
+
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
-                      <select
-                        value={reportApprover}
-                        onChange={(e) => setReportApprover(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
-                      >
-                        {getApproversList().map((ap, idx) => (
-                          <option key={idx} value={ap.name} className="bg-slate-900">
-                            {ap.name} ({ap.role})
-                          </option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const configuredLeaveApprover = getConfiguredApprover('leave');
+                        const useLockedApprover = isAttendanceReportType(reportType);
+                        if (configuredLeaveApprover && useLockedApprover) {
+                          const approverPos = configuredLeaveApprover.position ? ` (${configuredLeaveApprover.position})` : '';
+                          return (
+                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
+                              <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
+                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <select
+                            value={reportApprover}
+                            onChange={(e) => setReportApprover(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
+                          >
+                            {getApproversList().map((ap, idx) => (
+                              <option key={idx} value={ap.name} className="bg-slate-900">
+                                {ap.name} ({ap.role})
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
 
                     <div>
@@ -2762,76 +3612,30 @@ export default function DashboardOverview({
 
               {/* Tăng ca (OT) */}
               {((selectedDayDetail.log.timeInOT && selectedDayDetail.log.timeInOT !== '--:--') || (selectedDayDetail.log.otHours && selectedDayDetail.log.otHours > 0)) ? (
-                <div className="bg-purple-950/20 p-3.5 rounded-xl border border-purple-500/20 space-y-2 mt-2">
-                  <div className="flex items-center justify-between border-b border-purple-500/10 pb-1.5">
-                    <span className="font-extrabold text-[11px] text-purple-400 tracking-wide">🌌 TĂNG CA (OVERTIME)</span>
-                    <span className="text-[10px] text-purple-300 font-mono font-bold">Tích lũy: {selectedDayDetail.log.otHours || 0} giờ</span>
+                <div className="bg-purple-50 p-3.5 rounded-xl border border-purple-200 space-y-2 mt-2">
+                  <div className="flex items-center justify-between border-b border-purple-200 pb-1.5">
+                    <span className="font-extrabold text-[11px] text-purple-700 tracking-wide">🌌 TĂNG CA (OVERTIME)</span>
+                    <span className="text-[10px] text-purple-600 font-mono font-bold">Tích lũy: {selectedDayDetail.log.otHours || 0} giờ</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-purple-200">
+                  <div className="grid grid-cols-2 gap-2 text-purple-800">
                     <div>
-                      <span className="text-purple-400/60 block text-[10px]">Giờ vào OT:</span>
-                      <strong className="font-mono text-sm">{selectedDayDetail.log.timeInOT || '--:--'}</strong>
+                      <span className="text-purple-500 block text-[10px]">Giờ vào OT:</span>
+                      <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeInOT) || '--:--'}</strong>
                     </div>
                     <div>
-                      <span className="text-purple-400/60 block text-[10px]">Giờ ra OT:</span>
-                      <strong className="font-mono text-sm">{selectedDayDetail.log.timeOutOT || '--:--'}</strong>
+                      <span className="text-purple-500 block text-[10px]">Giờ ra OT:</span>
+                      <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeOutOT) || '--:--'}</strong>
                     </div>
                   </div>
                 </div>
               ) : null}
 
-              {/* Ảnh chấm công & GPS thiết bị nếu có */}
-              {(selectedDayDetail.log.photoIn || selectedDayDetail.log.photoOut || selectedDayDetail.log.coordsIn || selectedDayDetail.log.coordsOut) && (
-                <div className="bg-slate-950/45 p-3.5 rounded-xl border border-slate-850/60 space-y-2 mt-2">
-                  <span className="text-[10px] font-bold text-slate-500 block uppercase">HÌNH ẢNH & ĐỊA ĐIỂM XÁC THỰC:</span>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {selectedDayDetail.log.photoIn && (
-                      <button 
-                        type="button"
-                        className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 cursor-zoom-in hover:border-sky-500/50 transition-all text-left"
-                        onClick={() => setZoomedImage(selectedDayDetail.log.photoIn)}
-                      >
-                        <img src={selectedDayDetail.log.photoIn} className="w-8 h-8 rounded-md object-cover border border-slate-700" alt="Selfie Vào" referrerPolicy="no-referrer" />
-                        <span className="text-slate-300 font-medium text-[10px]">Ảnh Vào</span>
-                      </button>
-                    )}
-                    {selectedDayDetail.log.photoOut && (
-                      <button 
-                        type="button"
-                        className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 cursor-zoom-in hover:border-sky-500/50 transition-all text-left"
-                        onClick={() => setZoomedImage(selectedDayDetail.log.photoOut)}
-                      >
-                        <img src={selectedDayDetail.log.photoOut} className="w-8 h-8 rounded-md object-cover border border-slate-700" alt="Selfie Ra" referrerPolicy="no-referrer" />
-                        <span className="text-slate-300 font-medium text-[10px]">Ảnh Ra</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-1.5 mt-1 text-[10px] text-slate-400">
-                    {selectedDayDetail.log.coordsIn && (
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedDayDetail.log.coordsIn)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:underline flex items-center gap-1 text-sky-400"
-                        title="Xem trên Google Maps"
-                      >
-                        🗺️ Vào: {selectedDayDetail.log.locationIn || 'Công trình'} ({selectedDayDetail.log.coordsIn})
-                      </a>
-                    )}
-                    {selectedDayDetail.log.coordsOut && (
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedDayDetail.log.coordsOut)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:underline flex items-center gap-1 text-sky-455"
-                        title="Xem trên Google Maps"
-                      >
-                        🗺️ Ra: {selectedDayDetail.log.locationOut || 'Công trình'} ({selectedDayDetail.log.coordsOut})
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* Ảnh FaceID & tọa độ GPS của TỪNG lượt chấm: Vào/Ra sáng, chiều, tăng ca */}
+              <PunchMediaList
+                log={selectedDayDetail.log}
+                onZoomImage={setZoomedImage}
+                variant="full"
+              />
 
               {/* Ghi chú & Trạng thái hệ thống */}
               <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-850/40 text-slate-400">
@@ -2840,7 +3644,7 @@ export default function DashboardOverview({
                   {selectedDayDetail.log.notes || "Không có ghi chú đặc biệt."}
                 </p>
                 {selectedDayDetail.log.isLocked && (
-                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 mt-2 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/20">
+                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 mt-2 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                     🔒 BẢN GHI ĐÃ KHÓA CHỐT CÔNG
                   </span>
                 )}
@@ -2905,78 +3709,40 @@ export default function DashboardOverview({
                   <tbody>
                     <tr className="border-b border-slate-800 hover:bg-slate-850/40 transition-colors bg-emerald-950/10">
                       <td className="p-3 font-black text-emerald-400">{todayVal} (Hôm nay)</td>
-                      <td className="p-3 font-mono text-slate-300 font-bold">{userTodayLog.timeInS || '--:--'} - {userTodayLog.timeOutS || '--:--'}</td>
-                      <td className="p-3 font-mono text-slate-300 font-bold">{userTodayLog.timeInC || '--:--'} - {userTodayLog.timeOutC || '--:--'}</td>
-                      <td className="p-3 font-mono text-slate-300 font-bold">{userTodayLog.timeInOT || '--:--'} - {userTodayLog.timeOutOT || '--:--'}</td>
+                      <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInS) || '--:--'} - {normalizeTime(userTodayLog.timeOutS) || '--:--'}</td>
+                      <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInC) || '--:--'} - {normalizeTime(userTodayLog.timeOutC) || '--:--'}</td>
+                      <td className="p-3 font-mono text-slate-300 font-bold">{normalizeTime(userTodayLog.timeInOT) || '--:--'} - {normalizeTime(userTodayLog.timeOutOT) || '--:--'}</td>
                       <td className="p-3 text-slate-400 leading-tight">
                         <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black px-1.5 py-0.2 rounded uppercase tracking-wide">
+                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-black px-1.5 py-0.2 rounded uppercase tracking-wide">
                             Live Session
                           </span>
                           <span>{userTodayLog.notes || `Chưa thực hiện chấm công ca hôm nay.`}</span>
                         </div>
                         
-                        {/* Live Session Photo & GPS links */}
-                        <div className="flex flex-wrap items-center gap-2 mt-1">
-                          {userTodayLog.photoIn && (
-                            <button 
-                              type="button" 
-                              onClick={() => setZoomedImage(userTodayLog.photoIn)}
-                              className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                            >
-                              <img src={userTodayLog.photoIn} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Vào" referrerPolicy="no-referrer" />
-                              <span className="text-slate-400">Ảnh Vào</span>
-                            </button>
-                          )}
-                          {userTodayLog.photoOut && (
-                            <button 
-                              type="button" 
-                              onClick={() => setZoomedImage(userTodayLog.photoOut)}
-                              className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                            >
-                              <img src={userTodayLog.photoOut} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Ra" referrerPolicy="no-referrer" />
-                              <span className="text-slate-400">Ảnh Ra</span>
-                            </button>
-                          )}
-                          {userTodayLog.coordsIn && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(userTodayLog.coordsIn)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                              title="Click để xem trên Google Maps"
-                            >
-                              🗺️ Vào: {userTodayLog.locationIn || selectedSite} ({userTodayLog.coordsIn})
-                            </a>
-                          )}
-                          {userTodayLog.coordsOut && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(userTodayLog.coordsOut)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                              title="Click để xem trên Google Maps"
-                            >
-                              🗺️ Ra: {userTodayLog.locationOut || selectedSite} ({userTodayLog.coordsOut})
-                            </a>
-                          )}
-                        </div>
+                        {/* Ảnh + tọa độ của TỪNG lượt chấm hôm nay (tối đa 6 lượt) */}
+                        <PunchMediaList
+                          log={userTodayLog}
+                          onZoomImage={setZoomedImage}
+                          variant="compact"
+                          fallbackLocation={selectedSite}
+                        />
                       </td>
                     </tr>
                     {currentLogs.filter(a => a.date !== todayVal).map((log, index) => (
                       <tr key={index} className="border-b border-slate-800/60 hover:bg-slate-850/20 transition-colors">
                         <td className="p-3 font-bold text-slate-300 font-mono">{log.date}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.timeInS || '07:25'} - {log.timeOutS || '11:32'}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.timeInC || '12:55'} - {log.timeOutC || '17:05'}</td>
-                        <td className="p-3 font-mono text-slate-400">{log.timeInOT && log.timeInOT !== '--:--' ? `${log.timeInOT} - ${log.timeOutOT}` : 'Không OT'}</td>
+                        <td className="p-3 font-mono text-slate-400">{normalizeTime(log.timeInS) || '07:25'} - {normalizeTime(log.timeOutS) || '11:32'}</td>
+                        <td className="p-3 font-mono text-slate-400">{normalizeTime(log.timeInC) || '12:55'} - {normalizeTime(log.timeOutC) || '17:05'}</td>
+                        <td className="p-3 font-mono text-slate-400">{log.timeInOT && log.timeInOT !== '--:--' ? `${normalizeTime(log.timeInOT)} - ${normalizeTime(log.timeOutOT)}` : 'Không OT'}</td>
                         <td className="p-3 text-slate-400">
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {(() => {
                               const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
                               return (
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase select-none ${
-                                  st.isValid ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                                  'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  st.isValid ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                  'bg-rose-50 text-rose-700 border border-rose-200'
                                 }`}>
                                   {st.text}
                                 </span>
@@ -2985,51 +3751,12 @@ export default function DashboardOverview({
                             <span>{log.notes || `Chấm công FaceID & định vị tọa độ`} • OT {log.otHours || 0}H</span>
                           </div>
 
-                          {/* Historical Log Photo & GPS Links */}
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
-                            {log.photoIn && (
-                              <button 
-                                type="button" 
-                                onClick={() => setZoomedImage(log.photoIn)}
-                                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                              >
-                                <img src={log.photoIn} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Vào" referrerPolicy="no-referrer" />
-                                <span className="text-slate-400">Ảnh Vào</span>
-                              </button>
-                            )}
-                            {log.photoOut && (
-                              <button 
-                                type="button" 
-                                onClick={() => setZoomedImage(log.photoOut)}
-                                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
-                              >
-                                <img src={log.photoOut} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Selfie Ra" referrerPolicy="no-referrer" />
-                                <span className="text-slate-400">Ảnh Ra</span>
-                              </button>
-                            )}
-                            {log.coordsIn && (
-                              <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(log.coordsIn)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                                title="Click để xem trên Google Maps"
-                              >
-                                🗺️ Vào: {log.locationIn || 'Công trình'} ({log.coordsIn})
-                              </a>
-                            )}
-                            {log.coordsOut && (
-                              <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(log.coordsOut)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-sky-450 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
-                                title="Click để xem trên Google Maps"
-                              >
-                                🗺️ Ra: {log.locationOut || 'Công trình'} ({log.coordsOut})
-                              </a>
-                            )}
-                          </div>
+                          {/* Ảnh + tọa độ của TỪNG lượt chấm trong ngày (tối đa 6 lượt) */}
+                          <PunchMediaList
+                            log={log}
+                            onZoomImage={setZoomedImage}
+                            variant="compact"
+                          />
                         </td>
                       </tr>
                     ))}
@@ -3054,6 +3781,12 @@ export default function DashboardOverview({
       )}
 
       {/* MODAL 1: CHỤP ẢNH XÁC THỰC FACEID & GPS MOBILE APP */}
+      {pendingSync > 0 && (
+        <div className="fixed bottom-4 left-4 z-[60] bg-amber-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 pointer-events-none">
+          <span className="animate-pulse">⏳</span> {pendingSync} bản ghi chờ đồng bộ
+        </div>
+      )}
+
       {showPunchModal && activePunchSlot && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="biometric_webcam_modal">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
@@ -3072,7 +3805,7 @@ export default function DashboardOverview({
 
             <div className="p-5 space-y-4">
               
-              {/* CAMERA FEED OR SIMULATOR */}
+              {/* CAMERA FEED (hoặc cảnh báo khi camera không hoạt động) */}
               <div className="relative rounded-xl border border-slate-750 bg-black overflow-hidden h-48 flex flex-col items-center justify-center">
                 {webcamActive && !webcamError ? (
                   <>
@@ -3090,16 +3823,25 @@ export default function DashboardOverview({
                     </span>
                   </>
                 ) : (
-                  // Animated fall-back simulator
-                  <div className="text-center p-5 space-y-3 w-full h-full flex flex-col justify-center items-center bg-gradient-to-b from-slate-950 to-slate-900 border border-slate-850">
+                  // Camera lỗi/không có → cảnh báo rõ ràng (KHÔNG giả lập ảnh AI)
+                  <div className="text-center p-5 space-y-3 w-full h-full flex flex-col justify-center items-center bg-red-50 border border-red-200">
                     <div className="relative">
-                      <Fingerprint className="w-16 h-16 text-sky-400 animate-pulse mx-auto" />
-                      <div className="absolute inset-0 border-2 border-sky-400/20 rounded-full animate-ping scale-125"></div>
+                      <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
                     </div>
                     <div>
-                      <p className="text-xs text-slate-300 font-black">QUÉT SINH TRẮC HỌC HOÀNG LONG ERP</p>
-                      <p className="text-[10px] text-slate-500 mt-1">Đang giả lập nhận dạng khuôn mặt bằng AI 3D Mesh...</p>
+                      <p className="text-xs text-rose-700 font-black">KHÔNG TRUY CẬP ĐƯỢC CAMERA</p>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        Chấm công bắt buộc có ảnh khuôn mặt chụp trực tiếp lúc điểm danh.
+                        Vui lòng cấp quyền truy cập camera, mở qua HTTPS và thử lại.
+                      </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={startCameraStream}
+                      className="mt-1 bg-sky-500 hover:bg-sky-400 text-white text-[10px] py-1.5 px-3 rounded-lg font-bold cursor-pointer"
+                    >
+                      🔄 Thử lại camera
+                    </button>
                   </div>
                 )}
               </div>
@@ -3149,9 +3891,14 @@ export default function DashboardOverview({
                 <button
                   type="button"
                   onClick={handleConfirmPunch}
-                  className="flex-1 bg-sky-500 hover:bg-sky-400 text-white text-xs py-2 rounded-xl font-black text-center flex items-center justify-center gap-1.5 cursor-pointer"
+                  disabled={webcamError}
+                  className={`flex-1 text-xs py-2 rounded-xl font-black text-center flex items-center justify-center gap-1.5 ${
+                    webcamError
+                      ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                      : 'bg-sky-500 hover:bg-sky-400 text-white cursor-pointer'
+                  }`}
                 >
-                  <Camera className="w-4 h-4 text-white" />
+                  <Camera className={`w-4 h-4 ${webcamError ? 'text-slate-600' : 'text-white'}`} />
                   CHỤP ẢNH & CHẤM CÔNG
                 </button>
               </div>
@@ -3251,7 +3998,7 @@ export default function DashboardOverview({
               </div>
 
               {leaveDateWarningMessage && (
-                <div className="bg-amber-550/10 border border-amber-500/20 text-amber-500 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
                   {leaveDateWarningMessage}
                 </div>
               )}
@@ -3278,7 +4025,7 @@ export default function DashboardOverview({
                     return (
                       <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between">
                         <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                        <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
                       </div>
                     );
                   }
@@ -3398,7 +4145,7 @@ export default function DashboardOverview({
                   </div>
                 )}
                 <span className="block text-[10px] text-slate-500 mt-1 italic">
-                  * Số tiền ứng tối đa đề xuất: &lt;= 50% mức lương cơ bản ({userBaseSalary.toLocaleString('vi-VN')} đ)
+                  * Số tiền ứng tối đa đề xuất: &lt;= 50% mức lương cơ bản ({(userBaseSalary ?? 0).toLocaleString('vi-VN')} đ)
                 </span>
               </div>
 
@@ -3421,7 +4168,7 @@ export default function DashboardOverview({
                     return (
                       <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between">
                         <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
                       </div>
                     );
                   }

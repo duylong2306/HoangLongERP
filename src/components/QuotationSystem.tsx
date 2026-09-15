@@ -2,7 +2,9 @@
 import { Quote, Customer, Project, QuoteItem, QuoteConfig, ArchivedQuote } from '../types';
 import { dbService } from '../lib/dbService';
 import {
-  useNotification
+  useNotification,
+  loadHrmRoleGroups,
+  isUserInRoleGroup
 } from '../context';
 import {
   Calculator,
@@ -30,7 +32,9 @@ import {
   X,
   FolderOpen,
   Upload,
-  Download
+  Download,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 import CabinetEstimator from './CabinetEstimator';
 import ConstructionEstimator from './ConstructionEstimator';
@@ -43,7 +47,7 @@ import ConstructionFinalQuote from './ConstructionFinalQuote';
 import MechanicalArchive from './MechanicalArchive';
 import SubcontractorEstimator from './SubcontractorEstimator';
 import SubcontractorArchive from './SubcontractorArchive';
-import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
 export const HOUSE_ESTIMATE_PRICES = [
   {
@@ -682,6 +686,8 @@ interface QuotationSystemProps {
   preselectedCustomerId?: string;
   preselectedProjectId?: string;
   initialTab?: 'dashboard' | 'furniture' | 'construction' | 'mechanical' | 'subcontractor';
+  initialSubTab?: string;
+  preselectedDocType?: string;
   currentUser?: any;
 }
 
@@ -694,21 +700,14 @@ export default function QuotationSystem({
   preselectedCustomerId,
   preselectedProjectId,
   initialTab = 'construction',
+  initialSubTab,
+  preselectedDocType,
   currentUser
 }: QuotationSystemProps) {
   const { addToast } = useNotification();
   // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM (từ Supabase cache trước)
   const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean => {
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const savedRoles = localStorage.getItem('hl_hrm_roles_v2');
-      if (!savedRoles) return true;
-      try { rolesList = JSON.parse(savedRoles); } catch {}
-    }
+    let rolesList: any[] = loadHrmRoleGroups();
     if (rolesList.length === 0) return true;
     try {
       
@@ -772,14 +771,23 @@ export default function QuotationSystem({
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'furniture' | 'construction' | 'mechanical' | 'subcontractor'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'sent' | 'approved' | 'rejected'>('all');
-  const [furnitureSubTab, setFurnitureSubTab] = useState<'estimator' | 'catalog' | 'archive' | 'template'>('estimator');
+  const [furnitureSubTab, setFurnitureSubTab] = useState<'estimator' | 'catalog' | 'archive' | 'template'>(initialSubTab as any || 'estimator');
   const [subcontractorSubTab, setSubcontractorSubTab] = useState<'estimator' | 'archive' | 'template'>('estimator');
   const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
-  const [constructionSubTab, setConstructionSubTab] = useState<'quotes_folder' | 'norms' | 'archive' | 'template'>('quotes_folder');
+  const [constructionSubTab, setConstructionSubTab] = useState<'quotes_folder' | 'norms' | 'archive' | 'template'>(initialSubTab as any || 'quotes_folder');
   const [quotesFolderTab, setQuotesFolderTab] = useState<'estimator' | 'takeoff' | 'final_quote'>('estimator');
   const [normsInnerTab, setNormsInnerTab] = useState<'price' | 'composition' | 'material_labor'>('price');
   const [constructionSearchTerm, setConstructionSearchTerm] = useState('');
-  const [mechanicalSubTab, setMechanicalSubTab] = useState<'estimator' | 'archive' | 'template'>('estimator');
+  const [mechanicalSubTab, setMechanicalSubTab] = useState<'estimator' | 'archive' | 'template'>(initialSubTab as any || 'estimator');
+
+  // Khi điều hướng từ Menu Hồ Sơ Dự Án, mở thẳng sub-tab Lưu Trữ (archive)
+  useEffect(() => {
+    if (initialSubTab) {
+      setFurnitureSubTab(initialSubTab as any);
+      setConstructionSubTab(initialSubTab as any);
+      setMechanicalSubTab(initialSubTab as any);
+    }
+  }, [initialSubTab]);
 
   // --- SHARED STATES FOR CONSTRUCTION PROJECT & CUSTOMER ---
   const [selectedCustomerId, setSelectedCustomerId] = useState(preselectedCustomerId || '');
@@ -788,6 +796,10 @@ export default function QuotationSystem({
   const [customerName, setCustomerName] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // Người đại diện của khách hàng (chỉ dùng cho khối Dự Án Thầu Xây Dựng — nơi header
+  // chọn khách hàng được nâng lên cấp QuotationSystem này thay vì nằm trong
+  // ConstructionEstimator, xem hideMetadataHeader={true} bên dưới).
+  const [customerRepresentative, setCustomerRepresentative] = useState('');
 
   // --- NEW LOCK & SAVE CONTROL STATES FOR CONSTRUCTION ESTIMATOR, TAKEOFF, AND FINAL QUOTE ---
   const [isConstructionSaved, setIsConstructionSaved] = useState(false);
@@ -847,6 +859,12 @@ export default function QuotationSystem({
       if (loadedQuote.customerName) setCustomerName(loadedQuote.customerName);
       if (loadedQuote.customerPhone) setCustomerPhone(loadedQuote.customerPhone);
       if (loadedQuote.customerAddress) setCustomerAddress(loadedQuote.customerAddress);
+      // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+      // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+      {
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config?.customerRepresentative || fallbackCust?.representative || '');
+      }
       if (loadedQuote.projectId) setSelectedProjectId(loadedQuote.projectId);
       if (loadedQuote.customerId) setSelectedCustomerId(loadedQuote.customerId);
 
@@ -874,7 +892,6 @@ export default function QuotationSystem({
       dbService.constructionNorms.get(key).then(cloudData => {
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
           setter(cloudData as any);
-          localStorage.setItem(key, JSON.stringify(cloudData));
         }
       }).catch(() => {});
     });
@@ -902,12 +919,25 @@ export default function QuotationSystem({
         .then(list => setArchivedSubcontractorQuotesList(list))
         .catch(err => console.error("Lỗi khi tải hồ sơ lưu trữ thầu phụ:", err));
     };
-    window.addEventListener('hl-archived-quotes-updated', handleUpdate);
+    // 'hl-archived-quotes-updated' là event App.tsx THẬT SỰ bắn định kỳ 5 phút
+    // cho TOÀN BỘ bảng archived_quotes (không phân biệt sector) — trước đây chỉ
+    // gắn cho construction (handleUpdate), còn nội thất/cơ khí/thầu phụ chỉ nghe
+    // event nội bộ tab (hl-archived-cabinet/mechanical/subcontractor-quotes-updated,
+    // chỉ tự bắn khi CHÍNH tab này lưu) nên danh sách "Tìm nhanh hợp đồng" của 3
+    // sector đó không tự cập nhật khi người khác lập/duyệt hồ sơ ở tab/máy khác.
+    // Gọi lại cả 4 khi có sự kiện polling này (rẻ, không phân biệt sector nào đổi).
+    const handleAnyUpdate = () => {
+      handleUpdate();
+      handleCabinetUpdate();
+      handleMechanicalUpdate();
+      handleSubcontractorUpdate();
+    };
+    window.addEventListener('hl-archived-quotes-updated', handleAnyUpdate);
     window.addEventListener('hl-archived-cabinet-quotes-updated', handleCabinetUpdate);
     window.addEventListener('hl-archived-mechanical-quotes-updated', handleMechanicalUpdate);
     window.addEventListener('hl-archived-subcontractor-quotes-updated', handleSubcontractorUpdate);
     return () => {
-      window.removeEventListener('hl-archived-quotes-updated', handleUpdate);
+      window.removeEventListener('hl-archived-quotes-updated', handleAnyUpdate);
       window.removeEventListener('hl-archived-cabinet-quotes-updated', handleCabinetUpdate);
       window.removeEventListener('hl-archived-mechanical-quotes-updated', handleMechanicalUpdate);
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', handleSubcontractorUpdate);
@@ -930,6 +960,7 @@ export default function QuotationSystem({
     setLoadedSubcontractorQuote(null);
     setIsSubcontractorSaved(false);
     setIsSubcontractorLocked(false);
+    // Reset supplier lock state - SubcontractorEstimator will manage its own state
   };
 
   const handleStartNewQuote = () => {
@@ -944,6 +975,7 @@ export default function QuotationSystem({
     setCustomerName('');
     setCustomerPhone('');
     setCustomerAddress('');
+    setCustomerRepresentative('');
 
     // Reset lifted states to 0/empty
     setChieuDai(0);
@@ -984,6 +1016,31 @@ export default function QuotationSystem({
     sessionStorage.removeItem('hl_final_quote_quantities');
     sessionStorage.removeItem('hl_final_quote_prices');
     sessionStorage.removeItem('takeoff_saved_totals');
+  };
+
+  // ---- ĐIỀU HƯỚNG SỬA BÁO GIÁ TỪ LƯU TRỮ HỒ SƠ ----
+  // Khi bấm "Sửa Báo Giá" tại Lưu Trữ Hồ Sơ, chuyển về tab Lập Báo Giá tương ứng
+  // và nạp lại toàn bộ dữ liệu hồ sơ đã lưu để người dùng tiếp tục chỉnh sửa chi tiết.
+  const handleEditCabinetQuote = (quote: ArchivedQuote) => {
+    setActiveTab('furniture');
+    setFurnitureSubTab('estimator');
+    setLoadedCabinetQuote(quote);
+    setIsCabinetSaved(true);
+  };
+
+  const handleEditConstructionQuote = (quote: ArchivedQuote) => {
+    setActiveTab('construction');
+    setConstructionSubTab('quotes_folder');
+    setQuotesFolderTab('estimator');
+    setLoadedQuote(quote);
+    setIsConstructionSaved(true);
+  };
+
+  const handleEditMechanicalQuote = (quote: ArchivedQuote) => {
+    setActiveTab('mechanical');
+    setMechanicalSubTab('estimator');
+    setLoadedMechanicalQuote(quote);
+    setIsMechanicalSaved(true);
   };
 
   // Dropdowns
@@ -1075,6 +1132,22 @@ export default function QuotationSystem({
     }
   }, [archivedSubcontractorQuotesList]);
 
+  // Bấm "Hợp Đồng Giao Khoán" ở một công việc CHƯA có HĐ (từ Kanban/TaskDetailModal) khi
+  // tab "Lập HĐ Thầu Phụ" đang mở sẵn (không remount) sẽ không tự xóa loadedSubcontractorQuote
+  // của lần lập/xem hợp đồng thầu phụ trước — khiến dự án nhiều thầu phụ bị "dính" nhầm hợp
+  // đồng cũ (kể cả đã duyệt) khi lập hợp đồng mới cho thầu phụ khác. Lắng nghe sự kiện do
+  // ProjectKanbanBoard.tsx/TaskDetailModal.tsx bắn ra để chủ động reset về trạng thái lập mới.
+  useEffect(() => {
+    const handleNewContractRequested = () => {
+      setLoadedSubcontractorQuote(null);
+      setIsSubcontractorSaved(false);
+      setIsSubcontractorLocked(false);
+      setSubcontractorSubTab('estimator');
+    };
+    window.addEventListener('hl-subcontractor-new-contract-requested', handleNewContractRequested);
+    return () => window.removeEventListener('hl-subcontractor-new-contract-requested', handleNewContractRequested);
+  }, []);
+
   // Synchronize when selectedProjectId changes
   useEffect(() => {
     if (selectedProjectId) {
@@ -1084,6 +1157,7 @@ export default function QuotationSystem({
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
@@ -1095,6 +1169,7 @@ export default function QuotationSystem({
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -1136,7 +1211,8 @@ export default function QuotationSystem({
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -1148,20 +1224,11 @@ export default function QuotationSystem({
   };
 
   // --- LOCAL STATES FOR BUILDING NORMS & PRICING ---
-  const [houseEstimatePrices, setHouseEstimatePrices] = useState<{ stt: number; type: string; avgPrice: number; minPrice: number; maxPrice: number; features: string }[]>(() => {
-    const local = localStorage.getItem('house_estimate_prices');
-    return local ? JSON.parse(local) : HOUSE_ESTIMATE_PRICES;
-  });
+  const [houseEstimatePrices, setHouseEstimatePrices] = useState<{ stt: number; type: string; avgPrice: number; minPrice: number; maxPrice: number; features: string }[]>(() => HOUSE_ESTIMATE_PRICES);
 
-  const [materialCompositionNorms, setMaterialCompositionNorms] = useState<{ id: string; name: string; unit: string; brick?: number; cement?: number; sand?: number; stone?: number | null; steel?: number | null; water?: number; notes?: string }[]>(() => {
-    const local = localStorage.getItem('material_composition_norms');
-    return local ? JSON.parse(local) : MATERIAL_COMPOSITION_NORMS;
-  });
+  const [materialCompositionNorms, setMaterialCompositionNorms] = useState<{ id: string; name: string; unit: string; brick?: number; cement?: number; sand?: number; stone?: number | null; steel?: number | null; water?: number; notes?: string }[]>(() => MATERIAL_COMPOSITION_NORMS);
 
-  const [materialLaborPrices, setMaterialLaborPrices] = useState<{ group: string; name: string; unit: string; avgPrice: number; minPrice: number; maxPrice: number; notes?: string }[]>(() => {
-    const local = localStorage.getItem('material_labor_prices');
-    return local ? JSON.parse(local) : MATERIAL_LABOR_PRICES;
-  });
+  const [materialLaborPrices, setMaterialLaborPrices] = useState<{ group: string; name: string; unit: string; avgPrice: number; minPrice: number; maxPrice: number; notes?: string }[]>(() => MATERIAL_LABOR_PRICES);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -1174,19 +1241,16 @@ export default function QuotationSystem({
 
   const updateHouseEstimatePrices = (newData: any[]) => {
     setHouseEstimatePrices(newData);
-    localStorage.setItem('house_estimate_prices', JSON.stringify(newData));
     dbService.constructionNorms.save('house_estimate_prices', newData).catch(() => {});
   };
 
   const updateMaterialCompositionNorms = (newData: any[]) => {
     setMaterialCompositionNorms(newData);
-    localStorage.setItem('material_composition_norms', JSON.stringify(newData));
     dbService.constructionNorms.save('material_composition_norms', newData).catch(() => {});
   };
 
   const updateMaterialLaborPrices = (newData: any[]) => {
     setMaterialLaborPrices(newData);
-    localStorage.setItem('material_labor_prices', JSON.stringify(newData));
     dbService.constructionNorms.save('material_labor_prices', newData).catch(() => {});
   };
 
@@ -1246,7 +1310,8 @@ export default function QuotationSystem({
         'Giá cao (đ/m²)': p.maxPrice,
         'Đặc điểm kết cấu chính': p.features,
       }));
-      exportToExcel(data, 'DonGiaKhaiToan', `Don_Gia_Khai_Toan_${formatDateForFile()}.xlsx`);
+      exportToExcel(data, 'DonGiaKhaiToan', `Don_Gia_Khai_Toan_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.houseEstimatePrice]);
+      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} báo giá nhà`, type: 'success' });
     } else if (tab === 'composition') {
       const data = materialCompositionNorms.map(n => ({
         'Mã ĐM': n.id,
@@ -1260,7 +1325,8 @@ export default function QuotationSystem({
         'Nước (L)': n.water ?? '',
         'Ghi chú': n.notes ?? '',
       }));
-      exportToExcel(data, 'DinhMucCapPhoi', `Dinh_Muc_Cap_Phoi_Vat_Tu_${formatDateForFile()}.xlsx`);
+      exportToExcel(data, 'DinhMucCapPhoi', `Dinh_Muc_Cap_Phoi_Vat_Tu_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.compositionNorm]);
+      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} định mức cấp phối`, type: 'success' });
     } else {
       const data = materialLaborPrices.map((p, idx) => ({
         'STT': idx + 1,
@@ -1272,7 +1338,8 @@ export default function QuotationSystem({
         'Giá cao (đ)': p.maxPrice,
         'Nguồn / Ghi chú': p.notes ?? '',
       }));
-      exportToExcel(data, 'DonGiaVatTuNhanCong', `Don_Gia_Vat_Tu_Nhan_Cong_${formatDateForFile()}.xlsx`);
+      exportToExcel(data, 'DonGiaVatTuNhanCong', `Don_Gia_Vat_Tu_Nhan_Cong_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.materialLaborNorm]);
+      addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} giá vật tư nhân công`, type: 'success' });
     }
   };
 
@@ -1559,8 +1626,11 @@ export default function QuotationSystem({
 
                           <div className="space-y-1">
                             {(() => {
-                              const userFilteredList = archivedCabinetQuotesList.filter(q => q.creatorId === currentUser?.id);
-                              const matches = userFilteredList.filter(q => 
+                              // Người có quyền quotes (admin/office/technical) xem được toàn bộ hồ sơ,
+                              // người khác chỉ xem hồ sơ do mình tạo
+                              const canViewAllArchives = canView || isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical');
+                              const userFilteredList = canViewAllArchives ? archivedCabinetQuotesList : archivedCabinetQuotesList.filter(q => q.creatorId === currentUser?.id);
+                              const matches = userFilteredList.filter(q =>
                                 (q.customerName || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
                                 (q.customerPhone || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
                                 (q.code || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
@@ -1585,8 +1655,8 @@ export default function QuotationSystem({
                                     setCabinetArchiveSearchQuery('');
                                   }}
                                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    loadedCabinetQuote?.id === q.id 
-                                      ? 'bg-amber-950/40 text-amber-400 border border-amber-900 font-bold' 
+                                    loadedCabinetQuote?.id === q.id
+                                      ? 'bg-amber-50 text-amber-700 border border-amber-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -1619,11 +1689,6 @@ export default function QuotationSystem({
                       Lập mới
                     </button>
                   </div>
-                </div>
-
-                <div className="p-3.5 bg-amber-500/5 border border-amber-500/20 rounded-xl text-left text-xs mb-4">
-                  <span className="font-extrabold text-amber-400 uppercase text-[10px] block mb-1">MÔ HÌNH THẦU BÀN BẾP, KỆ TỦ, GIƯỜNG NGĂN GỖ CÔNG NGHIỆP</span>
-                  Định mức hao mòn ván An Cường, gỗ sồi sấy dẻo dai bám dính Acrylic không đường line dính. Tính toán phụ kiện mâm xoay Blum Hafele.
                 </div>
                 
                 <CabinetEstimator 
@@ -1674,7 +1739,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <CabinetArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} />
+              <CabinetArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} onEditQuote={handleEditCabinetQuote} />
             )}
           </div>
         )}
@@ -1791,8 +1856,8 @@ export default function QuotationSystem({
                                       setSubcontractorArchiveSearchQuery('');
                                     }}
                                     className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                      loadedSubcontractorQuote?.id === q.id 
-                                        ? 'bg-blue-950/40 text-blue-400 border border-blue-900 font-bold' 
+                                      loadedSubcontractorQuote?.id === q.id
+                                        ? 'bg-blue-50 text-blue-700 border border-blue-200 font-bold'
                                         : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                     }`}
                                   >
@@ -1825,11 +1890,6 @@ export default function QuotationSystem({
                         Lập mới
                       </button>
                     </div>
-                  </div>
-
-                  <div className="p-3.5 bg-blue-500/5 border border-blue-500/20 rounded-xl text-left text-xs mb-4">
-                    <span className="font-extrabold text-blue-400 uppercase text-[10px] block mb-1">MÔ HÌNH QUẢN LÝ THẦU PHỤ NHÂN CÔNG & VẬT TƯ</span>
-                    Định mức khối lượng nhân công thầu phụ, nhà cung cấp phụ trợ. Kiểm soát dự toán chi phí thực tế và tiến độ nghiệm thu thầu phụ.
                   </div>
 
                   <SubcontractorEstimator 
@@ -1983,8 +2043,8 @@ export default function QuotationSystem({
                                     setArchiveSearchQuery('');
                                   }}
                                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    loadedQuote?.id === q.id 
-                                      ? 'bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-bold' 
+                                    loadedQuote?.id === q.id
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -2026,7 +2086,7 @@ export default function QuotationSystem({
                     Thông Tin Dự Án & Chủ Đầu Tư (Liên kết Hồ Sơ Báo Giá)
                   </h3>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                     {/* Dự án (searchable custom selection) */}
                     <div className="relative">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Dự Án <span className="text-rose-500 font-bold">*</span></label>
@@ -2077,7 +2137,7 @@ export default function QuotationSystem({
                                 setIsProjDropdownOpen(false);
                                 setSearchQuery('');
                               }}
-                              className="w-full text-left px-2.5 py-2 hover:bg-rose-950/40 text-rose-400 font-bold border border-rose-900 rounded-lg text-xs mb-2 transition-colors block"
+                              className="w-full text-left px-2.5 py-2 hover:bg-rose-50 text-rose-600 font-bold border border-rose-200 rounded-lg text-xs mb-2 transition-colors block"
                             >
                               ❌ Báo giá Độc lập (Nhập tay tên dự án)
                             </button>
@@ -2113,15 +2173,15 @@ export default function QuotationSystem({
                                       setSearchQuery('');
                                     }}
                                     className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                      selectedProjectId === p.id 
-                                        ? 'bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-bold' 
+                                      selectedProjectId === p.id
+                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold'
                                         : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                     }`}
                                   >
                                     <div className="font-bold text-slate-300 text-left flex items-center justify-between">
                                         <span>{p.name}</span>
                                         {hasArchive && (
-                                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] bg-indigo-950 text-indigo-400 px-1.5 py-0.5 rounded font-black border border-indigo-900">
+                                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-black border border-indigo-200">
                                             📁 ĐÃ CÓ HS
                                           </span>
                                         )}
@@ -2205,8 +2265,8 @@ export default function QuotationSystem({
                                   type="button"
                                   onClick={() => handleSelectCustomer(c)}
                                   className={`w-full text-left px-2.5 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    selectedCustomerId === c.id 
-                                      ? 'bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-bold' 
+                                    selectedCustomerId === c.id
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -2233,6 +2293,21 @@ export default function QuotationSystem({
                           </button>
                         </div>
                       )}
+                    </div>
+
+                    {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                        Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                        Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+                    <div>
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                      <input
+                        type="text"
+                        value={customerRepresentative}
+                        disabled={isLocked}
+                        onChange={(e) => setCustomerRepresentative(e.target.value)}
+                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-2.5 outline-none font-semibold text-xs focus:border-indigo-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        placeholder="Mặc định theo Tên khách hàng"
+                      />
                     </div>
 
                     {/* Số điện thoại */}
@@ -2264,7 +2339,7 @@ export default function QuotationSystem({
                 {/* QUICK CREATE CUSTOMER MODAL (DARK REGION-SPECIFIC) */}
                 {showQuickCreateCust && (
                   <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-none">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
                       <h3 className="text-sm font-black text-slate-100 uppercase tracking-widest border-b border-slate-800 pb-3 mb-4 flex items-center gap-2">
                         <User className="w-4 h-4 text-indigo-400" />
                         Thêm Nhanh Chủ Đầu Tư
@@ -2365,10 +2440,6 @@ export default function QuotationSystem({
 
                 {quotesFolderTab === 'estimator' ? (
                   <>
-                    <div className="p-3.5 bg-indigo-500/5 border border-indigo-500/20 rounded-xl text-left text-xs mb-1">
-                      <span className="font-extrabold text-indigo-400 uppercase text-[10px] block mb-1">DỰ TOÁN KHUNG KẾT CẤU BÊ TÔNG, MÓNG ĐÚC, TRẠT GẠCH CHỈ</span>
-                      Lập mốc xi măng bao, cát san lấp vĩ độ dốc chịu tải. Đồng bộ biên bản bàn giao và mác ép thợ móng biệt thự.
-                    </div>
 
                     <ConstructionEstimator 
                       customers={customers}
@@ -2390,6 +2461,8 @@ export default function QuotationSystem({
                       setCustomerAddress={setCustomerAddress}
                       customerPhone={customerPhone}
                       setCustomerPhone={setCustomerPhone}
+                      customerRepresentative={customerRepresentative}
+                      setCustomerRepresentative={setCustomerRepresentative}
                       hideMetadataHeader={true}
                       isConstructionSaved={isConstructionSaved}
                       setIsConstructionSaved={setIsConstructionSaved}
@@ -2569,7 +2642,7 @@ export default function QuotationSystem({
                                 <td className="px-4 py-3.5 font-bold text-slate-100">
                                   {p.type}
                                 </td>
-                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-500/5">
+                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-50">
                                   {p.avgPrice.toLocaleString('vi-VN')}
                                 </td>
                                 <td className="px-4 py-3.5 font-bold text-emerald-400 text-right font-mono">
@@ -2588,7 +2661,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => setEditingItem({ tab: 'price', action: 'edit', data: p })}
-                                          className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                           title="Sửa"
                                         >
                                           <Edit className="w-3.5 h-3.5" />
@@ -2598,7 +2671,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => handleDeletePrice(p.stt)}
-                                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
                                           title="Xóa"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2672,13 +2745,13 @@ export default function QuotationSystem({
                                 <td className="px-3 py-3 text-center font-mono font-bold text-sky-400">
                                   {n.brick !== null ? n.brick : '—'}
                                 </td>
-                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-400 bg-sky-500/5">
+                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-600 bg-sky-50">
                                   {n.cement !== null ? n.cement : '—'}
                                 </td>
                                 <td className="px-3 py-3 text-center font-mono font-bold text-sky-400">
                                   {n.sand != null ? n.sand.toFixed(4) : '—'}
                                 </td>
-                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-400 bg-sky-500/5">
+                                <td className="px-3 py-3 text-center font-mono font-bold text-sky-600 bg-sky-50">
                                   {n.stone != null ? n.stone.toFixed(4) : '—'}
                                 </td>
                                 <td className="px-3 py-3 text-center font-mono font-bold text-sky-400">
@@ -2697,7 +2770,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => setEditingItem({ tab: 'composition', action: 'edit', data: n })}
-                                          className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                           title="Sửa"
                                         >
                                           <Edit className="w-3.5 h-3.5" />
@@ -2707,7 +2780,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteNorm(n.id)}
-                                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
                                           title="Xóa"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2765,17 +2838,17 @@ export default function QuotationSystem({
                             );
                           }).map((p, idx) => {
                             // Determine badge styling based on group
-                            let groupClass = "bg-slate-850 text-slate-400 border border-slate-800";
+                            let groupClass = "bg-slate-100 text-slate-600 border border-slate-200";
                             if (p.group === "VẬT LIỆU CHÍNH") {
-                              groupClass = "bg-blue-500/10 text-blue-400 border border-blue-500/20";
+                              groupClass = "bg-blue-50 text-blue-700 border border-blue-200";
                             } else if (p.group === "HOÀN THIỆN") {
-                              groupClass = "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                              groupClass = "bg-emerald-50 text-emerald-700 border border-emerald-200";
                             } else if (p.group === "CỬA & KẾT CẤU") {
-                              groupClass = "bg-purple-500/10 text-purple-400 border border-purple-500/20";
+                              groupClass = "bg-purple-50 text-purple-700 border border-purple-200";
                             } else if (p.group === "NHÂN CÔNG") {
-                              groupClass = "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                              groupClass = "bg-amber-50 text-amber-700 border border-amber-200";
                             } else if (p.group === "MÁY & THIẾT BỊ") {
-                              groupClass = "bg-rose-500/10 text-rose-400 border border-rose-500/20";
+                              groupClass = "bg-rose-50 text-rose-700 border border-rose-200";
                             }
 
                             return (
@@ -2791,7 +2864,7 @@ export default function QuotationSystem({
                                 <td className="px-3 py-3.5 text-center font-semibold text-slate-300 font-mono">
                                   {p.unit}
                                 </td>
-                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-500/5">
+                                <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-50">
                                   {p.avgPrice.toLocaleString('vi-VN')}
                                 </td>
                                 <td className="px-4 py-3.5 font-bold text-emerald-400 text-right font-mono">
@@ -2810,7 +2883,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => setEditingItem({ tab: 'material_labor', action: 'edit', data: p })}
-                                          className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                           title="Sửa"
                                         >
                                           <Edit className="w-3.5 h-3.5" />
@@ -2820,7 +2893,7 @@ export default function QuotationSystem({
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteMaterialLabor(p.name)}
-                                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
                                           title="Xóa"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2853,7 +2926,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <ConstructionArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} />
+              <ConstructionArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} onEditQuote={handleEditConstructionQuote} />
             )}
           </div>
         )}
@@ -2944,8 +3017,11 @@ export default function QuotationSystem({
 
                           <div className="space-y-1">
                             {(() => {
-                              const userFilteredList = archivedMechanicalQuotesList.filter(q => q.creatorId === currentUser?.id);
-                              const matches = userFilteredList.filter(q => 
+                              // Người có quyền quotes (admin/office/technical) xem được toàn bộ hồ sơ,
+                              // người khác chỉ xem hồ sơ do mình tạo
+                              const canViewAllArchives = canView || isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical');
+                              const userFilteredList = canViewAllArchives ? archivedMechanicalQuotesList : archivedMechanicalQuotesList.filter(q => q.creatorId === currentUser?.id);
+                              const matches = userFilteredList.filter(q =>
                                 (q.customerName || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||
                                 (q.customerPhone || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||
                                 (q.code || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||
@@ -2970,8 +3046,8 @@ export default function QuotationSystem({
                                     setMechanicalArchiveSearchQuery('');
                                   }}
                                   className={`w-full text-left px-3 py-2.5 rounded-lg text-xs cursor-pointer block transition-all ${
-                                    loadedMechanicalQuote?.id === q.id 
-                                      ? 'bg-pink-950/40 text-pink-400 border border-pink-900 font-bold' 
+                                    loadedMechanicalQuote?.id === q.id
+                                      ? 'bg-pink-50 text-pink-700 border border-pink-200 font-bold'
                                       : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                                   }`}
                                 >
@@ -3006,11 +3082,6 @@ export default function QuotationSystem({
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-pink-500/5 border border-pink-500/20 rounded-xl text-left text-xs mb-4">
-                  <span className="font-extrabold text-pink-400 uppercase text-[10px] block mb-1">BÓC TÁCH KHỐI LƯỢNG QUE HÀN, THÉP HÌNH SS400, SƠN TĨNH ĐIỆN CNC</span>
-                  Ưu thế tính phôi sắt tôn, khối lượng nặng theo kg sắt hoặc theo bệ đo dử sắt. Chắn tia cực tím mắt thợ xưởng Bảo Lộc.
-                </div>
-
                 <MechanicalEstimator 
                   customers={customers}
                   projects={projects}
@@ -3035,7 +3106,7 @@ export default function QuotationSystem({
                 />
               </div>
             ) : (
-              <MechanicalArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} />
+              <MechanicalArchive currentUser={currentUser} canEdit={canEdit} canDelete={canDelete} preselectedProjectId={preselectedProjectId} initialDetailTab={preselectedDocType as any} onEditQuote={handleEditMechanicalQuote} />
             )}
           </div>
         )}
@@ -3246,7 +3317,7 @@ function ConstructionNormsModal({
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl text-slate-100 text-left">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl text-slate-100 text-left animate-in fade-in zoom-in-95 duration-200">
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <h2 className="text-sm font-black uppercase text-indigo-400 tracking-wider">
             {action === 'add' ? '➕ Thêm' : '📝 Sửa'} {
@@ -3262,7 +3333,7 @@ function ConstructionNormsModal({
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {error && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-bold">
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold">
               ⚠️ {error}
             </div>
           )}

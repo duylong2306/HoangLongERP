@@ -1,11 +1,12 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { 
-  Search, Plus, Minus, Edit2, Trash2, Check, X, 
-  AlertTriangle, Layers, MapPin, DollarSign, Activity, FileText 
+import {
+  Search, Plus, Edit2, Trash2, Check, X,
+  AlertTriangle, Layers, MapPin, DollarSign, Download, FileUp
 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
-import { WarehouseLog } from '../types';
 import { useNotification } from '../context';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
+import * as XLSX from 'xlsx';
 
 interface MaterialStock {
   id: string;
@@ -65,14 +66,6 @@ export default function WarehouseManagement() {
     }
   };
 
-  // Stock Transaction Modal State
-  const [txModalType, setTxModalType] = useState<'in' | 'out' | null>(null);
-  const [txMatId, setTxMatId] = useState<string>('');
-  const [txQty, setTxQty] = useState<number>(0);
-  const [txPrice, setTxPrice] = useState<number>(0);
-  const [txNote, setTxNote] = useState('');
-  const [txTarget, setTxTarget] = useState(''); // Dự án xuất / Nhà cung cấp nhập
-
   // Form fields for adding new item
   const [formCode, setFormCode] = useState('');
   const [formName, setFormName] = useState('');
@@ -90,18 +83,73 @@ export default function WarehouseManagement() {
   const [editMin, setEditMin] = useState(10);
   const [editLoc, setEditLoc] = useState('');
 
-  // Transaction Log
-  const [logs, setLogs] = useState<WarehouseLog[]>([]);
-
   const loadInventory = async () => {
     try {
       const invData = await dbService.inventory.list();
       setInventory(invData);
-      
-      const logData = await dbService.warehouseLogs.list();
-      setLogs(logData.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()));
     } catch (e) {
       console.error("Lỗi khi tải dữ liệu kho từ Firebase:", e);
+    }
+  };
+
+  // ── Export / Import Excel ──
+  const handleExportExcel = () => {
+    const data = inventory.map((m) => ({
+      'Mã Vật Tư': m.code,
+      'Tên Nguyên Vật Liệu': m.name,
+      'ĐVT': m.unit,
+      'Số lượng tồn': m.qty,
+      'Đơn giá đ.mức': m.unitPrice || 0,
+      'Ngưỡng cảnh báo': m.minAlert,
+      'Vị trí lưu kho': m.location || '',
+    }));
+    const headers = [...EXCEL_HEADERS.inventory];
+    exportToExcel(data, 'TonKho', `Ton_Kho_${formatDateForFile()}.xlsx`, undefined, headers);
+    addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} vật tư`, type: 'success' });
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const rows = await importFromExcel<Record<string, any>>(file, (row) => row);
+      if (rows.length === 0) {
+        addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel không có dữ liệu.', type: 'warning' });
+        return;
+      }
+      const mapped: MaterialStock[] = rows.map((r, idx) => ({
+        id: String(r['Mã Vật Tư'] || `MT_IMP_${Date.now()}_${idx}`),
+        code: String(r['Mã Vật Tư'] || `VT-${String(idx + 1).padStart(3, '0')}`).toUpperCase().trim(),
+        name: String(r['Tên Nguyên Vật Liệu'] || '').trim(),
+        unit: String(r['ĐVT'] || 'Tấm').trim(),
+        qty: Number(String(r['Số lượng tồn'] || '0').replace(/[^\d.-]/g, '')) || 0,
+        unitPrice: Number(String(r['Đơn giá đ.mức'] || '0').replace(/[^\d.-]/g, '')) || 0,
+        minAlert: Number(String(r['Ngưỡng cảnh báo'] || '10').replace(/[^\d.-]/g, '')) || 10,
+        location: String(r['Vị trí lưu kho'] || '').trim(),
+      })).filter(m => m.name);
+      if (mapped.length === 0) {
+        addToast({ title: '⚠️ Không hợp lệ', message: 'Không tìm thấy cột "Tên Nguyên Vật Liệu" trong file.', type: 'warning' });
+        return;
+      }
+      const merged = [...inventory];
+      mapped.forEach(imp => {
+        const existIdx = merged.findIndex(m => m.code.toLowerCase() === imp.code.toLowerCase());
+        if (existIdx > -1) merged[existIdx] = { ...merged[existIdx], ...imp };
+        else merged.push(imp);
+      });
+      setInventory(merged);
+      try {
+        await Promise.allSettled(
+          mapped.map(m => dbService.inventory.save(m).catch(err => console.error("Lỗi lưu vật tư import:", err)))
+        );
+      } catch (err) {
+        console.error("Lỗi import vật tư hàng loạt:", err);
+      }
+      addToast({ title: '✅ Nhập thành công', message: `Đã import ${mapped.length} vật tư từ file Excel`, type: 'success' });
+    } catch (err) {
+      console.error('Lỗi import Excel:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể đọc file Excel. Vui lòng kiểm tra định dạng.', type: 'error' });
     }
   };
 
@@ -207,66 +255,6 @@ export default function WarehouseManagement() {
     }
   };
 
-  // Transaction Handler (Nhập / Xuất kho)
-  const openTxModal = (type: 'in' | 'out', item?: MaterialStock) => {
-    setTxModalType(type);
-    if (item) {
-      setTxMatId(item.id);
-      setTxPrice(item.unitPrice || 0);
-    } else {
-      setTxMatId(inventory[0]?.id || '');
-      setTxPrice(inventory[0]?.unitPrice || 0);
-    }
-    setTxQty(10);
-    setTxNote('');
-    setTxTarget('');
-  };
-
-  const handleTxSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!txMatId || txQty <= 0) return addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập số lượng hợp lệ!', type: 'warning' });
-    
-    const mat = inventory.find(m => m.id === txMatId);
-    if (!mat) return;
-
-    if (txModalType === 'out' && mat.qty < txQty) {
-      const forceOut = window.confirm(
-        `🚨 CẢNH BÁO THIẾU HÀNG:\nSố lượng tồn kho hiện tại là ${mat.qty} ${mat.unit}, nhỏ hơn số lượng xuất ${txQty} ${mat.unit}.\n\nBạn vẫn muốn xuất kho và ghi nhận số lượng âm chứ?`
-      );
-      if (!forceOut) return;
-    }
-
-    const diff = txModalType === 'in' ? txQty : -txQty;
-    const updatedMat = {
-      ...mat,
-      qty: Math.max(txModalType === 'in' ? 0 : -9999, mat.qty + diff)
-    };
-
-    try {
-      await dbService.inventory.save(updatedMat);
-
-      // Create log
-      const newLog = {
-        id: `log_${Date.now()}`,
-        time: new Date().toISOString(),
-        type: txModalType,
-        matName: mat.name,
-        qty: txQty,
-        target: txTarget || (txModalType === 'in' ? 'NCC Vãng lai' : 'Công trình nội bộ'),
-        note: txNote
-      };
-      await dbService.warehouseLogs.save(newLog);
-
-      setInventory(prev => prev.map(m => m.id === updatedMat.id ? updatedMat : m));
-      setLogs(prev => [newLog, ...prev]);
-      setTxModalType(null);
-      addToast({ title: '✅ Thành công', message: `Đã ghi nhận phiếu ${txModalType === 'in' ? 'NHẬP' : 'XUẤT'} kho thành công!`, type: 'success' });
-    } catch (err) {
-      console.error(err);
-      addToast({ title: '❌ Lỗi', message: 'lỗi khi ghi nhận phiếu nhập xuất.', type: 'error' });
-    }
-  };
-
   return (
     <div className="space-y-6 text-slate-200" id="warehouse_management_panel">
       {/* Header cards */}
@@ -283,6 +271,20 @@ export default function WarehouseManagement() {
           </div>
         </div>
 
+        {/* Total Stock Value */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
+          <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400">
+            <DollarSign className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-455 block">Giá trị tồn kho</span>
+            <span className="text-xl font-black text-white font-mono">
+              {inventory.reduce((s, m) => s + (m.qty || 0) * (m.unitPrice || 0), 0).toLocaleString('vi-VN')}đ
+            </span>
+            <span className="text-[9.5px] text-slate-500 block">tổng SL × đơn giá nhập</span>
+          </div>
+        </div>
+
         {/* Low Stock Alerts */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
           <div className="p-3 rounded-lg bg-rose-500/10 text-rose-400 animate-pulse">
@@ -295,26 +297,6 @@ export default function WarehouseManagement() {
             </span>
             <span className="text-[9.5px] text-rose-400 block font-semibold">Cần lên kế hoạch thu mua ngay</span>
           </div>
-        </div>
-
-        {/* Action controls */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-around gap-2">
-          <button
-            type="button"
-            onClick={() => openTxModal('in')}
-            className="flex-1 bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 hover:border-emerald-500 text-emerald-400 hover:text-white font-bold text-xs py-2.5 px-3 rounded-lg cursor-pointer flex items-center justify-center gap-1.5 transition-all active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            Nhập Kho (+)
-          </button>
-          <button
-            type="button"
-            onClick={() => openTxModal('out')}
-            className="flex-1 bg-amber-600/20 hover:bg-amber-600 border border-amber-500/30 hover:border-amber-500 text-amber-400 hover:text-white font-bold text-xs py-2.5 px-3 rounded-lg cursor-pointer flex items-center justify-center gap-1.5 transition-all active:scale-95"
-          >
-            <Minus className="w-4 h-4" />
-            Xuất Kho (-)
-          </button>
         </div>
       </div>
 
@@ -420,109 +402,6 @@ export default function WarehouseManagement() {
         </form>
       )}
 
-      {/* Transaction Entry Modal (Nhập / Xuất kho) */}
-      {txModalType && (() => {
-        return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in text-left">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-                <h3 className="font-extrabold text-white text-xs uppercase tracking-wider flex items-center gap-1.5">
-                  <Activity className="w-4 h-4 text-emerald-500" />
-                  Ghi nhận phiếu {txModalType === 'in' ? 'NHẬP KHO VẬT TƯ' : 'XUẤT KHO CẤP PHÁT'}
-                </h3>
-                <button type="button" onClick={() => setTxModalType(null)} className="text-slate-400 hover:text-white cursor-pointer">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <form onSubmit={handleTxSubmit} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Chọn loại vật tư mộc ván</label>
-                  <select
-                    value={txMatId}
-                    onChange={(e) => {
-                      const mat = inventory.find(i => i.id === e.target.value);
-                      setTxMatId(e.target.value);
-                      if (mat) setTxPrice(mat.unitPrice || 0);
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none"
-                  >
-                    {inventory.map(m => (
-                      <option key={m.id} value={m.id}>
-                        {m.code} - {m.name} (Tồn: {m.qty} {m.unit})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase font-bold text-slate-400">Số lượng giao dịch</label>
-                    <input
-                      type="number"
-                      required
-                      min={1}
-                      value={txQty || ''}
-                      onChange={(e) => setTxQty(Number(e.target.value))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase font-bold text-slate-400">Đơn giá áp dụng (đ)</label>
-                    <input
-                      type="number"
-                      value={txPrice || ''}
-                      onChange={(e) => setTxPrice(Number(e.target.value))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">
-                    {txModalType === 'in' ? 'Nhà cung cấp / Nguồn nhập' : 'Dự án / Địa điểm nhận'}
-                  </label>
-                  <input
-                    type="text"
-                    value={txTarget}
-                    onChange={(e) => setTxTarget(e.target.value)}
-                    placeholder={txModalType === 'in' ? 'VD: Gỗ An Cường Đà Lạt...' : 'VD: Biệt thự 45 Đà Lạt...'}
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Diễn giải nội dung</label>
-                  <input
-                    type="text"
-                    value={txNote}
-                    onChange={(e) => setTxNote(e.target.value)}
-                    placeholder="Lý do bàn giao, số lô hàng..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setTxModalType(null)}
-                    className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-3.5 py-2 rounded-lg"
-                  >
-                    Hủy bỏ
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] px-4 py-2 rounded-lg"
-                  >
-                    Hoàn Tất Giao Dịch
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Main filters and list */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
         <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-3">
@@ -537,6 +416,23 @@ export default function WarehouseManagement() {
             />
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"
+              title="Xuất Excel tồn kho"
+            >
+              <Download className="w-3 h-3 text-blue-400" />
+              Xuất Excel
+            </button>
+            <label
+              className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"
+              title="Nhập Excel tồn kho"
+            >
+              <FileUp className="w-3 h-3 text-emerald-400" />
+              Nhập Excel
+              <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
+            </label>
             <button
               type="button"
               onClick={() => setIsAdding(!isAdding)}
@@ -710,22 +606,6 @@ export default function WarehouseManagement() {
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => openTxModal('in', item)}
-                              className="p-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded cursor-pointer"
-                              title="Nhập thêm kho"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openTxModal('out', item)}
-                              className="p-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded cursor-pointer"
-                              title="Xuất cấp phát"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => handleEditClick(item)}
                               className="p-1 bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-white rounded cursor-pointer"
                               title="Chỉnh sửa thông số"
@@ -761,47 +641,6 @@ export default function WarehouseManagement() {
             </button>
           </div>
         )}
-      </div>
-
-      {/* Transaction History Logs */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-left">
-        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800 pb-2">
-          <FileText className="w-4 h-4 text-teal-400" />
-          Nhật ký xuất nhập kho tức thời (gần đây)
-        </h3>
-        <div className="mt-3 overflow-y-auto max-h-48 space-y-2">
-          {logs.length === 0 ? (
-            <p className="text-xs text-slate-500 text-center py-4">Chưa ghi nhận hoạt động nào.</p>
-          ) : (
-            logs.map((log) => (
-              <div 
-                key={log.id} 
-                className="flex items-center justify-between p-2 rounded-lg bg-slate-950/50 border border-slate-850 text-[11px]"
-              >
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] uppercase ${
-                    log.type === 'in' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                  }`}>
-                    {log.type === 'in' ? 'Nhập' : 'Xuất'}
-                  </span>
-                  <div>
-                    <span className="font-extrabold text-slate-200">{log.matName}</span>
-                    <span className="text-slate-500 mx-1.5">•</span>
-                    <span className="text-slate-400 font-semibold">{log.target}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`font-mono font-black ${log.type === 'in' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {log.type === 'in' ? '+' : '-'}{log.qty}
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {new Date(log.time).toLocaleDateString('vi-VN')} {new Date(log.time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
       </div>
     </div>
   );

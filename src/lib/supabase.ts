@@ -15,9 +15,18 @@ export function initializeSupabase(url: string, anonKey: string): SupabaseClient
   }
 
   try {
-    supabaseInstance = createClient(url, anonKey);
+    supabaseInstance = createClient(url, anonKey, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    });
     currentConfig = { url, anonKey };
     console.log("[Supabase] Successfully initialized with URL:", url);
+    // Báo cho App re-subscribe realtime khi client chưa sẵn sàng lúc mount (G2).
+    // App lắng nghe event này để gọi lại setupRealtimeChannel(getSupabase()).
+    try { window.dispatchEvent(new CustomEvent('hl-supabase-client-ready')); } catch {}
     return supabaseInstance;
   } catch (error) {
     console.error("[Supabase] Failed to initialize:", error);

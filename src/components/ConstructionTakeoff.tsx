@@ -420,7 +420,7 @@ export default function ConstructionTakeoff({
     const localItems = sessionStorage.getItem('hl_construction_items') ? JSON.parse(sessionStorage.getItem('hl_construction_items')!) : [];
     const localNotes = sessionStorage.getItem('hl_construction_notes') || '';
     const localPaymentTerms = sessionStorage.getItem('hl_construction_payment_terms') || '';
-    const localConfig = sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 8 };
+    const localConfig = sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 0 };
 
     const quoteId = loadedQuote ? loadedQuote.id : `archived_quote_${Date.now()}`;
     const quoteCode = loadedQuote ? loadedQuote.code : `BGXD-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 100)}`;
@@ -983,7 +983,7 @@ export default function ConstructionTakeoff({
             tongDienTichXayDung: parseFloat(sessionStorage.getItem('hl_construction_chieu_dai') || '0') * parseFloat(sessionStorage.getItem('hl_construction_chieu_rong') || '0') * parseInt(sessionStorage.getItem('hl_construction_so_tang') || '0'),
             date: new Date().toISOString().split('T')[0],
             items: sessionStorage.getItem('hl_construction_items') ? JSON.parse(sessionStorage.getItem('hl_construction_items')!) : [],
-            config: sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 8 },
+            config: sessionStorage.getItem('hl_construction_config') ? JSON.parse(sessionStorage.getItem('hl_construction_config')!) : { discountPercent: 0, vatPercent: 0 },
             notes: sessionStorage.getItem('hl_construction_notes') || '',
             paymentTerms: sessionStorage.getItem('hl_construction_payment_terms') || '',
             customerName: customerName,
@@ -1002,7 +1002,7 @@ export default function ConstructionTakeoff({
       {/* Dynamic Print Preview Modal */}
       {savedQuoteForPreview && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 select-text text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-200">

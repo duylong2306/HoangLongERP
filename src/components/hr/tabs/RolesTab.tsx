@@ -5,8 +5,8 @@ import ProjectPermissionModal from './ProjectPermissionModal';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { loadApprovalConfig, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission } from '../../../context';
-import { loadProjectPermissions, saveProjectPermissions } from '../hrProjectPermissions';
+import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache } from '../../../context';
+import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { dbService } from '../../../lib/dbService';
 
 export interface RolesTabProps {
@@ -74,14 +74,22 @@ export default function RolesTab(props: RolesTabProps) {
     { type: 'contract', label: 'Hợp Đồng', group: 'Hồ Sơ Dự Án' },
     { type: 'acceptance', label: 'Nghiệm Thu', group: 'Hồ Sơ Dự Án' },
     { type: 'liquidation', label: 'Thanh Lý', group: 'Hồ Sơ Dự Án' },
+    { type: 'material_coordinator', label: 'Người Điều Phối Vật Tư', group: 'Hồ Sơ Dự Án' },
+    { type: 'material_approver', label: 'Người Xét Duyệt Vật Tư', group: 'Hồ Sơ Dự Án' },
     { type: 'leave', label: 'Đơn Xin Nghỉ Phép', group: 'Hồ Sơ Nhân Sự' },
     { type: 'salary_advance', label: 'Tạm Ứng Lương Nhanh', group: 'Hồ Sơ Nhân Sự' },
+    { type: 'travel_expense', label: 'Công Tác Phí', group: 'Hồ Sơ Nhân Sự' },
+    { type: 'payroll', label: 'Phiếu Lương', group: 'Hồ Sơ Nhân Sự' },
+    { type: 'finance_expense_proposal', label: 'Đề Xuất Chi Phí', group: 'Tài Chính - Kế Toán' },
+    { type: 'finance_advance_proposal', label: 'Tạm Ứng Thầu Phụ', group: 'Tài Chính - Kế Toán' },
   ]), []);
 
   // ─── Draft states cho cơ chế Manual Save (Mỗi tab ≠ nhau) ──────────────
   const [draftRoles, setDraftRoles] = React.useState(() => [...roles]);
   const [draftMatrix, setDraftMatrix] = React.useState(() => loadProjectPermissions());
+  const [savedMatrix, setSavedMatrix] = React.useState(() => loadProjectPermissions());
   const [draftApprovalConfig, setDraftApprovalConfig] = React.useState<ApprovalPermission[]>(() => loadApprovalConfig());
+  const [savedApprovalConfig, setSavedApprovalConfig] = React.useState<ApprovalPermission[]>(() => loadApprovalConfig());
 
   // Đồng bộ draftRoles khi roles thay đổi từ parent (thêm/xóa ở modal ngoài)
   React.useEffect(() => {
@@ -90,17 +98,61 @@ export default function RolesTab(props: RolesTabProps) {
 
   // Cờ hiển thị chưa lưu (để hiện badge)
   const groupChanged = React.useMemo(() => JSON.stringify(draftRoles) !== JSON.stringify(roles), [draftRoles, roles]);
-  const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(loadProjectPermissions()), [draftMatrix]);
-  const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(loadApprovalConfig()), [draftApprovalConfig]);
+  const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(savedMatrix), [draftMatrix, savedMatrix]);
+  const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
+
+  // Ref theo dõi cờ "chưa lưu" để đọc được giá trị MỚI NHẤT bên trong listener
+  // sự kiện (đăng ký 1 lần lúc mount, dep []) mà không phải re-subscribe mỗi
+  // lần draft đổi.
+  const approvalChangedRef = React.useRef(approvalChanged);
+  React.useEffect(() => { approvalChangedRef.current = approvalChanged; }, [approvalChanged]);
+  const projectChangedRef = React.useRef(projectChanged);
+  React.useEffect(() => { projectChangedRef.current = projectChanged; }, [projectChanged]);
+
+  // Sync Quyền Phê Duyệt từ Supabase khi mount (localStorage có thể trống trên browser mới)
+  React.useEffect(() => {
+    const loadApproval = () => syncApprovalConfigFromDb().then((dbConfigs) => {
+      if (dbConfigs.length > 0) {
+        setDraftApprovalConfig(dbConfigs);
+        setSavedApprovalConfig(JSON.parse(JSON.stringify(dbConfigs)));
+      }
+    });
+    loadApproval();
+    // Trước đây chỉ tải 1 lần lúc mount, không nghe sự kiện nào — cấu hình
+    // Quyền Phê Duyệt do người khác sửa ở tab/máy khác không tự cập nhật ở
+    // đây. CHỈ tự tải lại khi form KHÔNG có thay đổi chưa lưu (approvalChangedRef)
+    // — tránh ghi đè mất chỉnh sửa đang dang dở của người đang thao tác.
+    const handleApprovalUpdated = () => {
+      if (approvalChangedRef.current) return;
+      loadApproval();
+    };
+    window.addEventListener('hl-hrm-approval-config-updated', handleApprovalUpdated);
+    return () => window.removeEventListener('hl-hrm-approval-config-updated', handleApprovalUpdated);
+  }, []);
+
+  // Sync Quyền Dự Án từ Supabase khi mount
+  React.useEffect(() => {
+    const loadProject = () => syncProjectPermissionsFromDb().then((cloudMatrix) => {
+      setDraftMatrix(cloudMatrix);
+      setSavedMatrix(JSON.parse(JSON.stringify(cloudMatrix)));
+    });
+    loadProject();
+    // Cùng lý do như Quyền Phê Duyệt ở trên — chỉ tự tải lại khi KHÔNG có thay
+    // đổi chưa lưu (projectChangedRef).
+    const handleProjectUpdated = () => {
+      if (projectChangedRef.current) return;
+      loadProject();
+    };
+    window.addEventListener('hl-project-permissions-updated', handleProjectUpdated);
+    return () => window.removeEventListener('hl-project-permissions-updated', handleProjectUpdated);
+  }, []);
 
   // Save handlers
   const { addToast } = useNotification();
 
   const handleSaveGroup = React.useCallback(async () => {
     const updated = [...draftRoles];
-    // Ghi cache localStorage trước (offline-safe)
-    localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
-    localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
+    setRoleGroupsCache(updated); // sync in-memory cache
     setRoles(updated);
     syncHrmPermissionsToApp(updated);
     // Đồng bộ lên Supabase (chờ tất cả hoàn tất)
@@ -119,6 +171,83 @@ export default function RolesTab(props: RolesTabProps) {
       supabaseFailed = true;
       console.error('Supabase hrmRoleGroups save unexpected error:', e);
     }
+
+    // --- ĐỒNG BỘ role_group_ids CỦA EMPLOYEE VÀO SUPABASE (chỉ thêm, KHÔNG xóa) ---
+    try {
+      // B1: Lấy danh sách ID nhân sự đã CÓ TRƯỚC đó từ Supabase
+      const currentEmployeesFromSupabase = await dbService.employees.list();
+      // B2: Lấy danh sách ID nhân sự trong draftRoles (sau khi thay đổi)
+      const newMemberIds = updated.flatMap((r: any) => r.memberIds || []);
+
+      // B3: Chỉ cập nhật các nhân viên mới (không có sẵn -> có mới)
+      const employeeIdsToAdd = newMemberIds.filter(id =>
+        !currentEmployeesFromSupabase.some(emp => (emp.roleGroupIds || []).includes(id))
+      );
+
+      // B4: Cập nhật role_group_ids cho từng nhân viên mới
+      await Promise.all(
+        employeeIdsToAdd.map(async (empId: string) => {
+          // Tìm thông tin nhân viên từ draftRoles để tính toán roleGroupIds
+          const roleIds: string[] = [];
+          updated.forEach((role: any) => {
+            if (role.memberIds?.includes(empId)) {
+              roleIds.push(role.id);
+            }
+          });
+
+          // Lấy thông tin nhân viên đầy đủ từ danh sách nhân viên hiện tại
+          const emp = currentEmployeesFromSupabase.find(e => e.id === empId);
+          if (emp) {
+            await dbService.employees.save({
+              ...emp,
+              roleGroupIds: roleIds,
+            });
+          }
+        })
+      );
+    } catch (e) {
+      console.error('Lỗi đồng bộ role_group_ids cho nhân viên mới:', e);
+    }
+
+    // --- ĐỒNG BỘ role_group_ids CHO CÁC NHÂN SỰ ĐÃ XÓA KHỎI NHÓM ---
+    try {
+      // 1. Lấy danh sách nhân sự đã gán trong draftRoles (sau khi thay đổi)
+      const currentMemberIds = new Set(updated.flatMap((r: any) => r.memberIds || []));
+
+      // 2. Lấy danh sách nhân sự từ Supabase
+      const currentEmployeesFromSupabase = await dbService.employees.list();
+
+      const employeesToUpdate: { empId: string; roleGroupIds: string[] }[] = [];
+      for (const emp of currentEmployeesFromSupabase) {
+        if (!emp.id) continue;
+        const previousRoleGroupIds = emp.roleGroupIds || [];
+
+        // Tìm các role mà nhân viên đã từng thuộc về nhưng giờ không còn
+        const rolesToRemove = previousRoleGroupIds.filter((roleId: string) => {
+          const role = updated.find((r: any) => r.id === roleId);
+          return role && !currentMemberIds.has(emp.id);
+        });
+
+        if (rolesToRemove.length > 0) {
+          // Giữ lại các role chưa xóa
+          const remainingRoleGroupIds = previousRoleGroupIds.filter((rId: string) => !rolesToRemove.includes(rId));
+          employeesToUpdate.push({ empId: emp.id, roleGroupIds: remainingRoleGroupIds });
+        }
+      }
+
+      // 3. Cập nhật Supabase
+      await Promise.all(
+        employeesToUpdate.map(({ empId, roleGroupIds }) =>
+          dbService.employees.save({
+            id: empId,
+            roleGroupIds,
+          })
+        )
+      );
+    } catch (e) {
+      console.error('Lỗi đồng bộ role_group_ids khi xóa nhân sự khỏi nhóm:', e);
+    }
+
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
     if (supabaseFailed) {
@@ -131,6 +260,7 @@ export default function RolesTab(props: RolesTabProps) {
   const handleSaveProject = React.useCallback(async () => {
     try {
       await saveProjectPermissions(draftMatrix);
+      setSavedMatrix(JSON.parse(JSON.stringify(draftMatrix)));
       addToast({ title: '✅ Thành công', message: 'Quyền dự án đã được lưu.', type: 'success' });
     } catch (e) {
       console.error('Supabase projectPermissions save error:', e);
@@ -152,6 +282,9 @@ export default function RolesTab(props: RolesTabProps) {
     if (supabaseFailed) {
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     } else {
+      setSavedApprovalConfig(JSON.parse(JSON.stringify(draftApprovalConfig)));
+      // Nạp ngay vào in-memory cache để các form (nghỉ phép, báo cáo chấm công) hiển thị đúng người duyệt
+      setApprovalConfigCache(draftApprovalConfig);
       addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
     }
   }, [draftApprovalConfig, addToast]);
@@ -188,8 +321,8 @@ export default function RolesTab(props: RolesTabProps) {
     }
     if (!window.confirm('Khôi phục cấu hình về mặc định đã lưu? Các thay đổi chưa lưu sẽ bị mất.')) return;
     if (roleMainTab === 'group') setDraftRoles([...snap]);
-    else if (roleMainTab === 'task') setDraftMatrix(snap);
-    else setDraftApprovalConfig([...snap]);
+    else if (roleMainTab === 'task') { setDraftMatrix(snap); setSavedMatrix(JSON.parse(JSON.stringify(snap))); }
+    else { setDraftApprovalConfig([...snap]); setSavedApprovalConfig(JSON.parse(JSON.stringify(snap))); }
     addToast({ title: '↩️ Đã khôi phục', message: 'Đã khôi phục cấu hình mặc định.', type: 'info' });
   }, [roleMainTab, getCurrentTabDefault, addToast]);
 
@@ -198,7 +331,7 @@ export default function RolesTab(props: RolesTabProps) {
     const existing = [...draftApprovalConfig];
     const idx = existing.findIndex(p => p.documentType === docType);
     if (checked) {
-      const defaultApprover = employees[0];
+      const defaultApprover = employees.find(emp => emp.hasSystemAccount);
       if (!defaultApprover) return;
       const newPerm: ApprovalPermission = {
         id: `ap_${docType}`,
@@ -245,6 +378,28 @@ export default function RolesTab(props: RolesTabProps) {
     return draftApprovalConfig.find(p => p.documentType === docType);
   }, [draftApprovalConfig]);
 
+  const handleChangeSettler = React.useCallback((docType: ApprovalPermission['documentType'], empId: string, empName: string, empPosition?: string) => {
+    const existing = [...draftApprovalConfig];
+    const idx = existing.findIndex(p => p.documentType === docType);
+    if (idx >= 0) {
+      existing[idx] = { ...existing[idx], settlerId: empId, settlerName: empName, settlerPosition: empPosition || '' };
+    } else {
+      existing.push({
+        id: `ap_${docType}`,
+        documentType: docType,
+        documentTypeLabel: docType,
+        approverId: empId,
+        approverName: empName,
+        approverPosition: empPosition || '',
+        settlerId: empId,
+        settlerName: empName,
+        settlerPosition: empPosition || '',
+        canApprove: true
+      });
+    }
+    setDraftApprovalConfig(existing);
+  }, [draftApprovalConfig]);
+
   return (
     <div className="flex flex-col gap-6 animate-fadeIn text-slate-200">
 
@@ -282,7 +437,7 @@ export default function RolesTab(props: RolesTabProps) {
 
       {/* TOP PANEL: Master - List of Roles (chỉ hiển thị ở tab Phân Quyền Nhóm Vai Trò để tránh nhầm lẫn) */}
       {roleMainTab === 'group' && (
-      <div className="bg-slate-900 border border-slate-805 rounded-2xl p-5 space-y-4 w-full">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 w-full">
         <div className="flex justify-between items-center pb-2 border-b border-slate-800">
           <h4 className="font-extrabold text-xs text-white uppercase tracking-wider flex items-center gap-2">
             <Users className="w-4 h-4 text-amber-500" />
@@ -314,7 +469,7 @@ export default function RolesTab(props: RolesTabProps) {
                 onClick={() => {
                   setSelectedRoleId(r.id);
                 }}
-                className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${isSelected ? 'bg-amber-500/10 border-amber-500/50 shadow-lg' : 'bg-slate-950/40 border-slate-850 hover:bg-slate-850/30'}`}
+                className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${isSelected ? 'bg-amber-50 border-amber-300 shadow-lg' : 'bg-slate-950/40 border-slate-850 hover:bg-slate-850/30'}`}
               >
                 <div className="flex justify-between items-start gap-2">
                   <h5 className="font-bold text-xs text-white flex items-center gap-1.5">
@@ -340,8 +495,7 @@ export default function RolesTab(props: RolesTabProps) {
                           const updated = draftRoles.filter(item => item.id !== r.id);
                           setDraftRoles(updated);
                           setRoles(updated);
-                          localStorage.setItem('hl_cached_hrm_role_groups', JSON.stringify(updated));
-                          localStorage.setItem('hl_hrm_roles_v2', JSON.stringify(updated));
+                          setRoleGroupsCache(updated);
                           dbService.hrmRoleGroups.delete(r.id).catch(err => {
                             console.error('Supabase hrmRoleGroups delete error:', err);
                           });
@@ -380,81 +534,92 @@ export default function RolesTab(props: RolesTabProps) {
         // Admin (role_admin) luôn full quyền, không cho sửa
         const isAdmin = activeRole.id === 'role_admin';
 
+        // Ánh xạ cha-con cho logic "chọn cha tự động chọn hết con"
+        const parentChildrenMap: Record<string, string[]> = {
+          director_office: ['director_dashboard'],
+          project_office: ['projects_construction', 'projects_furniture', 'projects_mechanical'],
+          hr_office: ['employees', 'hr_data'],
+          accounting_office: ['finance', 'finance_data'],
+          warehouse_office: ['material_coordination', 'warehouse_suppliers', 'warehouse_management'],
+          subcontractor_office: ['subcontractor_management'],
+          library_office: ['quotes_construction', 'quotes', 'quotes_mechanical', 'quotes_subcontractor'],
+          system_office: ['settings_accounts', 'settings_roles', 'settings'],
+        };
+
         const groupedModules = [
           {
             department: 'PHÒNG GIÁM ĐỐC',
-            color: 'border-violet-500/20 text-violet-400 bg-violet-500/5',
+            color: 'border-violet-200 text-violet-700 bg-violet-50',
             modules: [
-              { code: 'director_office', name: 'Menu Cha: Phòng Giám Đốc', desc: 'Kiểm soát khu vực làm việc và dữ liệu nhạy cảm của Ban Giám Đốc' },
-              { code: 'director_dashboard', name: '↳ Bàn Làm Việc Giám Đốc', desc: 'Báo cáo chỉ số kinh doanh, biểu đồ tăng trưởng và duyệt ngân sách lớn' }
+              { code: 'director_office', name: 'Menu Cha: Phòng Giám Đốc', desc: 'Phòng Giám Đốc - Dashboard Tổng Hợp' },
+              { code: 'director_dashboard', name: '↳ Dashboard Tổng Hợp', desc: 'Bảng điều hành tổng hợp các chỉ số doanh nghiệp' }
             ]
           },
           {
             department: 'PHÒNG DỰ ÁN',
-            color: 'border-emerald-500/20 text-emerald-400 bg-emerald-500/5',
+            color: 'border-emerald-200 text-emerald-700 bg-emerald-50',
             modules: [
-              { code: 'project_office', name: 'Menu Cha: Phòng Dự Án', desc: 'Khu vực quản lý và giám sát các công trình xây dựng, sản xuất gỗ, cơ khí' },
-              { code: 'projects_construction', name: '↳ Công trình & Thi công mộc (Xây Dựng)', desc: 'Theo dõi hợp đồng xây dựng, thi công thô và hoàn thiện thợ thầu dẻo dai' },
-              { code: 'projects_furniture', name: '↳ Dự án Nội thất cao cấp', desc: 'Sản xuất mộc xưởng gỗ, bệ tủ kịch trần cao cấp và lắp đặt hoàn thiện' },
-              { code: 'projects_mechanical', name: '↳ Sắt mỹ thuật & Cơ khí', desc: 'Gia công hàn cắt sắt mỹ nghệ, xưởng sỹ mạ cơ khí Hoàng Long' },
-              { code: 'tasks', name: '↳ Nhiệm vụ & Tiến độ công việc', desc: 'Phân chia tác vụ việc làm, tiến độ thợ nhật thầu khoán liên thông' }
+              { code: 'project_office', name: 'Menu Cha: Phòng Dự Án', desc: 'Quản lý & giám sát các dự án Xây dựng, Nội thất, Cơ khí' },
+              { code: 'projects_construction', name: '↳ Xây dựng', desc: 'Quản lý các công trình xây dựng dân dụng & công nghiệp' },
+              { code: 'projects_furniture', name: '↳ Nội thất', desc: 'Quản lý các dự án nội thất mộc & cabinet' },
+              { code: 'projects_mechanical', name: '↳ Cơ khí', desc: 'Quản lý dự án cơ khí & gia công sắt mỹ thuật' }
             ]
           },
           {
             department: 'PHÒNG NHÂN SỰ',
-            color: 'border-orange-500/20 text-orange-400 bg-orange-500/5',
+            color: 'border-orange-200 text-orange-700 bg-orange-50',
             modules: [
-              { code: 'hr_office', name: 'Menu Cha: Phòng Nhân Sự', desc: 'Cổng thông tin nhân sự toàn công ty Hoàng Long Lâm Đồng' },
-              { code: 'employees', name: '↳ Quản trị Nhân sự - Chấm công', desc: 'Quản lý thông tin hồ sơ lý lịch, máy chấm công vân tay, tự động tính bảng lương' },
-              { code: 'hr_data', name: '↳ Dữ liệu nhân sự', desc: 'Lưu trữ hồ sơ số, hợp đồng lao động, quyết định bổ nhiệm và tài liệu nhân lực' }
+              { code: 'hr_office', name: 'Menu Cha: Phòng Nhân Sự', desc: 'Quản lý nhân sự toàn công ty' },
+              { code: 'employees', name: '↳ Hệ thống Nhân sự', desc: 'Hồ sơ nhân viên, chấm công, bảng lương' },
+              { code: 'hr_data', name: '↳ Dữ liệu nhân sự', desc: 'Lưu trữ hồ sơ số, hợp đồng, quyết định nhân sự' }
             ]
           },
           {
             department: 'PHÒNG KẾ TOÁN',
-            color: 'border-sky-500/20 text-sky-400 bg-sky-500/5',
+            color: 'border-sky-200 text-sky-700 bg-sky-50',
             modules: [
-              { code: 'accounting_office', name: 'Menu Cha: Phòng Kế Toán', desc: 'Nghiệp vụ tài chính kế toán, lập đề xuất chi tiền mặt và ngân hàng' },
-              { code: 'finance', name: '↳ Tài chính - Kế toán', desc: 'Thống kê thu chi doanh nghiệp Hoàng Long Lâm Đồng' },
-              { code: 'finance_data', name: '↳ Dữ Liệu Kế Toán', desc: 'Lịch sử giao dịch sao kê ngân hàng, hóa đơn chứng từ, phiếu thu phiếu chi' }
+              { code: 'accounting_office', name: 'Menu Cha: Phòng Kế Toán', desc: 'Nghiệp vụ tài chính kế toán doanh nghiệp' },
+              { code: 'finance', name: '↳ Tài Chính - Kế Toán', desc: 'Đề xuất thu chi, quản lý dòng tiền' },
+              { code: 'finance_data', name: '↳ Dữ Liệu Kế Toán', desc: 'Dữ liệu kế toán, sao kê, hóa đơn chứng từ' }
             ]
           },
           {
             department: 'KHO & VẬT TƯ',
-            color: 'border-teal-500/20 text-teal-400 bg-teal-500/5',
+            color: 'border-teal-200 text-teal-700 bg-teal-50',
             modules: [
-              { code: 'warehouse_office', name: 'Menu Cha: Kho & Vật Tư', desc: 'Theo dõi chuỗi cung ứng vật tư gỗ, sắt thép, đá tự nhiên và phụ kiện' },
-              { code: 'material_coordination', name: '↳ Điều phối vật tư', desc: 'Yêu cầu cấp phát vật tư công trình thầu phụ, điều chuyển và nghiệm thu thực tế' },
-              { code: 'warehouse_suppliers', name: '↳ Nhà cung cấp vật tư', desc: 'Danh sách và đánh giá năng lực các đơn vị cung ứng vật tư xây dựng mộc cơ khí' },
-              { code: 'warehouse_management', name: '↳ Quản lý tồn kho', desc: 'Nhập kho nguyên liệu, xuất kho chế biến và báo cáo kiểm kho định kỳ' }
+              { code: 'warehouse_office', name: 'Menu Cha: Kho & Vật Tư', desc: 'Quản lý chuỗi cung ứng & vật tư' },
+              { code: 'material_coordination', name: '↳ Điều phối vật tư', desc: 'Điều phối & yêu cầu cấp phát vật tư' },
+              { code: 'warehouse_suppliers', name: '↳ Nhà cung cấp vật tư', desc: 'Danh sách & đánh giá nhà cung cấp' },
+              { code: 'warehouse_management', name: '↳ Quản lý tồn kho', desc: 'Nhập xuất tồn kho, kiểm kho' }
             ]
           },
           {
             department: 'PHÂN HỆ THẦU PHỤ',
-            color: 'border-amber-500/20 text-amber-400 bg-amber-500/5',
+            color: 'border-amber-200 text-amber-700 bg-amber-50',
             modules: [
-              { code: 'subcontractor_office', name: 'Menu Cha: Thầu Phụ', desc: 'Điều hành các tổ thợ, cai thầu xây dựng dẻo dai' },
-              { code: 'subcontractor_management', name: '↳ Quản Lý Thầu Phụ', desc: 'Hồ sơ thầu phụ, nghiệm thu khối lượng thi công thô gỗ cơ khí hoàn thiện' }
+              { code: 'subcontractor_office', name: 'Menu Cha: Thầu Phụ', desc: 'Điều hành các tổ thợ & nhà thầu phụ' },
+              { code: 'subcontractor_management', name: '↳ Quản Lý Thầu Phụ', desc: 'Hồ sơ thầu phụ, nghiệm thu khối lượng' }
             ]
           },
           {
             department: 'THƯ VIỆN & BÁO GIÁ',
-            color: 'border-blue-500/20 text-blue-400 bg-blue-500/5',
+            color: 'border-blue-200 text-blue-700 bg-blue-50',
             modules: [
-              { code: 'library_office', name: 'Menu Cha: Thư Viện', desc: 'Cơ sở dữ liệu biểu giá định mức dự toán của Hoàng Long Lâm Đồng' },
-              { code: 'quotes_construction', name: '↳ Hồ Sơ Xây Dựng (Thư viện)', desc: 'Thư viện mẫu dự toán xây dựng công trình, thợ thầu thi công thô dẻo dai' },
-              { code: 'quotes', name: '↳ Hồ Sơ Nội Thất (Thư viện)', desc: 'Thư viện báo giá mẫu mộc tủ bếp gỗ công nghiệp, gỗ tự nhiên cao cấp' },
-              { code: 'quotes_mechanical', name: '↳ Hồ Sơ Cơ Khí (Thư viện)', desc: 'Thư viện mẫu báo giá sắt nghệ thuật, hàng rào, cổng ngõ mạ kẽm' },
-              { code: 'quotes_subcontractor', name: '↳ Hồ Sơ Thầu Phụ (Thư viện)', desc: 'Thư viện định mức báo giá chi tiết của các tổ đội thợ liên thông' }
+              { code: 'library_office', name: 'Menu Cha: Thư Viện', desc: 'Thư viện báo giá & định mức dự toán' },
+              { code: 'quotes_construction', name: '↳ Hồ Sơ Xây Dựng', desc: 'Thư viện báo giá mẫu xây dựng' },
+              { code: 'quotes', name: '↳ Hồ Sơ Nội Thất', desc: 'Thư viện báo giá mẫu nội thất' },
+              { code: 'quotes_mechanical', name: '↳ Hồ Sơ Cơ Khí', desc: 'Thư viện báo giá mẫu cơ khí' },
+              { code: 'quotes_subcontractor', name: '↳ Hồ Sơ Thầu Phụ', desc: 'Thư viện báo giá mẫu thầu phụ' }
             ]
           },
           {
-            department: 'QUẢN TRỊ HỆ THỐNG',
+            department: 'CÀI ĐẶT HỆ THỐNG',
             color: 'border-slate-800 text-slate-300 bg-slate-900/40',
             modules: [
-              { code: 'system_office', name: 'Menu Cha: Quản Trị Hệ Thống', desc: 'Công cụ quản trị hệ thống ERP, phân quyền nhóm vai trò' },
-              { code: 'settings_accounts', name: '↳ Tài Khoản Hệ Thống', desc: 'Tạo mới, phân nhóm, thay đổi trạng thái và mật khẩu người dùng' },
-              { code: 'settings_roles', name: '↳ Phân Quyền Và Vai Trò', desc: 'Thiết lập danh mục chức năng phân hệ, phân quyền Xem, Thêm, Sửa, Xóa' },
-              { code: 'settings', name: '↳ Thiết lập & Bản đồ vách mộc', desc: 'Quy chế công tác phí, hệ số lương tăng ca, ngày nghỉ lễ của công ty' }
+              { code: 'system_office', name: 'Menu Cha: Cài Đặt Hệ Thống', desc: 'Quản trị hệ thống ERP & phân quyền' },
+              { code: 'settings_accounts', name: '↳ Tài Khoản Hệ Thống', desc: 'Quản lý tài khoản người dùng' },
+              { code: 'settings_roles', name: '↳ Phân Quyền Và Vai Trò', desc: 'Thiết lập phân quyền & vai trò' },
+              { code: 'settings', name: '↳ Cài Đặt Hệ Thống', desc: 'Cấu hình chung doanh nghiệp' }
             ]
           }
         ];
@@ -467,13 +632,13 @@ export default function RolesTab(props: RolesTabProps) {
             {/* Active role header */}
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
               <div>
-                <span className="text-[9px] bg-amber-500/10 text-amber-500 font-extrabold px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider">
+                <span className="text-[9px] bg-amber-50 text-amber-700 font-extrabold px-2 py-0.5 rounded border border-amber-200 uppercase tracking-wider">
                   Đang cấu hình
                 </span>
                 <h4 className="font-extrabold text-sm text-white mt-1 flex items-center gap-2">
                   {activeRole.name}
                 </h4>
-                <p className="text-[10.5px] text-slate-405 mt-1">
+                <p className="text-[10.5px] text-slate-400 mt-1">
                   {activeRole.description || 'Chưa có mô tả cho nhóm vai trò này.'}
                 </p>
               </div>
@@ -571,15 +736,39 @@ export default function RolesTab(props: RolesTabProps) {
                             if (isAdmin) return;
                             const updatedRoles = draftRoles.map(r => {
                               if (r.id === activeRole.id) {
-                                const currentPerms = r.permissions[m.code] || { view: false, create: false, edit: false, delete: false };
-                                const nextPerms = {
-                                  ...r.permissions,
-                                  [m.code]: {
-                                    ...currentPerms,
-                                    [action]: !currentPerms[action]
+                                const newPerms = { ...r.permissions };
+                                const currentPerms = newPerms[m.code] || { view: false, create: false, edit: false, delete: false };
+                                const newVal = !currentPerms[action];
+
+                                // 1. Cập nhật quyền cho module hiện tại
+                                newPerms[m.code] = { ...currentPerms, [action]: newVal };
+
+                                // 2. Auto-select/con: khi tick cha → tick hết tất cả con cùng action
+                                const children = parentChildrenMap[m.code];
+                                if (children) {
+                                  children.forEach(childCode => {
+                                    const childPerms = newPerms[childCode] || { view: false, create: false, edit: false, delete: false };
+                                    newPerms[childCode] = { ...childPerms, [action]: newVal };
+                                  });
+                                }
+
+                                // 3. Auto-uncheck cha: nếu untick 1 quyền ở con → untick quyền đó ở cha (nếu tất cả con đều false)
+                                if (!newVal) {
+                                  const parentCode = Object.keys(parentChildrenMap).find(p => parentChildrenMap[p].includes(m.code));
+                                  if (parentCode) {
+                                    const siblings = parentChildrenMap[parentCode];
+                                    const allFalse = siblings.every(sibCode => {
+                                      const sibPerms = newPerms[sibCode] || { view: false, create: false, edit: false, delete: false };
+                                      return !sibPerms[action];
+                                    });
+                                    if (allFalse) {
+                                      const parentPerms = newPerms[parentCode] || { view: false, create: false, edit: false, delete: false };
+                                      newPerms[parentCode] = { ...parentPerms, [action]: false };
+                                    }
                                   }
-                                };
-                                return { ...r, permissions: nextPerms };
+                                }
+
+                                return { ...r, permissions: newPerms };
                               }
                               return r;
                             });
@@ -665,7 +854,7 @@ export default function RolesTab(props: RolesTabProps) {
                             return (
                               <span
                                 key={empId}
-                                className="bg-amber-500/10 text-amber-500 font-bold px-2 py-0.5 rounded-md border border-amber-500/20 text-[10px] flex items-center gap-1 shrink-0"
+                                className="bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-md border border-amber-200 text-[10px] flex items-center gap-1 shrink-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedTempEmpIds(prev => prev.filter(id => id !== empId));
@@ -716,7 +905,7 @@ export default function RolesTab(props: RolesTabProps) {
                         {/* Dropdown Options List */}
                         <div className="space-y-1 overflow-y-auto max-h-48 pr-1 flex-1">
                           {(() => {
-                            const availableEmployees = employees.filter(emp => !activeRole.memberIds.includes(emp.id));
+                            const availableEmployees = employees.filter(emp => emp.hasSystemAccount && !activeRole.memberIds.includes(emp.id));
                             const filtered = availableEmployees.filter(emp => {
                               const query = roleSearchQuery.toLowerCase();
                               return (
@@ -750,7 +939,7 @@ export default function RolesTab(props: RolesTabProps) {
                                     }
                                   }}
                                   className={`flex items-start gap-3 p-2 rounded-md cursor-pointer transition-all ${
-                                    isChecked ? 'bg-amber-500/10 border-amber-500/20' : 'hover:bg-slate-800/60'
+                                    isChecked ? 'bg-amber-50 border-amber-200' : 'hover:bg-slate-800/60'
                                   } border border-transparent`}
                                 >
                                   <input
@@ -808,8 +997,8 @@ export default function RolesTab(props: RolesTabProps) {
 
                   {/* Multi-add confirmation bar */}
                   {selectedTempEmpIds.length > 0 && (
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl gap-2 animate-fadeIn">
-                      <div className="text-[10.5px] text-amber-500 font-bold">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-amber-50 border border-amber-200 rounded-xl gap-2 animate-fadeIn">
+                      <div className="text-[10.5px] text-amber-700 font-bold">
                         👉 Sẵn sàng gán <span className="underline">{selectedTempEmpIds.length}</span> nhân sự mới vào nhóm <span className="text-white">"{activeRole.name}"</span>
                       </div>
                       <div className="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
@@ -990,10 +1179,11 @@ export default function RolesTab(props: RolesTabProps) {
           <ProjectPermissionModal
             isOpen={true}
             onClose={() => setRoleMainTab('group')}
-            onSave={onSaveProjectPermissions}
+            onSave={handleSaveProject}
             mode="inline"
             value={draftMatrix}
             onChange={setDraftMatrix}
+            hasChanges={projectChanged}
           />
         </div>
       )}
@@ -1006,15 +1196,15 @@ export default function RolesTab(props: RolesTabProps) {
               <Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Phê Duyệt
             </h4>
             <p className="text-[10.5px] text-slate-400 mt-1">
-              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người có quyền duyệt các hồ sơ Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý và người xét duyệt cho Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh. Thông tin này sẽ hiển thị tự động trong biểu mẫu tương ứng.
+              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người có quyền duyệt các hồ sơ Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý và người xét duyệt cho Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí. Thông tin này sẽ hiển thị tự động trong biểu mẫu tương ứng.
             </p>
           </div>
 
           <div className="space-y-6">
               {/* HỒ SƠ DỰ ÁN */}
               <div className="border border-slate-800 rounded-xl overflow-hidden">
-                <div className="bg-violet-500/10 px-4 py-2.5 border-b border-slate-800">
-                  <h5 className="font-extrabold text-[11px] text-violet-400 uppercase tracking-wider">Hồ Sơ Dự Án</h5>
+                <div className="bg-violet-50 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-violet-700 uppercase tracking-wider">Hồ Sơ Dự Án</h5>
                 </div>
                 <div className="divide-y divide-slate-850">
                   {approvalDocumentTypes.filter(t => t.group === 'Hồ Sơ Dự Án').map(t => {
@@ -1042,7 +1232,7 @@ export default function RolesTab(props: RolesTabProps) {
                               }}
                               className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
                             >
-                              {employees.map(emp => (
+                              {employees.filter(emp => emp.hasSystemAccount).map(emp => (
                                 <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
                               ))}
                             </select>
@@ -1056,8 +1246,8 @@ export default function RolesTab(props: RolesTabProps) {
 
               {/* HỒ SƠ NHÂN SỰ */}
               <div className="border border-slate-800 rounded-xl overflow-hidden">
-                <div className="bg-orange-500/10 px-4 py-2.5 border-b border-slate-800">
-                  <h5 className="font-extrabold text-[11px] text-orange-400 uppercase tracking-wider">Hồ Sơ Nhân Sự</h5>
+                <div className="bg-orange-50 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-orange-700 uppercase tracking-wider">Hồ Sơ Nhân Sự</h5>
                 </div>
                 <div className="divide-y divide-slate-850">
                   {approvalDocumentTypes.filter(t => t.group === 'Hồ Sơ Nhân Sự').map(t => {
@@ -1075,20 +1265,105 @@ export default function RolesTab(props: RolesTabProps) {
                           <span className="font-bold text-xs text-white">{t.label}</span>
                         </div>
                         {enabled && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-400">Người xét duyệt:</span>
-                            <select
-                              value={perm?.approverId || ''}
-                              onChange={(e) => {
-                                const emp = employees.find(em => em.id === e.target.value);
-                                handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                              }}
-                              className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
-                            >
-                              {employees.map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                              ))}
-                            </select>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              {/* "Phiếu Lương" cấu hình 2 người (giống nhóm Tài Chính - Kế Toán):
+                                  approver = "Người phát lương", settler = "Kế toán" — thay cho
+                                  việc phải nhập lại 2 trường này mỗi lần in phiếu lương. */}
+                              <span className="text-[10px] text-slate-400">{t.type === 'payroll' ? 'Người phát lương:' : 'Người xét duyệt:'}</span>
+                              <select
+                                value={perm?.approverId || ''}
+                                onChange={(e) => {
+                                  const emp = employees.find(em => em.id === e.target.value);
+                                  handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                }}
+                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
+                              >
+                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                ))}
+                              </select>
+                            </div>
+                            {t.type === 'payroll' && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-400">Kế toán:</span>
+                                <select
+                                  value={perm?.settlerId || ''}
+                                  onChange={(e) => {
+                                    const emp = employees.find(em => em.id === e.target.value);
+                                    handleChangeSettler(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                  }}
+                                  className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
+                                >
+                                  <option value="">— Chọn —</option>
+                                  {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* TÀI CHÍNH - KẾ TOÁN */}
+              <div className="border border-slate-800 rounded-xl overflow-hidden">
+                <div className="bg-emerald-50 px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-emerald-700 uppercase tracking-wider">Tài Chính - Kế Toán</h5>
+                </div>
+                <div className="divide-y divide-slate-850">
+                  {approvalDocumentTypes.filter(t => t.group === 'Tài Chính - Kế Toán').map(t => {
+                    const perm = getCurrentApprovalPerm(t.type);
+                    const enabled = !!perm?.canApprove;
+                    return (
+                      <div key={t.type} className="p-4 bg-slate-950/40 flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
+                          />
+                          <span className="font-bold text-xs text-white">{t.label}</span>
+                        </div>
+                        {enabled && (
+                          <div className="flex flex-col sm:flex-row gap-3 pl-7">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400">Người xét duyệt:</span>
+                              <select
+                                value={perm?.approverId || ''}
+                                onChange={(e) => {
+                                  const emp = employees.find(em => em.id === e.target.value);
+                                  handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                }}
+                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[170px]"
+                              >
+                                <option value="">— Chọn —</option>
+                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400">Người quyết toán:</span>
+                              <select
+                                value={perm?.settlerId || ''}
+                                onChange={(e) => {
+                                  const emp = employees.find(em => em.id === e.target.value);
+                                  handleChangeSettler(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
+                                }}
+                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[170px]"
+                              >
+                                <option value="">— Chọn —</option>
+                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1098,7 +1373,7 @@ export default function RolesTab(props: RolesTabProps) {
               </div>
 
               <p className="text-[9.5px] text-slate-500 italic">
-                * Trường "Người Xét Duyệt" trong Lập Đơn Nghỉ Phép & Chi Tiết Nhân Sự và "Người Duyệt" trong Đề Xuất Tạm Ứng Lương Nhân Sự sẽ hiển thị tên người được chỉ định ở đây và không cho phép sửa.
+                * Trường "Người Xét Duyệt" trong Lập Đơn Nghỉ Phép & Chi Tiết Nhân Sự và "Người Duyệt" trong Đề Xuất Tạm Ứng Lương Nhân Sự sẽ hiển thị tên người được chỉ định ở đây và không cho phép sửa. Tại "Trung tâm Lập chi & Đề xuất" (Tài Chính - Kế Toán), "Người xét duyệt" & "Người quyết toán" được đọc từ đây, hiển thị ở dạng chỉ đọc.
               </p>
           </div>
         </div>
@@ -1110,8 +1385,8 @@ export default function RolesTab(props: RolesTabProps) {
         onSave={roleMainTab === 'group' ? handleSaveGroup : roleMainTab === 'task' ? handleSaveProject : handleSaveApproval}
         onCancel={() => {
           if (roleMainTab === 'group') setDraftRoles([...roles]);
-          else if (roleMainTab === 'task') setDraftMatrix(loadProjectPermissions());
-          else setDraftApprovalConfig(loadApprovalConfig());
+          else if (roleMainTab === 'task') setDraftMatrix(JSON.parse(JSON.stringify(savedMatrix)));
+          else setDraftApprovalConfig(JSON.parse(JSON.stringify(savedApprovalConfig)));
         }}
         onSetDefault={handleSetDefault}
         onRestoreDefault={handleRestoreDefault}

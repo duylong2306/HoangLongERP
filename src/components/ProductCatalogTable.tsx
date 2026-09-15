@@ -2,17 +2,15 @@
 import { ProductCatalogItem, ProductPriceItem, ProductMaterialItem } from '../types';
 import { useNotification } from '../context';
 import { dbService } from '../lib/dbService';
-import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import {
   Plus,
   Search,
   Edit,
   Trash2,
-  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   X,
-  Check,
   Info,
   Upload,
   Download
@@ -422,127 +420,71 @@ export const INITIAL_MATERIALS: ProductMaterialItem[] = getInitialMaterials(INIT
 
 export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableProps) {
   const { addToast } = useNotification();
-  const [products, setProducts] = useState<ProductCatalogItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_products');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu sản phẩm", e);
-      }
-    }
-    return INITIAL_PRODUCTS;
-  });
+  const [products, setProducts] = useState<ProductCatalogItem[]>(() => INITIAL_PRODUCTS);
 
-  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_product_prices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu đơn giá", e);
-      }
-    }
-    const savedProducts = localStorage.getItem('hl_acc_products');
-    if (savedProducts) {
-      try {
-        const parsedProducts: ProductCatalogItem[] = JSON.parse(savedProducts);
-        return getInitialPrices(parsedProducts);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return INITIAL_PRICES;
-  });
+  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => INITIAL_PRICES);
 
-  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => {
-    const saved = localStorage.getItem('hl_acc_product_materials');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu chất liệu", e);
-      }
-    }
-    const savedProducts = localStorage.getItem('hl_acc_products');
-    if (savedProducts) {
-      try {
-        const parsedProducts: ProductCatalogItem[] = JSON.parse(savedProducts);
-        return getInitialMaterials(parsedProducts);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return INITIAL_MATERIALS;
-  });
+  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => INITIAL_MATERIALS);
 
-  // Save to localStorage whenever products change
-  useEffect(() => {
-    localStorage.setItem('hl_acc_products', JSON.stringify(products));
-  }, [products]);
-
-  // Save to localStorage whenever prices change
-  useEffect(() => {
-    localStorage.setItem('hl_acc_product_prices', JSON.stringify(pricesList));
-  }, [pricesList]);
-
-  // Save to localStorage whenever materials change
-  useEffect(() => {
-    localStorage.setItem('hl_acc_product_materials', JSON.stringify(materialsList));
-  }, [materialsList]);
+  // Cờ chặn "tự lưu lại toàn bộ danh mục lên Supabase ngay khi vừa tải xong":
+  // products/pricesList/materialsList khởi tạo bằng dữ liệu MẪU hard-code
+  // (INITIAL_PRODUCTS/PRICES/MATERIALS) — nếu không chặn, effect sync bên dưới
+  // chạy ngay ở lần render ĐẦU TIÊN (với dữ liệu mẫu) rồi LẦN NỮA khi
+  // setState(cloudData) thật xong, ghi đè lại TOÀN BỘ danh mục lên Supabase 2
+  // lần mỗi khi mở tab này — không phải do người dùng sửa gì. Bắt đầu = true
+  // để chặn luôn cả lần render với dữ liệu mẫu, tắt sau khi có dữ liệu thật.
+  const isSyncingProductsFromCloud = useRef(true);
+  const isSyncingPricesFromCloud = useRef(true);
+  const isSyncingMaterialsFromCloud = useRef(true);
 
   // ── Load from Supabase on mount & sync prices to Supabase ──
   useEffect(() => {
     dbService.productPrices.list().then((cloudPrices) => {
       if (cloudPrices && cloudPrices.length > 0) {
         setPricesList(cloudPrices);
-        localStorage.setItem('hl_acc_product_prices', JSON.stringify(cloudPrices));
       }
-    }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err));
+    }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err)).finally(() => {
+      setTimeout(() => { isSyncingPricesFromCloud.current = false; }, 500);
+    });
 
     dbService.productMaterials.list().then((cloudMats) => {
       if (cloudMats && cloudMats.length > 0) {
         setMaterialsList(cloudMats);
-        localStorage.setItem('hl_acc_product_materials', JSON.stringify(cloudMats));
       }
-    }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err));
+    }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err)).finally(() => {
+      setTimeout(() => { isSyncingMaterialsFromCloud.current = false; }, 500);
+    });
   }, []);
 
-  // Sync prices to Supabase when changed (only after initial load to avoid overwrite)
-  const [pricesLoaded, setPricesLoaded] = useState(false);
+  // Sync prices to Supabase when changed (chỉ khi người dùng thật sự sửa)
   useEffect(() => {
-    if (!pricesLoaded) {
-      if (pricesList.length >= 0) setPricesLoaded(true);
-      return;
-    }
+    if (isSyncingPricesFromCloud.current) return;
     if (pricesList.length > 0) {
       pricesList.forEach(p => dbService.productPrices.save(p).catch(() => {}));
     }
-  }, [pricesList, pricesLoaded]);
+  }, [pricesList]);
 
-  const [materialsLoaded, setMaterialsLoaded] = useState(false);
   useEffect(() => {
-    if (!materialsLoaded) {
-      if (materialsList.length >= 0) setMaterialsLoaded(true);
-      return;
-    }
+    if (isSyncingMaterialsFromCloud.current) return;
     if (materialsList.length > 0) {
       materialsList.forEach(m => dbService.productMaterials.save(m).catch(() => {}));
     }
-  }, [materialsList, materialsLoaded]);
+  }, [materialsList]);
 
   // ── Load from Supabase on mount & sync products to Supabase ──
   useEffect(() => {
     dbService.subcontractorCatalog.list().then((cloudProducts: ProductCatalogItem[]) => {
       if (cloudProducts && cloudProducts.length > 0) {
         setProducts(cloudProducts);
-        localStorage.setItem('hl_acc_products', JSON.stringify(cloudProducts));
       }
-    }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err));
+    }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err)).finally(() => {
+      setTimeout(() => { isSyncingProductsFromCloud.current = false; }, 500);
+    });
   }, []);
 
-  // Sync products to Supabase when changed
+  // Sync products to Supabase when changed (chỉ khi người dùng thật sự sửa)
   useEffect(() => {
+    if (isSyncingProductsFromCloud.current) return;
     if (products.length > 0) {
       products.forEach(p => dbService.subcontractorCatalog.save(p).catch(() => {}));
     }
@@ -882,7 +824,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       'Đơn giá An Cường (đ)': p.donGiaAnCuong != null ? p.donGiaAnCuong.toLocaleString('vi-VN') : '',
       'Đơn giá Plywood (đ)': p.donGiaPlywood != null ? p.donGiaPlywood.toLocaleString('vi-VN') : '',
     }));
-    exportToExcel(data, 'DanhMucSanPham', `Danh_Muc_San_Pham_${formatDateForFile()}.xlsx`);
+    exportToExcel(data, 'DanhMucSanPham', `Danh_Muc_San_Pham_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.productCatalog]);
   };
 
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -976,25 +918,23 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     <div className="space-y-4" id="accounting_product_catalog_panel">
       {/* Upper stats bar & Category Filtering */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-3" id="catalog_filters_section">
-        {/* Category Tabs */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-extrabold uppercase text-slate-400 tracking-wider mr-2">Bộ lọc danh mục:</span>
-          {uniqueCategories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => {
-                setSelectedCategory(cat);
-                setCurrentPage(1);
-              }}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
-                selectedCategory === cat
-                  ? 'bg-orange-600 font-extrabold text-white border border-orange-500/20 shadow'
-                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-850 border border-transparent'
-              }`}
-            >
-              {cat === 'all' ? 'Tất cả' : cat}
-            </button>
-          ))}
+        {/* Category Filter Dropdown */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-extrabold uppercase text-slate-400 tracking-wider whitespace-nowrap">Bộ lọc danh mục:</span>
+          <select
+            value={selectedCategory}
+            onChange={(e) => {
+              setSelectedCategory(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="bg-slate-900 text-xs font-bold text-slate-200 border border-slate-800 rounded-lg px-3 py-1.5 outline-none cursor-pointer focus:border-orange-500 transition-colors"
+          >
+            {uniqueCategories.map(cat => (
+              <option key={cat} value={cat} className="bg-slate-950 text-slate-200">
+                {cat === 'all' ? 'Tất cả' : cat}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Action Controls */}
@@ -1083,7 +1023,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
                     >
                       {/* ID - Mã SP */}
                       <td className="px-3 py-3 font-mono font-bold text-orange-600 text-[11px] border-r border-slate-100">{p.id}</td>
-                      
+
                       {/* Lĩnh vực */}
                       <td className="px-3 py-3 font-semibold text-slate-700">{p.linhVuc}</td>
                       
@@ -1302,7 +1242,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       {/* Styled Add/Edit Modal (Hộp thoại Popup) */}
       {showFormModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[11.5px] animate-scale-up">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[11.5px] animate-in fade-in zoom-in-95 duration-200">
             
             {/* Modal Header */}
             <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1408,7 +1348,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
               <div className="bg-orange-50 border border-orange-200/80 p-3.5 rounded-xl text-xs text-orange-850 leading-relaxed font-medium">
                 ⚡ <strong>Cấu hình đơn giá riêng:</strong> Sau khi sản phẩm được lưu, bạn có thể tự do thêm, sửa, xóa vô hạn các mức đơn giá liên kết phù hợp với từng chất liệu (như Thái Lan, An Cường, Plywood, Vân gỗ...) bằng cách click nút <strong>"+ Thêm"</strong> hoặc click trực tiếp vào nhãn đơn giá trên dòng sản phẩm ngoài bảng chính.
               </div>
- 
+
               {/* Form Buttons */}
               <div className="flex justify-end gap-3 pt-3.5 border-t border-slate-200">
                 <button
@@ -1434,7 +1374,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       {/* Price Management Modal */}
       {showPriceModal && priceModalProduct && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden text-[11.5px] animate-scale-up">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden text-[11.5px] animate-in fade-in zoom-in-95 duration-200">
             
             {/* Header */}
             <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1453,7 +1393,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
             </div>
 
             {/* Product description header */}
-            <div className="bg-slate-900 text-slate-150 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
+            <div className="bg-slate-900 text-slate-100 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
               <div>
                 <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Sản phẩm áp dụng</div>
                 <div className="text-xs font-black text-white mt-0.5">{priceModalProduct.id} - {priceModalProduct.tenSanPham}</div>
@@ -1648,7 +1588,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       {/* Material Management Modal */}
       {showMaterialModal && materialModalProduct && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in text-[11.5px]">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden leading-relaxed animate-scale-up">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden leading-relaxed animate-in fade-in zoom-in-95 duration-200">
             
             {/* Header */}
             <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1667,7 +1607,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
             </div>
 
             {/* Product description header */}
-            <div className="bg-slate-900 text-slate-150 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
+            <div className="bg-slate-900 text-slate-100 px-5 py-3 border-b border-slate-850 flex items-center justify-between">
               <div>
                 <div className="text-[10px] uppercase font-bold tracking-wider text-slate-450">Sản phẩm áp dụng</div>
                 <div className="text-xs font-black text-white mt-0.5">{materialModalProduct.id} - {materialModalProduct.tenSanPham}</div>

@@ -2,6 +2,7 @@
 // Tách từ HumanResourcesManagement.tsx
 // Các hàm thuần (pure) — không phụ thuộc React hook hay component state.
 import { dbService } from '../../lib/dbService';
+import { isAttendanceReportType } from '../../lib/attendanceMeta';
 
 /** Helper trả về ngày local (UTC+7) theo định dạng YYYY-MM-DD. */
 export function getLocalYYYYMMDD(d: Date): string {
@@ -22,6 +23,8 @@ const HRM_CONFIG_DEFAULTS = {
   morningIn: '07:30', morningOut: '11:30',
   afternoonIn: '13:00', afternoonOut: '17:00',
   allowedLateMinutes: 15,
+  allowedLateMorning: 15,
+  allowedLateAfternoon: 15,
   punchOutOpenBeforeMinutes: 15,
   punchOutCloseAfterMinutes: 15,
 };
@@ -43,6 +46,8 @@ export async function refreshHrmConfigCache(): Promise<void> {
         afternoonIn:      cloud.afternoonIn      ?? HRM_CONFIG_DEFAULTS.afternoonIn,
         afternoonOut:     cloud.afternoonOut     ?? HRM_CONFIG_DEFAULTS.afternoonOut,
         allowedLateMinutes:          cloud.allowedLateMinutes          ?? HRM_CONFIG_DEFAULTS.allowedLateMinutes,
+        allowedLateMorning:          cloud.allowedLateMorning          ?? HRM_CONFIG_DEFAULTS.allowedLateMorning,
+        allowedLateAfternoon:        cloud.allowedLateAfternoon        ?? HRM_CONFIG_DEFAULTS.allowedLateAfternoon,
         punchOutOpenBeforeMinutes:   cloud.punchOutOpenBeforeMinutes   ?? HRM_CONFIG_DEFAULTS.punchOutOpenBeforeMinutes,
         punchOutCloseAfterMinutes:   cloud.punchOutCloseAfterMinutes   ?? HRM_CONFIG_DEFAULTS.punchOutCloseAfterMinutes,
       };
@@ -65,6 +70,8 @@ export function getAttendanceStatusText(
     morningIn?: string; morningOut?: string;
     afternoonIn?: string; afternoonOut?: string;
     allowedLateMinutes?: number;
+    allowedLateMorning?: number;
+    allowedLateAfternoon?: number;
     punchOutOpenBeforeMinutes?: number;
     punchOutCloseAfterMinutes?: number;
   }
@@ -95,15 +102,24 @@ export function getAttendanceStatusText(
   const afternoonFaulty = hasInC && !hasOutC;
 
   const cfg = hrmConfig ?? readHrmConfigFromStorage();
-  const allowedLate     = cfg.allowedLateMinutes           ?? 15;
   const punchOutOpenMin = cfg.punchOutOpenBeforeMinutes    ?? 15;
 
-  const lateMinutesS = (hasInS && cfg.morningIn)
-    ? Math.max(0, minutesDiff(log.timeInS, cfg.morningIn) - allowedLate) : 0;
+  // Dung sai "Cho phép đi muộn" tách RIÊNG theo từng ca (migration 036):
+  //   - Ca Sáng  → allowedLateMorning  (lấy từ ô "⏱️ Cho phép đi muộn" của CA SÁNG)
+  //   - Ca Chiều → allowedLateAfternoon (lấy từ ô "⏱️ Cho phép đi muộn" của CA CHIỀU)
+  // `allowedLateMinutes` (global) chỉ còn là fallback khi chưa có giá trị per-shift.
+  const allowedLateMorning   = cfg.allowedLateMorning   ?? cfg.allowedLateMinutes ?? 5;
+  const allowedLateAfternoon = cfg.allowedLateAfternoon ?? cfg.allowedLateMinutes ?? 5;
+
+  // Dung sai làm NGƯỠNG: điểm danh trong khoảng dung sai → KHÔNG tính đi muộn (0).
+  // Vượt ngưỡng → hiển thị phút lệch THỰC TẾ, KHÔNG trừ dung sai (vd 76').
+  // Về sớm dùng dung sai `punchOutOpenBeforeMinutes` (chung cả 2 ca).
+  const rawLateS = (hasInS && cfg.morningIn) ? minutesDiff(log.timeInS, cfg.morningIn) : 0;
+  const rawLateC = (hasInC && cfg.afternoonIn) ? minutesDiff(log.timeInC, cfg.afternoonIn) : 0;
+  const lateMinutesS = rawLateS > allowedLateMorning ? Math.max(0, rawLateS) : 0;
   const earlyMinutesS = (hasOutS && cfg.morningOut)
     ? Math.max(0, minutesDiff(cfg.morningOut, log.timeOutS) - punchOutOpenMin) : 0;
-  const lateMinutesC = (hasInC && cfg.afternoonIn)
-    ? Math.max(0, minutesDiff(log.timeInC, cfg.afternoonIn) - allowedLate) : 0;
+  const lateMinutesC = rawLateC > allowedLateAfternoon ? Math.max(0, rawLateC) : 0;
   const earlyMinutesC = (hasOutC && cfg.afternoonOut)
     ? Math.max(0, minutesDiff(cfg.afternoonOut, log.timeOutC) - punchOutOpenMin) : 0;
 
@@ -162,7 +178,8 @@ export function computeDailyWorkday(
   coefs: any[],
   holidays: any[],
   weekendDays: number[] = [0],
-  leaves: any[] = []
+  leaves: any[] = [],
+  opts: { applyMultiplier?: boolean } = {}
 ): {
   workday: number;
   label: string;
@@ -171,6 +188,9 @@ export function computeDailyWorkday(
   const activeCoefs = Array.isArray(coefs) ? coefs : [];
   const activeHolidays = Array.isArray(holidays) ? holidays : [];
   const activeLeaves = Array.isArray(leaves) ? leaves : [];
+  // Mặc định áp dụng hệ số nhân (dùng hiển thị & tính lương). Truyền
+  // { applyMultiplier: false } nếu cần "công cơ sở" (0.5/1.0) không nhân hệ số.
+  const applyMultiplier = opts.applyMultiplier !== false;
 
   const getCoefVal = (id: string, def: number): number => {
     const found = activeCoefs.find((c: any) => c.id === id);
@@ -183,7 +203,7 @@ export function computeDailyWorkday(
 
   const approvedLeave = activeLeaves.find((l: any) => {
     if (l.status !== 'approved') return false;
-    if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo lỗi chấm ra ca') return false;
+    if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return false;
     const sameEmp = (l.empId && log.empId && l.empId === log.empId) || (l.empName && log.empName && l.empName === log.empName);
     if (!sameEmp) return false;
     return log.date >= l.fromDate && log.date <= l.toDate;
@@ -270,18 +290,15 @@ export function computeDailyWorkday(
   }
 
   if (morningWorked || afternoonWorked) {
-    const finalVal = totalBaseShifts * multiplier;
+    const finalVal = totalBaseShifts * (applyMultiplier ? multiplier : 1);
     const detailsText = `${morningWorked ? 'Sáng' : ''}${morningWorked && afternoonWorked ? '+' : ''}${afternoonWorked ? 'Chiều' : ''} (Nhân ${multiplier}x ${multiplierType})`;
-    let latePenalty = 0;
-    let lateNote = '';
-    if (log.status === 'late' && !isHoliday && !isWeekend) {
-      latePenalty = getCoefVal('MDLATE', -0.25);
-      lateNote = ` • Phạt muộn ${latePenalty}`;
-    }
+    // Bỏ phạt -0.25 công khi đi muộn (MDLATE): đi muộn vẫn ghi nhận đủ công.
+    // Vi phạm đi muộn giờ được xử lý qua bảng Hiệu suất (hrm_employee_errors)
+    // khi số lần đi muộn trong tháng vượt quá ngưỡng cho phép (allowedLateCount).
     return {
-      workday: finalVal + latePenalty,
-      label: `+${finalVal + latePenalty}`,
-      details: detailsText + lateNote
+      workday: finalVal,
+      label: `+${finalVal}`,
+      details: detailsText
     };
   } else {
     const hasAnyPunch = hasInS || hasOutS || hasInC || hasOutC ||
@@ -290,12 +307,197 @@ export function computeDailyWorkday(
     if (hasAnyPunch) return { workday: 0, label: '0', details: 'Đang làm việc (chờ chốt ca)' };
 
     if (!isHoliday && !isWeekend) {
-      const penaltyVal = getCoefVal('KP', -1.0);
+      // Hệ số vắng không phép = công cơ sở (MSHID + ASHID) nhân với hệ số KP
+      // (mã 'KP' trong tab Hệ Số Chấm Công). Mặc định: 1.0 × (-1.0) = -1.0.
+      const baseDay = getCoefVal('MSHID', 0.5) + getCoefVal('ASHID', 0.5);
+      const kpCoef = getCoefVal('KP', -1.0);
+      const penaltyVal = baseDay * kpCoef;
       return { workday: penaltyVal, label: `${penaltyVal}`, details: 'Vắng không phép (KP)' };
     } else {
       return { workday: 0, label: '0', details: isHoliday ? `Nghỉ Lễ (${holidayName})` : 'Nghỉ cuối tuần' };
     }
   }
+}
+
+/**
+ * Tính điểm hiệu suất % theo số lỗi vi phạm trong kỳ.
+ * Được dùng chung ở tab Hiệu suất (PerformanceTab) và Tính Lương Tự Động
+ * (handleCalculatePayroll) để hai nơi cho ra cùng một con số %.
+ * 0→100, 1→97, 2→95, 3→90, 4→85, 5→80, ≥6→50.
+ */
+export function calculateScoreFromErrorCount(count: number): number {
+  if (count === 0) return 100;
+  if (count === 1) return 97;
+  if (count === 2) return 95;
+  if (count === 3) return 90;
+  if (count === 4) return 85;
+  if (count === 5) return 80;
+  return 50; // count >= 6
+}
+
+/**
+ * Tính tổng Công Tác Phí (CTP) ĐÃ DUYỆT của một nhân viên trong đúng kỳ lương
+ * (tháng/năm). Được dùng trong Tính Lương Tự Động (handleCalculatePayroll).
+ * - CHỈ cộng `status === 'approved'` (duyệt qua nút Duyệt) HOẶC
+ *   `status === 'completed'` (CTP legacy của cơ chế cũ — tự động "Đã duyệt" khi
+ *   hoàn thành, hiển thị như Đã duyệt). CTP "Chờ duyệt"/"Từ chối" KHÔNG tính.
+ * - Match nhân viên theo `empId` khi có; fallback theo `employeeName` cho dữ
+ *   liệu cũ (trước đây chỉ lưu tên, không lưu empId).
+ * - Khớp tháng-năm theo `completedDate` (dd/mm/yyyy hoặc ISO) — mỗi khoản chỉ
+ *   tính vào đúng kỳ lương của chuyến đi.
+ */
+export function sumApprovedTravelExpenses(
+  travelExpenses: any[],
+  emp: { id?: string; name?: string },
+  payrollMonth: string,
+  payrollYear: string,
+): number {
+  const monthNum = String(Number(payrollMonth));
+  return (travelExpenses || []).reduce((sum, s: any) => {
+    if (s.status !== 'approved' && s.status !== 'completed') return sum;
+    const empMatch = s.empId
+      ? s.empId === emp.id
+      : (s.employeeName || '') === (emp.name || '');
+    if (!empMatch) return sum;
+    if (!s.completedDate) return sum;
+    let cMonth = '';
+    let cYear = '';
+    const parts = String(s.completedDate).split('/');
+    if (parts.length === 3) {
+      cMonth = String(parseInt(parts[1], 10));
+      cYear = parts[2];
+    } else {
+      const dateObj = new Date(s.completedDate);
+      if (!isNaN(dateObj.getTime())) {
+        cMonth = String(dateObj.getMonth() + 1);
+        cYear = String(dateObj.getFullYear());
+      }
+    }
+    if (cMonth !== monthNum || cYear !== payrollYear) return sum;
+    return sum + (Number(s.amount) || 0);
+  }, 0);
+}
+
+// ─── Báo cáo vắng mặt (ngày không có bản ghi chấm công) ───────────────────
+// Hàm thuần: liệt kê các ngày mà nhân viên Đang làm KHÔNG có bản ghi chấm
+// công, để HR duyệt thủ công (gán KP / phép / bù công / bỏ qua).
+//
+// Đã loại trừ:
+//  - Nhân viên không ở trạng thái "working" (đã nghỉ việc…).
+//  - excludedIds / excludedRoles (mặc định: admin / giám đốc — không tự động
+//    phạt KP cho người không chấm công hàng ngày).
+//  - Ngày trước ngày vào làm (emp.startDate).
+//  - Ngày được bao phủ bởi đơn nghỉ ĐÃ DUYỆT (không tính đơn báo cáo/chốt công).
+//  - Ngày tương lai (chưa tới kỳ chấm công).
+
+export interface MissingAttendanceEntry {
+  empId: string;
+  empName: string;
+  date: string;        // YYYY-MM-DD
+  dayOfWeek: number;
+  isHoliday: boolean;
+  isWeekend: boolean;
+  type: 'absent' | 'holiday' | 'weekend';
+}
+
+function matchHolidayDate(dateStr: string, holidays: any[]): boolean {
+  if (!dateStr || !Array.isArray(holidays)) return false;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return false;
+  const ddMmYyyy = `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return holidays.some((h: any) => {
+    if (h.inputMode === 'single') return h.singleDate === dateStr;
+    return dateStr >= h.fromDate && dateStr <= h.toDate;
+  });
+}
+
+function eachDateInRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  if (!from || !to) return out;
+  const cur = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (isNaN(cur.getTime()) || isNaN(end.getTime())) return out;
+  while (cur <= end) {
+    out.push(
+      `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`
+    );
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+export function getMissingAttendanceReport(params: {
+  employees: any[];
+  attendance: any[];
+  leaves: any[];
+  holidays: any[];
+  weekendDays: number[];
+  month: string;   // '1'..'12'
+  year: string;    // '2026'
+  excludedIds?: string[];
+  excludedRoles?: string[];
+}): MissingAttendanceEntry[] {
+  const {
+    employees, attendance, leaves, holidays, weekendDays,
+    month, year, excludedIds = [], excludedRoles = [],
+  } = params;
+
+  const result: MissingAttendanceEntry[] = [];
+  const m = parseInt(month, 10);
+  const y = parseInt(year, 10);
+  if (!Array.isArray(employees) || !m || !y) return result;
+
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const excludedIdSet = new Set(excludedIds);
+  const excludedRoleSet = new Set(excludedRoles);
+
+  const existing = new Set(
+    (attendance || []).map((a: any) => `${a.empId}|${a.date}`)
+  );
+
+  // Ngày được bao phủ bởi đơn nghỉ ĐÃ DUYỆT (không tính đơn báo cáo/chốt công).
+  const leaveCov = new Set<string>();
+  (leaves || []).forEach((l: any) => {
+    if (l.status !== 'approved') return;
+    if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return;
+    eachDateInRange(l.fromDate, l.toDate).forEach((d) => {
+      if (l.empId) leaveCov.add(`${l.empId}|${d}`);
+      if (l.empName) leaveCov.add(`${l.empName}|${d}`);
+    });
+  });
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+
+  (employees || []).forEach((emp: any) => {
+    if (emp.status !== 'working') return;
+    if (excludedIdSet.has(emp.id)) return;
+    if (emp.role && excludedRoleSet.has(emp.role)) return;
+
+    const startDate = (typeof emp.startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(emp.startDate))
+      ? emp.startDate
+      : null;
+    const empName = emp.name || emp.empName || emp.id || '';
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (dateStr > todayStr) continue;               // bỏ ngày tương lai
+      if (startDate && dateStr < startDate) continue;  // bỏ trước ngày vào làm
+      if (existing.has(`${emp.id}|${dateStr}`)) continue;
+      if (leaveCov.has(`${emp.id}|${dateStr}`)) continue;
+
+      const dow = new Date(`${dateStr}T00:00:00`).getDay();
+      const isHoliday = matchHolidayDate(dateStr, holidays);
+      const isWeekend = (weekendDays || []).includes(dow);
+      const type: MissingAttendanceEntry['type'] = isHoliday ? 'holiday' : isWeekend ? 'weekend' : 'absent';
+
+      result.push({ empId: emp.id, empName, date: dateStr, dayOfWeek: dow, isHoliday, isWeekend, type });
+    }
+  });
+
+  result.sort((a, b) => a.empName.localeCompare(b.empName) || (a.date < b.date ? -1 : 1));
+  return result;
 }
 
 /**
@@ -335,15 +537,22 @@ export function calculateSingleEmployeePayroll(
   const salaryPerDay = (baseSalary + kpiBonus) / standardWorkDays;
   const daySalary = salaryPerDay * inputs.workedDays;
 
+  // Đơn giá RIÊNG dùng cho tăng ca (CN/Lễ + ngoài giờ) — ĐÚNG theo sheet "LƯƠNG OK":
+  // dùng "Định mức" (performanceSalary, CHƯA nhân điểm KPI) thay vì "Thưởng HS
+  // thực tế" (kpiBonus, đã nhân điểm KPI) như đơn giá ngày công thường ở trên.
+  // Ví dụ Excel: N10=(H10+F10)/D5×L10×2, Q10=(F10+H10)/D5/8×O10×150%+P10×40000
+  // — cả 2 đều dùng (F+H) = Lương cơ bản + Định mức, không phải (F+J).
+  const otSalaryPerDay = (baseSalary + performanceSalary) / standardWorkDays;
+
   const otSundayCount = inputs.otSunday;
-  const otSundaySalary = salaryPerDay * otSundayCount;
+  const otSundaySalary = otSalaryPerDay * otSundayCount;
 
   const otHolidayCount = inputs.otHoliday;
-  const otHolidaySalary = salaryPerDay * otHolidayCount;
+  const otHolidaySalary = otSalaryPerDay * otHolidayCount;
 
   const otHours = inputs.otHours;
   const otCount = inputs.otCount;
-  const otHoursSalary = ((salaryPerDay / 8) * otHours * 1.5) + (otCount * 40000);
+  const otHoursSalary = ((otSalaryPerDay / 8) * otHours * 1.5) + (otCount * 40000);
 
   const expenses = inputs.expenses;
   const bonusHoliday = inputs.bonusHoliday;
@@ -355,13 +564,32 @@ export function calculateSingleEmployeePayroll(
   const otherDeductions = inputs.otherDeductions;
   const advances = inputs.advances;
 
-  const netSalaryRaw = totalIncome - bhxhAmount - otherDeductions - advances;
-  const netSalary = parseFloat(netSalaryRaw.toFixed(4));
+  // ─── Thuế TNCN & Giảm trừ gia cảnh — ĐÚNG công thức sheet "LƯƠNG OK" của file
+  // BẢNG LƯƠNG, NHÂN SỰ (cột Y→AF), không tự suy diễn theo lý thuyết luật thuế:
+  //   Thu nhập miễn thuế (Y) = toàn bộ tiền tăng ca CN/Lễ + tăng ca ngoài giờ
+  //   Thu nhập chịu thuế (Z) = Tổng thu nhập − Thu nhập miễn thuế
+  //   Giảm trừ bản thân (AA) = employee.taxPersonalRelief, mặc định 15.500.000đ
+  //   Giảm trừ người phụ thuộc (AC) = Số người phụ thuộc × 6.200.000đ
+  //   Thu nhập tính thuế (AD) = Z − BHXH − AA − AC, chặn dưới 0
+  //   Thuế TNCN (AE) = biểu rút gọn 5 bậc (giống hệt công thức IF lồng trong file gốc)
+  const taxExemptIncome = otSundaySalary + otHolidaySalary + otHoursSalary;
+  const taxableIncome = totalIncome - taxExemptIncome;
+  const personalDeduction = Number(emp.taxPersonalRelief) || 15500000;
+  const dependentCount = Number(emp.dependentCount) || 0;
+  const dependentDeduction = dependentCount * 6200000;
+  const taxableNetIncome = Math.max(0, taxableIncome - bhxhAmount - personalDeduction - dependentDeduction);
+  const tax = calculatePersonalIncomeTax(taxableNetIncome);
+
+  // Làm tròn Thực lĩnh về hàng chục nghìn — đúng ROUND(...,-4) trong file gốc
+  // (trước đây làm tròn hàng nghìn, nay đồng bộ lại theo đúng file tham chiếu).
+  const netSalaryRaw = totalIncome - bhxhAmount - otherDeductions - advances - tax;
+  const netSalary = Math.round(netSalaryRaw / 10000) * 10000;
 
   const bluCode = `BLU-${emp.id}-${monthStr.replace('/', '')}`;
 
   return {
     bluCode,
+    workedDays: inputs.workedDays,
     baseSalary,
     performanceSalary,
     kpiScore,
@@ -382,6 +610,30 @@ export function calculateSingleEmployeePayroll(
     insurance: bhxhAmount,
     otherDeductions,
     advances,
+    taxExemptIncome,
+    taxableIncome,
+    personalDeduction,
+    dependentCount,
+    dependentDeduction,
+    taxableNetIncome,
+    tax,
     netSalary
   };
+}
+
+/**
+ * Tính Thuế TNCN theo biểu rút gọn 5 bậc — ĐÚNG NGUYÊN VĂN công thức IF lồng
+ * trong sheet "LƯƠNG OK" (file BẢNG LƯƠNG, NHÂN SỰ), áp dụng trên "Thu nhập
+ * tính thuế" (đã trừ BHXH + giảm trừ gia cảnh). Không dùng biểu 7 bậc lý
+ * thuyết của luật thuế — công ty đang áp dụng đúng biểu rút gọn 5 bậc này.
+ */
+export function calculatePersonalIncomeTax(taxableNetIncome: number): number {
+  if (taxableNetIncome <= 0) return 0;
+  let result: number;
+  if (taxableNetIncome <= 10000000) result = taxableNetIncome * 0.05;
+  else if (taxableNetIncome <= 30000000) result = taxableNetIncome * 0.10 - 500000;
+  else if (taxableNetIncome <= 60000000) result = taxableNetIncome * 0.20 - 3500000;
+  else if (taxableNetIncome <= 100000000) result = taxableNetIncome * 0.30 - 9500000;
+  else result = taxableNetIncome * 0.35 - 14500000;
+  return Math.max(0, result);
 }

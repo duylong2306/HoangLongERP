@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Printer, CheckCircle2, FileCheck } from 'lucide-react';
+import { Printer, CheckCircle2, FileCheck, XCircle, FileDown } from 'lucide-react';
 import { docSoTiengViet } from './QuotationTableSheet';
-import { dbService } from '../lib/dbService';
+import { dbService, invalidateCache } from '../lib/dbService';
 import { useNotification } from '../context';
+import RichTextEditor from './RichTextEditor';
+import { exportHtmlToWord } from '../lib/wordExport';
 
 const DEFAULT_MECH_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><strong>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</strong></h3>
 <p style="text-align: center;"><strong>Độc lập - Tự do - Hạnh phúc</strong></p>
@@ -198,6 +200,7 @@ const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><strong>
   <li>Họ và tên: {{TEN_KHACH_HANG}}</li>
   <li>Địa chỉ: {{DIA_CHI_KHACH_HANG}}</li>
   <li>Điện thoại: {{DIEN_THOAI_KHACH_HANG}}</li>
+  <li>Đại diện: {{DAI_DIEN_KHACH_HANG}}</li>
 </ul>
 
 <p><strong>Bên B: Đơn vị thi công nội thất</strong></p>
@@ -231,7 +234,6 @@ const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><strong>
 <p>{{BANG_CHI_TIET_BÁO_GIÁ}}</p>
 <p>Tổng giá trị hợp đồng: <strong>{{TONG_CONG}}</strong> VND</p>
 <p>Viết bằng chữ: <em>{{TONG_CONG_CHU}}</em></p>
-<p>Đơn giá chưa bao gồm thuế VAT</p>
 
 <p><strong>Điều 4. Cách thức thanh toán hợp đồng thi công nội thất theo từng giai đoạn (tiền mặt hoặc chuyển khoản)</strong></p>
 <p>Khi hợp đồng được ký kết, để đảm bảo vốn sản xuất, Bên A ứng trước cho Bên B 50% kinh phí trên tổng giá trị hợp đồng</p>
@@ -288,12 +290,13 @@ interface ContractDocumentProps {
 export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   const { addToast } = useNotification();
   const items = quoteData.items || [];
-  const discountPercent = quoteData.discountPercent || 0;
+  // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ.
+  const discountPercent = 0;
   const rawTotal = items.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0);
-  const discountValue = rawTotal * (discountPercent / 100);
-  const subtotalAfterDiscount = rawTotal - discountValue;
-  const vatAmount = Math.round(subtotalAfterDiscount * 0.08); // 8% VAT
-  const grandTotal = subtotalAfterDiscount + vatAmount;
+  const discountValue = 0;
+  const subtotalAfterDiscount = rawTotal;
+  const vatAmount = 0;
+  const grandTotal = rawTotal;
 
   // Detect sector
   const isMechanical = quoteData.sector === 'mechanical';
@@ -348,10 +351,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   // Use contractItems for table generation
   const tableItems = isConstruction && quoteData.selectedFinalResult ? contractItems : items;
   const tableRawTotal = tableItems.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0);
-  const tableDiscountValue = tableRawTotal * (discountPercent / 100);
-  const tableSubtotalAfterDiscount = tableRawTotal - tableDiscountValue;
-  const tableVatAmount = Math.round(tableSubtotalAfterDiscount * 0.08);
-  const tableGrandTotal = tableSubtotalAfterDiscount + tableVatAmount;
+  const tableGrandTotal = tableRawTotal; // Không cộng VAT, không trừ chiết khấu
 
   const sector = isMechanical ? 'mechanical' : isConstruction ? 'construction' : 'furniture';
   const fallbackTemplate = isMechanical 
@@ -368,19 +368,84 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
     return !!quoteData.contractApproved;
   });
 
+  // Đảm bảo có 1 dòng Công Nợ Thu (accounting_receivables, isAuto=true) neo theo
+  // projectId — trước đây dòng này CHỈ được tạo lúc "Duyệt Báo Giá"
+  // (QuotationTableSheet.tsx). Nếu dự án bỏ qua bước đó, Hợp Đồng duyệt xong vẫn
+  // cần dòng này tồn tại để nhóm đúng theo khách hàng ở Công Nợ Thu. Giá trị
+  // contractValue ghi ở đây chỉ là placeholder — FinanceManagement.tsx sẽ tính
+  // lại SỐ THẬT mỗi lần render từ tổng các Hợp Đồng đã duyệt (xem mergedReceivables),
+  // không phụ thuộc số ghi cứng ở đây.
+  const ensureReceivableRowForProject = async () => {
+    if (!quoteData.projectId) return;
+    try {
+      invalidateCache('accounting_receivables');
+      const existingRecs = await dbService.accountingReceivables.list();
+      const existingAuto = existingRecs.find((r: any) => r.projectId === quoteData.projectId && r.isAuto === true);
+      if (existingAuto) return; // Đã có dòng neo sẵn — không cần tạo lại.
+      const sectorLabel = isConstruction ? 'Xây dựng' : isMechanical ? 'Cơ khí' : 'Nội thất';
+      await dbService.accountingReceivables.save({
+        id: crypto.randomUUID(),
+        projectName: quoteData.projectName || '',
+        investor: quoteData.customerName || '',
+        customerId: quoteData.customerId || undefined,
+        field: sectorLabel,
+        contractValue: tableGrandTotal,
+        collected: 0,
+        remaining: tableGrandTotal,
+        notes: '',
+        isAuto: true,
+        projectId: quoteData.projectId,
+      });
+    } catch (err) {
+      console.error('Lỗi khi đảm bảo dòng Công nợ Thu cho dự án:', err);
+    }
+  };
+
   const handleApproveContract = async () => {
     try {
       setSaving(true);
       await dbService.updateQuoteDocHtml(quoteData.id, { contractApproved: true });
       quoteData.contractApproved = true;
       setContractApproved(true);
-      addToast({ title: '✅ Phê duyệt', message: 'Đã phê duyệt Hợp Đồng thành công!', type: 'success' });
+      await ensureReceivableRowForProject();
+      // Báo cho ConstructionArchive/CabinetArchive/MechanicalArchive/ProjectKanbanBoard/
+      // FinanceManagement biết archived_quotes vừa đổi — các nơi đó đều đã lắng nghe
+      // sẵn event này (App.tsx dispatch cùng tên khi xóa dự án theo cascade).
+      window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
+      addToast({ title: '✅ Phê duyệt', message: 'Đã phê duyệt Hợp Đồng thành công! Giá trị hợp đồng đã được cộng vào Công Nợ Thu.', type: 'success' });
     } catch (err) {
       console.error('Lỗi khi phê duyệt hợp đồng:', err);
       addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi phê duyệt. Vui lòng thử lại!', type: 'error' });
     } finally {
       setSaving(false);
     }
+  };
+
+  // Hủy phê duyệt: mở khóa lại để chỉnh sửa hồ sơ khi khách hàng đổi ý / cần cập
+  // nhật giá trị hợp đồng. Không đụng tới nội dung contractHtml đã lưu — chỉ đổi
+  // lại cờ contractApproved, người dùng phải bấm "Duyệt Hợp Đồng" lại sau khi sửa.
+  // Công Nợ Thu tự trừ lại giá trị hợp đồng này NGAY (không cần code trừ riêng)
+  // vì FinanceManagement.tsx tính contractValue động theo contractApproved===true.
+  const handleUnapproveContract = async () => {
+    if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Hợp Đồng?\nSau khi sửa xong cần Duyệt Hợp Đồng lại từ đầu.\nLưu ý: giá trị hợp đồng này sẽ tạm thời không còn tính vào Công Nợ Thu cho tới khi được duyệt lại.')) return;
+    try {
+      setSaving(true);
+      await dbService.updateQuoteDocHtml(quoteData.id, { contractApproved: false });
+      quoteData.contractApproved = false;
+      setContractApproved(false);
+      window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated'));
+      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Hợp Đồng đã được mở khóa để chỉnh sửa.', type: 'info' });
+    } catch (err) {
+      console.error('Lỗi khi hủy phê duyệt hợp đồng:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi hủy phê duyệt. Vui lòng thử lại!', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExportWord = () => {
+    if (!docHtml) return;
+    exportHtmlToWord(docHtml, `HopDong_${quoteData.code || quoteData.id}`);
   };
 
   const editorRef = React.useRef<HTMLDivElement>(null);
@@ -395,12 +460,19 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   const generateProcessedHtml = (templateToProcess: string) => {
     let html = templateToProcess;
     
+    // Bảng khối lượng công việc lấy ĐÚNG các trường như bảng Báo Giá gốc (kể cả
+    // cột Hình ảnh) — xem cấu trúc cột tương ứng tại QuotationTableSheet.tsx
+    // (nhánh mặc định: STT | Tên sản phẩm | Hình ảnh | Thông số kỹ thuật/Vật
+    // liệu cấu tạo | ĐVT | SL | Đơn giá | Thành tiền), để Hợp Đồng khớp với
+    // Báo Giá đã gửi khách hàng, tránh lệch thông tin giữa 2 tài liệu.
     const tableHtml = `
       <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 12px; text-align: left; font-family: 'Times New Roman', Times, serif; color: #000000; border: 1px solid #000000;">
         <thead>
           <tr style="background-color: #fcfcfc; border-bottom: 1px solid #000000;">
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">STT</th>
-            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold;">Tên sản phẩm / Quy cách vật tư</th>
+            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold;">Tên sản phẩm</th>
+            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">Hình ảnh</th>
+            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold;">Thông số kỹ thuật / Vật liệu cấu tạo</th>
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">ĐVT</th>
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">Số lượng</th>
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: right;">Đơn giá (đ)</th>
@@ -412,10 +484,15 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
           ${tableItems.map((item: any, idx: number) => `
             <tr style="border-bottom: 1px solid #000000;">
               <td style="padding: 8px; border: 1px solid #000000; text-align: center;">${idx + 1}</td>
-              <td style="padding: 8px; border: 1px solid #000000;">
-                <strong>${item.productName || item.name || ''}</strong>
-                ${item.material ? `<br/><span style="font-size: 11px; color: #000000;">${item.material}</span>` : ''}
-                ${item.notes ? `<br/><span style="font-size: 11px; color: #000000; font-style: italic;">Ghi chú: ${item.notes}</span>` : ''}
+              <td style="padding: 8px; border: 1px solid #000000;"><strong>${item.productName || item.name || ''}</strong></td>
+              <td style="padding: 4px; border: 1px solid #000000; text-align: center;">
+                ${item.images && item.images.length > 0
+                  ? `<img src="${item.images[0]}" alt="${item.productName || ''}" style="width: 56px; height: 56px; object-fit: cover; border: 1px solid #cccccc; border-radius: 6px; display: block; margin: 0 auto;" />`
+                  : `<span style="font-size: 10px; color: #666666; font-style: italic;">Mẫu thiết kế</span>`}
+              </td>
+              <td style="padding: 8px; border: 1px solid #000000; font-size: 11px;">
+                ${item.material || item.lowerCabinetMaterial || item.upperCabinetMaterial || 'Gỗ công nghiệp MDF chống ẩm nhập khẩu chuẩn hãng'}
+                ${item.notes ? `<br/><span style="color: #c02428; font-style: italic;">Chú ý: ${item.notes}</span>` : ''}
               </td>
               <td style="padding: 8px; border: 1px solid #000000; text-align: center;">${item.unit || 'Cái'}</td>
               <td style="padding: 8px; border: 1px solid #000000; text-align: center;">${item.qty || 1}</td>
@@ -425,21 +502,9 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
             </tr>
           `).join('')}
           <tr style="font-weight: bold; background-color: #fcfcfc;">
-            <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Cộng thành tiền trước chiết khấu:</td>
-            <td style="padding: 8px; border: 1px solid #000000; text-align: right;">${tableRawTotal.toLocaleString('vi-VN')}</td>
-            ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000; text-align: center;">100%</td>` : ''}
-          </tr>
-          ${tableDiscountValue > 0 ? `
-            <tr style="font-weight: bold; background-color: #fcfcfc;">
-              <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Chiết khấu (${discountPercent}%):</td>
-              <td style="padding: 8px; border: 1px solid #000000; text-align: right;">-${tableDiscountValue.toLocaleString('vi-VN')}</td>
-              ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000;"></td>` : ''}
-            </tr>
-          ` : ''}
-          <tr style="font-weight: bold; background-color: #fcfcfc;">
-            <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Tổng cộng thanh toán:</td>
+            <td colspan="7" style="padding: 8px; border: 1px solid #000000; text-align: right;">Tổng cộng thanh toán:</td>
             <td style="padding: 8px; border: 1px solid #000000; text-align: right; font-size: 13px;">${tableGrandTotal.toLocaleString('vi-VN')}</td>
-            ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000;"></td>` : ''}
+            ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000; text-align: center;">100%</td>` : ''}
           </tr>
         </tbody>
       </table>
@@ -532,10 +597,11 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   };
 
   const handleSave = async () => {
-    if (!editorRef.current) return;
+    // RichTextEditor đồng bộ docHtml qua onChange ở MỌI lần gõ (state luôn mới
+    // nhất) — không cần đọc lại DOM qua editorRef.current.innerHTML như trước.
     setSaving(true);
     try {
-      const newHtml = editorRef.current.innerHTML;
+      const newHtml = docHtml;
       await dbService.updateQuoteDocHtml(quoteData.id, { contractHtml: newHtml });
       quoteData.contractHtml = newHtml;
       setDocHtml(newHtml);
@@ -637,10 +703,21 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
         )}
 
         {contractApproved ? (
-          <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            Đã Duyệt
-          </span>
+          <div className="flex items-center gap-1">
+            <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Đã Duyệt
+            </span>
+            <button
+              onClick={handleUnapproveContract}
+              disabled={saving}
+              title="Hủy phê duyệt để mở khóa chỉnh sửa"
+              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Hủy phê duyệt
+            </button>
+          </div>
         ) : (
           <button
             onClick={handleApproveContract}
@@ -652,7 +729,14 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
           </button>
         )}
 
-        {!isEditing ? (
+        {/* Hồ sơ đã duyệt: khóa hẳn nút "Chỉnh sửa bản in" — phải Hủy phê duyệt
+            (ở trên) mới mở khóa lại được, tránh sửa nội dung sau khi đã duyệt
+            mà không ai biết. */}
+        {contractApproved ? (
+          <span className="px-3 py-1.5 text-[10px] text-slate-500 font-sans italic flex items-center gap-1">
+            🔒 Đã duyệt — hủy phê duyệt để chỉnh sửa
+          </span>
+        ) : !isEditing ? (
           <button
             onClick={() => setIsEditing(true)}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white transition-all rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
@@ -681,7 +765,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
             </button>
           </div>
         )}
-        {quoteData.contractHtml && !isEditing && (
+        {quoteData.contractHtml && !isEditing && !contractApproved && (
           <button
             onClick={handleRestoreDefault}
             className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 transition-all rounded-xl text-xs font-bold font-sans flex items-center gap-1 cursor-pointer shadow-sm active:scale-95"
@@ -691,16 +775,23 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
         )}
       </div>
 
-      {/* Approved Stamp on the printed document */}
+      {/* Approved Stamp — chỉ hiện trên màn hình, KHÔNG in ra bản in/PDF (print:hidden) */}
       {contractApproved && (
-        <div className="absolute top-24 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500 text-emerald-500 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/95 shadow-md pointer-events-none select-none z-50">
-          <CheckCircle2 className="w-5 h-5 text-emerald-500 animate-pulse" />
+        <div className="absolute top-20 right-10 md:right-16 transform rotate-12 border-4 border-emerald-500/40 text-emerald-500/50 font-extrabold uppercase px-4 py-2 rounded-lg text-sm tracking-widest font-sans flex items-center gap-1 bg-white/10 shadow-md pointer-events-none select-none z-50 print:hidden">
+          <CheckCircle2 className="w-5 h-5 text-emerald-500/50 animate-pulse" />
           ĐÃ PHÊ DUYỆT
         </div>
       )}
 
       {/* Print Button floating */}
       <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print" contentEditable={false}>
+        <button
+          onClick={handleExportWord}
+          className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
+        >
+          <FileDown className="w-4 h-4 text-blue-600" />
+          Xuất Word
+        </button>
         <button
           onClick={handlePrint}
           className="px-4 py-2 bg-[#00a651] text-white hover:bg-[#008f45] transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
@@ -710,14 +801,18 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
         </button>
       </div>
 
-      {/* Freeform editor */}
-      <div 
-        ref={editorRef}
-        className="times-roman-print prose max-w-none text-left text-base space-y-4 print:prose-sm leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: docHtml }}
-        contentEditable={isEditing}
-        suppressContentEditableWarning={true}
-      />
+      {/* Freeform editor — RichTextEditor cấp toolbar căn chỉnh kiểu Word (căn lề/
+          giữa/giãn dòng/danh sách...) khi isEditing=true; toolbar tự ẩn hoàn toàn
+          lúc chỉ xem (disabled + hideToolbarWhenDisabled). */}
+      <div ref={editorRef} className="times-roman-print">
+        <RichTextEditor
+          value={docHtml}
+          onChange={setDocHtml}
+          disabled={!isEditing}
+          hideToolbarWhenDisabled
+          editorHeightClassName="min-h-[200px] max-h-none prose max-w-none text-left text-base space-y-4 print:prose-sm leading-relaxed"
+        />
+      </div>
       
       <div className="times-roman-print mt-12 border-t border-dashed border-slate-300 pt-8 grid grid-cols-2 text-center text-sm" contentEditable={false}>
         <div>

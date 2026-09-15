@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { X, RotateCcw, Save, Shield, AlertTriangle, CheckCircle2, DollarSign, FileText, Users, Settings, Eye } from 'lucide-react';
-import { TaskPermissionMatrix, TaskAction, RoleScope, DEFAULT_TASK_PERMISSIONS } from '../hrTaskPermissions';
+import { TaskPermissionMatrix, TaskAction, RoleScope, DEFAULT_TASK_PERMISSIONS, loadTaskPermissionMatrix, saveTaskPermissionMatrix } from '../hrTaskPermissions';
 
 interface TaskPermissionModalProps {
   isOpen: boolean;
@@ -20,21 +20,18 @@ export default function TaskPermissionModal({ isOpen, onClose, roleId, roleName,
 
   const [matrix, setMatrix] = React.useState<TaskPermissionMatrix>(DEFAULT_TASK_PERMISSIONS);
 
-  // Load current matrix for this role from localStorage on open
+  // Load current matrix for this role from in-memory cache on open
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('hl_task_permissions_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Check if there's role-specific override
-        const roleSpecific = parsed.roles?.[roleId];
-        if (roleSpecific) {
-          setMatrix(roleSpecific);
-        } else {
-          setMatrix({
-            actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
-          });
-        }
+      const parsed = loadTaskPermissionMatrix() as any;
+      // Check if there's role-specific override
+      const roleSpecific = parsed.roles?.[roleId];
+      if (roleSpecific) {
+        setMatrix(roleSpecific);
+      } else {
+        setMatrix({
+          actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
+        });
       }
     } catch (e) {
       console.error('Load task permissions error:', e);
@@ -59,7 +56,6 @@ export default function TaskPermissionModal({ isOpen, onClose, roleId, roleName,
     assigner: { label: 'Người Giao Việc', desc: 'Người khởi tạo & giao công việc (task.assignerId)', color: 'text-sky-400 bg-sky-500/10' },
     assignee: { label: 'Phụ Trách Công Việc', desc: 'Phụ Trách Công Việc chịu trách nhiệm toàn bộ công việc (task.assigneeId)', color: 'text-amber-400 bg-amber-500/10' },
     missionAssignee: { label: 'Phụ Trách Nhiệm Vụ', desc: 'Phụ Trách Nhiệm Vụ thực hiện nhiệm vụ con (task.missions[].mainAssigneeId)', color: 'text-orange-400 bg-orange-500/10' },
-    involved: { label: 'Người Tham Gia', desc: 'Nhân sự hỗ trợ liên quan (task.involvedEmployeeIds)', color: 'text-teal-400 bg-teal-500/10' },
     accountant: { label: 'Kế Toán', desc: 'Nhân viên kế toán phụ trách thu chi (role === accountant)', color: 'text-sky-400 bg-sky-500/10' },
     none: { label: 'Không Liên Quan', desc: 'Không có quyền mặc định với công việc này', color: 'text-slate-500 bg-slate-500/10' },
   };
@@ -79,15 +75,12 @@ export default function TaskPermissionModal({ isOpen, onClose, roleId, roleName,
   };
 
   const handleSave = () => {
-    // Save role-specific override
+    // Save role-specific override (in-memory + Supabase)
     try {
-      const saved = localStorage.getItem('hl_task_permissions_v1');
-      const base = saved ? JSON.parse(saved) : { actions: DEFAULT_TASK_PERMISSIONS.actions, roles: {} };
+      const base = (loadTaskPermissionMatrix() as any);
       base.roles = base.roles || {};
       base.roles[roleId] = matrix;
-      localStorage.setItem('hl_task_permissions_v1', JSON.stringify(base));
-      window.dispatchEvent(new Event('storage'));
-      window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+      saveTaskPermissionMatrix(base);
     } catch (e) {
       console.error('Save task permissions error:', e);
     }

@@ -8,13 +8,15 @@ import {
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
 import * as XLSX from 'xlsx';
+import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
-export default function WarehouseSuppliers() {
+export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpenAddSignal?: number }) {
   const { addToast } = useNotification();
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedSupDetail, setSelectedSupDetail] = useState<SupplierPartner | null>(null);
 
   // ── Multi-row selection ──
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -47,10 +49,14 @@ export default function WarehouseSuppliers() {
     setSelectedRows(new Set());
     setSelectAll(false);
     addToast({ title: '✅ Đã xóa', message: `Đã xóa ${idsToDelete.length} nhà cung cấp.`, type: 'success' });
-    // Persist deletions to Supabase
+    // Persist deletions to Supabase — xóa kèm dòng Công nợ đầu kỳ snapshot của
+    // từng NCC (nếu có) để tránh để lại dòng "mồ côi" cộng dư vào Công Nợ Trả.
     try {
       await Promise.allSettled(
-        idsToDelete.map(id => dbService.suppliers.delete(id).catch(err => console.error("Lỗi xóa nhà cung cấp:", err)))
+        idsToDelete.flatMap(id => [
+          dbService.suppliers.delete(id).catch(err => console.error("Lỗi xóa nhà cung cấp:", err)),
+          dbService.accountingLiabilities.delete(`opbal_sup_${id}`).catch(() => {})
+        ])
       );
     } catch (err) {
       console.error("Lỗi xóa hàng loạt nhà cung cấp:", err);
@@ -71,6 +77,7 @@ export default function WarehouseSuppliers() {
   const [formBankNo, setFormBankNo] = useState('');
   const [formBankName, setFormBankName] = useState('');
   const [formDebt, setFormDebt] = useState<number>(0);
+  const [formOpeningDebt, setFormOpeningDebt] = useState<number>(0);
 
   // Quick Debt adjustment
   const [adjustDebtId, setAdjustDebtId] = useState<string | null>(null);
@@ -81,10 +88,11 @@ export default function WarehouseSuppliers() {
   const loadSuppliers = async () => {
     try {
       const data = await dbService.suppliers.list();
-      setSuppliers(data.map((s: any) => ({
+      const normalized = data.map((s: any) => ({
         ...s,
         debt: typeof s.debt === 'number' ? s.debt : 0
-      })));
+      }));
+      setSuppliers(normalized);
     } catch (e) {
       console.error(e);
     }
@@ -97,10 +105,77 @@ export default function WarehouseSuppliers() {
     return () => window.removeEventListener('hl-suppliers-updated', syncSuppliers);
   }, []);
 
+  // Đồng bộ dòng "Công nợ đầu kỳ" tương ứng của NCC này trong Công Nợ Trả
+  // (bảng accounting_liabilities, id "opbal_sup_<mã NCC>") mỗi khi sửa/xóa NCC.
+  // TRƯỚC ĐÂY: nút "Cập nhật Công Nợ Đầu Kỳ" ở tab Tài Chính chỉ COPY 1 LẦN giá
+  // trị openingDebt sang 1 dòng riêng — sau đó nếu sửa hoặc xóa Công nợ đầu kỳ
+  // trên hồ sơ NCC (hoặc xóa hẳn NCC), dòng đã copy KHÔNG tự cập nhật/xóa theo,
+  // vẫn cộng dồn số cũ vào Công Nợ Trả mãi mãi. Sự cố thật: "CÔNG TY TNHH THIÊN
+  // TỰ PHƯỚC" bị cộng dư 922.440.000đ từ 2 dòng snapshot cũ + mồ côi (1 dòng của
+  // NCC đã xóa, 1 dòng chưa cập nhật theo khi NCC còn lại đổi Công nợ đầu kỳ về 0).
+  const syncOpeningDebtLiability = async (supplierId: string, name: string, openingDebt: number) => {
+    const liabId = `opbal_sup_${supplierId}`;
+    try {
+      if (openingDebt > 0) {
+        await dbService.accountingLiabilities.save({
+          id: liabId,
+          name,
+          category: 'Nhà Cung Cấp',
+          value: 0,
+          openingDebt,
+          paid: 0,
+          remaining: openingDebt,
+          notes: 'Cập nhật từ Công Nợ đầu kỳ (NCC Vật tư)',
+          isOpeningDebt: true,
+        });
+      } else {
+        // Công nợ đầu kỳ = 0 (đã xóa/sửa về 0) → xóa luôn dòng snapshot tương ứng
+        // thay vì để lại số cũ.
+        await dbService.accountingLiabilities.delete(liabId);
+      }
+    } catch (err) {
+      console.warn('Đồng bộ Công nợ đầu kỳ (Công Nợ Trả) thất bại:', err);
+    }
+  };
+
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) return addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên nhà cung cấp!', type: 'warning' });
-    
+
+    // Nếu đang sửa (editingId) → cập nhật bản ghi hiện có, không tạo mã mới.
+    if (editingId) {
+      const existing = suppliers.find(s => s.id === editingId);
+      if (!existing) return;
+      const updated: SupplierPartner = {
+        ...existing,
+        name: formName,
+        representative: formRep || formName,
+        phone: formPhone,
+        email: formEmail,
+        address: formAddress || 'Đà Lạt',
+        field: formField,
+        note: formNote,
+        bankAccount: formBankNo,
+        bankName: formBankName,
+        bankNo: formBankNo,
+        debt: formDebt,
+        openingDebt: formOpeningDebt
+      } as any;
+      try {
+        await dbService.suppliers.save(updated);
+        await syncOpeningDebtLiability(updated.id, updated.name, updated.openingDebt || 0);
+        setSuppliers(prev => prev.map(s => s.id === editingId ? updated : s));
+        setIsAdding(false);
+        resetForm();
+        setSelectedSupDetail(updated);
+        addToast({ title: '✅ Thành công', message: 'Cập nhật nhà cung cấp thành công!', type: 'success' });
+      } catch (err) {
+        console.error(err);
+        addToast({ title: '⚠️ Lỗi', message: 'không thể lưu nhà cung cấp lên máy chủ.', type: 'warning' });
+      }
+      return;
+    }
+
     const newId = `SUP_${Date.now()}`;
     const newSup: SupplierPartner = {
       id: newId,
@@ -119,18 +194,20 @@ export default function WarehouseSuppliers() {
       bankName: formBankName,
       field: formField,
       note: formNote,
-      debt: formDebt
+      debt: formDebt,
+      openingDebt: formOpeningDebt
     } as any;
 
     try {
       await dbService.suppliers.save(newSup);
+      await syncOpeningDebtLiability(newSup.id, newSup.name, newSup.openingDebt || 0);
       setSuppliers(prev => [...prev, newSup]);
       setIsAdding(false);
       resetForm();
       addToast({ title: '✅ Thành công', message: 'Thêm nhà cung cấp mới thành công!', type: 'success' });
     } catch (err) {
       console.error(err);
-      addToast({ title: '⚠️ Lỗi', message: 'không thể lưu nhà cung cấp lên Firebase.', type: 'warning' });
+      addToast({ title: '⚠️ Lỗi', message: 'không thể lưu nhà cung cấp lên máy chủ.', type: 'warning' });
     }
   };
 
@@ -145,43 +222,18 @@ export default function WarehouseSuppliers() {
     setFormNote(sup.note || '');
     setFormBankNo(sup.bankAccount || sup.bankNo || '');
     setFormBankName(sup.bankName || '');
-  };
-
-  const handleEditSubmit = async (id: string) => {
-    if (!formName.trim()) return addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên nhà cung cấp!', type: 'warning' });
-    const existing = suppliers.find(s => s.id === id);
-    if (!existing) return;
-
-    const updated = {
-      ...existing,
-      name: formName,
-      representative: formRep,
-      phone: formPhone,
-      email: formEmail,
-      address: formAddress,
-      field: formField,
-      note: formNote,
-      bankAccount: formBankNo,
-      bankNo: formBankNo,
-      bankName: formBankName
-    };
-
-    try {
-      await dbService.suppliers.save(updated);
-      setSuppliers(prev => prev.map(s => s.id === id ? updated : s));
-      setEditingId(null);
-      resetForm();
-      addToast({ title: '✅ Thành công', message: 'Cập nhật nhà cung cấp thành công!', type: 'success' });
-    } catch (err) {
-      console.error(err);
-      addToast({ title: '⚠️ Lỗi', message: 'không thể lưu nhà cung cấp lên Firebase.', type: 'warning' });
-    }
+    setFormDebt(sup.debt || 0);
+    setFormOpeningDebt(sup.openingDebt || 0);
+    setIsAdding(true);
   };
 
   const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`⚠️ Bạn có chắc chắn muốn XÓA nhà cung cấp "${name}"? Thao tác này sẽ dọn sạch thông tin đối tác khỏi hệ thống.`)) {
       try {
         await dbService.suppliers.delete(id);
+        // Xóa luôn dòng Công nợ đầu kỳ snapshot của NCC này (nếu có) — tránh để
+        // lại dòng "mồ côi" vẫn cộng vào Công Nợ Trả dù NCC đã bị xóa hẳn.
+        await dbService.accountingLiabilities.delete(`opbal_sup_${id}`).catch(() => {});
         setSuppliers(prev => prev.filter(s => s.id !== id));
         addToast({ title: '🗑️ Đã xóa', message: 'Đã xóa nhà cung cấp.', type: 'info' });
       } catch (err) {
@@ -229,14 +281,21 @@ export default function WarehouseSuppliers() {
     setFormBankNo('');
     setFormBankName('');
     setFormDebt(0);
+    setFormOpeningDebt(0);
+    setEditingId(null);
   };
+
+  // Mở nhanh form "Thêm Nhà Cung Cấp" khi nhận tín hiệu từ bên ngoài (vd: từ nút Chi Nhà Cung Cấp).
+  useEffect(() => {
+    if (autoOpenAddSignal > 0) {
+      setEditingId(null);
+      resetForm();
+      setIsAdding(true);
+    }
+  }, [autoOpenAddSignal]);
 
   // ===================== BLOCK EXCEL (DANH MỤC NHÀ CUNG CẤP VẬT TƯ) =====================
   const handleExportNccExcel = () => {
-    if (suppliers.length === 0) {
-      addToast({ title: '⚠️ Không có dữ liệu', message: 'Chưa có nhà cung cấp nào để xuất.', type: 'warning' });
-      return;
-    }
     const data = suppliers.map(s => ({
       'Mã NCC': s.id,
       'Tên nhà cung cấp': s.name,
@@ -244,14 +303,10 @@ export default function WarehouseSuppliers() {
       'Email': s.email || '',
       'Địa chỉ': s.address || '',
       'Loại vật tư': s.field || '',
+      'Công nợ đầu kỳ': s.openingDebt || 0,
       'Ghi chú': s.note || '',
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'DanhMucNCC');
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    XLSX.writeFile(wb, `DanhMucNCC_${ymd}.xlsx`);
+    exportToExcel(data, 'DanhMucNCC', `DanhMucNCC_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.supplier]);
     addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} nhà cung cấp`, type: 'success' });
   };
 
@@ -259,48 +314,53 @@ export default function WarehouseSuppliers() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const wb = XLSX.read(ev.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        const imported: SupplierPartner[] = rows.map((r, idx) => ({
-          id: String(r['Mã NCC'] || `NCC_IMP_${Date.now()}_${idx}`),
-          name: String(r['Tên nhà cung cấp'] || '').trim(),
-          representative: String(r['Người đại diện'] || r['Tên nhà cung cấp'] || ''),
-          gender: 'Nam',
-          birthDate: '',
-          cccd: '',
-          cccdDate: '',
-          cccdPlace: '',
-          address: String(r['Địa chỉ'] || 'Đà Lạt'),
-          phone: String(r['Số điện thoại'] || ''),
-          email: String(r['Email'] || ''),
-          taxCode: '',
-          bankAccount: String(r['Số tài khoản'] || ''),
-          bankNo: String(r['Số tài khoản'] || ''),
-          bankName: String(r['Ngân hàng'] || ''),
-          field: String(r['Loại vật tư'] || 'Cung cấp gỗ ván & phụ kiện'),
-          note: String(r['Ghi chú'] || ''),
-          debt: 0,
-        } as any)).filter(r => r.name);
-        if (imported.length === 0) {
-          addToast({ title: '⚠️ Không có dữ liệu', message: 'File không có dòng hợp lệ (cần cột Tên nhà cung cấp).', type: 'warning' });
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false });
+        if (rows.length === 0) {
+          addToast({ title: '⚠️ Không có dữ liệu', message: 'File Excel trống.', type: 'warning' });
           return;
         }
-        let savedCount = 0;
-        imported.forEach(async (sup) => {
-          try {
-            await dbService.suppliers.save(sup);
-            savedCount++;
-          } catch (err) {
-            console.error(err);
-          }
+        const deduped = new Map<string, any>();
+        rows.forEach((r, idx) => {
+          const id = String(r['Mã NCC'] || `NCC_IMP_${Date.now()}_${idx}`);
+          deduped.set(id, r);
         });
-        setTimeout(() => {
-          addToast({ title: '✅ Nhập thành công', message: `Đã import ${imported.length} nhà cung cấp`, type: 'success' });
-        }, 500);
+        for (const [id, r] of deduped) {
+          const name = String(r['Tên nhà cung cấp'] || '').trim();
+          if (!name) continue;
+          const existing = suppliers.find(s => s.id === id);
+          const toSave: SupplierPartner = {
+            ...(existing as SupplierPartner),
+            id,
+            name,
+            representative: String(r['Người đại diện'] || r['Tên nhà cung cấp'] || existing?.representative || ''),
+            gender: existing?.gender || 'Nam',
+            birthDate: existing?.birthDate || '',
+            cccd: existing?.cccd || '',
+            cccdDate: existing?.cccdDate || '',
+            cccdPlace: existing?.cccdPlace || '',
+            address: String(r['Địa chỉ'] || existing?.address || 'Đà Lạt'),
+            phone: String(r['Số điện thoại'] || existing?.phone || ''),
+            email: String(r['Email'] || existing?.email || ''),
+            taxCode: existing?.taxCode || '',
+            bankAccount: String(r['Số tài khoản'] || existing?.bankAccount || ''),
+            bankNo: String(r['Số tài khoản'] || existing?.bankNo || ''),
+            bankName: String(r['Ngân hàng'] || existing?.bankName || ''),
+            field: String(r['Loại vật tư'] || existing?.field || 'Cung cấp gỗ ván & phụ kiện'),
+            note: String(r['Ghi chú'] || existing?.note || ''),
+            openingDebt: Number(r['Công nợ đầu kỳ']) || existing?.openingDebt || 0,
+            debt: existing?.debt || 0,
+          };
+          await dbService.suppliers.save(toSave);
+          await syncOpeningDebtLiability(toSave.id, toSave.name, toSave.openingDebt || 0);
+        }
+        await loadSuppliers();
+        addToast({ title: '✅ Nhập thành công', message: `Đã cập nhật ${deduped.size} nhà cung cấp (thêm mới/mã đã có)`, type: 'success' });
       } catch (err) {
+        console.error(err);
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel', type: 'error' });
       }
     };
@@ -308,12 +368,17 @@ export default function WarehouseSuppliers() {
     e.target.value = '';
   };
 
-  const filtered = suppliers.filter(s =>
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (s.representative && s.representative.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (s.field && s.field.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const [fieldFilter, setFieldFilter] = useState('all');
+  const supFields = Array.from(new Set(suppliers.map(s => (s.field || '').trim()).filter(Boolean))).sort();
+  const filtered = suppliers.filter(s => {
+    const matchSearch =
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.representative && s.representative.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.field && s.field.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchField = fieldFilter === 'all' || (s.field || '') === fieldFilter;
+    return matchSearch && matchField;
+  });
 
   return (
     <div className="space-y-6 text-slate-200" id="warehouse_suppliers_panel">
@@ -322,11 +387,8 @@ export default function WarehouseSuppliers() {
         <div>
           <h2 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
-            Danh Mục Nhà Cung Cấp Vật Tư (KHO)
+            Danh Mục Nhà Cung Cấp Vật Tư
           </h2>
-          <p className="text-[10.5px] text-slate-400 mt-1">
-            Hệ thống quản lý thông tin các nhà cung cấp gỗ ván, sắt thép dầm móng và công nợ liên kết điều phối.
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -368,7 +430,7 @@ export default function WarehouseSuppliers() {
       {isAdding && (
         <form onSubmit={handleAddSubmit} className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4 animate-fade-in text-left">
           <h3 className="text-xs font-bold text-teal-400 uppercase tracking-wider border-b border-slate-800 pb-2">
-            ✍️ KHAI BÁO NHÀ CUNG CẤP MỚI
+            {editingId ? '✍️ CẬP NHẬT NHÀ CUNG CẤP' : '✍️ KHAI BÁO NHÀ CUNG CẤP MỚI'}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1">
@@ -470,6 +532,20 @@ export default function WarehouseSuppliers() {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-slate-455">Công Nợ Đầu Kỳ (VNĐ)</label>
+              <input
+                type="number"
+                min={0}
+                value={formOpeningDebt || ''}
+                onChange={(e) => setFormOpeningDebt(Number(e.target.value))}
+                placeholder="Công nợ đầu kỳ (nếu có)..."
+                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-teal-500"
+              />
+            </div>
+          </div>
+
           <div className="space-y-1">
             <label className="text-[10px] uppercase font-bold text-slate-455">Ghi Chú Hoạt Động</label>
             <textarea
@@ -508,7 +584,7 @@ export default function WarehouseSuppliers() {
         if (!sup) return null;
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in text-left">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
               <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                 <h3 className="font-extrabold text-white text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <DollarSign className="w-4 h-4 text-amber-500" />
@@ -587,23 +663,38 @@ export default function WarehouseSuppliers() {
       })()}
 
       {/* Main Filter & List */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-        <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-3">
-          <div className="relative w-full sm:w-72">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Tìm kiếm nhà cung cấp..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 outline-none focus:border-teal-500"
-            />
-          </div>
-          <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400">
-            <span>Tổng số:</span>
-            <span className="font-bold text-teal-400 font-mono">{filtered.length} NCC</span>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+        <div className={`${selectedSupDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <div className="relative w-full sm:w-72">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Tìm kiếm nhà cung cấp..."
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 outline-none focus:border-teal-500"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10.5px] text-slate-400 uppercase font-bold hidden sm:inline">Lĩnh vực:</span>
+                <select
+                  value={fieldFilter}
+                  onChange={(e) => setFieldFilter(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-teal-500 cursor-pointer"
+                >
+                  <option value="all">Tất cả</option>
+                  {supFields.map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400">
+                  <span>Tổng số:</span>
+                  <span className="font-bold text-teal-400 font-mono">{filtered.length} NCC</span>
+                </div>
+              </div>
+            </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -617,13 +708,13 @@ export default function WarehouseSuppliers() {
                     className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
                   />
                 </th>
-                <th className="p-3 w-16 text-center">Mã NCC</th>
+                <th className="p-3 pl-4">Mã NCC</th>
                 <th className="p-3">Tên Nhà Cung Cấp</th>
-                <th className="p-3">Lĩnh Vực Hoạt Động</th>
-                <th className="p-3">Thông Tin Liên Hệ</th>
-                <th className="p-3">Ngân Hàng Giao Dịch</th>
-                <th className="p-3 text-right">CÔNG NỢ HIỆN TẠI</th>
-                <th className="p-3 w-28 text-center">Thao tác</th>
+                <th className="p-3">Địa Chỉ</th>
+                <th className="p-3">SĐT</th>
+                <th className="p-3">Lĩnh Vực</th>
+                <th className="p-3 text-right">Công Nợ đầu kỳ</th>
+                <th className="p-3 text-right">Công Nợ hiện tại</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-850 bg-slate-900/40">
@@ -635,11 +726,15 @@ export default function WarehouseSuppliers() {
                 </tr>
               ) : (
                 filtered.map((s) => {
-                  const isEditingThis = editingId === s.id;
                   const currentDebt = s.debt || 0;
+                  const openDebt = s.openingDebt || 0;
                   return (
-                    <tr key={s.id} className={`hover:bg-slate-900/70 text-slate-300 ${selectedRows.has(s.id) ? 'bg-amber-500/10' : ''}`}>
-                      <td className="p-3 text-center">
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelectedSupDetail(s)}
+                      className={`hover:bg-slate-800/40 cursor-pointer transition-colors text-slate-300 ${selectedRows.has(s.id) ? 'bg-amber-50' : ''} ${selectedSupDetail?.id === s.id ? 'bg-teal-50 border-l-2 border-teal-500' : ''}`}
+                    >
+                      <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedRows.has(s.id)}
@@ -647,159 +742,25 @@ export default function WarehouseSuppliers() {
                           className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
                         />
                       </td>
-                      <td className="p-3 text-center font-mono font-bold text-slate-500">{s.id}</td>
+                      <td className="p-3 pl-4 font-mono font-bold text-teal-400 text-[10px] uppercase">{s.id}</td>
                       <td className="p-3">
-                        {isEditingThis ? (
-                          <div className="space-y-1.5">
-                            <input
-                              type="text"
-                              value={formName}
-                              onChange={(e) => setFormName(e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded p-1 text-xs text-white"
-                            />
-                            <input
-                              type="text"
-                              value={formRep}
-                              placeholder="Người đại diện"
-                              onChange={(e) => setFormRep(e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded p-1 text-[11px] text-slate-400 w-full"
-                            />
-                          </div>
-                        ) : (
-                          <div>
-                            <span className="font-extrabold text-teal-400 block">{s.name}</span>
-                            <span className="text-[10px] text-slate-455 block">ĐD: {s.representative || 'Chưa rõ'}</span>
-                          </div>
-                        )}
+                        <div className="font-extrabold text-white text-[12.5px]">{s.name}</div>
+                        <div className="text-[10px] text-slate-455">ĐD: {s.representative || 'Chưa rõ'}</div>
                       </td>
+                      <td className="p-3 text-slate-300">{s.address || '—'}</td>
+                      <td className="p-3 whitespace-nowrap font-mono text-slate-300">{s.phone || '—'}</td>
                       <td className="p-3">
-                        {isEditingThis ? (
-                          <input
-                            type="text"
-                            value={formField}
-                            onChange={(e) => setFormField(e.target.value)}
-                            className="bg-slate-950 border border-slate-800 rounded p-1 text-xs text-white"
-                          />
-                        ) : (
-                          <span className="bg-teal-500/10 text-teal-400 border border-teal-500/20 text-[10px] px-2 py-0.5 rounded-full font-semibold">
-                            {s.field || 'Đại lý vật tư'}
-                          </span>
-                        )}
+                        <span className="bg-teal-50 text-teal-700 border border-teal-200 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                          {s.field || 'Đại lý vật tư'}
+                        </span>
                       </td>
-                      <td className="p-3 space-y-1">
-                        {isEditingThis ? (
-                          <div className="space-y-1">
-                            <input
-                              type="text"
-                              value={formPhone}
-                              placeholder="SĐT"
-                              onChange={(e) => setFormPhone(e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded p-1 text-xs text-white"
-                            />
-                            <input
-                              type="text"
-                              value={formEmail}
-                              placeholder="Email"
-                              onChange={(e) => setFormEmail(e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded p-1 text-xs text-white w-full"
-                            />
-                          </div>
-                        ) : (
-                          <div className="text-[11px] space-y-0.5">
-                            {s.phone && <div className="flex items-center gap-1 text-slate-300"><Phone className="w-3 h-3 text-slate-500" /> {s.phone}</div>}
-                            {s.email && <div className="flex items-center gap-1 text-slate-400"><Mail className="w-3 h-3 text-slate-500" /> {s.email}</div>}
-                            {s.address && <div className="flex items-center gap-1 text-slate-400"><MapPin className="w-3 h-3 text-slate-500" /> {s.address}</div>}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3 text-[11px] space-y-0.5">
-                        {isEditingThis ? (
-                          <div className="space-y-1">
-                            <input
-                              type="text"
-                              value={formBankNo}
-                              placeholder="Số TK"
-                              onChange={(e) => setFormBankNo(e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded p-1 text-xs text-white"
-                            />
-                            <input
-                              type="text"
-                              value={formBankName}
-                              placeholder="Tên ngân hàng"
-                              onChange={(e) => setFormBankName(e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded p-1 text-xs text-white w-full"
-                            />
-                          </div>
-                        ) : (
-                          <div>
-                            {s.bankAccount ? (
-                              <>
-                                <span className="font-semibold block font-mono text-slate-300">{s.bankAccount}</span>
-                                <span className="text-[10px] text-slate-500 block truncate max-w-[130px]">{s.bankName || 'Ngân hàng'}</span>
-                              </>
-                            ) : (
-                              <span className="text-slate-500 italic">Chưa liên kết</span>
-                            )}
-                          </div>
-                        )}
+                      <td className="p-3 text-right font-mono font-bold text-amber-400">
+                        {openDebt.toLocaleString('vi-VN')} đ
                       </td>
                       <td className="p-3 text-right font-mono">
                         <span className={`font-black text-[12.5px] ${currentDebt > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
                           {currentDebt.toLocaleString('vi-VN')} đ
                         </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        {isEditingThis ? (
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleEditSubmit(s.id)}
-                              className="p-1 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 rounded cursor-pointer"
-                              title="Lưu thay đổi"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setEditingId(null); resetForm(); }}
-                              className="p-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded cursor-pointer"
-                              title="Hủy"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAdjustDebtId(s.id);
-                                setAdjustAmount(0);
-                                setAdjustType('decrease');
-                              }}
-                              className="p-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded cursor-pointer"
-                              title="Thu chi công nợ"
-                            >
-                              <DollarSign className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleEditClick(s)}
-                              className="p-1 bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-white rounded cursor-pointer"
-                              title="Chỉnh sửa"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(s.id, s.name)}
-                              className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded cursor-pointer"
-                              title="Xóa nhà cung cấp"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
                       </td>
                     </tr>
                   );
@@ -819,6 +780,148 @@ export default function WarehouseSuppliers() {
             </button>
           </div>
         )}
+      </div>
+      </div>
+
+      {/* Right Detail Panel */}
+      {selectedSupDetail && (() => {
+        const cur = selectedSupDetail.debt || 0;
+        const opn = selectedSupDetail.openingDebt || 0;
+        return (
+          <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4 text-left text-xs">
+            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
+              <div>
+                <span className="font-mono text-[9px] text-teal-400 font-black uppercase tracking-wider">
+                  {selectedSupDetail.id.toUpperCase()}
+                </span>
+                <h3 className="font-extrabold text-white text-sm mt-0.5">
+                  Hồ sơ Nhà cung cấp vật tư
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSupDetail(null)}
+                className="text-slate-400 hover:text-white bg-slate-850 p-1.5 rounded-lg transition-colors cursor-pointer"
+                title="Đóng xem chi tiết"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-950/60 rounded-xl space-y-3 border border-slate-850">
+                <div>
+                  <span className="text-slate-500 block text-[9.5px] uppercase font-bold">Tên nhà cung cấp</span>
+                  <strong className="text-white text-md block font-extrabold">{selectedSupDetail.name}</strong>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
+                  <div>
+                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Người đại diện</span>
+                    <span className="text-white mt-1 block font-bold text-[11px]">{selectedSupDetail.representative || 'Chưa rõ'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số điện thoại</span>
+                    <span className="text-slate-205 mt-1 block font-mono font-bold text-[11px]">{selectedSupDetail.phone || 'Chưa cập nhật'}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
+                  <div>
+                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Email</span>
+                    <span className="text-slate-300 mt-1 block font-mono text-[11px] truncate" title={selectedSupDetail.email}>{selectedSupDetail.email || 'Chưa cập nhật'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Địa chỉ</span>
+                    <span className="text-slate-300 mt-1 block font-medium text-[11px]">{selectedSupDetail.address || 'Trống'}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
+                  <div>
+                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Lĩnh vực</span>
+                    <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-teal-700">
+                      {selectedSupDetail.field || 'Chưa phân loại'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ngân hàng</span>
+                    <span className="text-slate-300 mt-1 block font-mono text-[11px] truncate" title={selectedSupDetail.bankName}>
+                      {selectedSupDetail.bankAccount ? `${selectedSupDetail.bankAccount}${selectedSupDetail.bankName ? ` (${selectedSupDetail.bankName})` : ''}` : 'Chưa liên kết'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-850/50">
+                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ghi chú</span>
+                  <span className="text-slate-300 mt-1 block text-[10.5px] max-h-12 overflow-y-auto" title={selectedSupDetail.note}>
+                    {selectedSupDetail.note || 'Không có ghi chú'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-950/60 rounded-xl space-y-2 border border-slate-850">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Công nợ đầu kỳ:</span>
+                  <span className="font-mono font-extrabold text-amber-400">{opn.toLocaleString('vi-VN')} đ</span>
+                </div>
+                <div className="flex justify-between text-[11px] pt-1 border-t border-slate-900">
+                  <span className="text-slate-400">Công nợ hiện tại:</span>
+                  <span className="font-mono font-extrabold text-amber-400">{cur.toLocaleString('vi-VN')} đ</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleEditClick(selectedSupDetail);
+                  document.getElementById('warehouse_suppliers_panel')?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="bg-amber-600 hover:bg-amber-550 text-white font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
+              >
+                <Edit2 className="w-3.5 h-3.5" /> Sửa
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdjustDebtId(selectedSupDetail.id);
+                  setAdjustAmount(0);
+                  setAdjustType('decrease');
+                }}
+                className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
+              >
+                <DollarSign className="w-3.5 h-3.5" /> Công nợ
+              </button>
+            </div>
+
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  handleDelete(selectedSupDetail.id, selectedSupDetail.name);
+                  setSelectedSupDetail(null);
+                }}
+                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors w-full"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Xóa nhà cung cấp
+              </button>
+            </div>
+
+            <div className="pt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedSupDetail(null)}
+                className="bg-slate-800 hover:bg-slate-755 text-slate-200 font-bold px-4 py-1.5 rounded-xl transition-colors cursor-pointer w-full text-center"
+              >
+                Đóng chi tiết
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       </div>
     </div>
   );

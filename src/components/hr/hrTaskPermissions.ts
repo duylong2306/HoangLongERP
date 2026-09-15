@@ -9,15 +9,17 @@
 
 import { Employee, Project, Task } from '../../types';
 import { isUserInRoleGroup } from '../../context';
+import { dbService } from '../../lib/dbService';
+import { loadProjectPermissions } from './hrProjectPermissions';
 
 // ─── Role Scope: vai trò của user đối với MỘT task cụ thể ────────────
+// Dựa trên vị trí dữ liệu THỰC TẾ trong UI
 // Tên hiển thị UI (Xem TaskPermissionModal.tsx > roleScopeLabels):
 //   director        → "Giám Đốc"
 //   pm              → "Trưởng Dự Án"
 //   assigner        → "Người Giao Việc"
 //   assignee        → "Phụ Trách Công Việc"
 //   missionAssignee → "Phụ Trách Nhiệm Vụ"
-//   involved        → "Người Tham Gia"
 //   accountant      → "Kế Toán"
 //   none            → "Không Liên Quan"
 export type RoleScope =
@@ -26,7 +28,6 @@ export type RoleScope =
   | 'pm'               // Trưởng Dự Án (project.pmId)
   | 'assignee'         // Phụ Trách Công Việc (task.assigneeId)
   | 'missionAssignee'  // Phụ Trách Nhiệm Vụ (task.missions[].mainAssigneeId)
-  | 'involved'         // Người Tham Gia (task.involvedEmployeeIds)
   | 'accountant'       // Kế Toán (role hệ thống)
   | 'none';            // Không Liên Quan
 
@@ -56,7 +57,7 @@ export interface TaskPermissionMatrix {
 
 export const DEFAULT_TASK_PERMISSIONS: TaskPermissionMatrix = {
   actions: {
-    view:             ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'involved', 'accountant'],
+    view:             ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'accountant'],
     receiveTask:      ['assignee', 'missionAssignee'],
     completeTask:     ['assignee', 'missionAssignee'],
     approveResult:    ['director', 'pm', 'assigner'],
@@ -74,35 +75,39 @@ export const DEFAULT_TASK_PERMISSIONS: TaskPermissionMatrix = {
   },
 };
 
-const STORAGE_KEY = 'hl_task_permissions_v1';
+// ─── In-memory cache (nguồn: Supabase khi mount) ─────────────────────
+let _taskPermissionCache: TaskPermissionMatrix = DEFAULT_TASK_PERMISSIONS;
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-// Đọc ma trận từ localStorage (hoặc default nếu chưa cấu hình)
+// Đọc ma trận từ in-memory cache (đã load từ Supabase khi mount)
 export const loadTaskPermissionMatrix = (): TaskPermissionMatrix => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Merge với default để đảm bảo đủ fields
-      return {
-        actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...(parsed.actions || {}) },
-      };
-    }
-  } catch (e) {
-    console.error('Lỗi đọc hl_task_permissions_v1:', e);
-  }
-  return DEFAULT_TASK_PERMISSIONS;
+  return _taskPermissionCache;
 };
 
-export const saveTaskPermissionMatrix = (matrix: TaskPermissionMatrix): void => {
+/** Đồng bộ từ Supabase về in-memory cache (gọi khi app mount) */
+export const syncTaskPermissionsFromCloud = async (): Promise<void> => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(matrix));
-    window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+    const cloud = await dbService.hrmTaskPermissions.get();
+    if (cloud && cloud.actions) {
+      _taskPermissionCache = {
+        actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...cloud.actions },
+      };
+      window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+    }
   } catch (e) {
-    console.error('Lỗi lưu hl_task_permissions_v1:', e);
+    console.warn('Sync task permissions from cloud failed:', e);
   }
+};
+
+// Lưu lên in-memory cache + Supabase (async, fail-safe)
+export const saveTaskPermissionMatrix = (matrix: TaskPermissionMatrix): void => {
+  _taskPermissionCache = matrix;
+  // Đồng bộ lên Supabase (non-blocking)
+  dbService.hrmTaskPermissions.save(matrix).catch(e =>
+    console.warn('Supabase save task permissions error:', e)
+  );
+  window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
 };
 
 // ─── Role Group IDs (HRM) ─────────────────────────────────────
@@ -136,14 +141,15 @@ export const getTaskRoleScope = (
   // 6. Kế Toán (Role Group: role_accounting)
   if (isUserInRoleGroup(currentUser.id, ROLE_GROUP_ACCOUNTING)) return 'accountant';
 
-  // 7. Người Tham Gia
-  if (task.involvedEmployeeIds?.includes(currentUser.id)) return 'involved';
-
   return 'none';
 };
 
 /** Admin/root luôn full quyền */
 const IS_ADMIN = (uid: string) => uid === 'NV_ADMIN' || uid === 'emp_admin';
+
+const IS_DIRECTOR = (uid: string): boolean => {
+  return isUserInRoleGroup(uid, 'role_admin'); // superadmin cũng true nhờ isUserInRoleGroup
+};
 
 // Kiểm tra user có được xem task này không (dùng action matrix 'view')
 export const canViewTask = (
@@ -154,8 +160,25 @@ export const canViewTask = (
 ): boolean => {
   if (!currentUser) return false;
 
-  // Admin luôn thấy mọi thứ
-  if (IS_ADMIN(currentUser.id)) return true;
+  // Admin/Director luôn thấy mọi thứ
+  if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
+
+  // Check role group permissions via project permissions matrix
+  // If user's role group has 'viewTask' action, allow
+  try {
+    const parsed = loadProjectPermissions() as any;
+    const rgMatrix = parsed.roleGroupMatrix || {};
+    const empGroupIds = currentUser.roleGroupIds || [];
+    for (const groupId of empGroupIds) {
+      const actions = rgMatrix.roleGroupActions?.[groupId];
+      if (actions?.includes('viewTask')) {
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('canViewTask role group check failed:', e);
+    // Fallback — continue to context check
+  }
 
   const roleScope = getTaskRoleScope(currentUser, task, project);
   const allowedRoles = matrix.actions.view || [];
@@ -172,11 +195,39 @@ export const canDoTaskAction = (
 ): boolean => {
   if (!currentUser) return false;
 
-  // Admin luôn được làm mọi action
-  if (IS_ADMIN(currentUser.id)) return true;
+  // Admin/Director luôn được làm mọi action
+  if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
+
+  // Superadmin check (dự phòng cho user không trong role_admin nhưng là superadmin)
+  if (isUserInRoleGroup(currentUser.id, 'role_superadmin')) return true;
 
   const roleScope = getTaskRoleScope(currentUser, task, project);
   const allowedRoles = matrix.actions[action] || [];
+  if (allowedRoles.includes(roleScope)) return true;
 
-  return allowedRoles.includes(roleScope);
+  // Kiểm tra roleGroupMatrix từ Quyền Dự Án (Hệ thống mới — tab "Vai trò nhóm HRM")
+  // Cho phép HRM Role Group cấp quyền đặc biệt trong mọi task
+  try {
+    const parsed = loadProjectPermissions() as any;
+    const rgMatrix = parsed.roleGroupMatrix;
+    if (rgMatrix?.roleGroupActions) {
+      const empGroupIds = currentUser.roleGroupIds || [];
+      for (const groupId of empGroupIds) {
+        const groupActions = rgMatrix.roleGroupActions[groupId] || [];
+        // Map TaskAction → ProjectAction nếu tên khác nhau
+        const mappedAction = action === 'assignSubWorkers' ? 'assignSubWorker' : action;
+        if (groupActions.includes(mappedAction)) return true;
+        // manageSubTask → kiểm tra nhiều quyền mission
+        if (action === 'manageSubTask') {
+          if (groupActions.includes('createMission') ||
+              groupActions.includes('editMission') ||
+              groupActions.includes('deleteMission')) return true;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('canDoTaskAction roleGroupMatrix check failed:', e);
+  }
+
+  return false;
 };

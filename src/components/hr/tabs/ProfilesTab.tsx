@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Search, Check, CheckSquare, Trash2, RotateCcw, UserPlus, Users, X } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
-import { SalaryScale, Employee } from '../../../types';
+import { SalaryScale } from '../../../types';
 import { dbService } from '../../../lib/dbService';
 import { hashPasswordSync } from '../../../lib/passwordUtils';
+import { loadHrmRoleGroups, setRoleGroupsCache } from '../../../context';
 
 type ToastInput = { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number };
 
@@ -48,7 +49,7 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
               >
                 <option value="">— Không phân quyền —</option>
                 {availableRoles.map(role => (
-                  <option key={role.id} value={role.id}>{role.id} - {role.name}</option>
+                  <option key={role.id} value={role.id}>{role.name}</option>
                 ))}
               </select>
             </div>
@@ -64,7 +65,7 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
           </button>
           <button
             onClick={() => { onConfirm(assignments); onClose(); }}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-550 text-slate-950 font-bold rounded-lg transition-colors"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-colors"
           >
             Tạo tài khoản
           </button>
@@ -149,7 +150,13 @@ export default function ProfilesTab({
     emp.name.toLowerCase().includes(employeeSearch.toLowerCase()) ||
     emp.position.toLowerCase().includes(employeeSearch.toLowerCase()) ||
     emp.department.toLowerCase().includes(employeeSearch.toLowerCase())
-  );
+  ).sort((a, b) => {
+    // Prioritize "working" status (đang làm) first
+    if (a.status === 'working' && b.status !== 'working') return -1;
+    if (a.status !== 'working' && b.status === 'working') return 1;
+    // Then sort by employee code (mã nhân viên) ascending
+    return a.id.localeCompare(b.id);
+  });
 
   const paginatedEmployees = globalPageSize === 'all'
     ? filteredEmployees
@@ -223,55 +230,48 @@ export default function ProfilesTab({
     }
 
     const username = generateUsernameFromProfile(emp.name, emp.phone);
-    const newId = `emp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-
-    const newAccount: Employee = {
-      id: newId,
-      name: emp.name,
-      role: 'engineer',
-      roleGroupIds: roleGroupId ? [roleGroupId] : [],
-      email: `${username}@hoanglonglamdong.vn`,
-      phone: emp.phone || '09xxxxxxxx',
-      department: emp.department || 'Phòng Ban Liên Quan',
-      username: username,
-      password: hashPasswordSync('123')
-    };
 
     try {
-      // Save to localStorage (hl_erp_employees)
-      const existingAccounts = JSON.parse(localStorage.getItem('hl_erp_employees') || '[]');
-      const updatedAccounts = [...existingAccounts, newAccount];
-      localStorage.setItem('hl_erp_employees', JSON.stringify(updatedAccounts));
+      // UPDATE the existing profile row in-place: add username, password, role fields.
+      // Do NOT create a new Employee with a different ID — that would duplicate the row.
+      const updatedProfile = {
+        ...emp,
+        username,
+        password: hashPasswordSync('123'),
+        role: 'engineer',
+        roleGroupIds: roleGroupId ? [roleGroupId] : ([] as string[]),
+        email: `${username}@hoanglonglamdong.vn`,
+        hasSystemAccount: true,
+      };
 
-      // Also save to cloud via dbService (don't let cloud failures block the local save)
-      try {
-        await dbService.employees.save(newAccount);
-      } catch (cloudErr) {
-        console.warn('Lưu lên cloud thất bại, nhưng đã lưu cục bộ:', cloudErr);
-      }
+      // Save to Supabase (same ID — upsert, no duplicate)
+      await dbService.employees.save(updatedProfile);
+
+      // Update local HR state — đảm bảo không tạo duplicate record
+      setEmployees(prev => {
+        const exists = prev.some(e => e.id === emp.id);
+        if (exists) {
+          return prev.map(e => e.id === emp.id ? updatedProfile : e);
+        }
+        // Nếu record không có trong state local (sync issue), thêm vào
+        return [...prev, updatedProfile];
+      });
+
+      // Đánh dấu cache bị invalidate để realtime sync lấy dữ liệu mới
+      window.dispatchEvent(new CustomEvent('hl-system-account-created', {
+        detail: { empId: emp.id, username }
+      }));
 
       // If roleGroupId provided, add employee to the role group
       if (roleGroupId) {
-        // Đọc từ cache Supabase trước, fallback localStorage cũ
-        let rolesList: any[] = [];
-        const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-        if (supCached) {
-          try { rolesList = JSON.parse(supCached); } catch {}
-        }
-        if (rolesList.length === 0) {
-          const hrmRoles = localStorage.getItem('hl_hrm_roles_v2');
-          if (hrmRoles) {
-            try { rolesList = JSON.parse(hrmRoles); } catch {}
-          }
-        }
+        // Đọc từ in-memory cache (đã load từ Supabase)
+        let rolesList: any[] = loadHrmRoleGroups();
         if (Array.isArray(rolesList)) {
           const targetRole = rolesList.find((r: any) => r.id === roleGroupId);
           if (targetRole) {
             if (!targetRole.memberIds) targetRole.memberIds = [];
-            targetRole.memberIds.push(newId);
-            const updated = JSON.stringify(rolesList);
-            localStorage.setItem('hl_cached_hrm_role_groups', updated);
-            localStorage.setItem('hl_hrm_roles_v2', updated);
+            targetRole.memberIds.push(emp.id);
+            setRoleGroupsCache(rolesList);
             // Đồng bộ lên Supabase
             dbService.hrmRoleGroups.save({
               id: targetRole.id,
@@ -292,58 +292,7 @@ export default function ProfilesTab({
         type: 'success'
       });
 
-      // Also update HR employee list (hl_hrm_employees_v3) so the UI reflects the new account
-      // Find if this employee already exists in HR store; if not, add a marker so it's visible
-      const existingHR = employees.find(e => e.id === emp.id);
-      if (existingHR) {
-        // Employee exists in HR - we can add a flag or note that they now have a system account
-        // The HR profile already exists, just the auth account was created
-        setEmployees(prev => prev.map(e =>
-          e.id === emp.id ? { ...e, hasSystemAccount: true } : e
-        ));
-      } else {
-        // Employee doesn't exist in HR yet - add a basic profile entry so they appear in the list
-        const newHRProfile: EmployeeProfile = {
-          id: newAccount.id,
-          name: emp.name,
-          gender: emp.gender,
-          dob: emp.dob,
-          phone: emp.phone,
-          email: emp.email,
-          cccd: emp.cccd,
-          cccdIssuedDate: emp.cccdIssuedDate,
-          cccdIssuedPlace: emp.cccdIssuedPlace,
-          address: emp.address,
-          currentAddress: emp.currentAddress,
-          emergencyContact: emp.emergencyContact,
-          department: emp.department,
-          position: emp.position,
-          startDate: emp.startDate,
-          contractType: emp.contractType,
-          contractDurationMonths: emp.contractDurationMonths,
-          status: emp.status,
-          phepNam: emp.phepNam,
-          bankAccount: emp.bankAccount,
-          bankName: emp.bankName,
-          docsCount: 0,
-          education: emp.education,
-          salaryCode: emp.salaryCode,
-          bhxhBookNo: emp.bhxhBookNo,
-          bhxhSalary: emp.bhxhSalary,
-          bhxhRate: emp.bhxhRate,
-          taxPersonalRelief: emp.taxPersonalRelief,
-          dependentCount: emp.dependentCount,
-          bhxhDate: emp.bhxhDate,
-          hasSystemAccount: true
-        };
-        setEmployees(prev => [...prev, newHRProfile]);
-        const updatedEmps = [...employees, newHRProfile];
-        localStorage.setItem('hl_hrm_employees_v3', JSON.stringify(updatedEmps));
-        dbService.employees.save(newHRProfile).catch(err =>
-          console.warn('Lỗi khi lưu nhân viên mới lên Supabase:', err));
-      }
-
-      return newAccount;
+      return updatedProfile;
     } catch (error) {
       console.error('Lỗi tạo tài khoản:', error);
       addToast({
@@ -359,23 +308,8 @@ export default function ProfilesTab({
   const handleBulkCreateSystemAccounts = async () => {
     if (selectedRows.size === 0) return;
 
-    // Đọc danh sách role groups từ Supabase cache trước
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const rolesData = localStorage.getItem('hl_hrm_roles_v2');
-      if (rolesData) {
-        try {
-          const parsed = JSON.parse(rolesData);
-          if (Array.isArray(parsed)) rolesList = parsed;
-        } catch (e) {
-          console.error('Error parsing roles:', e);
-        }
-      }
-    }
+    // Đọc danh sách role groups từ in-memory cache (đã load từ Supabase)
+    let rolesList: any[] = loadHrmRoleGroups();
     const availableRoles: { id: string; name: string }[] = rolesList.map((r: any) => ({ id: r.id, name: r.name }));
 
     const selectedEmployees = employees.filter(e => selectedRows.has(e.id));
@@ -407,23 +341,8 @@ export default function ProfilesTab({
 
   // Tạo tài khoản nhanh cho nhân viên đang xem chi tiết (single)
   const handleSingleCreateSystemAccount = async (emp: EmployeeProfile) => {
-    // Đọc danh sách role groups từ Supabase cache trước
-    let rolesList: any[] = [];
-    const supCached = localStorage.getItem('hl_cached_hrm_role_groups');
-    if (supCached) {
-      try { rolesList = JSON.parse(supCached); } catch {}
-    }
-    if (rolesList.length === 0) {
-      const rolesData = localStorage.getItem('hl_hrm_roles_v2');
-      if (rolesData) {
-        try {
-          const parsed = JSON.parse(rolesData);
-          if (Array.isArray(parsed)) rolesList = parsed;
-        } catch (e) {
-          console.error('Error parsing roles:', e);
-        }
-      }
-    }
+    // Đọc danh sách role groups từ in-memory cache (đã load từ Supabase)
+    let rolesList: any[] = loadHrmRoleGroups();
     const availableRoles: { id: string; name: string }[] = rolesList.map((r: any) => ({ id: r.id, name: r.name }));
 
     setBulkRoleModal({
@@ -522,13 +441,15 @@ export default function ProfilesTab({
                     <td className="py-2.5 text-slate-300 font-bold">{emp.position}</td>
                     <td className="py-2.5 text-center font-mono font-bold text-sky-400">{emp.phepNam !== undefined ? emp.phepNam : 12} ngày</td>
                     <td className="py-2.5 text-center">
+                      {/* Badge nền pastel sáng (theo chuẩn Điều phối vật tư) thay cho nền
+                          màu trong suốt trước đây — xem docs/design-system-dieu-phoi-vat-tu.md */}
                       {emp.hasSystemAccount ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                           Đã tạo
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-50 text-slate-600 border border-slate-200">
                           <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                           Chưa tạo
                         </span>
@@ -536,12 +457,13 @@ export default function ProfilesTab({
                     </td>
                     <td className="py-2.5 text-center">
                       <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                        emp.status === 'working' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        emp.status === 'leave' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                        'bg-red-500/10 text-red-400 border border-red-500/20'
+                        emp.status === 'working' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                        emp.status === 'leave' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                        emp.status === 'director_board' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
+                        'bg-rose-50 text-rose-700 border border-rose-200'
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-400' : emp.status === 'leave' ? 'bg-amber-400' : 'bg-red-400'}`}></span>
-                        {emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : 'Nghỉ làm'}
+                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-500' : emp.status === 'leave' ? 'bg-amber-500' : emp.status === 'director_board' ? 'bg-indigo-500' : 'bg-rose-500'}`}></span>
+                        {emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm'}
                       </span>
                     </td>
                   </tr>
@@ -599,13 +521,13 @@ export default function ProfilesTab({
                   </button>
                   <button
                     onClick={handleBulkResetPhepNam}
-                    className="bg-amber-600 hover:bg-amber-550 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
+                    className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
                   >
                     <RotateCcw className="w-3 h-3 inline-block align-middle mr-1" /> Reset phép năm
                   </button>
                   <button
                     onClick={handleBulkCreateSystemAccounts}
-                    className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
                   >
                     <UserPlus className="w-3 h-3 inline-block align-middle mr-1" /> Tạo tài khoản nhanh
                   </button>
@@ -687,7 +609,7 @@ export default function ProfilesTab({
                     <div>Loại hợp đồng: <strong className="text-slate-200 block mt-0.5">{emp.contractType}</strong></div>
                     <div>Thời hạn HĐ (tháng): <strong className="text-slate-200 block mt-0.5">{emp.contractType === 'Có thời hạn' ? (emp.contractDurationMonths || '—') : '—'}</strong></div>
                     <div>Công Nhật Vào: <strong className="text-slate-200 block mt-0.5">{emp.startDate}</strong></div>
-                    <div>Trạng thái: <strong className="text-slate-200 block mt-0.5 capitalize">{emp.status === 'working' ? 'Đang làm' : 'Nghỉ làm'}</strong></div>
+                    <div>Trạng thái: <strong className="text-slate-200 block mt-0.5 capitalize">{emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm'}</strong></div>
                   </div>
                 </div>
 
@@ -714,14 +636,14 @@ export default function ProfilesTab({
                         setEditingEmpData({ ...emp });
                         setIsEditingEmp(true);
                       }}
-                      className="bg-amber-600 hover:bg-amber-550 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+                      className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
                     >
                       Sửa
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSingleCreateSystemAccount(emp)}
-                      className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
                     >
                       <UserPlus className="w-3 h-3" /> Tạo tài khoản nhanh
                     </button>
@@ -729,7 +651,7 @@ export default function ProfilesTab({
                       type="button"
                       onClick={() => {
                         if (emp.id === 'NV_ADMIN' || emp.id === 'emp_admin' || emp.name === 'Administrator') {
-                          addToast({ title: '🗑️ Đã xóa', message: 'Không thể xóa hồ sơ nhân sự của Quản trị viên hệ thống (admin)!', type: 'info' });
+                          addToast({ title: '🔒 Bị khóa', message: 'Không thể xóa tài khoản quản trị viên hệ thống (admin). Tài khoản này được bảo vệ và không thể xóa.', type: 'warning' });
                           return;
                         }
                         if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa vĩnh viễn hồ sơ nhân sự của ${emp.name} (${emp.id}) không?\nHành động này không thể hoàn tác.`)) {
@@ -1014,13 +936,26 @@ export default function ProfilesTab({
                       <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Trạng thái làm việc:</label>
                       <select
                         value={editingEmpData.status}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, status: e.target.value as any })}
+                        onChange={(e) => {
+                          const newStatus = e.target.value as any;
+                          // Gắn "Nghỉ hẳn" -> xóa rỗng ngay tài khoản + mật khẩu đăng nhập,
+                          // tránh nhân viên đã nghỉ việc vẫn đăng nhập được vào hệ thống.
+                          // Không xóa hồ sơ nhân sự, chỉ khóa đường đăng nhập.
+                          const accountClear = newStatus === 'retired' ? { username: '', password: '', hasSystemAccount: false } : {};
+                          setEditingEmpData({ ...editingEmpData, status: newStatus, ...accountClear } as any);
+                        }}
                         className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
                       >
                         <option value="working">Đang làm</option>
                         <option value="leave">Nghỉ phép</option>
+                        <option value="director_board">Ban giám đốc</option>
                         <option value="retired">Nghỉ hẳn</option>
                       </select>
+                      {editingEmpData.status === 'retired' && (
+                        <p className="text-[9.5px] text-amber-400 mt-1 leading-relaxed">
+                          ⚠️ Nhân viên "Nghỉ hẳn" sẽ bị xóa tài khoản + mật khẩu đăng nhập khi lưu, không thể đăng nhập hệ thống nữa.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1029,6 +964,8 @@ export default function ProfilesTab({
                       <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Số lần phép năm được cấp:</label>
                       <input
                         type="number"
+                        step="0.5"
+                        min="0"
                         required
                         value={editingEmpData.phepNam !== undefined ? editingEmpData.phepNam : 12}
                         onChange={(e) => setEditingEmpData({ ...editingEmpData, phepNam: Number(e.target.value) })}
@@ -1091,7 +1028,7 @@ export default function ProfilesTab({
                     </button>
                     <button
                       type="submit"
-                      className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold px-4 py-1.5 rounded-lg cursor-pointer"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded-lg cursor-pointer"
                     >
                       Lưu lại ✅
                     </button>

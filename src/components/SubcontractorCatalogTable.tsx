@@ -419,86 +419,52 @@ export const INITIAL_MATERIALS: ProductMaterialItem[] = getInitialMaterials(INIT
 
 export default function SubcontractorCatalogTable({ searchTerm }: SubcontractorCatalogTableProps) {
   const { addToast } = useNotification();
-  const [products, setProducts] = useState<ProductCatalogItem[]>(() => {
-    // Ưu tiên Supabase cache
-    const supCached = localStorage.getItem('hl_cached_subcontractorCatalog_v2');
-    if (supCached) {
-      try {
-        const parsed = JSON.parse(supCached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    // Fallback localStorage cũ
-    const saved = localStorage.getItem('hl_subcontractor_products');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu sản phẩm", e);
-      }
-    }
-    return INITIAL_PRODUCTS;
-  });
+  const [products, setProducts] = useState<ProductCatalogItem[]>(() => INITIAL_PRODUCTS);
 
-  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => {
-    const saved = localStorage.getItem('hl_subcontractor_product_prices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu đơn giá", e);
-      }
-    }
-    const supCached = localStorage.getItem('hl_subcontractor_products');
-    if (supCached) {
-      try {
-        const parsedProducts: ProductCatalogItem[] = JSON.parse(supCached);
-        return getInitialPrices(parsedProducts);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return INITIAL_PRICES;
-  });
+  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => INITIAL_PRICES);
 
-  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => {
-    const saved = localStorage.getItem('hl_subcontractor_product_materials');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu chất liệu", e);
-      }
-    }
-    const supCached = localStorage.getItem('hl_subcontractor_products');
-    if (supCached) {
-      try {
-        const parsedProducts: ProductCatalogItem[] = JSON.parse(supCached);
-        return getInitialMaterials(parsedProducts);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return INITIAL_MATERIALS;
-  });
+  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => INITIAL_MATERIALS);
 
-  // Save to localStorage whenever products change
+  // Load danh mục sản phẩm từ Supabase
   useEffect(() => {
-    localStorage.setItem('hl_subcontractor_products', JSON.stringify(products));
-    // Đồng bộ Supabase
+    dbService.subcontractorCatalog.list().then((cloudProducts: ProductCatalogItem[]) => {
+      if (cloudProducts && cloudProducts.length > 0) setProducts(cloudProducts);
+    }).catch(err => console.warn('Load danh mục sản phẩm từ Supabase thất bại:', err));
+  }, []);
+
+  // Load giá bán từ Supabase
+  useEffect(() => {
+    dbService.productPrices.list().then((cloudPrices) => {
+      if (cloudPrices && cloudPrices.length > 0) setPricesList(cloudPrices);
+    }).catch(err => console.warn('Load giá bán từ Supabase thất bại:', err));
+  }, []);
+
+  // Load chất liệu từ Supabase
+  useEffect(() => {
+    dbService.productMaterials.list().then((cloudMats) => {
+      if (cloudMats && cloudMats.length > 0) setMaterialsList(cloudMats);
+    }).catch(err => console.warn('Load chất liệu từ Supabase thất bại:', err));
+  }, []);
+
+  // Đồng bộ products lên Supabase
+  useEffect(() => {
     products.forEach(p => {
       dbService.subcontractorCatalog.save(p).catch(() => {});
     });
   }, [products]);
 
-  // Save to localStorage whenever prices change
+  // Đồng bộ prices lên Supabase
   useEffect(() => {
-    localStorage.setItem('hl_subcontractor_product_prices', JSON.stringify(pricesList));
+    pricesList.forEach(p => {
+      dbService.productPrices.save(p).catch(() => {});
+    });
   }, [pricesList]);
 
-  // Save to localStorage whenever materials change
+  // Đồng bộ materials lên Supabase
   useEffect(() => {
-    localStorage.setItem('hl_subcontractor_product_materials', JSON.stringify(materialsList));
+    materialsList.forEach(m => {
+      dbService.productMaterials.save(m).catch(() => {});
+    });
   }, [materialsList]);
 
   // Price Management modal active states

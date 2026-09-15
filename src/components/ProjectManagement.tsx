@@ -2,7 +2,8 @@
 import { Project, Customer, Employee, ProjectType, ProjectStatus, Receipt, Payment, ProjectDoc, ProjectDocCustomField } from '../types';
 import { Plus, Search, Eye, Filter, Calendar, TrendingUp, DollarSign, ArrowRight, FileText, Check, Trash2, FolderOpen, Settings, AlertTriangle, X, Users } from 'lucide-react';
 import { useNotification } from '../context';
-import { can, loadProjectPermissions } from './hr/hrProjectPermissions';
+import { can, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
+import { generateProjectId } from '../lib/projectId';
 
 interface ProjectManagementProps {
   projects: Project[];
@@ -26,8 +27,11 @@ const getAbbreviation = (name: string): string => {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
-  const words = normalized.trim().split(/\s+/).filter(Boolean);
-  const initials = words.map(w => w[0].toUpperCase()).join('');
+  // Bỏ các "từ" chỉ toàn ký tự đặc biệt (vd: "-") và bỏ dấu ngoặc/ký tự đặc biệt
+  // đứng đầu mỗi từ (vd: "(Minh" → lấy "M" thay vì "("), tránh mã sinh ra dính
+  // dấu ngoặc/gạch ngang xấu như "AH-PHT(H".
+  const words = normalized.trim().split(/\s+/).filter(w => /[a-zA-Z0-9]/.test(w));
+  const initials = words.map(w => (w.match(/[a-zA-Z0-9]/) as RegExpMatchArray)[0].toUpperCase()).join('');
   return initials;
 };
 
@@ -48,6 +52,7 @@ export default function ProjectManagement({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [forcePermVersion, setForcePermVersion] = useState(0);
   
   // Trạng thái dự án đang chọn để xem Chi tiết sâu
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(projects[0]?.id || null);
@@ -56,6 +61,22 @@ export default function ProjectManagement({
   useEffect(() => {
     setIsConfirmingDelete(false);
   }, [selectedProjectId]);
+
+  // Lắng nghe realtime: refresh ma trận phân quyền dự án từ thiết bị khác
+  useEffect(() => {
+    let active = true;
+    const handleProjectPermissionsUpdated = async () => {
+      if (!active) return;
+      await syncProjectPermissionsFromDb();
+      // force re-render để can()/loadProjectPermissions() tính lại
+      setForcePermVersion(v => v + 1);
+    };
+    window.addEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('hl-project-permissions-updated', handleProjectPermissionsUpdated);
+    };
+  }, []);
 
   // Form dự án mới
   const [showAddForm, setShowAddForm] = useState(false);
@@ -104,6 +125,7 @@ export default function ProjectManagement({
     new: 'Mới',
     processing: 'Đang triển khai',
     paused: 'Tạm dừng',
+    maintenance: 'Đang Bảo Trì',
     completed: 'Hoàn thành',
     cancelled: 'Hủy'
   };
@@ -143,8 +165,10 @@ export default function ProjectManagement({
     if (!quickCustName) return;
 
     const abbrev = getAbbreviation(quickCustName);
-    const orderIndex = customers.length + 1;
-    const generatedId = `KH_${abbrev}_${orderIndex}`;
+    // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
+    // trùng khi 2 người tạo khách gần như đồng thời, hoặc khi khách cũ đã bị
+    // xóa làm độ dài mảng tụt xuống rồi tái sử dụng lại đúng số thứ tự cũ.
+    const generatedId = `KH_${abbrev}_${Date.now()}`;
 
     const newCust: Customer = {
       id: generatedId,
@@ -204,7 +228,7 @@ export default function ProjectManagement({
     }
 
     const newProj: Project = {
-      id: `proj_${Date.now()}`,
+      id: generateProjectId(newProjType),
       code: autoCode,
       name: newProjName,
       customerId: newProjCust,
@@ -530,7 +554,7 @@ export default function ProjectManagement({
                         <input
                           type="text"
                           disabled
-                          value={quickCustName ? `KH_${getAbbreviation(quickCustName)}_${customers.length + 1}` : 'KH_[Tên viết tắt]_[STT]'}
+                          value={quickCustName ? `KH_${getAbbreviation(quickCustName)}_...` : 'KH_[Tên viết tắt]_[Mã duy nhất]'}
                           className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-orange-400 font-mono font-bold cursor-not-allowed outline-none"
                         />
                       </div>
@@ -679,6 +703,7 @@ export default function ProjectManagement({
               <option value="new">Mới ký</option>
               <option value="processing">Đang chạy</option>
               <option value="paused">Tạm ngưng</option>
+              <option value="maintenance">Đang Bảo Trì</option>
               <option value="completed">Đã bàn giao</option>
             </select>
           </div>
@@ -709,6 +734,7 @@ export default function ProjectManagement({
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
                       p.status === 'processing' ? 'bg-sky-100 text-sky-800' :
+                      p.status === 'maintenance' ? 'bg-orange-100 text-orange-800' :
                       p.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {statusLabels[p.status]}
@@ -781,6 +807,7 @@ export default function ProjectManagement({
                       <option value="new">Mới</option>
                       <option value="processing">Đang triển khai</option>
                       <option value="paused">Tạm dừng</option>
+                      <option value="maintenance">Đang Bảo Trì</option>
                       <option value="completed">Hoàn thành</option>
                     </select>
                     <input
@@ -795,7 +822,7 @@ export default function ProjectManagement({
                 </div>
               ) : (
                 <div className="p-2 bg-slate-50 rounded border border-slate-200 text-xs text-slate-400 text-center italic">
-                  Trạng thái: <strong className="text-slate-700">{selectedProject.status === 'new' ? 'Mới' : selectedProject.status === 'processing' ? 'Đang triển khai' : selectedProject.status === 'paused' ? 'Tạm dừng' : selectedProject.status === 'completed' ? 'Hoàn thành' : 'Hủy'}</strong> | Tiến độ: <strong className="text-slate-700">{selectedProject.progress}%</strong> (chỉ PM/Giám đốc mới cập nhật)
+                  Trạng thái: <strong className="text-slate-700">{selectedProject.status === 'new' ? 'Mới' : selectedProject.status === 'processing' ? 'Đang triển khai' : selectedProject.status === 'paused' ? 'Tạm dừng' : selectedProject.status === 'maintenance' ? 'Đang Bảo Trì' : selectedProject.status === 'completed' ? 'Hoàn thành' : 'Hủy'}</strong> | Tiến độ: <strong className="text-slate-700">{selectedProject.progress}%</strong> (chỉ PM/Giám đốc mới cập nhật)
                 </div>
               )}
 
@@ -1134,7 +1161,12 @@ export default function ProjectManagement({
                 ) : (
                   <div className="bg-red-50 border border-red-250 p-2.5 rounded-lg space-y-2 text-left">
                     <p className="text-[11px] text-red-700 font-bold leading-normal">
-                      ⚠️ Bạn có chắc chắn muốn xóa dự án này khỏi hệ thống? Thao tác này sẽ xóa vĩnh viễn toàn bộ hồ sơ của dự án và toàn bộ các nhiệm vụ, công việc thi công liên quan!
+                      ⚠️ Bạn có chắc chắn muốn xóa dự án này khỏi hệ thống?
+                    </p>
+                    <p className="text-[10px] text-slate-600 font-semibold leading-normal">
+                      Toàn bộ dữ liệu phát sinh sẽ bị xóa vĩnh viễn khỏi cơ sở dữ liệu và không thể khôi phục:
+                      Công việc (kể cả đã hoàn thành), Nhiệm vụ, Nhóm chat, Ghi nhận vi phạm, Công tác phí,
+                      Báo giá, Hợp đồng, Nghiệm thu, Thanh lý, HĐ thầu, Công nợ, Đề xuất, Phiếu thu, Phiếu chi.
                     </p>
                     <div className="flex gap-1.5">
                       <button
