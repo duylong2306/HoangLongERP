@@ -455,8 +455,10 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
 
             {quoteData.selectedHouseType && subQuoteTab === 'takeoff' ? (
               <div className="bg-white p-3 md:p-8 rounded-2xl shadow-sm border border-slate-250 select-text font-serif text-slate-900 leading-normal max-w-5xl mx-auto my-1 relative print:border-none print:shadow-none print:p-0">
-                {/* Print Trigger Button */}
-                <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print">
+                {/* Print Trigger Button — nằm trong luồng bố cục bình thường (không absolute) để
+                    không đè lên tên doanh nghiệp thật (dài, có thể xuống 2 dòng) lấy từ Cài Đặt
+                    Hệ Thống — trước đây định vị "absolute top-6" chỉ vừa mắt với "HOANG LONG" ngắn. */}
+                <div className="flex items-center justify-end gap-2 mb-3 print:hidden no-print">
                   {isApproved ? (
                     <div className="flex items-center gap-1">
                       <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
@@ -711,8 +713,11 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
               <FinalQuoteDocument quoteData={quoteData} />
             ) : (
               <div className="bg-white p-3 md:p-8 rounded-2xl shadow-sm border border-slate-250 select-text font-serif text-slate-900 leading-normal max-w-4xl mx-auto my-1 relative print:border-none print:shadow-none print:p-0">
-                {/* Print Trigger & Approval Buttons (Visible only on UI screen, hidden during printing) */}
-                <div className="absolute right-6 top-6 flex items-center gap-2 print:hidden no-print">
+                {/* Print Trigger & Approval Buttons (Visible only on UI screen, hidden during printing).
+                    Nằm trong luồng bố cục bình thường (không absolute) để không đè lên tên doanh
+                    nghiệp thật (dài, có thể xuống 2 dòng) lấy từ Cài Đặt Hệ Thống — trước đây định
+                    vị "absolute top-6" chỉ vừa mắt với chữ "HOANG LONG" ngắn hard-code cũ. */}
+                <div className="flex items-center justify-end gap-2 mb-3 print:hidden no-print">
                   {isApproved ? (
                     <div className="flex items-center gap-1">
                       <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold font-sans flex items-center gap-1 shadow-sm">
