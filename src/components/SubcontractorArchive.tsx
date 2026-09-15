@@ -38,12 +38,12 @@ const DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE = `
 
 <p><strong>Hôm nay, ngày {{NGAY}} tháng {{THANG}} năm {{NAM}}, tại Văn phòng Ban chỉ huy công trường Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm có:</strong></p>
 
-<p><strong>BÊN A (BÊN GIAO KHOÁN): <span style="color:#2563eb;">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span></strong></p>
+<p><strong>BÊN A (BÊN GIAO KHOÁN): <span style="color:#2563eb;">{{TEN_CONG_TY_A}}</span></strong></p>
 <ul>
-  <li>Mã số thuế: 5801452655</li>
-  <li>Địa chỉ trụ sở: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</li>
-  <li>Điện thoại: 0966 545 959</li>
-  <li>Đại diện: (Ông) Nguyễn Văn Hoàng &nbsp;&nbsp; Chức vụ: Giám đốc</li>
+  <li>Mã số thuế: {{MST_CONG_TY_A}}</li>
+  <li>Địa chỉ trụ sở: {{DIA_CHI_CONG_TY_A}}</li>
+  <li>Điện thoại: {{DIEN_THOAI_CONG_TY_A}}</li>
+  <li>Đại diện: (Ông) {{DAI_DIEN_CONG_TY_A}} &nbsp;&nbsp; Chức vụ: {{CHUC_VU_CONG_TY_A}}</li>
 </ul>
 
 <p><strong>BÊN B (BÊN NHẬN KHOÁN): <span style="color:#059669;">{{TEN_THAU_PHU}}</span></strong></p>
@@ -162,7 +162,7 @@ const DEFAULT_SUBCONTRACTOR_CONTRACT_TEMPLATE = `
   <tr>
     <td style="width:50%;text-align:center;border:none;padding:0;">
       <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN A (GIAO KHOÁN)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký, đóng dấu và ghi rõ họ tên</span></p>
-      <p style="font-weight:bold;">Nguyễn Văn Hoàng<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Giám đốc Hoàng Long Lâm Đồng</span></p>
+      <p style="font-weight:bold;">{{DAI_DIEN_CONG_TY_A}}<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">{{CHUC_VU_CONG_TY_A}} {{TEN_CONG_TY_A}}</span></p>
     </td>
     <td style="width:50%;text-align:center;border:none;padding:0;">
       <p style="font-weight:bold;text-transform:uppercase;margin-bottom:64px;">ĐẠI DIỆN BÊN B (NHẬN KHOÁN)<br/><span style="font-weight:normal;font-size:11px;color:#64748b;">Ký và ghi rõ họ tên</span></p>
@@ -197,6 +197,14 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
   const [docHtml, setDocHtml] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [savingDoc, setSavingDoc] = useState(false);
+  // Thông tin doanh nghiệp (Bên A) lấy trực tiếp từ Cài Đặt Hệ Thống
+  // (business_profile) thay vì hard-code cứng trong mẫu hợp đồng — trước đây
+  // mẫu ghi sai cứng MST/địa chỉ/SĐT và cả tên người đại diện ("Nguyễn Văn
+  // Hoàng" — không phải tên thật Giám đốc).
+  const [businessInfo, setBusinessInfo] = useState<any>(null);
+  useEffect(() => {
+    dbService.businessProfile.get().then(setBusinessInfo).catch(() => {});
+  }, []);
 
   // Load suppliers list from Supabase (bảng thầu phụ riêng)
   useEffect(() => {
@@ -327,6 +335,12 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString('vi-VN') : 'Đang cập nhật';
     const signedLabel = q.signedLabel || (q.signedDate ? `Đã ký ngày ${fmtDate(q.signedDate)}` : 'Chưa ký (Sẽ bổ sung ngày ký sau)');
     const replacements: Record<string, string> = {
+      '{{TEN_CONG_TY_A}}': businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG',
+      '{{MST_CONG_TY_A}}': businessInfo?.taxCode || '5801372263',
+      '{{DIA_CHI_CONG_TY_A}}': businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng',
+      '{{DIEN_THOAI_CONG_TY_A}}': businessInfo?.phone || '0966 545 959',
+      '{{DAI_DIEN_CONG_TY_A}}': businessInfo?.representative || 'Trương Hữu Long',
+      '{{CHUC_VU_CONG_TY_A}}': 'Giám đốc',
       '{{MA_HOP_DONG}}': q.code || 'Chưa cập nhật',
       '{{NGAY}}': String(day), '{{THANG}}': String(month), '{{NAM}}': String(year),
       '{{TEN_THAU_PHU}}': q.subcontractorName || 'Chưa cập nhật',
@@ -372,7 +386,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     setDocHtml(tempQuote.contractHtml || generateSubcontractorContractHtml(tempQuote, selectedSupplier));
     setIsEditing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPrintPreview, tempQuote?.id]);
+  }, [showPrintPreview, tempQuote?.id, businessInfo]);
 
   const handleUnapproveSubcontractorContract = async () => {
     if (!tempQuote) return;
