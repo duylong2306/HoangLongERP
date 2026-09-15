@@ -364,6 +364,12 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingCustom, setLoadingCustom] = useState(true);
+  // Thông tin doanh nghiệp lấy trực tiếp từ Cài Đặt Hệ Thống (business_profile)
+  // thay vì hard-code, để hồ sơ mới tạo luôn khớp dữ liệu mới nhất.
+  const [businessInfo, setBusinessInfo] = useState<any>(null);
+  useEffect(() => {
+    dbService.businessProfile.get().then(setBusinessInfo).catch(() => {});
+  }, []);
   const [contractApproved, setContractApproved] = useState<boolean>(() => {
     return !!quoteData.contractApproved;
   });
@@ -532,12 +538,12 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
       '{{DAI_DIEN_KHACH_HANG}}': repName,
       '{{CHUC_VU_KHACH_HANG}}': quoteData.config?.customerRepRole || 'Đại diện',
       
-      '{{TEN_CONG_TY}}': quoteData.companyLogoText || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG',
-      '{{DIA_CHI_CONG_TY}}': 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng',
-      '{{DIEN_THOAI_CONG_TY}}': '0966 545 959',
-      '{{MST_CONG_TY}}': '5801372263',
-      '{{STK_CONG_TY}}': '799201899999 tại ngân hàng MB Bank Lâm Đồng',
-      '{{DAI_DIEN_CONG_TY}}': 'Ông Trương Hữu Long',
+      '{{TEN_CONG_TY}}': quoteData.companyLogoText || businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG',
+      '{{DIA_CHI_CONG_TY}}': businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng',
+      '{{DIEN_THOAI_CONG_TY}}': businessInfo?.phone || '0966 545 959',
+      '{{MST_CONG_TY}}': businessInfo?.taxCode || '5801372263',
+      '{{STK_CONG_TY}}': businessInfo?.bankInfo || '799201899999 tại ngân hàng MB Bank Lâm Đồng',
+      '{{DAI_DIEN_CONG_TY}}': businessInfo?.representative ? `Ông ${businessInfo.representative}` : 'Ông Trương Hữu Long',
       '{{CHUC_VU_CONG_TY}}': 'Giám đốc',
       
       '{{TONG_CONG}}': tableGrandTotal.toLocaleString('vi-VN'),
@@ -549,7 +555,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
       // Additional parameters
       '{{DIA_DIEM_KY}}': quoteData.customerAddress || 'Lâm Đồng',
       '{{EMAIL_KHACH_HANG}}': quoteData.customerEmail || 'Chưa cập nhật',
-      '{{EMAIL_CONG_TY}}': 'long.nd2306@gmail.com',
+      '{{EMAIL_CONG_TY}}': businessInfo?.email || 'contact@hoanglonglamdong.vn',
       '{{LOAI_CAP_CONG_TRINH}}': 'Cấp IV',
       '{{QUY_MO_DIEN_TICH}}': quoteData.projectName || 'Dự án',
       '{{NGAY_KHOI_CONG}}': formattedToday,
@@ -590,7 +596,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
       }
     };
     loadCustomTemplate();
-  }, [sector, fallbackTemplate, quoteData.contractHtml, quoteData.contractTemplate, quoteData.id]);
+  }, [sector, fallbackTemplate, quoteData.contractHtml, quoteData.contractTemplate, quoteData.id, businessInfo]);
 
   const handlePrint = () => {
     window.print();
