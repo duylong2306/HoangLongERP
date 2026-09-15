@@ -502,29 +502,26 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                   </div>
                 )}
 
-                {/* 1. COMP-HEADER */}
-                <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-4 border-b border-[#00a651] pb-4 mb-5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center border border-[#00a651]/20 p-2">
-                      <svg viewBox="0 0 100 100" className="w-10 h-10 text-[#00a651]" fill="currentColor">
-                        <path d="M50 15 L15 48 L25 48 L25 85 L75 85 L75 48 L85 48 Z" fill="none" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" />
-                        <path d="M42 85 L42 55 L58 55 L58 85" fill="none" stroke="currentColor" strokeWidth="6" />
-                        <path d="M15 15 L45 42 L35 48" fill="none" stroke="currentColor" strokeWidth="4" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">{businessInfo?.companyName || 'HOANG LONG'}</h1>
-                      <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">{businessInfo?.businessSector || 'Construction - Furniture - Doors'}</p>
-                      <div className="text-[9px] text-slate-500 font-sans mt-1">
-                        <p className="m-0">📍 Địa chỉ: {businessInfo?.address || 'Đang cập nhật'}</p>
-                        <p className="m-0">🧾 MST: {businessInfo?.taxCode || 'Đang cập nhật'}</p>
-                      </div>
-                    </div>
+                {/* 1. COMP-HEADER — 1 cột duy nhất, toàn bộ căn trái (theo yêu cầu đồng bộ
+                    thiết kế header giữa giao diện chi tiết/Tải PDF/Chia Sẻ/In Hồ Sơ). */}
+                <div className="flex items-start gap-3 border-b border-[#00a651] pb-4 mb-5 text-left">
+                  <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center border border-[#00a651]/20 p-2 shrink-0">
+                    <svg viewBox="0 0 100 100" className="w-10 h-10 text-[#00a651]" fill="currentColor">
+                      <path d="M50 15 L15 48 L25 48 L25 85 L75 85 L75 48 L85 48 Z" fill="none" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" />
+                      <path d="M42 85 L42 55 L58 55 L58 85" fill="none" stroke="currentColor" strokeWidth="6" />
+                      <path d="M15 15 L45 42 L35 48" fill="none" stroke="currentColor" strokeWidth="4" />
+                    </svg>
                   </div>
-                  <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
-                    <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo?.phone || 'Đang cập nhật'}</p>
-                    <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo?.email || 'Đang cập nhật'}</p>
-                    <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo?.representative || 'Đang cập nhật'}</p>
+                  <div>
+                    <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">{businessInfo?.companyName || 'HOANG LONG'}</h1>
+                    <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">{businessInfo?.businessSector || 'Construction - Furniture - Doors'}</p>
+                    <div className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5">
+                      <p className="m-0">📍 Địa chỉ: {businessInfo?.address || 'Đang cập nhật'}</p>
+                      <p className="m-0">🧾 MST: {businessInfo?.taxCode || 'Đang cập nhật'}</p>
+                      <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo?.phone || 'Đang cập nhật'}</p>
+                      <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo?.email || 'Đang cập nhật'}</p>
+                      <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo?.representative || 'Đang cập nhật'}</p>
+                    </div>
                   </div>
                 </div>
 
@@ -761,74 +758,69 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                   </div>
                 )}
 
-      {/* 1. COMP-HEADER: LOGO & COMPANY INFO */}
-      <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-4 border-b border-[#00a651] pb-4 mb-5">
-        <div className="flex items-center gap-3 text-left">
-          {quoteData.companyLogoImg ? (
-            <div className="max-w-[120px] max-h-[60px] flex items-center justify-center overflow-hidden shrink-0">
-              <img 
-                src={quoteData.companyLogoImg} 
-                referrerPolicy="no-referrer" 
-                className="max-w-full max-h-[60px] object-contain rounded-lg" 
-                alt="Logo" 
-              />
-            </div>
-          ) : (
-            <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center border border-[#00a651]/20 p-2 shrink-0">
-              <svg viewBox="0 0 100 100" className="w-10 h-10 text-[#00a651]" fill="currentColor">
-                <path d="M50 15 L15 48 L25 48 L25 85 L75 85 L75 48 L85 48 Z" fill="none" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" />
-                <path d="M42 85 L42 55 L58 55 L58 85" fill="none" stroke="currentColor" strokeWidth="6" />
-                <path d="M15 15 L45 42 L35 48" fill="none" stroke="currentColor" strokeWidth="4" />
-              </svg>
-            </div>
-          )}
-          <div>
-            <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">
-              {businessInfo?.companyName || (quoteData.companyLogoText !== undefined && quoteData.companyLogoText !== '' ? quoteData.companyLogoText : "HOANG LONG")}
-            </h1>
-            <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">
-              {businessInfo?.businessSector || (quoteData.companySlogan !== undefined && quoteData.companySlogan !== '' ? quoteData.companySlogan : "Construction - Furniture - Doors")}
-            </p>
-            {/* Ưu tiên hồ sơ doanh nghiệp lấy từ "Cài Đặt Hệ Thống" (business_profile) —
-                chỉ dùng nội dung tùy chỉnh riêng theo từng báo giá (companyAddressInfo)
-                khi CHƯA tải được hồ sơ chung, tránh hiển thị địa chỉ/SĐT cũ đã lỗi thời. */}
-            {businessInfo ? (
-              <div className="text-[9px] text-slate-500 font-sans mt-1">
-                <p className="m-0">📍 Địa chỉ: {businessInfo.address || 'Đang cập nhật'}</p>
-                <p className="m-0">🧾 MST: {businessInfo.taxCode || 'Đang cập nhật'}</p>
-              </div>
-            ) : quoteData.companyAddressInfo ? (
-              <div
-                className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5"
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyAddressInfo) }}
-              />
-            ) : (
-              <div className="text-[9px] text-slate-500 font-sans mt-1">
-                <p className="m-0">📍 Địa điểm kinh doanh: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
-                <p className="m-0">🏠 Địa chỉ: 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>
-              </div>
-            )}
+      {/* 1. COMP-HEADER: LOGO & COMPANY INFO — 1 cột duy nhất, toàn bộ căn trái
+          (theo yêu cầu đồng bộ thiết kế header giữa giao diện chi tiết/Tải PDF/
+          Chia Sẻ/In Hồ Sơ). */}
+      <div className="flex items-start gap-3 border-b border-[#00a651] pb-4 mb-5 text-left">
+        {quoteData.companyLogoImg ? (
+          <div className="max-w-[120px] max-h-[60px] flex items-center justify-center overflow-hidden shrink-0">
+            <img
+              src={quoteData.companyLogoImg}
+              referrerPolicy="no-referrer"
+              className="max-w-full max-h-[60px] object-contain rounded-lg"
+              alt="Logo"
+            />
           </div>
-        </div>
-
-        {businessInfo ? (
-          <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
-            <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo.phone || 'Đang cập nhật'}</p>
-            <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo.email || 'Đang cập nhật'}</p>
-            <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo.representative || 'Đang cập nhật'}</p>
-          </div>
-        ) : quoteData.companyContactInfo ? (
-          <div
-            className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1 text-left md:text-right"
-            dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyContactInfo) }}
-          />
         ) : (
-          <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
-            <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> 0966 545 959 - 0374 883 979</p>
-            <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> hoanglongld.com@gmail.com</p>
-            <p className="m-0"><span className="font-bold text-slate-700">🌐 Web:</span> hoanglongld.com</p>
+          <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center border border-[#00a651]/20 p-2 shrink-0">
+            <svg viewBox="0 0 100 100" className="w-10 h-10 text-[#00a651]" fill="currentColor">
+              <path d="M50 15 L15 48 L25 48 L25 85 L75 85 L75 48 L85 48 Z" fill="none" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" />
+              <path d="M42 85 L42 55 L58 55 L58 85" fill="none" stroke="currentColor" strokeWidth="6" />
+              <path d="M15 15 L45 42 L35 48" fill="none" stroke="currentColor" strokeWidth="4" />
+            </svg>
           </div>
         )}
+        <div>
+          <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">
+            {businessInfo?.companyName || (quoteData.companyLogoText !== undefined && quoteData.companyLogoText !== '' ? quoteData.companyLogoText : "HOANG LONG")}
+          </h1>
+          <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">
+            {businessInfo?.businessSector || (quoteData.companySlogan !== undefined && quoteData.companySlogan !== '' ? quoteData.companySlogan : "Construction - Furniture - Doors")}
+          </p>
+          {/* Ưu tiên hồ sơ doanh nghiệp lấy từ "Cài Đặt Hệ Thống" (business_profile) —
+              chỉ dùng nội dung tùy chỉnh riêng theo từng báo giá (companyAddressInfo/
+              companyContactInfo) khi CHƯA tải được hồ sơ chung, tránh hiển thị địa
+              chỉ/SĐT cũ đã lỗi thời. */}
+          {businessInfo ? (
+            <div className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5">
+              <p className="m-0">📍 Địa chỉ: {businessInfo.address || 'Đang cập nhật'}</p>
+              <p className="m-0">🧾 MST: {businessInfo.taxCode || 'Đang cập nhật'}</p>
+              <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo.phone || 'Đang cập nhật'}</p>
+              <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo.email || 'Đang cập nhật'}</p>
+              <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo.representative || 'Đang cập nhật'}</p>
+            </div>
+          ) : (
+            <div className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5">
+              {quoteData.companyAddressInfo ? (
+                <div dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyAddressInfo) }} />
+              ) : (
+                <>
+                  <p className="m-0">📍 Địa điểm kinh doanh: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
+                  <p className="m-0">🏠 Địa chỉ: 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>
+                </>
+              )}
+              {quoteData.companyContactInfo ? (
+                <div dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyContactInfo) }} />
+              ) : (
+                <>
+                  <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> 0966 545 959 - 0374 883 979</p>
+                  <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> hoanglongld.com@gmail.com</p>
+                  <p className="m-0"><span className="font-bold text-slate-700">🌐 Web:</span> hoanglongld.com</p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 2. TITLE GRID: BẢNG BÁO GIÁ */}
