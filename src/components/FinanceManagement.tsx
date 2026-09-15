@@ -8,6 +8,7 @@ import { useSettings } from '../context/SettingsContext';
 import VoucherPrintModal from './VoucherPrintModal';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
+import { numberToVietnameseWords } from '../lib/numberToWords';
 
 import SearchableCustomerSelect from './SearchableCustomerSelect';
 import SearchableSupplierSelect from './SearchableSupplierSelect';
@@ -4057,8 +4058,12 @@ export default function FinanceManagement({
     addToast({ title: '✅ Đã xóa', message: `Đã xóa phiếu chi ${p.code}.`, type: 'success' });
   };
 
-  // Xuất PDF phiếu đề xuất (header "Hồ Sơ Thông Tin Doanh Nghiệp" từ Cài đặt hệ thống)
-  const exportProposalPdf = async (adv: SubcontractorAdvanceProposal) => {
+  // Dựng HTML Phiếu Đề Xuất Chi — theo đúng khung mẫu PDF chuẩn của "Điều phối
+  // vật tư" (docs/design-system-dieu-phoi-vat-tu.md mục 11: header 2 cột bằng
+  // <table> + quốc hiệu bên phải, bảng info viền đen, bảng danh mục, tổng bằng
+  // chữ, khối ký tên 3 cột) — KHÔNG tự nghĩ layout mới, tái dùng nguyên khối
+  // CSS đã được xác nhận ổn định qua buildPurchaseOrderHtml.
+  const buildProposalHtml = (adv: SubcontractorAdvanceProposal) => {
     const cp: any = companyProfile || {};
     const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const fmt = (v: any) => (v != null && !isNaN(Number(v))) ? `${Number(v).toLocaleString('vi-VN')} đ` : '—';
@@ -4067,71 +4072,69 @@ export default function FinanceManagement({
       awaiting_voucher_update: 'Cập Nhật Chứng Từ', completed: 'Hoàn Thành', rejected: 'Từ Chối',
     };
     const expenseRows = (adv.expenseItems && adv.expenseItems.length > 0)
-      ? `<table class="items"><thead><tr><th>Mục chi tiêu</th><th>Công trình</th><th class="r">Số tiền</th><th>Ghi chú</th></tr></thead><tbody>
-          ${adv.expenseItems.map((it: any) => `<tr><td>${esc(it.item)}</td><td>${esc(it.projectName || '—')}</td><td class="r">${fmt(it.amount)}</td><td>${esc(it.note || '—')}</td></tr>`).join('')}
+      ? `<table class="items"><thead><tr><th style="width:36px">STT</th><th>Mục chi tiêu</th><th>Công trình</th><th style="width:110px" class="r">Số tiền</th><th>Ghi chú</th></tr></thead><tbody>
+          ${adv.expenseItems.map((it: any, i: number) => `<tr><td style="text-align:center">${i + 1}</td><td>${esc(it.item)}</td><td>${esc(it.projectName || '—')}</td><td class="r">${fmt(it.amount)}</td><td>${esc(it.note || '—')}</td></tr>`).join('')}
         </tbody></table>`
       : '';
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>DeXuat_${esc(adv.id)}</title>
+    return `<!doctype html><html><head><meta charset="utf-8"><title>DeXuat_${esc(adv.id)}</title>
       <style>
-        @page { size: A4; margin: 12mm; }
-        * { box-sizing: border-box; }
-        body { font-family: 'Times New Roman', serif; color:#1a1a1a; font-size: 12px; margin:0; padding:0; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-        .wrap { padding: 3mm 4mm 2mm; }
-        .nat { text-align:center; margin-bottom:8px; }
-        .nat .r1 { font-weight:bold; font-size:13px; letter-spacing:0.5px; }
-        .nat .r2 { font-size:11px; margin-top:1px; }
-        .nat .ul { border-top:1px solid #1a1a1a; width:210px; margin:4px auto 0; }
-        .band { display:flex; justify-content:space-between; gap:20px; align-items:center; background:#0f172a; color:#fff; padding:12px 16px; border-radius:8px; }
-        .band .co { font-size:16px; font-weight:bold; letter-spacing:0.5px; }
-        .band .ci { font-size:10.5px; margin-top:3px; }
-        .band .ri { text-align:right; border-left:1px solid rgba(255,255,255,0.35); padding-left:16px; white-space:nowrap; }
-        .band .ri .k { font-size:9px; opacity:0.8; }
-        .band .ri .v { font-size:14px; font-weight:bold; font-family:monospace; }
-        .band .ri .v2 { font-size:12px; font-weight:bold; }
-        .doctitle { text-align:center; margin:16px 0 6px; }
-        .doctitle h1 { font-size:21px; font-weight:bold; text-transform:uppercase; margin:0; letter-spacing:1px; }
-        .doctitle .sub { font-size:11px; color:#555; margin-top:2px; }
-        .info { width:100%; border-collapse:collapse; margin-top:10px; font-size:11.5px; }
-        .info td { border:1px solid #1a1a1a; padding:6px 8px; vertical-align:top; }
-        .info .lbl { font-weight:bold; white-space:nowrap; width:20%; background:#eef2f7; }
-        .info .amt { font-family:monospace; font-weight:bold; color:#b42318; }
-        .sect { font-weight:bold; text-transform:uppercase; font-size:10.5px; margin:14px 0 5px; color:#0f172a; border-bottom:2px solid #0f172a; padding-bottom:3px; }
-        .reason { border:1px solid #1a1a1a; padding:8px 10px; font-style:italic; min-height:42px; }
-        .items { width:100%; border-collapse:collapse; margin-top:6px; }
-        .items th, .items td { border:1px solid #1a1a1a; padding:5px 7px; font-size:11px; }
-        .items th { background:#eef2f7; }
-        .items .r { text-align:right; }
-        .sign { display:flex; justify-content:space-between; margin-top:42px; text-align:center; font-size:11px; }
-        .sign div { width:30%; }
-        .sign .t { font-weight:bold; margin-bottom:34px; }
-        .sign .ln { border-top:1px solid #1a1a1a; padding-top:4px; }
-        .foot { text-align:center; font-size:9px; color:#888; margin-top:18px; }
+        @page { size: A4; margin: 15mm 18mm; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, .pdf-export-root { font-family: 'Times New Roman', serif; color: #1a1a1a; font-size: 12px; line-height: 1.5; }
+        .page { padding: 0; }
+        table.header { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+        table.header td { vertical-align: top; padding: 0; }
+        .company-info { width: 58%; }
+        .company-info .name { font-size: 14px; font-weight: bold; }
+        .company-info .detail { font-size: 10.5px; color: #333; margin: 1.5px 0; }
+        .center-title { text-align: center; width: 42%; }
+        .center-title .country { font-size: 12px; font-weight: bold; letter-spacing: 0.5px; }
+        .center-title .motto { font-size: 10px; font-style: italic; color: #444; }
+        .center-title .divider { width: 55px; height: 1px; background: #111; margin: 4px auto; }
+        .center-title .doc-title { font-size: 18px; font-weight: bold; letter-spacing: 1px; margin-top: 8px; text-transform: uppercase; }
+        .center-title .doc-sub { font-size: 10.5px; color: #555; margin-top: 2px; }
+        .center-title .doc-code { font-size: 10.5px; font-weight: bold; margin-top: 4px; }
+        .center-title .doc-date { font-size: 10px; color: #555; margin-top: 1px; }
+        hr { border: none; border-top: 1.5px solid #222; margin: 8px 0 10px; }
+        table.info { width: 100%; border-collapse: collapse; margin: 6px 0; table-layout: fixed; }
+        table.info td { border: 1px solid #1a1a1a; padding: 6px 8px; vertical-align: top; font-size: 11.5px; }
+        table.info .lbl { font-weight: bold; white-space: nowrap; width: 130px; background: #eef2f7; }
+        table.info .amt { font-family: monospace; font-weight: bold; color: #b42318; }
+        .sect { font-weight: bold; text-transform: uppercase; font-size: 10.5px; margin: 12px 0 5px; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 3px; }
+        .reason { border: 1px solid #1a1a1a; padding: 8px 10px; font-style: italic; min-height: 40px; }
+        table.items { width: 100%; border-collapse: collapse; margin-top: 6px; }
+        table.items th, table.items td { border: 1px solid #1a1a1a; padding: 5px 7px; font-size: 11px; }
+        table.items th { background: #eef2f7; font-weight: bold; text-align: center; }
+        table.items .r { text-align: right; }
+        .total-row { text-align: right; font-weight: bold; font-size: 13px; margin-top: 8px; }
+        .total-words { font-size: 11px; color: #333; font-style: italic; margin: 3px 0 4px; }
+        table.signatures { width: 100%; border-collapse: collapse; margin-top: 34px; text-align: center; font-size: 11px; }
+        table.signatures td { vertical-align: top; width: 33.33%; padding: 0; }
+        .signatures .sig-title { font-weight: bold; font-size: 11px; }
+        .signatures .sig-note { font-size: 9.5px; color: #666; font-style: italic; margin-top: 3px; }
+        .signatures .sig-name { font-weight: bold; margin-top: 34px; font-size: 11px; }
+        .foot { text-align: center; font-size: 9px; color: #888; margin-top: 20px; }
       </style></head><body>
-      <div class="wrap">
-        <div class="nat">
-          <div class="r1">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
-          <div class="r2">Độc lập – Tự do – Hạnh phúc</div>
-          <div class="ul"></div>
-        </div>
-        <div class="band">
-          <div>
-            <div class="co">${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
-            <div class="ci">MST: ${esc(cp.taxCode || '—')}</div>
-            <div class="ci">Địa chỉ: ${esc(cp.address || '—')}</div>
-            <div class="ci">ĐT: ${esc(cp.phone || '—')} &nbsp; Email: ${esc(cp.email || '—')}</div>
-            <div class="ci">Người đại diện: ${esc(cp.representative || '—')}</div>
-          </div>
-          <div class="ri">
-            <div class="k">MÃ ĐỀ XUẤT</div>
-            <div class="v">${esc(adv.id)}</div>
-            <div class="k" style="margin-top:8px;">NGÀY LẬP</div>
-            <div class="v2">${esc(adv.date || adv.proposalDate || '—')}</div>
-          </div>
-        </div>
-        <div class="doctitle">
-          <h1>Phiếu Đề Xuất Chi</h1>
-          <div class="sub">${esc(proposalTypeLabel(adv.type))}</div>
-        </div>
+      <div class="page pdf-export-root">
+        <table class="header"><tr>
+          <td class="company-info">
+            <div class="name">${esc(cp.companyName || 'TÊN DOANH NGHIỆP')}</div>
+            ${cp.taxCode ? `<div class="detail">MST: ${esc(cp.taxCode)}</div>` : ''}
+            ${cp.address ? `<div class="detail">Địa chỉ: ${esc(cp.address)}</div>` : ''}
+            ${cp.phone ? `<div class="detail">Điện thoại: ${esc(cp.phone)}</div>` : ''}
+            ${cp.representative ? `<div class="detail">Người đại diện: ${esc(cp.representative)}</div>` : ''}
+          </td>
+          <td class="center-title">
+            <div class="country">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</div>
+            <div class="motto">Độc lập – Tự do – Hạnh phúc</div>
+            <div class="divider"></div>
+            <div class="doc-title">Phiếu Đề Xuất Chi</div>
+            <div class="doc-sub">${esc(proposalTypeLabel(adv.type))}</div>
+            <div class="doc-code">Mã: ${esc(adv.id)}</div>
+            <div class="doc-date">Ngày lập: ${esc(adv.date || adv.proposalDate || '—')}</div>
+          </td>
+        </tr></table>
+        <hr/>
         <table class="info">
           <tr><td class="lbl">Đối tượng chi</td><td>${esc(adv.subcontractorName || '—')}</td>
               <td class="lbl">Trạng thái</td><td>${esc(statusLabel[adv.status] || adv.status || '—')}</td></tr>
@@ -4146,22 +4149,113 @@ export default function FinanceManagement({
         <div class="sect">Nội dung / Diễn giải chi tiết</div>
         <div class="reason">${esc(adv.reason || 'Không có diễn giải.')}</div>
         ${expenseRows ? `<div class="sect">Bảng phân rã chi phí chi tiết</div>${expenseRows}` : ''}
-        <div class="sign">
-          <div><div class="t">Người lập</div><div class="ln">${esc(adv.creatorName || adv.creator || '')}</div></div>
-          <div><div class="t">Người duyệt</div><div class="ln">${esc(adv.approverName || adv.approver || '')}</div></div>
-          <div><div class="t">Thủ quỹ / Kế toán</div><div class="ln">&nbsp;</div></div>
-        </div>
+        ${adv.amount ? `<div class="total-row">TỔNG SỐ TIỀN ĐỀ XUẤT: ${fmt(adv.amount)}</div>
+        <div class="total-words">Bằng chữ: ${esc(numberToVietnameseWords(adv.amount))}</div>` : ''}
+        <table class="signatures"><tr>
+          <td>
+            <div class="sig-title">NGƯỜI LẬP</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${esc(adv.creatorName || adv.creator || '')}</div>
+          </td>
+          <td>
+            <div class="sig-title">NGƯỜI PHÊ DUYỆT</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+            <div class="sig-name">${esc(adv.approverName || adv.approver || '')}</div>
+          </td>
+          <td>
+            <div class="sig-title">THỦ QUỸ / KẾ TOÁN</div>
+            <div class="sig-note">(Ký, ghi rõ họ tên)</div>
+          </td>
+        </tr></table>
         <div class="foot">${esc(cp.companyName || '')} — Phiếu Đề Xuất Chi · ${esc(adv.id)}</div>
       </div>
       </body></html>`;
+  };
+
+  // Tải động html2canvas/jsPDF — theo đúng cách xuất PDF đã ổn định của Đơn
+  // Mua Hàng (MaterialCoordination.tsx), KHÔNG dùng html2pdf.js (thư viện đó
+  // gán nhầm property `container.height` thay vì `.style.height` khiến ảnh
+  // chụp ra trắng/không đọc được CSS — đúng nguyên nhân PDF cũ bị mất style).
+  const loadHtml2CanvasForProposal = async () => {
+    const mod = await import('html2canvas');
+    return (mod as any).default || mod;
+  };
+  const loadJsPdfForProposal = async () => {
+    const mod = await import('jspdf');
+    return (mod as any).jsPDF || (mod as any).default;
+  };
+
+  // Dựng PDF Phiếu Đề Xuất Chi thành Blob — dựng nội dung ngay trong 1 <div>
+  // ẩn của CHÍNH document đang chạy (không dùng iframe) để html2canvas đọc
+  // đúng CSS, rồi tự chia trang A4 nếu nội dung dài hơn 1 trang.
+  const generateProposalPdfBlob = async (adv: SubcontractorAdvanceProposal): Promise<Blob> => {
+    const html = buildProposalHtml(adv);
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    const styleText = parsed.querySelector('style')?.textContent || '';
+    const rootEl = parsed.querySelector('.page');
+    if (!rootEl) throw new Error('Không dựng được nội dung để xuất PDF.');
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.width = '794px'; // ~ khổ A4 210mm ở 96dpi
+    container.style.background = '#ffffff';
+    const styleEl = document.createElement('style');
+    styleEl.textContent = styleText;
+    container.appendChild(styleEl);
+    container.appendChild(rootEl.cloneNode(true));
+    document.body.appendChild(container);
     try {
-      const mod = await import('html2pdf.js');
-      const html2pdf: any = (mod as any).default || mod;
-      await html2pdf().from(html).set({
-        filename: `DeXuat_${adv.id}.pdf`,
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      }).save();
+      await new Promise((r) => setTimeout(r, 120));
+      const fullHeight = Math.ceil(Math.max(
+        container.scrollHeight, container.offsetHeight, container.getBoundingClientRect().height
+      )) + 20;
+
+      const [html2canvas, JsPdf] = await Promise.all([loadHtml2CanvasForProposal(), loadJsPdfForProposal()]);
+      const canvas = await html2canvas(container, {
+        scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff',
+        height: fullHeight, windowHeight: fullHeight,
+      });
+
+      const marginTop = 15, marginSide = 18;
+      const pageWidthMm = 210, pageHeightMm = 297;
+      const contentWidthMm = pageWidthMm - marginSide * 2;
+      const contentHeightMm = pageHeightMm - marginTop * 2;
+      const pageHeightPx = (contentHeightMm * canvas.width) / contentWidthMm;
+
+      const pdf = new JsPdf({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      let renderedPx = 0;
+      let isFirstPage = true;
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d')!.drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceHeightMm = (sliceHeightPx * contentWidthMm) / canvas.width;
+        if (!isFirstPage) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginSide, marginTop, contentWidthMm, sliceHeightMm);
+        renderedPx += sliceHeightPx;
+        isFirstPage = false;
+      }
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // Xuất PDF phiếu đề xuất (header "Hồ Sơ Thông Tin Doanh Nghiệp" từ Cài đặt hệ thống)
+  const exportProposalPdf = async (adv: SubcontractorAdvanceProposal) => {
+    try {
+      const blob = await generateProposalPdfBlob(adv);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `DeXuat_${adv.id}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
       addToast({ title: '✅ Xuất PDF', message: `Đã tải Phiếu Đề Xuất ${adv.id}`, type: 'success' });
     } catch (err) {
       console.error('Lỗi xuất PDF đề xuất:', err);
