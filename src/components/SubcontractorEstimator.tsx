@@ -525,6 +525,15 @@ export default function SubcontractorEstimator({
   const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_SUBCONTRACTOR_LIQUIDATION_TEMPLATE);
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
   const [dbSaving, setDbSaving] = useState(false);
+  // Thông tin doanh nghiệp (Bên A) lấy trực tiếp từ Cài Đặt Hệ Thống
+  // (business_profile) thay vì hard-code cứng trong getRenderedContractHTML/
+  // AcceptanceHTML/LiquidationHTML — trước đây 3 hàm này tự ghi cứng sai MST/
+  // địa chỉ/SĐT và cả tên người đại diện ("Nguyễn Văn Hoàng" — không phải tên
+  // thật Giám đốc), độc lập hoàn toàn với SubcontractorArchive.tsx.
+  const [businessInfo, setBusinessInfo] = useState<any>(null);
+  useEffect(() => {
+    dbService.businessProfile.get().then(setBusinessInfo).catch(() => {});
+  }, []);
 
   const handleSetAsDefault = async () => {
     setDbSaving(true);
@@ -1347,14 +1356,14 @@ export default function SubcontractorEstimator({
     let tpl = contractTemplate;
     
     // Replace Bên A & Thông tin chung
-    tpl = tpl.replaceAll('[TEN_CTY]', 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG');
-    tpl = tpl.replaceAll('[MST_CTY]', '5801452655');
-    tpl = tpl.replaceAll('[DIA_CHI_CTY]', 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng');
-    tpl = tpl.replaceAll('[SDT_CTY]', '0966 545 959');
-    tpl = tpl.replaceAll('[EMAIL_CTY]', 'hoanglongld.com@gmail.com');
-    tpl = tpl.replaceAll('[DAI_DIEN_A]', 'Nguyễn Văn Hoàng');
+    tpl = tpl.replaceAll('[TEN_CTY]', businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG');
+    tpl = tpl.replaceAll('[MST_CTY]', businessInfo?.taxCode || '5801372263');
+    tpl = tpl.replaceAll('[DIA_CHI_CTY]', businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng');
+    tpl = tpl.replaceAll('[SDT_CTY]', businessInfo?.phone || '0966 545 959');
+    tpl = tpl.replaceAll('[EMAIL_CTY]', businessInfo?.email || 'hoanglongld.com@gmail.com');
+    tpl = tpl.replaceAll('[DAI_DIEN_A]', businessInfo?.representative || 'Trương Hữu Long');
     tpl = tpl.replaceAll('[CHUC_VU_A]', 'Giám đốc');
-    tpl = tpl.replaceAll('[STK_CTY]', '799201899999');
+    tpl = tpl.replaceAll('[STK_CTY]', businessInfo?.bankInfo || '799201899999');
     tpl = tpl.replaceAll('[NGAN_HANG_CTY]', 'Ngân hàng TMCP Quân Đội (MB BANK)');
 
     // Replace các thông tin chung hợp đồng
@@ -1417,13 +1426,13 @@ export default function SubcontractorEstimator({
 
   const getRenderedAcceptanceHTML = () => {
     let tpl = acceptanceTemplate;
-    
-    tpl = tpl.replaceAll('[TEN_CTY]', 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG');
-    tpl = tpl.replaceAll('[MST_CTY]', '5801452655');
-    tpl = tpl.replaceAll('[DIA_CHI_CTY]', 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng');
-    tpl = tpl.replaceAll('[SDT_CTY]', '0966 545 959');
-    tpl = tpl.replaceAll('[EMAIL_CTY]', 'hoanglongld.com@gmail.com');
-    tpl = tpl.replaceAll('[DAI_DIEN_A]', 'Nguyễn Văn Hoàng');
+
+    tpl = tpl.replaceAll('[TEN_CTY]', businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG');
+    tpl = tpl.replaceAll('[MST_CTY]', businessInfo?.taxCode || '5801372263');
+    tpl = tpl.replaceAll('[DIA_CHI_CTY]', businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng');
+    tpl = tpl.replaceAll('[SDT_CTY]', businessInfo?.phone || '0966 545 959');
+    tpl = tpl.replaceAll('[EMAIL_CTY]', businessInfo?.email || 'hoanglongld.com@gmail.com');
+    tpl = tpl.replaceAll('[DAI_DIEN_A]', businessInfo?.representative || 'Trương Hữu Long');
     tpl = tpl.replaceAll('[CHUC_VU_A]', 'Giám đốc');
 
     tpl = tpl.replaceAll('[SO_HD]', contractCode || '...........................................');
@@ -1473,13 +1482,13 @@ export default function SubcontractorEstimator({
 
   const getRenderedLiquidationHTML = () => {
     let tpl = liquidationTemplate;
-    
-    tpl = tpl.replaceAll('[TEN_CTY]', 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG');
-    tpl = tpl.replaceAll('[MST_CTY]', '5801452655');
-    tpl = tpl.replaceAll('[DIA_CHI_CTY]', 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng');
-    tpl = tpl.replaceAll('[SDT_CTY]', '0966 545 959');
-    tpl = tpl.replaceAll('[EMAIL_CTY]', 'hoanglongld.com@gmail.com');
-    tpl = tpl.replaceAll('[DAI_DIEN_A]', 'Nguyễn Văn Hoàng');
+
+    tpl = tpl.replaceAll('[TEN_CTY]', businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG');
+    tpl = tpl.replaceAll('[MST_CTY]', businessInfo?.taxCode || '5801372263');
+    tpl = tpl.replaceAll('[DIA_CHI_CTY]', businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng');
+    tpl = tpl.replaceAll('[SDT_CTY]', businessInfo?.phone || '0966 545 959');
+    tpl = tpl.replaceAll('[EMAIL_CTY]', businessInfo?.email || 'hoanglongld.com@gmail.com');
+    tpl = tpl.replaceAll('[DAI_DIEN_A]', businessInfo?.representative || 'Trương Hữu Long');
     tpl = tpl.replaceAll('[CHUC_VU_A]', 'Giám đốc');
 
     tpl = tpl.replaceAll('[SO_HD]', contractCode || '...........................................');
@@ -2977,19 +2986,19 @@ export default function SubcontractorEstimator({
                       onChange={(e) => setTempPreviewQuote({ ...tempPreviewQuote, year: e.target.value })}
                       className="bg-transparent border-b border-dashed border-slate-400 focus:border-blue-500 outline-none font-bold text-slate-800 w-12 text-center print:border-none"
                     />
-                    <span>, tại trụ sở Công ty TNHH Hoàng Long Lâm Đồng, chúng tôi gồm:</span>
+                    <span>, tại trụ sở {businessInfo?.companyName || 'Công ty TNHH Hoàng Long Lâm Đồng'}, chúng tôi gồm:</span>
                   </p>
 
                   {/* BÊN GIAO THẦU */}
                   <div className="space-y-1">
                     <h4 className="font-bold uppercase text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-1">
                       <span>Bên A (Bên giao thầu):</span>
-                      <span className="font-extrabold text-blue-600">CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG</span>
+                      <span className="font-extrabold text-blue-600">{businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG'}</span>
                     </h4>
-                    <p>• Địa chỉ: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
-                    <p>• MST: 5801452655</p>
-                    <p>• Đại diện: Ông Nguyễn Văn Hoàng - Chức vụ: Giám đốc</p>
-                    <p>• Hotline liên hệ: 0966 545 959</p>
+                    <p>• Địa chỉ: {businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng'}</p>
+                    <p>• MST: {businessInfo?.taxCode || '5801372263'}</p>
+                    <p>• Đại diện: Ông {businessInfo?.representative || 'Trương Hữu Long'} - Chức vụ: Giám đốc</p>
+                    <p>• Hotline liên hệ: {businessInfo?.phone || '0966.54.59.59'}</p>
                   </div>
 
                   {/* BÊN NHẬN THẦU PHỤ */}
@@ -3194,8 +3203,8 @@ export default function SubcontractorEstimator({
                       <p className="text-[10px] text-slate-400 font-medium">Ký, đóng dấu và ghi rõ họ tên</p>
                     </div>
                     <div className="text-slate-800">
-                      <p>Nguyễn Văn Hoàng</p>
-                      <p className="text-[10px] text-slate-400 font-normal">Giám đốc Hoàng Long Lâm Đồng</p>
+                      <p>{businessInfo?.representative || 'Trương Hữu Long'}</p>
+                      <p className="text-[10px] text-slate-400 font-normal">Giám đốc {businessInfo?.companyName || 'Hoàng Long Lâm Đồng'}</p>
                     </div>
                   </div>
                   <div className="space-y-16">
