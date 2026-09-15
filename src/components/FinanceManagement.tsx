@@ -517,9 +517,13 @@ export default function FinanceManagement({
   subcontractorAdvances: subcontractorAdvancesProp,
   setSubcontractorAdvances: setSubcontractorAdvancesProp,
 }: FinanceProps) {
-  const companyProfile = systemConfig?.companyProfile || {};
   const { addToast } = useNotification();
   const { businessInfo } = useSettings();
+  // Hồ sơ doanh nghiệp cho Xuất PDF Phiếu Đề Xuất Chi — trước đây lấy nhầm từ
+  // systemConfig?.companyProfile (field không tồn tại trong shift_config, luôn
+  // rỗng) khiến PDF xuất ra bỏ trống toàn bộ tên/MST/địa chỉ công ty. Nay lấy
+  // đúng từ businessInfo (Cài Đặt Hệ Thống), giống mọi chứng từ khác.
+  const companyProfile = businessInfo || {};
   // ── Multi-row selection ──
   const [finSelectedRows, setFinSelectedRows] = useState<Set<string>>(new Set());
   const [finSelectAll, setFinSelectAll] = useState(false);
