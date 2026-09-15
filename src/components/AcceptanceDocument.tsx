@@ -266,7 +266,7 @@ export default function AcceptanceDocument({ quoteData }: AcceptanceDocumentProp
       '{{STK_KHACH_HANG}}': quoteData.config?.customerBankAccount || 'Chưa cập nhật',
       '{{DAI_DIEN_KHACH_HANG}}': repName,
       '{{CHUC_VU_KHACH_HANG}}': quoteData.config?.customerRepRole || 'Đại diện',
-      '{{TEN_CONG_TY}}': quoteData.companyLogoText || businessInfo?.companyName || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG',
+      '{{TEN_CONG_TY}}': businessInfo?.companyName || quoteData.companyLogoText || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG',
       '{{DIA_CHI_CONG_TY}}': businessInfo?.address || 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng',
       '{{DIEN_THOAI_CONG_TY}}': businessInfo?.phone || '0966 545 959',
       '{{MST_CONG_TY}}': businessInfo?.taxCode || '5801372263',
