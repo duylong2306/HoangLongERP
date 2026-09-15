@@ -528,6 +528,9 @@ export default function MechanicalEstimator({
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [projectName, setProjectName] = useState('');
+  // Người đại diện của khách hàng — hiển thị trong Báo Giá và dùng làm tên ký ở khối
+  // chữ ký Bên A trong Hợp Đồng/Nghiệm Thu/Thanh Lý (xem ContractDocument.tsx...).
+  const [customerRepresentative, setCustomerRepresentative] = useState('');
 
   // Trạng thái cho bộ tìm kiếm dự án nhanh (searchable dropdown)
   const [isProjDropdownOpen, setIsProjDropdownOpen] = useState(false);
@@ -546,6 +549,7 @@ export default function MechanicalEstimator({
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -586,7 +590,8 @@ export default function MechanicalEstimator({
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -606,6 +611,7 @@ export default function MechanicalEstimator({
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
@@ -659,7 +665,13 @@ export default function MechanicalEstimator({
       if (loadedQuote.customerName) setCustomerName(loadedQuote.customerName);
       if (loadedQuote.customerPhone) setCustomerPhone(loadedQuote.customerPhone || '');
       if (loadedQuote.customerAddress) setCustomerAddress(loadedQuote.customerAddress || '');
-      
+      // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+      // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+      {
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config?.customerRepresentative || fallbackCust?.representative || '');
+      }
+
       // Load custom company header if they exist
       setCompanyLogoImg(loadedQuote.companyLogoImg || '');
       setCompanyLogoText(loadedQuote.companyLogoText || 'HOANG LONG');
@@ -1188,7 +1200,7 @@ export default function MechanicalEstimator({
         projectName: projectName.trim(),
         date: loadedQuote ? loadedQuote.date : new Date().toISOString().split('T')[0],
         items: quoteItems,
-        config: config,
+        config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
         status: 'draft',
         notes: `[BÁO GIÁ CƠ KHÍ CHẾ TẠO] ${quoteNotes}`,
         paymentTerms: paymentTerms,
@@ -1971,7 +1983,7 @@ export default function MechanicalEstimator({
             </div>
 
             {/* Thông tin metadata của Báo giá */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-3 p-4 bg-slate-950/60 rounded-xl border border-slate-850 text-xs text-left">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-3 p-4 bg-slate-950/60 rounded-xl border border-slate-850 text-xs text-left">
               {/* Dự án (searchable custom selection) */}
               <div className="relative">
                 <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Dự Án <span className="text-rose-500 font-bold">*</span></label>
@@ -2178,6 +2190,21 @@ export default function MechanicalEstimator({
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                  Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                  Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+              <div>
+                <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                <input
+                  type="text"
+                  value={customerRepresentative}
+                  disabled={isLockedVal}
+                  onChange={(e) => setCustomerRepresentative(e.target.value)}
+                  className="w-full bg-slate-900 text-slate-200 border border-slate-800 rounded-lg p-2.5 outline-none font-medium text-xs focus:border-pink-500 transition-all disabled:bg-slate-950/50 disabled:text-slate-500 disabled:cursor-not-allowed"
+                  placeholder="Mặc định theo Tên khách hàng"
+                />
               </div>
 
               {/* Số điện thoại */}
@@ -2919,7 +2946,7 @@ export default function MechanicalEstimator({
                       projectName: selectedProjectId ? (projects.find(p => p.id === selectedProjectId)?.name || '').trim() : projectName.trim(),
                       date: new Date().toISOString().split('T')[0],
                       items: quoteItems,
-                      config: config,
+                      config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
                       status: 'draft',
                       notes: quoteNotes,
                       paymentTerms: paymentTerms,
@@ -3008,17 +3035,35 @@ export default function MechanicalEstimator({
                       max-height: none !important;
                       overflow: visible !important;
                       padding: 0 !important;
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                       khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                       nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                    #print-area-archive * {
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
                     }
                     .print-hide {
                       display: none !important;
                     }
-                    /* Chrome có lỗi phân trang với CSS Grid/Flex: khi 1 khối grid (VD: khối
-                       ký tên 2 cột cuối văn bản) rơi đúng ranh giới giữa 2 trang, nội dung
-                       bị vẽ đè/lặp lên trang sau. Ép về dạng khối xếp dọc (block) khi in để
-                       tránh lỗi này — chấp nhận đánh đổi 2 cột xếp chồng thành 1 cột khi in. */
-                    #print-area-archive .grid {
-                      display: block !important;
-                    }
+                    /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                       panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                       hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                       của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                       duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                       cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                       hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                       khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                    #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                    #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                    #print-area-archive .md\\:text-right { text-align: right !important; }
+                    #print-area-archive .md\\:text-left { text-align: left !important; }
+                    #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                    #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                    #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                    #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
                   }
                 `}</style>
                 <QuotationTableSheet quoteData={savedQuoteForPreview} />
@@ -3056,7 +3101,7 @@ export default function MechanicalEstimator({
                   className="px-5 py-2.5 bg-[#00a651] hover:bg-[#008f45] text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  In Báo Giá
+                  In Hồ Sơ
                 </button>
               </div>
             </div>

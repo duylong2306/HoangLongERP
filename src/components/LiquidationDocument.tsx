@@ -219,6 +219,8 @@ export default function LiquidationDocument({ quoteData }: LiquidationDocumentPr
       '{{DIEN_THOAI_KHACH_HANG}}': quoteData.customerPhone || 'Chưa cập nhật',
       '{{MST_KHACH_HANG}}': quoteData.config?.customerTaxCode || 'Chưa cập nhật',
       '{{STK_KHACH_HANG}}': quoteData.config?.customerBankAccount || 'Chưa cập nhật',
+      '{{DAI_DIEN_KHACH_HANG}}': repName,
+      '{{CHUC_VU_KHACH_HANG}}': quoteData.config?.customerRepRole || 'Đại diện',
       '{{TEN_CONG_TY}}': quoteData.companyLogoText || 'CÔNG TY TNHH HOÀNG LONG LÂM ĐỒNG',
       '{{DIA_CHI_CONG_TY}}': 'Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng',
       '{{DIEN_THOAI_CONG_TY}}': '0966 545 959',

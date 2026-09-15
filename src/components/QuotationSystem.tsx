@@ -796,6 +796,10 @@ export default function QuotationSystem({
   const [customerName, setCustomerName] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // Người đại diện của khách hàng (chỉ dùng cho khối Dự Án Thầu Xây Dựng — nơi header
+  // chọn khách hàng được nâng lên cấp QuotationSystem này thay vì nằm trong
+  // ConstructionEstimator, xem hideMetadataHeader={true} bên dưới).
+  const [customerRepresentative, setCustomerRepresentative] = useState('');
 
   // --- NEW LOCK & SAVE CONTROL STATES FOR CONSTRUCTION ESTIMATOR, TAKEOFF, AND FINAL QUOTE ---
   const [isConstructionSaved, setIsConstructionSaved] = useState(false);
@@ -855,6 +859,12 @@ export default function QuotationSystem({
       if (loadedQuote.customerName) setCustomerName(loadedQuote.customerName);
       if (loadedQuote.customerPhone) setCustomerPhone(loadedQuote.customerPhone);
       if (loadedQuote.customerAddress) setCustomerAddress(loadedQuote.customerAddress);
+      // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+      // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+      {
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config?.customerRepresentative || fallbackCust?.representative || '');
+      }
       if (loadedQuote.projectId) setSelectedProjectId(loadedQuote.projectId);
       if (loadedQuote.customerId) setSelectedCustomerId(loadedQuote.customerId);
 
@@ -965,6 +975,7 @@ export default function QuotationSystem({
     setCustomerName('');
     setCustomerPhone('');
     setCustomerAddress('');
+    setCustomerRepresentative('');
 
     // Reset lifted states to 0/empty
     setChieuDai(0);
@@ -1121,6 +1132,22 @@ export default function QuotationSystem({
     }
   }, [archivedSubcontractorQuotesList]);
 
+  // Bấm "Hợp Đồng Giao Khoán" ở một công việc CHƯA có HĐ (từ Kanban/TaskDetailModal) khi
+  // tab "Lập HĐ Thầu Phụ" đang mở sẵn (không remount) sẽ không tự xóa loadedSubcontractorQuote
+  // của lần lập/xem hợp đồng thầu phụ trước — khiến dự án nhiều thầu phụ bị "dính" nhầm hợp
+  // đồng cũ (kể cả đã duyệt) khi lập hợp đồng mới cho thầu phụ khác. Lắng nghe sự kiện do
+  // ProjectKanbanBoard.tsx/TaskDetailModal.tsx bắn ra để chủ động reset về trạng thái lập mới.
+  useEffect(() => {
+    const handleNewContractRequested = () => {
+      setLoadedSubcontractorQuote(null);
+      setIsSubcontractorSaved(false);
+      setIsSubcontractorLocked(false);
+      setSubcontractorSubTab('estimator');
+    };
+    window.addEventListener('hl-subcontractor-new-contract-requested', handleNewContractRequested);
+    return () => window.removeEventListener('hl-subcontractor-new-contract-requested', handleNewContractRequested);
+  }, []);
+
   // Synchronize when selectedProjectId changes
   useEffect(() => {
     if (selectedProjectId) {
@@ -1130,6 +1157,7 @@ export default function QuotationSystem({
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
@@ -1141,6 +1169,7 @@ export default function QuotationSystem({
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -1182,7 +1211,8 @@ export default function QuotationSystem({
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -2056,7 +2086,7 @@ export default function QuotationSystem({
                     Thông Tin Dự Án & Chủ Đầu Tư (Liên kết Hồ Sơ Báo Giá)
                   </h3>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                     {/* Dự án (searchable custom selection) */}
                     <div className="relative">
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Dự Án <span className="text-rose-500 font-bold">*</span></label>
@@ -2265,6 +2295,21 @@ export default function QuotationSystem({
                       )}
                     </div>
 
+                    {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                        Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                        Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+                    <div>
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                      <input
+                        type="text"
+                        value={customerRepresentative}
+                        disabled={isLocked}
+                        onChange={(e) => setCustomerRepresentative(e.target.value)}
+                        className="w-full bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-2.5 outline-none font-semibold text-xs focus:border-indigo-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        placeholder="Mặc định theo Tên khách hàng"
+                      />
+                    </div>
+
                     {/* Số điện thoại */}
                     <div>
                       <label className="block text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-1">Số điện thoại <span className="text-rose-500 font-bold">*</span></label>
@@ -2416,6 +2461,8 @@ export default function QuotationSystem({
                       setCustomerAddress={setCustomerAddress}
                       customerPhone={customerPhone}
                       setCustomerPhone={setCustomerPhone}
+                      customerRepresentative={customerRepresentative}
+                      setCustomerRepresentative={setCustomerRepresentative}
                       hideMetadataHeader={true}
                       isConstructionSaved={isConstructionSaved}
                       setIsConstructionSaved={setIsConstructionSaved}

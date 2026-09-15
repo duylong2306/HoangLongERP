@@ -369,6 +369,12 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
                 <span className="font-bold text-slate-700 w-24 shrink-0">Khách hàng:</span>
                 <span className="text-slate-800 font-semibold border-b border-dotted border-slate-300 grow pb-0.5">{quoteData.customerName || 'Chị Ngân Nguyễn'}</span>
               </div>
+              {quoteData.config?.customerRepresentative && (
+                <div className="flex items-baseline">
+                  <span className="font-bold text-slate-700 w-24 shrink-0">Người đại diện:</span>
+                  <span className="text-slate-800 font-semibold border-b border-dotted border-slate-300 grow pb-0.5">{quoteData.config.customerRepresentative}</span>
+                </div>
+              )}
               <div className="flex items-baseline">
                 <span className="font-bold text-slate-700 w-24 shrink-0">Địa chỉ:</span>
                 <span className="text-slate-800 border-b border-dotted border-slate-300 grow pb-0.5 leading-relaxed">{quoteData.customerAddress || 'Lâm Đồng'}</span>
@@ -586,7 +592,7 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
               </div>
               <div className="pt-2">
                 <span className="font-black text-slate-800 text-xs underline decoration-dotted tracking-wider">
-                  {quoteData.customerName || 'Nguyễn Viết Đăng Trình'}
+                  {quoteData.config?.customerRepresentative || quoteData.customerName || 'Nguyễn Viết Đăng Trình'}
                 </span>
               </div>
             </div>

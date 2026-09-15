@@ -455,6 +455,10 @@ export interface QuoteConfig {
   profitPercent: number;    // Lợi nhuận %
   wastagePercent: number;   // Hao hụt %
   vatPercent: number;       // % Thuế VAT
+  // Người đại diện khách hàng (Bên A) trong Hợp đồng/Nghiệm thu/Thanh lý — đọc bởi
+  // ContractDocument.tsx/AcceptanceDocument.tsx/LiquidationDocument.tsx cho cả placeholder
+  // {{DAI_DIEN_KHACH_HANG}} lẫn khối chữ ký; mặc định lấy theo Tên khách hàng nếu bỏ trống.
+  customerRepresentative?: string;
 }
 
 export interface QuoteItem {

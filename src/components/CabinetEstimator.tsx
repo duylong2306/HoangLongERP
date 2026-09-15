@@ -40,6 +40,7 @@ export const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><
   <li>Họ và tên: {{TEN_KHACH_HANG}}</li>
   <li>Địa chỉ: {{DIA_CHI_KHACH_HANG}}</li>
   <li>Điện thoại: {{DIEN_THOAI_KHACH_HANG}}</li>
+  <li>Đại diện: {{DAI_DIEN_KHACH_HANG}}</li>
 </ul>
 
 <p><strong>Bên B: Đơn vị thi công nội thất</strong></p>
@@ -450,6 +451,9 @@ export default function CabinetEstimator({
   const [customerName, setCustomerName] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // Người đại diện của khách hàng — hiển thị trong Báo Giá và dùng làm tên ký ở khối
+  // chữ ký Bên A trong Hợp Đồng/Nghiệm Thu/Thanh Lý (xem ContractDocument.tsx...).
+  const [customerRepresentative, setCustomerRepresentative] = useState('');
 
   // Trạng thái cho bộ tìm kiếm dự án nhanh (searchable dropdown)
   const [isProjDropdownOpen, setIsProjDropdownOpen] = useState(false);
@@ -468,6 +472,7 @@ export default function CabinetEstimator({
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -508,7 +513,8 @@ export default function CabinetEstimator({
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -528,6 +534,7 @@ export default function CabinetEstimator({
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
@@ -699,7 +706,13 @@ export default function CabinetEstimator({
   useEffect(() => {
     if (loadedQuote && loadedQuote.sector === 'furniture') {
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
-      if (loadedQuote.config) setConfig(loadedQuote.config);
+      if (loadedQuote.config) {
+        setConfig(loadedQuote.config);
+        // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+        // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config.customerRepresentative || fallbackCust?.representative || '');
+      }
       if (loadedQuote.notes) setQuoteNotes(loadedQuote.notes);
       if (loadedQuote.paymentTerms) setPaymentTerms(loadedQuote.paymentTerms);
       if (loadedQuote.customerId) setSelectedCustomerId(loadedQuote.customerId);
@@ -735,6 +748,7 @@ export default function CabinetEstimator({
         setCustomerName('');
         setCustomerAddress('');
         setCustomerPhone('');
+        setCustomerRepresentative('');
       }
       setPaymentTerms(`<p><strong>1. Thời gian thực hiện:</strong> 10-12 ngày.</p>
 <p><strong>2. Bảo hành:</strong> Bảo hành 1 năm. Lỗi phụ kiện thay mới.</p>
@@ -788,6 +802,7 @@ export default function CabinetEstimator({
   const [customProductOtherQty, setCustomProductOtherQty] = useState<number | string>('');
   const [customProductOtherUnitPrice, setCustomProductOtherUnitPrice] = useState<number | string>('');
   const [customProductOtherMaterial, setCustomProductOtherMaterial] = useState<string>('');
+  const [customProductOtherUnit, setCustomProductOtherUnit] = useState<string>('bộ');
 
   // Nạp danh mục sản phẩm lĩnh vực Nội thất (từ Supabase)
   useEffect(() => {
@@ -1179,6 +1194,7 @@ export default function CabinetEstimator({
       setCustomProductOtherQty(item.qty);
       setCustomProductOtherUnitPrice(item.unitPrice ?? Math.round((item.totalPrice || 0) / (item.qty || 1)));
       setCustomProductOtherMaterial((item.material && item.material !== 'Tự chọn theo ý khách') ? item.material : '');
+      setCustomProductOtherUnit(item.unit || 'bộ');
       setDraftProductImage(item.images?.[0] || null);
     } else {
       // Tìm sản phẩm trong danh mục theo tên
@@ -1240,7 +1256,7 @@ export default function CabinetEstimator({
         ...item,
         productName: customProductOtherName.trim(),
         qty: specQty,
-        unit: 'bộ',
+        unit: customProductOtherUnit.trim() || 'bộ',
         unitPrice: specPrice,
         totalPrice: specQty * specPrice,
         material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
@@ -1258,7 +1274,7 @@ export default function CabinetEstimator({
         productType: 'Sản phẩm khác',
         calcMethod: 'Đơn chiếc / Khác',
         qty: specQty,
-        unit: 'bộ',
+        unit: customProductOtherUnit.trim() || 'bộ',
         unitPrice: specPrice,
         totalPrice: specQty * specPrice,
         material: customProductOtherMaterial.trim() || 'Tự chọn theo ý khách',
@@ -1279,6 +1295,7 @@ export default function CabinetEstimator({
     setCustomProductOtherQty(1);
     setCustomProductOtherUnitPrice(1000000);
     setCustomProductOtherMaterial('Tự chọn theo ý khách');
+    setCustomProductOtherUnit('bộ');
     setDraftProductImage(null);
     setEditingItemId(null);
     setEditingSource(null);
@@ -1475,7 +1492,7 @@ export default function CabinetEstimator({
         projectName: projectName.trim(),
         date: new Date().toISOString().split('T')[0],
         items: quoteItems,
-        config: config,
+        config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
         status: 'draft',
         notes: quoteNotes,
         paymentTerms: paymentTerms,
@@ -2085,7 +2102,7 @@ export default function CabinetEstimator({
             
 
             {/* Thông tin metadata của Báo giá */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs text-left">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-3 p-4 bg-slate-50/70 rounded-xl border border-slate-200 text-xs text-left">
               {/* Dự án (searchable custom selection) */}
               <div className="relative">
                 <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Dự Án <span className="text-rose-500 font-bold">*</span></label>
@@ -2296,6 +2313,21 @@ export default function CabinetEstimator({
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                  Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                  Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+              <div>
+                <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                <input
+                  type="text"
+                  value={customerRepresentative}
+                  disabled={isLocked}
+                  onChange={(e) => setCustomerRepresentative(e.target.value)}
+                  className="w-full bg-white text-slate-800 border border-slate-200 rounded-lg p-2.5 outline-none font-semibold text-xs focus:border-emerald-500 transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-550 disabled:cursor-not-allowed"
+                  placeholder="Mặc định theo Tên khách hàng"
+                />
               </div>
 
               {/* Số điện thoại */}
@@ -2829,7 +2861,7 @@ export default function CabinetEstimator({
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                     {/* Tên sản phẩm */}
-                    <div className="md:col-span-4">
+                    <div className="md:col-span-3">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
                         Tên sản phẩm khác <span className="text-rose-500 font-extrabold">*</span>
                       </label>
@@ -2843,7 +2875,7 @@ export default function CabinetEstimator({
                     </div>
 
                     {/* Chất liệu */}
-                    <div className="md:col-span-4">
+                    <div className="md:col-span-3">
                       <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
                         Chất liệu
                       </label>
@@ -2853,6 +2885,20 @@ export default function CabinetEstimator({
                         onChange={(e) => setCustomProductOtherMaterial(e.target.value)}
                         className="w-full bg-white text-slate-950 border border-slate-200 rounded-xl p-3 text-xs focus:border-orange-500 outline-none font-semibold transition-all placeholder-slate-400"
                         placeholder="Ví dụ: Gỗ công nghiệp An Cường, Nhựa Picomat..."
+                      />
+                    </div>
+
+                    {/* Đơn vị tính */}
+                    <div className="md:col-span-2">
+                      <label className="block text-slate-600 font-bold uppercase tracking-wider text-[9px] mb-1.5">
+                        Đơn vị tính
+                      </label>
+                      <input
+                        type="text"
+                        value={customProductOtherUnit}
+                        onChange={(e) => setCustomProductOtherUnit(e.target.value)}
+                        className="w-full bg-white text-slate-950 border border-slate-200 rounded-xl p-3 text-xs focus:border-orange-500 outline-none font-semibold transition-all placeholder-slate-400"
+                        placeholder="Ví dụ: bộ, m2, cái..."
                       />
                     </div>
 
@@ -3157,7 +3203,7 @@ export default function CabinetEstimator({
                     projectName: projectName.trim(),
                     date: new Date().toISOString().split('T')[0],
                     items: quoteItems,
-                    config: config,
+                    config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
                     status: 'draft' as const,
                     notes: quoteNotes,
                     paymentTerms: paymentTerms,
@@ -3239,17 +3285,35 @@ export default function CabinetEstimator({
                       max-height: none !important;
                       overflow: visible !important;
                       padding: 0 !important;
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                       khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                       nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                    #print-area-archive * {
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
                     }
                     .print-hide {
                       display: none !important;
                     }
-                    /* Chrome có lỗi phân trang với CSS Grid/Flex: khi 1 khối grid (VD: khối
-                       ký tên 2 cột cuối văn bản) rơi đúng ranh giới giữa 2 trang, nội dung
-                       bị vẽ đè/lặp lên trang sau. Ép về dạng khối xếp dọc (block) khi in để
-                       tránh lỗi này — chấp nhận đánh đổi 2 cột xếp chồng thành 1 cột khi in. */
-                    #print-area-archive .grid {
-                      display: block !important;
-                    }
+                    /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                       panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                       hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                       của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                       duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                       cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                       hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                       khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                    #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                    #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                    #print-area-archive .md\\:text-right { text-align: right !important; }
+                    #print-area-archive .md\\:text-left { text-align: left !important; }
+                    #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                    #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                    #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                    #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
                   }
                 `}</style>
                 <QuotationTableSheet quoteData={savedQuoteForPreview} />
@@ -3287,7 +3351,7 @@ export default function CabinetEstimator({
                   className="px-5 py-2.5 bg-[#00a651] hover:bg-[#008f45] text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  In Báo Giá
+                  In Hồ Sơ
                 </button>
               </div>
             </div>

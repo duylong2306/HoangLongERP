@@ -307,6 +307,8 @@ interface ConstructionEstimatorProps {
   setCustomerPhone?: (val: string) => void;
   customerAddress?: string;
   setCustomerAddress?: (val: string) => void;
+  customerRepresentative?: string;
+  setCustomerRepresentative?: (val: string) => void;
   hideMetadataHeader?: boolean;
 
   // Saved & Lock control props
@@ -437,6 +439,14 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const customerPhone = props.customerPhone !== undefined ? props.customerPhone : localCustomerPhone;
   const setCustomerPhone = props.setCustomerPhone || setLocalCustomerPhone;
 
+  // Người đại diện của khách hàng — hiển thị trong Báo Giá và dùng làm tên ký ở khối
+  // chữ ký Bên A trong Hợp Đồng/Nghiệm Thu/Thanh Lý (xem ContractDocument.tsx...).
+  // Prop-lifted giống customerName: khi hideMetadataHeader=true, QuotationSystem.tsx
+  // nâng state này lên cấp cha để dùng chung header Dự Án/Khách Hàng.
+  const [localCustomerRepresentative, setLocalCustomerRepresentative] = useState('');
+  const customerRepresentative = props.customerRepresentative !== undefined ? props.customerRepresentative : localCustomerRepresentative;
+  const setCustomerRepresentative = props.setCustomerRepresentative || setLocalCustomerRepresentative;
+
   // Trạng thái cho bộ tìm kiếm dự án nhanh (searchable dropdown)
   const [isProjDropdownOpen, setIsProjDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -454,6 +464,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
     setCustomerName(cust.name);
     setCustomerPhone(cust.phone || '');
     setCustomerAddress(cust.address || '');
+    setCustomerRepresentative(cust.representative || '');
     setIsCustDropdownOpen(false);
     setCustSearchQuery('');
 
@@ -494,7 +505,8 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       setCustomerName(newCust.name);
       setCustomerPhone(newCust.phone);
       setCustomerAddress(newCust.address);
-      
+      setCustomerRepresentative('');
+
       setQuickCustName('');
       setQuickCustPhone('');
       setQuickCustAddress('');
@@ -514,6 +526,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         setCustomerName(cust ? cust.name : '');
         setCustomerAddress(proj.address || (cust ? cust.address : ''));
         setCustomerPhone(cust ? cust.phone : '');
+        setCustomerRepresentative(cust?.representative || '');
         setSelectedCustomerId(proj.customerId);
         setProjectName(proj.name);
       }
@@ -771,12 +784,24 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
       if (loadedQuote.notes) setQuoteNotes(loadedQuote.notes);
       if (loadedQuote.paymentTerms) setPaymentTerms(loadedQuote.paymentTerms);
-      if (loadedQuote.config) setConfig(loadedQuote.config);
+      if (loadedQuote.config) {
+        setConfig(loadedQuote.config);
+        // Hồ sơ cũ lập trước khi có trường này chưa từng lưu customerRepresentative
+        // riêng — tự lấy theo hồ sơ Khách Hàng thay vì để trống.
+        const fallbackCust = customers.find(c => c.id === loadedQuote.customerId);
+        setCustomerRepresentative(loadedQuote.config.customerRepresentative || fallbackCust?.representative || '');
+      }
       if (loadedQuote.companyLogoImg !== undefined) setCompanyLogoImg(loadedQuote.companyLogoImg || '');
       if (loadedQuote.companyLogoText) setCompanyLogoText(loadedQuote.companyLogoText);
       if (loadedQuote.companySlogan) setCompanySlogan(loadedQuote.companySlogan);
       if (loadedQuote.companyAddressInfo) setCompanyAddressInfo(loadedQuote.companyAddressInfo);
       if (loadedQuote.companyContactInfo) setCompanyContactInfo(loadedQuote.companyContactInfo);
+    } else {
+      // "Lập mới": customerName/Phone/Address được reset bởi handleStartNewQuote ở
+      // QuotationSystem.tsx (props lifted), nhưng customerRepresentative là state cục
+      // bộ của component này nên phải tự xóa ở đây — nếu không sẽ dính "Người đại diện"
+      // của hồ sơ vừa xem trước đó sang hồ sơ mới đang lập.
+      setCustomerRepresentative('');
     }
   }, [loadedQuote]);
 
@@ -1499,7 +1524,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
         tongDienTichXayDung: chieuDai * chieuRong * soTang,
         date: new Date().toISOString().split('T')[0],
         items: quoteItems,
-        config: config,
+        config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
         status: 'draft',
         notes: quoteNotes,
         paymentTerms: paymentTerms,
@@ -2331,6 +2356,20 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                       ➕ Tạo khách hàng nhanh
                     </button>
                   </div>
+                </div>
+
+                {/* Người đại diện — mặc định lấy theo hồ sơ khách hàng, có thể sửa tay.
+                    Dùng để hiển thị trong Báo Giá và làm tên ký Bên A trong Hợp Đồng/
+                    Nghiệm Thu/Thanh Lý thay vì Tên khách hàng (áp dụng khi khách là tổ chức). */}
+                <div>
+                  <label className="block text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-1">Người đại diện</label>
+                  <input
+                    type="text"
+                    value={customerRepresentative}
+                    onChange={(e) => setCustomerRepresentative(e.target.value)}
+                    className="w-full bg-white text-slate-800 border border-slate-200 rounded-lg p-2.5 outline-none font-semibold text-xs focus:border-indigo-500 transition-all shadow-sm"
+                    placeholder="Mặc định theo Tên khách hàng"
+                  />
                 </div>
 
                 {/* Số điện thoại */}
@@ -3213,7 +3252,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                     tongDienTichXayDung: chieuDai * chieuRong * soTang,
                     date: new Date().toISOString().split('T')[0],
                     items: quoteItems,
-                    config: config,
+                    config: { ...config, customerRepresentative: customerRepresentative.trim() || undefined },
                     notes: quoteNotes,
                     paymentTerms: paymentTerms,
                     customerName: customerName,
@@ -3293,17 +3332,35 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                       max-height: none !important;
                       overflow: visible !important;
                       padding: 0 !important;
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
+                    }
+                    /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                       khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                       nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                    #print-area-archive * {
+                      -webkit-print-color-adjust: exact !important;
+                      print-color-adjust: exact !important;
                     }
                     .print-hide {
                       display: none !important;
                     }
-                    /* Chrome có lỗi phân trang với CSS Grid/Flex: khi 1 khối grid (VD: khối
-                       ký tên 2 cột cuối văn bản) rơi đúng ranh giới giữa 2 trang, nội dung
-                       bị vẽ đè/lặp lên trang sau. Ép về dạng khối xếp dọc (block) khi in để
-                       tránh lỗi này — chấp nhận đánh đổi 2 cột xếp chồng thành 1 cột khi in. */
-                    #print-area-archive .grid {
-                      display: block !important;
-                    }
+                    /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                       panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                       hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                       của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                       duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                       cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                       hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                       khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                    #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                    #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                    #print-area-archive .md\\:text-right { text-align: right !important; }
+                    #print-area-archive .md\\:text-left { text-align: left !important; }
+                    #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                    #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                    #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                    #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
                   }
                 `}</style>
                 <QuotationTableSheet quoteData={savedQuoteForPreview} />

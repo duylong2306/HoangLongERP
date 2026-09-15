@@ -349,8 +349,15 @@ export default function ProjectKanbanBoard({
     // ===========================================================================
     const fetchArchivedQuotes = async () => {
       try {
+        // LƯU Ý: dbService.archivedQuotes.list() KHÔNG truyền sector sẽ tải TOÀN
+        // BỘ bảng archived_quotes không lọc (mọi sector cộng dồn, gồm cả các cột
+        // HTML nặng contract_html/acceptance_html/...) — trước đây gọi thiếu
+        // tham số 'general' khiến mỗi lần tải hồ sơ tải trùng lặp gần như gấp đôi
+        // dữ liệu (đã tải theo sector ở 4 lệnh dưới, rồi tải lại y hệt không lọc
+        // ở đây), là nguyên nhân chính khiến "Trạng thái hồ sơ" trong Dự Án load
+        // rất chậm. Chỉ tải đúng nhóm sector='general' (hồ sơ không rõ lĩnh vực).
         const [generalList, constructionList, cabinetList, mechanicalList, subList] = await Promise.all([
-          dbService.archivedQuotes.list().catch(() => []),
+          dbService.archivedQuotes.list('general').catch(() => []),
           dbService.archivedConstructionQuotes.list().catch(() => []),
           dbService.archivedCabinetQuotes.list().catch(() => []),
           dbService.archivedMechanicalQuotes.list().catch(() => []),
@@ -395,7 +402,14 @@ export default function ProjectKanbanBoard({
       window.removeEventListener('hl-archived-mechanical-quotes-updated', handleArchivedUpdated);
       window.removeEventListener('hl-archived-subcontractor-quotes-updated', handleArchivedUpdated);
     };
-  }, [projects]);
+    // KHÔNG phụ thuộc `projects` — fetchArchivedQuotes() không hề đọc biến này,
+    // nhưng vì `projects` đổi tham chiếu rất thường xuyên (mọi thao tác kéo thả
+    // Kanban, đổi trạng thái task, realtime patch...) nên trước đây effect này
+    // bị chạy lại (tải lại toàn bộ 5 danh sách hồ sơ) không cần thiết mỗi lần
+    // như vậy — đây là nguyên nhân chính khiến "Trạng thái hồ sơ" trong Dự Án
+    // load rất chậm/giật. Chỉ tải khi mount và khi có sự kiện cập nhật hồ sơ.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load columns từ Supabase khi sector thay đổi + lắng nghe realtime
   useEffect(() => {
@@ -4792,10 +4806,19 @@ export default function ProjectKanbanBoard({
                                                       
                                                       if (matchedContract) {
                                                         // Đã có HĐ → App.tsx sẽ redirect tới Lưu Trữ Hồ Sơ Thầu Phụ (Đường 2)
+                                                        // Xóa hl_preselected_task_id còn sót lại từ lần bấm "Lập HĐ mới" trước đó
+                                                        // (nếu không xóa, dự án nhiều thầu phụ có thể lẫn dữ liệu công việc cũ).
+                                                        localStorage.removeItem('hl_preselected_task_id');
                                                         localStorage.setItem('hl_view_contract_id', matchedContract.id);
                                                       } else {
                                                         // Chưa có HĐ → set task ID để form Lập HĐ tự điền sẵn
+                                                        // Xóa hl_view_contract_id còn sót lại từ lần xem HĐ khác trước đó — nếu
+                                                        // không, QuotationSystem sẽ tự nạp nhầm hợp đồng cũ (kể cả đã duyệt)
+                                                        // vào form đang lập cho thầu phụ mới, khiến hợp đồng mới bị khóa do
+                                                        // "dính" trạng thái Đã Duyệt của hợp đồng thầu phụ trước.
+                                                        localStorage.removeItem('hl_view_contract_id');
                                                         localStorage.setItem('hl_preselected_task_id', task.id);
+                                                        window.dispatchEvent(new CustomEvent('hl-subcontractor-new-contract-requested', { detail: { taskId: task.id } }));
                                                       }
 
                                                       if (onRedirectToSubcontractor) {

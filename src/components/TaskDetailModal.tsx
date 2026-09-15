@@ -3741,10 +3741,18 @@ export default function TaskDetailModal({
                             onClick={() => {
                               if (matchedContract) {
                                 // Đã có HĐ → set ID để App.tsx redirect tới Lưu Trữ Hồ Sơ Thầu Phụ (Đường 2)
+                                // Xóa hl_preselected_task_id còn sót lại từ lần bấm "Lập HĐ mới" trước đó
+                                // (nếu không xóa, dự án nhiều thầu phụ có thể lẫn dữ liệu công việc cũ).
+                                localStorage.removeItem('hl_preselected_task_id');
                                 localStorage.setItem('hl_view_contract_id', matchedContract.id);
                               } else {
                                 // Chưa có HĐ → set task ID để form Lập HĐ tự điền dự án/thầu phụ/công việc
+                                // Xóa hl_view_contract_id còn sót lại từ lần xem HĐ khác trước đó — nếu không,
+                                // QuotationSystem sẽ tự nạp nhầm hợp đồng cũ (kể cả đã duyệt) vào form đang lập
+                                // cho thầu phụ mới, khiến hợp đồng mới bị khóa do "dính" trạng thái Đã Duyệt.
+                                localStorage.removeItem('hl_view_contract_id');
                                 localStorage.setItem('hl_preselected_task_id', selectedTask.id);
+                                window.dispatchEvent(new CustomEvent('hl-subcontractor-new-contract-requested', { detail: { taskId: selectedTask.id } }));
                               }
 
                               if (onRedirectToSubcontractor) {

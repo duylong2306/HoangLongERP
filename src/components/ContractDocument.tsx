@@ -200,6 +200,7 @@ const DEFAULT_FURN_CONTRACT_TEMPLATE = `<h3 style="text-align: center;"><strong>
   <li>Họ và tên: {{TEN_KHACH_HANG}}</li>
   <li>Địa chỉ: {{DIA_CHI_KHACH_HANG}}</li>
   <li>Điện thoại: {{DIEN_THOAI_KHACH_HANG}}</li>
+  <li>Đại diện: {{DAI_DIEN_KHACH_HANG}}</li>
 </ul>
 
 <p><strong>Bên B: Đơn vị thi công nội thất</strong></p>
@@ -459,12 +460,19 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   const generateProcessedHtml = (templateToProcess: string) => {
     let html = templateToProcess;
     
+    // Bảng khối lượng công việc lấy ĐÚNG các trường như bảng Báo Giá gốc (kể cả
+    // cột Hình ảnh) — xem cấu trúc cột tương ứng tại QuotationTableSheet.tsx
+    // (nhánh mặc định: STT | Tên sản phẩm | Hình ảnh | Thông số kỹ thuật/Vật
+    // liệu cấu tạo | ĐVT | SL | Đơn giá | Thành tiền), để Hợp Đồng khớp với
+    // Báo Giá đã gửi khách hàng, tránh lệch thông tin giữa 2 tài liệu.
     const tableHtml = `
       <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 12px; text-align: left; font-family: 'Times New Roman', Times, serif; color: #000000; border: 1px solid #000000;">
         <thead>
           <tr style="background-color: #fcfcfc; border-bottom: 1px solid #000000;">
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">STT</th>
-            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold;">Tên sản phẩm / Quy cách vật tư</th>
+            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold;">Tên sản phẩm</th>
+            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">Hình ảnh</th>
+            <th style="padding: 8px; border: 1px solid #000000; font-weight: bold;">Thông số kỹ thuật / Vật liệu cấu tạo</th>
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">ĐVT</th>
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: center;">Số lượng</th>
             <th style="padding: 8px; border: 1px solid #000000; font-weight: bold; text-align: right;">Đơn giá (đ)</th>
@@ -476,10 +484,15 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
           ${tableItems.map((item: any, idx: number) => `
             <tr style="border-bottom: 1px solid #000000;">
               <td style="padding: 8px; border: 1px solid #000000; text-align: center;">${idx + 1}</td>
-              <td style="padding: 8px; border: 1px solid #000000;">
-                <strong>${item.productName || item.name || ''}</strong>
-                ${item.material ? `<br/><span style="font-size: 11px; color: #000000;">${item.material}</span>` : ''}
-                ${item.notes ? `<br/><span style="font-size: 11px; color: #000000; font-style: italic;">Ghi chú: ${item.notes}</span>` : ''}
+              <td style="padding: 8px; border: 1px solid #000000;"><strong>${item.productName || item.name || ''}</strong></td>
+              <td style="padding: 4px; border: 1px solid #000000; text-align: center;">
+                ${item.images && item.images.length > 0
+                  ? `<img src="${item.images[0]}" alt="${item.productName || ''}" style="width: 56px; height: 56px; object-fit: cover; border: 1px solid #cccccc; border-radius: 6px; display: block; margin: 0 auto;" />`
+                  : `<span style="font-size: 10px; color: #666666; font-style: italic;">Mẫu thiết kế</span>`}
+              </td>
+              <td style="padding: 8px; border: 1px solid #000000; font-size: 11px;">
+                ${item.material || item.lowerCabinetMaterial || item.upperCabinetMaterial || 'Gỗ công nghiệp MDF chống ẩm nhập khẩu chuẩn hãng'}
+                ${item.notes ? `<br/><span style="color: #c02428; font-style: italic;">Chú ý: ${item.notes}</span>` : ''}
               </td>
               <td style="padding: 8px; border: 1px solid #000000; text-align: center;">${item.unit || 'Cái'}</td>
               <td style="padding: 8px; border: 1px solid #000000; text-align: center;">${item.qty || 1}</td>
@@ -489,7 +502,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
             </tr>
           `).join('')}
           <tr style="font-weight: bold; background-color: #fcfcfc;">
-            <td colspan="5" style="padding: 8px; border: 1px solid #000000; text-align: right;">Tổng cộng thanh toán:</td>
+            <td colspan="7" style="padding: 8px; border: 1px solid #000000; text-align: right;">Tổng cộng thanh toán:</td>
             <td style="padding: 8px; border: 1px solid #000000; text-align: right; font-size: 13px;">${tableGrandTotal.toLocaleString('vi-VN')}</td>
             ${isConstruction && quoteData.selectedFinalResult ? `<td style="padding: 8px; border: 1px solid #000000; text-align: center;">100%</td>` : ''}
           </tr>

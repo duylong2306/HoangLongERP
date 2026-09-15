@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
-import { Employee, Project, ArchivedQuote } from '../types';
+import { Employee, Project, ArchivedQuote, Customer } from '../types';
 import { generateProjectId } from '../lib/projectId';
 import { useNotification } from '../context';
 import { isUserInRoleGroup } from '../context';
@@ -32,6 +32,9 @@ interface ConstructionArchiveProps {
 export default function ConstructionArchive({ currentUser, canEdit = true, canDelete = true, preselectedProjectId, initialDetailTab, onEditQuote }: ConstructionArchiveProps) {
   const [archivedList, setArchivedList] = useState<ArchivedQuote[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
+  // Danh sách khách hàng — dùng để tự động lấy "Người đại diện" cho các hồ sơ CŨ
+  // (lập trước khi có trường này) chưa từng lưu customerRepresentative riêng.
+  const [customersList, setCustomersList] = useState<Customer[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<ArchivedQuote | null>(null);
@@ -229,12 +232,23 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
 
   useEffect(() => {
     if (selectedQuote) {
-      const candidateName = selectedQuote.projectName || 
-                            (selectedQuote.projectId && !selectedQuote.projectId.startsWith('proj_') && !selectedQuote.projectId.startsWith('q_') ? selectedQuote.projectId : '') || 
+      const candidateName = selectedQuote.projectName ||
+                            (selectedQuote.projectId && !selectedQuote.projectId.startsWith('proj_') && !selectedQuote.projectId.startsWith('q_') ? selectedQuote.projectId : '') ||
                             `Dự án ${selectedQuote.customerName || 'vãng lai'} - Lập Xây dựng`;
       setQuickProjName(candidateName);
     }
   }, [selectedQuote]);
+
+  // Hồ sơ LẬP TRƯỚC khi có trường "Người đại diện" chưa từng lưu config.customerRepresentative
+  // riêng — tự động lấy theo hồ sơ Khách Hàng (trường "representative") thay vì để trống,
+  // để không bắt người dùng phải mở từng hồ sơ cũ để nhập lại thủ công.
+  const displayedQuote = useMemo(() => {
+    if (!selectedQuote) return selectedQuote;
+    if (selectedQuote.config?.customerRepresentative) return selectedQuote;
+    const cust = customersList.find(c => c.id === selectedQuote.customerId);
+    if (!cust?.representative) return selectedQuote;
+    return { ...selectedQuote, config: { ...selectedQuote.config, customerRepresentative: cust.representative } };
+  }, [selectedQuote, customersList]);
 
   const handleQuickCreateProject = async () => {
     if (!selectedQuote) return;
@@ -297,10 +311,18 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
   const fetchArchives = async () => {
     setLoading(true);
     try {
-      const data = await dbService.archivedQuotes.list('construction');
+      // Tải song song thay vì tuần tự (await nối tiếp) — 3 lệnh độc lập nhau nên
+      // gộp qua Promise.all giảm gần 3 lần thời gian chờ so với trước, đồng thời
+      // tránh hiện tượng danh sách "nháy" do render 2-3 lần liên tiếp khi từng
+      // phần dữ liệu về không cùng lúc.
+      const [data, projs, custs] = await Promise.all([
+        dbService.archivedQuotes.list('construction'),
+        dbService.projects.list(),
+        dbService.customers.list(),
+      ]);
       setArchivedList(data);
-      const projs = await dbService.projects.list();
       setProjectsList(projs);
+      setCustomersList(custs);
     } catch (error) {
       console.error("Lỗi khi tải hồ sơ báo giá xây dựng:", error);
     } finally {
@@ -692,21 +714,39 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                     max-height: none !important;
                     overflow: visible !important;
                     padding: 0 !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  /* Giữ lại màu nền/màu chữ (banner tiêu đề xanh, giá trị màu xanh lá...)
+                     khi in — mặc định trình duyệt bỏ hầu hết màu nền khi in, khiến bản in
+                     nhạt màu hơn hẳn so với bản Tải PDF (html2canvas chụp nguyên màu). */
+                  #print-area-archive * {
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
                   }
                   .print-hide {
                     display: none !important;
                   }
-                  /* Chrome có lỗi phân trang với CSS Grid/Flex: khi 1 khối grid (VD: khối
-                     ký tên 2 cột cuối văn bản) rơi đúng ranh giới giữa 2 trang, nội dung
-                     bị vẽ đè/lặp lên trang sau. Ép về dạng khối xếp dọc (block) khi in để
-                     tránh lỗi này — chấp nhận đánh đổi 2 cột xếp chồng thành 1 cột khi in. */
-                  #print-area-archive .grid {
-                    display: block !important;
-                  }
+                  /* Nhiều phần tử trong bản in (header logo/liên hệ, bảng thông tin 2 cột,
+                     panel thông số kỹ thuật...) dùng các lớp Tailwind "md:..." — chỉ kích
+                     hoạt từ breakpoint 768px trở lên. Khi in, bề rộng vùng nội dung thực tế
+                     của trang thường NHỎ HƠN 768px (do lề trang in mặc định của trình
+                     duyệt) nên các lớp "md:..." không kích hoạt, khiến bản in xếp dọc/lệch
+                     cột — khác hẳn bản Tải PDF (html2canvas luôn chụp đúng bố cục trên màn
+                     hình rộng, không phụ thuộc breakpoint). Ép các lớp "md:..." dùng trong
+                     khu vực in kích hoạt bất kể bề rộng thực tế khi in. */
+                  #print-area-archive .md\\:flex-row { flex-direction: row !important; }
+                  #print-area-archive .md\\:items-start { align-items: flex-start !important; }
+                  #print-area-archive .md\\:text-right { text-align: right !important; }
+                  #print-area-archive .md\\:text-left { text-align: left !important; }
+                  #print-area-archive .md\\:pt-1 { padding-top: 0.25rem !important; }
+                  #print-area-archive .md\\:col-span-7 { grid-column: span 7 / span 7 !important; }
+                  #print-area-archive .md\\:col-span-5 { grid-column: span 5 / span 5 !important; }
+                  #print-area-archive .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
                 }
               `}</style>
               <QuotationTableSheet
-                quoteData={selectedQuote}
+                quoteData={displayedQuote}
                 initialTab={activeDetailTab}
                 onApproved={(updated) => {
                   setSelectedQuote(prev => prev ? { ...prev, ...updated } : prev);
@@ -793,7 +833,7 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                   className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all hover:scale-[1.01]"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  In Báo Giá
+                  In Hồ Sơ
                 </button>
               </div>
             </div>

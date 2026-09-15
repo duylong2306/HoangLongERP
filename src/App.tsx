@@ -226,13 +226,18 @@ const ADMIN_EMPLOYEE: Employee = {
 const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
   const mapped: Employee[] = emps.map(emp => {
     if (emp.username === 'admin' || emp.id === 'emp_admin') {
+      // CHỈ chuẩn hoá id/username/quyền hạn (đảm bảo tài khoản admin không bao giờ bị
+      // khóa quyền do lỗi dữ liệu) — KHÔNG ghi đè password/email/phone/... bằng
+      // ADMIN_EMPLOYEE nữa. Mật khẩu phải lấy đúng theo dữ liệu đang lưu trên Supabase;
+      // ADMIN_EMPLOYEE.password chỉ dùng làm giá trị khởi tạo lần đầu khi tài khoản admin
+      // trong DB chưa có mật khẩu nào (trường hợp gần như không xảy ra ngoài bootstrap).
       return {
         ...emp,
-        ...ADMIN_EMPLOYEE,
         id: 'emp_admin',
         username: 'admin',
         roleGroupIds: ['role_superadmin', 'role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
-        hasSystemAccount: true
+        hasSystemAccount: true,
+        password: emp.password || ADMIN_EMPLOYEE.password
       };
     }
     // Enrich roleGroupIds for non-admin users
@@ -1162,12 +1167,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       await dbService.bootstrapFirstTime(true);
       
       // Load lại toàn bộ danh sách thực tế từ Live database
+      // ensureAdminAndPasswords chuẩn hoá luôn tài khoản admin (mật khẩu cố định "admin")
+      // để tránh tình trạng đăng nhập lúc được lúc không (xem ghi chú ở Tier 2 poll).
       const emps = await dbService.employees.list();
-      const mappedEmps = emps.map(emp => ({
-        ...emp,
-        username: emp.username || generateUsername(emp.name),
-        password: emp.password || hashPasswordSync('123')
-      }));
+      const mappedEmps = ensureAdminAndPasswords(emps);
       setEmployees(mappedEmps);
 
       const activeSessionStr = sessionStorage.getItem('hl_erp_active_session') || localStorage.getItem('hl_erp_active_session');
@@ -2118,6 +2121,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // ─── Polling Tier 1 (300s): dữ liệu thay đổi vừa phải, fallback cho Realtime ──
   useEffect(() => {
+    // Lần chạy poll() ĐẦU TIÊN xảy ra ngay khi App mount — trùng thời điểm mọi
+    // màn hình (Lưu Trữ Hồ Sơ, Kanban Dự Án...) cũng đang tự tải dữ liệu lần đầu
+    // của riêng chúng. Các sự kiện "hl-*-updated" bắn ra ở lượt đầu này khiến
+    // những màn hình đó tải lại TOÀN BỘ danh sách lần thứ 2 gần như ngay lập
+    // tức, gây cảm giác danh sách "nháy" (render lại giữa chừng) và load chậm.
+    // Bỏ qua việc bắn sự kiện ở lượt poll đầu tiên — dữ liệu quotes/customers/
+    // projects/tasks của App.tsx vẫn được làm mới bình thường (an toàn), chỉ
+    // các listener phụ thuộc sự kiện mới bỏ qua lượt đầu vì chúng đã tự tải rồi.
+    let isFirstRun = true;
     const poll = async () => {
       // ÉP tải mới (invalidate trước khi list()) — đây là lưới an toàn CUỐI CÙNG
       // khi kênh Realtime đã chết êm (tab để lâu/máy ngủ/đổi mạng, không có sự
@@ -2133,12 +2145,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         setProjects(projs.filter(p => !p.name.startsWith('Dự án độc lập - ') || !p.notes?.includes('Tạo dự án tự động từ báo giá hoàn tất')));
       } catch {}
       try { invalidateCache('tasks'); setTasks(await dbService.tasks.list()); } catch {}
-      try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
-      try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
-      try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
-      try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
-      try { window.dispatchEvent(new CustomEvent('hl-task-permissions-updated')); } catch {}
-      import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()).catch(() => {});
+      if (!isFirstRun) {
+        try { window.dispatchEvent(new CustomEvent('hl-suppliers-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-inventory-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-archived-quotes-updated')); } catch {}
+        try { window.dispatchEvent(new CustomEvent('hl-task-permissions-updated')); } catch {}
+        import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()).catch(() => {});
+      }
+      isFirstRun = false;
     };
     poll();
     const interval = setInterval(poll, 300000);
@@ -2158,7 +2173,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         const config = await dbService.shiftConfig.get();
         if (config) setHrmConfig(prev => ({ ...DEFAULT_SYSTEM_CONFIG, ...config }));
       } catch {}
-      try { setEmployees(await dbService.employees.list()); } catch {}
+      // ensureAdminAndPasswords ép mật khẩu tài khoản admin về "admin" (thiết kế cố ý —
+      // xem ADMIN_EMPLOYEE) — nếu setEmployees thẳng dữ liệu thô từ Supabase ở đây, tài
+      // khoản admin sẽ mang mật khẩu (hash) thật đang lưu trong DB, khiến việc đăng nhập
+      // lúc dùng được "admin", lúc phải dùng mật khẩu đã lưu tùy theo lần poll nào chạy
+      // sau cùng. Luôn chuẩn hoá qua ensureAdminAndPasswords để hành vi nhất quán.
+      try { setEmployees(ensureAdminAndPasswords(await dbService.employees.list())); } catch {}
       try {
         const cloudRoles = await dbService.hrmRoleGroups.list();
         if (cloudRoles && cloudRoles.length > 0) {
@@ -2249,7 +2269,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           const firstHasAccount = (first.username || first.hasSystemAccount);
           return hasAccount && !firstHasAccount;
         });
-        setEmployees(deduped);
+        // Chuẩn hoá lại tài khoản admin (mật khẩu cố định "admin") trước khi setState —
+        // dữ liệu tới từ event Realtime là bản thô từ Supabase, nếu set thẳng sẽ ghi đè
+        // mật khẩu admin bằng giá trị thật trong DB (xem ghi chú tại Tier 2 poll ở trên).
+        setEmployees(ensureAdminAndPasswords(deduped));
       }
     };
     window.addEventListener('hl-task-permissions-updated', handleTaskPermUpdated);

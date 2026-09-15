@@ -42,7 +42,9 @@ const ADMIN_EMPLOYEE: Employee = {
 export function ensureAdminAndPasswords(emps: Employee[]): Employee[] {
   const mapped: Employee[] = emps.map(emp => {
     if (emp.username === 'admin' || emp.id === 'emp_admin') {
-      return { ...emp, username: 'admin', password: 'admin', role: 'director' as const, roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'], hasSystemAccount: true };
+      // KHÔNG ép password về 'admin' — mật khẩu phải lấy đúng theo dữ liệu đang lưu
+      // trên Supabase, chỉ dùng 'admin' làm giá trị khởi tạo khi chưa có mật khẩu nào.
+      return { ...emp, username: 'admin', password: emp.password || 'admin', role: 'director' as const, roleGroupIds: ['role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'], hasSystemAccount: true };
     }
     // Backfill roleGroupIds từ memberIds của Role Groups (tương thích dữ liệu cũ)
     let roleGroupIds = emp.roleGroupIds;
