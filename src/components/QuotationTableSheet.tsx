@@ -182,6 +182,14 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
   });
   const [unapproving, setUnapproving] = useState(false);
 
+  // Thông tin doanh nghiệp hiển thị ở header Báo Giá — lấy đúng theo hồ sơ đã lưu
+  // tại "Cài Đặt Hệ Thống > Thông Tin Doanh Nghiệp" (bảng business_profile) thay
+  // vì hard-code cứng tên/địa chỉ/SĐT cũ trong JSX bên dưới.
+  const [businessInfo, setBusinessInfo] = useState<any>(null);
+  useEffect(() => {
+    dbService.businessProfile.get().then(setBusinessInfo).catch(() => {});
+  }, []);
+
   const handleApproveQuote = async () => {
     try {
       const approvedAt = new Date().toLocaleString('vi-VN');
@@ -503,18 +511,18 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                       </svg>
                     </div>
                     <div>
-                      <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">HOANG LONG</h1>
-                      <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">Construction - Furniture - Doors</p>
+                      <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">{businessInfo?.companyName || 'HOANG LONG'}</h1>
+                      <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">{businessInfo?.businessSector || 'Construction - Furniture - Doors'}</p>
                       <div className="text-[9px] text-slate-500 font-sans mt-1">
-                        <p className="m-0">📍 Địa điểm kinh doanh: Số 4 TDP Trung Vương, TT. Nam Ban, huyện Lâm Hà, tỉnh Lâm Đồng</p>
-                        <p className="m-0">🏠 Địa chỉ: 54/20 Kim Đồng, Phường 6, TP. Đà Lạt, tỉnh Lâm Đồng</p>
+                        <p className="m-0">📍 Địa chỉ: {businessInfo?.address || 'Đang cập nhật'}</p>
+                        <p className="m-0">🧾 MST: {businessInfo?.taxCode || 'Đang cập nhật'}</p>
                       </div>
                     </div>
                   </div>
                   <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
-                    <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> 0966 545 959 - 0374 883 979</p>
-                    <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> hoanglongld.com@gmail.com</p>
-                    <p className="m-0"><span className="font-bold text-slate-700">🌐 Web:</span> hoanglongld.com</p>
+                    <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo?.phone || 'Đang cập nhật'}</p>
+                    <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo?.email || 'Đang cập nhật'}</p>
+                    <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo?.representative || 'Đang cập nhật'}</p>
                   </div>
                 </div>
 
@@ -771,14 +779,22 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
           )}
           <div>
             <h1 className="text-2xl font-black tracking-widest text-[#00a651] font-sans m-0 leading-tight">
-              {quoteData.companyLogoText !== undefined && quoteData.companyLogoText !== '' ? quoteData.companyLogoText : "HOANG LONG"}
+              {businessInfo?.companyName || (quoteData.companyLogoText !== undefined && quoteData.companyLogoText !== '' ? quoteData.companyLogoText : "HOANG LONG")}
             </h1>
             <p className="text-[10px] font-bold text-slate-600 tracking-widest uppercase font-sans m-0 leading-tight">
-              {quoteData.companySlogan !== undefined && quoteData.companySlogan !== '' ? quoteData.companySlogan : "Construction - Furniture - Doors"}
+              {businessInfo?.businessSector || (quoteData.companySlogan !== undefined && quoteData.companySlogan !== '' ? quoteData.companySlogan : "Construction - Furniture - Doors")}
             </p>
-            {quoteData.companyAddressInfo ? (
-              <div 
-                className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5" 
+            {/* Ưu tiên hồ sơ doanh nghiệp lấy từ "Cài Đặt Hệ Thống" (business_profile) —
+                chỉ dùng nội dung tùy chỉnh riêng theo từng báo giá (companyAddressInfo)
+                khi CHƯA tải được hồ sơ chung, tránh hiển thị địa chỉ/SĐT cũ đã lỗi thời. */}
+            {businessInfo ? (
+              <div className="text-[9px] text-slate-500 font-sans mt-1">
+                <p className="m-0">📍 Địa chỉ: {businessInfo.address || 'Đang cập nhật'}</p>
+                <p className="m-0">🧾 MST: {businessInfo.taxCode || 'Đang cập nhật'}</p>
+              </div>
+            ) : quoteData.companyAddressInfo ? (
+              <div
+                className="text-[9px] text-slate-500 font-sans mt-1 space-y-0.5"
                 dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyAddressInfo) }}
               />
             ) : (
@@ -790,9 +806,15 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
           </div>
         </div>
 
-        {quoteData.companyContactInfo ? (
-          <div 
-            className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1 text-left md:text-right" 
+        {businessInfo ? (
+          <div className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1">
+            <p className="m-0"><span className="font-bold text-slate-700">📞 Hotline:</span> {businessInfo.phone || 'Đang cập nhật'}</p>
+            <p className="m-0"><span className="font-bold text-slate-700">✉ Email:</span> {businessInfo.email || 'Đang cập nhật'}</p>
+            <p className="m-0"><span className="font-bold text-slate-700">👤 Đại diện:</span> {businessInfo.representative || 'Đang cập nhật'}</p>
+          </div>
+        ) : quoteData.companyContactInfo ? (
+          <div
+            className="text-center md:text-right font-sans text-[10px] text-slate-500 space-y-0.5 md:pt-1 text-left md:text-right"
             dangerouslySetInnerHTML={{ __html: sanitizeHTML(quoteData.companyContactInfo) }}
           />
         ) : (
