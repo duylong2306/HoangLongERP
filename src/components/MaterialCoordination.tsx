@@ -442,6 +442,67 @@ export default function MaterialCoordination({
     await saveProposal({ ...prop, items });
   };
 
+  // Cho phép XÓA 1 dòng vật tư khỏi đề xuất ở 4 giai đoạn: Tìm nhà cung cấp,
+  // Chờ duyệt, Chờ đặt hàng, Đặt hàng thành công (KHÔNG cho ở "Đã nhận hàng"
+  // vì lúc đó đã có số liệu nhận hàng thực tế gắn với dòng, xóa sẽ làm sai
+  // lệch dữ liệu đã đối soát). Quyền theo đúng người phụ trách từng giai đoạn:
+  // coordinator quản lý find_supplier/waiting_order/ordered, approver phê
+  // duyệt ở waiting_approval — giống canEditProposalItems ở trên, chỉ mở rộng
+  // thêm 2 giai đoạn sau.
+  const canDeleteProposalItem = (prop: any): boolean => {
+    if (!prop) return false;
+    if (prop.status === 'find_supplier') return isCoordinator;
+    if (prop.status === 'waiting_approval') return isApprover;
+    if (prop.status === 'waiting_order') return isCoordinator;
+    if (prop.status === 'ordered') return isCoordinator;
+    return false;
+  };
+
+  // Xóa 1 dòng vật tư khỏi đề xuất, có cảnh báo trước khi xác nhận. Nếu đề
+  // xuất ĐÃ lên Đơn Mua Hàng (purchaseOrderIds), đồng thời gỡ dòng đó khỏi
+  // (các) đơn hàng liên quan và tính lại tổng tiền/công nợ — tránh 2 nguồn dữ
+  // liệu (đề xuất vs đơn hàng) lệch nhau, vốn sẽ làm sai số tiền phải trả NCC
+  // ở Tài Chính - Kế Toán (xem ghi chú tại saveOrderEdit — cùng công thức).
+  const deleteProposalItem = (prop: any, itemId: string) => {
+    const item = (prop.items || []).find((it: any) => it.id === itemId);
+    if (!item) return;
+    const linkedOrderIds: string[] = prop.purchaseOrderIds || [];
+    const hasOrder = linkedOrderIds.length > 0;
+
+    const doDelete = async () => {
+      try {
+        const items = (prop.items || []).filter((it: any) => it.id !== itemId);
+        await saveProposal({ ...prop, items });
+
+        if (hasOrder) {
+          for (const oid of linkedOrderIds) {
+            const po = purchaseOrders.find((o: any) => o.id === oid);
+            if (!po || !(po.items || []).some((it: any) => it.id === itemId)) continue;
+            const poItems = (po.items || []).filter((it: any) => it.id !== itemId);
+            const tongTien = poItems.reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0);
+            const updatedPo = { ...po, items: poItems, tongTien, congNo: tongTien - (po.thanhToanThucTe || 0) };
+            await dbService.purchaseOrders.save(updatedPo).catch(() => {});
+          }
+          loadOrders();
+        }
+        showNotification(`Đã xóa vật tư "${item.name}" khỏi đề xuất.`, 'Xóa vật tư', 'success');
+      } catch (e) {
+        showNotification('Có lỗi khi xóa vật tư. Vui lòng thử lại.', 'Lỗi', 'warning');
+      }
+    };
+
+    const orderWarning = hasOrder
+      ? ' Vật tư này ĐÃ LÊN ĐƠN HÀNG — xóa sẽ đồng thời gỡ khỏi (các) đơn hàng liên quan và tính lại tổng tiền/công nợ.'
+      : '';
+    askConfirmation(
+      `Xóa vật tư "${item.name}" (SL: ${item.qty || 0} ${item.unit || ''}) khỏi đề xuất này?${orderWarning} Hành động này không thể hoàn tác.`,
+      'Xác nhận xóa vật tư',
+      doDelete,
+      'Xóa vật tư',
+      'Hủy bỏ'
+    );
+  };
+
   // ─── Thùng rác: đề xuất bị HỦY (tự xóa sau 30 ngày + khôi phục) ─────────
   const DAYS_TO_AUTO_DELETE = 30;
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -2062,6 +2123,7 @@ export default function MaterialCoordination({
                         const { received, poQty } = activeDetail.kind === 'proposal' ? getReceivedInfo(activeDetail.doc, m.id) : { received: 0, poQty: null };
                         const shortage = poQty !== null ? Math.max(0, poQty - received) : null;
                         const canEditRow = activeDetail.kind === 'proposal' && canEditProposalItems(activeDetail.doc);
+                        const canDeleteRow = activeDetail.kind === 'proposal' && canDeleteProposalItem(activeDetail.doc);
                         return (
                           <div key={m.id || idx} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/50">
                             <div className="flex items-start justify-between gap-2">
@@ -2069,6 +2131,16 @@ export default function MaterialCoordination({
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[9px] font-mono font-bold text-slate-400">{idx + 1}.</span>
                                   <span className="font-semibold text-[11px] text-slate-800 truncate">{m.name}</span>
+                                  {canDeleteRow && (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteProposalItem(activeDetail.doc, m.id)}
+                                      className="ml-auto shrink-0 p-1 text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-md cursor-pointer transition-all"
+                                      title="Xóa dòng vật tư này"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                                 {m.maSanPham && (
                                   <span className="ml-4 text-[8px] text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5 font-bold">Mã: {m.maSanPham}</span>
@@ -2139,11 +2211,12 @@ export default function MaterialCoordination({
                           <th className="p-2.5 text-right w-24">Thành tiền</th>
                           <th className="p-2.5 text-center w-16">Đã nhận</th>
                           <th className="p-2.5 text-center w-16">Còn thiếu</th>
+                          <th className="p-2.5 text-center w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
                         {getDocItems(activeDetail.doc).length === 0 ? (
-                          <tr><td colSpan={10} className="p-8 text-center text-slate-600 font-medium">Chưa có vật tư nào trong đề xuất này.</td></tr>
+                          <tr><td colSpan={11} className="p-8 text-center text-slate-600 font-medium">Chưa có vật tư nào trong đề xuất này.</td></tr>
                         ) : (
                           getDocItems(activeDetail.doc).map((m: any, idx: number) => {
                             const price = m.price || 0;
@@ -2151,6 +2224,7 @@ export default function MaterialCoordination({
                             const { received, poQty } = activeDetail.kind === 'proposal' ? getReceivedInfo(activeDetail.doc, m.id) : { received: 0, poQty: null };
                             const shortage = poQty !== null ? Math.max(0, poQty - received) : null;
                             const canEditRow = activeDetail.kind === 'proposal' && canEditProposalItems(activeDetail.doc);
+                            const canDeleteRow = activeDetail.kind === 'proposal' && canDeleteProposalItem(activeDetail.doc);
                             return (
                               <tr key={m.id || idx} className="hover:bg-slate-50/40">
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600">{idx + 1}</td>
@@ -2192,6 +2266,18 @@ export default function MaterialCoordination({
                                 <td className="p-2.5 text-right font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</td>
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600">{poQty !== null ? received : '—'}</td>
                                 <td className={`p-2.5 text-center font-mono font-bold ${shortage ? 'text-amber-600' : 'text-slate-400'}`}>{shortage !== null ? shortage : '—'}</td>
+                                <td className="p-2.5 text-center">
+                                  {canDeleteRow && (
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteProposalItem(activeDetail.doc, m.id)}
+                                      className="p-1 text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-md cursor-pointer transition-all"
+                                      title="Xóa dòng vật tư này"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </td>
                               </tr>
                             );
                           })
