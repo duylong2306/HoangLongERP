@@ -2325,6 +2325,40 @@ export default function FinanceManagement({
     setPoPage(1);
   };
 
+  // ── Tab Đơn Hàng: chuyển đổi giữa "Đơn Hàng Mua" và "Đơn Hàng Trả" (danh
+  // sách tập trung mọi chứng từ Trả Hàng NCC — trước đây phải mở đúng đề xuất
+  // ở Điều Phối Vật Tư mới xem được từng chứng từ). ──
+  const [poViewMode, setPoViewMode] = useState<'mua' | 'tra'>('mua');
+  const [returnFilters, setReturnFilters] = useState({ fromDate: '', toDate: '', supplier: '', project: '', status: '' });
+  const [returnSupplierOpen, setReturnSupplierOpen] = useState(false);
+  const [returnsPage, setReturnsPage] = useState(1);
+  const [returnsPageSize, setReturnsPageSize] = useState(10);
+  const updateReturnFilter = (patch: Partial<typeof returnFilters>) => {
+    setReturnFilters(prev => ({ ...prev, ...patch }));
+    setReturnsPage(1);
+  };
+
+  // Xóa 1 chứng từ Trả Hàng từ danh sách "Đơn Hàng Trả" — chỉ cho phép khi
+  // chưa cấn trừ vào công nợ nào (đúng nguyên tắc deleteSupplierReturn ở
+  // MaterialCoordination.tsx, tránh làm "biến mất" 1 khoản đã dùng để giảm
+  // công nợ thật của đơn khác).
+  const handleDeleteSupplierReturnFromList = async (r: any) => {
+    if ((r.appliedAmount || 0) > 0) {
+      addToast({ title: '⚠️ Không thể xóa', message: 'Chứng từ đã được cấn trừ vào công nợ, không thể xóa.', type: 'warning' });
+      return;
+    }
+    if (!window.confirm(`⚠️ Xóa chứng từ trả hàng ${r.id}?\nHành động này không thể hoàn tác.`)) return;
+    try {
+      await dbService.supplierReturns.delete(r.id);
+      setSupplierReturns(prev => prev.filter((x: any) => x.id !== r.id));
+      window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
+      addToast({ title: '🗑️ Đã xóa', message: `Đã xóa chứng từ trả hàng ${r.id}.`, type: 'info' });
+    } catch (err) {
+      console.error('Lỗi xóa chứng từ trả hàng:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể xóa chứng từ trả hàng.', type: 'error' });
+    }
+  };
+
   // ── Tab Nhập Thu: bộ lọc (lưu localStorage cho lần sau) ──
   const RECEIPT_FILTER_KEY = 'hl_fin_receipt_filters';
   const loadReceiptFilters = (): { fromDate: string; toDate: string; customer: string; form: string } => {
@@ -5538,6 +5572,25 @@ export default function FinanceManagement({
 
               return (
                 <div className="space-y-4">
+                  <div className="inline-flex bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => { setPoViewMode('mua'); setSearchTerm(''); }}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${poViewMode === 'mua' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      🛒 Đơn Hàng Mua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPoViewMode('tra'); setSearchTerm(''); }}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${poViewMode === 'tra' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      ↩️ Đơn Hàng Trả{supplierReturns.length > 0 ? ` (${supplierReturns.length})` : ''}
+                    </button>
+                  </div>
+
+                  {poViewMode === 'mua' && (
+                  <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
                     <div>
                       <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
@@ -5791,6 +5844,236 @@ export default function FinanceManagement({
                       <button type="button" disabled={poPage >= totalPages} onClick={() => setPoPage(p => Math.min(totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
                     </div>
                   </div>
+
+                  </div>
+                  )}
+
+                  {poViewMode === 'tra' && (() => {
+                    const returnSupplierOptions = Array.from(new Set(supplierReturns.map((r: any) => r.supplierName).filter(Boolean))).sort() as string[];
+                    const matchedReturns = supplierReturns.filter((r: any) => {
+                      if (keyword && !((r.id || '').toLowerCase().includes(keyword) || (r.supplierName || '').toLowerCase().includes(keyword) || (r.purchaseOrderId || '').toLowerCase().includes(keyword) || (r.reason || '').toLowerCase().includes(keyword))) return false;
+                      const rd = (r.createdAt || '').slice(0, 10);
+                      if (returnFilters.fromDate && rd && rd < returnFilters.fromDate) return false;
+                      if (returnFilters.toDate && rd && rd > returnFilters.toDate) return false;
+                      if (returnFilters.supplier && !(r.supplierName || '').toLowerCase().includes(returnFilters.supplier.toLowerCase())) return false;
+                      if (returnFilters.project && (r.projectId || '') !== returnFilters.project) return false;
+                      const applied = r.appliedAmount || 0;
+                      const total = r.totalAmount || 0;
+                      const stat = applied <= 0 ? 'unused' : applied >= total ? 'full' : 'partial';
+                      if (returnFilters.status && returnFilters.status !== stat) return false;
+                      return true;
+                    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+                    const returnsGrandTotal = matchedReturns.reduce((s: number, r: any) => s + (r.totalAmount || 0), 0);
+                    const returnsGrandApplied = matchedReturns.reduce((s: number, r: any) => s + (r.appliedAmount || 0), 0);
+                    const returnsGrandAvailable = returnsGrandTotal - returnsGrandApplied;
+                    const returnsTotalPages = returnsPageSize === -1 ? 1 : Math.max(1, Math.ceil(matchedReturns.length / returnsPageSize));
+                    const returnsPageItems = returnsPageSize === -1 ? matchedReturns : matchedReturns.slice((returnsPage - 1) * returnsPageSize, returnsPage * returnsPageSize);
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
+                          <div>
+                            <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
+                              Danh sách Đơn Hàng Trả (Trả Hàng NCC)
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Bộ lọc */}
+                        <div className="flex flex-wrap items-end gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
+                            <input
+                              type="date"
+                              value={returnFilters.fromDate}
+                              onChange={(e) => updateReturnFilter({ fromDate: e.target.value })}
+                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
+                            <input
+                              type="date"
+                              value={returnFilters.toDate}
+                              onChange={(e) => updateReturnFilter({ toDate: e.target.value })}
+                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1 relative">
+                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Nhà Cung Cấp</label>
+                            <input
+                              type="text"
+                              value={returnFilters.supplier}
+                              onChange={(e) => { updateReturnFilter({ supplier: e.target.value }); setReturnSupplierOpen(true); }}
+                              onFocus={() => setReturnSupplierOpen(true)}
+                              onBlur={() => setTimeout(() => setReturnSupplierOpen(false), 150)}
+                              placeholder="Gõ để tìm NCC..."
+                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer w-48"
+                            />
+                            {returnSupplierOpen && (
+                              <div className="absolute top-full left-0 z-30 mt-1 w-64 max-h-52 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1">
+                                <button type="button" onClick={() => { updateReturnFilter({ supplier: '' }); setReturnSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-white">Tất cả nhà cung cấp</button>
+                                {returnSupplierOptions.filter(s => s.toLowerCase().includes(returnFilters.supplier.toLowerCase())).map(s => (
+                                  <button key={s} type="button" onClick={() => { updateReturnFilter({ supplier: s }); setReturnSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800">{s}</button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Dự án</label>
+                            <select
+                              value={returnFilters.project}
+                              onChange={(e) => updateReturnFilter({ project: e.target.value })}
+                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer min-w-[160px]"
+                            >
+                              <option value="">Tất cả dự án</option>
+                              {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái cấn trừ</label>
+                            <select
+                              value={returnFilters.status}
+                              onChange={(e) => updateReturnFilter({ status: e.target.value })}
+                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer"
+                            >
+                              <option value="">Tất cả</option>
+                              <option value="unused">Chưa cấn trừ</option>
+                              <option value="partial">Cấn trừ 1 phần</option>
+                              <option value="full">Đã cấn trừ hết</option>
+                            </select>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReturnFilters({ fromDate: '', toDate: '', supplier: '', project: '', status: '' })}
+                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                            title="Xóa bộ lọc"
+                          >
+                            <X className="w-3.5 h-3.5" /> Reset
+                          </button>
+                        </div>
+
+                        <div className="overflow-x-auto text-[10.5px]">
+                          <table className="w-full text-left text-slate-300">
+                            <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                              <tr>
+                                <th className="px-3 py-2.5 w-10 text-center">#</th>
+                                <th className="px-3 py-2.5">Mã chứng từ</th>
+                                <th className="px-3 py-2.5">Nhà cung cấp</th>
+                                <th className="px-3 py-2.5">Đơn hàng gốc / Dự án</th>
+                                <th className="px-3 py-2.5">Ngày tạo</th>
+                                <th className="px-3 py-2.5">Lý do</th>
+                                <th className="px-3 py-2.5 text-right">Tổng tiền trả</th>
+                                <th className="px-3 py-2.5 text-right">Đã cấn trừ</th>
+                                <th className="px-3 py-2.5 text-right">Còn khả dụng</th>
+                                <th className="px-3 py-2.5">Trạng thái</th>
+                                <th className="px-3 py-2.5 text-center">Hành động</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {matchedReturns.length === 0 ? (
+                                <tr>
+                                  <td colSpan={11} className="px-3 py-8 text-center text-slate-500 italic">
+                                    {supplierReturns.length === 0 ? 'Chưa có chứng từ trả hàng NCC nào. Tạo chứng từ ở Điều Phối Vật Tư (nút "Trả hàng NCC" trên đơn đã nhận hàng).' : 'Không tìm thấy chứng từ trả hàng phù hợp với bộ lọc.'}
+                                  </td>
+                                </tr>
+                              ) : returnsPageItems.map((r: any, ri: number) => {
+                                const applied = r.appliedAmount || 0;
+                                const total = r.totalAmount || 0;
+                                const available = total - applied;
+                                const stat = applied <= 0 ? 'unused' : applied >= total ? 'full' : 'partial';
+                                const statLabel = stat === 'unused' ? 'Chưa cấn trừ' : stat === 'full' ? 'Đã cấn trừ hết' : 'Cấn trừ 1 phần';
+                                const statClass = stat === 'unused' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : stat === 'full' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+                                const originPo = purchaseOrders.find(p => p.id === r.purchaseOrderId);
+                                return (
+                                  <tr key={r.id} className="border-b border-slate-850/60 hover:bg-slate-900/40">
+                                    <td className="px-3 py-2.5 text-center text-slate-600">{(returnsPage - 1) * (returnsPageSize === -1 ? 0 : returnsPageSize) + ri + 1}</td>
+                                    <td className="px-3 py-2.5 font-semibold text-slate-200">{r.id}</td>
+                                    <td className="px-3 py-2.5 text-slate-300">{r.supplierName || '—'}</td>
+                                    <td className="px-3 py-2.5">
+                                      <div className="text-slate-300">{r.purchaseOrderId || '—'}</div>
+                                      {r.projectName && <div className="text-[9px] text-sky-400">🏗️ {r.projectName}</div>}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-slate-400">{(r.createdAt || '').slice(0, 10) || '—'}</td>
+                                    <td className="px-3 py-2.5 text-slate-400 max-w-[14rem] truncate" title={r.reason}>{r.reason || '—'}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-rose-400">{total.toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-emerald-400">{applied.toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-black text-slate-200">{available.toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5">
+                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${statClass}`}>{statLabel}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      <div className="flex items-center justify-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => { if (originPo) setPoDetailModal({ open: true, order: originPo }); else addToast({ title: 'ℹ️ Không tìm thấy', message: 'Đơn hàng gốc đã bị xóa.', type: 'info' }); }}
+                                          className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer"
+                                          title="Xem đơn hàng gốc"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </button>
+                                        {available > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => { setActiveSubTab('cong_no_phai_tra'); setSearchTerm(r.supplierName || ''); }}
+                                            className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap"
+                                            title="Sang Công Nợ Trả để cấn trừ khoản này vào 1 đơn hàng"
+                                          >
+                                            <Undo2 className="w-3 h-3" /> Cấn trừ ngay
+                                          </button>
+                                        )}
+                                        {applied <= 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteSupplierReturnFromList(r)}
+                                            className="text-rose-400 hover:text-rose-300 p-1 border border-rose-500/30 rounded cursor-pointer"
+                                            title="Xóa chứng từ trả hàng"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t-2 border-slate-700 bg-slate-900/80">
+                                <td className="px-3 py-3" colSpan={6}></td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-rose-400">{returnsGrandTotal.toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-emerald-400">{returnsGrandApplied.toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-slate-200">{returnsGrandAvailable.toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3" colSpan={2}></td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
+                          <div className="flex items-center gap-2">
+                            <span>
+                              Tổng: <span className="text-rose-400 font-black font-mono">{matchedReturns.length}</span> chứng từ ·{' '}
+                              <span className="text-rose-400 font-black font-mono">{returnsTotalPages}</span> trang
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span>Dòng / trang:</span>
+                            <select value={returnsPageSize} onChange={(e) => { setReturnsPageSize(Number(e.target.value)); setReturnsPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                              {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                              <option value={-1}>Tất cả</option>
+                            </select>
+                            <button type="button" disabled={returnsPage <= 1} onClick={() => setReturnsPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                            <span>Trang {returnsPage} / {returnsTotalPages}</span>
+                            <button type="button" disabled={returnsPage >= returnsTotalPages} onClick={() => setReturnsPage(p => Math.min(returnsTotalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                 </div>
               );
