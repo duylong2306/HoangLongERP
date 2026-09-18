@@ -3313,6 +3313,20 @@ export default function FinanceManagement({
     }
   }, [activeSubTab]);
 
+  // Điền sẵn ô "Tìm kiếm nhanh" ở tab Công Nợ Trả khi được điều hướng tới từ
+  // nơi khác (VD: nút "Xem Công Nợ Trả" cạnh chứng từ Trả Hàng NCC ở Điều
+  // phối vật tư) — cùng cơ chế localStorage + hl-switch-tab như prefill Phiếu
+  // Thu ở trên. Search theo mã đơn hàng (PO id) khớp trực tiếp vào `notes`
+  // của dòng chi tiết liability (xem expandToDetailRows), nên lọc đúng NCC.
+  useEffect(() => {
+    if (activeSubTab !== 'cong_no_phai_tra') return;
+    const stored = localStorage.getItem('hl_prefill_liability_search');
+    if (stored) {
+      setSearchTerm(stored);
+      localStorage.removeItem('hl_prefill_liability_search');
+    }
+  }, [activeSubTab]);
+
   // Auto-select newly created customer from "Thêm khách hàng nhanh" + reopen receipt form
   const [autoSelectCustId, setAutoSelectCustId] = useState<string | null>(null);
   useEffect(() => {
