@@ -2487,6 +2487,31 @@ export const dbService = {
     }
   },
 
+  // 14f2. SUPPLIER RETURNS (Chứng từ Trả Hàng NCC — sync Supabase)
+  // Chứng từ ĐỘC LẬP, không sửa purchase_orders gốc (giữ nguyên lịch sử đã
+  // nhận hàng) — khi xác nhận, tạo "Số dư Có" cho NCC, kế toán chủ động chọn
+  // đơn hàng để áp dụng (xem FinanceManagement.tsx applySupplierCredit).
+  supplierReturns: {
+    async list(): Promise<any[]> {
+      const rows = await querySupabase<any>('supplier_returns', []);
+      return rows.map((r: any) => ({
+        ...r,
+        items: Array.isArray(r.items) ? r.items : [],
+        applications: Array.isArray(r.applications) ? r.applications : [],
+      }));
+    },
+    async save(ret: any): Promise<void> {
+      await saveSupabase('supplier_returns', ret);
+    },
+    /** Tạo chứng từ trả hàng MỚI — không bao giờ ghi đè chứng từ cũ. */
+    async create(ret: any): Promise<any> {
+      return createOrderUnique('supplier_returns', ret);
+    },
+    async delete(id: string): Promise<void> {
+      await deleteSupabase('supplier_returns', id);
+    }
+  },
+
   // 14g. MATERIAL PROPOSALS (Đề xuất vật tư theo luồng mới — sync Supabase)
   materialProposals: {
     async list(): Promise<any[]> {

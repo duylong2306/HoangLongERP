@@ -62,6 +62,7 @@ import {
   Upload,
   RefreshCcw,
   Image as ImageIcon,
+  Undo2,
 } from 'lucide-react';
 
 // Trạng thái hiển thị của phiếu chi xoay quanh chứng từ (thay cho 'approved'/'pending').
@@ -2146,6 +2147,75 @@ export default function FinanceManagement({
     setPoPaymentNote('');
     addToast({ title: '✅ Đã lập phiếu chi', message: `Phiếu chi ${newPayment.code} cho đơn ${order.id} đã tạo. Chờ duyệt để ghi nhận thanh toán.`, type: 'success' });
   };
+
+  // ── Áp dụng Số dư Có NCC (từ Trả Hàng) vào công nợ 1 đơn hàng cụ thể ──
+  // Kế toán CHỦ ĐỘNG chọn đơn hàng + số tiền — không tự động FIFO vào đơn nào.
+  const [applyCreditModal, setApplyCreditModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
+  const [applyCreditAmount, setApplyCreditAmount] = useState<string>('0');
+
+  const openApplyCreditModal = (order: PurchaseOrder) => {
+    const balance = supplierCreditBalance(order.supplierId);
+    const congNo = order.congNo || 0;
+    setApplyCreditAmount(String(Math.max(0, Math.min(balance, congNo))));
+    setApplyCreditModal({ open: true, order });
+  };
+
+  // Coi việc áp dụng Số dư Có như 1 hình thức "thanh toán không dùng tiền
+  // mặt": cộng thẳng vào thanhToanThucTe/congNo của PO — TÁI DÙNG đúng công
+  // thức đã dùng ở saveOrderEdit/handleFinalizeShortDelivery
+  // (MaterialCoordination.tsx) — nhờ vậy handleCreatePoPayment/
+  // expandToDetailRows/getRecordedPOSum (đều đọc congNo/thanhToanThucTe) tự
+  // phản ánh đúng, không cần sửa logic giới hạn thanh toán ở nơi khác.
+  const applySupplierCredit = async () => {
+    const order = applyCreditModal.order;
+    if (!order) return;
+    const amount = Number(applyCreditAmount) || 0;
+    const balance = supplierCreditBalance(order.supplierId);
+    const congNo = order.congNo || 0;
+    if (amount <= 0) {
+      addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập số tiền cần áp dụng.', type: 'warning' });
+      return;
+    }
+    if (amount > balance + 1) {
+      addToast({ title: '⚠️ Vượt quá Số dư Có', message: `Số tiền không được lớn hơn Số dư Có khả dụng (${balance.toLocaleString('vi-VN')} đ).`, type: 'warning' });
+      return;
+    }
+    if (amount > congNo + 1) {
+      addToast({ title: '⚠️ Vượt quá công nợ', message: `Số tiền không được lớn hơn công nợ còn lại của đơn này (${congNo.toLocaleString('vi-VN')} đ).`, type: 'warning' });
+      return;
+    }
+
+    // Trừ dần vào các chứng từ Trả Hàng còn số dư của NCC này — cũ nhất trước.
+    let remain = amount;
+    const relevantReturns = supplierReturns
+      .filter((r: any) => r.supplierId === order.supplierId && r.status === 'confirmed' && ((r.totalAmount || 0) - (r.appliedAmount || 0)) > 0)
+      .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    for (const r of relevantReturns) {
+      if (remain <= 0) break;
+      const avail = (r.totalAmount || 0) - (r.appliedAmount || 0);
+      const use = Math.min(avail, remain);
+      const updated = {
+        ...r,
+        appliedAmount: (r.appliedAmount || 0) + use,
+        applications: [...(r.applications || []), { purchaseOrderId: order.id, amount: use, appliedAt: new Date().toISOString(), appliedBy: currentUser?.name || '' }],
+      };
+      await dbService.supplierReturns.save(updated).catch(() => {});
+      remain -= use;
+    }
+
+    const newThanhToan = (order.thanhToanThucTe || 0) + amount;
+    const newCongNo = (order.tongTien || 0) - newThanhToan;
+    const noteLine = `Đã trừ ${amount.toLocaleString('vi-VN')}đ từ Số dư Có (Trả hàng NCC) ngày ${new Date().toLocaleDateString('vi-VN')}`;
+    const updatedOrder = { ...order, thanhToanThucTe: newThanhToan, congNo: newCongNo, notes: order.notes ? `${order.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
+    await dbService.purchaseOrders.save(updatedOrder).catch(() => {});
+    setPurchaseOrders(prev => prev.map(o => o.id === order.id ? updatedOrder : o));
+
+    window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+    window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
+    setApplyCreditModal({ open: false, order: null });
+    setApplyCreditAmount('0');
+    addToast({ title: '✅ Đã áp dụng Số dư Có', message: `Đã trừ ${amount.toLocaleString('vi-VN')}đ vào công nợ đơn ${order.id}.`, type: 'success' });
+  };
   // ── Tab Đơn Hàng: gom theo NCC, ghi nhận công nợ per-order, sửa đơn giá ──
   const [poExpandedSuppliers, setPoExpandedSuppliers] = useState<Set<string>>(new Set());
   const [poPage, setPoPage] = useState(1);
@@ -2783,6 +2853,24 @@ export default function FinanceManagement({
   useEffect(() => {
     setPurchaseOrders(purchaseOrdersProp);
   }, [purchaseOrdersProp]);
+
+  // ── Trả Hàng NCC: tự quản lý riêng (chưa có prop từ App.tsx) — chứng từ
+  // độc lập, tạo ra "Số dư Có" NCC dùng để trừ vào công nợ ở tab Công Nợ Trả
+  // (xem MaterialCoordination.tsx openReturnModal/handleReturnOrder). ──
+  const [supplierReturns, setSupplierReturns] = useState<any[]>([]);
+  useEffect(() => {
+    const load = () => dbService.supplierReturns.list().then(setSupplierReturns).catch(() => {});
+    load();
+    window.addEventListener('hl-supplier-returns-updated', load);
+    return () => window.removeEventListener('hl-supplier-returns-updated', load);
+  }, []);
+
+  // Số dư Có hiện có của 1 NCC — tính động từ ledger (KHÔNG lưu field riêng),
+  // đúng pattern cashFundBalance đã dùng cho Quỹ Tiền Mặt trong file này.
+  const supplierCreditBalance = (supplierId: string): number =>
+    supplierReturns
+      .filter((r: any) => r.supplierId === supplierId && r.status === 'confirmed')
+      .reduce((sum: number, r: any) => sum + ((r.totalAmount || 0) - (r.appliedAmount || 0)), 0);
 
   // ── Đơn hàng bán: Handlers ──
   const generateSOCode = (): string => {
@@ -8977,6 +9065,18 @@ export default function FinanceManagement({
                                         {g.name}
                                       </button>
                                       <div className="text-[9px] text-slate-400 mt-0.5">{g.items.length} khoản nợ</div>
+                                      {/* Số dư Có NCC (từ Trả Hàng chưa áp dụng hết) — chỉ hiện cho NCC vật tư */}
+                                      {g.category === 'Nhà Cung Cấp' && (() => {
+                                        const poItem = g.items.find((it: any) => it.purchaseOrderId);
+                                        const supplierId = poItem ? purchaseOrders.find(p => p.id === poItem.purchaseOrderId)?.supplierId : undefined;
+                                        const balance = supplierId ? supplierCreditBalance(supplierId) : 0;
+                                        if (balance <= 0) return null;
+                                        return (
+                                          <div className="text-[9px] text-rose-400 font-bold mt-0.5">
+                                            ↩️ Số dư Có: {balance.toLocaleString('vi-VN')} đ (từ trả hàng)
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                 </td>
@@ -9047,14 +9147,34 @@ export default function FinanceManagement({
                                     {item.notes || '-'}
                                   </td>
                                   <td className="px-3 py-2.5 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenProposalFromLiability(item)}
-                                      className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
-                                      title="Tạo Đề Xuất Chi từ công nợ này"
-                                    >
-                                      <FileText className="w-3 h-3" /> Đề Xuất Chi
-                                    </button>
+                                    <div className="flex flex-col items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenProposalFromLiability(item)}
+                                        className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
+                                        title="Tạo Đề Xuất Chi từ công nợ này"
+                                      >
+                                        <FileText className="w-3 h-3" /> Đề Xuất Chi
+                                      </button>
+                                      {/* Áp dụng Số dư Có NCC (từ Trả Hàng) — chỉ hiện cho dòng gắn 1 đơn hàng
+                                          cụ thể, còn công nợ, và NCC đó đang có số dư Có khả dụng. */}
+                                      {item.purchaseOrderId && g.category === 'Nhà Cung Cấp' && (() => {
+                                        const po = purchaseOrders.find(p => p.id === item.purchaseOrderId);
+                                        if (!po || (po.congNo || 0) <= 0) return null;
+                                        const balance = supplierCreditBalance(po.supplierId);
+                                        if (balance <= 0) return null;
+                                        return (
+                                          <button
+                                            type="button"
+                                            onClick={() => openApplyCreditModal(po)}
+                                            className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
+                                            title={`Áp dụng Số dư Có (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
+                                          >
+                                            <Undo2 className="w-3 h-3" /> Áp dụng Có
+                                          </button>
+                                        );
+                                      })()}
+                                    </div>
                                   </td>
                                 </tr>
                               ))}
@@ -10499,6 +10619,90 @@ export default function FinanceManagement({
                   className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
                 >
                   <RefreshCcw className="w-3.5 h-3.5" /> Xác nhận hoàn tác
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL: ÁP DỤNG SỐ DƯ CÓ NCC (từ Trả Hàng) vào công nợ 1 đơn hàng */}
+      {applyCreditModal.open && applyCreditModal.order && (() => {
+        const order = applyCreditModal.order;
+        const balance = supplierCreditBalance(order.supplierId);
+        const congNo = order.congNo || 0;
+        const amount = Number(applyCreditAmount) || 0;
+        const invalid = amount <= 0 || amount > balance + 1 || amount > congNo + 1;
+        return (
+          <div
+            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setApplyCreditModal({ open: false, order: null })}
+          >
+            <div
+              className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Undo2 className="w-5 h-5 text-rose-400" />
+                  <span className="font-black text-sm text-white uppercase">Áp dụng Số dư Có NCC</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setApplyCreditModal({ open: false, order: null })}
+                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-5 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Đơn hàng</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{order.id}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Công nợ còn lại</label>
+                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{congNo.toLocaleString('vi-VN')} đ</div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
+                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{order.supplierName || '—'}</div>
+                </div>
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[10px] font-semibold">
+                  ↩️ Số dư Có khả dụng (từ trả hàng): {balance.toLocaleString('vi-VN')} đ
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền áp dụng</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.min(balance, congNo)}
+                    value={applyCreditAmount}
+                    onChange={(e) => setApplyCreditAmount(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold text-sm outline-none focus:border-rose-500"
+                  />
+                </div>
+                <p className="text-[9.5px] text-slate-500 italic">
+                  Tương đương ghi nhận "thanh toán không dùng tiền mặt" — công nợ đơn hàng này giảm đúng số tiền áp dụng, không tạo phiếu chi.
+                </p>
+              </div>
+              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setApplyCreditModal({ open: false, order: null })}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={applySupplierCredit}
+                  disabled={invalid}
+                  className={`flex-1 ${invalid ? 'opacity-50 cursor-not-allowed bg-rose-600' : 'bg-rose-600 hover:bg-rose-500 cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 transition-all`}
+                >
+                  <Undo2 className="w-3.5 h-3.5" /> Xác nhận áp dụng
                 </button>
               </div>
             </div>
