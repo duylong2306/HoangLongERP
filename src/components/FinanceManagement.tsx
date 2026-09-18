@@ -2186,9 +2186,13 @@ export default function FinanceManagement({
     }
 
     // Trừ dần vào các chứng từ Trả Hàng còn số dư của NCC này — cũ nhất trước.
+    // CHỈ lấy từ các chứng từ có đơn hàng gốc ĐÃ ghi nhận công nợ — trả hàng
+    // của đơn CHƯA ghi nhận (chưa từng thực sự nợ NCC, thanhToanThucTe luôn =
+    // 0) không được coi là "NCC Nợ" khả dụng, tránh dùng 1 khoản nợ chưa từng
+    // tồn tại để trừ vào công nợ thật của đơn khác (xem supplierCreditBalance).
     let remain = amount;
     const relevantReturns = supplierReturns
-      .filter((r: any) => r.supplierId === order.supplierId && r.status === 'confirmed' && ((r.totalAmount || 0) - (r.appliedAmount || 0)) > 0)
+      .filter((r: any) => r.supplierId === order.supplierId && r.status === 'confirmed' && isPoRecorded(r.purchaseOrderId) && ((r.totalAmount || 0) - (r.appliedAmount || 0)) > 0)
       .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     for (const r of relevantReturns) {
       if (remain <= 0) break;
@@ -2867,9 +2871,18 @@ export default function FinanceManagement({
 
   // Khoản NCC Nợ (trả hàng) hiện có của 1 NCC — tính động từ ledger (KHÔNG lưu field riêng),
   // đúng pattern cashFundBalance đã dùng cho Quỹ Tiền Mặt trong file này.
+  // CHỈ tính các chứng từ có đơn hàng gốc ĐÃ ghi nhận công nợ (isPoRecorded):
+  // đơn CHƯA ghi nhận thì thanhToanThucTe luôn = 0 (chưa từng trả tiền) →
+  // trả lại hàng của đơn đó không tạo ra khoản NCC thực sự nợ lại công ty
+  // (công ty chưa trả tiền thì không có gì để hoàn), chỉ đơn giản là hủy bớt
+  // giao dịch — nếu tính vào đây sẽ cho phép dùng 1 khoản "nợ" chưa từng tồn
+  // tại để trừ vào công nợ THẬT của một đơn khác (xem chi tiết đã trao đổi).
+  // Trả hàng của đơn chưa ghi nhận vẫn được tự bù trừ đúng cho CHÍNH đơn đó
+  // khi ghi nhận (netOwnReturnOnRecord) — không mất, chỉ không "treo" ra
+  // ngoài để áp dụng chéo trước khi đơn được ghi nhận.
   const supplierCreditBalance = (supplierId: string): number =>
     supplierReturns
-      .filter((r: any) => r.supplierId === supplierId && r.status === 'confirmed')
+      .filter((r: any) => r.supplierId === supplierId && r.status === 'confirmed' && isPoRecorded(r.purchaseOrderId))
       .reduce((sum: number, r: any) => sum + ((r.totalAmount || 0) - (r.appliedAmount || 0)), 0);
 
   // Gợi ý đơn hàng nên ưu tiên áp dụng khoản NCC Nợ trước — KHÔNG tự động áp
