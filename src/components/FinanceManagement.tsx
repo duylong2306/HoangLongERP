@@ -9055,7 +9055,20 @@ export default function FinanceManagement({
                         </tr>
                       ) : (
                         liabilityPageInfo.pageItems.map((g: any) => {
-                          const expanded = expandedLiabilities.has(g.key);
+                          // Khi từ khóa tìm kiếm khớp trực tiếp vào 1/vài dòng chi tiết cụ thể
+                          // (VD: mã đơn hàng PO-... từ nút "Xem Công Nợ Trả" ở Điều phối vật
+                          // tư) — CHỈ hiện đúng (các) dòng khớp thay vì cả 15 khoản nợ của NCC
+                          // (trước đây search chỉ lọc ở CẤP NHÓM nên luôn hiện nguyên nhóm, gây
+                          // cảm giác "tìm không ra"). Nếu từ khóa khớp tên/loại NCC (tìm kiếm
+                          // thông thường theo NCC) thì vẫn giữ hành vi cũ — hiện đủ mọi khoản nợ.
+                          const kw = (searchTerm || '').toLowerCase().trim();
+                          const nameOrCategoryMatches = !!kw && `${g.name || ''} ${g.category || ''}`.toLowerCase().includes(kw);
+                          const itemMatches = kw && !nameOrCategoryMatches
+                            ? g.items.filter((it: any) => (it.notes || '').toLowerCase().includes(kw))
+                            : null;
+                          const displayItems = itemMatches && itemMatches.length > 0 ? itemMatches : g.items;
+                          const isNarrowed = displayItems !== g.items;
+                          const expanded = isNarrowed || expandedLiabilities.has(g.key);
                           const toggle = () => setExpandedLiabilities(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
                           return (
                             <React.Fragment key={g.key}>
@@ -9078,7 +9091,9 @@ export default function FinanceManagement({
                                       >
                                         {g.name}
                                       </button>
-                                      <div className="text-[9px] text-slate-400 mt-0.5">{g.items.length} khoản nợ</div>
+                                      <div className="text-[9px] text-slate-400 mt-0.5">
+                                        {isNarrowed ? `${displayItems.length}/${g.items.length} khoản nợ (đang lọc theo tìm kiếm)` : `${g.items.length} khoản nợ`}
+                                      </div>
                                       {/* Số dư Có NCC (từ Trả Hàng chưa áp dụng hết) — chỉ hiện cho NCC vật tư */}
                                       {g.category === 'Nhà Cung Cấp' && (() => {
                                         const poItem = g.items.find((it: any) => it.purchaseOrderId);
@@ -9133,7 +9148,7 @@ export default function FinanceManagement({
                               </tr>
 
                               {/* Chi tiết từng khoản nợ khi mở rộng */}
-                              {expanded && g.items.map((item: any) => (
+                              {expanded && displayItems.map((item: any) => (
                                 <tr key={item.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
                                   <td className="px-3 py-2.5 pl-9">
                                     <div className="font-semibold text-slate-200 text-[11px]">{item.notes || item.name}</div>
