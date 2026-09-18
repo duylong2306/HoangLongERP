@@ -46,6 +46,7 @@ import {
   Zap,
   Download,
   Undo2,
+  ExternalLink,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 
@@ -2772,8 +2773,25 @@ export default function MaterialCoordination({
                               {(() => {
                                 const orderReturns = supplierReturns.filter((r: any) => r.purchaseOrderId === o.id);
                                 if (orderReturns.length === 0) return null;
+                                // Điền sẵn ô "Tìm kiếm nhanh" ở tab Công Nợ Trả (Tài Chính - Kế Toán)
+                                // bằng đúng mã đơn hàng — khớp trực tiếp vào ghi chú dòng chi tiết
+                                // liability nên lọc ra đúng NCC (xem FinanceManagement.tsx).
+                                const goToLiability = () => {
+                                  localStorage.setItem('hl_prefill_liability_search', o.id);
+                                  window.dispatchEvent(new CustomEvent('hl-switch-tab', {
+                                    detail: { tab: 'finance', financeSubTab: 'cong_no_phai_tra' },
+                                  }));
+                                };
                                 return (
                                   <div className="px-3 pb-2 space-y-1">
+                                    <button
+                                      type="button"
+                                      onClick={goToLiability}
+                                      className="text-[9px] text-slate-500 hover:text-rose-600 font-bold flex items-center gap-1 cursor-pointer transition-all underline decoration-dotted underline-offset-2"
+                                      title="Mở Công Nợ Trả (Tài Chính - Kế Toán) đã lọc sẵn theo đơn hàng này"
+                                    >
+                                      <ExternalLink className="w-3 h-3" /> Xem Công Nợ Trả của đơn {o.id}
+                                    </button>
                                     {orderReturns.map((r: any) => (
                                       <div key={r.id} className="flex items-center justify-between gap-2 text-[9px] bg-rose-50/50 border border-rose-200/60 rounded-lg px-2 py-1">
                                         <span className="text-rose-700 font-bold truncate">
