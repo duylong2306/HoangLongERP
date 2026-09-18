@@ -2872,6 +2872,16 @@ export default function FinanceManagement({
       .filter((r: any) => r.supplierId === supplierId && r.status === 'confirmed')
       .reduce((sum: number, r: any) => sum + ((r.totalAmount || 0) - (r.appliedAmount || 0)), 0);
 
+  // Gợi ý đơn hàng nên ưu tiên áp dụng khoản NCC Nợ trước — KHÔNG tự động áp
+  // dụng (kế toán vẫn phải bấm "Áp dụng Nợ" để xác nhận), chỉ đánh dấu đơn
+  // hàng công nợ cũ nhất của NCC đó để gợi ý ưu tiên trả nợ cũ trước.
+  const suggestedApplyOrderId = (supplierId: string): string | null => {
+    const candidates = purchaseOrders
+      .filter(p => p.supplierId === supplierId && (p.congNo || 0) > 0)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return candidates.length > 0 ? candidates[0].id : null;
+  };
+
   // ── Đơn hàng bán: Handlers ──
   const generateSOCode = (): string => {
     return generateOrderCode('DH', salesOrders.map(o => o.id));
@@ -9192,15 +9202,26 @@ export default function FinanceManagement({
                                         if (!po || (po.congNo || 0) <= 0) return null;
                                         const balance = supplierCreditBalance(po.supplierId);
                                         if (balance <= 0) return null;
+                                        // Gợi ý (không tự động) — đơn hàng công nợ cũ nhất của NCC này.
+                                        const isSuggested = suggestedApplyOrderId(po.supplierId) === po.id;
                                         return (
-                                          <button
-                                            type="button"
-                                            onClick={() => openApplyCreditModal(po)}
-                                            className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
-                                            title={`Áp dụng NCC Nợ (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
-                                          >
-                                            <Undo2 className="w-3 h-3" /> Áp dụng Nợ
-                                          </button>
+                                          <div className="flex flex-col items-center gap-0.5">
+                                            {isSuggested && (
+                                              <span className="text-[8.5px] font-extrabold text-amber-400 flex items-center gap-0.5">
+                                                ⭐ Ưu tiên (nợ cũ nhất)
+                                              </span>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => openApplyCreditModal(po)}
+                                              className={`bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto ${isSuggested ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-900' : ''}`}
+                                              title={isSuggested
+                                                ? `Gợi ý ưu tiên áp dụng vào đơn này (công nợ cũ nhất của NCC) — khả dụng ${balance.toLocaleString('vi-VN')}đ`
+                                                : `Áp dụng NCC Nợ (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
+                                            >
+                                              <Undo2 className="w-3 h-3" /> Áp dụng Nợ
+                                            </button>
+                                          </div>
                                         );
                                       })()}
                                     </div>
