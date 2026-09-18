@@ -2882,6 +2882,20 @@ export default function FinanceManagement({
     return candidates.length > 0 ? candidates[0].id : null;
   };
 
+  // Tổng giá trị đã trả hàng của CHÍNH đơn này (không phụ thuộc đã áp dụng
+  // hay chưa) — dùng để biết đơn đã trả HẾT hay chỉ MỘT PHẦN trước khi ghi
+  // nhận công nợ lần đầu (xem handleRecordSupplierDebt/netOwnReturnOnRecord).
+  const supplierReturnedAmountForOrder = (orderId: string): number =>
+    supplierReturns
+      .filter((r: any) => r.purchaseOrderId === orderId && r.status === 'confirmed')
+      .reduce((sum: number, r: any) => sum + (r.totalAmount || 0), 0);
+
+  // Đơn đã bị trả lại TOÀN BỘ giá trị → không còn công nợ nào để ghi nhận.
+  const isOrderFullyReturned = (order: PurchaseOrder): boolean => {
+    const tongTien = order.tongTien || 0;
+    return tongTien > 0 && supplierReturnedAmountForOrder(order.id) >= tongTien - 1;
+  };
+
   // ── Đơn hàng bán: Handlers ──
   const generateSOCode = (): string => {
     return generateOrderCode('DH', salesOrders.map(o => o.id));
@@ -4826,6 +4840,13 @@ export default function FinanceManagement({
       addToast({ title: 'ℹ️ Đã ghi nhận', message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả.`, type: 'info' });
       return false;
     }
+    // Đơn đã bị trả lại 100% hàng cho NCC trước khi từng ghi nhận công nợ →
+    // không còn khoản nào để ghi nhận (chặn ở tầng logic, không chỉ ẩn nút,
+    // để an toàn với mọi đường gọi tới hàm này).
+    if (isOrderFullyReturned(order)) {
+      addToast({ title: 'ℹ️ Đã trả hết hàng', message: `Đơn ${order.id} đã được trả lại toàn bộ cho NCC, không có công nợ để ghi nhận.`, type: 'info' });
+      return false;
+    }
     const existing = customLiabilities.find(l => l.name === order.supplierName && l.category === 'Nhà Cung Cấp');
     if (existing) {
       // NCC đã có liability → gắn PO id vào recordedPurchaseOrderIds
@@ -4851,6 +4872,9 @@ export default function FinanceManagement({
         addToast({ title: '⚠️ Lưu ý', message: `Đã ghi nhận công nợ nhưng chưa cập nhật được trạng thái đơn ${order.id}.`, type: 'warning' });
         return true;
       }
+      // 4) Đơn từng bị trả hàng 1 phần trước khi ghi nhận → tự động bù trừ
+      // phần đó vào công nợ vừa ghi nhận (xem netOwnReturnOnRecord).
+      await netOwnReturnOnRecord(updatedPo);
       addToast({
         title: '✅ Đã ghi nhận',
         message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả của ${order.supplierName}.`,
@@ -4890,12 +4914,55 @@ export default function FinanceManagement({
       addToast({ title: '⚠️ Lưu ý', message: `Đã ghi nhận công nợ nhưng chưa cập nhật được trạng thái đơn ${order.id}.`, type: 'warning' });
       return true;
     }
+    // Đơn từng bị trả hàng 1 phần trước khi ghi nhận → tự động bù trừ phần
+    // đó vào công nợ vừa ghi nhận (xem netOwnReturnOnRecord).
+    await netOwnReturnOnRecord(updatedPo);
     addToast({
       title: '✅ Đã ghi nhận',
       message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả của ${order.supplierName}.`,
       type: 'success'
     });
     return true;
+  };
+
+  // Khi ghi nhận công nợ lần đầu cho 1 đơn ĐÃ bị trả hàng 1 phần (trước khi
+  // từng ghi nhận) — tự động bù trừ phần trả hàng CỦA CHÍNH đơn này vào công
+  // nợ vừa ghi nhận, để công nợ hiển thị đúng phần CÒN LẠI. KHÔNG đụng tới
+  // khoản Nợ từ các đơn khác của cùng NCC — việc áp dụng chéo sang đơn khác
+  // vẫn là thao tác thủ công của kế toán qua nút "Áp dụng Nợ"
+  // (xem applySupplierCredit). Tái dùng đúng công thức thanhToanThucTe/congNo
+  // đã dùng ở applySupplierCredit.
+  const netOwnReturnOnRecord = async (order: PurchaseOrder) => {
+    const ownReturns = supplierReturns
+      .filter((r: any) => r.purchaseOrderId === order.id && r.status === 'confirmed' && ((r.totalAmount || 0) - (r.appliedAmount || 0)) > 0)
+      .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    if (ownReturns.length === 0) return;
+
+    const available = ownReturns.reduce((s: number, r: any) => s + ((r.totalAmount || 0) - (r.appliedAmount || 0)), 0);
+    let remain = Math.min(order.congNo || 0, available);
+    if (remain <= 0) return;
+    const applyAmount = remain;
+
+    for (const r of ownReturns) {
+      if (remain <= 0) break;
+      const avail = (r.totalAmount || 0) - (r.appliedAmount || 0);
+      const use = Math.min(avail, remain);
+      const updated = {
+        ...r,
+        appliedAmount: (r.appliedAmount || 0) + use,
+        applications: [...(r.applications || []), { purchaseOrderId: order.id, amount: use, appliedAt: new Date().toISOString(), appliedBy: currentUser?.name || '' }],
+      };
+      await dbService.supplierReturns.save(updated).catch(() => {});
+      remain -= use;
+    }
+
+    const newThanhToan = (order.thanhToanThucTe || 0) + applyAmount;
+    const newCongNo = (order.tongTien || 0) - newThanhToan;
+    const noteLine = `Tự động bù trừ ${applyAmount.toLocaleString('vi-VN')}đ từ trả hàng 1 phần của chính đơn này khi ghi nhận công nợ, ngày ${new Date().toLocaleDateString('vi-VN')}`;
+    const updatedOrder = { ...order, thanhToanThucTe: newThanhToan, congNo: newCongNo, notes: order.notes ? `${order.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
+    await dbService.purchaseOrders.save(updatedOrder).catch(() => {});
+    setPurchaseOrders(prev => prev.map(o => o.id === order.id ? updatedOrder : o));
+    window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
   };
 
   // Hoàn tác ghi nhận công nợ của 1 đơn hàng — dùng khi lỡ ghi nhận nhầm (vd
@@ -5621,6 +5688,7 @@ export default function FinanceManagement({
                                 const st = getPoRowStatus(o);
                                 const recorded = isPoRecorded(o.id);
                                 const isFromWarehouse = (o as any).fromWarehouse || o.supplierId === WAREHOUSE_SOURCE_ID;
+                                const fullyReturned = !recorded && isOrderFullyReturned(o);
                                 return (
                                   <tr key={o.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
                                     <td className="px-3 py-2.5 text-center text-slate-600">—</td>
@@ -5659,6 +5727,8 @@ export default function FinanceManagement({
                                               <RefreshCcw className="w-3.5 h-3.5" />
                                             </button>
                                           </>
+                                        ) : fullyReturned ? (
+                                          <span className="text-[9px] font-bold text-rose-600 border border-rose-400 bg-white px-2 py-1 rounded-lg" title="Đơn hàng đã được trả lại toàn bộ hàng cho NCC — không phát sinh công nợ cần ghi nhận">↩️ Đã trả hết hàng</span>
                                         ) : (
                                           <button type="button" onClick={() => setPoRecordConfirm(o)} className="bg-white border border-orange-500 text-orange-500 hover:bg-orange-50 p-1.5 rounded-lg flex items-center justify-center cursor-pointer transition-all" title="Ghi nhận công nợ nhà cung cấp">
                                             <Plus className="w-3.5 h-3.5" />
@@ -10324,6 +10394,7 @@ export default function FinanceManagement({
         const o = poDetailModal.order;
         const recorded = isPoRecorded(o.id);
         const isFromWarehouse = (o as any).fromWarehouse || o.supplierId === WAREHOUSE_SOURCE_ID;
+        const fullyReturned = !recorded && isOrderFullyReturned(o);
         const st = getPoRowStatus(o);
         const editing = poEditId === o.id;
         const displayItems = editing ? poEditItems : (o.items || []);
@@ -10492,6 +10563,10 @@ export default function FinanceManagement({
                       {isFromWarehouse ? (
                         <span className="bg-teal-50 border border-teal-200 text-teal-700 text-[10px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">
                           📦 Đơn nội bộ (Kho) — không công nợ
+                        </span>
+                      ) : fullyReturned ? (
+                        <span className="bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn hàng đã được trả lại toàn bộ hàng cho NCC — không phát sinh công nợ cần ghi nhận">
+                          ↩️ Đã trả hết hàng — không công nợ
                         </span>
                       ) : (
                         <button
