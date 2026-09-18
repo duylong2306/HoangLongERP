@@ -9122,6 +9122,38 @@ export default function FinanceManagement({
                   <button type="button" onClick={() => { const y = new Date().getFullYear(); updateLiabilityFilter({ category: '', status: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
                 </div>
 
+                {/* Tổng hợp NCC Nợ (trả hàng) khả dụng — hiển thị LUÔN, KHÔNG phụ
+                    thuộc bộ lọc ngày/phân loại/trạng thái/tìm kiếm ở trên, để không
+                    bị "ẩn" số dư khi group NCC tương ứng bị lọc mất khỏi bảng bên
+                    dưới (badge trong bảng chỉ hiện khi group đó lọt qua bộ lọc). */}
+                {(() => {
+                  const creditMap = new Map<string, { supplierName: string; balance: number }>();
+                  supplierReturns.forEach((r: any) => {
+                    if (r.status !== 'confirmed' || !isPoRecorded(r.purchaseOrderId)) return;
+                    const avail = (r.totalAmount || 0) - (r.appliedAmount || 0);
+                    if (avail <= 0) return;
+                    const cur = creditMap.get(r.supplierId) || { supplierName: r.supplierName, balance: 0 };
+                    cur.balance += avail;
+                    creditMap.set(r.supplierId, cur);
+                  });
+                  const list = Array.from(creditMap.entries());
+                  if (list.length === 0) return null;
+                  return (
+                    <div className="bg-rose-950/20 border border-rose-900/40 rounded-xl px-3 py-2.5 space-y-1.5">
+                      <div className="text-[10px] font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1">
+                        ↩️ NCC Nợ (trả hàng) khả dụng — {list.length} nhà cung cấp
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {list.map(([supplierId, v]) => (
+                          <span key={supplierId} className="text-[10.5px] bg-slate-900 border border-rose-900/50 text-rose-300 rounded-lg px-2.5 py-1 font-semibold">
+                            {v.supplierName}: <b>{v.balance.toLocaleString('vi-VN')} đ</b>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="overflow-x-auto text-[10.5px]">
                   <table className="w-full text-left text-slate-300">
                     <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
