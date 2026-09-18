@@ -45,6 +45,7 @@ import {
   PanelRightClose,
   Zap,
   Download,
+  Undo2,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 
@@ -155,6 +156,12 @@ export default function MaterialCoordination({
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<string | null>(null);
   const [receiveModal, setReceiveModal] = useState<{ open: boolean; order: any | null; proposal: any | null }>({ open: false, order: null, proposal: null });
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({});
+  // Trả hàng NCC: chứng từ ĐỘC LẬP với PO gốc (không sửa receivedQty/items của
+  // PO — giữ nguyên lịch sử đã nhận). Chỉ áp dụng cho đơn đã nhận đủ.
+  const [supplierReturns, setSupplierReturns] = useState<any[]>([]);
+  const [returnModal, setReturnModal] = useState<{ open: boolean; order: any | null; proposal: any | null }>({ open: false, order: null, proposal: null });
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnReason, setReturnReason] = useState('');
   // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
   // Hồ sơ doanh nghiệp lấy trực tiếp từ SettingsContext (nguồn thật duy nhất,
   // nơi màn hình "Thông Tin Doanh Nghiệp" lưu vào bảng business_profile) —
@@ -222,6 +229,9 @@ export default function MaterialCoordination({
   const loadOrders = React.useCallback(() => {
     dbService.purchaseOrders.list().then(setPurchaseOrders).catch(() => {});
   }, []);
+  const loadSupplierReturns = React.useCallback(() => {
+    dbService.supplierReturns.list().then(setSupplierReturns).catch(() => {});
+  }, []);
   const loadSuppliers = React.useCallback(() => {
     dbService.suppliers.list().then(list => setSuppliers(list)).catch(() => {});
   }, []);
@@ -234,26 +244,30 @@ export default function MaterialCoordination({
     loadOrders();
     loadSuppliers();
     loadInventory();
-  }, [loadProposals, loadOrders, loadSuppliers, loadInventory]);
+    loadSupplierReturns();
+  }, [loadProposals, loadOrders, loadSuppliers, loadInventory, loadSupplierReturns]);
 
   React.useEffect(() => {
     const reload = () => { loadProposals(); loadOrders(); };
     const reloadOrdersOnly = () => { loadOrders(); };
     const reloadSuppliers = () => loadSuppliers();
     const reloadInventory = () => loadInventory();
+    const reloadSupplierReturns = () => loadSupplierReturns();
     window.addEventListener('hl-material-proposals-updated', reload);
     window.addEventListener('hl-purchase-orders-updated', reloadOrdersOnly);
     window.addEventListener('hl-suppliers-updated', reloadSuppliers);
     window.addEventListener('hl-inventory-updated', reloadSuppliers);
     window.addEventListener('hl-inventory-updated', reloadInventory);
+    window.addEventListener('hl-supplier-returns-updated', reloadSupplierReturns);
     return () => {
       window.removeEventListener('hl-material-proposals-updated', reload);
       window.removeEventListener('hl-purchase-orders-updated', reloadOrdersOnly);
       window.removeEventListener('hl-suppliers-updated', reloadSuppliers);
       window.removeEventListener('hl-inventory-updated', reloadSuppliers);
       window.removeEventListener('hl-inventory-updated', reloadInventory);
+      window.removeEventListener('hl-supplier-returns-updated', reloadSupplierReturns);
     };
-  }, [loadProposals, loadOrders, loadSuppliers, loadInventory]);
+  }, [loadProposals, loadOrders, loadSuppliers, loadInventory, loadSupplierReturns]);
 
   // Deep-link: mở chi tiết đề xuất khi được gọi từ module khác (tab Đơn Hàng)
   React.useEffect(() => {
@@ -283,6 +297,17 @@ export default function MaterialCoordination({
     }
     return { received: 0, poQty: null };
   };
+
+  // Tổng số lượng ĐÃ TRẢ NCC của 1 dòng vật tư trên 1 đơn hàng — cộng dồn qua
+  // mọi chứng từ Trả Hàng còn hiệu lực (status='confirmed') liên kết tới đơn
+  // đó, dùng để giới hạn không cho trả vượt quá số đã nhận thật.
+  const getReturnedQty = (orderId: string, itemId: string): number =>
+    supplierReturns
+      .filter((r: any) => r.purchaseOrderId === orderId && r.status === 'confirmed')
+      .reduce((sum: number, r: any) => {
+        const it = (r.items || []).find((i: any) => i.id === itemId);
+        return sum + (it?.qty || 0);
+      }, 0);
 
   const proposalTotal = (doc: any): number =>
     getDocItems(doc).reduce((s, m) => s + (m.qty || 0) * (m.price || 0), 0);
@@ -1590,6 +1615,97 @@ export default function MaterialCoordination({
     window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
   };
 
+  // Mở modal Trả Hàng NCC — chỉ cho đơn ĐÃ NHẬN ĐỦ. Mặc định số lượng trả = 0
+  // (không tự điền, khác nhận hàng) — người dùng chủ động chọn dòng cần trả.
+  const openReturnModal = (prop: any, orderId: string) => {
+    const order = purchaseOrders.find((o: any) => o.id === orderId);
+    if (!order) return;
+    setReturnQuantities({});
+    setReturnReason('');
+    setReturnModal({ open: true, order, proposal: prop });
+  };
+
+  // Tạo chứng từ Trả Hàng NCC — chứng từ ĐỘC LẬP, KHÔNG sửa purchase_orders
+  // gốc (giữ nguyên receivedQty/items — lịch sử đã nhận không đổi). Khi xác
+  // nhận, số tiền trả hàng trở thành "Số dư Có" của NCC, kế toán chủ động
+  // chọn đơn hàng để áp dụng ở Tài Chính - Kế Toán (xem applySupplierCredit).
+  const handleReturnOrder = async () => {
+    const { order, proposal } = returnModal;
+    if (!order || !proposal) return;
+    const items = (order.items || [])
+      .map((it: any) => {
+        const qty = returnQuantities[it.id] ?? 0;
+        if (qty <= 0) return null;
+        return { id: it.id, name: it.name, unit: it.unit, qty, price: it.price || 0, totalPrice: qty * (it.price || 0) };
+      })
+      .filter(Boolean) as any[];
+    if (items.length === 0) {
+      showNotification('Vui lòng nhập số lượng cần trả cho ít nhất 1 dòng vật tư.', 'Chưa chọn vật tư', 'warning');
+      return;
+    }
+    const totalAmount = items.reduce((s, it) => s + it.totalPrice, 0);
+
+    const doCreate = async () => {
+      try {
+        await dbService.supplierReturns.create({
+          id: `TH-${Date.now()}-0`,
+          purchaseOrderId: order.id,
+          proposalId: proposal.id,
+          proposalCode: proposal.code,
+          projectId: proposal.projectId,
+          projectName: proposal.projectName,
+          supplierId: order.supplierId,
+          supplierName: order.supplierName,
+          items,
+          totalAmount,
+          reason: returnReason.trim(),
+          status: 'confirmed',
+          appliedAmount: 0,
+          applications: [],
+          createdBy: currentUser?.id || '',
+          createdByName: currentUser?.name || '',
+          createdAt: new Date().toISOString(),
+        });
+        window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
+        showNotification(`Đã ghi nhận trả hàng ${totalAmount.toLocaleString('vi-VN')}đ cho NCC ${order.supplierName} — cộng vào Số dư Có, kế toán áp dụng vào công nợ ở Tài Chính - Kế Toán.`, 'Trả hàng NCC', 'success');
+        setReturnModal({ open: false, order: null, proposal: null });
+        setReturnQuantities({});
+        setReturnReason('');
+      } catch (e) {
+        showNotification('Có lỗi khi ghi nhận trả hàng. Vui lòng thử lại.', 'Lỗi', 'warning');
+      }
+    };
+
+    askConfirmation(
+      `Ghi nhận trả ${items.length} dòng vật tư (tổng ${totalAmount.toLocaleString('vi-VN')}đ) cho NCC "${order.supplierName}"? Số tiền này sẽ thành Số dư Có của NCC — KHÔNG sửa đơn hàng gốc. Hành động này không thể hoàn tác (chỉ xoá được khi chưa áp dụng vào công nợ nào).`,
+      'Xác nhận trả hàng NCC',
+      doCreate,
+      'Xác nhận trả hàng',
+      'Hủy bỏ'
+    );
+  };
+
+  // Xoá 1 chứng từ trả hàng — chỉ cho phép khi CHƯA được áp dụng vào công nợ
+  // đơn nào (appliedAmount === 0), tránh số dư đã dùng biến mất mà đơn hàng
+  // liên quan không được hoàn lại tương ứng.
+  const deleteSupplierReturn = (ret: any) => {
+    if ((ret.appliedAmount || 0) > 0) {
+      showNotification('Chứng từ này đã được áp dụng vào công nợ — không thể xoá trực tiếp. Vui lòng liên hệ kế toán để xử lý.', 'Không thể xoá', 'warning');
+      return;
+    }
+    askConfirmation(
+      `Xoá chứng từ trả hàng "${ret.id}" (${(ret.totalAmount || 0).toLocaleString('vi-VN')}đ)? Hành động này không thể hoàn tác.`,
+      'Xác nhận xoá chứng từ trả hàng',
+      async () => {
+        await dbService.supplierReturns.delete(ret.id).catch(() => {});
+        window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
+        showNotification('Đã xoá chứng từ trả hàng.', 'Xoá trả hàng', 'success');
+      },
+      'Xóa',
+      'Hủy bỏ'
+    );
+  };
+
   // Chốt số lượng thực nhận cho 1 đơn giao thiếu: hạ vĩnh viễn SL đặt + giá trị
   // đơn về đúng bằng SL đã thực nhận (không chờ giao phần còn thiếu nữa), giúp
   // đơn được coi là "đã nhận đủ" để chuyển đề xuất sang ĐÃ NHẬN HÀNG và đưa đúng
@@ -2634,6 +2750,53 @@ export default function MaterialCoordination({
                                   </button>
                                 </div>
                               )}
+                              {/* Trả hàng NCC — chỉ khi đơn đã nhận đủ (mô hình sàn TMĐT: KHÔNG sửa
+                                  receivedQty/items của đơn gốc, tạo 1 chứng từ độc lập liên kết tới
+                                  đơn này — xem openReturnModal/handleReturnOrder). */}
+                              {allReceived && isCoordinator && (
+                                <div className="px-3 pb-2 flex items-center justify-between gap-2 bg-rose-50/60 border-t border-rose-200/50 py-1.5">
+                                  <span className="text-[9.5px] text-rose-700 font-bold flex items-center gap-1">
+                                    ↩️ Cần trả lại hàng cho NCC?
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openReturnModal(prop, o.id)}
+                                    className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-black px-2 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap shrink-0"
+                                    title="Ghi nhận trả hàng cho nhà cung cấp"
+                                  >
+                                    Trả hàng NCC
+                                  </button>
+                                </div>
+                              )}
+                              {/* Danh sách chứng từ Trả Hàng đã tạo cho đơn này (nếu có) */}
+                              {(() => {
+                                const orderReturns = supplierReturns.filter((r: any) => r.purchaseOrderId === o.id);
+                                if (orderReturns.length === 0) return null;
+                                return (
+                                  <div className="px-3 pb-2 space-y-1">
+                                    {orderReturns.map((r: any) => (
+                                      <div key={r.id} className="flex items-center justify-between gap-2 text-[9px] bg-rose-50/50 border border-rose-200/60 rounded-lg px-2 py-1">
+                                        <span className="text-rose-700 font-bold truncate">
+                                          ↩️ {r.id} · Đã trả {(r.totalAmount || 0).toLocaleString('vi-VN')}đ
+                                          {(r.appliedAmount || 0) > 0 && (
+                                            <span className="text-slate-500 font-medium"> (đã áp dụng {(r.appliedAmount || 0).toLocaleString('vi-VN')}đ)</span>
+                                          )}
+                                        </span>
+                                        {isCoordinator && (r.appliedAmount || 0) === 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => deleteSupplierReturn(r)}
+                                            className="text-rose-500 hover:text-rose-600 shrink-0 cursor-pointer"
+                                            title="Xoá chứng từ trả hàng"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
                               {/* Item summary tags (only for not fully received) */}
                               {!allReceived && (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1">
@@ -3335,6 +3498,138 @@ export default function MaterialCoordination({
                   className={`px-5 py-2 ${Object.values(receiveQuantities).every((v) => (v as number) === 0) ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black rounded-lg flex items-center gap-1.5 transition-all`}
                 >
                   <PackageCheck className="w-4 h-4" /> Nhận hàng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
+    {/* RETURN ORDER MODAL — Trả Hàng NCC (chứng từ độc lập, không sửa PO gốc) */}
+    {returnModal.open && returnModal.order && (() => {
+      const order = returnModal.order;
+      const totalReturning = Object.values(returnQuantities).reduce((s: number, v) => s + (v as number), 0);
+      const totalReturnAmount = (order.items || []).reduce((s: number, it: any) => s + (returnQuantities[it.id] ?? 0) * (it.price || 0), 0);
+      return (
+        <div
+          className="fixed inset-0 z-[9500] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in"
+          onClick={() => { setReturnModal({ open: false, order: null, proposal: null }); setReturnQuantities({}); setReturnReason(''); }}
+        >
+          <div
+            className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-4 bg-rose-50 border-b border-rose-200 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Undo2 className="w-5 h-5 text-rose-600" />
+                <span className="font-black text-sm text-slate-900 uppercase">Trả hàng NCC</span>
+                <span className="font-mono font-extrabold text-[10px] text-rose-600 bg-white border border-rose-200 px-2 py-0.5 rounded ml-1">{order.id}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setReturnModal({ open: false, order: null, proposal: null }); setReturnQuantities({}); setReturnReason(''); }}
+                className="p-1.5 hover:bg-rose-100 rounded-full text-slate-600 cursor-pointer transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Body */}
+            <div className="p-3 sm:p-5 space-y-3 sm:space-y-4 overflow-y-auto flex-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-black text-slate-800">🏢 {order.supplierName}</span>
+                <span className="text-[10px] text-slate-500 font-mono">{formatVietnameseDateTime(order.createdAt)}</span>
+              </div>
+              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                ℹ️ Trả hàng KHÔNG sửa lại đơn hàng gốc — chỉ ghi nhận thành Số dư Có của NCC, kế toán chủ động áp dụng vào công nợ ở Tài Chính - Kế Toán.
+              </p>
+              {/* Items table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-[10.5px]">
+                  <thead className="bg-slate-100 text-slate-600 font-bold">
+                    <tr>
+                      <th className="p-2 text-center w-10">STT</th>
+                      <th className="p-2 text-left">Tên vật tư</th>
+                      <th className="p-2 text-center w-16">Đã nhận</th>
+                      <th className="p-2 text-center w-16">Đã trả</th>
+                      <th className="p-2 text-center w-24">Trả lần này</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(order.items || []).length === 0 ? (
+                      <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-[11px]">Đơn hàng không có vật tư.</td></tr>
+                    ) : (
+                      (order.items || []).map((it: any, idx: number) => {
+                        const received = it.receivedQty || 0;
+                        const alreadyReturned = getReturnedQty(order.id, it.id);
+                        const max = Math.max(0, received - alreadyReturned);
+                        return (
+                          <tr key={it.id || idx} className={`bg-white ${max <= 0 ? 'opacity-50' : ''}`}>
+                            <td className="p-2 text-center font-mono text-slate-500">{idx + 1}</td>
+                            <td className="p-2">
+                              <div className="font-semibold text-slate-800">{it.name}</div>
+                              {it.spec && <div className="text-[8.5px] text-slate-400 italic">{it.spec}</div>}
+                              {it.unit && <span className="text-[8.5px] text-slate-400">ĐVT: {it.unit}</span>}
+                            </td>
+                            <td className="p-2 text-center font-mono font-bold text-slate-700">{received}</td>
+                            <td className="p-2 text-center font-mono text-rose-500 font-bold">{alreadyReturned > 0 ? alreadyReturned : '—'}</td>
+                            <td className="p-2 text-center">
+                              {max <= 0 ? (
+                                <span className="text-[9px] text-slate-400 font-bold">Không còn để trả</span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={max}
+                                  value={returnQuantities[it.id] ?? 0}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, Math.min(max, Number(e.target.value) || 0));
+                                    setReturnQuantities(prev => ({ ...prev, [it.id]: val }));
+                                  }}
+                                  className="w-20 text-center border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-mono font-bold outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500/30"
+                                />
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {/* Lý do */}
+              <div className="space-y-1">
+                <label className="block text-slate-500 font-bold text-[10px] uppercase">Lý do trả hàng</label>
+                <textarea
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  rows={2}
+                  placeholder="VD: Hàng lỗi, giao sai quy cách, thừa so với nhu cầu thi công..."
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-rose-500 resize-none"
+                />
+              </div>
+              {/* Summary */}
+              <div className="flex justify-between items-center bg-rose-50 border border-rose-100 rounded-lg px-3 py-2 text-[11px]">
+                <span className="font-bold text-slate-600">{totalReturning} vật tư sẽ trả</span>
+                <span className="font-mono font-black text-rose-600">{totalReturnAmount.toLocaleString('vi-VN')} đ</span>
+              </div>
+              {/* Actions */}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setReturnModal({ open: false, order: null, proposal: null }); setReturnQuantities({}); setReturnReason(''); }}
+                  className="px-5 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg cursor-pointer transition-all"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReturnOrder}
+                  disabled={totalReturning === 0}
+                  className={`px-5 py-2 ${totalReturning === 0 ? 'opacity-50 cursor-not-allowed bg-rose-600' : 'bg-rose-600 hover:bg-rose-500 cursor-pointer'} text-white text-[11px] font-black rounded-lg flex items-center gap-1.5 transition-all`}
+                >
+                  <Undo2 className="w-4 h-4" /> Xác nhận trả hàng
                 </button>
               </div>
             </div>
