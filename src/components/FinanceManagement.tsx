@@ -9139,14 +9139,14 @@ export default function FinanceManagement({
                   const list = Array.from(creditMap.entries());
                   if (list.length === 0) return null;
                   return (
-                    <div className="bg-rose-950/20 border border-rose-900/40 rounded-xl px-3 py-2.5 space-y-1.5">
-                      <div className="text-[10px] font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1">
+                    <div className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-2.5 space-y-1.5">
+                      <div className="text-[10px] font-extrabold text-rose-700 uppercase tracking-wider flex items-center gap-1">
                         ↩️ NCC Nợ (trả hàng) khả dụng — {list.length} nhà cung cấp
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {list.map(([supplierId, v]) => (
-                          <span key={supplierId} className="text-[10.5px] bg-slate-900 border border-rose-900/50 text-rose-300 rounded-lg px-2.5 py-1 font-semibold">
-                            {v.supplierName}: <b>{v.balance.toLocaleString('vi-VN')} đ</b>
+                          <span key={supplierId} className="text-[10.5px] bg-white border border-rose-300 text-rose-700 rounded-lg px-2.5 py-1 font-bold">
+                            {v.supplierName}: <b className="text-rose-800">{v.balance.toLocaleString('vi-VN')} đ</b>
                           </span>
                         ))}
                       </div>
