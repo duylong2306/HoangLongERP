@@ -2148,7 +2148,7 @@ export default function FinanceManagement({
     addToast({ title: '✅ Đã lập phiếu chi', message: `Phiếu chi ${newPayment.code} cho đơn ${order.id} đã tạo. Chờ duyệt để ghi nhận thanh toán.`, type: 'success' });
   };
 
-  // ── Áp dụng Số dư Có NCC (từ Trả Hàng) vào công nợ 1 đơn hàng cụ thể ──
+  // ── Áp dụng khoản NCC Nợ (trả hàng) vào công nợ 1 đơn hàng cụ thể ──
   // Kế toán CHỦ ĐỘNG chọn đơn hàng + số tiền — không tự động FIFO vào đơn nào.
   const [applyCreditModal, setApplyCreditModal] = useState<{ open: boolean; order: PurchaseOrder | null }>({ open: false, order: null });
   const [applyCreditAmount, setApplyCreditAmount] = useState<string>('0');
@@ -2160,7 +2160,7 @@ export default function FinanceManagement({
     setApplyCreditModal({ open: true, order });
   };
 
-  // Coi việc áp dụng Số dư Có như 1 hình thức "thanh toán không dùng tiền
+  // Coi việc áp dụng khoản NCC Nợ (trả hàng) như 1 hình thức "thanh toán không dùng tiền
   // mặt": cộng thẳng vào thanhToanThucTe/congNo của PO — TÁI DÙNG đúng công
   // thức đã dùng ở saveOrderEdit/handleFinalizeShortDelivery
   // (MaterialCoordination.tsx) — nhờ vậy handleCreatePoPayment/
@@ -2177,7 +2177,7 @@ export default function FinanceManagement({
       return;
     }
     if (amount > balance + 1) {
-      addToast({ title: '⚠️ Vượt quá Số dư Có', message: `Số tiền không được lớn hơn Số dư Có khả dụng (${balance.toLocaleString('vi-VN')} đ).`, type: 'warning' });
+      addToast({ title: '⚠️ Vượt quá NCC Nợ (trả hàng)', message: `Số tiền không được lớn hơn NCC Nợ (trả hàng) khả dụng (${balance.toLocaleString('vi-VN')} đ).`, type: 'warning' });
       return;
     }
     if (amount > congNo + 1) {
@@ -2205,7 +2205,7 @@ export default function FinanceManagement({
 
     const newThanhToan = (order.thanhToanThucTe || 0) + amount;
     const newCongNo = (order.tongTien || 0) - newThanhToan;
-    const noteLine = `Đã trừ ${amount.toLocaleString('vi-VN')}đ từ Số dư Có (Trả hàng NCC) ngày ${new Date().toLocaleDateString('vi-VN')}`;
+    const noteLine = `Đã trừ ${amount.toLocaleString('vi-VN')}đ từ khoản NCC Nợ (trả hàng) ngày ${new Date().toLocaleDateString('vi-VN')}`;
     const updatedOrder = { ...order, thanhToanThucTe: newThanhToan, congNo: newCongNo, notes: order.notes ? `${order.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
     await dbService.purchaseOrders.save(updatedOrder).catch(() => {});
     setPurchaseOrders(prev => prev.map(o => o.id === order.id ? updatedOrder : o));
@@ -2214,7 +2214,7 @@ export default function FinanceManagement({
     window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
     setApplyCreditModal({ open: false, order: null });
     setApplyCreditAmount('0');
-    addToast({ title: '✅ Đã áp dụng Số dư Có', message: `Đã trừ ${amount.toLocaleString('vi-VN')}đ vào công nợ đơn ${order.id}.`, type: 'success' });
+    addToast({ title: '✅ Đã áp dụng NCC Nợ (trả hàng)', message: `Đã trừ ${amount.toLocaleString('vi-VN')}đ vào công nợ đơn ${order.id}.`, type: 'success' });
   };
   // ── Tab Đơn Hàng: gom theo NCC, ghi nhận công nợ per-order, sửa đơn giá ──
   const [poExpandedSuppliers, setPoExpandedSuppliers] = useState<Set<string>>(new Set());
@@ -2855,8 +2855,8 @@ export default function FinanceManagement({
   }, [purchaseOrdersProp]);
 
   // ── Trả Hàng NCC: tự quản lý riêng (chưa có prop từ App.tsx) — chứng từ
-  // độc lập, tạo ra "Số dư Có" NCC dùng để trừ vào công nợ ở tab Công Nợ Trả
-  // (xem MaterialCoordination.tsx openReturnModal/handleReturnOrder). ──
+  // độc lập, tạo ra khoản "NCC Nợ (trả hàng)" dùng để trừ vào công nợ ở tab
+  // Công Nợ Trả (xem MaterialCoordination.tsx openReturnModal/handleReturnOrder). ──
   const [supplierReturns, setSupplierReturns] = useState<any[]>([]);
   useEffect(() => {
     const load = () => dbService.supplierReturns.list().then(setSupplierReturns).catch(() => {});
@@ -2865,7 +2865,7 @@ export default function FinanceManagement({
     return () => window.removeEventListener('hl-supplier-returns-updated', load);
   }, []);
 
-  // Số dư Có hiện có của 1 NCC — tính động từ ledger (KHÔNG lưu field riêng),
+  // Khoản NCC Nợ (trả hàng) hiện có của 1 NCC — tính động từ ledger (KHÔNG lưu field riêng),
   // đúng pattern cashFundBalance đã dùng cho Quỹ Tiền Mặt trong file này.
   const supplierCreditBalance = (supplierId: string): number =>
     supplierReturns
@@ -9094,7 +9094,7 @@ export default function FinanceManagement({
                                       <div className="text-[9px] text-slate-400 mt-0.5">
                                         {isNarrowed ? `${displayItems.length}/${g.items.length} khoản nợ (đang lọc theo tìm kiếm)` : `${g.items.length} khoản nợ`}
                                       </div>
-                                      {/* Số dư Có NCC (từ Trả Hàng chưa áp dụng hết) — chỉ hiện cho NCC vật tư */}
+                                      {/* NCC Nợ (trả hàng chưa áp dụng hết) — chỉ hiện cho NCC vật tư */}
                                       {g.category === 'Nhà Cung Cấp' && (() => {
                                         const poItem = g.items.find((it: any) => it.purchaseOrderId);
                                         const supplierId = poItem ? purchaseOrders.find(p => p.id === poItem.purchaseOrderId)?.supplierId : undefined;
@@ -9102,7 +9102,7 @@ export default function FinanceManagement({
                                         if (balance <= 0) return null;
                                         return (
                                           <div className="text-[9px] text-rose-400 font-bold mt-0.5">
-                                            ↩️ Số dư Có: {balance.toLocaleString('vi-VN')} đ (từ trả hàng)
+                                            ↩️ NCC Nợ (trả hàng): {balance.toLocaleString('vi-VN')} đ
                                           </div>
                                         );
                                       })()}
@@ -9185,8 +9185,8 @@ export default function FinanceManagement({
                                       >
                                         <FileText className="w-3 h-3" /> Đề Xuất Chi
                                       </button>
-                                      {/* Áp dụng Số dư Có NCC (từ Trả Hàng) — chỉ hiện cho dòng gắn 1 đơn hàng
-                                          cụ thể, còn công nợ, và NCC đó đang có số dư Có khả dụng. */}
+                                      {/* Áp dụng khoản NCC Nợ (trả hàng) — chỉ hiện cho dòng gắn 1 đơn hàng
+                                          cụ thể, còn công nợ, và NCC đó đang có khoản Nợ khả dụng. */}
                                       {item.purchaseOrderId && g.category === 'Nhà Cung Cấp' && (() => {
                                         const po = purchaseOrders.find(p => p.id === item.purchaseOrderId);
                                         if (!po || (po.congNo || 0) <= 0) return null;
@@ -9197,9 +9197,9 @@ export default function FinanceManagement({
                                             type="button"
                                             onClick={() => openApplyCreditModal(po)}
                                             className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
-                                            title={`Áp dụng Số dư Có (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
+                                            title={`Áp dụng NCC Nợ (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
                                           >
-                                            <Undo2 className="w-3 h-3" /> Áp dụng Có
+                                            <Undo2 className="w-3 h-3" /> Áp dụng Nợ
                                           </button>
                                         );
                                       })()}
@@ -10674,7 +10674,7 @@ export default function FinanceManagement({
               <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Undo2 className="w-5 h-5 text-rose-400" />
-                  <span className="font-black text-sm text-white uppercase">Áp dụng Số dư Có NCC</span>
+                  <span className="font-black text-sm text-white uppercase">Áp dụng NCC Nợ (trả hàng)</span>
                 </div>
                 <button
                   type="button"
@@ -10700,7 +10700,7 @@ export default function FinanceManagement({
                   <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{order.supplierName || '—'}</div>
                 </div>
                 <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[10px] font-semibold">
-                  ↩️ Số dư Có khả dụng (từ trả hàng): {balance.toLocaleString('vi-VN')} đ
+                  ↩️ NCC Nợ (trả hàng) khả dụng: {balance.toLocaleString('vi-VN')} đ
                 </div>
                 <div className="space-y-1">
                   <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền áp dụng</label>

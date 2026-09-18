@@ -1628,7 +1628,7 @@ export default function MaterialCoordination({
 
   // Tạo chứng từ Trả Hàng NCC — chứng từ ĐỘC LẬP, KHÔNG sửa purchase_orders
   // gốc (giữ nguyên receivedQty/items — lịch sử đã nhận không đổi). Khi xác
-  // nhận, số tiền trả hàng trở thành "Số dư Có" của NCC, kế toán chủ động
+  // nhận, số tiền trả hàng trở thành khoản "NCC Nợ (trả hàng)", kế toán chủ động
   // chọn đơn hàng để áp dụng ở Tài Chính - Kế Toán (xem applySupplierCredit).
   const handleReturnOrder = async () => {
     const { order, proposal } = returnModal;
@@ -1668,7 +1668,7 @@ export default function MaterialCoordination({
           createdAt: new Date().toISOString(),
         });
         window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
-        showNotification(`Đã ghi nhận trả hàng ${totalAmount.toLocaleString('vi-VN')}đ cho NCC ${order.supplierName} — cộng vào Số dư Có, kế toán áp dụng vào công nợ ở Tài Chính - Kế Toán.`, 'Trả hàng NCC', 'success');
+        showNotification(`Đã ghi nhận trả hàng ${totalAmount.toLocaleString('vi-VN')}đ cho NCC ${order.supplierName} — cộng vào khoản NCC Nợ (trả hàng), kế toán áp dụng vào công nợ ở Tài Chính - Kế Toán.`, 'Trả hàng NCC', 'success');
         setReturnModal({ open: false, order: null, proposal: null });
         setReturnQuantities({});
         setReturnReason('');
@@ -1678,7 +1678,7 @@ export default function MaterialCoordination({
     };
 
     askConfirmation(
-      `Ghi nhận trả ${items.length} dòng vật tư (tổng ${totalAmount.toLocaleString('vi-VN')}đ) cho NCC "${order.supplierName}"? Số tiền này sẽ thành Số dư Có của NCC — KHÔNG sửa đơn hàng gốc. Hành động này không thể hoàn tác (chỉ xoá được khi chưa áp dụng vào công nợ nào).`,
+      `Ghi nhận trả ${items.length} dòng vật tư (tổng ${totalAmount.toLocaleString('vi-VN')}đ) cho NCC "${order.supplierName}"? Số tiền này sẽ thành khoản NCC Nợ (trả hàng) — KHÔNG sửa đơn hàng gốc. Hành động này không thể hoàn tác (chỉ xoá được khi chưa áp dụng vào công nợ nào).`,
       'Xác nhận trả hàng NCC',
       doCreate,
       'Xác nhận trả hàng',
@@ -3560,7 +3560,7 @@ export default function MaterialCoordination({
                 <span className="text-[10px] text-slate-500 font-mono">{formatVietnameseDateTime(order.createdAt)}</span>
               </div>
               <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                ℹ️ Trả hàng KHÔNG sửa lại đơn hàng gốc — chỉ ghi nhận thành Số dư Có của NCC, kế toán chủ động áp dụng vào công nợ ở Tài Chính - Kế Toán.
+                ℹ️ Trả hàng KHÔNG sửa lại đơn hàng gốc — chỉ ghi nhận thành khoản NCC Nợ (trả hàng), kế toán chủ động áp dụng vào công nợ ở Tài Chính - Kế Toán.
               </p>
               {/* Items table */}
               <div className="border border-slate-200 rounded-xl overflow-hidden">
