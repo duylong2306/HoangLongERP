@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Calculator, ChevronDown, ChevronUp, Plus, Trash2, RotateCcw } from 'lucide-react';
 
 /**
@@ -95,6 +95,35 @@ export default function QuickCostCalculator() {
     }
   };
 
+  // Bấm Enter ở bất kỳ ô nào của 1 dòng: nếu là dòng cuối → thêm dòng mới, nếu không →
+  // nhảy xuống dòng kế. Cả hai trường hợp đều đặt con trỏ vào ô "Tên vật tư" của dòng đích.
+  // Dòng cuối còn trống hoàn toàn thì không thêm (tránh tạo hàng loạt dòng rỗng).
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [focusId, setFocusId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (focusId === null) return;
+    const el = tableRef.current?.querySelector<HTMLInputElement>(`[data-calc-name="${focusId}"]`);
+    el?.focus();
+    setFocusId(null);
+  }, [focusId, rows]);
+
+  const handleRowEnter = (e: React.KeyboardEvent, index: number) => {
+    // Chỉ xử lý khi đang gõ trong ô nhập (không chặn phím Enter trên nút Xóa dòng)
+    if (e.key !== 'Enter' || (e.target as HTMLElement).tagName !== 'INPUT') return;
+    e.preventDefault();
+    const next = rows[index + 1];
+    if (next) {
+      setFocusId(next.id);
+      return;
+    }
+    const cur = rows[index];
+    if (!cur.name.trim() && !cur.qty && !cur.unit.trim() && !cur.price) return;
+    const newId = Math.max(0, ...rows.map(r => r.id)) + 1;
+    setRows(prev => [...prev, { id: newId, name: '', qty: '', unit: '', price: 0 }]);
+    setFocusId(newId);
+  };
+
   const updateRow = (id: number, patch: Partial<CalcRow>) =>
     setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
 
@@ -172,7 +201,7 @@ export default function QuickCostCalculator() {
         {open && (
           <div className="p-4 space-y-4 border-t border-amber-200">
             {/* BẢNG VẬT TƯ */}
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" ref={tableRef}>
               <div className="min-w-[620px]">
                 <div className="grid grid-cols-[32px_1fr_80px_64px_120px_120px_32px] gap-2 px-1 pb-1.5 text-[10px] font-bold text-slate-500 uppercase">
                   <div className="text-center">Stt</div>
@@ -185,11 +214,12 @@ export default function QuickCostCalculator() {
                 </div>
                 <div className="space-y-1.5">
                   {rows.map((r, i) => (
-                    <div key={r.id} className="grid grid-cols-[32px_1fr_80px_64px_120px_120px_32px] gap-2 items-center">
+                    <div key={r.id} onKeyDown={(e) => handleRowEnter(e, i)} className="grid grid-cols-[32px_1fr_80px_64px_120px_120px_32px] gap-2 items-center">
                       <div className="text-center text-[11px] text-slate-400 font-bold">{i + 1}</div>
                       <input
                         type="text"
                         value={r.name}
+                        data-calc-name={r.id}
                         onChange={(e) => updateRow(r.id, { name: e.target.value })}
                         placeholder="Tên vật tư..."
                         className="w-full bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-amber-500"
