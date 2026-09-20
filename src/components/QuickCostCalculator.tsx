@@ -34,7 +34,7 @@ interface CalcRates {
 
 const STORAGE_KEY = 'hl_quick_cost_calc';
 const SEEN_KEY = 'hl_quick_cost_calc_seen';
-const DEFAULT_ROW_COUNT = 5; // Excel gốc có sẵn 5 dòng vật tư
+const DEFAULT_ROW_COUNT = 1; // Mặc định gọn 1 dòng, bấm "Thêm dòng vật tư" khi cần thêm
 const DEFAULT_RATES: CalcRates = { labor: '35', accessory: '15', waste: '5', profit: '15' };
 
 const makeRows = (count: number): CalcRow[] =>
