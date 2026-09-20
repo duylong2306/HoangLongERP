@@ -24,7 +24,7 @@ interface ConstructionArchiveProps {
   canEdit?: boolean;
   canDelete?: boolean;
   preselectedProjectId?: string;
-  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'final_quote';
   /** Điều hướng về giao diện Lập Báo Giá và tải lại dữ liệu để sửa chi tiết */
   onEditQuote?: (quote: ArchivedQuote) => void;
 }
@@ -38,7 +38,7 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<ArchivedQuote | null>(null);
-  const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>('quote');
+  const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'final_quote'>('quote');
 
   // Tự động mở chi tiết hồ sơ theo dự án (khi điều hướng từ Menu Hồ Sơ Dự Án của công việc)
   // Lưu ý: KHÔNG đưa selectedQuote vào dependency để tránh popup bị mở lại ngay sau khi đóng.
@@ -475,7 +475,7 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                           ? `${itemAny.chieuRong}m x ${itemAny.chieuDai}m (${itemAny.soTang || 1} tầng, S = ${itemAny.tongDienTichXayDung || (itemAny.chieuRong * itemAny.chieuDai)}m²)`
                           : 'N/A';
 
-                        // 4 kinds of documents
+                        // 5 kinds of documents
                         const docs = [
                           {
                             type: 'quote' as const,
@@ -520,6 +520,16 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
                             color: 'text-purple-600 bg-purple-50 border-purple-200',
                             statusLabel: itemAny.liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
                             statusColor: itemAny.liquidationApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
+                          },
+                          {
+                            type: 'legal' as const,
+                            label: 'Hồ Sơ Pháp Lý',
+                            code: item.code ? 'PL-' + item.code.replace('BGXD-', '') : 'HỒ SƠ PHÁP LÝ',
+                            color: 'text-rose-600 bg-rose-50 border-rose-200',
+                            statusLabel: itemAny.legalApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: itemAny.legalApproved
                               ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
                               : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           }

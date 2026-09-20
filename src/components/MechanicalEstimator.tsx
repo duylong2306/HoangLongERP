@@ -6,6 +6,7 @@ import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCirc
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
+import LegalTemplatePanel from './LegalTemplatePanel';
 import { useNotification } from '../context';
 
 interface MechanicalEstimatorProps {
@@ -340,7 +341,7 @@ export default function MechanicalEstimator({
   const [localIsSaved, setLocalIsSaved] = useState(false);
   const [localIsLocked, setLocalIsLocked] = useState(false);
   const [localLoadedQuote, setLocalLoadedQuote] = useState<Quote | null>(null);
-  const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
+  const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal'>('quote');
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
   const handleSetAsDefault = async () => {
@@ -1481,9 +1482,21 @@ export default function MechanicalEstimator({
             >
               🤝 Mẫu thanh lý
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTemplateTab('legal')}
+              className={`text-xs font-extrabold uppercase tracking-wider relative pb-3 transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeTemplateTab === 'legal' 
+                  ? 'text-pink-500 border-b-2 border-pink-500' 
+                  : 'text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              ⚖️ Mẫu hồ sơ pháp lý
+            </button>
           </div>
 
           {/* Action buttons for defaults */}
+          {activeTemplateTab !== 'legal' && (
           <div className="flex flex-wrap items-center gap-2 pb-2 lg:pb-0">
             <button
               type="button"
@@ -1510,6 +1523,7 @@ export default function MechanicalEstimator({
               🔄 Khôi phục mặc định
             </button>
           </div>
+          )}
         </div>
 
         {activeTemplateTab === 'quote' && (
@@ -1873,6 +1887,13 @@ export default function MechanicalEstimator({
           </div>
         )}
         
+        {activeTemplateTab === 'legal' && (
+          <LegalTemplatePanel sector="mechanical" themeColor="pink" />
+        )}
+
+        {/* Khối lưu chung bên dưới chỉ áp dụng cho 4 mẫu cũ — mẫu Pháp lý tự có nút lưu riêng */}
+        {activeTemplateTab !== 'legal' && (
+        <>
         {/* Success Alert Banner indicating autosave is active */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-xl">
           <div className="flex items-center gap-3 text-xs text-slate-300">
@@ -1960,6 +1981,8 @@ export default function MechanicalEstimator({
               <span className="font-bold">Lỗi lưu:</span> {dbSaveError}
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
     );

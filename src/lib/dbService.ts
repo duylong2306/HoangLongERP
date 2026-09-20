@@ -1679,11 +1679,13 @@ export const dbService = {
           contractHtml: row.contract_html,
           acceptanceHtml: row.acceptance_html,
           liquidationHtml: row.liquidation_html,
+          legalHtml: row.legal_html,
           finalQuoteHtml: row.final_quote_html,
           isApproved: row.is_approved,
           contractApproved: row.contract_approved,
           acceptanceApproved: row.acceptance_approved,
           liquidationApproved: row.liquidation_approved,
+          legalApproved: row.legal_approved,
           approvedAt: row.approved_at,
           approvedBy: row.approved_by,
           creatorId: row.creator_id,
@@ -1753,11 +1755,13 @@ export const dbService = {
           contract_html: quote.contractHtml,
           acceptance_html: quote.acceptanceHtml,
           liquidation_html: quote.liquidationHtml,
+          legal_html: quote.legalHtml,
           final_quote_html: quote.finalQuoteHtml,
           is_approved: quote.isApproved,
           contract_approved: quote.contractApproved,
           acceptance_approved: quote.acceptanceApproved,
           liquidation_approved: quote.liquidationApproved,
+          legal_approved: quote.legalApproved,
           approved_at: quote.approvedAt,
           approved_by: quote.approvedBy,
           creator_id: quote.creatorId,
@@ -2100,11 +2104,13 @@ export const dbService = {
     contractHtml?: string;
     acceptanceHtml?: string;
     liquidationHtml?: string;
+    legalHtml?: string;
     finalQuoteHtml?: string;
     isApproved?: boolean;
     contractApproved?: boolean;
     acceptanceApproved?: boolean;
     liquidationApproved?: boolean;
+    legalApproved?: boolean;
     approvedAt?: string;
     approvedBy?: string;
   }): Promise<void> {
@@ -2119,11 +2125,13 @@ export const dbService = {
       if (fields.contractHtml !== undefined)        snakeFields.contract_html = fields.contractHtml;
       if (fields.acceptanceHtml !== undefined)      snakeFields.acceptance_html = fields.acceptanceHtml;
       if (fields.liquidationHtml !== undefined)     snakeFields.liquidation_html = fields.liquidationHtml;
+      if (fields.legalHtml !== undefined)           snakeFields.legal_html = fields.legalHtml;
       if (fields.finalQuoteHtml !== undefined)      snakeFields.final_quote_html = fields.finalQuoteHtml;
       if (fields.isApproved !== undefined)          snakeFields.is_approved = fields.isApproved;
       if (fields.contractApproved !== undefined)    snakeFields.contract_approved = fields.contractApproved;
       if (fields.acceptanceApproved !== undefined)  snakeFields.acceptance_approved = fields.acceptanceApproved;
       if (fields.liquidationApproved !== undefined) snakeFields.liquidation_approved = fields.liquidationApproved;
+      if (fields.legalApproved !== undefined)       snakeFields.legal_approved = fields.legalApproved;
       if (fields.approvedAt !== undefined)          snakeFields.approved_at = fields.approvedAt;
       if (fields.approvedBy !== undefined)          snakeFields.approved_by = fields.approvedBy;
       if (Object.keys(snakeFields).length > 0) {

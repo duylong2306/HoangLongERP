@@ -4,6 +4,7 @@ import { FileText, Printer, Download, ClipboardList, FileSignature, FileCheck, C
 import ContractDocument from './ContractDocument';
 import AcceptanceDocument from './AcceptanceDocument';
 import LiquidationDocument from './LiquidationDocument';
+import LegalDocument from './LegalDocument';
 import FinalQuoteDocument from './FinalQuoteDocument';
 import { dbService, invalidateCache } from '../lib/dbService';
 import { useNotification } from '../context';
@@ -107,7 +108,7 @@ interface QuotationTableSheetProps {
     sector?: string;
     estimatorMode?: string;
   };
-  initialTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  initialTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'final_quote';
   onApproved?: (updated: any) => void;
 }
 
@@ -356,7 +357,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
     window.print();
   };
 
-  const [activeTab, setActiveTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>(initialTab || 'quote');
+  const [activeTab, setActiveTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'final_quote'>(initialTab || 'quote');
   const [subQuoteTab, setSubQuoteTab] = useState<'estimator' | 'takeoff' | 'final_quote'>('estimator');
 
   useEffect(() => {
@@ -409,6 +410,8 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
         return <AcceptanceDocument quoteData={quoteData} />;
       case 'liquidation':
         return <LiquidationDocument quoteData={quoteData} />;
+      case 'legal':
+        return <LegalDocument quoteData={quoteData} />;
       case 'final_quote':
         return <FinalQuoteDocument quoteData={quoteData} />;
       default:
@@ -1301,7 +1304,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
 
   return (
     <div className="space-y-4">
-      {/* 4 Custom Document Tabs with professional look, active indicators and icons */}
+      {/* 5 Custom Document Tabs with professional look, active indicators and icons */}
       <div className="flex flex-wrap items-center justify-center gap-2 border-b border-slate-200 pb-3 print:hidden no-print">
         <button
           onClick={() => setActiveTab('quote')}
@@ -1346,6 +1349,17 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
         >
           <FileText className="w-4 h-4" />
           Thanh Lý
+        </button>
+        <button
+          onClick={() => setActiveTab('legal')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold font-sans rounded-xl transition-all cursor-pointer ${
+            activeTab === 'legal'
+              ? 'bg-rose-600 text-white shadow-sm'
+              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          Hồ Sơ Pháp Lý
         </button>
       </div>
 
