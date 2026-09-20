@@ -251,6 +251,9 @@ export default function TaskDetailModal({
   const [downloadedQuoteModal, setDownloadedQuoteModal] = useState<ArchivedQuote | null>(null);
   const [downloadedQuoteActiveTab, setDownloadedQuoteActiveTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
   const [archivedQuotesList, setArchivedQuotesList] = useState<ArchivedQuote[]>([]);
+  // Danh sách hồ sơ lưu trữ tải bất đồng bộ (5 truy vấn) — cần biết đã tải xong chưa để Menu Hồ Sơ Dự Án
+  // không hiện nhầm "Chưa Lập" + khóa nút trong lúc còn đang tải.
+  const [archivedLoaded, setArchivedLoaded] = useState(false);
   const [subcontractorContracts, setSubcontractorContracts] = useState<ArchivedQuote[]>([]);
   const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
   const [paymentsList, setPaymentsList] = useState<Payment[]>([]);
@@ -385,9 +388,11 @@ export default function TaskDetailModal({
           setSubcontractorContracts(subList);
           setSubcontractorAdvances(advancesList);
           setPaymentsList(pList);
+          setArchivedLoaded(true);
         }
       } catch (err) {
         console.error("Lỗi khi tải hồ sơ lưu trữ:", err);
+        if (active) setArchivedLoaded(true); // lỗi tải → đừng khóa nút vĩnh viễn
       }
     };
 
@@ -3564,7 +3569,15 @@ export default function TaskDetailModal({
                         if (project?.name) return q.projectName === project.name;
                         return false;
                       });
-                      const latestArchivedQuote = projectArchivedQuotes.length > 0 ? projectArchivedQuotes[projectArchivedQuotes.length - 1] : null;
+                      // Ưu tiên hồ sơ báo giá đúng lĩnh vực của dự án (một dự án có thể còn hồ sơ Thầu phụ cùng
+                      // projectId — không được để hồ sơ đó "che" hồ sơ Xây dựng/Nội thất/Cơ khí), rồi lấy bản
+                      // MỚI NHẤT theo ngày tạo — cùng cách chọn với màn Lưu trữ khi mở hồ sơ (pickLatestQuote).
+                      const projectSector = project?.type === 'construction' ? 'construction' : project?.type === 'mechanical' ? 'mechanical' : 'furniture';
+                      const sameSectorQuotes = projectArchivedQuotes.filter(q => ((q as any).sector || q._sectorType) === projectSector);
+                      const quotePool = sameSectorQuotes.length > 0 ? sameSectorQuotes : projectArchivedQuotes;
+                      const latestArchivedQuote = quotePool.length > 0
+                        ? [...quotePool].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0]
+                        : null;
                       const hasQuoteFile = latestArchivedQuote;
 
                       // Status configurations
@@ -3633,7 +3646,14 @@ export default function TaskDetailModal({
                       }
 
                       // Điều hướng Menu Hồ Sơ Dự Án sang Lưu Trữ Hồ Sơ theo lĩnh vực (Xây dựng / Nội thất / Cơ khí)
-                      const quoteLocked = quoteStatusText === 'Chưa Lập';
+                      // Chỉ khóa khi ĐÃ tải xong và thật sự chưa có báo giá. Đang tải → hiện "Đang tải…", KHÔNG khóa
+                      // (trước đây khóa + hiện "Chưa Lập" trong lúc tải nên bấm sớm không có phản hồi).
+                      const quoteLocked = archivedLoaded && quoteStatusText === 'Chưa Lập';
+                      if (!archivedLoaded) {
+                        const loadingColor = "bg-white text-slate-400 border-slate-300 shadow-sm animate-pulse";
+                        quoteStatusText = contractStatusText = acceptanceStatusText = liquidationStatusText = legalStatusText = "Đang tải…";
+                        quoteStatusColor = contractStatusColor = acceptanceStatusColor = liquidationStatusColor = legalStatusColor = loadingColor;
+                      }
                       const goArchive = (docType: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' = 'quote') => {
                         const targetProjectId = project?.id || selectedTask?.projectId;
                         window.dispatchEvent(new CustomEvent('hl-switch-tab', {
