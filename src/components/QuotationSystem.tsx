@@ -39,6 +39,7 @@ import {
 import CabinetEstimator from './CabinetEstimator';
 import ConstructionEstimator from './ConstructionEstimator';
 import MechanicalEstimator from './MechanicalEstimator';
+import QuickCostCalculator from './QuickCostCalculator';
 import ProductCatalogTable from './ProductCatalogTable';
 import CabinetArchive from './CabinetArchive';
 import ConstructionArchive from './ConstructionArchive';
@@ -1579,6 +1580,9 @@ export default function QuotationSystem({
 
             {furnitureSubTab === 'estimator' ? (
               <>
+                {/* Công cụ tính nhanh giá bán (dùng chung Nội thất & Cơ khí) — đặt trên cùng, mặc định thu gọn */}
+                <QuickCostCalculator />
+
                 {/* Search Archived Cabinet Quote & Quick Start Top Bar */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 p-4.5 rounded-xl border border-slate-800 text-xs text-left mb-4">
                   <div className="flex items-center gap-2.5">
@@ -2970,6 +2974,9 @@ export default function QuotationSystem({
 
             {mechanicalSubTab === 'estimator' ? (
               <>
+                {/* Công cụ tính nhanh giá bán (dùng chung Nội thất & Cơ khí) — đặt trên cùng, mặc định thu gọn */}
+                <QuickCostCalculator />
+
                 {/* TIM NHANH HO SO CO KHI */}
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-left shadow-lg mb-4" id="mechanical_quote_search_and_reset_header">
                   <div className="flex items-center gap-3">
