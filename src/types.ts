@@ -208,7 +208,7 @@ export interface HrmRoleGroup {
 
 export interface HrmApprovalConfig {
   id: string;
-  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal' | 'payroll';
+  documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal' | 'payroll';
   documentTypeLabel: string;
   approverId: string;
   approverName: string;
@@ -545,6 +545,7 @@ export interface Quote {
   contractHtml?: string;
   acceptanceHtml?: string;
   liquidationHtml?: string;
+  legalHtml?: string; // Hồ sơ pháp lý dự án (bản in đã lưu)
   finalQuoteHtml?: string;
   contractTemplate?: string;
   acceptanceTemplate?: string;
@@ -757,6 +758,7 @@ export interface ArchivedQuote {
   contractHtml?: string;
   acceptanceHtml?: string;
   liquidationHtml?: string;
+  legalHtml?: string; // Hồ sơ pháp lý dự án (bản in đã lưu)
   finalQuoteHtml?: string;
   isApproved?: boolean;
   approvedAt?: string;
@@ -787,6 +789,7 @@ export interface ArchivedQuote {
   contractApproved?: boolean;
   acceptanceApproved?: boolean;
   liquidationApproved?: boolean;
+  legalApproved?: boolean; // Hồ sơ pháp lý dự án đã duyệt
   taskId?: string;
   content?: string;
   name?: string;

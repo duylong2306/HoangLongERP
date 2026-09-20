@@ -9,7 +9,7 @@ import {
   HelpCircle, ChevronLeft, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
   Users, Mail, Percent, ListTodo, RotateCcw, Calculator, Sliders, Type, MoreVertical,
   ZoomIn, ZoomOut, Lock
-} from 'lucide-react';
+, Scale} from 'lucide-react';
 // MODULE NHẬP (Imports)
 // -----------------------
 // ./TaskDetailModal         → Modal chi tiết công việc (Task)
@@ -4541,7 +4541,7 @@ export default function ProjectKanbanBoard({
 
                                     {/* ===========================================================================
                                         POPOVER NHÓM HS (Hồ Sơ Dự Án) — Các nút mở:
-                                        Báo giá (Quote), Hợp đồng (Contract), Nghiệm thu (Acceptance), Thanh lý (Liquidation)
+                                        Báo giá (Quote), Hợp đồng (Contract), Nghiệm thu (Acceptance), Thanh lý (Liquidation), Hồ sơ pháp lý (Legal)
                                         =========================================================================== */}
                                     {/* 2. HS (Hồ Sơ Dự Án) Badge */}
                                     {task.isDocGenerationEnabled === true && (
@@ -4661,7 +4661,20 @@ export default function ProjectKanbanBoard({
                                                 }
                                               }
 
-                                              // Khi Báo Giá chưa lập → khóa HĐ / Nghiệm thu / Thanh lý
+                                              // Hồ Sơ Pháp Lý Dự Án: mặc định Chờ Duyệt (bản in tự sinh từ mẫu) → Đã Duyệt khi duyệt riêng
+                                              let legalStatusText = "Chưa Lập";
+                                              let legalStatusColor = "text-slate-600 bg-slate-50";
+                                              if (hasQuoteFile) {
+                                                if ((latestArchivedQuote as any).legalApproved) {
+                                                  legalStatusText = "Đã Duyệt";
+                                                  legalStatusColor = "text-emerald-700 bg-emerald-50";
+                                                } else {
+                                                  legalStatusText = "Chờ Duyệt";
+                                                  legalStatusColor = "text-amber-700 bg-amber-50";
+                                                }
+                                              }
+
+                                              // Khi Báo Giá chưa lập → khóa HĐ / Nghiệm thu / Thanh lý / Hồ sơ pháp lý
                                               const quoteLocked = quoteStatusText === 'Chưa Lập';
                                               const goArchive = () => {
                                                 window.dispatchEvent(new CustomEvent('hl-switch-tab', {
@@ -4669,6 +4682,19 @@ export default function ProjectKanbanBoard({
                                                     tab: sectorArchiveTab(selectedProject.type),
                                                     projectId: selectedProject.id,
                                                     customerId: selectedProject.customerId,
+                                                  },
+                                                }));
+                                                setActivePopover(null);
+                                              };
+                                              // Riêng Hồ Sơ Pháp Lý mở thẳng vào tab pháp lý của hồ sơ báo giá (giống Menu trong Công việc)
+                                              const goLegalArchive = () => {
+                                                window.dispatchEvent(new CustomEvent('hl-switch-tab', {
+                                                  detail: {
+                                                    tab: sectorArchiveTab(selectedProject.type),
+                                                    projectId: selectedProject.id,
+                                                    customerId: selectedProject.customerId,
+                                                    quotesSubTab: 'archive',
+                                                    docType: 'legal',
                                                   },
                                                 }));
                                                 setActivePopover(null);
@@ -4725,6 +4751,19 @@ export default function ProjectKanbanBoard({
                                                       <span>Thanh Lý</span>
                                                     </div>
                                                     <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${liquidationStatusColor}`}>{liquidationStatusText}</span>
+                                                  </button>
+
+                                                  <button
+                                                    type="button"
+                                                    onClick={goLegalArchive}
+                                                    disabled={quoteLocked}
+                                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors text-sky-400 hover:bg-sky-500/10 ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
+                                                  >
+                                                    <div className="flex items-center gap-1.5">
+                                                      <Scale className="w-3.5 h-3.5 text-sky-400" />
+                                                      <span>Hồ Sơ Pháp Lý</span>
+                                                    </div>
+                                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border border-slate-200 ${legalStatusColor}`}>{legalStatusText}</span>
                                                   </button>
                                                 </>
                                               );

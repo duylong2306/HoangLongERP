@@ -23,7 +23,7 @@ interface CabinetArchiveProps {
   canEdit?: boolean;
   canDelete?: boolean;
   preselectedProjectId?: string;
-  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote';
+  initialDetailTab?: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'final_quote';
   /** Điều hướng về giao diện Lập Báo Giá và tải lại dữ liệu để sửa chi tiết */
   onEditQuote?: (quote: ArchivedQuote) => void;
 }
@@ -37,7 +37,7 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<ArchivedQuote | null>(null);
-  const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'final_quote'>('quote');
+  const [activeDetailTab, setActiveDetailTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'final_quote'>('quote');
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
   const { addToast } = useNotification();
 
@@ -471,7 +471,7 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
                           ? item.items.map((it) => `${(it as any).name || (it as any).productName || ''} (${it.material || it.unit || 'gỗ'})`).join(', ')
                           : 'Nội thất gỗ tổng hợp';
 
-                        // 4 kinds of documents
+                        // 5 kinds of documents
                         const docs = [
                           {
                             type: 'quote' as const,
@@ -517,6 +517,16 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
                             color: 'text-purple-600 bg-purple-50 border-purple-200',
                             statusLabel: (item as any).liquidationApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
                             statusColor: (item as any).liquidationApproved
+                              ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
+                              : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
+                          },
+                          {
+                            type: 'legal' as const,
+                            label: 'Hồ Sơ Pháp Lý',
+                            code: item.code ? 'PL-' + item.code.replace('BGN-', '') : 'HỒ SƠ PHÁP LÝ',
+                            color: 'text-rose-600 bg-rose-50 border-rose-200',
+                            statusLabel: (item as any).legalApproved ? 'Đã Duyệt' : 'Chờ Duyệt',
+                            statusColor: (item as any).legalApproved
                               ? 'bg-white text-emerald-600 border-emerald-500/30 shadow-sm'
                               : 'bg-white text-amber-600 border-amber-500/30 shadow-sm'
                           }

@@ -1171,6 +1171,8 @@ CREATE TABLE IF NOT EXISTS public.archived_quotes (
   contract_approved boolean,
   acceptance_approved boolean,
   liquidation_approved boolean,
+  legal_html text,
+  legal_approved boolean,
   approved_at text,
   approved_by text,
   creator_id text,

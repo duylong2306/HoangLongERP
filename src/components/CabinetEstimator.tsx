@@ -8,6 +8,7 @@ import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCirc
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
+import LegalTemplatePanel from './LegalTemplatePanel';
 
 export const DEFAULT_FURN_PAYMENT_TERMS = `<p><strong>1. Thời gian thực hiện:</strong> 10-12 ngày.</p>
 <p><strong>2. Bảo hành:</strong> Bảo hành 1 năm. Lỗi phụ kiện thay mới.</p>
@@ -552,7 +553,7 @@ export default function CabinetEstimator({
   const [contractTemplate, setContractTemplate] = useState(() => DEFAULT_FURN_CONTRACT_TEMPLATE);
   const [acceptanceTemplate, setAcceptanceTemplate] = useState(() => DEFAULT_FURN_ACCEPTANCE_TEMPLATE);
   const [liquidationTemplate, setLiquidationTemplate] = useState(() => DEFAULT_FURN_LIQUIDATION_TEMPLATE);
-  const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation'>('quote');
+  const [activeTemplateTab, setActiveTemplateTab] = useState<'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal'>('quote');
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
   const handleSetAsDefault = async () => {
@@ -1621,9 +1622,21 @@ export default function CabinetEstimator({
             >
               🤝 Mẫu thanh lý
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTemplateTab('legal')}
+              className={`text-xs font-extrabold uppercase tracking-wider relative pb-3 transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeTemplateTab === 'legal' 
+                  ? 'text-amber-500 border-b-2 border-amber-500' 
+                  : 'text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              ⚖️ Mẫu hồ sơ pháp lý
+            </button>
           </div>
 
           {/* Action buttons for defaults */}
+          {activeTemplateTab !== 'legal' && (
           <div className="flex flex-wrap items-center gap-2 pb-2 lg:pb-0">
             <button
               type="button"
@@ -1650,6 +1663,7 @@ export default function CabinetEstimator({
               🔄 Khôi phục mặc định
             </button>
           </div>
+          )}
         </div>
 
         {activeTemplateTab === 'quote' && (
@@ -2010,6 +2024,13 @@ export default function CabinetEstimator({
           </div>
         )}
         
+        {activeTemplateTab === 'legal' && (
+          <LegalTemplatePanel sector="furniture" themeColor="orange" />
+        )}
+
+        {/* Khối lưu chung bên dưới chỉ áp dụng cho 4 mẫu cũ — mẫu Pháp lý tự có nút lưu riêng */}
+        {activeTemplateTab !== 'legal' && (
+        <>
         {/* Success Alert Banner indicating autosave is active */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-xl">
           <div className="flex items-center gap-3 text-xs text-slate-300">
@@ -2077,6 +2098,8 @@ export default function CabinetEstimator({
               <span className="font-bold">Lưu thành công:</span> Cấu hình mẫu hồ sơ và báo giá Nội thất đã được lưu vào hệ thống cơ sở dữ liệu đám mây và đồng bộ hóa thành công trên toàn ứng dụng!
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
     );

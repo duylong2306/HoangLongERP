@@ -6,7 +6,7 @@ import {
   DollarSign, Plus, ArrowRight, CheckCircle2,
   AlertTriangle, Briefcase, FileText, Zap, Edit2, Shield, Award, ListTodo, Search, Camera,
   Download, Upload, FileSpreadsheet, UserCheck, Image as ImageIcon
-} from 'lucide-react';
+, Scale} from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import SearchableSelect from './SearchableSelect';
@@ -3619,9 +3619,22 @@ export default function TaskDetailModal({
                         }
                       }
 
+                      let legalStatusText = "Chưa Lập";
+                      let legalStatusColor = "bg-white text-slate-500 border-slate-300 shadow-sm";
+                      if (hasQuoteFile) {
+                        // Hồ Sơ Pháp Lý Dự Án tự sinh từ mẫu khi mở → mặc định Chờ Duyệt; duyệt riêng → Đã Duyệt
+                        if ((latestArchivedQuote as any).legalApproved) {
+                          legalStatusText = "Đã Duyệt";
+                          legalStatusColor = "bg-white text-emerald-600 border-emerald-500/30 shadow-sm";
+                        } else {
+                          legalStatusText = "Chờ Duyệt";
+                          legalStatusColor = "bg-white text-amber-600 border-amber-500/30 shadow-sm";
+                        }
+                      }
+
                       // Điều hướng Menu Hồ Sơ Dự Án sang Lưu Trữ Hồ Sơ theo lĩnh vực (Xây dựng / Nội thất / Cơ khí)
                       const quoteLocked = quoteStatusText === 'Chưa Lập';
-                      const goArchive = (docType: 'quote' | 'contract' | 'acceptance' | 'liquidation' = 'quote') => {
+                      const goArchive = (docType: 'quote' | 'contract' | 'acceptance' | 'liquidation' | 'legal' = 'quote') => {
                         const targetProjectId = project?.id || selectedTask?.projectId;
                         window.dispatchEvent(new CustomEvent('hl-switch-tab', {
                           detail: {
@@ -3698,6 +3711,21 @@ export default function TaskDetailModal({
                             </div>
                             <span className={`text-[9.5px] font-extrabold px-2 py-0.5 rounded border uppercase tracking-wider ${liquidationStatusColor}`}>
                               {liquidationStatusText}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => goArchive('legal')}
+                            disabled={quoteLocked}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-sky-400 hover:text-sky-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Scale className="w-4 h-4 text-sky-400" />
+                              Hồ Sơ Pháp Lý
+                            </div>
+                            <span className={`text-[9.5px] font-extrabold px-2 py-0.5 rounded border uppercase tracking-wider ${legalStatusColor}`}>
+                              {legalStatusText}
                             </span>
                           </button>
                         </div>
