@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
+import { useOpenArchiveFromMenu, pickLatestQuote } from '../hooks/useOpenArchiveFromMenu';
 import { Employee, Project, ArchivedQuote, Customer } from '../types';
 import { generateProjectId } from '../lib/projectId';
 import { useNotification } from '../context';
@@ -45,7 +46,7 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
   const openedPreselectedRef = useRef<string | null>(null);
   useEffect(() => {
     if (preselectedProjectId && archivedList.length > 0) {
-      const q = archivedList.find(x => x.projectId === preselectedProjectId);
+      const q = pickLatestQuote(archivedList, preselectedProjectId);
       if (q && openedPreselectedRef.current !== preselectedProjectId) {
         openedPreselectedRef.current = preselectedProjectId;
         setSelectedQuote(q);
@@ -53,6 +54,17 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
       }
     }
   }, [preselectedProjectId, archivedList, initialDetailTab]);
+
+  // Các lần bấm sau (khi màn Lưu trữ đã mounted sẵn): tải lại danh sách rồi mở đúng hồ sơ mới nhất + đúng loại tài liệu
+  useOpenArchiveFromMenu({
+    tabId: 'quotes-construction',
+    sector: 'construction',
+    onOpen: (list, quote, docType) => {
+      setArchivedList(list);
+      setSelectedQuote(quote);
+      setActiveDetailTab(docType as any);
+    },
+  });
   const [deleteTarget, setDeleteTarget] = useState<ArchivedQuote | null>(null);
   const { addToast } = useNotification();
 
