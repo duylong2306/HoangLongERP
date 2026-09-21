@@ -3,57 +3,12 @@ import { Printer, FileText } from 'lucide-react';
 import { docSoTiengViet } from './QuotationTableSheet';
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
-
-interface FinalQuoteItem {
-  id: string;
-  category: string;
-  name: string;
-  unit: string;
-  qty: number;
-  price: number;
-  isAuto: boolean;
-  note: string;
-}
+import TakeoffSummaryTable from './TakeoffSummaryTable';
+import { buildFinalSummary } from '../lib/takeoffCalc';
 
 interface FinalQuoteDocumentProps {
   quoteData: any;
 }
-
-const DEFAULT_FINAL_ITEMS: Omit<FinalQuoteItem, 'qty'>[] = [
-  // VẬT LIỆU CHÍNH
-  { id: 'gach', category: 'VẬT LIỆU CHÍNH', name: 'Gạch xây (đặc + rỗng)', unit: 'viên', price: 2875, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'ximang', category: 'VẬT LIỆU CHÍNH', name: 'Xi măng PCB40 (Hà Tiên/Hoàng Thạch)', unit: 'kg', price: 2185, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'cat', category: 'VẬT LIỆU CHÍNH', name: 'Cát xây (cát vàng/cát sông)', unit: 'm³', price: 379500, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'da', category: 'VẬT LIỆU CHÍNH', name: 'Đá dăm 1x2 & 2x4 (bê tông + lót)', unit: 'm³', price: 414000, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'thep', category: 'VẬT LIỆU CHÍNH', name: 'Thép CB300-V phi 10-12 (chịu lực)', unit: 'kg', price: 20125, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'thep_cb400', category: 'VẬT LIỆU CHÍNH', name: 'Thép CB400-V phi 14-22 (cột dầm)', unit: 'kg', price: 21275, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'thep_cb240', category: 'VẬT LIỆU CHÍNH', name: 'Thép CB240-T phi 6-8 (đai, cấu tạo)', unit: 'kg', price: 18975, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'nuoc', category: 'VẬT LIỆU CHÍNH', name: 'Nước thi công', unit: 'm³', price: 23000, isAuto: false, note: 'Ước tính ~10m³/100m² sàn' },
-
-  // HOÀN THIỆN
-  { id: 'son_noithat', category: 'HOÀN THIỆN', name: 'Sơn nước nội thất (Dulux/Jotun)', unit: 'lít', price: 112700, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'son_ngoai_that', category: 'HOÀN THIỆN', name: 'Sơn nước ngoại thất chống thấm', unit: 'lít', price: 143750, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'gach_ceramic', category: 'HOÀN THIỆN', name: 'Gạch ceramic ốp tường (30x60)', unit: 'm²', price: 155250, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'gach_granite', category: 'HOÀN THIỆN', name: 'Gạch granite lát sàn (60x60)', unit: 'm²', price: 241500, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'keo_dan_gach', category: 'HOÀN THIỆN', name: 'Keo dán gạch (Mapei/Bostik)', unit: 'kg', price: 10925, isAuto: false, note: '~5 kg/m² gạch' },
-  { id: 'chong_tham_sika', category: 'HOÀN THIỆN', name: 'Chống thấm Sika (sàn mái + WC)', unit: 'kg', price: 74750, isAuto: false, note: '~2-3 kg/m²' },
-  { id: 'thach_cao', category: 'HOÀN THIỆN', name: 'Thạch cao tấm (vách, trần)', unit: 'm²', price: 124200, isAuto: false, note: 'Nhập thủ công' },
-
-  // CỬA & KẾT CẤU
-  { id: 'cua_nhom_1', category: 'CỬA & KẾT CẤU', name: 'Cửa nhôm kính 1 cánh (W800×H2100)', unit: 'bộ', price: 3680000, isAuto: false, note: 'Đếm theo bản vẽ' },
-  { id: 'cua_nhom_2', category: 'CỬA & KẾT CẤU', name: 'Cửa nhôm kính 2 cánh (W1200×H2100)', unit: 'bộ', price: 5980000, isAuto: false, note: 'Đếm theo bản vẽ' },
-  { id: 'cua_go_hdf', category: 'CỬA & KẾT CẤU', name: 'Cửa đi gỗ HDF chống ẩm', unit: 'bộ', price: 4600000, isAuto: false, note: 'Phòng ngủ/WC' },
-
-  // NHÂN CÔNG
-  { id: 'tho_xay', category: 'NHÂN CÔNG', name: 'Thợ xây gạch bậc 3/7', unit: 'ca', price: 490500, isAuto: false, note: 'Ước tính ca theo KL' },
-  { id: 'tho_betong', category: 'NHÂN CÔNG', name: 'Thợ đổ bê tông + cốp pha bậc 3.5/7', unit: 'ca', price: 545000, isAuto: false, note: 'Ước tính ca theo KL' },
-  { id: 'tho_thep', category: 'NHÂN CÔNG', name: 'Thợ cốt thép bậc 4/7', unit: 'ca', price: 577700, isAuto: false, note: 'Ước tính ca theo KL' },
-  { id: 'nhan_cong_pt', category: 'NHÂN CÔNG', name: 'Nhân công phổ thông', unit: 'ca', price: 381500, isAuto: false, note: 'Vận chuyển, đào đất' },
-
-  // MÁY & THIẾT BỊ
-  { id: 'may_bom', category: 'MÁY & THIẾT BỊ', name: 'Máy bơm bê tông (thuê ca)', unit: 'ca', price: 3335000, isAuto: false, note: '1 ca = 1 lần đổ BT' },
-  { id: 'may_tron', category: 'MÁY & THIẾT BỊ', name: 'Máy trộn bê tông 250L', unit: 'ca', price: 460000, isAuto: false, note: 'Nếu không thuê bơm' },
-];
 
 export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProps) {
   const { addToast } = useNotification();
@@ -61,100 +16,9 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
   const [month, setMonth] = useState((new Date().getMonth() + 1).toString().padStart(2, '0'));
   const [year, setYear] = useState(new Date().getFullYear().toString());
 
-  // Định mức vật liệu từ Supabase
-  const [materialNorms, setMaterialNorms] = useState<any[]>([]);
-  useEffect(() => {
-    dbService.constructionNorms.get('material_composition_norms')
-      .then((data: any) => { if (Array.isArray(data)) setMaterialNorms(data); })
-      .catch(err => console.warn('Lỗi tải định mức vật liệu từ Supabase:', err));
-  }, []);
-
-  // 1. Calculate takeoff totals if finalItems is not explicitly saved in quoteData
-  const takeoffTotals = useMemo(() => {
-    if (quoteData.finalItems) return { gach: 0, ximang: 0, cat: 0, da: 0, thep: 0 };
-
-    const parsedRows = quoteData.takeoffRows || [];
-    let gach = 0;
-    let ximang = 0;
-    let cat = 0;
-    let da = 0;
-    let thep = 0;
-
-    parsedRows.forEach((row: any) => {
-      const dai = parseFloat(row.dai) || 0;
-      const rong = parseFloat(row.rong) || 0;
-      const cao = parseFloat(row.cao) || 0;
-      const qty = parseFloat(row.qty) || 0;
-
-      let klTong = 0;
-      if (dai > 0 && rong > 0 && cao > 0) {
-        klTong = dai * rong * cao;
-      } else if (dai > 0 && rong > 0) {
-        klTong = dai * rong;
-      } else if (dai > 0) {
-        klTong = dai;
-      }
-
-      if (qty > 0) {
-        klTong = klTong > 0 ? klTong * qty : qty;
-      }
-
-      const haoMultiplier = 1 + (parseFloat(row.haoHut as any) || 0) / 100;
-
-      // Load norms from Supabase
-      const normsList = materialNorms;
-
-      if (row.maDM) {
-        const norm = normsList.find((n: any) => n.id.toLowerCase() === row.maDM.toLowerCase());
-        if (norm) {
-          gach += (parseFloat(norm.brick) || 0) * klTong * haoMultiplier;
-          ximang += (parseFloat(norm.cement) || 0) * klTong * haoMultiplier;
-          cat += (parseFloat(norm.sand) || 0) * klTong * haoMultiplier;
-          da += (parseFloat(norm.stone) || 0) * klTong * haoMultiplier;
-          thep += (parseFloat(norm.steel) || 0) * klTong * haoMultiplier;
-        }
-      }
-    });
-
-    return { gach, ximang, cat, da, thep };
-  }, [quoteData, materialNorms]);
-
-  // 2. Load list of items to render
-  const finalItems = useMemo<FinalQuoteItem[]>(() => {
-    if (quoteData.finalItems && quoteData.finalItems.length > 0) {
-      return quoteData.finalItems;
-    }
-
-    // Attempt to reconstruct from fallback sessionStorage quantities/prices
-    let savedQuantities: Record<string, number> = {};
-    let savedPrices: Record<string, number> = {};
-    try {
-      savedQuantities = JSON.parse(sessionStorage.getItem('hl_final_quote_quantities') || '{}');
-      savedPrices = JSON.parse(sessionStorage.getItem('hl_final_quote_prices') || '{}');
-    } catch (e) {}
-
-    return DEFAULT_FINAL_ITEMS.map(item => {
-      let qty = savedQuantities[item.id] || 0;
-      if (item.isAuto) {
-        if (item.id === 'gach') qty = takeoffTotals.gach;
-        else if (item.id === 'ximang') qty = takeoffTotals.ximang;
-        else if (item.id === 'cat') qty = takeoffTotals.cat;
-        else if (item.id === 'da') qty = takeoffTotals.da;
-        else if (item.id === 'thep') qty = takeoffTotals.thep;
-      }
-      return {
-        ...item,
-        qty,
-        price: savedPrices[item.id] !== undefined ? savedPrices[item.id] : item.price
-      };
-    });
-  }, [quoteData, takeoffTotals]);
-
-  const grandTotalCost = useMemo(() => {
-    return finalItems.reduce((acc, item) => acc + (item.qty * item.price), 0);
-  }, [finalItems]);
-
-  const categories = ['VẬT LIỆU CHÍNH', 'HOÀN THIỆN', 'CỬA & KẾT CẤU', 'NHÂN CÔNG', 'MÁY & THIẾT BỊ'];
+  // Bảng tổng hợp theo từng phần lấy từ bảng bóc tách đã lưu trong hồ sơ (giống sheet PL HỢP ĐỒNG)
+  const takeoffTotals = useMemo(() => buildFinalSummary(quoteData.takeoffRows).totals, [quoteData.takeoffRows]);
+  const grandTotalCost = takeoffTotals.rounded;
 
   const [docHtml, setDocHtml] = useState(quoteData.finalQuoteHtml || '');
   const [isEditing, setIsEditing] = useState(false);
@@ -480,90 +344,9 @@ export default function FinalQuoteDocument({ quoteData }: FinalQuoteDocumentProp
             </div>
           )}
 
-          {/* Materials and services table */}
+          {/* Bảng tổng hợp theo từng phần */}
           <div className="w-full overflow-x-auto my-4 border border-slate-200 rounded-xl bg-white shadow-sm font-sans">
-            <table className="w-full text-left border-collapse border border-black font-sans text-slate-800" style={{ fontSize: '11px', lineHeight: '1.3' }}>
-              <thead>
-                <tr className="bg-[#1e40af] text-white font-extrabold border-b border-black uppercase tracking-wider text-center text-[10px]">
-                  <th className="px-2 py-2.5 border border-black w-[40px]">STT</th>
-                  <th className="px-3 py-2.5 border border-black text-left min-w-[220px]">Tên vật tư / nhân công / dịch vụ</th>
-                  <th className="px-2 py-2.5 border border-black w-[55px] text-center">ĐVT</th>
-                  <th className="px-2 py-2.5 border border-black w-[95px] text-center">Tổng KL</th>
-                  <th className="px-2 py-2.5 border border-black w-[110px] text-right">Đơn giá (đ)</th>
-                  <th className="px-2 py-2.5 border border-black w-[120px] text-right">Thành tiền (đ)</th>
-                  <th className="px-3 py-2.5 border border-black text-left min-w-[130px]">Ghi chú / Nguồn</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  let sttCounter = 1;
-                  return categories.map(cat => {
-                    const itemsInCat = finalItems.filter(item => item.category === cat);
-                    if (itemsInCat.length === 0) return null;
-
-                    return (
-                      <React.Fragment key={cat}>
-                        {/* Section header row */}
-                        <tr className="bg-blue-50/60 font-black text-[#1e40af] text-[10.5px] uppercase border-y border-black">
-                          <td colSpan={7} className="px-3 py-2 text-left tracking-wide">
-                            {cat}
-                          </td>
-                        </tr>
-
-                        {/* Item rows */}
-                        {itemsInCat.map(item => {
-                          const amount = item.qty * item.price;
-                          return (
-                            <tr key={item.id} className="hover:bg-slate-50/80 transition-colors border-b border-black text-slate-700 text-center">
-                              <td className="px-2 py-2.5 border border-black font-medium text-slate-500">{sttCounter++}</td>
-                              <td className="px-3 py-2.5 border border-black text-left font-bold text-slate-900 leading-tight">
-                                {item.name}
-                              </td>
-                              <td className="px-2 py-2.5 border border-black font-medium text-slate-600 text-center">
-                                {item.unit}
-                              </td>
-
-                              {/* Quantity column */}
-                              <td className="px-2 py-2.5 border border-black font-mono text-center">
-                                <span className="inline-block px-1.5 py-0.5 bg-slate-50 text-slate-800 font-bold border border-slate-200 rounded">
-                                  {item.qty.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                              </td>
-
-                              {/* Price column */}
-                              <td className="px-2 py-2.5 border border-black font-mono text-right text-slate-700">
-                                {item.price.toLocaleString('vi-VN')}
-                              </td>
-
-                              {/* Total cost column */}
-                              <td className="px-2 py-2.5 border border-black font-mono text-right font-black text-slate-900 bg-slate-50/30">
-                                {amount.toLocaleString('vi-VN')}
-                              </td>
-
-                              <td className="px-3 py-2.5 border border-black text-left text-[10.5px] italic text-slate-500 leading-normal">
-                                {item.note}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  });
-                })()}
-
-                {/* Overall Grand Total Banner */}
-                <tr className="bg-[#047857] text-white text-[11px] font-black uppercase tracking-wider text-center border-t-2 border-slate-300">
-                  <td colSpan={2} className="px-3 py-3 text-left border border-emerald-800 font-black">
-                    TỔNG GIÁ TRỊ BÁO GIÁ QUY CHUẨN ĐÃ BAO GỒM THUẾ & PHÍ
-                  </td>
-                  <td colSpan={3} className="border border-emerald-800"></td>
-                  <td className="px-3 py-3 text-right border border-emerald-800 font-mono text-[12.5px] font-black">
-                    {grandTotalCost.toLocaleString('vi-VN')} đ
-                  </td>
-                  <td className="border border-emerald-800"></td>
-                </tr>
-              </tbody>
-            </table>
+            <TakeoffSummaryTable rows={quoteData.takeoffRows} />
           </div>
 
           {/* Money in Words */}

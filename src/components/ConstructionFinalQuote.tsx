@@ -1,83 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Printer, Save, RotateCcw, Check, FileText, Edit } from 'lucide-react';
+import { Printer, Save, Check, FileText, Edit } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { useNotification } from '../context';
 import QuotationTableSheet from './QuotationTableSheet';
+import TakeoffSummaryTable from './TakeoffSummaryTable';
+import { buildFinalSummary, takeoffToFinalItems, normalizeTakeoffRows } from '../lib/takeoffCalc';
 
-function calculateTakeoffTotalsFromRows(rows: any[], norms: any[]) {
-  let gach = 0;
-  let ximang = 0;
-  let cat = 0;
-  let da = 0;
-  let thep = 0;
-  let cost = 0;
-
-  rows.forEach(row => {
-    const d = parseFloat(row.dai as any) || 0;
-    const r = parseFloat(row.rong as any) || 0;
-    const c = parseFloat(row.cao as any) || 0;
-    const qty = parseFloat(row.qty as any) || 0;
-    
-    // I. Khối lượng tổng
-    let klTong = 0;
-    if (qty > 0) {
-      if (row.unit === 'm³') {
-        klTong = d * r * c * qty;
-      } else if (row.unit === 'm²') {
-        const depthOrHeight = r > 0 ? r : (c > 0 ? c : 1);
-        klTong = d * depthOrHeight * qty;
-      } else {
-        klTong = qty;
-      }
-    }
-
-    // Hao hụt multiplier
-    const haoMultiplier = 1 + (parseFloat(row.haoHut as any) || 0) / 100;
-
-    // II. Lookup composition norm
-    let rowGach = 0;
-    let rowXimang = 0;
-    let rowCat = 0;
-    let rowDa = 0;
-    let rowThep = 0;
-
-    if (row.maDM) {
-      const norm = norms.find(n => n.id.toLowerCase() === row.maDM.toLowerCase());
-      if (norm) {
-        rowGach = (parseFloat(norm.brick) || 0) * klTong * haoMultiplier;
-        rowXimang = (parseFloat(norm.cement) || 0) * klTong * haoMultiplier;
-        rowCat = (parseFloat(norm.sand) || 0) * klTong * haoMultiplier;
-        rowDa = (parseFloat(norm.stone) || 0) * klTong * haoMultiplier;
-        rowThep = (parseFloat(norm.steel) || 0) * klTong * haoMultiplier;
-      }
-    }
-
-    // III. Thành tiền
-    const rowCost = klTong * haoMultiplier * (parseFloat(row.price as any) || 0);
-
-    gach += rowGach;
-    ximang += rowXimang;
-    cat += rowCat;
-    da += rowDa;
-    thep += rowThep;
-    cost += rowCost;
-  });
-
-  return { gach, ximang, cat, da, thep, cost };
-}
-
-interface FinalQuoteItem {
-  id: string;
-  category: string;
-  name: string;
-  unit: string;
-  qty: number;
-  price: number;
-  isAuto: boolean;
-  note: string;
-}
-
+/**
+ * Tổng tiền bóc tách tính từ các dòng bóc tách (định dạng mới, hoặc cũ được tự chuyển đổi).
+ * Định mức cấp phối không còn tham gia; chỉ lấy tổng thành tiền.
+ */
 interface ConstructionFinalQuoteProps {
   currentUser?: any;
   selectedCustomerId?: string;
@@ -97,42 +30,6 @@ interface ConstructionFinalQuoteProps {
   setLoadedQuote?: (quote: any) => void;
 }
 
-const DEFAULT_FINAL_ITEMS: Omit<FinalQuoteItem, 'qty'>[] = [
-  // VẬT LIỆU CHÍNH
-  { id: 'gach', category: 'VẬT LIỆU CHÍNH', name: 'Gạch xây (đặc + rỗng)', unit: 'viên', price: 2875, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'ximang', category: 'VẬT LIỆU CHÍNH', name: 'Xi măng PCB40 (Hà Tiên/Hoàng Thạch)', unit: 'kg', price: 2185, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'cat', category: 'VẬT LIỆU CHÍNH', name: 'Cát xây (cát vàng/cát sông)', unit: 'm³', price: 379500, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'da', category: 'VẬT LIỆU CHÍNH', name: 'Đá dăm 1x2 & 2x4 (bê tông + lót)', unit: 'm³', price: 414000, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'thep', category: 'VẬT LIỆU CHÍNH', name: 'Thép CB300-V phi 10-12 (chịu lực)', unit: 'kg', price: 20125, isAuto: true, note: 'Từ bảng bóc tách' },
-  { id: 'thep_cb400', category: 'VẬT LIỆU CHÍNH', name: 'Thép CB400-V phi 14-22 (cột dầm)', unit: 'kg', price: 21275, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'thep_cb240', category: 'VẬT LIỆU CHÍNH', name: 'Thép CB240-T phi 6-8 (đai, cấu tạo)', unit: 'kg', price: 18975, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'nuoc', category: 'VẬT LIỆU CHÍNH', name: 'Nước thi công', unit: 'm³', price: 23000, isAuto: false, note: 'Ước tính ~10m³/100m² sàn' },
-
-  // HOÀN THIỆN
-  { id: 'son_noithat', category: 'HOÀN THIỆN', name: 'Sơn nước nội thất (Dulux/Jotun)', unit: 'lít', price: 112700, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'son_ngoai_that', category: 'HOÀN THIỆN', name: 'Sơn nước ngoại thất chống thấm', unit: 'lít', price: 143750, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'gach_ceramic', category: 'HOÀN THIỆN', name: 'Gạch ceramic ốp tường (30x60)', unit: 'm²', price: 155250, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'gach_granite', category: 'HOÀN THIỆN', name: 'Gạch granite lát sàn (60x60)', unit: 'm²', price: 241500, isAuto: false, note: 'Nhập thủ công' },
-  { id: 'keo_dan_gach', category: 'HOÀN THIỆN', name: 'Keo dán gạch (Mapei/Bostik)', unit: 'kg', price: 10925, isAuto: false, note: '~5 kg/m² gạch' },
-  { id: 'chong_tham_sika', category: 'HOÀN THIỆN', name: 'Chống thấm Sika (sàn mái + WC)', unit: 'kg', price: 74750, isAuto: false, note: '~2-3 kg/m²' },
-  { id: 'thach_cao', category: 'HOÀN THIỆN', name: 'Thạch cao tấm (vách, trần)', unit: 'm²', price: 124200, isAuto: false, note: 'Nhập thủ công' },
-
-  // CỬA & KẾT CẤU
-  { id: 'cua_nhom_1', category: 'CỬA & KẾT CẤU', name: 'Cửa nhôm kính 1 cánh (W800×H2100)', unit: 'bộ', price: 3680000, isAuto: false, note: 'Đếm theo bản vẽ' },
-  { id: 'cua_nhom_2', category: 'CỬA & KẾT CẤU', name: 'Cửa nhôm kính 2 cánh (W1200×H2100)', unit: 'bộ', price: 5980000, isAuto: false, note: 'Đếm theo bản vẽ' },
-  { id: 'cua_go_hdf', category: 'CỬA & KẾT CẤU', name: 'Cửa đi gỗ HDF chống ẩm', unit: 'bộ', price: 4600000, isAuto: false, note: 'Phòng ngủ/WC' },
-
-  // NHÂN CÔNG
-  { id: 'tho_xay', category: 'NHÂN CÔNG', name: 'Thợ xây gạch bậc 3/7', unit: 'ca', price: 490500, isAuto: false, note: 'Ước tính ca theo KL' },
-  { id: 'tho_betong', category: 'NHÂN CÔNG', name: 'Thợ đổ bê tông + cốp pha bậc 3.5/7', unit: 'ca', price: 545000, isAuto: false, note: 'Ước tính ca theo KL' },
-  { id: 'tho_thep', category: 'NHÂN CÔNG', name: 'Thợ cốt thép bậc 4/7', unit: 'ca', price: 577700, isAuto: false, note: 'Ước tính ca theo KL' },
-  { id: 'nhan_cong_pt', category: 'NHÂN CÔNG', name: 'Nhân công phổ thông', unit: 'ca', price: 381500, isAuto: false, note: 'Vận chuyển, đào đất' },
-
-  // MÁY & THIẾT BỊ
-  { id: 'may_bom', category: 'MÁY & THIẾT BỊ', name: 'Máy bơm bê tông (thuê ca)', unit: 'ca', price: 3335000, isAuto: false, note: '1 ca = 1 lần đổ BT' },
-  { id: 'may_tron', category: 'MÁY & THIẾT BỊ', name: 'Máy trộn bê tông 250L', unit: 'ca', price: 460000, isAuto: false, note: 'Nếu không thuê bơm' },
-];
-
 export default function ConstructionFinalQuote({
   currentUser,
   selectedCustomerId,
@@ -150,63 +47,7 @@ export default function ConstructionFinalQuote({
   setLoadedQuote
 }: ConstructionFinalQuoteProps) {
   const { addToast } = useNotification();
-  // Load quantities and prices when loadedQuote changes
-  useEffect(() => {
-    if (loadedQuote && loadedQuote.finalItems) {
-      const loadedQuantities: Record<string, number> = {};
-      const loadedPrices: Record<string, number> = {};
-      
-      // Initialize with 0 and default prices first
-      DEFAULT_FINAL_ITEMS.forEach(item => {
-        loadedQuantities[item.id] = 0;
-        loadedPrices[item.id] = item.price;
-      });
-
-      loadedQuote.finalItems.forEach((item: any) => {
-        loadedQuantities[item.id] = item.qty !== undefined && item.qty !== null ? item.qty : 0;
-        loadedPrices[item.id] = item.price !== undefined && item.price !== null ? item.price : (DEFAULT_FINAL_ITEMS.find(df => df.id === item.id)?.price || 0);
-      });
-      setQuantities(loadedQuantities);
-      setPrices(loadedPrices);
-    } else if (!loadedQuote) {
-      // Reset to defaults when no quote is loaded (or starting new quote)
-      const initialQuantities: Record<string, number> = {};
-      const initialPrices: Record<string, number> = {};
-      DEFAULT_FINAL_ITEMS.forEach(item => {
-        initialQuantities[item.id] = 0;
-        initialPrices[item.id] = item.price;
-      });
-      
-      // Try fallback to sessionStorage
-      const localQuantities = sessionStorage.getItem('hl_final_quote_quantities');
-      const localPrices = sessionStorage.getItem('hl_final_quote_prices');
-      
-      if (localQuantities) {
-        try {
-          const parsed = JSON.parse(localQuantities);
-          Object.assign(initialQuantities, parsed);
-        } catch (e) {}
-      }
-      if (localPrices) {
-        try {
-          const parsed = JSON.parse(localPrices);
-          Object.assign(initialPrices, parsed);
-        } catch (e) {}
-      }
-      
-      setQuantities(initialQuantities);
-      setPrices(initialPrices);
-    }
-  }, [loadedQuote]);
   const [takeoffUpdateTrigger, setTakeoffUpdateTrigger] = useState(0);
-  // Định mức vật liệu từ Supabase
-  const [materialNorms, setMaterialNorms] = useState<any[]>([]);
-  useEffect(() => {
-    dbService.constructionNorms.get('material_composition_norms')
-      .then((data: any) => { if (Array.isArray(data)) setMaterialNorms(data); })
-      .catch(err => console.warn('Lỗi tải định mức vật liệu từ Supabase:', err));
-  }, []);
-
   useEffect(() => {
     const handleUpdate = () => {
       setTakeoffUpdateTrigger(prev => prev + 1);
@@ -219,91 +60,23 @@ export default function ConstructionFinalQuote({
     };
   }, []);
 
-  // 1. Get takeoff calculation totals in real-time from localStorage or saved state
-  const takeoffTotalsAndCost = useMemo(() => {
+  // 1. Lấy bảng bóc tách để tổng hợp. Luôn TÍNH LẠI từ dòng bóc tách (không dùng số tổng lưu sẵn) để không bị hiện số cũ:
+  //  - Hồ sơ đã lưu & đang khóa → dùng bảng đã lưu trong hồ sơ
+  //  - Đang chỉnh sửa / hồ sơ mới → dùng bảng bóc tách hiện hành trong phiên (nếu trống thì lấy bảng trong hồ sơ)
+  const takeoffRows = useMemo<any[]>(() => {
     try {
-      // If loadedQuote has takeoffTotals directly, use it!
-      if (loadedQuote && loadedQuote.takeoffTotals) {
-        return {
-          gach: loadedQuote.takeoffTotals.gach || 0,
-          ximang: loadedQuote.takeoffTotals.ximang || 0,
-          cat: loadedQuote.takeoffTotals.cat || 0,
-          da: loadedQuote.takeoffTotals.da || 0,
-          thep: loadedQuote.takeoffTotals.thep || 0,
-          cost: loadedQuote.takeoffTotals.cost || 0
-        };
-      }
-      
-      // If loadedQuote has takeoffRows, compute from it!
-      if (loadedQuote && loadedQuote.takeoffRows && loadedQuote.takeoffRows.length > 0) {
-        return calculateTakeoffTotalsFromRows(loadedQuote.takeoffRows, materialNorms);
-      }
-
-      // Check if we have saved totals in sessionStorage
-      const savedTotalsLocal = sessionStorage.getItem('takeoff_saved_totals');
-      if (savedTotalsLocal) {
-        const parsed = JSON.parse(savedTotalsLocal);
-        if (parsed && typeof parsed === 'object' && parsed.gach !== undefined) {
-          return {
-            gach: parsed.gach || 0,
-            ximang: parsed.ximang || 0,
-            cat: parsed.cat || 0,
-            da: parsed.da || 0,
-            thep: parsed.thep || 0,
-            cost: parsed.cost || 0
-          };
-        }
-      }
-
-      // Fallback: calculate from sessionStorage takeoff_rows
-      const takeoffRowsLocal = sessionStorage.getItem('takeoff_rows');
-      const parsedRows = takeoffRowsLocal ? JSON.parse(takeoffRowsLocal) : [];
-
-      return calculateTakeoffTotalsFromRows(parsedRows, materialNorms);
+      const saved = normalizeTakeoffRows(loadedQuote?.takeoffRows);
+      if (isLocked && saved.length > 0) return saved;
+      const live = normalizeTakeoffRows(JSON.parse(sessionStorage.getItem('takeoff_rows') || '[]'));
+      return live.length > 0 ? live : saved;
     } catch (e) {
-      console.error("Error calculating takeoff totals:", e);
-      return { gach: 0, ximang: 0, cat: 0, da: 0, thep: 0, cost: 0 };
+      console.error("Error reading takeoff rows:", e);
+      return [];
     }
-  }, [loadedQuote, takeoffUpdateTrigger, materialNorms]);
+  }, [loadedQuote, isLocked, takeoffUpdateTrigger]);
 
-  const takeoffTotals = takeoffTotalsAndCost;
-
-  // 2. Load manual quantities and customized unit prices
-  const [quantities, setQuantities] = useState<Record<string, number>>(() => {
-    const initial: Record<string, number> = {};
-    DEFAULT_FINAL_ITEMS.forEach(item => {
-      initial[item.id] = 0;
-    });
-    
-    const local = sessionStorage.getItem('hl_final_quote_quantities');
-    if (local) {
-      try {
-        const parsed = JSON.parse(local);
-        return { ...initial, ...parsed };
-      } catch (e) {
-        return initial;
-      }
-    }
-    return initial;
-  });
-
-  const [prices, setPrices] = useState<Record<string, number>>(() => {
-    const initial: Record<string, number> = {};
-    DEFAULT_FINAL_ITEMS.forEach(item => {
-      initial[item.id] = item.price;
-    });
-
-    const local = sessionStorage.getItem('hl_final_quote_prices');
-    if (local) {
-      try {
-        const parsed = JSON.parse(local);
-        return { ...initial, ...parsed };
-      } catch (e) {
-        return initial;
-      }
-    }
-    return initial;
-  });
+  const takeoffSummary = useMemo(() => buildFinalSummary(takeoffRows), [takeoffRows]);
+  const takeoffTotals = takeoffSummary.totals;
 
   const [isSavedSuccessfully, setIsSavedSuccessfully] = useState(false);
   const [savedQuoteForPreview, setSavedQuoteForPreview] = useState<any | null>(null);
@@ -321,39 +94,6 @@ export default function ConstructionFinalQuote({
       setSelectedFinalResult(loadedQuote.selectedFinalResult);
     }
   }, [loadedQuote]);
-
-  // 3. Save to sessionStorage reactively
-  useEffect(() => {
-    sessionStorage.setItem('hl_final_quote_quantities', JSON.stringify(quantities));
-  }, [quantities]);
-
-  useEffect(() => {
-    sessionStorage.setItem('hl_final_quote_prices', JSON.stringify(prices));
-  }, [prices]);
-
-  // 4. Combine default items with updated quantities and prices
-  const finalItems = useMemo<FinalQuoteItem[]>(() => {
-    return DEFAULT_FINAL_ITEMS.map(item => {
-      let qty = quantities[item.id] || 0;
-      if (item.isAuto) {
-        if (item.id === 'gach') qty = takeoffTotals.gach;
-        else if (item.id === 'ximang') qty = takeoffTotals.ximang;
-        else if (item.id === 'cat') qty = takeoffTotals.cat;
-        else if (item.id === 'da') qty = takeoffTotals.da;
-        else if (item.id === 'thep') qty = takeoffTotals.thep;
-      }
-      return {
-        ...item,
-        qty,
-        price: prices[item.id] !== undefined ? prices[item.id] : item.price
-      };
-    });
-  }, [takeoffTotals, quantities, prices]);
-
-  // 5. Total cost calculations
-  const grandTotalCost = useMemo(() => {
-    return finalItems.reduce((acc, item) => acc + (item.qty * item.price), 0);
-  }, [finalItems]);
 
   // 6. Get Pre-estimate total from Lập báo cáo xây dựng
   const preEstimateAmount = useMemo(() => {
@@ -381,26 +121,9 @@ export default function ConstructionFinalQuote({
     }
   }, []);
 
-  const takeoffCostTotal = takeoffTotalsAndCost.cost;
+  const takeoffCostTotal = takeoffTotals.total;
   const priceDifference = takeoffCostTotal - preEstimateAmount;
   const priceDifferencePercent = preEstimateAmount > 0 ? (priceDifference / preEstimateAmount) * 100 : 0;
-
-  // 7. Handle changes in input fields
-  const handleQuantityChange = (id: string, value: string) => {
-    const num = parseFloat(value) || 0;
-    setQuantities(prev => ({
-      ...prev,
-      [id]: num >= 0 ? num : 0
-    }));
-  };
-
-  const handlePriceChange = (id: string, value: string) => {
-    const num = parseFloat(value) || 0;
-    setPrices(prev => ({
-      ...prev,
-      [id]: num >= 0 ? num : 0
-    }));
-  };
 
   // 8. Save quote action with Print preview tab trigger
   const handleSaveFinalQuote = async () => {
@@ -433,9 +156,10 @@ export default function ConstructionFinalQuote({
       createdAt: loadedQuote?.createdAt || new Date().toLocaleDateString('vi-VN'),
       totalAmount: selectedFinalAmount,
       status: 'approved',
-      finalItems: finalItems,
-      takeoffRows: JSON.parse(sessionStorage.getItem('takeoff_rows') || '[]'),
-      takeoffTotals: takeoffTotals,
+      // Danh sách hạng mục lấy từ bảng bóc tách (hợp đồng đọc lại để chia giá)
+      finalItems: takeoffToFinalItems(takeoffRows),
+      takeoffRows: takeoffRows,
+      takeoffTotals: { cost: takeoffTotals.total, vatTu: takeoffTotals.vatTu, nhanCong: takeoffTotals.nhanCong },
       isFinalQuote: true,
       selectedFinalResult: selectedFinalResult,
       // Store both amounts for reference
@@ -466,27 +190,10 @@ export default function ConstructionFinalQuote({
     }
   };
 
-  // 9. Reset action
-  const handleReset = () => {
-    if (window.confirm('Bạn có chắc muốn đặt lại toàn bộ số lượng nhập thủ công và đơn giá về mặc định không?')) {
-      const initialQuantities: Record<string, number> = {};
-      const initialPrices: Record<string, number> = {};
-      DEFAULT_FINAL_ITEMS.forEach(item => {
-        initialQuantities[item.id] = 0;
-        initialPrices[item.id] = item.price;
-      });
-      setQuantities(initialQuantities);
-      setPrices(initialPrices);
-    }
-  };
-
   // 10. Print action
   const handlePrint = () => {
     window.print();
   };
-
-  // Group items by category
-  const categories = ['VẬT LIỆU CHÍNH', 'HOÀN THIỆN', 'CỬA & KẾT CẤU', 'NHÂN CÔNG', 'MÁY & THIẾT BỊ'];
 
   return (
     <div className="space-y-4 w-full text-slate-100 font-sans text-left" id="final_construction_quote_component">
@@ -498,7 +205,7 @@ export default function ConstructionFinalQuote({
             ⚙️ Quản lý Báo Giá Cuối Cùng
           </h2>
           <p className="text-[11px] text-slate-400">
-            Tổng hợp dữ liệu từ bảng bóc tách chi tiết kết hợp nhập bổ sung các hạng mục hoàn thiện, lắp đặt, thợ thầy và máy móc.
+            Tổng hợp giá trị theo từng phần từ Bảng Bóc Tách Chi Tiết (giống bảng PL Hợp đồng). Muốn sửa số liệu, hãy sửa ở Bảng Bóc Tách Chi Tiết.
           </p>
         </div>
       </div>
@@ -506,107 +213,9 @@ export default function ConstructionFinalQuote({
       {/* Main Quotation Content / Card */}
       <div className="bg-white p-4 md:p-8 rounded-2xl shadow-sm border border-slate-200 text-slate-900 leading-normal max-w-5xl mx-auto my-1 relative print:border-none print:shadow-none print:p-0 print:text-black">
         
-        {/* Dynamic Table */}
+        {/* Bảng tổng hợp theo từng phần (từ Bảng Bóc Tách Chi Tiết) */}
         <div className="w-full overflow-x-auto my-4 border border-slate-200 rounded-xl bg-white shadow-sm">
-          <table className="w-full text-left border-collapse border border-black font-sans text-slate-800" style={{ fontSize: '11px', lineHeight: '1.3' }}>
-            <thead>
-              <tr className="bg-[#1e40af] text-white font-extrabold border-b border-black uppercase tracking-wider text-center text-[10.5px]">
-                <th className="px-3 py-3 border border-black w-[45px]">STT</th>
-                <th className="px-4 py-3 border border-black text-left min-w-[240px]">Tên vật tư / nhân công / dịch vụ</th>
-                <th className="px-3 py-3 border border-black w-[65px] text-center">Đơn vị</th>
-                <th className="px-3 py-3 border border-black w-[110px] text-center">Tổng KL</th>
-                <th className="px-3 py-3 border border-black w-[120px] text-right">Đơn giá (đ)</th>
-                <th className="px-3 py-3 border border-black w-[130px] text-right">Thành tiền (đ)</th>
-                <th className="px-4 py-3 border border-black text-left min-w-[150px]">Ghi chú / Nguồn</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                let sttCounter = 1;
-                return categories.map(cat => {
-                  const itemsInCat = finalItems.filter(item => item.category === cat);
-                  if (itemsInCat.length === 0) return null;
-
-                  return (
-                    <React.Fragment key={cat}>
-                      {/* Section header row */}
-                      <tr className="bg-[#3b82f6]/10 font-black text-[#1e40af] text-[11px] uppercase border-y border-black">
-                        <td colSpan={7} className="px-3 py-2 text-left tracking-wide">
-                          {cat}
-                        </td>
-                      </tr>
-
-                      {/* Item rows */}
-                      {itemsInCat.map(item => {
-                        const amount = item.qty * item.price;
-                        return (
-                          <tr key={item.id} className="hover:bg-slate-50/80 transition-colors border-b border-black text-slate-700 text-center">
-                            <td className="px-3 py-2.5 border border-black font-medium text-slate-500">{sttCounter++}</td>
-                            <td className="px-4 py-2.5 border border-black text-left font-bold text-slate-900 leading-tight">
-                              {item.name}
-                            </td>
-                            <td className="px-3 py-2.5 border border-black font-medium text-slate-600 text-center">
-                              {item.unit}
-                            </td>
-
-                            {/* Quantity column */}
-                            <td className="px-3 py-2.5 border border-black font-mono text-center">
-                              {item.isAuto ? (
-                                <div className="inline-block px-2.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 font-extrabold rounded-md text-[11px]">
-                                  {item.qty.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                              ) : (
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={quantities[item.id] !== undefined ? quantities[item.id] : 0}
-                                  onChange={(e) => handleQuantityChange(item.id, e.target.value)}
-                                  disabled={isLocked}
-                                  className="w-20 bg-amber-50/50 hover:bg-amber-100/40 text-amber-900 focus:bg-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-500 font-extrabold text-center border border-amber-200 rounded-md py-0.5 text-[11px] print:border-none print:bg-transparent print:p-0 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                                />
-                              )}
-                            </td>
-
-                            {/* Price column with creamy yellow background */}
-                            <td className="px-3 py-2.5 border border-black font-mono text-right bg-amber-50/30">
-                              <input
-                                type="number"
-                                value={prices[item.id] !== undefined ? prices[item.id] : item.price}
-                                onChange={(e) => handlePriceChange(item.id, e.target.value)}
-                                disabled={isLocked}
-                                className="w-24 bg-transparent hover:bg-amber-100/40 text-[#1e40af] focus:bg-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-500 font-extrabold text-right border border-amber-100 rounded-md py-0.5 px-1 print:border-none print:p-0 transition-all text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
-                              />
-                            </td>
-
-                            {/* Total cost column */}
-                            <td className="px-3 py-2.5 border border-black font-mono text-right font-bold text-slate-900">
-                              {amount.toLocaleString('vi-VN')}
-                            </td>
-
-                            <td className="px-4 py-2.5 border border-black text-left text-[11px] italic text-slate-500 leading-normal">
-                              {item.note}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                });
-              })()}
-
-              {/* Green Grand Total Banner */}
-              <tr className="bg-[#047857] text-white text-xs font-black uppercase tracking-wider text-center border-t-2 border-black">
-                <td colSpan={2} className="px-4 py-3.5 text-left border border-emerald-800 font-extrabold">
-                  TỔNG CHI PHÍ VẬT TƯ & NHÂN CÔNG (từ bóc tách)
-                </td>
-                <td colSpan={3} className="border border-emerald-800"></td>
-                <td className="px-4 py-3.5 text-right border border-emerald-800 font-mono text-[13px] font-black">
-                  {grandTotalCost.toLocaleString('vi-VN')} đ
-                </td>
-                <td className="border border-emerald-800"></td>
-              </tr>
-            </tbody>
-          </table>
+          <TakeoffSummaryTable rows={takeoffRows} />
         </div>
 
         {/* COMPARISON WITH PRE-ESTIMATE SECTION */}
@@ -769,10 +378,10 @@ export default function ConstructionFinalQuote({
             customerPhone: customerPhone,
             customerAddress: customerAddress,
             createdAt: new Date().toLocaleDateString('vi-VN'),
-            totalAmount: grandTotalCost,
+            totalAmount: takeoffCostTotal,
             status: 'approved',
-            finalItems: finalItems,
-            takeoffRows: JSON.parse(sessionStorage.getItem('takeoff_rows') || '[]'),
+            finalItems: takeoffToFinalItems(takeoffRows),
+            takeoffRows: takeoffRows,
             isFinalQuote: true
           })}
           disabled={!isConstructionSaved || !isLocked}

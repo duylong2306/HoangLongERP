@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { computeTakeoff, normalizeTakeoffRows } from '../lib/takeoffCalc';
 import { sanitizeHTML } from '../lib/sanitize';
 import { FileText, Printer, Download, ClipboardList, FileSignature, FileCheck, Coins, CheckCircle2, XCircle } from 'lucide-react';
 import ContractDocument from './ContractDocument';
@@ -382,25 +383,9 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
     return list;
   }, [quoteData.takeoffRows, quoteData.selectedHouseType]);
 
-  const takeoffTotals = React.useMemo(() => {
-    let klTong = 0;
-    let gach = 0;
-    let ximang = 0;
-    let cat = 0;
-    let da = 0;
-    let thep = 0;
-    let cost = 0;
-    takeoffRows.forEach((r: any) => {
-      klTong += parseFloat(r.klTong || 0);
-      gach += parseFloat(r.gach || 0);
-      ximang += parseFloat(r.ximang || 0);
-      cat += parseFloat(r.cat || 0);
-      da += parseFloat(r.da || 0);
-      thep += parseFloat(r.thep || 0);
-      cost += parseFloat(r.cost || 0);
-    });
-    return { klTong, gach, ximang, cat, da, thep, cost };
-  }, [takeoffRows]);
+  // Tính KL / đơn giá / thành tiền từ dữ liệu gốc (dữ liệu bóc tách cũ được tự chuyển sang định dạng mới)
+  const takeoffCalc = React.useMemo(() => computeTakeoff(normalizeTakeoffRows(takeoffRows)), [takeoffRows]);
+  const takeoffTotals = takeoffCalc.totals;
 
   const renderActiveDocument = () => {
     switch (activeTab) {
@@ -578,103 +563,94 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                 </div>
 
                 <p className="text-[11px] leading-relaxed my-4 text-slate-700 italic font-sans text-left">
-                  Công ty TNHH Hoàng Long xin trân trọng kính gửi đến quý đối tác/khách hàng bảng bóc tách, thống kê chi tiết khối lượng vật tư (gạch, xi măng, cát, đá, thép) dự tính cho từng hạng mục thi công công trình dưới đây:
+                  Công ty TNHH Hoàng Long xin trân trọng kính gửi đến quý đối tác/khách hàng bảng bóc tách khối lượng chi tiết và giá trị từng hạng mục thi công công trình dưới đây:
                 </p>
 
-                {/* Table */}
+                {/* Bảng bóc tách dạng file Excel: phần → hạng mục → dòng chi tiết */}
                 <div className="w-full overflow-x-auto my-4 border border-slate-200 rounded-xl bg-white">
                   <table className="w-full text-left border-collapse border border-slate-200 font-sans" style={{ fontSize: '8.5px', lineHeight: '1.2' }}>
                     <thead>
                       <tr className="bg-slate-50 font-bold border-b border-slate-300 uppercase tracking-wider text-slate-800 text-center">
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[25px]">STT</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-left w-[130px]">Tên hạng mục / công tác</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[70px]">Mã ĐM</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[25px]">ĐVT</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[28px]">STT</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-left w-[190px]">Nội dung công việc</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[28px]">Số BP</th>
                         <th colSpan={3} className="px-1 py-0.5 border border-slate-300">Kích thước (m)</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[25px]">S.L</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[45px]">KL Tổng</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[25px]">H.H (%)</th>
-                        <th colSpan={5} className="px-1 py-0.5 border border-slate-300">Khối lượng vật tư chi tiết bóc tách</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[28px]">S.Phụ</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 w-[30px]">ĐVT</th>
+                        <th colSpan={2} className="px-1 py-0.5 border border-slate-300">Khối lượng</th>
                         <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-right w-[65px]">Đơn giá (đ)</th>
-                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-right w-[75px]">Thành tiền (đ)</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-right w-[70px]">Vật tư (đ)</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-right w-[70px]">Nhân công (đ)</th>
+                        <th rowSpan={2} className="px-1 py-1.5 border border-slate-300 text-right w-[80px]">Thành tiền (đ)</th>
                       </tr>
                       <tr className="bg-slate-50 font-bold border-b border-slate-300 text-slate-700 text-center">
-                        <th className="px-1 py-0.5 border border-slate-300 w-[25px]">Dài</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[25px]">Rộng</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[25px]">Cao</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[45px] text-sky-700">Gạch (v)</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[45px] text-sky-700">Xi măng (kg)</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[40px] text-sky-700">Cát (m³)</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[40px] text-sky-700">Đá (m³)</th>
-                        <th className="px-1 py-0.5 border border-slate-300 w-[45px] text-sky-700">Thép (kg)</th>
+                        <th className="px-1 py-0.5 border border-slate-300 w-[28px]">Dài</th>
+                        <th className="px-1 py-0.5 border border-slate-300 w-[28px]">Rộng</th>
+                        <th className="px-1 py-0.5 border border-slate-300 w-[28px]">Cao</th>
+                        <th className="px-1 py-0.5 border border-slate-300 w-[45px]">Từng phần</th>
+                        <th className="px-1 py-0.5 border border-slate-300 w-[45px]">Toàn phần</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(() => {
-                        const categories = [
-                          'I. PHẦN MÓNG & NỀN MÓNG',
-                          'II. PHẦN THÂN - CỘT, DẦM, SÀN',
-                          'III. PHẦN TƯỜNG XÂY GẠCH',
-                          'IV. PHẦN TRÁT, CHỐNG THẤM, HOÀN THIỆN',
-                          'V. ỐP LÁT & HOÀN THIỆN MẶT'
-                        ];
-                        let stt = 1;
-
-                        return categories.map(cat => {
-                          const catRows = takeoffRows.filter((r: any) => r.category === cat);
-                          if (catRows.length === 0) return null;
-
-                          return (
-                            <React.Fragment key={cat}>
-                              <tr className="bg-slate-100 font-bold text-slate-800">
-                                <td colSpan={17} className="px-2 py-1 text-left border border-slate-200">
-                                  {cat}
-                                </td>
+                        const f = (v: number, d = 3) => v.toLocaleString('vi-VN', { minimumFractionDigits: 0, maximumFractionDigits: d });
+                        const dash = (v: any) => (v === null || v === undefined || v === '' ? '' : f(Number(v)));
+                        return takeoffCalc.rows.map((row: any) => {
+                          // Dòng phần lớn
+                          if (row.kind === 'section') {
+                            return (
+                              <tr key={row.id} className="bg-slate-100 font-bold text-slate-800">
+                                <td colSpan={11} className="px-2 py-1 text-left border border-slate-200 uppercase">{row.name}</td>
+                                <td className="px-1.5 py-1 text-right border border-slate-200 font-mono">{f(row.ttVatTu || 0, 0)}</td>
+                                <td className="px-1.5 py-1 text-right border border-slate-200 font-mono">{f(row.ttNhanCong || 0, 0)}</td>
+                                <td className="px-1.5 py-1 text-right border border-slate-200 font-mono">{f(row.sectionTotal || 0, 0)}</td>
                               </tr>
-
-                              {catRows.map((row: any) => {
-                                const hasDim = row.dai > 0 || row.rong > 0 || row.cao > 0;
-                                return (
-                                  <tr key={row.id} className="hover:bg-slate-50 transition-colors text-center text-slate-700">
-                                    <td className="px-1 py-1 border border-slate-200">{stt++}</td>
-                                    <td className="px-1.5 py-1 border border-slate-200 text-left font-medium text-slate-900 leading-tight">{row.name}</td>
-                                    <td className="px-1 py-1 border border-slate-200 truncate">{row.maDM || '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200">{row.unit}</td>
-                                    <td className="px-1 py-1 border border-slate-200 font-mono">{hasDim && row.dai > 0 ? row.dai.toFixed(2) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 font-mono">{hasDim && row.rong > 0 ? row.rong.toFixed(2) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 font-mono">{hasDim && row.cao > 0 ? row.cao.toFixed(2) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 font-mono">{row.qty > 0 ? row.qty : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 text-right font-bold font-mono">{row.klTong > 0 ? row.klTong.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 font-mono">{row.haoHut > 0 ? `${row.haoHut}%` : '-'}</td>
-                                    
-                                    <td className="px-1 py-1 border border-slate-200 text-right text-slate-650 font-mono">{row.gach > 0 ? row.gach.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 text-right text-slate-650 font-mono">{row.ximang > 0 ? row.ximang.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 text-right text-slate-650 font-mono">{row.cat > 0 ? row.cat.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 text-right text-slate-650 font-mono">{row.da > 0 ? row.da.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}</td>
-                                    <td className="px-1 py-1 border border-slate-200 text-right text-slate-650 font-mono">{row.thep > 0 ? row.thep.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}</td>
-                                    
-                                    <td className="px-1.5 py-1 border border-slate-200 text-right font-mono">{row.price ? row.price.toLocaleString('vi-VN') : '-'}</td>
-                                    <td className="px-1.5 py-1 border border-slate-200 text-right font-bold text-slate-800 font-mono">{(row.cost || 0).toLocaleString('vi-VN')}</td>
-                                  </tr>
-                                );
-                              })}
-                            </React.Fragment>
+                            );
+                          }
+                          // Dòng hạng mục
+                          if (row.kind === 'item') {
+                            return (
+                              <tr key={row.id} className="bg-slate-50 font-bold text-slate-900 text-center">
+                                <td className="px-1 py-1 border border-slate-200">{row.stt}</td>
+                                <td className="px-1.5 py-1 border border-slate-200 text-left leading-tight">{row.name}</td>
+                                <td colSpan={5} className="border border-slate-200"></td>
+                                <td className="px-1 py-1 border border-slate-200">{row.unit}</td>
+                                <td className="border border-slate-200"></td>
+                                <td className="px-1 py-1 border border-slate-200 text-right font-mono">{f(row.kl)}</td>
+                                <td className="px-1.5 py-1 border border-slate-200 text-right font-mono">{f(row.donGia || 0, 0)}</td>
+                                <td className="px-1.5 py-1 border border-slate-200 text-right font-mono">{f(row.ttVatTu || 0, 0)}</td>
+                                <td className="px-1.5 py-1 border border-slate-200 text-right font-mono">{f(row.ttNhanCong || 0, 0)}</td>
+                                <td className="px-1.5 py-1 border border-slate-200 text-right font-mono">{f(row.thanhTien || 0, 0)}</td>
+                              </tr>
+                            );
+                          }
+                          // Dòng bóc tách chi tiết
+                          return (
+                            <tr key={row.id} className="text-center text-slate-700">
+                              <td className="border border-slate-200"></td>
+                              <td className="px-1.5 py-0.5 border border-slate-200 text-left pl-4 leading-tight">{row.name}</td>
+                              <td className="px-1 py-0.5 border border-slate-200 font-mono">{dash(row.soBP)}</td>
+                              <td className="px-1 py-0.5 border border-slate-200 font-mono">{dash(row.daiHieuLuc)}</td>
+                              <td className="px-1 py-0.5 border border-slate-200 font-mono">{dash(row.rong)}</td>
+                              <td className="px-1 py-0.5 border border-slate-200 font-mono">{dash(row.cao)}</td>
+                              <td className="px-1 py-0.5 border border-slate-200 font-mono">{dash(row.phu)}</td>
+                              <td className="border border-slate-200"></td>
+                              <td className={`px-1 py-0.5 border border-slate-200 text-right font-mono ${row.kl < 0 ? 'text-rose-600' : ''}`}>{f(row.kl)}</td>
+                              <td colSpan={5} className="border border-slate-200"></td>
+                            </tr>
                           );
                         });
                       })()}
 
-                      <tr className="bg-emerald-50/60 border-t-2 border-slate-300 text-[9px] font-black uppercase text-slate-900 text-center">
-                        <td colSpan={2} className="px-2 py-1.5 text-left border border-slate-300 font-bold">TỔNG CỘNG HỒ SƠ</td>
-                        <td colSpan={6} className="border border-slate-300"></td>
-                        <td className="px-1 py-1.5 text-right border border-slate-300 font-mono text-emerald-800">{takeoffTotals.klTong.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="border border-slate-300"></td>
-                        <td className="px-1 py-1.5 text-right border border-slate-300 font-mono text-sky-800">{takeoffTotals.gach.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="px-1 py-1.5 text-right border border-slate-300 font-mono text-sky-800">{takeoffTotals.ximang.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="px-1 py-1.5 text-right border border-slate-300 font-mono text-sky-800">{takeoffTotals.cat.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="px-1 py-1.5 text-right border border-slate-300 font-mono text-sky-800">{takeoffTotals.da.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="px-1 py-1.5 text-right border border-slate-300 font-mono text-sky-800">{takeoffTotals.thep.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="border border-slate-300"></td>
-                        <td className="px-1.5 py-1.5 text-right border border-slate-300 font-mono text-emerald-800 text-[10px] font-black">{(takeoffTotals.cost).toLocaleString('vi-VN')} đ</td>
+                      <tr className="bg-emerald-50/60 border-t-2 border-slate-300 text-[9px] font-black uppercase text-slate-900">
+                        <td colSpan={11} className="px-2 py-1.5 text-right border border-slate-300 font-bold">TỔNG CỘNG ({takeoffTotals.itemCount} hạng mục)</td>
+                        <td className="px-1.5 py-1.5 text-right border border-slate-300 font-mono text-emerald-800">{takeoffTotals.vatTu.toLocaleString('vi-VN')}</td>
+                        <td className="px-1.5 py-1.5 text-right border border-slate-300 font-mono text-emerald-800">{takeoffTotals.nhanCong.toLocaleString('vi-VN')}</td>
+                        <td className="px-1.5 py-1.5 text-right border border-slate-300 font-mono text-emerald-800">{takeoffTotals.total.toLocaleString('vi-VN')}</td>
+                      </tr>
+                      <tr className="bg-emerald-50/40 text-[9px] font-black uppercase text-slate-900">
+                        <td colSpan={13} className="px-2 py-1.5 text-right border border-slate-300 font-bold">LÀM TRÒN</td>
+                        <td className="px-1.5 py-1.5 text-right border border-slate-300 font-mono text-emerald-800 text-[10px]">{takeoffTotals.rounded.toLocaleString('vi-VN')} đ</td>
                       </tr>
                     </tbody>
                   </table>
@@ -682,7 +658,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
 
                 <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs font-semibold italic text-left mb-6 font-sans text-slate-800 flex items-center gap-1.5 shadow-inner">
                   <span className="text-[#00a651] font-bold not-italic">Số tiền bằng chữ:</span>
-                  <span className="text-slate-800 font-serif font-semibold">{docSoTiengViet(takeoffTotals.cost)}</span>
+                  <span className="text-slate-800 font-serif font-semibold">{docSoTiengViet(takeoffTotals.rounded)}</span>
                 </div>
 
                 {/* SIGNATURE BLOCK */}

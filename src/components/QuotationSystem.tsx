@@ -1229,7 +1229,7 @@ export default function QuotationSystem({
 
   const [materialCompositionNorms, setMaterialCompositionNorms] = useState<{ id: string; name: string; unit: string; brick?: number; cement?: number; sand?: number; stone?: number | null; steel?: number | null; water?: number; notes?: string }[]>(() => MATERIAL_COMPOSITION_NORMS);
 
-  const [materialLaborPrices, setMaterialLaborPrices] = useState<{ group: string; name: string; unit: string; avgPrice: number; minPrice: number; maxPrice: number; notes?: string }[]>(() => MATERIAL_LABOR_PRICES);
+  const [materialLaborPrices, setMaterialLaborPrices] = useState<{ group: string; name: string; unit: string; avgPrice: number; minPrice: number; maxPrice: number; vatTu?: number | null; nhanCong?: number | null; notes?: string }[]>(() => MATERIAL_LABOR_PRICES);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -1335,6 +1335,8 @@ export default function QuotationSystem({
         'Tên vật tư / nhân công': p.name,
         'Đơn vị': p.unit,
         'Đơn giá TB (đ)': p.avgPrice,
+        'Đơn giá vật tư (đ)': p.vatTu ?? '',
+        'Đơn giá nhân công (đ)': p.nhanCong ?? '',
         'Giá thấp (đ)': p.minPrice,
         'Giá cao (đ)': p.maxPrice,
         'Nguồn / Ghi chú': p.notes ?? '',
@@ -1384,15 +1386,24 @@ export default function QuotationSystem({
         if (mapped.length === 0) { alert('Không tìm thấy cột "Mã ĐM" hoặc "Tên công tác" trong file.'); setIsImporting(false); return; }
         updateMaterialCompositionNorms(mapped);
       } else {
-        const mapped = rows.map((r, idx) => ({
+        const mapped = rows.map((r, idx) => {
+          // Đơn giá vật tư / nhân công tách riêng (ô trống → không có, dùng đơn giá TB như cũ)
+          const readOpt = (v: any) => (v === '' || v == null ? null : Number(String(v).replace(/[^\d.-]/g, '')) || 0);
+          const vatTu = readOpt(r['Đơn giá vật tư (đ)']);
+          const nhanCong = readOpt(r['Đơn giá nhân công (đ)']);
+          const avg = Number(String(r['Đơn giá TB (đ)'] ?? r['Don gia TB'] ?? '0').replace(/[^\d.-]/g, '')) || 0;
+          return {
+          vatTu,
+          nhanCong,
           group: String(r['Nhóm'] ?? r['Nhom'] ?? 'VẬT LIỆU CHÍNH').trim(),
           name: String(r['Tên vật tư / nhân công'] ?? r['Ten vat tu'] ?? '').trim(),
           unit: String(r['Đơn vị'] ?? r['Don vi'] ?? '').trim(),
-          avgPrice: Number(String(r['Đơn giá TB (đ)'] ?? r['Don gia TB'] ?? '0').replace(/[^\d.-]/g, '')) || 0,
+          avgPrice: (vatTu !== null || nhanCong !== null) ? (vatTu || 0) + (nhanCong || 0) : avg,
           minPrice: Number(String(r['Giá thấp (đ)'] ?? r['Gia thap'] ?? '0').replace(/[^\d.-]/g, '')) || 0,
           maxPrice: Number(String(r['Giá cao (đ)'] ?? r['Gia cao'] ?? '0').replace(/[^\d.-]/g, '')) || 0,
           notes: String(r['Nguồn / Ghi chú'] ?? r['Ghi chu'] ?? '').trim(),
-        })).filter(p => p.name);
+          };
+        }).filter(p => p.name);
         if (mapped.length === 0) { alert('Không tìm thấy cột "Tên vật tư / nhân công" trong file.'); setIsImporting(false); return; }
         updateMaterialLaborPrices(mapped);
       }
@@ -2492,7 +2503,7 @@ export default function QuotationSystem({
                   </>
                 ) : quotesFolderTab === 'takeoff' ? (
                   <ConstructionTakeoff 
-                    materialCompositionNorms={materialCompositionNorms}
+                    materialLaborPrices={materialLaborPrices}
                     currentUser={currentUser}
                     onAddQuote={handleSaveQuote}
                     selectedCustomerId={selectedCustomerId}
@@ -2703,7 +2714,7 @@ export default function QuotationSystem({
                         ĐỊNH MỨC CẤP PHỐI VẬT TƯ (Căn cứ Thông tư 12/2021/TT-BXD)
                       </h3>
                       <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        Tra cứu chi tiết hao phí định mức cát, đá, xi măng, gạch, thép, nước phục vụ thi công cho các công tác xây lắp chính.
+                        Tra cứu chi tiết hao phí định mức cát, đá, xi măng, gạch, thép, nước phục vụ thi công cho các công tác xây lắp chính. Chỉ dùng để tra cứu — không tham gia tính toán trong Bảng bóc tách.
                       </p>
                     </div>
 
@@ -2812,19 +2823,21 @@ export default function QuotationSystem({
                         ĐƠN GIÁ VẬT TƯ & NHÂN CÔNG (Khảo sát thị trường Việt Nam – Năm 2026)
                       </h3>
                       <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        Tra cứu đơn giá vật liệu xây dựng, vật tư hoàn thiện, nhân công xây lắp chính và máy móc thiết bị thi công mới nhất.
+                        Tra cứu đơn giá vật liệu xây dựng, vật tư hoàn thiện, nhân công xây lắp chính và máy móc thiết bị thi công mới nhất. Đơn giá vật tư và nhân công ở đây là dữ liệu chính để chọn vào Bảng bóc tách.
                       </p>
                     </div>
 
                     {/* BẢNG ĐƠN GIÁ VẬT TƯ & NHÂN CÔNG */}
                     <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/40">
-                      <table className="w-full text-xs border-collapse min-w-[900px]">
+                      <table className="w-full text-xs border-collapse min-w-[1180px]">
                         <thead>
                           <tr className="bg-slate-950 text-indigo-300 uppercase tracking-wider font-extrabold text-[10px] border-b border-slate-800/80">
                             <th className="px-4 py-3.5 text-left w-[150px]">Nhóm</th>
                             <th className="px-4 py-3.5 text-left min-w-[200px]">Tên vật tư / nhân công</th>
                             <th className="px-3 py-3.5 text-center w-[80px]">Đơn vị</th>
                             <th className="px-4 py-3.5 text-right w-[140px] text-indigo-300">Đơn giá TB (đ)</th>
+                            <th className="px-4 py-3.5 text-right w-[140px] text-sky-300">Đơn giá vật tư (đ)</th>
+                            <th className="px-4 py-3.5 text-right w-[140px] text-amber-300">Đơn giá nhân công (đ)</th>
                             <th className="px-4 py-3.5 text-right w-[140px] text-emerald-400/90">Giá thấp (đ)</th>
                             <th className="px-4 py-3.5 text-right w-[140px] text-rose-400/90">Giá cao (đ)</th>
                             <th className="px-4 py-3.5 text-left min-w-[180px] text-slate-300">Nguồn / Ghi chú</th>
@@ -2853,6 +2866,8 @@ export default function QuotationSystem({
                               groupClass = "bg-amber-50 text-amber-700 border border-amber-200";
                             } else if (p.group === "MÁY & THIẾT BỊ") {
                               groupClass = "bg-rose-50 text-rose-700 border border-rose-200";
+                            } else if (p.group === "CÔNG TÁC THI CÔNG") {
+                              groupClass = "bg-indigo-50 text-indigo-700 border border-indigo-200";
                             }
 
                             return (
@@ -2870,6 +2885,12 @@ export default function QuotationSystem({
                                 </td>
                                 <td className="px-4 py-3.5 font-extrabold text-indigo-400 text-right font-mono bg-indigo-50">
                                   {p.avgPrice.toLocaleString('vi-VN')}
+                                </td>
+                                <td className="px-4 py-3.5 font-bold text-sky-300 text-right font-mono">
+                                  {p.vatTu != null ? p.vatTu.toLocaleString('vi-VN') : '—'}
+                                </td>
+                                <td className="px-4 py-3.5 font-bold text-amber-300 text-right font-mono">
+                                  {p.nhanCong != null ? p.nhanCong.toLocaleString('vi-VN') : '—'}
                                 </td>
                                 <td className="px-4 py-3.5 font-bold text-emerald-400 text-right font-mono">
                                   {p.minPrice.toLocaleString('vi-VN')}
@@ -3184,6 +3205,9 @@ function ConstructionNormsModal({
   const [itemName, setItemName] = useState<string>('');
   const [itemUnit, setItemUnit] = useState<string>('');
   const [itemAvgPrice, setItemAvgPrice] = useState<number>(0);
+  // Đơn giá vật tư / nhân công tách riêng (để trống = dùng đơn giá TB như dữ liệu cũ)
+  const [itemVatTu, setItemVatTu] = useState<number | ''>('');
+  const [itemNhanCong, setItemNhanCong] = useState<number | ''>('');
   const [itemMinPrice, setItemMinPrice] = useState<number>(0);
   const [itemMaxPrice, setItemMaxPrice] = useState<number>(0);
   const [itemNotes, setItemNotes] = useState<string>('');
@@ -3240,6 +3264,8 @@ function ConstructionNormsModal({
         setItemName(data.name);
         setItemUnit(data.unit);
         setItemAvgPrice(data.avgPrice);
+        setItemVatTu(data.vatTu ?? '');
+        setItemNhanCong(data.nhanCong ?? '');
         setItemMinPrice(data.minPrice);
         setItemMaxPrice(data.maxPrice);
         setItemNotes(data.notes || '');
@@ -3248,6 +3274,8 @@ function ConstructionNormsModal({
         setItemName('');
         setItemUnit('m³');
         setItemAvgPrice(100000);
+        setItemVatTu('');
+        setItemNhanCong('');
         setItemMinPrice(90000);
         setItemMaxPrice(110000);
         setItemNotes('');
@@ -3310,11 +3338,15 @@ function ConstructionNormsModal({
         setError('Tên vật tư hoặc nhân công này đã tồn tại.');
         return;
       }
+      const hasSplit = itemVatTu !== '' || itemNhanCong !== '';
       onSave(tab, action, {
         group,
         name: itemName.trim(),
         unit: itemUnit.trim(),
-        avgPrice: itemAvgPrice,
+        vatTu: itemVatTu === '' ? null : itemVatTu,
+        nhanCong: itemNhanCong === '' ? null : itemNhanCong,
+        // Có tách vật tư/nhân công thì đơn giá TB = tổng hai khoản
+        avgPrice: hasSplit ? (Number(itemVatTu) || 0) + (Number(itemNhanCong) || 0) : itemAvgPrice,
         minPrice: itemMinPrice,
         maxPrice: itemMaxPrice,
         notes: itemNotes.trim()
@@ -3549,6 +3581,7 @@ function ConstructionNormsModal({
                     <option value="CỬA & KẾT CẤU">CỬA & KẾT CẤU</option>
                     <option value="NHÂN CÔNG">NHÂN CÔNG</option>
                     <option value="MÁY & THIẾT BỊ">MÁY & THIẾT BỊ</option>
+                    <option value="CÔNG TÁC THI CÔNG">CÔNG TÁC THI CÔNG</option>
                   </select>
                 </div>
                 <div>
@@ -3574,6 +3607,31 @@ function ConstructionNormsModal({
                   className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 outline-none focus:border-indigo-500 font-bold"
                 />
               </div>
+
+              {/* Đơn giá vật tư / nhân công — nguồn đơn giá chính cho Bảng bóc tách */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sky-300 font-bold mb-1">Đơn giá vật tư (đ):</label>
+                  <input
+                    type="number"
+                    placeholder="Để trống nếu chưa tách"
+                    value={itemVatTu}
+                    onChange={(e) => setItemVatTu(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 outline-none focus:border-sky-500 font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-amber-300 font-bold mb-1">Đơn giá nhân công (đ):</label>
+                  <input
+                    type="number"
+                    placeholder="Để trống nếu chưa tách"
+                    value={itemNhanCong}
+                    onChange={(e) => setItemNhanCong(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 outline-none focus:border-amber-500 font-mono font-bold"
+                  />
+                </div>
+              </div>
+              <p className="text-[10.5px] text-slate-500 italic -mt-1">Khi nhập vật tư hoặc nhân công, Đơn giá TB tự tính bằng tổng hai khoản này.</p>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
