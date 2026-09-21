@@ -2044,6 +2044,11 @@ export default function FinanceManagement({
         // khác. Phiếu chi Thanh Toán Công Nợ (không gắn dự án cụ thể) vẫn tính chung
         // như trước — không có project để phân biệt.
         if (p.projectId && sub.projectId && p.projectId !== sub.projectId) return false;
+        // Phiếu chi "Chi Nhà Cung Cấp" (supplier_payment) chỉ khớp được vào thầu phụ khi gắn ĐÚNG
+        // mã thầu phụ. Nếu chỉ trùng TÊN (1 công ty vừa là NCC vật tư vừa là thầu phụ) thì đó là
+        // tiền trả công nợ NCC — không được trừ vào hợp đồng thầu phụ (trước đây làm hụt "Còn lại"
+        // của thầu phụ đúng bằng số tiền đã trả cho NCC).
+        if (p.category === 'supplier_payment' && (!sub.subcontractorId || p.subcontractorId !== sub.subcontractorId)) return false;
         return true;
       });
       const totalPaidAmount = paymentsMade.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
@@ -2076,7 +2081,21 @@ export default function FinanceManagement({
       };
     });
 
-    const customs = customLiabilities.map(liab => {
+    // Công nợ khớp phiếu chi theo TÊN người nhận (không có subcontractorId/relatedAdvanceId):
+    // nếu có nhiều công nợ CÙNG TÊN thì tổng phiếu chi của tên đó chỉ được phân bổ MỘT LẦN
+    // (lần lượt vào từng công nợ tới hết tổng giá trị, phần dư dồn vào công nợ cuối) — trước đây
+    // mỗi công nợ cùng tên đều nhận đủ toàn bộ phiếu chi nên 1 phiếu chi bị tính nhiều lần.
+    const isNameMatched = (l: any) => !l.subcontractorId && !l.relatedAdvanceId;
+    const lastIdxByName = new Map<string, number>();
+    const countByName = new Map<string, number>();
+    customLiabilities.forEach((l, i) => {
+      if (!isNameMatched(l)) return;
+      lastIdxByName.set(l.name, i);
+      countByName.set(l.name, (countByName.get(l.name) || 0) + 1);
+    });
+    const namePoolRemaining = new Map<string, number>();
+
+    const customs = customLiabilities.map((liab, liabIdx) => {
       // Công nợ đầu kỳ Thầu Phụ: khớp chính xác theo subcontractorId của phiếu chi.
       // Nợ tạm ứng: khớp theo relatedAdvanceId.
       // Nợ thủ công NCC / khác: khớp theo tên người nhận (recipient).
@@ -2085,14 +2104,24 @@ export default function FinanceManagement({
         : liab.relatedAdvanceId
           ? (paymentsByAdvanceId.get(liab.relatedAdvanceId) || []).filter(p => p.status === 'approved')
           : (paymentsByRecipient.get(liab.name) || []).filter(p => p.status === 'approved');
-      const totalPaidAmount = paymentsMade.length > 0
-        ? paymentsMade.reduce((sum, p) => sum + p.amount, 0)
-        : (liab.relatedAdvanceId ? 0 : (liab.paid || 0));
       const openingDebt = liab.openingDebt ?? (liab.isOpeningDebt ? liab.value : 0);
       // NCC: Phát Sinh = tổng tongTien PO đã ghi nhận; Thầu Phụ/Khác: giữ nguyên value
       const value = liab.category === 'Nhà Cung Cấp' ? getRecordedPOSum(liab) : (liab.value || 0);
       // Cập nhật: Tổng giá trị = Công nợ đầu kỳ + Phát Sinh
       const tongGiaTri = openingDebt + value;
+      let paymentsTotal = paymentsMade.reduce((sum, p) => sum + p.amount, 0);
+      if (paymentsMade.length > 0 && isNameMatched(liab)) {
+        if ((countByName.get(liab.name) || 0) > 1) {
+          const pool = namePoolRemaining.has(liab.name) ? namePoolRemaining.get(liab.name)! : paymentsTotal;
+          const isLast = lastIdxByName.get(liab.name) === liabIdx;
+          const alloc = isLast ? pool : Math.min(pool, Math.max(0, tongGiaTri));
+          namePoolRemaining.set(liab.name, pool - alloc);
+          paymentsTotal = alloc;
+        }
+      }
+      const totalPaidAmount = paymentsMade.length > 0
+        ? paymentsTotal
+        : (liab.relatedAdvanceId ? 0 : (liab.paid || 0));
       // Cập nhật: Còn lại = Tổng giá trị - Đã Trả
       const remaining = tongGiaTri - totalPaidAmount;
       return {
