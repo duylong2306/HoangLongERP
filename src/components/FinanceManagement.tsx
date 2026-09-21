@@ -1827,6 +1827,42 @@ export default function FinanceManagement({
   const handleUpdateOpeningLiabilities = async () => {
     const subOpening = (allSubcontractors || []).filter(s => (s.openingDebt || 0) > 0);
     const supOpening = (suppliers || []).filter(s => (s.openingDebt || 0) > 0);
+
+    // ── Rà soát công nợ đầu kỳ "mồ côi" / trùng tên (chống tái diễn lỗi 1 công nợ bị nhân đôi) ──
+    // Nút này chỉ THÊM/GHI ĐÈ bản ghi opbal_<mã NCC/thầu phụ>. Nếu NCC bị tạo lại/nhập lại với mã
+    // mới thì bản ghi cũ (mã cũ) không bao giờ bị dọn → còn nguyên công nợ đầu kỳ + bị trừ lặp phiếu chi.
+    // Không tự xóa (đây là số liệu tiền, có thể đã có phiếu chi) — chỉ phát hiện rồi HỎI người dùng.
+    // Chỉ chạy khi danh mục đã tải xong, tránh coi nhầm toàn bộ là mồ côi.
+    if ((suppliers || []).length > 0 && (allSubcontractors || []).length > 0) {
+      const validSupIds = new Set((suppliers || []).map(x => x.id));
+      const validSubIds = new Set((allSubcontractors || []).map(x => x.id));
+      const orphans = customLiabilities.filter(l => {
+        if (l.id.startsWith('opbal_sup_')) return !validSupIds.has(l.id.slice('opbal_sup_'.length)) && !(l.recordedPurchaseOrderIds?.length);
+        if (l.id.startsWith('opbal_sub_')) return !validSubIds.has(l.id.slice('opbal_sub_'.length));
+        return false;
+      });
+      if (orphans.length > 0) {
+        const lines = orphans.map(l => {
+          const paidTotal = payments.filter(p => p.status === 'approved' && p.recipient === l.name).reduce((sm, p) => sm + p.amount, 0);
+          return `• ${l.name}: công nợ đầu kỳ ${(l.openingDebt ?? l.value ?? 0).toLocaleString('vi-VN')}đ (đã có phiếu chi cùng tên: ${paidTotal.toLocaleString('vi-VN')}đ)`;
+        }).join('\n');
+        if (window.confirm(`⚠️ Phát hiện ${orphans.length} công nợ đầu kỳ KHÔNG còn NCC/Thầu phụ tương ứng trong danh mục (có thể do nhập lại NCC với mã mới):\n\n${lines}\n\nXóa các bản ghi này khỏi Công nợ Trả?\n(Bấm Hủy để giữ nguyên và tự kiểm tra.)`)) {
+          const removed = new Set<string>();
+          await Promise.all(orphans.map(async l => {
+            try { await dbService.accountingLiabilities.delete(l.id); removed.add(l.id); }
+            catch (err) { console.error('[DB] Xóa công nợ đầu kỳ mồ côi thất bại:', l.id, err); }
+          }));
+          setCustomLiabilities(prev => prev.filter(l => !removed.has(l.id)));
+          addToast({ title: '🧹 Đã dọn công nợ mồ côi', message: `Đã xóa ${removed.size}/${orphans.length} bản ghi công nợ đầu kỳ không còn NCC/Thầu phụ tương ứng.`, type: removed.size === orphans.length ? 'success' : 'warning' });
+        }
+      }
+    }
+    // Danh mục có 2+ NCC CÙNG TÊN đều có công nợ đầu kỳ > 0 → sẽ sinh 2 dòng công nợ trùng nhau.
+    const dupNames = Object.entries(supOpening.reduce((acc: Record<string, number>, x) => { acc[x.name] = (acc[x.name] || 0) + 1; return acc; }, {}))
+      .filter(([, n]) => n > 1).map(([name]) => name);
+    if (dupNames.length > 0) {
+      addToast({ title: '⚠️ NCC trùng tên', message: `Danh mục có nhiều NCC cùng tên và đều có công nợ đầu kỳ: ${dupNames.join('; ')}. Hãy gộp/xóa bản trùng ở Dữ liệu kế toán để tránh tính nợ 2 lần.`, type: 'warning' });
+    }
     if (subOpening.length === 0 && supOpening.length === 0) {
       addToast({ title: 'ℹ️ Thông báo', message: 'Không có Thầu Phụ / NCC nào có Công Nợ đầu kỳ > 0.', type: 'info' });
       return;
