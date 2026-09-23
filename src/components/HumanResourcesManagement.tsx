@@ -1629,6 +1629,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // ─── XÉT DUYỆT CÔNG TÁC PHÍ (nút Duyệt/Từ chối trong TripsTab) ─────────────
   const handleApproveTravelExpense = React.useCallback((rowId: string, decision: 'approved' | 'rejected') => {
+    // RÀ SOÁT 2026-09: nút Duyệt/Từ chối chỉ hiện khi canApprove (xem TripsTab.tsx)
+    // nhưng hàm này không kiểm tra lại — gate lại ở đây để không có đường vòng.
+    if (!canApproveTravelExpense) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt công tác phí.', type: 'warning' });
+      return;
+    }
     const target = travelExpensesSummary.find(s => s.rowId === rowId || s.id === rowId);
     if (!target) return;
 

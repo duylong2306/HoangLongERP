@@ -210,6 +210,10 @@ export default function TaskManagement({
   }, [taskScope]);
 
   const handleApproveLeave = async (id: string, status: 'approved' | 'rejected') => {
+    if (!myPendingLeaves.some(l => l.id === id)) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt đơn nghỉ phép này.', type: 'warning' });
+      return;
+    }
     const getLeaveSymbol = (type: string) => {
       try {
         const coefsSaved = localStorage.getItem('hl_hrm_leave_coefs_v6');
@@ -393,6 +397,13 @@ export default function TaskManagement({
   };
 
   const handleApprovePayment = (id: string, status: 'approved' | 'rejected') => {
+    // RÀ SOÁT 2026-09: nút Duyệt/Từ chối chỉ hiện cho phiếu chi nằm trong
+    // myPendingPayments (đã lọc đúng thẩm quyền, không còn tự duyệt) — gate lại ở
+    // đây để không có đường vòng nếu hàm được gọi ngoài danh sách đã lọc.
+    if (!myPendingPayments.some(p => p.id === id)) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt phiếu chi này.', type: 'warning' });
+      return;
+    }
     const updatedPayment = payments.find(p => p.id === id);
     const updated = payments.map(p => p.id === id ? { ...p, status } : p);
     setPayments(updated);
@@ -421,6 +432,10 @@ export default function TaskManagement({
   // Xử lý duyệt Đề Xuất Thu Chi (Subcontractor Advance Proposal)
   // Trạng thái: 'pending_approval' (Chờ Duyệt BGĐ) -> 'pending_payment' (Chờ Lập Phiếu KT) | 'rejected'
   const handleApproveAdvance = async (id: string, decision: 'approved' | 'rejected') => {
+    if (!myPendingAdvances.some(a => a.id === id)) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt đề xuất này.', type: 'warning' });
+      return;
+    }
     const adv = subcontractorAdvances.find(a => a.id === id);
     if (!adv) return;
     const newStatus = decision === 'approved' ? 'pending_payment' : 'rejected';
@@ -458,6 +473,13 @@ export default function TaskManagement({
   // Supabase, fire sự kiện làm mới toàn cục + gửi tin nhắn cá nhân trả kết quả
   // cho NGƯỜI KHỞI TẠO (creatorId/creatorName) của công tác phí.
   const handleApproveTravelExpense = (rowId: string, decision: 'approved' | 'rejected') => {
+    // RÀ SOÁT 2026-09: myPendingTravelExpenses chỉ lọc theo boolean canApproveTravelExpense
+    // dùng chung cho MỌI công tác phí (không lọc theo từng bản ghi) — gate lại ở đây để
+    // không có đường vòng nếu hàm này được gọi từ nơi khác ngoài danh sách đã lọc.
+    if (!canApproveTravelExpense) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt công tác phí.', type: 'warning' });
+      return;
+    }
     const target = travelExpenses.find((s: any) => s.rowId === rowId || s.id === rowId);
     if (!target) return;
 
@@ -747,11 +769,15 @@ export default function TaskManagement({
   // (b) thuộc nhóm Kế toán (role_accounting) / Giám đốc (role_admin) → xem & duyệt toàn bộ.
   // Đồng nhất với canApproveProposal trong FinanceManagement.
   const isFinanceApprover = isRoleAccounting(currentUser?.id) || isRoleAdmin(currentUser?.id);
+  // RÀ SOÁT 2026-09: trước đây điều kiện còn có p.proposer === currentUser?.name ||
+  // p.recipient === currentUser?.name — khiến người ĐỀ XUẤT hoặc người NHẬN TIỀN của
+  // chính phiếu chi đó cũng thấy nút Duyệt/Từ chối, dù họ không có thẩm quyền duyệt
+  // (tự duyệt chi tiền cho chính mình). Bỏ 2 điều kiện đó — chỉ còn thẩm quyền THẬT
+  // (finance approver / được chỉ định duyệt), đúng như comment mô tả và đúng nguyên
+  // tắc "không tự duyệt" đã áp dụng ở canApproveProposal (FinanceManagement.tsx).
   const myPendingPayments = React.useMemo(() => payments.filter(p =>
     p.status === 'pending' &&
     (isFinanceApprover ||
-     p.proposer === currentUser?.name ||
-     p.recipient === currentUser?.name ||
      p.approver === currentUser?.name ||
      (p.approver && currentUser?.name && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
      p.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
