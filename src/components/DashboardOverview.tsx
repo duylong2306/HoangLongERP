@@ -237,54 +237,6 @@ export default function DashboardOverview({
     });
   }, [travelExpensesSummary, ctpStatusFilter, currentUser]);
 
-  // --- ACTIONS XỬ LÝ (INTERACTIVE APPROVALS) ---
-  const handleApproveTaskItem = (taskId: string, actionStatus: 'completed' | 'doing' | 'todo') => {
-    if (onUpdateTask) {
-      onUpdateTask(taskId, { status: actionStatus as any });
-      alert(`Đã cập nhật trạng thái công việc sang: ${actionStatus.toUpperCase()}`);
-    }
-  };
-
-  const handleApproveTaskStep = (taskId: string, stepId: string, status: 'approved' | 'rejected') => {
-    if (onUpdateTask) {
-      const task = tasks.find(t => t.id === taskId);
-      if (task && task.approvals) {
-        const updatedSteps = task.approvals.map(step => 
-          step.id === stepId ? { ...step, status, updatedAt: todayVal } : step
-        );
-        onUpdateTask(taskId, { approvals: updatedSteps });
-        alert(`Đã duyệt phê duyệt nội bộ của công việc thành công!`);
-      }
-    }
-  };
-
-  const handleApproveMaterialRequest = (payId: string, status: 'approved' | 'rejected') => {
-    if (onApprovePayment) {
-      onApprovePayment(payId, status);
-      alert(`Đã cập nhật trạng thái mua vật tư: ${status.toUpperCase()}`);
-    }
-  };
-
-  const handleApproveAdvanceRequest = (advanceItem: typeof filteredAdvances[0], status: 'approved' | 'rejected') => {
-    if (advanceItem.originType === 'payment_advance') {
-      if (onApprovePayment) {
-        onApprovePayment(advanceItem.id, status);
-        alert(`Đã duyệt đề xuất tạm ứng chi tài chính thành công nhãn: ${status.toUpperCase()}`);
-      }
-    } else if (advanceItem.originType === 'task_advance') {
-      if (onUpdateTask) {
-        const task = tasks.find(t => t.id === advanceItem.taskId);
-        if (task && task.advanceRequests) {
-          const updated = task.advanceRequests.map(r => 
-            r.id === advanceItem.id ? { ...r, status } : r
-          );
-          onUpdateTask(advanceItem.taskId, { advanceRequests: updated });
-          alert(`Đã duyệt đề xuất tạm ứng thợ mộc của công việc thành công nhãn: ${status.toUpperCase()}`);
-        }
-      }
-    }
-  };
-
   // Nộp Yêu Cầu Vật Tư mới
   const handleSubmitMaterial = (e: React.FormEvent) => {
     e.preventDefault();
