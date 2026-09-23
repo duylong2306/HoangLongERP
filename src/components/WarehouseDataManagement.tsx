@@ -4,7 +4,8 @@ import {
   ChevronLeft, ChevronRight, ShoppingCart, Package, Info, Download, FileUp
 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
+import { useAuth } from '../context/AuthContext';
 import { exportToExcel, importFromExcel, formatDateForFile } from '../lib/excelUtils';
 
 interface CatalogItem {
@@ -27,6 +28,15 @@ interface CatalogTableProps {
 
 function CatalogTable({ mode }: CatalogTableProps) {
   const { addToast } = useNotification();
+  // Component này không nhận currentUser qua props nên lấy trực tiếp từ AuthContext để kiểm tra
+  // quyền. Chưa có module con riêng cho "Dữ Liệu Kho" trong ma trận Phân Quyền Nhóm Vai Trò
+  // (chỉ có material_coordination/warehouse_suppliers/warehouse_management) — dùng chung
+  // warehouse_management (nhóm "Quản lý tồn kho") cho tới khi tách riêng module con nếu cần.
+  const { currentUser } = useAuth();
+  const canCreate = hasModulePermission(currentUser?.id, 'warehouse_management', 'create');
+  const canEditItem = hasModulePermission(currentUser?.id, 'warehouse_management', 'edit');
+  const canDeleteItem = hasModulePermission(currentUser?.id, 'warehouse_management', 'delete');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Quản Lý Tồn Kho.`, type: 'warning' });
   const isMua = mode === 'mua';
   const service: CatalogService = isMua ? dbService.purchaseProductCatalog : dbService.salesProductCatalog;
   const codePrefix = isMua ? 'SPM' : 'SPB';
@@ -102,6 +112,7 @@ function CatalogTable({ mode }: CatalogTableProps) {
     });
   };
   const handleBulkDelete = async () => {
+    if (!canDeleteItem) { denyToast('Xóa'); return; }
     if (selectedRows.size === 0) return;
     if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${selectedRows.size} sản phẩm đã chọn không?\nHành động này không thể hoàn tác.`)) return;
     const maList = Array.from(selectedRows);
@@ -134,6 +145,7 @@ function CatalogTable({ mode }: CatalogTableProps) {
   };
 
   const openAddModal = () => {
+    if (!canCreate) { denyToast('Thêm'); return; }
     setModalMode('add');
     setFMaSanPham(generateNextCode());
     setFTenSanPham('');
@@ -144,6 +156,7 @@ function CatalogTable({ mode }: CatalogTableProps) {
   };
 
   const openEditModal = (item: CatalogItem) => {
+    if (!canEditItem) { denyToast('Sửa'); return; }
     setModalMode('edit');
     setFMaSanPham(item.maSanPham);
     setFTenSanPham(item.tenSanPham);
@@ -155,6 +168,7 @@ function CatalogTable({ mode }: CatalogTableProps) {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!(modalMode === 'add' ? canCreate : canEditItem)) { denyToast(modalMode === 'add' ? 'Thêm' : 'Sửa'); setShowFormModal(false); return; }
     if (!fTenSanPham.trim()) {
       return addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập Tên sản phẩm!', type: 'warning' });
     }
@@ -182,6 +196,7 @@ function CatalogTable({ mode }: CatalogTableProps) {
   };
 
   const handleDelete = async (ma: string, ten: string) => {
+    if (!canDeleteItem) { denyToast('Xóa'); return; }
     if (!window.confirm(`⚠️ Bạn chắc chắn muốn XÓA sản phẩm "${ma} - ${ten}"?\nHành động này không thể hoàn tác.`)) return;
     try {
       await service.delete(ma);

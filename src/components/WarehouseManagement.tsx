@@ -4,7 +4,8 @@ import {
   AlertTriangle, Layers, MapPin, DollarSign, Download, FileUp
 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
+import { useAuth } from '../context/AuthContext';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import * as XLSX from 'xlsx';
 
@@ -21,6 +22,13 @@ interface MaterialStock {
 
 export default function WarehouseManagement() {
   const { addToast } = useNotification();
+  // Component này không nhận currentUser qua props (App.tsx/RouteHandler.tsx render
+  // <WarehouseManagement /> không truyền gì) nên lấy trực tiếp từ AuthContext để kiểm tra quyền.
+  const { currentUser } = useAuth();
+  const canCreate = hasModulePermission(currentUser?.id, 'warehouse_management', 'create');
+  const canEditItem = hasModulePermission(currentUser?.id, 'warehouse_management', 'edit');
+  const canDeleteItem = hasModulePermission(currentUser?.id, 'warehouse_management', 'delete');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Quản Lý Tồn Kho.`, type: 'warning' });
   const [inventory, setInventory] = useState<MaterialStock[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -166,6 +174,7 @@ export default function WarehouseManagement() {
 
   const handleAddNewItem = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreate) { denyToast('Thêm'); setIsAdding(false); return; }
     if (!formCode.trim() || !formName.trim()) return addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng điền đầy đủ Mã và Tên vật tư!', type: 'warning' });
     
     // Check duplication
@@ -217,6 +226,7 @@ export default function WarehouseManagement() {
   };
 
   const handleSaveEdit = async (id: string) => {
+    if (!canEditItem) { denyToast('Sửa'); setEditingId(null); return; }
     if (!editName.trim()) return addToast({ title: '⚠️ Lỗi', message: 'Tên vật tư không được để trống!', type: 'warning' });
     const item = inventory.find(i => i.id === id);
     if (!item) return;
@@ -243,6 +253,7 @@ export default function WarehouseManagement() {
   };
 
   const handleDeleteItem = async (id: string, name: string) => {
+    if (!canDeleteItem) { denyToast('Xóa'); return; }
     if (window.confirm(`⚠️ Bạn chắc chắn muốn XÓA mặt hàng "${name}" khỏi danh sách tồn kho?`)) {
       try {
         await dbService.inventory.delete(id);

@@ -2,7 +2,7 @@
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
-import { useNotification, isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, getConfiguredSettler } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
 import { useSettings } from '../context/SettingsContext';
 import VoucherPrintModal from './VoucherPrintModal';
@@ -583,49 +583,16 @@ export default function FinanceManagement({
       return next;
     });
   };
-  // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM
-  const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean => {
-    // Đọc từ in-memory cache (đã load từ Supabase)
-    let rolesList: any[] = loadHrmRoleGroups();
-    if (rolesList.length === 0) return true; // Mặc định có quyền nếu chưa cấu hình
-    try {
-      
-      // Khớp mã NV (emp_1 -> NV001, etc.)
-      const nvId = currentUser?.id?.replace('emp_', 'NV').replace('NV', () => {
-        const num = currentUser.id.split('_')[1];
-        if (!num) return 'NV';
-        return 'NV' + num.padStart(3, '0');
-      });
-
-      // Tìm nhóm vai trò chứa nhân sự này
-      const role = rolesList.find((r: any) => 
-        r.memberIds?.includes(currentUser?.id) || 
-        r.memberIds?.includes(nvId)
-      );
-
-      if (role) {
-        const modulePerms = role.permissions[moduleKey];
-        if (modulePerms) {
-          return !!modulePerms[actionKey];
-        }
-      } else {
-        // Fallback theo vai trò mặc định dựa trên Role Group
-        let defaultRoleId = 'role_office';
-        if (currentUser && isUserInRoleGroup(currentUser.id, 'role_admin')) defaultRoleId = 'role_admin';
-        else if (currentUser && isUserInRoleGroup(currentUser.id, 'role_accounting')) defaultRoleId = 'role_accounting';
-        else if (currentUser?.role === 'director') defaultRoleId = 'role_admin';
-        else if (currentUser?.role === 'accountant') defaultRoleId = 'role_accounting';
-
-        const defRole = rolesList.find((r: any) => r.id === defaultRoleId);
-        if (defRole && defRole.permissions[moduleKey]) {
-          return !!defRole.permissions[moduleKey][actionKey];
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return true;
-  };
+  // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM.
+  // TRƯỚC ĐÂY: hàm này tự viết lại logic đọc ma trận Phân Quyền Nhóm Vai Trò (trùng lặp y hệt với
+  // hasModulePermission() ở SettingsContext.tsx — xem RÀ SOÁT 2026-09), nhưng có 2 lỗi:
+  //  (1) Mặc định TRẢ VỀ TRUE (cho phép) khi chưa tìm thấy cấu hình — ngược nguyên tắc an toàn
+  //      "mặc định từ chối"; quên tick quyền cho 1 nhóm thì nhóm đó vẫn thao tác được bình thường.
+  //  (2) Đoạn quy đổi id kiểu cũ (emp_1 → NV001) không khớp định dạng id nhân viên thật (NV004...).
+  // Dùng thẳng hasModulePermission() dùng chung — đã fail-closed đúng (không tìm thấy cấu hình →
+  // từ chối) và có kế thừa quyền cha→con (VD: cấu hình ở "accounting_office" thì áp cho "finance").
+  const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean =>
+    hasModulePermission(currentUser?.id, moduleKey, actionKey);
 
   const canView = getPermission('finance', 'view');
   const canCreate = getPermission('finance', 'create');
@@ -1072,8 +1039,8 @@ export default function FinanceManagement({
       if (emp.status === 'retired' || emp.hasSystemAccount === false) return false;
       if (emp.id === proposal.approver) return true;
       if (proposal.approverName && emp.name?.toLowerCase() === proposal.approverName.toLowerCase()) return true;
-      if (isUserInRoleGroup(emp.id, 'role_accounting')) return true;
-      if (isUserInRoleGroup(emp.id, 'role_admin')) return true;
+      if (isRoleAccounting(emp.id)) return true;
+      if (isRoleAdmin(emp.id)) return true;
       return false;
     });
   }, [employeesProp]);
@@ -1096,9 +1063,9 @@ export default function FinanceManagement({
     if (proposal.approverName && proposal.approverName.toLowerCase() === currentUser.name.toLowerCase()) return true;
 
     // 2. Thuộc nhóm Kế toán (role_accounting)
-    if (isUserInRoleGroup(currentUser.id, 'role_accounting')) return true;
+    if (isRoleAccounting(currentUser.id)) return true;
     // 3. Là Giám đốc (role_admin) - có quyền duyệt tất cả
-    if (isUserInRoleGroup(currentUser.id, 'role_admin')) return true;
+    if (isRoleAdmin(currentUser.id)) return true;
     // 4. Fallback tự duyệt: chỉ khi là người tạo VÀ không còn ai khác đủ điều kiện
     if (isCreator) return true;
     return false;
@@ -1212,9 +1179,9 @@ export default function FinanceManagement({
     if (proposal.approver === currentUser.id) return true;
     if (proposal.approverName && proposal.approverName.toLowerCase() === currentUser.name.toLowerCase()) return true;
     // 2. Thuộc nhóm Kế toán (role_accounting)
-    if (isUserInRoleGroup(currentUser.id, 'role_accounting')) return true;
+    if (isRoleAccounting(currentUser.id)) return true;
     // 3. Là Giám đốc (role_admin) - có quyền từ chối tất cả
-    if (isUserInRoleGroup(currentUser.id, 'role_admin')) return true;
+    if (isRoleAdmin(currentUser.id)) return true;
     // 4. Fallback tự xử lý: chỉ khi là người tạo VÀ không còn ai khác đủ điều kiện
     if (isCreator) return true;
     return false;
@@ -1383,7 +1350,7 @@ export default function FinanceManagement({
   const cashFundBalance = (cashFundConfig?.openingBalance || 0) + cashFundDeposited - cashFundSpent;
   const [editingOpeningBalance, setEditingOpeningBalance] = useState(false);
   const [openingBalanceInput, setOpeningBalanceInput] = useState('0');
-  const canEditCashFundOpening = !!currentUser && (isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_accounting'));
+  const canEditCashFundOpening = !!currentUser && (isRoleAdmin(currentUser.id) || isRoleAccounting(currentUser.id));
   const handleSaveCashFundOpening = async () => {
     const cfg: CashFundConfig = {
       id: cashFundConfig?.id || 'cash_fund_main',
@@ -3997,7 +3964,7 @@ export default function FinanceManagement({
       attachmentName: 'bien_nhan_giao_hang.pdf',
       // Lập phiếu từ Đề Xuất (activeProposalForPayment) = phiếu tất toán Đề Xuất đã duyệt → tự động duyệt.
       // Thủ công: admin duyệt luôn, còn lại chờ duyệt.
-      status: activeProposalForPayment ? 'approved' : ((currentUser && isUserInRoleGroup(currentUser.id, 'role_admin')) ? 'approved' : 'pending'),
+      status: activeProposalForPayment ? 'approved' : ((currentUser && isRoleAdmin(currentUser.id)) ? 'approved' : 'pending'),
       relatedAdvanceId: activeProposalForPayment?.id,
       source: activeProposalForPayment ? 'auto' : 'manual'
     };
@@ -4092,7 +4059,7 @@ export default function FinanceManagement({
     }
 
     setShowPayForm(false);
-    addToast({ title: '✅ Thành công', message: (currentUser && isUserInRoleGroup(currentUser.id, 'role_admin'))
+    addToast({ title: '✅ Thành công', message: (currentUser && isRoleAdmin(currentUser.id))
       ? `✅ Giám đốc tự động thông duyệt Phiếu chi ${newPay.code}!`
       : `✍️ Đã gửi trình lên Đề xuất chi ${newPay.code} thành công.`, type: 'success' });
   };
@@ -7100,13 +7067,13 @@ export default function FinanceManagement({
                           <div>
                             <span className="text-[9px] text-slate-400 block mb-0.5">Người xét duyệt</span>
                             <div className="text-[11px] font-bold text-white">
-                              {getConfiguredApprover(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance')?.name || <span className="text-amber-400">Chưa cấu hình</span>}
+                              {getConfiguredApprovers(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance').map(a => a.name).join(', ') || <span className="text-amber-400">Chưa cấu hình</span>}
                             </div>
                           </div>
                           <div>
                             <span className="text-[9px] text-slate-400 block mb-0.5">Người quyết toán</span>
                             <div className="text-[11px] font-bold text-white">
-                              {getConfiguredSettler(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance')?.name || <span className="text-amber-400">Chưa cấu hình</span>}
+                              {getConfiguredSettlers(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance').map(a => a.name).join(', ') || <span className="text-amber-400">Chưa cấu hình</span>}
                             </div>
                           </div>
                         </div>

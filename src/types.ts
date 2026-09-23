@@ -210,10 +210,19 @@ export interface HrmApprovalConfig {
   id: string;
   documentType: 'quotation' | 'contract' | 'acceptance' | 'liquidation' | 'legal' | 'leave' | 'salary_advance' | 'travel_expense' | 'material_coordinator' | 'material_approver' | 'finance_expense_proposal' | 'finance_advance_proposal' | 'payroll';
   documentTypeLabel: string;
+  // Người có quyền duyệt (BẤT KỲ AI trong danh sách đều duyệt được — không phải tuần tự nhiều cấp).
+  // Bảng Supabase hrm_approval_config chỉ có 3 cột text (approver_id/name/position), không có cột
+  // mảng/jsonb, nên để hỗ trợ nhiều người mà KHÔNG cần đổi schema DB, các trường này lưu một chuỗi
+  // JSON-encode của string[] (VD: '["NV001","NV004"]'), khớp theo index giữa 3 trường. Dữ liệu cũ
+  // (trước khi hỗ trợ nhiều người) là một chuỗi ID/tên đơn — không phải JSON hợp lệ — nên khi đọc,
+  // dùng decodeApprovalList() (context/SettingsContext.tsx) để tự nhận diện và coi như mảng 1 phần
+  // tử. Không đọc/ghi trực tiếp các trường này ở nơi khác — luôn qua getConfiguredApprovers() /
+  // encodeApprovalApprovers() để tránh JSON.parse rải rác nhiều nơi.
   approverId: string;
   approverName: string;
   approverPosition?: string;
-  // Người quyết toán (kế toán thực hiện lập phiếu chi / quyết toán) — cấu hình trong Quyền Phê Duyệt
+  // Người quyết toán (kế toán thực hiện lập phiếu chi / quyết toán) — cấu hình trong Quyền Phê Duyệt.
+  // Cùng quy ước JSON-encode string[] như approverId/approverName/approverPosition ở trên.
   settlerId?: string;
   settlerName?: string;
   settlerPosition?: string;

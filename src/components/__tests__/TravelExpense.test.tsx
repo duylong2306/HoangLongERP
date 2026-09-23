@@ -21,9 +21,14 @@ vi.mock('./hr/hrTaskPermissions', () => ({
 vi.mock('../../context', () => ({
   useNotification: () => ({ addToast: vi.fn() }),
   isUserInRoleGroup: () => true,
+  isRoleAdmin: () => true,
+  isRoleAccounting: () => true,
+  isRoleOffice: () => true,
+  isRoleTechnical: () => true,
   useSettings: () => ({ settings: {} }),
   getAccentClasses: () => '',
   getConfiguredApprover: () => null, // chưa cấu hình người duyệt CTP → không gửi tin cá nhân
+  getConfiguredApprovers: () => [], // idem, dạng nhiều người (xem RolesTab.tsx — Quyền Phê Duyệt)
 }));
 
 const hrmTravelExpensesSave = vi.fn().mockResolvedValue(undefined);

@@ -5,7 +5,7 @@ import { useOpenArchiveFromMenu, pickLatestQuote } from '../hooks/useOpenArchive
 import { Employee, Project, ArchivedQuote, Customer } from '../types';
 import { generateProjectId } from '../lib/projectId';
 import { useNotification } from '../context';
-import { isUserInRoleGroup } from '../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleOffice, isRoleTechnical } from '../context';
 import {
   FileText,
   Search,
@@ -549,7 +549,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
 
   const filteredList = useMemo(() => {
     return archivedList.filter(item => {
-      const isPrivileged = isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_office') || isUserInRoleGroup(currentUser.id, 'role_technical');
+      const isPrivileged = isRoleAdmin(currentUser.id) || isRoleOffice(currentUser.id) || isRoleTechnical(currentUser.id);
       const isCreator = item.creatorId === currentUser.id || !item.creatorId;
       if (!isPrivileged && !isCreator) return false;
 

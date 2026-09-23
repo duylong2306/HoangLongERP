@@ -8,7 +8,7 @@
 // ma trận Role × Action có thể tùy biến qua UI trong tab "Phân Quyền Và Vai Trò"
 
 import { Employee, Project, Task } from '../../types';
-import { isUserInRoleGroup } from '../../context';
+import { isUserInRoleGroup, isRoleAdmin } from '../../context';
 import { dbService } from '../../lib/dbService';
 import { loadProjectPermissions } from './hrProjectPermissions';
 
@@ -148,7 +148,7 @@ export const getTaskRoleScope = (
 const IS_ADMIN = (uid: string) => uid === 'NV_ADMIN' || uid === 'emp_admin';
 
 const IS_DIRECTOR = (uid: string): boolean => {
-  return isUserInRoleGroup(uid, 'role_admin'); // superadmin cũng true nhờ isUserInRoleGroup
+  return isRoleAdmin(uid); // superadmin cũng true nhờ isUserInRoleGroup
 };
 
 // Kiểm tra user có được xem task này không (dùng action matrix 'view')

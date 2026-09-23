@@ -7,7 +7,7 @@
 // Ma trận được lưu lên Firestore + Supabase (dbService.projectPermissions).
 
 import { Employee, Project, Task } from '../../types';
-import { isUserInRoleGroup } from '../../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting } from '../../context';
 import { dbService } from '../../lib/dbService';
 
 // ─── Role Scope: vai trò của user đối với MỘT dự án / công việc cụ thể ───
@@ -250,10 +250,10 @@ export const getProjectRoleScopes = (
   const scopes: ProjectRoleScope[] = [];
 
   // 1. Director (Role Group: role_admin)
-  if (isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_superadmin')) scopes.push('director');
+  if (isRoleAdmin(currentUser.id) || isUserInRoleGroup(currentUser.id, 'role_superadmin')) scopes.push('director');
 
   // 2. Kế Toán (Role Group: role_accounting)
-  if (isUserInRoleGroup(currentUser.id, 'role_accounting')) scopes.push('accountant');
+  if (isRoleAccounting(currentUser.id)) scopes.push('accountant');
 
   if (project) {
     // 3. Trưởng Dự Án (PM)

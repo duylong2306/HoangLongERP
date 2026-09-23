@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNotification, getConfiguredApprover, getConfiguredSettler } from '../context';
-import { isUserInRoleGroup } from '../context';
+import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
 import { useSettings } from '../context/SettingsContext';
 import {
   Users, Clock, DollarSign, Calendar, Award,
@@ -19,7 +19,7 @@ import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
-import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog } from './hr/hrTypes';
+import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog, ERP_MODULE_CODES } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
 import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
@@ -234,6 +234,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteAttendance = (log: any) => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (log.isLocked) {
       addToast({ title: '🔒 Không thể xóa', message: 'Bản ghi đã chốt công', type: 'warning' });
       return;
@@ -251,7 +255,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Nhân viên thường chỉ xem, không can thiệp vào dữ liệu đã chốt.
   const canManageLockedAttendance = (): boolean => {
     if (!currentUser) return false;
-    return isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_accounting');
+    return isRoleAdmin(currentUser.id) || isRoleAccounting(currentUser.id);
   };
 
   /**
@@ -1675,6 +1679,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Xóa trực tiếp khỏi bảng hrm_travel_expenses theo rowId (khóa chính uuid),
   // cập nhật state + báo làm mới toàn cục cho Tổng Quan / Việc của tôi.
   const handleDeleteTravelExpenses = React.useCallback(async (rowIds: string[]) => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (!rowIds.length) return;
     const targets = travelExpensesSummary.filter(s => rowIds.includes(s.rowId || s.id));
     const remaining = travelExpensesSummary.filter(s => !rowIds.includes(s.rowId || s.id));
@@ -1828,9 +1836,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // có quyền thấy nút Duyệt/Từ chối trong TripsTab. Fallback: vai trò Kế toán.
   const canApproveTravelExpense = React.useMemo(() => {
     if (!currentUser?.id) return false;
-    const configured = getConfiguredApprover('travel_expense');
-    if (configured?.id === currentUser.id) return true;
-    return isUserInRoleGroup(currentUser.id, 'role_accounting');
+    // Bất kỳ ai trong danh sách người duyệt CTP đã cấu hình đều được duyệt (không chỉ 1 người).
+    if (getConfiguredApprovers('travel_expense').some(a => a.id === currentUser.id)) return true;
+    return isRoleAccounting(currentUser.id);
   }, [currentUser]);
 
   // Form states
@@ -2112,6 +2120,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteTravelNorm = (id: string) => {
+    if (!hasModulePermission(currentUser?.id, 'hr_data', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Dữ Liệu Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (confirm('Bạn có chắc chắn muốn xóa định mức công tác phí này?')) {
       setTravelNorms(prev => prev.filter(item => item.id !== id));
       addToast({ title: '🗑️ Đã xóa', message: '🗑️ Đã xóa định mức công tác phí.', type: 'info' });
@@ -2187,6 +2199,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteHoliday = (id: string) => {
+    if (!hasModulePermission(currentUser?.id, 'hr_data', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Dữ Liệu Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (confirm('Bạn có chắc muốn xóa ngày nghỉ lễ này?')) {
       const updated = holidays.filter(h => h.id !== id);
       setHolidays(updated);
@@ -2241,6 +2257,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteSalaryScale = (id: string) => {
+    if (!hasModulePermission(currentUser?.id, 'hr_data', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Dữ Liệu Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (confirm(`Bạn có chắc chắn muốn xóa Bậc Lương "${id}" này không?`)) {
       const target = salaryScales.find(item => item.id === id);
       setSalaryScales(prev => prev.filter(item => item.id !== id));
@@ -2318,6 +2338,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteCoefficient = (id: string) => {
+    if (!hasModulePermission(currentUser?.id, 'hr_data', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Dữ Liệu Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (confirm('Bạn có chắc muốn xóa hệ số chấm công này?')) {
       const updated = leaveCoefficients.filter(c => c.id !== id);
       setLeaveCoefficients(updated);
@@ -2371,6 +2395,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteCriteria = (deptId: string, critId: string) => {
+    if (!hasModulePermission(currentUser?.id, 'hr_data', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Dữ Liệu Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (window.confirm("Bạn có chắc chắn muốn xóa tiêu chí đánh giá này không?")) {
       setDepartmentCriteria(prev => prev.map(dept => {
         if (dept.id === deptId) {
@@ -2485,6 +2513,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleDeleteError = (id: string) => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     const target = employeeErrors.find(e => e.id === id);
     setEmployeeErrors(prev => prev.filter(e => e.id !== id));
     // Đồng bộ xóa lên Supabase
@@ -3004,6 +3036,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // ===================== BLOCK HỒ SƠ NHÂN VIÊN (profiles) =====================
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Kiểm tra quyền "Thêm" module Hệ Thống Nhân Sự (khớp checkbox ↳ Hệ thống Nhân sự trong
+    // Phân Quyền Nhóm Vai Trò) — trước đây hành động này không có kiểm tra nào (xem RÀ SOÁT 2026-09).
+    if (!hasModulePermission(currentUser?.id, 'employees', 'create')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Thêm" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      setShowEmpModal(false);
+      return;
+    }
     const id = `NV${String(employees.length + 1).padStart(3, '0')}`;
     const profile: EmployeeProfile = {
       ...newEmp,
@@ -3435,6 +3474,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Xóa hẳn 1 đơn nghỉ phép (dùng cho nút Xóa ở thẻ Chi tiết / xóa hàng loạt
   // trong LeavesTab). Không hoàn tác — component con đã hỏi xác nhận trước khi gọi.
   const handleDeleteLeave = (id: string) => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'delete')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     setLeaves(prev => prev.filter(l => l.id !== id));
     dbService.hrmLeaves.delete(id).catch(err => console.warn('Xóa đơn nghỉ phép trên Supabase thất bại:', err));
   };
@@ -3579,8 +3622,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const position = emp?.position || 'Nhân viên';
     const cp: any = businessInfo || {};
     const docTien = docSoTiengViet(item.netSalary);
-    const nguoiPhat = getConfiguredApprover('payroll');
-    const keToan = getConfiguredSettler('payroll');
+    // Nhiều người được cấu hình → liệt kê đủ tên (ngăn cách dấu phẩy) trên chữ ký phiếu lương.
+    const nguoiPhat = { name: getConfiguredApprovers('payroll').map(a => a.name).join(', ') };
+    const keToan = { name: getConfiguredSettlers('payroll').map(a => a.name).join(', ') };
     const lineNotes = item.lineNotes || {};
     const rows = getPayslipLineItems(item).map(li => {
       const noteText = lineNotes[li.key] || '';
@@ -4082,8 +4126,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 {activeSubTab === 'profiles' && (
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setShowEmpModal(true)}
-                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg px-3 py-1.5 text-sm font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+                      onClick={() => {
+                        if (!hasModulePermission(currentUser?.id, 'employees', 'create')) {
+                          addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Thêm" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+                          return;
+                        }
+                        setShowEmpModal(true);
+                      }}
+                      disabled={!hasModulePermission(currentUser?.id, 'employees', 'create')}
+                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg px-3 py-1.5 text-sm font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-amber-500 disabled:hover:to-orange-500"
                     >
                       <Plus className="w-3.5 h-3.5" /> Thêm nhân viên
                     </button>
@@ -5018,17 +5069,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
                 const newId = 'role_custom_' + Date.now();
                 const defaultPerms: any = {};
-                const modules = [
-                  'projects_construction',
-                  'projects_furniture',
-                  'projects_mechanical',
-                  'tasks',
-                  'finance',
-                  'employees',
-                  'reports',
-                  'settings'
-                ];
-                modules.forEach(m => {
+                // Gán quyền Xem mặc định cho TOÀN BỘ phân hệ thật (ERP_MODULE_CODES, dùng chung với
+                // ma trận ở RolesTab.tsx) — trước đây dùng một danh sách mã module khác/cũ, lệch với
+                // ma trận thật nên nhóm mới tạo gần như không có quyền Xem ở đa số phân hệ.
+                ERP_MODULE_CODES.forEach(m => {
                   defaultPerms[m] = { view: true, create: false, edit: false, delete: false };
                 });
 
@@ -5481,13 +5525,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <div>
                 <label className="block text-slate-400 font-bold mb-1">Người xét duyệt:</label>
                 {(() => {
-                  const configuredApprover = getConfiguredApprover('leave');
-                  if (configuredApprover) {
-                    const approverPos = configuredApprover.position ? ` (${configuredApprover.position})` : '';
+                  // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
+                  const configuredApprovers = getConfiguredApprovers('leave');
+                  if (configuredApprovers.length > 0) {
                     return (
-                      <div className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white flex items-center justify-between">
-                        <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded">Đã khóa · Tự động từ Quyền Phê Duyệt</span>
+                      <div className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white flex items-center justify-between gap-2">
+                        <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                        <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động từ Quyền Phê Duyệt</span>
                       </div>
                     );
                   }

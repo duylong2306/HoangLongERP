@@ -9,7 +9,7 @@ import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
-import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 
 interface TaskManagementProps {
@@ -746,7 +746,7 @@ export default function TaskManagement({
   // (a) được CHỈ ĐỊNH làm người duyệt (approver theo ID/tên, kể cả chuỗi duyệt approvals), HOẶC
   // (b) thuộc nhóm Kế toán (role_accounting) / Giám đốc (role_admin) → xem & duyệt toàn bộ.
   // Đồng nhất với canApproveProposal trong FinanceManagement.
-  const isFinanceApprover = isUserInRoleGroup(currentUser?.id, 'role_accounting') || isUserInRoleGroup(currentUser?.id, 'role_admin');
+  const isFinanceApprover = isRoleAccounting(currentUser?.id) || isRoleAdmin(currentUser?.id);
   const myPendingPayments = React.useMemo(() => payments.filter(p =>
     p.status === 'pending' &&
     (isFinanceApprover ||
@@ -767,9 +767,9 @@ export default function TaskManagement({
   // Duyệt → Công Tác Phí) hoặc thuộc nhóm Kế toán → thấy & duyệt toàn bộ.
   const canApproveTravelExpense = React.useMemo(() => {
     if (!currentUser?.id) return false;
-    const configured = getConfiguredApprover('travel_expense');
-    if (configured?.id === currentUser.id) return true;
-    return isUserInRoleGroup(currentUser.id, 'role_accounting');
+    // Bất kỳ ai trong danh sách người duyệt CTP đã cấu hình đều được duyệt (không chỉ 1 người).
+    if (getConfiguredApprovers('travel_expense').some(a => a.id === currentUser.id)) return true;
+    return isRoleAccounting(currentUser.id);
   }, [currentUser]);
   const myPendingTravelExpenses = React.useMemo(() => travelExpenses.filter((t: any) =>
     t.status === 'pending' && canApproveTravelExpense

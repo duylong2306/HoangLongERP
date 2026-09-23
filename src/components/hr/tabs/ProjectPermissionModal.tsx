@@ -32,6 +32,15 @@ interface ProjectPermissionModalProps {
   onChange?: (matrix: ProjectPermissionMatrix) => void;
   /** Cờ cho biết value đã thay đổi so với saved (dùng cho inline mode) */
   hasChanges?: boolean;
+  // ─── Handlers Lưu/Hủy/Mặc định cho ma trận "Theo vị trí" (context), do component cha (RolesTab)
+  // cung cấp vì state gốc (savedMatrix) nằm ở cha. Không truyền thì dùng no-op (dùng cho chế độ modal
+  // độc lập, chưa nơi nào dùng chế độ này nên giữ mặc định an toàn). Trước đây các nút này luôn là
+  // no-op ngay cả khi có cha quản lý draft, khiến "Hủy bỏ"/"Đặt mặc định"/"Khôi phục mặc định" ở
+  // thanh cục bộ (ngay dưới bảng) không có tác dụng — xem RolesTab.tsx để biết cách truyền thật.
+  onCancelContext?: () => void;
+  onSetDefaultContext?: () => void;
+  onRestoreDefaultContext?: () => void;
+  hasDefaultContext?: boolean;
 }
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
@@ -163,6 +172,10 @@ const actionGroups: {
 ];
 
 // Vai trò (cột của ma trận) — dựa trên vị trí dữ liệu thực tế trong UI
+// Nhận diện nhóm "Admin" trong bảng "Vai trò nhóm HRM" — trước đây chỉ so 'role_admin' nên nhóm
+// Siêu Admin thật (id role_superadmin, xem RolesTab.tsx) không được khóa full quyền ở ma trận này.
+const isAdminRoleGroup = (id: string) => id === 'role_admin' || id === 'role_superadmin';
+
 const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; color: string }> = {
   director: { label: 'Giám Đốc', desc: 'Role Group role_admin — luôn full quyền mọi dự án', color: 'text-violet-400 bg-violet-500/10' },
   pm: { label: 'Trưởng Dự Án', desc: 'project.pmId — người quản lý chính dự án', color: 'text-emerald-400 bg-emerald-500/10' },
@@ -179,7 +192,7 @@ const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string }[] = [
   { value: 'readonly', label: 'Chỉ xem' },
 ];
 
-export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange, hasChanges: externalChanged }: ProjectPermissionModalProps) {
+export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange, hasChanges: externalChanged, onCancelContext, onSetDefaultContext, onRestoreDefaultContext, hasDefaultContext }: ProjectPermissionModalProps) {
   const [internalMatrix, setInternalMatrix] = React.useState<ProjectPermissionMatrix>(DEFAULT_PROJECT_PERMISSIONS);
   const [activeGroup, setActiveGroup] = React.useState<string | null>(null);
   const [rgTab, setRgTab] = React.useState<'context' | 'roleGroup'>('context');
@@ -357,9 +370,9 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                       <span className="text-[10px] leading-tight">{rg.name}</span>
                       <button
                         type="button"
-                        disabled={rg.id === 'role_admin'}
+                        disabled={isAdminRoleGroup(rg.id)}
                         onClick={() => {
-                          if (rg.id === 'role_admin') return;
+                          if (isAdminRoleGroup(rg.id)) return;
                           // Toggle all actions for this role group
                           const allActionKeys = allActions.map(a => a.action);
                           const currentActions = rgMatrix.roleGroupActions[rg.id] || [];
@@ -373,11 +386,11 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                           }));
                         }}
                         className={`text-[8px] font-bold px-1.5 py-0.5 rounded transition-all ${
-                          rg.id === 'role_admin'
+                          isAdminRoleGroup(rg.id)
                             ? 'text-slate-600 cursor-not-allowed'
                             : 'text-amber-500/60 hover:text-amber-400 hover:bg-amber-500/10 cursor-pointer'
                         }`}
-                        title={rg.id === 'role_admin' ? 'Admin luôn full quyền' : 'Chọn/bỏ chọn tất cả'}
+                        title={isAdminRoleGroup(rg.id) ? 'Admin luôn full quyền' : 'Chọn/bỏ chọn tất cả'}
                       >
                         {(() => {
                           const allActionKeys = allActions.map(a => a.action);
@@ -428,7 +441,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => handleToggleRoleGroupAction(rg.id, action)}
-                                disabled={rg.id === 'role_admin'}
+                                disabled={isAdminRoleGroup(rg.id)}
                                 className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer mx-auto transition-transform hover:scale-110 disabled:opacity-60 disabled:cursor-not-allowed"
                               />
                             </td>
@@ -592,10 +605,10 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             <SaveActionBar
               changed={!!externalChanged}
               onSave={handleSaveContext}
-              onCancel={() => {/* Reset handled by parent */}}
-              onSetDefault={() => {/* Default handled by parent */}}
-              onRestoreDefault={() => {/* Restore handled by parent */}}
-              hasDefault={false}
+              onCancel={onCancelContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
+              onSetDefault={onSetDefaultContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
+              onRestoreDefault={onRestoreDefaultContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
+              hasDefault={!!hasDefaultContext}
               accent="emerald"
             />
           </div>
@@ -663,10 +676,10 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
               <SaveActionBar
                 changed={!!externalChanged}
                 onSave={handleSaveContext}
-                onCancel={() => {/* Reset handled by parent */}}
-                onSetDefault={() => {/* Default handled by parent */}}
-                onRestoreDefault={() => {/* Restore handled by parent */}}
-                hasDefault={false}
+                onCancel={onCancelContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
+                onSetDefault={onSetDefaultContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
+                onRestoreDefault={onRestoreDefaultContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
+                hasDefault={!!hasDefaultContext}
                 accent="emerald"
               />
             </div>

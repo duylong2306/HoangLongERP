@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { dbService } from '../lib/dbService';
 import { Employee, ArchivedQuote, Project, Payment } from '../types';
-import { useNotification, isUserInRoleGroup } from '../context';
+import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleAccounting } from '../context';
 import {
   FileText,
   DollarSign,
@@ -50,7 +50,7 @@ export default function SubcontractorManagement({
       // Filter based on role permissions similar to SubcontractorArchive
       const filtered = data.filter(item => {
         const isCreator = item.creatorId === currentUser.id;
-        if (!isCreator && !isUserInRoleGroup(currentUser.id, 'role_admin') && !isUserInRoleGroup(currentUser.id, 'role_accounting')) return false;
+        if (!isCreator && !isRoleAdmin(currentUser.id) && !isRoleAccounting(currentUser.id)) return false;
         return true;
       });
 

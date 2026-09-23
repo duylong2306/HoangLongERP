@@ -56,7 +56,7 @@ const TRAVEL_NORMS_FALLBACK: TravelAllowanceNorm[] = [
   { id: 'ctp_28', code: 'CTP_028', content: 'Đi Nam Ban - Tân Hà (xe 2 người)', quantity: 2, unitPrice: 120000, notes: '' },
   { id: 'ctp_29', code: 'CTP_029', content: 'Nghỉ qua đêm', quantity: 1, unitPrice: 180000, notes: '' },
 ];
-import { useNotification, isUserInRoleGroup, getConfiguredApprover } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin } from '../context';
 import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { CTPStatus } from '../lib/travelExpenseStatus';
@@ -220,7 +220,7 @@ export default function TaskDetailModal({
   const assigner = employees.find(e => e.id === selectedTask.assignerId);
 
   const isAssignee = currentUser.id === selectedTask.assigneeId;
-  const isAssigner = currentUser.id === selectedTask.assignerId || isUserInRoleGroup(currentUser.id, 'role_admin') || currentUser.id === project?.pmId;
+  const isAssigner = currentUser.id === selectedTask.assignerId || isRoleAdmin(currentUser.id) || currentUser.id === project?.pmId;
 
   // ─── PHÂN QUYỀN CÔNG VIỆC (Task Action Matrix) ──────────────────────
   // Thay thế hardcode isAssignee/isAssigner bằng ma trận Role × Action
@@ -3846,7 +3846,7 @@ export default function TaskDetailModal({
         <div className="p-4 bg-slate-950 border-t border-slate-850 shrink-0 flex justify-end items-center gap-3">
           {!isReadOnly && (() => {
             const isAssignee = currentUser.id === selectedTask.assigneeId;
-            const isAssigner = currentUser.id === selectedTask.assignerId || isUserInRoleGroup(currentUser.id, 'role_admin') || currentUser.id === project?.pmId;
+            const isAssigner = currentUser.id === selectedTask.assignerId || isRoleAdmin(currentUser.id) || currentUser.id === project?.pmId;
 
             // Chặn Hoàn thành công việc / Gửi phê duyệt khi còn nhiệm vụ (missions) chưa hoàn thành.
             const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
@@ -4539,11 +4539,12 @@ export default function TaskDetailModal({
                                 // nhiệm vụ đã hoàn thành (theo quy trình xét duyệt mới).
                                 persistTravelExpense(newAllowance, mission.name, 'pending');
 
-                                // 📩 Gửi tin nhắn CÁ NHÂN cho người xét duyệt CTP (cấu hình trong
-                                // Phân Quyền → Quyền Phê Duyệt → Công Tác Phí). Best-effort — không
+                                // 📩 Gửi tin nhắn CÁ NHÂN cho TỪNG người xét duyệt CTP đã cấu hình
+                                // (Phân Quyền → Quyền Phê Duyệt → Công Tác Phí, có thể nhiều người —
+                                // bất kỳ ai trong danh sách cũng duyệt được). Best-effort — không
                                 // chặn luồng nếu chưa cấu hình người duyệt hoặc gửi lỗi.
-                                const ctpApprover = getConfiguredApprover('travel_expense');
-                                if (ctpApprover && ctpApprover.id !== currentUser.id) {
+                                const ctpApprovers = getConfiguredApprovers('travel_expense').filter(a => a.id !== currentUser.id);
+                                ctpApprovers.forEach((ctpApprover) => {
                                   const creatorEmp = employees.find(e => e.id === finalMemId);
                                   const creatorName = creatorEmp?.name || currentUser.name;
                                   sendApprovalDirectMessage({
@@ -4555,7 +4556,7 @@ export default function TaskDetailModal({
                                     content: `🚗 ${currentUser.name} vừa đăng ký CÔNG TÁC PHÍ "${selectedNorm.content}" cho ${creatorName} (${Number(selectedNorm.unitPrice).toLocaleString('vi-VN')} đ) trong nhiệm vụ "${mission.name}". Vui lòng xét duyệt.`,
                                     relatedEntity: { type: 'travel_expense', id: newAllowance.rowId },
                                   }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin cho người duyệt thất bại:', e?.message || e));
-                                }
+                                });
 
                                 // Reset form states
                                 setAllowanceNormId('');

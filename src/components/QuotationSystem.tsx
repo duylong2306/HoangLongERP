@@ -1,11 +1,7 @@
 ﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Quote, Customer, Project, QuoteItem, QuoteConfig, ArchivedQuote } from '../types';
 import { dbService } from '../lib/dbService';
-import {
-  useNotification,
-  loadHrmRoleGroups,
-  isUserInRoleGroup
-} from '../context';
+import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleOffice, isRoleTechnical, hasModulePermission } from '../context';
 import {
   Calculator,
   CheckCircle,
@@ -706,46 +702,12 @@ export default function QuotationSystem({
   currentUser
 }: QuotationSystemProps) {
   const { addToast } = useNotification();
-  // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM (từ Supabase cache trước)
-  const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean => {
-    let rolesList: any[] = loadHrmRoleGroups();
-    if (rolesList.length === 0) return true;
-    try {
-      
-      // Khớp mã NV (emp_1 -> NV001, etc.)
-      const nvId = currentUser?.id?.replace('emp_', 'NV').replace('NV', () => {
-        const num = currentUser.id.split('_')[1];
-        if (!num) return 'NV';
-        return 'NV' + num.padStart(3, '0');
-      });
-
-      // Tìm nhóm vai trò chứa nhân sự này
-      const role = rolesList.find((r: any) => 
-        r.memberIds?.includes(currentUser?.id) || 
-        r.memberIds?.includes(nvId)
-      );
-
-      if (role) {
-        const modulePerms = role.permissions[moduleKey];
-        if (modulePerms) {
-          return !!modulePerms[actionKey];
-        }
-      } else {
-        // Fallback theo vai trò mặc định dựa trên currentUser.role trong App.tsx
-        let defaultRoleId = 'role_office';
-        if (currentUser?.role === 'director') defaultRoleId = 'role_admin';
-        else if (currentUser?.role === 'accountant') defaultRoleId = 'role_accounting';
-
-        const defRole = rolesList.find((r: any) => r.id === defaultRoleId);
-        if (defRole && defRole.permissions[moduleKey]) {
-          return !!defRole.permissions[moduleKey][actionKey];
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return true;
-  };
+  // Cấu hình Phân quyền người dùng dựa trên nhóm vai trò từ HRM. Trước đây tự viết lại logic đọc
+  // ma trận Phân Quyền Nhóm Vai Trò (trùng lặp với hasModulePermission() ở SettingsContext.tsx —
+  // xem RÀ SOÁT 2026-09) và mặc định CHO PHÉP khi chưa tìm thấy cấu hình — ngược nguyên tắc an
+  // toàn. Dùng thẳng hàm dùng chung, fail-closed đúng và có kế thừa quyền cha→con.
+  const getPermission = (moduleKey: string, actionKey: 'view' | 'create' | 'edit' | 'delete'): boolean =>
+    hasModulePermission(currentUser?.id, moduleKey, actionKey);
 
   const canView = getPermission('quotes', 'view');
   const canCreate = getPermission('quotes', 'create');
@@ -1643,7 +1605,7 @@ export default function QuotationSystem({
                             {(() => {
                               // Người có quyền quotes (admin/office/technical) xem được toàn bộ hồ sơ,
                               // người khác chỉ xem hồ sơ do mình tạo
-                              const canViewAllArchives = canView || isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical');
+                              const canViewAllArchives = canView || isRoleAdmin(currentUser?.id) || isRoleOffice(currentUser?.id) || isRoleTechnical(currentUser?.id);
                               const userFilteredList = canViewAllArchives ? archivedCabinetQuotesList : archivedCabinetQuotesList.filter(q => q.creatorId === currentUser?.id);
                               const matches = userFilteredList.filter(q =>
                                 (q.customerName || '').toLowerCase().includes(cabinetArchiveSearchQuery.toLowerCase()) ||
@@ -3047,7 +3009,7 @@ export default function QuotationSystem({
                             {(() => {
                               // Người có quyền quotes (admin/office/technical) xem được toàn bộ hồ sơ,
                               // người khác chỉ xem hồ sơ do mình tạo
-                              const canViewAllArchives = canView || isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical');
+                              const canViewAllArchives = canView || isRoleAdmin(currentUser?.id) || isRoleOffice(currentUser?.id) || isRoleTechnical(currentUser?.id);
                               const userFilteredList = canViewAllArchives ? archivedMechanicalQuotesList : archivedMechanicalQuotesList.filter(q => q.creatorId === currentUser?.id);
                               const matches = userFilteredList.filter(q =>
                                 (q.customerName || '').toLowerCase().includes(mechanicalArchiveSearchQuery.toLowerCase()) ||

@@ -5,9 +5,20 @@ import ProjectPermissionModal from './ProjectPermissionModal';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache } from '../../../context';
+import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache, encodeApprovalApprovers, getRoleGroupKind, withRoleGroupKind, ROLE_GROUP_KIND_LABELS, RoleGroupKind } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { dbService } from '../../../lib/dbService';
+import SearchableMultiSelect from '../../SearchableMultiSelect';
+
+// Id các nhóm Admin luôn full quyền, không cho sửa checkbox. 'role_admin' là id quy ước cũ;
+// 'role_superadmin' là id THẬT của nhóm "Siêu Admin (Super Admin)" trong dữ liệu đang chạy — trước đây
+// chỉ kiểm tra 'role_admin' nên nhóm Siêu Admin thật KHÔNG được coi là admin: checkbox của nó sửa
+// được tự do như mọi nhóm khác.
+const ADMIN_ROLE_IDS = ['role_admin', 'role_superadmin'];
+// Id các nhóm vai trò không cho xóa qua nút "Xóa nhóm" (gồm 2 nhóm admin ở trên, cộng các nhóm hệ
+// thống quy ước khác). Trước đây thiếu 'role_superadmin' nên nút "Xóa nhóm" vẫn hiện cho nhóm Siêu
+// Admin thật, có thể vô tình xóa mất nhóm quản trị cao nhất của hệ thống.
+const PROTECTED_ROLE_IDS = [...ADMIN_ROLE_IDS, 'role_accounting', 'role_office'];
 
 export interface RolesTabProps {
   roles: Role[];
@@ -331,21 +342,25 @@ export default function RolesTab(props: RolesTabProps) {
     const existing = [...draftApprovalConfig];
     const idx = existing.findIndex(p => p.documentType === docType);
     if (checked) {
-      const defaultApprover = employees.find(emp => emp.hasSystemAccount);
-      if (!defaultApprover) return;
-      const newPerm: ApprovalPermission = {
-        id: `ap_${docType}`,
-        documentType: docType,
-        documentTypeLabel: docLabel,
-        approverId: defaultApprover.id,
-        approverName: defaultApprover.name,
-        approverPosition: defaultApprover.position || '',
-        canApprove: true
-      };
+      // Bật lại một mục đã từng cấu hình (đang canApprove=false) → GIỮ NGUYÊN người duyệt/người quyết
+      // toán đã chọn trước đó, chỉ bật canApprove lại. Trước đây luôn tạo mới newPerm với người duyệt
+      // mặc định (nhân sự đầu tiên có tài khoản hệ thống), khiến chỉ cần tắt/bật lại checkbox là mất
+      // người duyệt đã chọn — rất dễ xảy ra ngoài ý muốn và không có cảnh báo nào.
       if (idx >= 0) {
-        existing[idx] = newPerm;
+        existing[idx] = { ...existing[idx], documentTypeLabel: docLabel, canApprove: true };
       } else {
-        existing.push(newPerm);
+        const defaultApprover = employees.find(emp => emp.hasSystemAccount);
+        if (!defaultApprover) return;
+        const encoded = encodeApprovalApprovers([{ id: defaultApprover.id, name: defaultApprover.name, position: defaultApprover.position }]);
+        existing.push({
+          id: `ap_${docType}`,
+          documentType: docType,
+          documentTypeLabel: docLabel,
+          approverId: encoded.id,
+          approverName: encoded.name,
+          approverPosition: encoded.position,
+          canApprove: true
+        });
       }
     } else {
       if (idx >= 0) {
@@ -355,50 +370,72 @@ export default function RolesTab(props: RolesTabProps) {
     setDraftApprovalConfig(existing);
   }, [draftApprovalConfig, employees]);
 
-  const handleChangeApprover = React.useCallback((docType: ApprovalPermission['documentType'], empId: string, empName: string, empPosition?: string) => {
+  /** Đổi TOÀN BỘ danh sách người duyệt của 1 loại hồ sơ — bất kỳ ai trong danh sách đều duyệt được. */
+  const handleChangeApprovers = React.useCallback((docType: ApprovalPermission['documentType'], docLabel: string, ids: string[]) => {
+    const list = ids.map(id => employees.find(e => e.id === id)).filter((e): e is EmployeeProfile => !!e)
+      .map(e => ({ id: e.id, name: e.name, position: e.position }));
+    const encoded = encodeApprovalApprovers(list);
     const existing = [...draftApprovalConfig];
     const idx = existing.findIndex(p => p.documentType === docType);
     if (idx >= 0) {
-      existing[idx] = { ...existing[idx], approverId: empId, approverName: empName, approverPosition: empPosition || '' };
+      existing[idx] = { ...existing[idx], approverId: encoded.id, approverName: encoded.name, approverPosition: encoded.position };
     } else {
       existing.push({
         id: `ap_${docType}`,
         documentType: docType,
-        documentTypeLabel: docType,
-        approverId: empId,
-        approverName: empName,
-        approverPosition: empPosition || '',
+        documentTypeLabel: docLabel,
+        approverId: encoded.id,
+        approverName: encoded.name,
+        approverPosition: encoded.position,
         canApprove: true
       });
     }
     setDraftApprovalConfig(existing);
-  }, [draftApprovalConfig]);
+  }, [draftApprovalConfig, employees]);
 
   const getCurrentApprovalPerm = React.useCallback((docType: string): ApprovalPermission | undefined => {
     return draftApprovalConfig.find(p => p.documentType === docType);
   }, [draftApprovalConfig]);
 
-  const handleChangeSettler = React.useCallback((docType: ApprovalPermission['documentType'], empId: string, empName: string, empPosition?: string) => {
+  /** Danh sách id người duyệt hiện tại của 1 loại hồ sơ (giải mã từ approverId đã JSON-encode). */
+  const getCurrentApproverIds = React.useCallback((docType: string): string[] => {
+    const perm = draftApprovalConfig.find(p => p.documentType === docType);
+    if (!perm?.approverId) return [];
+    try { const p = JSON.parse(perm.approverId); return Array.isArray(p) ? p : [perm.approverId]; } catch { return [perm.approverId]; }
+  }, [draftApprovalConfig]);
+
+  /** Danh sách id người quyết toán hiện tại của 1 loại hồ sơ (giải mã từ settlerId đã JSON-encode). */
+  const getCurrentSettlerIds = React.useCallback((docType: string): string[] => {
+    const perm = draftApprovalConfig.find(p => p.documentType === docType);
+    if (!perm?.settlerId) return [];
+    try { const p = JSON.parse(perm.settlerId); return Array.isArray(p) ? p : [perm.settlerId]; } catch { return [perm.settlerId]; }
+  }, [draftApprovalConfig]);
+
+  /** Đổi TOÀN BỘ danh sách người quyết toán của 1 loại hồ sơ — bất kỳ ai trong danh sách đều duyệt được. */
+  const handleChangeSettlers = React.useCallback((docType: ApprovalPermission['documentType'], docLabel: string, ids: string[]) => {
+    const list = ids.map(id => employees.find(e => e.id === id)).filter((e): e is EmployeeProfile => !!e)
+      .map(e => ({ id: e.id, name: e.name, position: e.position }));
+    const encoded = encodeApprovalApprovers(list);
     const existing = [...draftApprovalConfig];
     const idx = existing.findIndex(p => p.documentType === docType);
     if (idx >= 0) {
-      existing[idx] = { ...existing[idx], settlerId: empId, settlerName: empName, settlerPosition: empPosition || '' };
+      existing[idx] = { ...existing[idx], settlerId: encoded.id, settlerName: encoded.name, settlerPosition: encoded.position };
     } else {
       existing.push({
         id: `ap_${docType}`,
         documentType: docType,
-        documentTypeLabel: docType,
-        approverId: empId,
-        approverName: empName,
-        approverPosition: empPosition || '',
-        settlerId: empId,
-        settlerName: empName,
-        settlerPosition: empPosition || '',
+        documentTypeLabel: docLabel,
+        approverId: '',
+        approverName: '',
+        approverPosition: '',
+        settlerId: encoded.id,
+        settlerName: encoded.name,
+        settlerPosition: encoded.position,
         canApprove: true
       });
     }
     setDraftApprovalConfig(existing);
-  }, [draftApprovalConfig]);
+  }, [draftApprovalConfig, employees]);
 
   return (
     <div className="flex flex-col gap-6 animate-fadeIn text-slate-200">
@@ -425,7 +462,7 @@ export default function RolesTab(props: RolesTabProps) {
             setRoleMainTab('approval');
             // Auto-select first role (or admin role) when entering approval tab
             if (!selectedRoleId && roles.length > 0) {
-              const adminRole = roles.find(r => r.id === 'role_admin');
+              const adminRole = roles.find(r => ADMIN_ROLE_IDS.includes(r.id));
               setSelectedRoleId(adminRole ? adminRole.id : roles[0].id);
             }
           }}
@@ -463,6 +500,10 @@ export default function RolesTab(props: RolesTabProps) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 overflow-y-auto pr-1">
           {roles.map(r => {
             const isSelected = selectedRoleId === r.id;
+            // "Loại nhóm" đã gán (xem dropdown "Loại nhóm hệ thống" trong phần "Đang cấu hình" bên
+            // dưới) — hiển thị ngay trên thẻ để biết nhóm nào đã/chưa gán mà không cần bấm vào từng
+            // nhóm. Nhóm Admin/Siêu Admin (ADMIN_ROLE_IDS) luôn ngầm định là "admin", không cần gán.
+            const kind = ADMIN_ROLE_IDS.includes(r.id) ? 'admin' : getRoleGroupKind(r.permissions);
             return (
               <div
                 key={r.id}
@@ -476,16 +517,25 @@ export default function RolesTab(props: RolesTabProps) {
                     <Lock className={`w-3 h-3 ${isSelected ? 'text-amber-500' : 'text-slate-400'}`} />
                     {r.name}
                   </h5>
-                  <span className="bg-slate-800 text-slate-300 font-mono text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
+                  <span className="bg-slate-800 text-slate-300 font-mono text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shrink-0">
                     {r.memberIds.length} nhân sự
                   </span>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1.5 line-clamp-2 leading-relaxed">
                   {r.description || 'Chưa cấu hình mô tả ngắn cho nhóm phân quyền này.'}
                 </p>
+                {kind ? (
+                  <span className="inline-flex items-center gap-1 mt-2 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-1.5 py-0.5 rounded-md text-[9px]">
+                    🛡️ Loại nhóm: {ROLE_GROUP_KIND_LABELS[kind]}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 mt-2 bg-slate-800/60 text-slate-500 border border-slate-700 font-bold px-1.5 py-0.5 rounded-md text-[9px]" title="Nhóm này chưa được gán tương đương vai trò hệ thống nào — một số đặc quyền riêng (duyệt tạm ứng, xem hồ sơ lưu trữ...) sẽ không áp dụng cho thành viên nhóm.">
+                    ⚠️ Chưa gán loại nhóm
+                  </span>
+                )}
 
                 {/* Quick delete/edit controls for custom roles */}
-                {!['role_admin', 'role_accounting', 'role_office'].includes(r.id) && (
+                {!PROTECTED_ROLE_IDS.includes(r.id) && (
                   <div className="flex justify-end gap-2 mt-3 pt-2 border-t border-slate-800/40 text-[9.5px]">
                     <button
                       type="button"
@@ -501,7 +551,10 @@ export default function RolesTab(props: RolesTabProps) {
                           });
                           syncHrmPermissionsToApp(updated);
                           if (selectedRoleId === r.id) {
-                            setSelectedRoleId('role_admin');
+                            // Chuyển về nhóm admin thật (nếu có) thay vì id 'role_admin' cố định
+                            // (nhóm Siêu Admin thật dùng id 'role_superadmin' — xem ADMIN_ROLE_IDS).
+                            const fallback = updated.find(x => ADMIN_ROLE_IDS.includes(x.id)) || updated[0];
+                            setSelectedRoleId(fallback ? fallback.id : '');
                           }
                         }
                       }}
@@ -531,8 +584,18 @@ export default function RolesTab(props: RolesTabProps) {
           );
         }
 
-        // Admin (role_admin) luôn full quyền, không cho sửa
-        const isAdmin = activeRole.id === 'role_admin';
+        // Admin (role_admin / role_superadmin) luôn full quyền, không cho sửa
+        const isAdmin = ADMIN_ROLE_IDS.includes(activeRole.id);
+
+        // "Loại nhóm" (xem ghi chú tại isRoleAdmin/isRoleAccounting/... trong SettingsContext.tsx):
+        // đánh dấu nhóm này tương đương 1 trong 4 vai trò hệ thống mặc định, để các đặc quyền viết
+        // cứng trong nhiều màn khác (Tài Chính, Kho Vật Tư, Lưu Trữ Hồ Sơ...) nhận diện đúng thành
+        // viên của nhóm này, dù id/tên nhóm do bạn tự đặt là gì.
+        const currentKind = getRoleGroupKind(activeRole.permissions);
+        const setRoleKind = (kind: RoleGroupKind | null) => {
+          const updated = draftRoles.map(r => r.id === activeRole.id ? { ...r, permissions: withRoleGroupKind(r.permissions, kind) } : r);
+          setDraftRoles(updated);
+        };
 
         // Ánh xạ cha-con cho logic "chọn cha tự động chọn hết con"
         const parentChildrenMap: Record<string, string[]> = {
@@ -641,6 +704,22 @@ export default function RolesTab(props: RolesTabProps) {
                 <p className="text-[10.5px] text-slate-400 mt-1">
                   {activeRole.description || 'Chưa có mô tả cho nhóm vai trò này.'}
                 </p>
+                {!isAdmin && (
+                  <div className="flex items-center gap-2 mt-2.5">
+                    <span className="text-[9.5px] text-slate-500 font-bold uppercase tracking-wider">Loại nhóm hệ thống:</span>
+                    <select
+                      value={currentKind || ''}
+                      onChange={(e) => setRoleKind((e.target.value || null) as RoleGroupKind | null)}
+                      className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[10.5px] text-white outline-none focus:border-amber-500 cursor-pointer"
+                      title="Đánh dấu nhóm này tương đương vai trò hệ thống nào, để các đặc quyền riêng (VD: duyệt tạm ứng, xem toàn bộ hồ sơ lưu trữ...) nhận diện đúng thành viên nhóm — không phụ thuộc tên/id nhóm."
+                    >
+                      <option value="">— Không gán (mặc định) —</option>
+                      {(Object.keys(ROLE_GROUP_KIND_LABELS) as RoleGroupKind[]).map(k => (
+                        <option key={k} value={k}>{ROLE_GROUP_KIND_LABELS[k]}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Tab Selector inside Detail */}
@@ -1184,6 +1263,20 @@ export default function RolesTab(props: RolesTabProps) {
             value={draftMatrix}
             onChange={setDraftMatrix}
             hasChanges={projectChanged}
+            // Trước đây các nút Hủy/Đặt mặc định/Khôi phục mặc định của thanh Lưu cục bộ (ngay dưới
+            // bảng "Theo vị trí") là no-op — không có tác dụng gì. Nối vào state draftMatrix/savedMatrix
+            // thật ở đây để chúng hoạt động đúng, đồng thời KHÔNG hiển thị thêm thanh Lưu ở cuối trang
+            // (xem SaveActionBar bên dưới) để tránh 2 thanh trùng lặp gây nhầm lẫn.
+            onCancelContext={() => setDraftMatrix(JSON.parse(JSON.stringify(savedMatrix)))}
+            onSetDefaultContext={() => { saveDefaultSnapshot('project', draftMatrix).catch(() => {}); addToast({ title: '📌 Đã đặt mặc định', message: 'Cấu hình quyền dự án hiện tại đã được lưu làm mặc định.', type: 'info' }); }}
+            onRestoreDefaultContext={() => {
+              const snap = loadDefaultSnapshot('project');
+              if (!snap) { addToast({ title: '⚠️ Chưa có mặc định', message: 'Tab này chưa được đặt cấu hình mặc định.', type: 'warning' }); return; }
+              if (!window.confirm('Khôi phục cấu hình về mặc định đã lưu? Các thay đổi chưa lưu sẽ bị mất.')) return;
+              setDraftMatrix(snap);
+              addToast({ title: '↩️ Đã khôi phục', message: 'Đã khôi phục cấu hình mặc định.', type: 'info' });
+            }}
+            hasDefaultContext={!!loadDefaultSnapshot('project')}
           />
         </div>
       )}
@@ -1223,19 +1316,13 @@ export default function RolesTab(props: RolesTabProps) {
                         </div>
                         {enabled && (
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-400">Người duyệt:</span>
-                            <select
-                              value={perm?.approverId || ''}
-                              onChange={(e) => {
-                                const emp = employees.find(em => em.id === e.target.value);
-                                handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                              }}
-                              className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
-                            >
-                              {employees.filter(emp => emp.hasSystemAccount).map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                              ))}
-                            </select>
+                            <span className="text-[10px] text-slate-400 shrink-0">Người duyệt (bất kỳ ai trong danh sách đều duyệt được):</span>
+                            <SearchableMultiSelect
+                              options={employees.filter(emp => emp.hasSystemAccount).map(emp => ({ id: emp.id, label: `${emp.name} (${emp.position})` }))}
+                              value={getCurrentApproverIds(t.type)}
+                              onChange={(ids) => handleChangeApprovers(t.type as ApprovalPermission['documentType'], t.label, ids)}
+                              className="min-w-[220px] max-w-[360px]"
+                            />
                           </div>
                         )}
                       </div>
@@ -1270,36 +1357,23 @@ export default function RolesTab(props: RolesTabProps) {
                               {/* "Phiếu Lương" cấu hình 2 người (giống nhóm Tài Chính - Kế Toán):
                                   approver = "Người phát lương", settler = "Kế toán" — thay cho
                                   việc phải nhập lại 2 trường này mỗi lần in phiếu lương. */}
-                              <span className="text-[10px] text-slate-400">{t.type === 'payroll' ? 'Người phát lương:' : 'Người xét duyệt:'}</span>
-                              <select
-                                value={perm?.approverId || ''}
-                                onChange={(e) => {
-                                  const emp = employees.find(em => em.id === e.target.value);
-                                  handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                                }}
-                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
-                              >
-                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
-                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                                ))}
-                              </select>
+                              <span className="text-[10px] text-slate-400 shrink-0">{t.type === 'payroll' ? 'Người phát lương:' : 'Người xét duyệt (nhiều người):'}</span>
+                              <SearchableMultiSelect
+                                options={employees.filter(emp => emp.hasSystemAccount).map(emp => ({ id: emp.id, label: `${emp.name} (${emp.position})` }))}
+                                value={getCurrentApproverIds(t.type)}
+                                onChange={(ids) => handleChangeApprovers(t.type as ApprovalPermission['documentType'], t.label, ids)}
+                                className="min-w-[220px] max-w-[360px]"
+                              />
                             </div>
                             {t.type === 'payroll' && (
                               <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-slate-400">Kế toán:</span>
-                                <select
-                                  value={perm?.settlerId || ''}
-                                  onChange={(e) => {
-                                    const emp = employees.find(em => em.id === e.target.value);
-                                    handleChangeSettler(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                                  }}
-                                  className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[180px]"
-                                >
-                                  <option value="">— Chọn —</option>
-                                  {employees.filter(emp => emp.hasSystemAccount).map(emp => (
-                                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                                  ))}
-                                </select>
+                                <span className="text-[10px] text-slate-400 shrink-0">Kế toán (nhiều người):</span>
+                                <SearchableMultiSelect
+                                  options={employees.filter(emp => emp.hasSystemAccount).map(emp => ({ id: emp.id, label: `${emp.name} (${emp.position})` }))}
+                                  value={getCurrentSettlerIds(t.type)}
+                                  onChange={(ids) => handleChangeSettlers(t.type as ApprovalPermission['documentType'], t.label, ids)}
+                                  className="min-w-[220px] max-w-[360px]"
+                                />
                               </div>
                             )}
                           </div>
@@ -1333,36 +1407,22 @@ export default function RolesTab(props: RolesTabProps) {
                         {enabled && (
                           <div className="flex flex-col sm:flex-row gap-3 pl-7">
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-slate-400">Người xét duyệt:</span>
-                              <select
-                                value={perm?.approverId || ''}
-                                onChange={(e) => {
-                                  const emp = employees.find(em => em.id === e.target.value);
-                                  handleChangeApprover(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                                }}
-                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[170px]"
-                              >
-                                <option value="">— Chọn —</option>
-                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
-                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                                ))}
-                              </select>
+                              <span className="text-[10px] text-slate-400 shrink-0">Người xét duyệt (nhiều người):</span>
+                              <SearchableMultiSelect
+                                options={employees.filter(emp => emp.hasSystemAccount).map(emp => ({ id: emp.id, label: `${emp.name} (${emp.position})` }))}
+                                value={getCurrentApproverIds(t.type)}
+                                onChange={(ids) => handleChangeApprovers(t.type as ApprovalPermission['documentType'], t.label, ids)}
+                                className="min-w-[220px] max-w-[320px]"
+                              />
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-slate-400">Người quyết toán:</span>
-                              <select
-                                value={perm?.settlerId || ''}
-                                onChange={(e) => {
-                                  const emp = employees.find(em => em.id === e.target.value);
-                                  handleChangeSettler(t.type as ApprovalPermission['documentType'], e.target.value, emp?.name || '', emp?.position);
-                                }}
-                                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-white text-xs min-w-[170px]"
-                              >
-                                <option value="">— Chọn —</option>
-                                {employees.filter(emp => emp.hasSystemAccount).map(emp => (
-                                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.position})</option>
-                                ))}
-                              </select>
+                              <span className="text-[10px] text-slate-400 shrink-0">Người quyết toán (nhiều người):</span>
+                              <SearchableMultiSelect
+                                options={employees.filter(emp => emp.hasSystemAccount).map(emp => ({ id: emp.id, label: `${emp.name} (${emp.position})` }))}
+                                value={getCurrentSettlerIds(t.type)}
+                                onChange={(ids) => handleChangeSettlers(t.type as ApprovalPermission['documentType'], t.label, ids)}
+                                className="min-w-[220px] max-w-[320px]"
+                              />
                             </div>
                           </div>
                         )}
@@ -1379,20 +1439,27 @@ export default function RolesTab(props: RolesTabProps) {
         </div>
       )}
 
-      {/* ─── Save Action Bar ───────────────────────────────────────────────── */}
-      <SaveActionBar
-        changed={roleMainTab === 'group' ? groupChanged : roleMainTab === 'task' ? projectChanged : approvalChanged}
-        onSave={roleMainTab === 'group' ? handleSaveGroup : roleMainTab === 'task' ? handleSaveProject : handleSaveApproval}
-        onCancel={() => {
-          if (roleMainTab === 'group') setDraftRoles([...roles]);
-          else if (roleMainTab === 'task') setDraftMatrix(JSON.parse(JSON.stringify(savedMatrix)));
-          else setDraftApprovalConfig(JSON.parse(JSON.stringify(savedApprovalConfig)));
-        }}
-        onSetDefault={handleSetDefault}
-        onRestoreDefault={handleRestoreDefault}
-        hasDefault={!!getCurrentTabDefault()}
-        accent={roleMainTab === 'task' ? 'emerald' : roleMainTab === 'approval' ? 'sky' : 'amber'}
-      />
+      {/* ─── Save Action Bar ───────────────────────────────────────────────────────
+          Tab "Quyền Dự Án" (task) KHÔNG dùng thanh này: nó có 2 sub-tab ("Theo vị trí" và
+          "Vai trò nhóm HRM"), mỗi sub-tab đã tự vẽ thanh Lưu/Hủy riêng đúng với state của nó
+          (xem <ProjectPermissionModal mode="inline">). Trước đây thanh chung này CŨNG hiện ở
+          tab "task", tạo ra 2 thanh trùng lặp cho "Theo vị trí" (1 cái là no-op) và hiển thị SAI
+          trạng thái "chưa lưu"/nút Lưu cho "Vai trò nhóm HRM" (chỉ theo dõi draftMatrix, không
+          theo dõi rgMatrix nội bộ của ProjectPermissionModal) — dễ khiến tưởng đã lưu nhưng chưa. */}
+      {roleMainTab !== 'task' && (
+        <SaveActionBar
+          changed={roleMainTab === 'group' ? groupChanged : approvalChanged}
+          onSave={roleMainTab === 'group' ? handleSaveGroup : handleSaveApproval}
+          onCancel={() => {
+            if (roleMainTab === 'group') setDraftRoles([...roles]);
+            else setDraftApprovalConfig(JSON.parse(JSON.stringify(savedApprovalConfig)));
+          }}
+          onSetDefault={handleSetDefault}
+          onRestoreDefault={handleRestoreDefault}
+          hasDefault={!!getCurrentTabDefault()}
+          accent={roleMainTab === 'approval' ? 'sky' : 'amber'}
+        />
+      )}
     </div>
   );
 }

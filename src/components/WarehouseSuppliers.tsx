@@ -6,12 +6,19 @@ import {
   Download, FileUp
 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
+import { useAuth } from '../context/AuthContext';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 
 export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpenAddSignal?: number }) {
   const { addToast } = useNotification();
+  // Component này không nhận currentUser qua props nên lấy trực tiếp từ AuthContext để kiểm tra quyền.
+  const { currentUser } = useAuth();
+  const canCreate = hasModulePermission(currentUser?.id, 'warehouse_suppliers', 'create');
+  const canEditSup = hasModulePermission(currentUser?.id, 'warehouse_suppliers', 'edit');
+  const canDeleteSup = hasModulePermission(currentUser?.id, 'warehouse_suppliers', 'delete');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Nhà Cung Cấp Vật Tư.`, type: 'warning' });
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -140,6 +147,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!(editingId ? canEditSup : canCreate)) { denyToast(editingId ? 'Sửa' : 'Thêm'); setIsAdding(false); return; }
     if (!formName.trim()) return addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên nhà cung cấp!', type: 'warning' });
 
     // Nếu đang sửa (editingId) → cập nhật bản ghi hiện có, không tạo mã mới.
@@ -228,6 +236,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
   };
 
   const handleDelete = async (id: string, name: string) => {
+    if (!canDeleteSup) { denyToast('Xóa'); return; }
     if (window.confirm(`⚠️ Bạn có chắc chắn muốn XÓA nhà cung cấp "${name}"? Thao tác này sẽ dọn sạch thông tin đối tác khỏi hệ thống.`)) {
       try {
         await dbService.suppliers.delete(id);

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { isUserInRoleGroup, getMaterialCoordinator, getMaterialApprover } from '../context';
+import { isUserInRoleGroup, getMaterialCoordinators, getMaterialApprovers, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical } from '../context';
 import { useSettings } from '../context/SettingsContext';
 import {
   Project,
@@ -331,21 +331,21 @@ export default function MaterialCoordination({
   // Quyền thao tác
   const canCoordinate = React.useCallback((uid?: string): boolean => {
     if (!uid) return false;
-    if (isUserInRoleGroup(uid, 'role_admin')) return true;
-    if (isUserInRoleGroup(uid, 'role_accounting')) return true;
-    if (isUserInRoleGroup(uid, 'role_office')) return true;
-    if (isUserInRoleGroup(uid, 'role_technical')) return true;
+    if (isRoleAdmin(uid)) return true;
+    if (isRoleAccounting(uid)) return true;
+    if (isRoleOffice(uid)) return true;
+    if (isRoleTechnical(uid)) return true;
     if (currentUser?.username === 'admin') return true;
-    const coord = getMaterialCoordinator();
-    return !!coord && coord.id === uid;
+    // Bất kỳ ai trong danh sách người điều phối vật tư đã cấu hình đều được (không chỉ 1 người).
+    return getMaterialCoordinators().some(c => c.id === uid);
   }, [currentUser]);
 
   const canApprove = React.useCallback((uid?: string): boolean => {
     if (!uid) return false;
-    if (isUserInRoleGroup(uid, 'role_admin')) return true;
+    if (isRoleAdmin(uid)) return true;
     if (currentUser?.username === 'admin') return true;
-    const appr = getMaterialApprover();
-    return !!appr && appr.id === uid;
+    // Bất kỳ ai trong danh sách người xét duyệt vật tư đã cấu hình đều được (không chỉ 1 người).
+    return getMaterialApprovers().some(a => a.id === uid);
   }, [currentUser]);
 
   const isCoordinator = canCoordinate(currentUser?.id);
@@ -941,9 +941,9 @@ export default function MaterialCoordination({
     const proposerEmp = employees.find((e: any) => e.id === prop?.createdBy);
     // Đề xuất (proposal) KHÔNG có sẵn trường coordinatorId/coordinatorName (chưa từng được
     // set ở bất kỳ đâu khi tạo đề xuất) — "Người điều phối" thực chất là người được CHỈ ĐỊNH
-    // trong Quyền Phê Duyệt (loại 'material_coordinator'), lấy qua getMaterialCoordinator().
-    const materialCoordinator = getMaterialCoordinator();
-    const coordinatorEmp = employees.find((e: any) => e.id === (prop?.coordinatorId || materialCoordinator?.id));
+    // trong Quyền Phê Duyệt (loại 'material_coordinator'), lấy qua getMaterialCoordinators().
+    const materialCoordinators = getMaterialCoordinators();
+    const coordinatorEmp = employees.find((e: any) => e.id === (prop?.coordinatorId || materialCoordinators[0]?.id));
     // Người lập phiếu: order chỉ lưu createdBy (ID nhân viên), không lưu createdByName
     // → phải tra cứu tên thật từ danh sách nhân viên, không hiển thị thẳng mã NV.
     const creatorEmp = employees.find((e: any) => e.id === order.createdBy);
@@ -954,7 +954,8 @@ export default function MaterialCoordination({
       receiverPhone: proposerEmp?.phone || '—',
       deliveryAddress: proj?.address || '—',
       creatorName: creatorEmp?.name || order.createdByName || '—',
-      coordinatorName: prop?.coordinatorName || materialCoordinator?.name || '—',
+      // Nhiều người điều phối được cấu hình → liệt kê đủ tên (ngăn cách dấu phẩy) thay vì chỉ 1 người.
+      coordinatorName: prop?.coordinatorName || materialCoordinators.map(c => c.name).join(', ') || '—',
       coordinatorPhone: coordinatorEmp?.phone || '—',
     };
   };
@@ -3120,7 +3121,7 @@ export default function MaterialCoordination({
             <div className="space-y-12">
               <strong>NGƯỜI XÉT DUYỆT</strong>
               <p className="italic text-gray-400 text-[9px]">(Ký, ghi rõ họ tên)</p>
-              <div className="mt-8 font-bold text-[11px]">{getMaterialApprover()?.name || 'Người xét duyệt'}</div>
+              <div className="mt-8 font-bold text-[11px]">{getMaterialApprovers().map(a => a.name).join(', ') || 'Người xét duyệt'}</div>
             </div>
             <div className="space-y-12">
               <strong>GIÁM ĐỐC PHÊ DUYỆT</strong>

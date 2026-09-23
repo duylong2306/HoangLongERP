@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
-import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, useNotification } from '../context';
+import { isUserInRoleGroup, loadHrmRoleGroups, getConfiguredApprover, getConfiguredApprovers, useNotification, isRoleAdmin, isRoleAccounting, isRoleOffice } from '../context';
 import { dbService, mapAttendanceRow, todayString } from '../lib/dbService';
 import {
   enqueuePunch,
@@ -98,9 +98,9 @@ export default function DashboardOverview({
   // Director & Accountant có thể duyệt tất cả Reviewing tasks hoặc pending approvals.
   // PM duyệt cho dự án của họ hoặc nếu được gán là approver.
   // Các vai trò khác duyệt nếu họ được chỉ định approver.
-  const isAdmin = currentUser ? isUserInRoleGroup(currentUser.id, 'role_admin') : false;
-  const isAccountant = currentUser ? isUserInRoleGroup(currentUser.id, 'role_accounting') : false;
-  const isPM = currentUser ? isUserInRoleGroup(currentUser.id, 'role_office') : false;
+  const isAdmin = currentUser ? isRoleAdmin(currentUser.id) : false;
+  const isAccountant = currentUser ? isRoleAccounting(currentUser.id) : false;
+  const isPM = currentUser ? isRoleOffice(currentUser.id) : false;
 
   const needingApprovalTasks = tasks.filter(t => {
     if (isAdmin || isAccountant) {
@@ -142,7 +142,7 @@ export default function DashboardOverview({
     if (isAdmin || isAccountant) {
       return true; // Sếp / kế toán thấy tất cả để duyệt
     }
-    const isPM = currentUser ? isUserInRoleGroup(currentUser.id, 'role_office') : false;
+    const isPM = currentUser ? isRoleOffice(currentUser.id) : false;
     if (isPM) {
       const isProjectPM = projects.find(p => p.id === mr.projectId)?.pmId === currentUser.id;
       return isProjectPM || mr.proposer === currentUser.name;
@@ -3377,14 +3377,14 @@ export default function DashboardOverview({
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
                       {(() => {
-                        const configuredLeaveApprover = getConfiguredApprover('leave');
+                        // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
+                        const configuredLeaveApprovers = getConfiguredApprovers('leave');
                         const useLockedApprover = isAttendanceReportType(reportType);
-                        if (configuredLeaveApprover && useLockedApprover) {
-                          const approverPos = configuredLeaveApprover.position ? ` (${configuredLeaveApprover.position})` : '';
+                        if (configuredLeaveApprovers.length > 0 && useLockedApprover) {
                           return (
-                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
-                              <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
-                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
+                              <span className="font-bold">{configuredLeaveApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
                             </div>
                           );
                         }
@@ -3549,14 +3549,14 @@ export default function DashboardOverview({
                     <div>
                       <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
                       {(() => {
-                        const configuredLeaveApprover = getConfiguredApprover('leave');
+                        // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
+                        const configuredLeaveApprovers = getConfiguredApprovers('leave');
                         const useLockedApprover = isAttendanceReportType(reportType);
-                        if (configuredLeaveApprover && useLockedApprover) {
-                          const approverPos = configuredLeaveApprover.position ? ` (${configuredLeaveApprover.position})` : '';
+                        if (configuredLeaveApprovers.length > 0 && useLockedApprover) {
                           return (
-                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between">
-                              <span className="font-bold">{configuredLeaveApprover.name}{approverPos}</span>
-                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
+                              <span className="font-bold">{configuredLeaveApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
                             </div>
                           );
                         }
@@ -4019,13 +4019,13 @@ export default function DashboardOverview({
               <div>
                 <label className="block text-[10px] text-slate-500 font-bold mb-1">NGƯỜI XÉT DUYỆT</label>
                 {(() => {
-                  const configuredApprover = getConfiguredApprover('leave');
-                  if (configuredApprover) {
-                    const approverPos = configuredApprover.position ? ` (${configuredApprover.position})` : '';
+                  // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
+                  const configuredApprovers = getConfiguredApprovers('leave');
+                  if (configuredApprovers.length > 0) {
                     return (
-                      <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between">
-                        <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                      <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
+                        <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                        <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
                       </div>
                     );
                   }
@@ -4162,13 +4162,13 @@ export default function DashboardOverview({
 
               <div>
                 {(() => {
-                  const configuredApprover = getConfiguredApprover('salary_advance');
-                  if (configuredApprover) {
-                    const approverPos = configuredApprover.position ? ` (${configuredApprover.position})` : '';
+                  // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
+                  const configuredApprovers = getConfiguredApprovers('salary_advance');
+                  if (configuredApprovers.length > 0) {
                     return (
-                      <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between">
-                        <span className="font-bold">{configuredApprover.name}{approverPos}</span>
-                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">Đã khóa · Tự động</span>
+                      <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
+                        <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
                       </div>
                     );
                   }

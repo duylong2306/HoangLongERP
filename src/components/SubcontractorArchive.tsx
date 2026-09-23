@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
 import { Employee, ArchivedQuote, Supplier } from '../types';
 import { FileText, Search, Printer, Trash2, Eye, Calendar, User, Briefcase, ChevronRight, ShieldCheck, Info, CheckCircle2, FileCheck, Save, XCircle, FileDown } from 'lucide-react';
-import { useNotification, isUserInRoleGroup } from '../context';
+import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleAccounting } from '../context';
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 import { docSoTiengViet } from './QuotationTableSheet';
@@ -275,7 +275,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     return archivedList.filter(item => {
       const isCreator = item.creatorId === currentUser.id;
       // Allow viewing if creator, or if user has admin/accountant privileges, but fallback to simple filter
-      if (!isCreator && !isUserInRoleGroup(currentUser.id, 'role_admin') && !isUserInRoleGroup(currentUser.id, 'role_accounting')) return false;
+      if (!isCreator && !isRoleAdmin(currentUser.id) && !isRoleAccounting(currentUser.id)) return false;
 
       const matchesSearch = 
         (item.code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||

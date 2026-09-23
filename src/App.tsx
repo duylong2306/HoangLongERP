@@ -37,7 +37,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission } from './context';
 import { Toast } from './context/NotificationContext';
 import { hashPasswordSync } from './lib/passwordUtils';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
@@ -3124,7 +3124,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (isSuperAdmin) return true;
 
     // ── Nguồn sự thật chính: HRM Role Groups (hl_cached_hrm_role_groups / hl_hrm_roles_v2) ──
-    const isAdminGroup = isUserInRoleGroup(currentUser.id, 'role_admin');
+    const isAdminGroup = isRoleAdmin(currentUser.id);
 
     const allowedFromGroups = getAllowedTabsFromRoleGroups(currentUser);
 
@@ -3215,7 +3215,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     );
     // Đề xuất tài chính chờ duyệt (đồng bộ TaskManagement myPendingPayments/myPendingAdvances):
     // chỉ định làm người duyệt, hoặc thuộc nhóm Kế toán / Giám đốc → xem toàn bộ.
-    const isFinanceApprover = isUserInRoleGroup(currentUser.id, 'role_accounting') || isUserInRoleGroup(currentUser.id, 'role_admin');
+    const isFinanceApprover = isRoleAccounting(currentUser.id) || isRoleAdmin(currentUser.id);
     const myPendingPayments = payments.filter(p =>
       p.status === 'pending' &&
       (isFinanceApprover ||
@@ -3234,7 +3234,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     );
     // Công tác phí chờ duyệt (đồng bộ TaskManagement myPendingTravelExpenses):
     // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.
-    const canApproveTravelExpense = isUserInRoleGroup(currentUser.id, 'role_accounting') ||
+    const canApproveTravelExpense = isRoleAccounting(currentUser.id) ||
       (getConfiguredApprover('travel_expense')?.id === currentUser.id);
     const myPendingTravelExpenses = ctpSummary.filter((t: any) => t.status === 'pending' && canApproveTravelExpense);
     const toReviewUncompletedCount = toReviewTasksCount
@@ -3386,7 +3386,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               {/* Các phân hệ - kiểu Flowbite dropdown */}
               <ul className="space-y-1 font-medium text-sm border-t border-gray-200 pt-3 mt-3">
                 {/* PHÒNG GIÁM ĐỐC */}
-                {isUserInRoleGroup(currentUser.id, 'role_admin') && (
+                {isRoleAdmin(currentUser.id) && (
                   <li>
                     <button
                       type="button"
@@ -4065,8 +4065,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             <div style={{ display: activeTab === 'subcontractor-management' ? undefined : 'none' }}>
             <SubcontractorManagement
               currentUser={currentUser}
-              canEdit={isUserInRoleGroup(currentUser?.id, 'role_admin') || isUserInRoleGroup(currentUser?.id, 'role_office') || isUserInRoleGroup(currentUser?.id, 'role_technical')}
-              canDelete={isUserInRoleGroup(currentUser?.id, 'role_admin')}
+              canEdit={isRoleAdmin(currentUser?.id) || isRoleOffice(currentUser?.id) || isRoleTechnical(currentUser?.id)}
+              canDelete={isRoleAdmin(currentUser?.id)}
               viewContractId={localStorage.getItem('hl_view_contract_id') || undefined}
             />
             </div>
@@ -4278,6 +4278,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    // Kiểm tra quyền "Xóa" module ↳ Tài Khoản Hệ Thống — trước đây
+                                    // không có kiểm tra nào (xem RÀ SOÁT 2026-09), ai vào được trang
+                                    // này cũng xóa được tài khoản đăng nhập của bất kỳ ai khác.
+                                    if (!hasModulePermission(currentUser?.id, 'settings_accounts', 'delete')) {
+                                      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Tài Khoản Hệ Thống.', type: 'warning' });
+                                      return;
+                                    }
                                     if (emp.username === 'admin' || emp.id === 'emp_admin' || emp.id === 'NV_ADMIN') {
                                       addToast({
                                         title: 'Hành động bị cấm',

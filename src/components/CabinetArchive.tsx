@@ -4,7 +4,7 @@ import { dbService } from '../lib/dbService';
 import { useOpenArchiveFromMenu, pickLatestQuote } from '../hooks/useOpenArchiveFromMenu';
 import { Employee, Project, ArchivedQuote, ProjectType, Customer } from '../types';
 import { generateProjectId } from '../lib/projectId';
-import { useNotification, isUserInRoleGroup } from '../context';
+import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleOffice, isRoleTechnical } from '../context';
 import {
   FileText,
   Search,
@@ -349,9 +349,9 @@ export default function CabinetArchive({ currentUser, canEdit = true, canDelete 
 
   const filteredList = useMemo(() => {
     return archivedList.filter(item => {
-      const isPrivileged = isUserInRoleGroup(currentUser.id, 'role_admin') ||
-                           isUserInRoleGroup(currentUser.id, 'role_office') ||
-                           isUserInRoleGroup(currentUser.id, 'role_technical');
+      const isPrivileged = isRoleAdmin(currentUser.id) ||
+                           isRoleOffice(currentUser.id) ||
+                           isRoleTechnical(currentUser.id);
       const isCreator = item.creatorId === currentUser.id || !item.creatorId;
       if (!isPrivileged && !isCreator) return false;
 

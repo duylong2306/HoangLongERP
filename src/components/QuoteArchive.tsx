@@ -2,7 +2,7 @@
 import { dbService } from '../lib/dbService';
 import { Employee, Quote, Project, ArchivedQuote, ProjectType } from '../types';
 import { useNotification } from '../context';
-import { isUserInRoleGroup } from '../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleOffice, isRoleTechnical } from '../context';
 import { generateProjectId } from '../lib/projectId';
 
 /** Map a quote sector to a project type */
@@ -170,7 +170,7 @@ export default function QuoteArchive({ currentUser }: QuoteArchiveProps) {
   const filteredList = useMemo(() => {
     return archivedList.filter(item => {
       // Allow privileged roles to view all, other users can only view what they created
-      const isPrivileged = isUserInRoleGroup(currentUser.id, 'role_admin') || isUserInRoleGroup(currentUser.id, 'role_office') || isUserInRoleGroup(currentUser.id, 'role_technical');
+      const isPrivileged = isRoleAdmin(currentUser.id) || isRoleOffice(currentUser.id) || isRoleTechnical(currentUser.id);
       const isCreator = item.creatorId === currentUser.id || !item.creatorId;
       if (!isPrivileged && !isCreator) return false;
 

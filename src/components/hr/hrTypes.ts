@@ -18,6 +18,26 @@ export interface Role {
   memberIds: string[];
 }
 
+/**
+ * Toàn bộ mã phân hệ (module code) hiển thị trong ma trận "Phân Quyền Nhóm Vai Trò" (RolesTab.tsx).
+ * Dùng chung ở đây để nơi tạo nhóm vai trò mới (handleAddRole trong HumanResourcesManagement.tsx) gán
+ * quyền mặc định đúng khớp với danh sách phân hệ thật — trước đây 2 nơi dùng 2 danh sách mã khác
+ * nhau (lệch do đã refactor ma trận phân quyền nhưng quên cập nhật nơi tạo nhóm), khiến nhóm vai trò
+ * mới tạo gần như không có quyền Xem ở đa số phân hệ thật (bao gồm cả Dashboard, Dữ liệu nhân sự/kế
+ * toán, toàn bộ Kho & Vật Tư, Thầu Phụ, Thư Viện, Cài Đặt Hệ Thống) trong khi lại set quyền cho vài mã
+ * không tồn tại (VD: 'tasks', 'reports'). Nếu thêm/bớt phân hệ trong RolesTab.tsx, hãy cập nhật cả ở đây.
+ */
+export const ERP_MODULE_CODES: string[] = [
+  'director_office', 'director_dashboard',
+  'project_office', 'projects_construction', 'projects_furniture', 'projects_mechanical',
+  'hr_office', 'employees', 'hr_data',
+  'accounting_office', 'finance', 'finance_data',
+  'warehouse_office', 'material_coordination', 'warehouse_suppliers', 'warehouse_management',
+  'subcontractor_office', 'subcontractor_management',
+  'library_office', 'quotes_construction', 'quotes', 'quotes_mechanical', 'quotes_subcontractor',
+  'system_office', 'settings_accounts', 'settings_roles', 'settings',
+];
+
 export interface HRMProps {
   currentUser: any;
   projects?: any[];
