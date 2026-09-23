@@ -1980,47 +1980,16 @@ export default function DashboardOverview({
       return;
     }
 
-    // 1. Ghi nhận dữ liệu sang chi tiết lương (Hệ thống nhân sự)
-    let currentPayroll: any[] = [];
-    try {
-      currentPayroll = await dbService.hrmPayrollRecords.list();
-    } catch (err) {
-      console.warn('Lỗi tải bảng lương từ Supabase:', err);
-    }
-    currentPayroll = currentPayroll || [];
+    // RÀ SOÁT 2026-09: trước đây bước này ghi thẳng vào bảng lương (hrmPayrollRecords)
+    // NGAY KHI ĐỀ XUẤT ĐƯỢC GỬI — trong khi đề xuất vẫn ở trạng thái 'pending_approval',
+    // chưa hề được duyệt. Khi đề xuất sau đó được duyệt và lập Phiếu Chi Ứng Lương,
+    // updatePayrollWithAdvance() ở FinanceManagement.tsx (handleAddPaymentSubmitInner,
+    // nhánh payCategory==='salary_advance') CỘNG DỒN tiếp vào payrollItem.advances —
+    // khiến khoản ứng lương bị trừ 2 LẦN vào lương thực nhận (1 lần lúc gửi đề xuất,
+    // 1 lần lúc thực sự chi tiền). Bảng lương chỉ nên được cập nhật đúng 1 lần, tại
+    // thời điểm Phiếu Chi thực sự được lập (tiền đã chi) — không phải lúc mới đề xuất.
 
-    // Tìm xem đã có bản ghi bảng lương tháng của nhân sự này chưa
-    let payrollItem = currentPayroll.find((p: any) => p.empName === currentUser.name && p.month === advancePeriod);
-    if (payrollItem) {
-      payrollItem.advances = (payrollItem.advances || 0) + amount;
-      payrollItem.netSalary = payrollItem.netSalary - amount; // trừ tạm ứng trực tiếp
-    } else {
-      // Tạo mới
-      payrollItem = {
-        id: `PL-${Date.now().toString().slice(-4)}`,
-        empId: empId,
-        empName: currentUser.name,
-        month: advancePeriod,
-        baseSalary: isAdmin ? 45000000 : currentUser?.role === 'pm' ? 22000000 : isAccountant ? 18000000 : 14000000,
-        workedDays: 22,
-        otHours: 12,
-        allowance: 3000000,
-        kpiBonus: 1000000,
-        advances: amount,
-        tax: 0,
-        insurance: 1500000,
-        expenses: 0,
-        netSalary: (isAdmin ? 45000000 : 14000000) - amount,
-        status: 'unpaid'
-      };
-      currentPayroll.push(payrollItem);
-    }
-
-    // Lưu bảng lương lên Supabase
-    dbService.hrmPayrollRecords.save(payrollItem).catch(err =>
-      console.warn('Lỗi lưu bảng lương lên Supabase:', err));
-
-    // 2. Tạo Đề Xuất Tạm Ứng Lương (SubcontractorAdvanceProposal) - Gửi sang Đề Xuất Thu Chi
+    // Tạo Đề Xuất Tạm Ứng Lương (SubcontractorAdvanceProposal) - Gửi sang Đề Xuất Thu Chi
     // Loại: project_expense_proposal (đề xuất chi phí dự án - ứng lương nhân sự)
     const proposalId = `DX-${todayVal.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 

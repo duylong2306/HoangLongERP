@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Employee, ChatAttachment, Task, TaskComment, Conversation, ChatMessage } from '../types';
-import { useNotification } from '../context';
+import { useNotification, isRoleAdmin } from '../context';
 import {
   getConversations, saveConversations, getMessages, addMessage,
   getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
@@ -312,6 +312,16 @@ export default function MessagesView({
       addToast({ title: '🔒 Không thể xóa', message: 'Nhóm này liên kết với Công việc, chỉ xóa khi Công việc bị xóa', type: 'warning' });
       return;
     }
+    // RÀ SOÁT 2026-09: xóa hội thoại là XÓA VĨNH VIỄN cho TẤT CẢ thành viên (xem
+    // deleteConversation() ở chatStore.ts — xóa hẳn bảng conversations + toàn bộ
+    // tin nhắn). Trước đây bất kỳ ai trong nhóm cũng xóa được cho mọi người, kể cả
+    // nhóm đông thành viên (VD nhóm chat dự án). Với hội thoại NHÓM (type='group'),
+    // chỉ người TẠO nhóm hoặc Admin mới được xóa hẳn — hội thoại cá nhân (1-1) vẫn
+    // giữ nguyên hành vi cũ (cả 2 phía đều xóa được, rủi ro thấp vì chỉ ảnh hưởng 2 người).
+    if (selectedConv.type === 'group' && selectedConv.createdBy !== currentUser.id && !isRoleAdmin(currentUser.id)) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Chỉ người tạo nhóm hoặc Admin mới được xóa hội thoại nhóm này.', type: 'warning' });
+      return;
+    }
     if (!confirm(`Xóa toàn bộ cuộc trò chuyện "${selectedConv.name}"?`)) return;
     await deleteConversation(selectedConv.id);
     setSelectedConv(null);
@@ -521,12 +531,19 @@ export default function MessagesView({
     if (count === 0) return;
     if (!confirm(`Xóa ${count} cuộc trò chuyện đã chọn?\nThao tác này không thể hoàn tác.`)) return;
 
+    // Cùng nguyên tắc với handleDeleteConversation: hội thoại NHÓM chỉ người tạo
+    // nhóm hoặc Admin mới được xóa hẳn cho mọi thành viên.
+    const canDeleteConv = (conv: Conversation) =>
+      conv.type !== 'task' && (conv.type !== 'group' || conv.createdBy === currentUser.id || isRoleAdmin(currentUser.id));
     let deletedCount = 0;
+    let skippedCount = 0;
     for (const convId of selectedConvIds) {
       const conv = conversations.find(c => c.id === convId);
-      if (conv && conv.type !== 'task') {
+      if (conv && canDeleteConv(conv)) {
         await deleteConversation(convId);
         deletedCount++;
+      } else if (conv && conv.type !== 'task') {
+        skippedCount++;
       }
     }
 
@@ -539,7 +556,11 @@ export default function MessagesView({
     setSelectedConvIds(new Set());
     setConvSelectMode(false);
     setConversations(getConversations());
-    addToast({ title: '🗑️ Đã xóa', message: `Đã xóa ${deletedCount} cuộc trò chuyện`, type: 'info' });
+    addToast({
+      title: '🗑️ Đã xóa',
+      message: `Đã xóa ${deletedCount} cuộc trò chuyện${skippedCount > 0 ? ` — bỏ qua ${skippedCount} nhóm bạn không có quyền xóa (chỉ người tạo nhóm/Admin)` : ''}`,
+      type: 'info',
+    });
   };
 
   // Đếm tin nhắn chưa đọc CHỈ của hội thoại cá nhân (1-1)
@@ -1310,7 +1331,7 @@ export default function MessagesView({
                     <Search className="w-4 h-4" />
                   </button>
                 )}
-                {selectedConv && selectedConv.type !== 'task' && (
+                {selectedConv && selectedConv.type !== 'task' && (selectedConv.type !== 'group' || selectedConv.createdBy === currentUser.id || isRoleAdmin(currentUser.id)) && (
                   <button
                     onClick={handleDeleteConversation}
                     className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg cursor-pointer transition-all"
