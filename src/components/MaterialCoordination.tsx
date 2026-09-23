@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { isUserInRoleGroup, getMaterialCoordinators, getMaterialApprovers, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical } from '../context';
+import { isUserInRoleGroup, getMaterialCoordinators, getMaterialApprovers, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission } from '../context';
 import { useSettings } from '../context/SettingsContext';
 import {
   Project,
@@ -329,15 +329,26 @@ export default function MaterialCoordination({
   };
 
   // Quyền thao tác
+  // RÀ SOÁT 2026-09: trước đây canCoordinate() chỉ xét "Loại nhóm"/danh sách người điều phối
+  // đã cấu hình — HOÀN TOÀN KHÔNG đọc ô Thêm/Sửa/Xóa của module 'material_coordination' trong
+  // Phân Quyền & Vai Trò, nên dù admin tắt hẳn quyền đó cho 1 nhóm, thành viên vẫn điều phối
+  // được bình thường (y hệt lỗi "checkbox không có tác dụng" đã sửa ở HR/Kho/Tài Chính). Nay
+  // bắt buộc phải ĐỒNG THỜI thỏa logic cũ VÀ có quyền "Sửa" module material_coordination —
+  // admin phải chủ động bật quyền này cho nhóm nào thực sự cần điều phối vật tư.
   const canCoordinate = React.useCallback((uid?: string): boolean => {
     if (!uid) return false;
+    const legacyAllowed =
+      isRoleAdmin(uid) ||
+      isRoleAccounting(uid) ||
+      isRoleOffice(uid) ||
+      isRoleTechnical(uid) ||
+      currentUser?.username === 'admin' ||
+      // Bất kỳ ai trong danh sách người điều phối vật tư đã cấu hình đều được (không chỉ 1 người).
+      getMaterialCoordinators().some(c => c.id === uid);
+    if (!legacyAllowed) return false;
+    // Admin (role_admin/role_superadmin/"Loại nhóm" = admin) luôn full quyền, không cần xét thêm.
     if (isRoleAdmin(uid)) return true;
-    if (isRoleAccounting(uid)) return true;
-    if (isRoleOffice(uid)) return true;
-    if (isRoleTechnical(uid)) return true;
-    if (currentUser?.username === 'admin') return true;
-    // Bất kỳ ai trong danh sách người điều phối vật tư đã cấu hình đều được (không chỉ 1 người).
-    return getMaterialCoordinators().some(c => c.id === uid);
+    return hasModulePermission(uid, 'material_coordination', 'edit');
   }, [currentUser]);
 
   const canApprove = React.useCallback((uid?: string): boolean => {
@@ -649,6 +660,13 @@ export default function MaterialCoordination({
     setQuickPropItems(prev => prev.filter((_, i) => i !== idx));
   };
   const submitQuickProposal = async () => {
+    // RÀ SOÁT 2026-09: hàm này trước đây KHÔNG kiểm tra quyền điều phối — bất kỳ ai
+    // mở được modal (kể cả người bị tắt Thêm/Sửa/Xóa ở module material_coordination)
+    // đều tạo được đề xuất mới. Gate cùng điều kiện với các thao tác điều phối khác.
+    if (!canCoordinate(currentUser?.id)) {
+      showNotification('Bạn không có quyền "Thêm" ở phân hệ Điều Phối Vật Tư.', '⛔ Không đủ quyền', 'warning');
+      return;
+    }
     // "Đề Xuất Kho": không thuộc dự án thật nào — dùng "dự án ảo" Kho Tổng
     // (board đã có sẵn cơ chế fallback dựng project giả từ projectId/projectName).
     const proj: any = quickPropIsWarehouse
