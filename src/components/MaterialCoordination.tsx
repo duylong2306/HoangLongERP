@@ -1308,6 +1308,10 @@ export default function MaterialCoordination({
 
   // ─── CHỜ DUYỆT ───────────────────────────────────────────────────────────
   const handleApprove = async (prop: any) => {
+    // RÀ SOÁT 2026-09: nút "Duyệt"/"Từ chối" chỉ hiện khi isApprover (xem JSX bên
+    // dưới) nhưng bản thân hàm không kiểm tra lại — gate lại ở đây để không có
+    // đường vòng nếu sau này ai đó lỡ bỏ điều kiện isApprover && ở JSX.
+    if (!isApprover) { showNotification('Bạn không có quyền duyệt đề xuất vật tư.', '⛔ Không đủ quyền', 'warning'); return; }
     const quote = (prop.quotes || []).find((q: any) => q.id === chosenQuoteId);
     if (!quote) { showNotification('Vui lòng chọn 1 báo giá để duyệt.', 'Chưa chọn báo giá', 'warning'); return; }
     const items = (prop.items || []).map((it: any) => {
@@ -1332,6 +1336,7 @@ export default function MaterialCoordination({
   };
 
   const handleReject = async (prop: any) => {
+    if (!isApprover) { showNotification('Bạn không có quyền từ chối đề xuất vật tư.', '⛔ Không đủ quyền', 'warning'); return; }
     const proposer = prop.createdByName || currentUser?.name || '—';
     const approver = currentUser?.name || '—';
     await saveProposal({ ...prop, status: 'find_supplier' });
@@ -1342,6 +1347,7 @@ export default function MaterialCoordination({
   };
 
   const handleCancel = async (prop: any) => {
+    if (!isCoordinator && !isApprover) { showNotification('Bạn không có quyền hủy đề xuất vật tư.', '⛔ Không đủ quyền', 'warning'); return; }
     askConfirmation(
       `Bạn có chắc chắn muốn HỦY đề xuất ${prop.code} không?`,
       "Xác nhận hủy",
