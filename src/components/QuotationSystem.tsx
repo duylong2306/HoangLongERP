@@ -713,6 +713,8 @@ export default function QuotationSystem({
   const canCreate = getPermission('quotes', 'create');
   const canEdit = getPermission('quotes', 'edit');
   const canDelete = getPermission('quotes', 'delete');
+  // Toast chặn khi không đủ quyền Thêm/Sửa/Xóa ở phân hệ Báo Giá / Định mức - Đơn giá.
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Báo Giá.`, type: 'warning' });
 
   const handleSaveQuote = (newQuote: Quote) => {
     if (!canCreate) {
@@ -1218,6 +1220,7 @@ export default function QuotationSystem({
   };
 
   const handleDeletePrice = (stt: number) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     if (window.confirm('Bạn có chắc chắn muốn xóa đơn giá khái toán này không?')) {
       const filtered = houseEstimatePrices.filter(p => p.stt !== stt);
       const reindexed = filtered.map((item, idx) => ({ ...item, stt: idx + 1 }));
@@ -1226,6 +1229,7 @@ export default function QuotationSystem({
   };
 
   const handleDeleteNorm = (id: string) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     if (window.confirm('Bạn có chắc chắn muốn xóa định mức cấp phối này không?')) {
       const filtered = materialCompositionNorms.filter(n => n.id !== id);
       updateMaterialCompositionNorms(filtered);
@@ -1233,6 +1237,7 @@ export default function QuotationSystem({
   };
 
   const handleDeleteMaterialLabor = (name: string) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     if (window.confirm('Bạn có chắc chắn muốn xóa đơn giá vật tư/nhân công này không?')) {
       const filtered = materialLaborPrices.filter(p => p.name !== name);
       updateMaterialLaborPrices(filtered);
@@ -1240,6 +1245,7 @@ export default function QuotationSystem({
   };
 
   const handleSaveEditedItem = (tab: string, action: string, updatedData: any) => {
+    if (action === 'add' ? !canCreate : !canEdit) { denyToast(action === 'add' ? 'Thêm' : 'Sửa'); return; }
     if (tab === 'price') {
       if (action === 'add') {
         updateHouseEstimatePrices([...houseEstimatePrices, updatedData]);
@@ -1312,6 +1318,7 @@ export default function QuotationSystem({
     const file = e.target.files?.[0];
     e.target.value = ''; // reset để chọn lại cùng file
     if (!file) return;
+    if (!canEdit) { denyToast('Sửa'); return; }
     setIsImporting(true);
     try {
       const tab = normsInnerTab;

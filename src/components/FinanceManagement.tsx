@@ -598,6 +598,8 @@ export default function FinanceManagement({
   const canCreate = getPermission('finance', 'create');
   const canEdit = getPermission('finance', 'edit');
   const canDelete = getPermission('finance', 'delete');
+  // Toast chặn khi không đủ quyền Thêm/Sửa/Xóa ở phân hệ Tài Chính - Kế Toán.
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Tài Chính - Kế Toán.`, type: 'warning' });
 
   // Current active child segment among 12 tabs
   const [activeSubTab, setActiveSubTab] = useState<string>(
@@ -860,6 +862,7 @@ export default function FinanceManagement({
 
   // Xóa Đề xuất bị TỪ CHỐI (từng dòng hoặc hàng loạt, có xác nhận)
   const handleDeleteProposal = async (id: string) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     const target = subcontractorAdvances.find(p => p.id === id);
     if (!target) return;
     if (target.status !== 'rejected') {
@@ -879,6 +882,7 @@ export default function FinanceManagement({
   };
 
   const handleBulkDeleteProposals = async () => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     const rejectedIds = subcontractorAdvances.filter(p => finSelectedRows.has(p.id) && p.status === 'rejected').map(p => p.id);
     if (rejectedIds.length === 0) {
       addToast({ title: '⚠️ Không có mục hợp lệ', message: 'Chỉ các Đề xuất bị Từ chối mới được xóa.', type: 'warning' });
@@ -1352,6 +1356,7 @@ export default function FinanceManagement({
   const [openingBalanceInput, setOpeningBalanceInput] = useState('0');
   const canEditCashFundOpening = !!currentUser && (isRoleAdmin(currentUser.id) || isRoleAccounting(currentUser.id));
   const handleSaveCashFundOpening = async () => {
+    if (!canEditCashFundOpening) { denyToast('Sửa'); return; }
     const cfg: CashFundConfig = {
       id: cashFundConfig?.id || 'cash_fund_main',
       openingBalance: Number(openingBalanceInput) || 0,
@@ -1743,6 +1748,7 @@ export default function FinanceManagement({
 
   // Công nợ Thu: đẩy Công Nợ đầu kỳ > 0 của Khách Hàng vào cột Giá Trị (và lưu lên Supabase để không bị mất khi reload).
   const handleUpdateOpeningReceivables = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     const opening = (customers || []).filter(c => (c.openingDebt || 0) > 0);
     if (opening.length === 0) {
       addToast({ title: 'ℹ️ Thông báo', message: 'Không có Khách Hàng nào có Công Nợ đầu kỳ > 0.', type: 'info' });
@@ -1792,6 +1798,7 @@ export default function FinanceManagement({
 
   // Công nợ Trả: đẩy Công Nợ đầu kỳ > 0 của Thầu Phụ (subcontractorId) và NCC (name) vào cột Số Dư Đầu Kỳ (và lưu lên Supabase).
   const handleUpdateOpeningLiabilities = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     const subOpening = (allSubcontractors || []).filter(s => (s.openingDebt || 0) > 0);
     const supOpening = (suppliers || []).filter(s => (s.openingDebt || 0) > 0);
 
@@ -2147,6 +2154,7 @@ export default function FinanceManagement({
   // Tạo phiếu chi thanh toán công nợ cho 1 đơn hàng (liên kết qua purchaseOrderId).
   // Công nợ đơn hàng & Công nợ Trả được giảm khi phiếu chi được duyệt (xử lý tại App.tsx handleApprovePayment).
   const handleCreatePoPayment = (order: PurchaseOrder) => {
+    if (!canCreate) { denyToast('Thêm'); return; }
     const amount = Number(poPaymentAmount) || 0;
     const congNo = order.congNo || 0;
     if (amount <= 0) {
@@ -2199,6 +2207,7 @@ export default function FinanceManagement({
   // expandToDetailRows/getRecordedPOSum (đều đọc congNo/thanhToanThucTe) tự
   // phản ánh đúng, không cần sửa logic giới hạn thanh toán ở nơi khác.
   const applySupplierCredit = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     const order = applyCreditModal.order;
     if (!order) return;
     const amount = Number(applyCreditAmount) || 0;
@@ -2375,6 +2384,7 @@ export default function FinanceManagement({
   // MaterialCoordination.tsx, tránh làm "biến mất" 1 khoản đã dùng để giảm
   // công nợ thật của đơn khác).
   const handleDeleteSupplierReturnFromList = async (r: any) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     if ((r.appliedAmount || 0) > 0) {
       addToast({ title: '⚠️ Không thể xóa', message: 'Chứng từ đã được cấn trừ vào công nợ, không thể xóa.', type: 'warning' });
       return;
@@ -2723,6 +2733,7 @@ export default function FinanceManagement({
     setPoSupplierPay({ open: true, supplierName, max });
   };
   const handleCreateSupplierPayment = () => {
+    if (!canCreate) { denyToast('Thêm'); return; }
     const amount = Number(poPaymentAmount) || 0;
     if (amount <= 0) { addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập số tiền thanh toán.', type: 'warning' }); return; }
     if (amount > poSupplierPay.max + 1) { addToast({ title: '⚠️ Vượt quá', message: 'Số tiền không được lớn hơn còn lại.', type: 'warning' }); return; }
@@ -2776,6 +2787,7 @@ export default function FinanceManagement({
     }));
   };
   const handleSavePoPrices = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     const order = purchaseOrders.find(o => o.id === poEditId);
     if (!order) { setPoEditId(null); return; }
     const newTong = poEditItems.reduce((s, it) => s + (poItemTotal(it) || 0), 0);
@@ -2817,6 +2829,7 @@ export default function FinanceManagement({
     setPoEditId(null); setPoEditItems([]);
   };
   const handleSavePoProject = async (orderId: string, projectId: string, projectName: string) => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     const order = purchaseOrders.find(o => o.id === orderId);
     if (!order) return;
     const updated: PurchaseOrder = { ...order, projectId, projectName };
@@ -2831,6 +2844,7 @@ export default function FinanceManagement({
     }
   };
   const handleSavePoNotes = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     const order = purchaseOrders.find(o => o.id === poDetailModal.order?.id);
     if (!order) { setPoNotesEditing(false); return; }
     const updated: PurchaseOrder = { ...order, notes: poNotesEdit };
@@ -2846,6 +2860,7 @@ export default function FinanceManagement({
     }
   };
   const handleDeletePoUnrecorded = async (id: string) => {
+    if (!canDelete) { denyToast('Xóa'); setPoDeleteId(null); return; }
     if (isPoRecorded(id)) { addToast({ title: '⚠️ Đã ghi nhận', message: 'Đơn hàng đã ghi nhận Công nợ, không thể xóa.', type: 'warning' }); setPoDeleteId(null); return; }
     if (!window.confirm(`⚠️ Xóa đơn mua ${id}?\nHành động này không thể hoàn tác.`)) { setPoDeleteId(null); return; }
     try {
@@ -3282,6 +3297,8 @@ export default function FinanceManagement({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập tên sản phẩm.', type: 'warning' });
       return;
     }
+    const isEditMode = accProdFormMode === 'edit' && !!accProdEditId;
+    if (isEditMode ? !canEdit : !canCreate) { denyToast(isEditMode ? 'Sửa' : 'Thêm'); return; }
     const donGia = accProdDonGia.trim() !== '' ? Number(accProdDonGia) : 0;
     if (accProdFormMode === 'edit' && accProdEditId) {
       setAccProducts(prev => prev.map(p => p.id === accProdEditId ? { ...p, tenSanPham: accProdTenSP.trim(), donGia, donViTinh: accProdDonViTinh.trim() || undefined } : p));
@@ -3306,6 +3323,7 @@ export default function FinanceManagement({
   };
 
   const handleAccProdDelete = (id: string) => {
+    if (!canDelete) { denyToast('Xóa'); setAccProdDeleteId(null); return; }
     setAccProducts(prev => prev.filter(p => p.id !== id));
     setAccProdDeleteId(null);
     dbService.accountingProductCatalog.delete(id).catch(() => {});
@@ -3333,6 +3351,7 @@ export default function FinanceManagement({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (!canCreate) { denyToast('Thêm'); return; }
     try {
       const rows = await importFromExcel<Record<string, any>>(file, (row) => row);
       if (rows.length === 0) {
@@ -3624,6 +3643,7 @@ export default function FinanceManagement({
   // ── Xử lý tạo Đề Xuất nhanh (Tạo Đề Xuất) ──
   const handleQuickProposalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreate) { denyToast('Thêm'); return; }
     let amount = Number(quickProposalAmount);
     let expenseItems: { id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[] | undefined;
     let settlerId = '';
@@ -3840,6 +3860,7 @@ export default function FinanceManagement({
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreate) { denyToast('Thêm'); return; }
 
     // Chặn double-submit: request trước còn đang chạy thì bỏ qua request sau.
     if (isSubmittingPayment) return;
@@ -4087,6 +4108,7 @@ export default function FinanceManagement({
   };
 
   const handleSaveEditReceipt = () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     if (!editingReceipt) return;
     const updated: Receipt = {
       ...editingReceipt,
@@ -4124,6 +4146,7 @@ export default function FinanceManagement({
   } | null>(null);
 
   const handleSaveEditPayment = () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     if (!editingPayment) return;
     const updated: Payment = {
       ...editingPayment,
@@ -4243,6 +4266,7 @@ export default function FinanceManagement({
   // thành trong khi phiếu chi thực tế đã biến mất (đúng sự cố từng phải fix tay
   // qua scripts/fix_move_proposals_delete_payments.cjs, xem PC-2026-267/427/525).
   const handleDeletePaymentRow = async (p: Payment) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     const linkedProposal = p.relatedAdvanceId ? (subcontractorAdvances || []).find(a => a.id === p.relatedAdvanceId) : undefined;
     const warnExtra = linkedProposal
       ? `\nĐề xuất liên kết ${linkedProposal.id} sẽ được trả về trạng thái "Chờ Lập Phiếu".`
@@ -4490,6 +4514,7 @@ export default function FinanceManagement({
   //  - qua Đề Xuất (voucherUploadProposal): tìm phiếu chi rồi cập nhật cả đề xuất → completed
   //  - trực tiếp phiếu chi (voucherUploadPay): chỉ cập nhật ảnh cho phiếu đó
   const handleSaveVoucherImages = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     if (!voucherUploadProposal && !voucherUploadPay) return;
 
     // Xác định phiếu chi đích
@@ -4599,6 +4624,7 @@ export default function FinanceManagement({
 
   const handleAddSubContractSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreate) { denyToast('Thêm'); return; }
     const newSub: SubContract = {
       id: `sub_${Date.now()}`,
       code: `HĐTP-2026-${Math.floor(Math.random() * 90 + 10)}`,
@@ -4668,6 +4694,7 @@ export default function FinanceManagement({
   const handleCreateCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!custName) return;
+    if (editingCustId ? !canEdit : !canCreate) { denyToast(editingCustId ? 'Sửa' : 'Thêm'); return; }
 
     let targetId = editingCustId;
     if (!targetId) {
@@ -4736,6 +4763,7 @@ export default function FinanceManagement({
   const handleImportCustomerExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!canCreate) { denyToast('Thêm'); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -4790,6 +4818,7 @@ export default function FinanceManagement({
   const handleAddMaterialSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formMatName) return;
+    if (!canCreate) { denyToast('Thêm'); return; }
     const newMat: MaterialStock = {
       id: `mt_${Date.now()}`,
       code: formMatCode || `VT-${Math.floor(Math.random() * 900 + 100)}`,
@@ -4834,6 +4863,7 @@ export default function FinanceManagement({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập Nội dung Công tác phí!', type: 'warning' });
       return;
     }
+    if (editingTravelNorm ? !canEdit : !canCreate) { denyToast(editingTravelNorm ? 'Sửa' : 'Thêm'); return; }
 
     if (editingTravelNorm) {
       setTravelNorms(prev => prev.map(item => 
@@ -4866,6 +4896,7 @@ export default function FinanceManagement({
   };
 
   const handleDeleteTravelNorm = (id: string) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     if (confirm('Bạn có chắc chắn muốn xóa định mức công tác phí này?')) {
       setTravelNorms(prev => prev.filter(item => item.id !== id));
       addToast({ title: '🗑️ Đã xóa', message: '🗑️ Đã xóa định mức công tác phí.', type: 'info' });
@@ -4905,6 +4936,7 @@ export default function FinanceManagement({
   // không đổi trạng thái và báo lỗi.
   // Trả về true nếu đã ghi nhận xong (hoặc đang mở modal để ghi nhận), false nếu lỗi.
   const handleRecordSupplierDebt = async (order: PurchaseOrder): Promise<boolean> => {
+    if (!canCreate) { denyToast('Thêm'); return false; }
     // Đơn nội bộ xuất từ Kho có sẵn cho công trình: không phải mua hàng từ NCC
     // thật → không có công nợ để ghi nhận.
     if ((order as any).fromWarehouse || order.supplierId === WAREHOUSE_SOURCE_ID) {
@@ -5049,6 +5081,7 @@ export default function FinanceManagement({
   // về trạng thái "Chưa ghi nhận" (status 'confirmed') để có thể sửa rồi ghi
   // nhận lại. Ngược lại chính xác với handleRecordSupplierDebt ở trên.
   const handleUndoSupplierDebt = async (order: PurchaseOrder): Promise<boolean> => {
+    if (!canDelete) { denyToast('Xóa'); return false; }
     const liab = customLiabilities.find(l =>
       l.category === 'Nhà Cung Cấp' && Array.isArray(l.recordedPurchaseOrderIds) && l.recordedPurchaseOrderIds.includes(order.id)
     );
@@ -5101,6 +5134,7 @@ export default function FinanceManagement({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập Tên dự án / công trình', type: 'warning' });
       return;
     }
+    if (editingReceivableId ? !canEdit : !canCreate) { denyToast(editingReceivableId ? 'Sửa' : 'Thêm'); return; }
     if (editingReceivableId) {
       setCustomReceivables(prev => prev.map(item => item.id === editingReceivableId ? {
         ...item,
@@ -5151,6 +5185,7 @@ export default function FinanceManagement({
   };
 
   const confirmDeleteReceivable = async () => {
+    if (!canDelete) { denyToast('Xóa'); setReceivableToDelete(null); return; }
     if (receivableToDelete) {
       try {
         // Xóa trên Supabase
