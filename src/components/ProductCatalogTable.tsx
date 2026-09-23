@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { ProductCatalogItem, ProductPriceItem, ProductMaterialItem } from '../types';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
+import { useAuth } from '../context/AuthContext';
 import { dbService } from '../lib/dbService';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import {
@@ -420,6 +421,13 @@ export const INITIAL_MATERIALS: ProductMaterialItem[] = getInitialMaterials(INIT
 
 export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableProps) {
   const { addToast } = useNotification();
+  const { currentUser } = useAuth();
+  // RÀ SOÁT 2026-09: file này trước đây KHÔNG import bất kỳ cơ chế phân quyền nào —
+  // mọi Thêm/Sửa/Xóa/Import Excel ở Danh Mục Sản Phẩm Nội Thất đều mở hoàn toàn.
+  const canCreate = hasModulePermission(currentUser?.id, 'quotes', 'create');
+  const canEdit = hasModulePermission(currentUser?.id, 'quotes', 'edit');
+  const canDelete = hasModulePermission(currentUser?.id, 'quotes', 'delete');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Danh Mục Sản Phẩm.`, type: 'warning' });
   const [products, setProducts] = useState<ProductCatalogItem[]>(() => INITIAL_PRODUCTS);
 
   const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => INITIAL_PRICES);
@@ -590,6 +598,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên sản phẩm.', type: 'warning' });
       return;
     }
+    if (modalMode === 'add' ? !canCreate : !canEdit) { denyToast(modalMode === 'add' ? 'Thêm' : 'Sửa'); return; }
 
     const priceThaiLan = fDonGiaThaiLan.trim() !== '' ? Number(fDonGiaThaiLan) : null;
     const priceAnCuong = fDonGiaAnCuong.trim() !== '' ? Number(fDonGiaAnCuong) : null;
@@ -697,6 +706,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập đơn giá trị hợp lệ.', type: 'warning' });
       return;
     }
+    if (priceFormMode === 'add' ? !canCreate : !canEdit) { denyToast(priceFormMode === 'add' ? 'Thêm' : 'Sửa'); return; }
 
     const priceAmount = Number(fDonGia);
 
@@ -731,6 +741,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
   };
 
   const handleDeletePrice = (priceId: string) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     setPricesList(prev => prev.filter(pr => pr.id !== priceId));
     if (editingPriceId === priceId) {
       setPriceFormMode('add');
@@ -767,6 +778,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên chất liệu.', type: 'warning' });
       return;
     }
+    if (materialFormMode === 'add' ? !canCreate : !canEdit) { denyToast(materialFormMode === 'add' ? 'Thêm' : 'Sửa'); return; }
 
     if (materialFormMode === 'add') {
       const newMaterialItem: ProductMaterialItem = {
@@ -796,6 +808,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
   };
 
   const handleDeleteMaterial = (materialId: string) => {
+    if (!canDelete) { denyToast('Xóa'); return; }
     setMaterialsList(prev => prev.filter(m => m.id !== materialId));
     if (editingMaterialId === materialId) {
       setMaterialFormMode('add');
@@ -831,6 +844,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (!canCreate) { denyToast('Thêm'); return; }
     setIsImporting(true);
     try {
       const rows = await importFromExcel<Record<string, any>>(file, (row) => row);
@@ -873,6 +887,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
 
   // Item deletion
   const handleDeleteProduct = (id: string) => {
+    if (!canDelete) { denyToast('Xóa'); setDeleteConfirmId(null); return; }
     setProducts(prev => prev.filter(p => p.id !== id));
     setDeleteConfirmId(null);
     // Đồng bộ xóa lên Supabase

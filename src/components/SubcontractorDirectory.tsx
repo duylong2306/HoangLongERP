@@ -86,6 +86,7 @@ export default function SubcontractorDirectory({
   };
   const handleBulkDelete = () => {
     if (selectedRows.size === 0) return;
+    if (!canDelete) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Xóa" ở phân hệ Tài Chính - Kế Toán.', type: 'warning' }); return; }
     if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${selectedRows.size} thầu phụ đã chọn không?\nHành động này không thể hoàn tác.`)) return;
     const idsToDelete = Array.from(selectedRows);
     setSuppliers(suppliers.filter(s => !selectedRows.has(s.id)));
@@ -195,6 +196,7 @@ export default function SubcontractorDirectory({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng điền đầy đủ các thông tin bắt buộc (Tên thầu phụ, Người đại diện, Điện thoại, Địa chỉ)!', type: 'warning' });
       return;
     }
+    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${editingSupId ? 'Sửa' : 'Thêm'}" ở phân hệ Tài Chính - Kế Toán.`, type: 'warning' }); return; }
 
     if (editingSupId) {
       const updated = suppliers.map(s => {
@@ -364,6 +366,7 @@ export default function SubcontractorDirectory({
   const handleImportSubcontractorExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Thêm" ở phân hệ Tài Chính - Kế Toán.', type: 'warning' }); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {

@@ -324,6 +324,13 @@ export default function ProjectKanbanBoard({
   const canEditTask = canProjectAction('editTask', currentUser, boardProject, undefined, matrix);
   const canDeleteTask = canProjectAction('deleteTask', currentUser, boardProject, undefined, matrix);
 
+  // RÀ SOÁT 2026-09: 3 action này đã có sẵn trong ma trận Quyền Dự Án (hrProjectPermissions.ts)
+  // nhưng chưa từng được canProjectAction() gọi ở component này — lập phiếu thu/sửa thông tin
+  // dự án/thêm khách hàng nhanh trước đây KHÔNG kiểm tra quyền gì cả.
+  const canSettlePayment = canProjectAction('settlePayment', currentUser, boardProject, undefined, matrix);
+  const canEditProjectInfo = canProjectAction('editProjectInfo', currentUser, boardProject, undefined, matrix);
+  const canQuickAddCustomer = canProjectAction('quickAddCustomer', currentUser, boardProject, undefined, matrix);
+
   // 1. Column configuration initialized in LocalStorage or defaults
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
   // Force re-render khi phân quyền dự án đổi từ thiết bị khác (realtime)
@@ -816,6 +823,10 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   const handleCreateReceipt = (isFinal: boolean) => {
     if (!selectedProject) return;
+    if (!canSettlePayment) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền lập phiếu tạm ứng/quyết toán cho dự án này.', type: 'warning' });
+      return;
+    }
     const projectReceipts = receipts.filter(r => r.projectId === selectedProject.id);
     const totalReceived = projectReceipts.reduce((sum, r) => sum + (r.amount || 0), 0);
     
@@ -895,6 +906,10 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   const handleSaveProjectDetails = async () => {
     if (!selectedProject) return;
+    if (!canEditProjectInfo) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa thông tin dự án này.', type: 'warning' });
+      return;
+    }
 
     let calculatedEndStr = '';
     if (editStartDate && editDuration) {
@@ -1020,6 +1035,10 @@ export default function ProjectKanbanBoard({
   const handleQuickAddCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickCustName) return;
+    if (!canQuickAddCustomer) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền thêm nhanh khách hàng từ dự án.', type: 'warning' });
+      return;
+    }
 
     const abbrev = getAbbrev(quickCustName);
     // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
@@ -2402,10 +2421,16 @@ export default function ProjectKanbanBoard({
       {/* PROJECT CREATION MODAL */}
       {showAddProjectModal && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <form 
+          <form
             onSubmit={(e) => {
               e.preventDefault();
               if (!newProjName.trim()) return;
+              // Nút mở modal đã kiểm tra canCreate, nhưng modal 1 khi đã mở thì submit
+              // không kiểm tra lại — kiểm tra lại ở đây để không có đường vòng qua quyền.
+              if (!canCreate) {
+                addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền THÊM dự án ở phân hệ này.', type: 'error' });
+                return;
+              }
 
               // 1. Prepare initial project object helper for name initials
               const code = `DA_${getAbbrev(newProjName) || 'DA'}_${projects.length + 1}`;
@@ -3703,14 +3728,16 @@ export default function ProjectKanbanBoard({
                     {/* Button action toggles */}
                     <div className="col-span-2 pt-2 border-t border-slate-900 flex justify-end gap-3.5">
                       {!isEditingDetails ? (
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingDetails(true)}
-                          className="bg-indigo-650 hover:bg-indigo-600 text-white font-extrabold px-4.5 py-2.2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-[0.98] cursor-pointer text-xs"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                          Chỉnh sửa thông tin
-                        </button>
+                        canEditProjectInfo && (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingDetails(true)}
+                            className="bg-indigo-650 hover:bg-indigo-600 text-white font-extrabold px-4.5 py-2.2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-[0.98] cursor-pointer text-xs"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                            Chỉnh sửa thông tin
+                          </button>
+                        )
                       ) : (
                         <>
                           <button

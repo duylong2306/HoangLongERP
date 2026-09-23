@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
 import { INITIAL_PRODUCTS } from './ProductCatalogTable';
 import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle, Download, Share2 } from 'lucide-react';
@@ -489,6 +489,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập đầy đủ Tên, Số điện thoại và Địa chỉ!', type: 'warning' });
       return;
     }
+    if (!canCreate) { denyToast('Thêm'); return; }
     const newCustId = `cust_${Date.now()}`;
     const newCust = {
       id: newCustId,
@@ -550,6 +551,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
   const handleSetAsDefault = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setDbSaving(true);
     setDbSaveSuccess(false);
     setDbSaveError(null);
@@ -933,6 +935,12 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const [searchCategoryQuery, setSearchCategoryQuery] = useState<string>('');
   const [searchProductQuery, setSearchProductQuery] = useState<string>('');
   const { addToast } = useNotification();
+  // RÀ SOÁT 2026-09: file này lưu thẳng dbService (archivedQuotes/quotationConfigs)
+  // — độc lập với cổng canCreate/canEdit đã gate ở QuotationSystem.handleSaveQuote —
+  // nên trước đây hoàn toàn không kiểm tra quyền.
+  const canCreate = hasModulePermission(currentUser?.id, 'quotes_construction', 'create');
+  const canEdit = hasModulePermission(currentUser?.id, 'quotes_construction', 'edit');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Báo Giá Xây Dựng.`, type: 'warning' });
 
   // Tải động html2canvas/jsPDF — dùng lại đúng cách export PDF đã ổn định của
   // Đơn Mua Hàng (MaterialCoordination.tsx): gọi html2canvas trực tiếp rồi tự
@@ -1484,6 +1492,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   const totalWithVat = subtotal;
 
   const handleSaveQuote = async () => {
+    if (loadedQuote ? !canEdit : !canCreate) { denyToast(loadedQuote ? 'Sửa' : 'Thêm'); return; }
     if (!loadedQuote && selectedProjectId) {
       try {
         const archivedList = await dbService.archivedQuotes.list('construction');
@@ -2078,9 +2087,12 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
           <div className="flex flex-col sm:flex-row gap-2.5 w-full md:w-auto shrink-0">
             <button
               type="button"
-              onClick={() => setIsTemplateEditable(!isTemplateEditable)}
+              onClick={() => {
+                if (!canEdit) { denyToast('Sửa'); return; }
+                setIsTemplateEditable(!isTemplateEditable);
+              }}
               className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
-                isTemplateEditable 
+                isTemplateEditable
                   ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
                   : 'bg-indigo-600/15 text-indigo-700 hover:bg-indigo-600/25 border border-indigo-500/30'
               }`}
@@ -2092,6 +2104,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
               type="button"
               disabled={dbSaving || !isTemplateEditable}
               onClick={async () => {
+                if (!canEdit) { denyToast('Sửa'); return; }
                 setDbSaving(true);
                 setDbSaveSuccess(false);
                 setDbSaveError(null);

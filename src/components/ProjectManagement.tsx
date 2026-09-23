@@ -163,6 +163,9 @@ export default function ProjectManagement({
   const handleQuickAddCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickCustName) return;
+    // RÀ SOÁT 2026-09: nút mở modal đã kiểm tra canQuickAddCustomer, nhưng submit
+    // của modal không kiểm tra lại — kiểm tra lại ở đây để không có đường vòng.
+    if (!canQuickAddCustomer) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền thêm nhanh khách hàng từ dự án.', type: 'warning' }); return; }
 
     const abbrev = getAbbreviation(quickCustName);
     // Dùng Date.now() thay vì customers.length + 1: mã theo độ dài mảng dễ bị
@@ -211,6 +214,7 @@ export default function ProjectManagement({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập đầy đủ các trường bắt buộc!', type: 'warning' });
       return;
     }
+    if (!canCreateProject) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền tạo dự án mới.', type: 'warning' }); return; }
 
     // Auto generated code format: DA_chữ cái đầu tên dự án_số thứ tự hàng đang nhập
     const abbrev = getAbbreviation(newProjName) || 'DA';
@@ -260,6 +264,7 @@ export default function ProjectManagement({
   const handleCreateDocument = (e: React.FormEvent, projectId: string) => {
     e.preventDefault();
     if (!newDocName || !newDocCode) return;
+    if (!canManageProjectDocs) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền quản lý hồ sơ dự án.', type: 'warning' }); return; }
 
     const newDoc: ProjectDoc = {
       id: `doc_${Date.now()}`,
@@ -294,6 +299,7 @@ export default function ProjectManagement({
   };
 
   const handleDeleteDocument = (projectId: string, docId: string) => {
+    if (!canManageProjectDocs) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền quản lý hồ sơ dự án.', type: 'warning' }); return; }
     const proj = projects.find(p => p.id === projectId);
     if (proj && proj.documents) {
       if (onUpdateProject) {

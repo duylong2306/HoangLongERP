@@ -5,7 +5,7 @@ import { dbService } from '../lib/dbService';
 import { Quote, ArchivedQuote, Customer, Project, Employee, Supplier, Task } from '../types';
 import RichTextEditor from './RichTextEditor';
 import { docSoTiengViet } from './QuotationTableSheet';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
 
 // Mẫu Hợp Đồng Giao Khoán — cập nhật theo mẫu "Mẫu HĐ Thầu Phụ Mới.docx" do chủ
 // dự án cung cấp (2026-09-14). Giữ nguyên toàn bộ nội dung pháp lý của mẫu gốc
@@ -369,6 +369,12 @@ export default function SubcontractorEstimator({
   showTemplateOnly = false
 }: SubcontractorEstimatorProps) {
   const { addToast } = useNotification();
+  // RÀ SOÁT 2026-09: file này lưu thẳng dbService (archivedSubcontractorQuotes/
+  // quotationConfigs) — độc lập với cổng canCreate/canEdit đã gate ở QuotationSystem —
+  // nên trước đây hoàn toàn không kiểm tra quyền.
+  const canCreate = hasModulePermission(currentUser?.id, 'quotes_subcontractor', 'create');
+  const canEdit = hasModulePermission(currentUser?.id, 'quotes_subcontractor', 'edit');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Báo Giá Thầu Phụ.`, type: 'warning' });
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [archivedQuotesList, setArchivedQuotesList] = useState<ArchivedQuote[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -536,6 +542,7 @@ export default function SubcontractorEstimator({
   }, []);
 
   const handleSetAsDefault = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setDbSaving(true);
     try {
       let defaultData = await dbService.quotationConfigs.get('subcontractor_default') || {};
@@ -998,6 +1005,7 @@ export default function SubcontractorEstimator({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập đầy đủ Tên, Số điện thoại và Địa chỉ!', type: 'warning' });
       return;
     }
+    if (!canCreate) { denyToast('Thêm'); return; }
     const newCustId = `cust_${Date.now()}`;
     const newCust = {
       id: newCustId,
@@ -1050,6 +1058,7 @@ export default function SubcontractorEstimator({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng chọn hoặc điền thông tin Khách hàng!', type: 'warning' });
       return;
     }
+    if (loadedQuote ? !canEdit : !canCreate) { denyToast(loadedQuote ? 'Sửa' : 'Thêm'); return; }
     if (!selectedSupplierId) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng chọn Thầu phụ liên kết!', type: 'warning' });
       return;
@@ -1176,6 +1185,7 @@ export default function SubcontractorEstimator({
     }
 
     if (loadedQuote) {
+      if (!canEdit) { denyToast('Sửa'); return; }
       setSavingPrint(true);
       try {
         const fields: any = {};
@@ -1217,6 +1227,7 @@ export default function SubcontractorEstimator({
     }
 
     if (loadedQuote) {
+      if (!canEdit) { denyToast('Sửa'); return; }
       setSavingPrint(true);
       try {
         const fields: any = {};
@@ -1297,6 +1308,7 @@ export default function SubcontractorEstimator({
 
   const handleSavePreviewQuote = async () => {
     if (!tempPreviewQuote) return;
+    if (loadedQuote ? !canEdit : !canCreate) { denyToast(loadedQuote ? 'Sửa' : 'Thêm'); return; }
     const archivedRecord = {
       ...(loadedQuote || {}),
       ...tempPreviewQuote,
@@ -1784,9 +1796,12 @@ export default function SubcontractorEstimator({
             <div className="flex flex-col sm:flex-row gap-2.5 w-full md:w-auto shrink-0">
               <button
                 type="button"
-                onClick={() => setIsTemplateEditable(!isTemplateEditable)}
+                onClick={() => {
+                  if (!canEdit) { denyToast('Sửa'); return; }
+                  setIsTemplateEditable(!isTemplateEditable);
+                }}
                 className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
-                  isTemplateEditable 
+                  isTemplateEditable
                     ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
                     : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
                 }`}
@@ -1798,6 +1813,7 @@ export default function SubcontractorEstimator({
                 type="button"
                 disabled={dbSaving || !isTemplateEditable}
                 onClick={async () => {
+                  if (!canEdit) { denyToast('Sửa'); return; }
                   setDbSaving(true);
                   try {
                     await dbService.quotationConfigs.save('subcontractor', {

@@ -7,7 +7,7 @@ import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
 import LegalTemplatePanel from './LegalTemplatePanel';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
 
 interface MechanicalEstimatorProps {
   onAddQuote?: (newQuote: any) => void;
@@ -185,6 +185,12 @@ export default function MechanicalEstimator({
   showTemplateOnly = false
 }: MechanicalEstimatorProps) {
   const { addToast } = useNotification();
+  // RÀ SOÁT 2026-09: file này lưu thẳng dbService (archivedQuotes/quotationConfigs)
+  // — độc lập với cổng canCreate/canEdit đã gate ở QuotationSystem.handleSaveQuote —
+  // nên trước đây hoàn toàn không kiểm tra quyền.
+  const canCreate = hasModulePermission(currentUser?.id, 'quotes_mechanical', 'create');
+  const canEdit = hasModulePermission(currentUser?.id, 'quotes_mechanical', 'edit');
+  const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Báo Giá Cơ Khí.`, type: 'warning' });
 
   // Tải động html2canvas/jsPDF — dùng lại đúng cách export PDF đã ổn định của
   // Đơn Mua Hàng (MaterialCoordination.tsx): gọi html2canvas trực tiếp rồi tự
@@ -345,6 +351,7 @@ export default function MechanicalEstimator({
   const [isTemplateEditable, setIsTemplateEditable] = useState(false);
 
   const handleSetAsDefault = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setDbSaving(true);
     setDbSaveSuccess(false);
     setDbSaveError(null);
@@ -574,6 +581,7 @@ export default function MechanicalEstimator({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập đầy đủ Tên, Số điện thoại và Địa chỉ!', type: 'warning' });
       return;
     }
+    if (!canCreate) { denyToast('Thêm'); return; }
     const newCustId = `cust_${Date.now()}`;
     const newCust = {
       id: newCustId,
@@ -1174,6 +1182,7 @@ export default function MechanicalEstimator({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Thiếu thông tin bắt buộc! vui lòng chọn/điền đầy đủ các trường: DỰ ÁN/TÊN DỰ ÁN, TÊN KHÁCH HÀNG, SỐ ĐIỆN THOẠI và ĐỊA CHỈ để có thể thực hiện thao tác này.', type: 'warning' });
       return;
     }
+    if (loadedQuote ? !canEdit : !canCreate) { denyToast(loadedQuote ? 'Sửa' : 'Thêm'); return; }
 
     if (!loadedQuote && selectedProjectId) {
       try {
@@ -1909,9 +1918,12 @@ export default function MechanicalEstimator({
           <div className="flex flex-col sm:flex-row gap-2.5 w-full md:w-auto shrink-0">
             <button
               type="button"
-              onClick={() => setIsTemplateEditable(!isTemplateEditable)}
+              onClick={() => {
+                if (!canEdit) { denyToast('Sửa'); return; }
+                setIsTemplateEditable(!isTemplateEditable);
+              }}
               className={`w-full sm:w-auto px-5 py-3 text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md active:scale-95 ${
-                isTemplateEditable 
+                isTemplateEditable
                   ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/50'
                   : 'bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200'
               }`}
@@ -1923,6 +1935,7 @@ export default function MechanicalEstimator({
               type="button"
               disabled={dbSaving || !isTemplateEditable}
               onClick={async () => {
+                if (!canEdit) { denyToast('Sửa'); return; }
                 setDbSaving(true);
                 setDbSaveSuccess(false);
                 setDbSaveError(null);

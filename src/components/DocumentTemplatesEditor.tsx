@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { dbService } from '../lib/dbService';
+import { hasModulePermission, useNotification } from '../context';
+import { useAuth } from '../context/AuthContext';
 import { Save, RefreshCw, FileText, Settings, UserCheck, Shield, HelpCircle, CheckCircle } from 'lucide-react';
 
 export default function DocumentTemplatesEditor() {
+  const { currentUser } = useAuth();
+  const { addToast } = useNotification();
+  // RÀ SOÁT 2026-09: file này ghi đè thẳng mẫu tài liệu chung (Báo giá/Hợp đồng/
+  // Nghiệm thu/Thanh lý) cho TOÀN CÔNG TY qua dbService — trước đây không kiểm tra
+  // quyền gì cả.
+  const canEditTemplate = hasModulePermission(currentUser?.id, 'quotes', 'edit');
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
@@ -92,6 +100,10 @@ export default function DocumentTemplatesEditor() {
   };
 
   const saveConfig = async () => {
+    if (!canEditTemplate) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" mẫu tài liệu Báo Giá.', type: 'warning' });
+      return;
+    }
     setSaving(true);
     setSaveStatus('idle');
     try {

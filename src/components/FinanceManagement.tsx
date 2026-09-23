@@ -8278,6 +8278,11 @@ export default function FinanceManagement({
                     onClose={() => { setShowRecForm(false); setAutoSelectCustId(null); setReceiptPrefill(null); }}
                     onAddCustomer={() => { setShowRecForm(false); setActiveSubTab('du_lieu_ke_toan'); setDuLieuTab('khach_hang'); setShowAddCustomerModal(true); }}
                     onSubmit={(data) => {
+                      // RÀ SOÁT 2026-09: form này còn có thể mở qua lối tắt "Lập Phiếu Tạm
+                      // Ứng/Quyết Toán" ở thẻ Kanban dự án (đặt receiptPrefill + showRecForm
+                      // trực tiếp, không qua nút "Lập phiếu thu mới" đã có canCreate ở trên)
+                      // — phải kiểm tra lại ngay tại đây để không có đường vòng qua quyền.
+                      if (!canCreate) { denyToast('Thêm'); return; }
                       onAddReceipt({
                         id: `rec_${Date.now()}`,
                         code: `PT-2026-${Math.floor(Math.random() * 900 + 100)}`,
