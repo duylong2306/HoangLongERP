@@ -26,12 +26,14 @@ import {
  */
 interface SubcontractorDirectoryProps {
   currentUser: Employee;
+  canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
 }
 
 export default function SubcontractorDirectory({
   currentUser,
+  canCreate = true,
   canEdit = true,
   canDelete = true
 }: SubcontractorDirectoryProps) {
@@ -196,7 +198,10 @@ export default function SubcontractorDirectory({
       addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng điền đầy đủ các thông tin bắt buộc (Tên thầu phụ, Người đại diện, Điện thoại, Địa chỉ)!', type: 'warning' });
       return;
     }
-    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${editingSupId ? 'Sửa' : 'Thêm'}" ở phân hệ Tài Chính - Kế Toán.`, type: 'warning' }); return; }
+    // RÀ SOÁT 2026-09: trước đây luôn kiểm tra canEdit dù đang Thêm mới — 1 nhóm được
+    // cấp create=true nhưng edit=false cho module 'finance' sẽ bị chặn nhầm khi Thêm
+    // thầu phụ (cùng loại lỗi vừa phát hiện ở canCoordinate() của MaterialCoordination.tsx).
+    if (editingSupId ? !canEdit : !canCreate) { addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${editingSupId ? 'Sửa' : 'Thêm'}" ở phân hệ Tài Chính - Kế Toán.`, type: 'warning' }); return; }
 
     if (editingSupId) {
       const updated = suppliers.map(s => {
@@ -366,7 +371,7 @@ export default function SubcontractorDirectory({
   const handleImportSubcontractorExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Thêm" ở phân hệ Tài Chính - Kế Toán.', type: 'warning' }); e.target.value = ''; return; }
+    if (!canCreate) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Thêm" ở phân hệ Tài Chính - Kế Toán.', type: 'warning' }); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -461,17 +466,17 @@ export default function SubcontractorDirectory({
           <button
             type="button"
             onClick={() => {
-              if (!canEdit) {
+              if (showSupplierForm && editingSupId) {
+                resetSupForm();
+                return;
+              }
+              if (!canCreate) {
                 addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền KHỞI TẠO thầu phụ mới.', type: 'error' });
                 return;
               }
-              if (showSupplierForm && editingSupId) {
-                resetSupForm();
-              } else {
-                setShowSupplierForm(!showSupplierForm);
-              }
+              setShowSupplierForm(!showSupplierForm);
             }}
-            className={`font-bold text-[10.5px] px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1 ${canEdit ? 'bg-orange-600 hover:bg-orange-550 text-white cursor-pointer active:scale-95' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
+            className={`font-bold text-[10.5px] px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1 ${canCreate ? 'bg-orange-600 hover:bg-orange-550 text-white cursor-pointer active:scale-95' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
           >
             {editingSupId ? '✏️ Đang sửa thầu phụ' : '+ Thêm thầu phụ mới'}
           </button>

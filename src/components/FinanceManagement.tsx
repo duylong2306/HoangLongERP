@@ -7910,6 +7910,7 @@ export default function FinanceManagement({
             {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'ncc_thau_phu' && (
               <SubcontractorDirectory
                 currentUser={currentUser}
+                canCreate={canCreate}
                 canEdit={canEdit}
                 canDelete={canDelete}
               />
