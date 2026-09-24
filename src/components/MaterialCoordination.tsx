@@ -3289,7 +3289,19 @@ export default function MaterialCoordination({
                   <span className="flex-1 text-[11px] font-semibold text-slate-700 block sm:inline">{it.name}</span>
                   <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
                     <div className="flex items-center gap-1">
-                      <input type="number" value={it.qty || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, qty: Number(e.target.value) } : x) }))} className="w-14 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none" />
+                      <input
+                        type="number" min={0.01} step="0.01" inputMode="decimal"
+                        value={it.qty || 0}
+                        onChange={(e) => {
+                          // Cho phép nhập số lẻ kiểu Việt Nam (dấu phẩy, VD "1,5") — đồng bộ với
+                          // ô Số lượng ở "Tạo Đề Xuất Nhanh".
+                          const raw = e.target.value.replace(/,/g, '.');
+                          const num = parseFloat(raw);
+                          const qty = isNaN(num) ? 0 : Math.max(0.01, num);
+                          setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, qty } : x) }));
+                        }}
+                        className="w-14 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none"
+                      />
                       <span className="text-[9px] text-slate-400">{it.unit}</span>
                     </div>
                     <input type="number" value={it.price || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, price: Number(e.target.value) } : x) }))} className="w-20 sm:w-24 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none" />
