@@ -3846,7 +3846,6 @@ export default function TaskDetailModal({
         <div className="p-4 bg-slate-950 border-t border-slate-850 shrink-0 flex justify-end items-center gap-3">
           {!isReadOnly && (() => {
             const isAssignee = currentUser.id === selectedTask.assigneeId;
-            const isAssigner = currentUser.id === selectedTask.assignerId || isRoleAdmin(currentUser.id) || currentUser.id === project?.pmId;
 
             // Chặn Hoàn thành công việc / Gửi phê duyệt khi còn nhiệm vụ (missions) chưa hoàn thành.
             const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
@@ -3948,9 +3947,17 @@ export default function TaskDetailModal({
             }
 
             if (selectedTask.status === 'reviewing') {
-              if (isAssigner) {
+              // SỬA 2026-09: trước đây gate bằng isAssigner (assigner/admin/PM dự án) —
+              // bỏ qua hoàn toàn "director" trong ma trận Quyền Dự Án và mọi tùy biến
+              // riêng theo dự án admin đã cấu hình cho action approveResult/rejectResult
+              // (canApprove/canReject tính từ canDoTaskAction ở trên nhưng chưa từng được
+              // dùng — cùng loại lỗi "ma trận có cấu hình nhưng không có tác dụng thật" đã
+              // sửa ở nhiều nơi khác trong đợt rà soát này). Nay nối đúng vào canApprove/
+              // canReject, khớp thiết kế ['director','pm','assigner'] + override riêng dự án.
+              if (canApprove || canReject) {
                 return (
                   <div className="flex items-center gap-2">
+                    {canReject && (
                     <button
                       type="button"
                       onClick={async () => {
@@ -3971,6 +3978,8 @@ export default function TaskDetailModal({
                       <X className="w-4 h-4" />
                       Từ Chối
                     </button>
+                    )}
+                    {canApprove && (
                     <button
                       type="button"
                       disabled={!allMissionsCompleted}
@@ -3999,6 +4008,7 @@ export default function TaskDetailModal({
                       <CheckCircle2 className="w-4 h-4" />
                       Xét Duyệt
                     </button>
+                    )}
                   </div>
                 );
               } else {
