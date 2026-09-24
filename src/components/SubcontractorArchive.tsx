@@ -390,6 +390,10 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
 
   const handleUnapproveSubcontractorContract = async () => {
     if (!tempQuote) return;
+    // RÀ SOÁT 2026-09: canEdit được truyền vào (từ QuotationSystem.tsx) nhưng chưa
+    // từng được dùng để gate Duyệt/Hủy phê duyệt Hợp đồng — ai xem được hồ sơ cũng
+    // duyệt/hủy duyệt được, dù không có quyền "Sửa" ở phân hệ Báo Giá.
+    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền hủy phê duyệt hợp đồng này.', type: 'warning' }); return; }
     if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Hợp Đồng Thầu Phụ?\nSau khi sửa xong cần Duyệt Hợp Đồng lại từ đầu.\nLưu ý: hợp đồng này sẽ tạm thời không còn tính vào Công Nợ Trả cho tới khi được duyệt lại.')) return;
     try {
       // Khi duyệt, "status" được set cứng thành 'Hoàn thành' (xem nút Duyệt Hợp
@@ -413,6 +417,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
 
   const handleSaveSubcontractorDoc = async () => {
     if (!tempQuote) return;
+    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa hợp đồng này.', type: 'warning' }); return; }
     setSavingDoc(true);
     try {
       const updated = { ...tempQuote, contractHtml: docHtml };
@@ -699,6 +704,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                 ) : (
                   <button
                     onClick={async () => {
+                      if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt hợp đồng này.', type: 'warning' }); return; }
                       const updated = {
                         ...tempQuote,
                         isApproved: true,
@@ -731,7 +737,10 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                   <span className="px-2 text-[9px] text-slate-400 font-sans italic">🔒 Đã duyệt — hủy phê duyệt để sửa</span>
                 ) : !isEditing ? (
                   <button
-                    onClick={() => setIsEditing(true)}
+                    onClick={() => {
+                      if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa hợp đồng này.', type: 'warning' }); return; }
+                      setIsEditing(true);
+                    }}
                     className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
                   >
                     <Save className="w-3.5 h-3.5" />

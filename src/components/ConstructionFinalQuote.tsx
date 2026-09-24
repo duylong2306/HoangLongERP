@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer, Save, Check, FileText, Edit } from 'lucide-react';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
 import QuotationTableSheet from './QuotationTableSheet';
 import TakeoffSummaryTable from './TakeoffSummaryTable';
 import { buildFinalSummary, takeoffToFinalItems, normalizeTakeoffRows } from '../lib/takeoffCalc';
@@ -47,6 +47,10 @@ export default function ConstructionFinalQuote({
   setLoadedQuote
 }: ConstructionFinalQuoteProps) {
   const { addToast } = useNotification();
+  // RÀ SOÁT 2026-09: cùng lý do như ConstructionTakeoff.tsx — trước đây không tự kiểm
+  // tra quyền, dựa vào lớp check sai (luôn "Tạo", sai module) ở QuotationSystem.handleSaveQuote.
+  const canCreateFinalQuote = hasModulePermission(currentUser?.id, 'quotes_construction', 'create');
+  const canEditFinalQuote = hasModulePermission(currentUser?.id, 'quotes_construction', 'edit');
   const [takeoffUpdateTrigger, setTakeoffUpdateTrigger] = useState(0);
   useEffect(() => {
     const handleUpdate = () => {
@@ -127,6 +131,10 @@ export default function ConstructionFinalQuote({
 
   // 8. Save quote action with Print preview tab trigger
   const handleSaveFinalQuote = async () => {
+    if (loadedQuote ? !canEditFinalQuote : !canCreateFinalQuote) {
+      addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${loadedQuote ? 'Sửa' : 'Thêm'}" báo giá xây dựng.`, type: 'warning' });
+      return;
+    }
     if (!projectName || !projectName.trim() || !customerName || !customerName.trim() || !customerPhone || !customerPhone.trim() || !customerAddress || !customerAddress.trim()) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập đầy đủ thông tin dự án trước khi Lưu!', type: 'warning' });
       return;

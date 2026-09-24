@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Trash2, Save, Check, FileText, Printer, Edit, LayoutTemplate, X } from 'lucide-react';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, hasModulePermission } from '../context';
 import QuotationTableSheet from './QuotationTableSheet';
 import {
   TakeoffRow,
@@ -114,6 +114,12 @@ export default function ConstructionTakeoff({
   setLoadedQuote
 }: ConstructionTakeoffProps) {
   const { addToast } = useNotification();
+  // RÀ SOÁT 2026-09: trước đây file này KHÔNG kiểm tra quyền gì cả, dựa hoàn toàn vào
+  // lớp check ở QuotationSystem.handleSaveQuote — nhưng lớp đó luôn xét quyền "Tạo" (kể
+  // cả khi đang sửa) và xét sai module 'quotes' thay vì 'quotes_construction'. Tự kiểm
+  // tra đúng ngay tại đây, cùng chuẩn với ConstructionEstimator.tsx.
+  const canCreateTakeoff = hasModulePermission(currentUser?.id, 'quotes_construction', 'create');
+  const canEditTakeoff = hasModulePermission(currentUser?.id, 'quotes_construction', 'edit');
 
   // Danh sách dòng của bảng (phẳng: section / item / line)
   const [rows, setRows] = useState<TakeoffRow[]>(() => readSessionRows());
@@ -302,6 +308,10 @@ export default function ConstructionTakeoff({
 
   // Handle Save & Print for construction takeoff
   const handleSaveAndPrint = async () => {
+    if (loadedQuote ? !canEditTakeoff : !canCreateTakeoff) {
+      addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${loadedQuote ? 'Sửa' : 'Thêm'}" báo giá xây dựng.`, type: 'warning' });
+      return;
+    }
     if (!customerName || !customerName.trim()) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập tên Chủ Đầu Tư trước khi thực hiện Lưu!', type: 'warning' });
       return;

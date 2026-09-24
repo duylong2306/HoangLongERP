@@ -716,11 +716,14 @@ export default function QuotationSystem({
   // Toast chặn khi không đủ quyền Thêm/Sửa/Xóa ở phân hệ Báo Giá / Định mức - Đơn giá.
   const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Báo Giá.`, type: 'warning' });
 
+  // RÀ SOÁT 2026-09: trước đây hàm này luôn kiểm tra quyền "Tạo" (create) của module
+  // chung 'quotes' — kể cả khi đang SỬA 1 báo giá đã có, và bất kể quote đó thuộc
+  // sector nào (construction/mechanical/subcontractor đều có module riêng khác
+  // 'quotes'). Mỗi nơi gọi onAddQuote (CabinetEstimator/ConstructionEstimator/
+  // MechanicalEstimator/SubcontractorEstimator/ConstructionTakeoff/ConstructionFinalQuote)
+  // nay đã tự kiểm tra đúng module + đúng hành động (Thêm khi tạo mới, Sửa khi đang sửa)
+  // trước khi gọi — lớp check ở đây vừa thừa vừa sai nên bỏ hẳn.
   const handleSaveQuote = (newQuote: Quote) => {
-    if (!canCreate) {
-      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền THÊM/TẠO báo giá mới.', type: 'error' });
-      return;
-    }
     onAddQuote(newQuote);
   };
 

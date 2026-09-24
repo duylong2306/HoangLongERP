@@ -1561,6 +1561,10 @@ export default function TaskDetailModal({
     creator: string,
     proposalDate: string
   ) => {
+    if (!canProposeAdvance) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền đề xuất tạm ứng cho thầu phụ này.', type: 'error' });
+      return;
+    }
     if (!code || amount <= 0) {
       setCustomDialog({
         show: true,
@@ -3816,7 +3820,7 @@ export default function TaskDetailModal({
                             </span>
                           </button>
 
-                          {isApproved && (
+                          {isApproved && canProposeAdvance && (
                             <button
                               type="button"
                               onClick={() => {

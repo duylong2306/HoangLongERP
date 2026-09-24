@@ -264,6 +264,13 @@ export default function ConstructionArchive({ currentUser, canEdit = true, canDe
 
   const handleQuickCreateProject = async () => {
     if (!selectedQuote) return;
+    // RÀ SOÁT 2026-09: nút mở modal đã kiểm tra canEdit, nhưng hàm tạo dự án (được gọi
+    // từ form submit của modal) lại không kiểm tra lại — gate lại ở đây để không có
+    // đường vòng.
+    if (!canEdit) {
+      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền LIÊN KẾT/TẠO DỰ ÁN từ báo giá.', type: 'error' });
+      return;
+    }
     if (!quickProjName.trim()) {
       addToast({ title: '⚠️ Thiếu thông tin', message: 'Vui lòng nhập tên Dự Án!', type: 'warning' });
       return;
