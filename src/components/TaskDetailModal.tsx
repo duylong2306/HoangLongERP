@@ -242,7 +242,6 @@ export default function TaskDetailModal({
   const [activeConnectedTool, setActiveConnectedTool] = useState<'approval' | 'cost' | 'material' | 'quotation' | 'contract' | 'acceptance' | 'liquidation' | null>(null);
   const [connectedTaskId, setConnectedTaskId] = useState<string | null>(null);
   const [ctCostType, setCtCostType] = useState<'contractor-advance' | 'expense-advance'>('expense-advance');
-  const [showAdvForm, setShowAdvForm] = useState(false);
   const [showApprovalWarning, setShowApprovalWarning] = useState(false);
   const [customApproverId, setCustomApproverId] = useState<string>('');
   const [downloadedQuoteModal, setDownloadedQuoteModal] = useState<ArchivedQuote | null>(null);
@@ -867,12 +866,6 @@ export default function TaskDetailModal({
   const [allowanceCustomUnitPrice, setAllowanceCustomUnitPrice] = useState(0);
   const [allowanceNotes, setAllowanceNotes] = useState('');
 
-  // Expenses proposals form states
-  const [advTitle, setAdvTitle] = useState('');
-  const [advAmount, setAdvAmount] = useState<number>(500000);
-  const [advType, setAdvType] = useState<'advance' | 'reimbursement'>('advance');
-  const [advReason, setAdvReason] = useState('');
-
   // States for recording violations
   interface DraftViolationRow {
     id: string;
@@ -1432,59 +1425,6 @@ export default function TaskDetailModal({
     addToast({ title: '✅ Thành công', message: 'Đã gửi yêu cầu phê duyệt liên thông tự động thành công!', type: 'success' });
   };
 
-  // Xử lý duyệt từng cấp (sequential) — chỉ bước đang chờ mới được duyệt
-  const handleApproveStep = async (stepId: string, decision: 'approved' | 'rejected') => {
-    if (!selectedTask.approvals) return;
-    const next = selectedTask.approvals.map((s: any) =>
-      s.id === stepId
-        ? { ...s, status: decision, updatedAt: new Date().toISOString() }
-        : s
-    );
-    const allApproved = next.length > 0 && next.every((s: any) => s.status === 'approved');
-    const updatedTask = {
-      ...selectedTask,
-      approvals: next,
-      status: allApproved ? 'completed' as const : selectedTask.status,
-      completionRate: allApproved ? 100 : selectedTask.completionRate,
-    };
-    const ok = await onUpdateTask?.(selectedTask.id, updatedTask as any);
-    // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người giao việc
-    // - CHỈ SAU KHI SAVE THÀNH CÔNG
-    if (ok === true) {
-      const assignerEmp = employees.find(e => e.id === selectedTask.assignerId);
-      if (decision === 'approved') {
-        sendApprovalDirectMessage({
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderRole: currentUser.role,
-          recipientId: selectedTask.assignerId,
-          recipientName: assignerEmp?.name || 'Người giao việc',
-          content: `✅ ${currentUser.name} đã DUYỆT công việc "${selectedTask.name}"${allApproved ? ' — Công việc đã HOÀN THÀNH.' : ''}.`,
-          relatedEntity: { type: 'task', id: selectedTask.id },
-        });
-      } else {
-        sendApprovalDirectMessage({
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderRole: currentUser.role,
-          recipientId: selectedTask.assignerId,
-          recipientName: assignerEmp?.name || 'Người giao việc',
-          content: `❌ ${currentUser.name} đã TỪ CHỐI bước phê duyệt công việc "${selectedTask.name}".`,
-          relatedEntity: { type: 'task', id: selectedTask.id },
-        });
-      }
-    } else if (ok === false) {
-      addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu kết quả duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
-    }
-    if (ok !== false) {
-      addToast({
-        title: decision === 'approved' ? '✅ Đã duyệt' : '❌ Đã từ chối',
-        message: decision === 'approved' ? 'Bước duyệt đã được phê duyệt.' : 'Bước duyệt đã bị từ chối.',
-        type: decision === 'approved' ? 'success' : 'warning',
-      });
-    }
-  };
-
   const taskStatusLabels: Record<TaskStatus, string> = {
     todo: 'Chưa làm',
     doing: 'Đang làm',
@@ -1507,44 +1447,6 @@ export default function TaskDetailModal({
     } catch (e) {
       return str;
     }
-  };
-
-  // Add Expenses request
-  const handleAddAdvanceRequest = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!advTitle.trim()) return;
-
-    const newRequest = {
-      id: `adv_${Date.now()}`,
-      title: advTitle,
-      amount: advAmount,
-      status: 'pending' as const,
-      reason: advReason || 'Phục vụ thi công lắp dựng dự án',
-      proposerName: employees.find(emp => emp.id === selectedTask.assigneeId)?.name || currentUser.name,
-      date: new Date().toISOString().split('T')[0],
-      type: advType
-    };
-
-    const prevRequests = selectedTask.advanceRequests || [];
-
-    onUpdateTask(selectedTask.id, {
-      advanceRequests: [...prevRequests, newRequest]
-    });
-
-    setAdvTitle('');
-    setAdvReason('');
-    setShowAdvForm(false);
-  };
-
-  // Approve / Reject Expenses proposal
-  const handleActionAdvanceRequest = (reqId: string, action: 'approved' | 'rejected') => {
-    const prevRequests = selectedTask.advanceRequests || [];
-    const updated = prevRequests.map(r => r.id === reqId ? { ...r, status: action } : r);
-    const item = prevRequests.find(r => r.id === reqId);
-
-    onUpdateTask(selectedTask.id, {
-      advanceRequests: updated
-    });
   };
 
   const handleAddSubcontractorAdvance = async (
