@@ -555,6 +555,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
 
   // Open modal for Adding
   const handleOpenAdd = () => {
+    if (!canCreate) { denyToast('Thêm'); return; }
     resetFormFields();
     setModalMode('add');
     setShowFormModal(true);
@@ -562,6 +563,7 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
 
   // Open modal for Editing
   const handleOpenEdit = (item: ProductCatalogItem) => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setModalMode('edit');
     setCurrentEditingId(item.id);
     setFLinhVuc(item.linhVuc || 'Nội thất');

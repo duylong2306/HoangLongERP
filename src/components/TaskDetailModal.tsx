@@ -56,7 +56,7 @@ const TRAVEL_NORMS_FALLBACK: TravelAllowanceNorm[] = [
   { id: 'ctp_28', code: 'CTP_028', content: 'Đi Nam Ban - Tân Hà (xe 2 người)', quantity: 2, unitPrice: 120000, notes: '' },
   { id: 'ctp_29', code: 'CTP_029', content: 'Nghỉ qua đêm', quantity: 1, unitPrice: 180000, notes: '' },
 ];
-import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers } from '../context';
 import { dbService } from '../lib/dbService';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { CTPStatus } from '../lib/travelExpenseStatus';
@@ -218,9 +218,6 @@ export default function TaskDetailModal({
 
   const assignee = employees.find(e => e.id === selectedTask.assigneeId);
   const assigner = employees.find(e => e.id === selectedTask.assignerId);
-
-  const isAssignee = currentUser.id === selectedTask.assigneeId;
-  const isAssigner = currentUser.id === selectedTask.assignerId || isRoleAdmin(currentUser.id) || currentUser.id === project?.pmId;
 
   // ─── PHÂN QUYỀN CÔNG VIỆC (Task Action Matrix) ──────────────────────
   // Thay thế hardcode isAssignee/isAssigner bằng ma trận Role × Action
@@ -3845,15 +3842,16 @@ export default function TaskDetailModal({
         {/* Footer */}
         <div className="p-4 bg-slate-950 border-t border-slate-850 shrink-0 flex justify-end items-center gap-3">
           {!isReadOnly && (() => {
-            const isAssignee = currentUser.id === selectedTask.assigneeId;
-
             // Chặn Hoàn thành công việc / Gửi phê duyệt khi còn nhiệm vụ (missions) chưa hoàn thành.
             const pendingMissions = (selectedTask.missions || []).filter(m => m.status !== 'completed');
             const allMissionsCompleted = pendingMissions.length === 0;
             const missionBlockMsg = `Còn ${pendingMissions.length} nhiệm vụ chưa hoàn thành. Vui lòng xác nhận hoàn thành tất cả nhiệm vụ trước khi ${selectedTask.isApprovalRequired === true ? 'gửi yêu cầu phê duyệt' : 'hoàn thành công việc'} này.`;
 
             if (selectedTask.status === 'todo') {
-              if (isAssignee) {
+              // RÀ SOÁT 2026-09: cùng lỗi đã sửa ở nút Duyệt/Từ Chối trong file này — canReceive
+              // (canDoTaskAction 'receiveTask') đã tính sẵn nhưng nút "Nhận Việc" lại dùng thẳng
+              // isAssignee, bỏ qua mọi tùy biến riêng theo dự án cho action này.
+              if (canReceive) {
                 return (
                   <button
                     type="button"
@@ -3886,7 +3884,8 @@ export default function TaskDetailModal({
             }
 
             if (selectedTask.status === 'doing') {
-              if (isAssignee) {
+              // canComplete (canDoTaskAction 'completeTask') — cùng lỗi, trước đây dùng isAssignee.
+              if (canComplete) {
                 if (selectedTask.isApprovalRequired !== true) {
                   return (
                     <button

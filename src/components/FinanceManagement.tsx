@@ -3314,6 +3314,7 @@ export default function FinanceManagement({
   };
 
   const handleAccProdEdit = (item: AccountingProductItem) => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setAccProdFormMode('edit');
     setAccProdEditId(item.id);
     setAccProdTenSP(item.tenSanPham);
@@ -4100,6 +4101,7 @@ export default function FinanceManagement({
   const [editPayNotes, setEditPayNotes] = useState('');
 
   const openEditReceipt = (rec: Receipt) => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setEditingReceipt(rec);
     setEditRecDate(rec.date || new Date().toISOString().split('T')[0]);
     setEditRecAmount(rec.amount || 0);
@@ -4123,6 +4125,7 @@ export default function FinanceManagement({
   };
 
   const openEditPayment = (pay: Payment) => {
+    if (!canEdit) { denyToast('Sửa'); return; }
     setEditingPayment(pay);
     setEditPayDate(pay.date || new Date().toISOString().split('T')[0]);
     setEditPayAmount(pay.amount || 0);

@@ -216,6 +216,10 @@ export default function WarehouseManagement() {
   };
 
   const handleEditClick = (item: MaterialStock) => {
+    // RÀ SOÁT 2026-09: trước đây chỉ handleSaveEdit kiểm tra canEditItem — người không
+    // có quyền Sửa vẫn bấm mở được form sửa inline (thấy các ô nhập liệu), dù bấm Lưu
+    // sẽ bị chặn. Chặn ngay từ bước mở để không hiện form sửa cho người không đủ quyền.
+    if (!canEditItem) { denyToast('Sửa'); return; }
     setEditingId(item.id);
     setEditCode(item.code);
     setEditName(item.name);

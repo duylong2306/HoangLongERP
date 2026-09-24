@@ -2140,6 +2140,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Mở modal ở chế độ Sửa: đổ sẵn tên + ngày (dd/mm/yyyy -> yyyy-mm-dd cho input date),
   // luôn ép về chế độ "một ngày duy nhất" vì đang sửa đúng 1 dòng đã tồn tại.
   const handleOpenEditHoliday = (item: Holiday) => {
+    if (!hasModulePermission(currentUser?.id, 'hr_data', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Dữ Liệu Nhân Sự.', type: 'warning' });
+      return;
+    }
     setEditingHolidayId(item.id);
     setNewHolidayName(item.name);
     setHolidayInputMode('single');
@@ -2161,6 +2165,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const handleAddHoliday = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newHolidayName.trim()) return;
+    // RÀ SOÁT 2026-09: handleDeleteHoliday đã gate 'hr_data' delete, nhưng hàm này
+    // (Thêm/Sửa ngày nghỉ lễ) trước đây không kiểm tra quyền gì cả.
+    if (!hasModulePermission(currentUser?.id, 'hr_data', editingHolidayId ? 'edit' : 'create')) {
+      addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${editingHolidayId ? 'Sửa' : 'Thêm'}" ở phân hệ Dữ Liệu Nhân Sự.`, type: 'warning' });
+      return;
+    }
 
     // Chế độ Sửa: chỉ cập nhật tên + ngày của đúng dòng đang sửa.
     if (editingHolidayId) {
@@ -2611,6 +2621,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // ===================== BLOCK TÍNH LƯƠNG (payroll) =====================
   const handleCalculatePayroll = async () => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     const monthStr = `${payrollMonth}/${payrollYear}`;
 
     // Tải đúng công của KỲ LƯƠNG (payrollMonth/payrollYear) thay vì state `attendance`
@@ -2798,6 +2812,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleOpenEditPayroll = (item: any) => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     setEditingPayrollItem(item);
     setEditWorkedDays(item.workedDays);
     setEditKpiScore(item.kpiScore || 100);
@@ -2814,6 +2832,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleSaveEditPayroll = () => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     if (!editingPayrollItem) return;
     const emp = employees.find(e => e.id === editingPayrollItem.empId);
     if (!emp) return;
@@ -3894,6 +3916,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // phiếu lương (xem getPayslipDatePlace). Cho phép tải toàn bộ phiếu lương
   // (.zip) ngay sau khi khóa.
   const handleLockPayrollPeriod = async () => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
     const period = `${payrollMonth}/${payrollYear}`;
     const periodItems = payroll.filter(p => p.month === period);
     if (periodItems.length === 0) {

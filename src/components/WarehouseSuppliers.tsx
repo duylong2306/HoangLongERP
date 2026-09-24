@@ -220,6 +220,9 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
   };
 
   const handleEditClick = (sup: SupplierPartner) => {
+    // RÀ SOÁT 2026-09: chỉ hàm lưu kiểm tra canEditSup — chặn ngay từ bước mở form Sửa
+    // để không có đường vòng và không hiện form cho người không đủ quyền.
+    if (!canEditSup) { denyToast('Sửa'); return; }
     setEditingId(sup.id);
     setFormName(sup.name);
     setFormRep(sup.representative || '');

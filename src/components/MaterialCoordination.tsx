@@ -357,6 +357,24 @@ export default function MaterialCoordination({
       || hasModulePermission(uid, 'material_coordination', 'edit');
   }, [currentUser]);
 
+  // RÀ SOÁT 2026-09: canCoordinate() ở trên (create HOẶC edit) trước đây còn được dùng để
+  // gate luôn các thao tác XÓA thật sự (xóa dòng vật tư, xóa đơn hàng, xóa chứng từ trả
+  // hàng) — nghĩa là 1 nhóm chỉ có create=true, delete=false vẫn xóa được, ngược ý định
+  // admin. Tách riêng hàm này chỉ dùng cho các thao tác Xóa, xét đúng quyền "delete".
+  const canCoordinateDelete = React.useCallback((uid?: string): boolean => {
+    if (!uid) return false;
+    const legacyAllowed =
+      isRoleAdmin(uid) ||
+      isRoleAccounting(uid) ||
+      isRoleOffice(uid) ||
+      isRoleTechnical(uid) ||
+      currentUser?.username === 'admin' ||
+      getMaterialCoordinators().some(c => c.id === uid);
+    if (!legacyAllowed) return false;
+    if (isRoleAdmin(uid)) return true;
+    return hasModulePermission(uid, 'material_coordination', 'delete');
+  }, [currentUser]);
+
   const canApprove = React.useCallback((uid?: string): boolean => {
     if (!uid) return false;
     if (isRoleAdmin(uid)) return true;
@@ -366,6 +384,7 @@ export default function MaterialCoordination({
   }, [currentUser]);
 
   const isCoordinator = canCoordinate(currentUser?.id);
+  const isCoordinatorDelete = canCoordinateDelete(currentUser?.id);
   const isApprover = canApprove(currentUser?.id);
   // Người khởi tạo đề xuất cũng được thao tác nhận hàng
   const canActOnOrder = (prop: any) => {
@@ -494,10 +513,10 @@ export default function MaterialCoordination({
   // thêm 2 giai đoạn sau.
   const canDeleteProposalItem = (prop: any): boolean => {
     if (!prop) return false;
-    if (prop.status === 'find_supplier') return isCoordinator;
+    if (prop.status === 'find_supplier') return isCoordinatorDelete;
     if (prop.status === 'waiting_approval') return isApprover;
-    if (prop.status === 'waiting_order') return isCoordinator;
-    if (prop.status === 'ordered') return isCoordinator;
+    if (prop.status === 'waiting_order') return isCoordinatorDelete;
+    if (prop.status === 'ordered') return isCoordinatorDelete;
     return false;
   };
 
@@ -862,6 +881,12 @@ export default function MaterialCoordination({
   };
 
   const addQuote = async () => {
+    // RÀ SOÁT 2026-09: thêm/sửa báo giá NCC cho đề xuất (bước TÌM NHÀ CUNG CẤP) trước
+    // đây không kiểm tra quyền điều phối viên.
+    if (!canCoordinate(currentUser?.id)) {
+      showNotification('Bạn không có quyền thêm/sửa báo giá cho đề xuất vật tư.', '⛔ Không đủ quyền', 'warning');
+      return;
+    }
     const prop = proposals.find(p => p.id === quoteModal.proposalId);
     if (!prop) return;
     const items = prop.items || [];
@@ -1143,6 +1168,10 @@ export default function MaterialCoordination({
   };
 
   const deleteOrder = (order: any) => {
+    if (!isCoordinatorDelete) {
+      showNotification('Bạn không có quyền xóa đơn hàng.', '⛔ Không đủ quyền', 'warning');
+      return;
+    }
     askConfirmation(
       `Bạn có chắc chắn muốn XÓA đơn hàng ${order.id} không? Hành động này không thể hoàn tác và sẽ gỡ liên kết khỏi đề xuất.`,
       'Xác nhận xóa',
@@ -1721,6 +1750,10 @@ export default function MaterialCoordination({
   // đơn nào (appliedAmount === 0), tránh số dư đã dùng biến mất mà đơn hàng
   // liên quan không được hoàn lại tương ứng.
   const deleteSupplierReturn = (ret: any) => {
+    if (!isCoordinatorDelete) {
+      showNotification('Bạn không có quyền xóa chứng từ trả hàng.', '⛔ Không đủ quyền', 'warning');
+      return;
+    }
     if ((ret.appliedAmount || 0) > 0) {
       showNotification('Chứng từ này đã được áp dụng vào công nợ — không thể xoá trực tiếp. Vui lòng liên hệ kế toán để xử lý.', 'Không thể xoá', 'warning');
       return;
@@ -3328,7 +3361,7 @@ export default function MaterialCoordination({
       const od: any = orderDetailModal.order;
       const odCtx = resolveOrderCtx(od);
       const odHtml = buildPurchaseOrderHtml(od, odCtx);
-      const canDelete = isCoordinator && !(orderDetailModal.proposal?.status === 'received');
+      const canDelete = isCoordinatorDelete && !(orderDetailModal.proposal?.status === 'received');
       return (
         <div className="fixed inset-0 z-[9700] flex items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderDetailModal({ open: false, order: null })}>
           <div className="w-full max-w-3xl bg-white sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[94vh]" onClick={(e) => e.stopPropagation()}>

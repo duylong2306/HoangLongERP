@@ -318,6 +318,12 @@ export default function ProjectKanbanBoard({
   const canDelete = canProjectAction('deleteCard', currentUser, boardProject, undefined, matrix);
   const canMoveCard = canProjectAction('moveCard', currentUser, boardProject, undefined, matrix);
   const canAssignCardMember = canProjectAction('assignCardMember', currentUser, boardProject, undefined, matrix);
+  // RÀ SOÁT 2026-09: nút "Xóa dự án" (xóa vĩnh viễn CẢ dự án — công việc, chat, công nợ,
+  // báo giá, hợp đồng, phiếu thu/chi liên quan — xem dbService.projects.deleteCascade())
+  // trước đây chỉ kiểm tra prop onDeleteProject có tồn tại hay không (luôn true), không hề
+  // kiểm tra quyền 'deleteProject' trong ma trận Quyền Dự Án — ai mở được thẻ dự án cũng
+  // xóa được toàn bộ. ProjectManagement.tsx đã gate đúng action này (can('deleteProject')).
+  const canDeleteProject = canProjectAction('deleteProject', currentUser, boardProject, undefined, matrix);
 
   // Công việc (Task)
   const canCreateTask = canProjectAction('createTask', currentUser, boardProject, undefined, matrix);
@@ -1651,6 +1657,12 @@ export default function ProjectKanbanBoard({
   // CÁC HÀM QUẢN LÝ CỘT KANBAN (Column management)
   // ===========================================================================
   const openEditColumn = (col: KanbanColumn) => {
+    // RÀ SOÁT 2026-09: 1 trong 2 điểm gọi hàm này (menu chuột phải trên cột) không kiểm
+    // tra canEditColumn trước khi gọi — gate lại ngay trong hàm để không có đường vòng.
+    if (!canEditColumn) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa cột này.', type: 'warning' });
+      return;
+    }
     setEditingColumnId(col.id);
     setEditColName(col.name);
     setEditColColor(col.color);
@@ -3333,7 +3345,7 @@ export default function ProjectKanbanBoard({
                   Tải Dự Án
                 </button>
 
-                {onDeleteProject && (
+                {onDeleteProject && canDeleteProject && (
                   <>
                     <button
                       onClick={() => setIsConfirmingDelete(true)}
@@ -3371,6 +3383,11 @@ export default function ProjectKanbanBoard({
                             <div className="flex gap-2 mt-3">
                               <button
                                 onClick={() => {
+                                  if (!canDeleteProject) {
+                                    addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền xóa dự án này.', type: 'warning' });
+                                    setIsConfirmingDelete(false);
+                                    return;
+                                  }
                                   onDeleteProject(selectedProject.id);
                                   setSelectedProjectId(null);
                                   setIsConfirmingDelete(false);
