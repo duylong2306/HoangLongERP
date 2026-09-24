@@ -3794,9 +3794,15 @@ export default function MaterialCoordination({
                     <div className="flex items-center gap-2 pl-7">
                       <div className="flex items-center gap-1">
                         <input
-                          type="number" min={1}
+                          type="number" min={0.01} step="0.01" inputMode="decimal"
                           value={it.qty}
-                          onChange={(e) => updateQuickPropItem(idx, 'qty', Math.max(1, Number(e.target.value) || 1))}
+                          onChange={(e) => {
+                            // Cho phép nhập số lẻ kiểu Việt Nam (dấu phẩy, VD "1,5") — input
+                            // type="number" mặc định chỉ hiểu dấu chấm làm phân cách thập phân.
+                            const raw = e.target.value.replace(/,/g, '.');
+                            const num = parseFloat(raw);
+                            updateQuickPropItem(idx, 'qty', isNaN(num) ? 1 : Math.max(0.01, num));
+                          }}
                           className="w-14 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-amber-400"
                         />
                         <input
