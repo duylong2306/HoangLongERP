@@ -2,7 +2,7 @@
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
-import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
 import { useSettings } from '../context/SettingsContext';
 import VoucherPrintModal from './VoucherPrintModal';
@@ -1037,13 +1037,17 @@ export default function FinanceManagement({
   // (hasSystemAccount) — nhân viên đã nghỉ hoặc chưa cấp tài khoản thì không thể
   // vào hệ thống để duyệt, tính vào sẽ khiến fallback không bao giờ kích hoạt dù
   // thực tế không ai duyệt được.
+  // ⚠️ Trước đây cho CẢ nhóm "Kế toán" (isRoleAccounting) tính là "đủ điều kiện" bất kể có được
+  // add riêng cho ĐÚNG loại hồ sơ này (Tạm Ứng Lương/Chi Phí/Tạm Ứng Thầu Phụ...) hay không — gây
+  // hiểu lầm cả nhóm Kế toán đều thấy/duyệt được mọi loại đề xuất. Nay chỉ tính người được cấu
+  // hình riêng cho ĐÚNG documentType của đề xuất (isConfiguredApproverForProposal).
   const hasOtherEligibleApprover = useCallback((proposal: SubcontractorAdvanceProposal): boolean => {
     return (employeesProp || []).some(emp => {
       if (emp.id === proposal.creator) return false;
       if (emp.status === 'retired' || emp.hasSystemAccount === false) return false;
       if (emp.id === proposal.approver) return true;
       if (proposal.approverName && emp.name?.toLowerCase() === proposal.approverName.toLowerCase()) return true;
-      if (isRoleAccounting(emp.id)) return true;
+      if (isConfiguredApproverForProposal(emp.id, proposal)) return true;
       if (isRoleAdmin(emp.id)) return true;
       return false;
     });
@@ -1066,8 +1070,12 @@ export default function FinanceManagement({
     if (proposal.approver === currentUser.id) return true;
     if (proposal.approverName && proposal.approverName.toLowerCase() === currentUser.name.toLowerCase()) return true;
 
-    // 2. Thuộc nhóm Kế toán (role_accounting)
-    if (isRoleAccounting(currentUser.id)) return true;
+    // 2. Được cấu hình riêng trong "Quyền Phê Duyệt" cho ĐÚNG loại hồ sơ của đề xuất này
+    // (KHÔNG còn cấp quyền tràn lan cho cả nhóm "Kế toán" — trước đây isRoleAccounting(...) ở
+    // đây khiến ai cũng thuộc nhóm Kế toán đều duyệt được MỌI loại đề xuất, kể cả loại họ không
+    // được add riêng, VD: người chỉ được add "Người Điều Phối Vật Tư" nhưng lại thấy/duyệt được
+    // cả "Tạm Ứng Lương Nhanh" chỉ vì cùng thuộc phòng Kế toán).
+    if (isConfiguredApproverForProposal(currentUser.id, proposal)) return true;
     // 3. Là Giám đốc (role_admin) - có quyền duyệt tất cả
     if (isRoleAdmin(currentUser.id)) return true;
     // 4. Fallback tự duyệt: chỉ khi là người tạo VÀ không còn ai khác đủ điều kiện
@@ -1182,8 +1190,10 @@ export default function FinanceManagement({
     // 1. Là người được gán duyệt trong đề xuất (so sánh theo ID hoặc tên)
     if (proposal.approver === currentUser.id) return true;
     if (proposal.approverName && proposal.approverName.toLowerCase() === currentUser.name.toLowerCase()) return true;
-    // 2. Thuộc nhóm Kế toán (role_accounting)
-    if (isRoleAccounting(currentUser.id)) return true;
+    // 2. Được cấu hình riêng trong "Quyền Phê Duyệt" cho ĐÚNG loại hồ sơ của đề xuất này
+    // (xem giải thích chi tiết tại canApproveProposal ở trên — cùng nguyên tắc, không cấp quyền
+    // tràn lan cho cả nhóm "Kế toán" nữa).
+    if (isConfiguredApproverForProposal(currentUser.id, proposal)) return true;
     // 3. Là Giám đốc (role_admin) - có quyền từ chối tất cả
     if (isRoleAdmin(currentUser.id)) return true;
     // 4. Fallback tự xử lý: chỉ khi là người tạo VÀ không còn ai khác đủ điều kiện

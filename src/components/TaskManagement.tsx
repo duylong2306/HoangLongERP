@@ -9,7 +9,7 @@ import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
-import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 import { canDoTaskAction, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 
@@ -772,9 +772,15 @@ export default function TaskManagement({
 
   // Đề xuất TÀI CHÍNH chờ duyệt mà user hiện tại có quyền xét duyệt:
   // (a) được CHỈ ĐỊNH làm người duyệt (approver theo ID/tên, kể cả chuỗi duyệt approvals), HOẶC
-  // (b) thuộc nhóm Kế toán (role_accounting) / Giám đốc (role_admin) → xem & duyệt toàn bộ.
-  // Đồng nhất với canApproveProposal trong FinanceManagement.
-  const isFinanceApprover = isRoleAccounting(currentUser?.id) || isRoleAdmin(currentUser?.id);
+  // (b) là Giám đốc (role_admin) → xem & duyệt toàn bộ.
+  // ⚠️ RÀ SOÁT 2026-09 (lần 2): trước đây (b) còn gồm CẢ nhóm Kế toán (isRoleAccounting) — khiến
+  // BẤT KỲ ai thuộc phòng Kế toán đều thấy & duyệt được MỌI đề xuất tài chính đang chờ, kể cả loại
+  // họ KHÔNG được add riêng trong "Quyền Phê Duyệt" (VD thực tế: 1 nhân viên Kế toán chỉ được add
+  // vào "Người Điều Phối Vật Tư" lại nhìn thấy cả "Tạm Ứng Lương Nhanh" trong "Việc của tôi", dù
+  // không được add riêng cho loại đó). Bỏ isFinanceApprover dùng chung, thay bằng kiểm tra ĐÚNG
+  // loại hồ sơ của từng item (isConfiguredApproverForProposal/isConfiguredApproverForPayment) —
+  // đồng bộ với canApproveProposal đã sửa cùng nguyên tắc trong FinanceManagement.tsx.
+  const isFinanceAdmin = isRoleAdmin(currentUser?.id);
   // RÀ SOÁT 2026-09: trước đây điều kiện còn có p.proposer === currentUser?.name ||
   // p.recipient === currentUser?.name — khiến người ĐỀ XUẤT hoặc người NHẬN TIỀN của
   // chính phiếu chi đó cũng thấy nút Duyệt/Từ chối, dù họ không có thẩm quyền duyệt
@@ -783,32 +789,37 @@ export default function TaskManagement({
   // tắc "không tự duyệt" đã áp dụng ở canApproveProposal (FinanceManagement.tsx).
   const myPendingPayments = React.useMemo(() => payments.filter(p =>
     p.status === 'pending' &&
-    (isFinanceApprover ||
+    (isFinanceAdmin ||
+     isConfiguredApproverForPayment(currentUser?.id, p) ||
      p.approver === currentUser?.name ||
      (p.approver && currentUser?.name && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
      p.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  ), [payments, currentUser, isFinanceApprover]);
+  ), [payments, currentUser, isFinanceAdmin]);
   const myPendingAdvances = React.useMemo(() => subcontractorAdvances.filter(a =>
     a.status === 'pending_approval' &&
-    (isFinanceApprover ||
+    (isFinanceAdmin ||
+     isConfiguredApproverForProposal(currentUser?.id, a) ||
      a.approver === currentUser?.id ||
      (a.approverName && currentUser?.name && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
      a.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  ), [subcontractorAdvances, currentUser, isFinanceApprover]);
-  // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê
-  // Duyệt → Công Tác Phí) hoặc thuộc nhóm Kế toán → thấy & duyệt toàn bộ.
+  ), [subcontractorAdvances, currentUser, isFinanceAdmin]);
+  // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê Duyệt → Công Tác
+  // Phí). ⚠️ Bỏ fallback "thuộc nhóm Kế toán → duyệt tất cả" (isRoleAccounting) — cùng lý do rà
+  // soát ở trên, chỉ người được add riêng cho "Công Tác Phí" (hoặc admin) mới được duyệt.
   const canApproveTravelExpense = React.useMemo(() => {
     if (!currentUser?.id) return false;
+    if (isRoleAdmin(currentUser.id)) return true;
     // Bất kỳ ai trong danh sách người duyệt CTP đã cấu hình đều được duyệt (không chỉ 1 người).
-    if (getConfiguredApprovers('travel_expense').some(a => a.id === currentUser.id)) return true;
-    return isRoleAccounting(currentUser.id);
+    return getConfiguredApprovers('travel_expense').some(a => a.id === currentUser.id);
   }, [currentUser]);
   const myPendingTravelExpenses = React.useMemo(() => travelExpenses.filter((t: any) =>
     t.status === 'pending' && canApproveTravelExpense
   ), [travelExpenses, canApproveTravelExpense]);
   // ĐỀ XUẤT THU CHI chờ LẬP PHIẾU (KT) — status 'pending_payment' = "Chờ Lập Phiếu (KT)".
-  // Hiển thị những đề xuất mà user hiện tại được CHỈ ĐỊNH lập phiếu (creator = "Người Lập Phiếu"),
-  // hoặc thuộc phòng Kế toán (vì mặc định người lập phiếu là "Kế Toán").
+  // Đây là bước "Kế toán lập phiếu chi", KHÔNG phải bước xét duyệt — vẫn giữ cho CẢ phòng Kế toán
+  // thấy (isRoleAccounting), vì mặc định người lập phiếu là "Kế Toán" nói chung, không gắn với
+  // 1 loại hồ sơ "Quyền Phê Duyệt" cụ thể như bước duyệt ở trên.
+  const isFinanceApprover = isRoleAccounting(currentUser?.id) || isRoleAdmin(currentUser?.id);
   const myPendingVouchers = React.useMemo(() => subcontractorAdvances.filter(a =>
     a.status === 'pending_payment' &&
     (isFinanceApprover ||

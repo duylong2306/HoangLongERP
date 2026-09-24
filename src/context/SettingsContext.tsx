@@ -585,6 +585,51 @@ export function getConfiguredSettler(documentType: ApprovalPermission['documentT
 }
 
 /**
+ * Suy ra ĐÚNG loại hồ sơ (documentType trong Quyền Phê Duyệt) mà 1 SubcontractorAdvanceProposal
+ * thuộc về, dựa trên field `type` của đề xuất.
+ *
+ * LƯU Ý QUAN TRỌNG: luồng "Ứng Lương Nhanh" (DashboardOverview.tsx handleAdvanceSubmit) gán nhầm
+ * `type: 'project_expense_proposal'` cho đề xuất ứng lương (thay vì 'salary_advance') — vì vậy
+ * KHÔNG thể chỉ dựa vào `type` để nhận diện, phải kèm theo kiểm tra taskName bắt đầu bằng
+ * "Ứng lương" (cùng quy ước đã dùng ở handleCreateVoucherFromProposal trong FinanceManagement.tsx).
+ */
+export function getProposalApprovalDocType(proposal: { type?: string; taskName?: string }): ApprovalPermission['documentType'] {
+  const isSalaryAdvance = proposal.type === 'salary_advance' || !!proposal.taskName?.startsWith('Ứng lương');
+  if (isSalaryAdvance) return 'salary_advance';
+  if (proposal.type === 'subcontractor_advance') return 'finance_advance_proposal';
+  // project_expense_proposal / supplier_payment_proposal / cash_fund_deposit / other_expense_proposal
+  return 'finance_expense_proposal';
+}
+
+/**
+ * Kiểm tra currentUser có nằm trong danh sách người được cấu hình xét duyệt (Quyền Phê Duyệt)
+ * cho ĐÚNG loại hồ sơ của đề xuất này không — dùng để thay cho việc cấp quyền duyệt tràn lan
+ * cho CẢ nhóm "Kế toán" (isRoleAccounting) bất kể họ có được add riêng cho loại đó hay không.
+ */
+export function isConfiguredApproverForProposal(empId: string | undefined, proposal: { type?: string; taskName?: string }): boolean {
+  if (!empId) return false;
+  const docType = getProposalApprovalDocType(proposal);
+  return getConfiguredApprovers(docType).some(a => a.id === empId);
+}
+
+/**
+ * Tương tự getProposalApprovalDocType() nhưng cho Payment (phiếu chi) — field `category` của
+ * Payment không bị gán nhầm như `type` của SubcontractorAdvanceProposal nên map trực tiếp.
+ */
+export function getPaymentApprovalDocType(payment: { category?: string }): ApprovalPermission['documentType'] {
+  if (payment.category === 'salary_advance') return 'salary_advance';
+  if (payment.category === 'subcontractor_advance') return 'finance_advance_proposal';
+  return 'finance_expense_proposal';
+}
+
+/** Tương tự isConfiguredApproverForProposal() nhưng cho Payment (phiếu chi). */
+export function isConfiguredApproverForPayment(empId: string | undefined, payment: { category?: string }): boolean {
+  if (!empId) return false;
+  const docType = getPaymentApprovalDocType(payment);
+  return getConfiguredApprovers(docType).some(a => a.id === empId);
+}
+
+/**
  * Lấy người điều phối vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_coordinator')
  */
 export function getMaterialCoordinator(): ConfiguredApprover | null {
