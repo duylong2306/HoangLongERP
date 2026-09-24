@@ -348,7 +348,13 @@ export default function MaterialCoordination({
     if (!legacyAllowed) return false;
     // Admin (role_admin/role_superadmin/"Loại nhóm" = admin) luôn full quyền, không cần xét thêm.
     if (isRoleAdmin(uid)) return true;
-    return hasModulePermission(uid, 'material_coordination', 'edit');
+    // SỬA 2026-09: bản đầu chỉ xét quyền "Sửa" (edit) — chặn nhầm những nhóm được admin cấp
+    // "Thêm" (create=true) nhưng chưa cấp "Sửa" (edit=false), VD nhóm "Tổ trưởng - Tổ phó"
+    // (NV011 Hồ Văn Tặng không tạo được Đề Xuất Nhanh dù nhóm có create=true). canCoordinate
+    // là 1 cờ dùng chung cho nhiều thao tác điều phối (tạo/sửa đề xuất, chuyển bước Kanban...),
+    // nên chỉ cần có MỘT trong hai quyền Thêm/Sửa là đã được coi là "người điều phối".
+    return hasModulePermission(uid, 'material_coordination', 'create')
+      || hasModulePermission(uid, 'material_coordination', 'edit');
   }, [currentUser]);
 
   const canApprove = React.useCallback((uid?: string): boolean => {
