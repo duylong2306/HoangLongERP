@@ -11,6 +11,7 @@ import { dbService } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
+import { canDoTaskAction, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 
 interface TaskManagementProps {
   tasks: Task[];
@@ -725,6 +726,11 @@ export default function TaskManagement({
   // để tránh .find() lồng bên trong .flatMap()/.map() (O(N×M) cũ).
   const projectsById = React.useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
   const customersById = React.useMemo(() => new Map((customers || []).map(c => [c.id, c])), [customers]);
+  // RÀ SOÁT 2026-09: danh sách "Việc của tôi" bên dưới dùng isAssignee/isAssigner cục bộ
+  // (không xét director/PM/tùy biến riêng dự án), khác với ma trận canDoTaskAction đã dùng
+  // đúng ở TaskDetailModal.tsx — cùng 1 người có thể thấy 2 kết quả khác nhau giữa danh sách
+  // và modal chi tiết. Nạp ma trận 1 lần, dùng canDoTaskAction cho từng dòng công việc.
+  const taskMatrix = React.useMemo(() => loadTaskPermissionMatrix(), []);
 
   // NHIỆM VỤ LIÊN QUAN: liệt kê các Nhiệm vụ (mission trong Công việc) mà user được gán
   // với vai trò Phụ trách chính (mainAssigneeId) hoặc Nhân sự tham gia (memberIds)
@@ -1911,13 +1917,13 @@ export default function TaskManagement({
                             </button>
 
                             {(() => {
-                              const isAssignee = currentUser?.id === t.assigneeId || currentUser?.name === t.assigneeId;
-                              const isAssigner = currentUser?.id === t.assignerId || 
-                                                 currentUser?.name === t.assignerId ||
-                                                 t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name);
+                              const tProject = t.projectId ? projectsById.get(t.projectId) : undefined;
+                              const canReceiveRow = canDoTaskAction(currentUser, t, tProject, 'receiveTask', taskMatrix);
+                              const canApproveRow = canDoTaskAction(currentUser, t, tProject, 'approveResult', taskMatrix);
+                              const canRejectRow = canDoTaskAction(currentUser, t, tProject, 'rejectResult', taskMatrix);
 
                               if (t.status === 'todo') {
-                                if (isAssignee) {
+                                if (canReceiveRow) {
                                   return (
                                     <button
                                       type="button"
@@ -1960,9 +1966,10 @@ export default function TaskManagement({
                               }
 
                               if (t.status === 'reviewing') {
-                                if (isAssigner) {
+                                if (canApproveRow || canRejectRow) {
                                   return (
                                     <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
+                                      {canRejectRow && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -1984,6 +1991,8 @@ export default function TaskManagement({
                                       >
                                         Từ Chối
                                       </button>
+                                      )}
+                                      {canApproveRow && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -2005,6 +2014,7 @@ export default function TaskManagement({
                                       >
                                         Xét Duyệt
                                       </button>
+                                      )}
                                     </div>
                                   );
                                 } else {

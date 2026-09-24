@@ -2174,6 +2174,17 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                       <button
                         type="button"
                         onClick={async () => {
+                          // RÀ SOÁT 2026-09: ctContract/ctAcceptance/ctLiquidation/ctManageDocs (canProjectAction)
+                          // được tính sẵn nhưng chưa từng gate hành động ký/lưu hồ sơ này — hồ sơ được duyệt
+                          // thẳng (status:'approved') và có thể đổi cả trạng thái/tiến độ dự án mà không kiểm
+                          // tra quyền gì.
+                          const canSignThisDoc = activeConnectedTool === 'contract' ? ctContract
+                            : activeConnectedTool === 'acceptance' ? ctAcceptance
+                            : ctLiquidation;
+                          if (!canSignThisDoc || !ctManageDocs) {
+                            addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền ký/lưu hồ sơ này.', type: 'error' });
+                            return;
+                          }
                           // Sign approval actions
                           const dName = activeConnectedTool === 'contract' ? `Hợp đồng thi công ${ctDocSector === 'furniture' ? 'mọc nội thất' : ctDocSector === 'construction' ? 'xây dựng thô' : 'cơ khí'} tùy biến` :
                                         activeConnectedTool === 'acceptance' ? `Biên bản nghiệm thu khối lượng hoàn thành ${ctDocAcceptRate}%` :
@@ -2349,6 +2360,12 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
               type="button"
               onClick={async () => {
                 try {
+                  // RÀ SOÁT 2026-09: ctMaterial (canProjectAction 'openToolMaterial') được tính
+                  // sẵn nhưng chưa từng gate hành động gửi đề xuất vật tư này.
+                  if (!ctMaterial) {
+                    addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền gửi đề xuất vật tư từ công cụ này.', type: 'error' });
+                    return;
+                  }
                   if (!selectedProject) {
                     if (setConfirmDialog) {
                       setConfirmDialog({
