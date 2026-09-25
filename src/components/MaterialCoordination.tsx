@@ -157,6 +157,14 @@ export default function MaterialCoordination({
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<string | null>(null);
   const [receiveModal, setReceiveModal] = useState<{ open: boolean; order: any | null; proposal: any | null }>({ open: false, order: null, proposal: null });
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({});
+  // Chặn double-submit "Tạo đơn hàng" / "Nhận hàng" — bấm nhanh 2 lần (hoặc 2 người cùng bấm gần
+  // như đồng thời) trước khi state proposals/purchaseOrders kịp đồng bộ lại từ server sẽ khiến
+  // hàm chạy 2 lần trên cùng dữ liệu CŨ: sinh ĐÔI đơn mua hàng cho cùng 1 đề xuất, và với vật tư
+  // "Xuất từ Kho có sẵn" / nhận hàng nhập kho thì bị TRỪ/CỘNG tồn kho 2 LẦN cho cùng 1 số lượng
+  // thực tế — đúng lỗi thực tế đã gặp (tồn kho ghi nhận sai do trùng đơn hàng). Cùng nguyên tắc
+  // isSubmittingPayment đã áp dụng ở FinanceManagement.tsx (xem PC-2026-274/PC-2026-927).
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [isReceivingOrder, setIsReceivingOrder] = useState(false);
   // Trả hàng NCC: chứng từ ĐỘC LẬP với PO gốc (không sửa receivedQty/items của
   // PO — giữ nguyên lịch sử đã nhận). Chỉ áp dụng cho đơn đã nhận đủ.
   const [supplierReturns, setSupplierReturns] = useState<any[]>([]);
@@ -1405,6 +1413,11 @@ export default function MaterialCoordination({
   };
 
   const createOrders = async (prop: any) => {
+    // Chặn double-submit (xem giải thích isCreatingOrder ở khai báo state) — chốt NGAY khi bấm,
+    // trước bất kỳ await nào, nên không phụ thuộc vào prop/purchaseOrderIds (có thể đang stale).
+    if (isCreatingOrder) return;
+    setIsCreatingOrder(true);
+    try {
     const items = prop.items || [];
     if (!items.some((it: any) => it.supplierId || itemSupplierDraft[it.id])) {
       showNotification('Chưa gán nhà cung cấp hoặc chọn "Xuất từ Kho có sẵn" cho sản phẩm nào.', 'Thiếu nguồn vật tư', 'warning');
@@ -1568,6 +1581,9 @@ export default function MaterialCoordination({
     const summary = summaryParts.join(', ') || 'không có thay đổi';
     await sendProjectChat(prop, `🛒 ĐÃ XỬ LÝ ĐỀ XUẤT ${prop.code}: ${summary}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười điều phối: ${coordinator}\n→ ${allWarehouseOnly ? 'Đã nhận hàng (xuất kho).' : 'Chờ Đặt hàng.'}`);
     showNotification(`Đã xử lý đề xuất: ${summary}.`, 'Xử lý đề xuất vật tư', 'success');
+    } finally {
+      setIsCreatingOrder(false);
+    }
   };
 
   const markOrdered = async (prop: any) => {
@@ -1608,6 +1624,10 @@ export default function MaterialCoordination({
   };
 
   const handleReceiveOrder = async () => {
+    // Chặn double-submit (xem giải thích isReceivingOrder ở khai báo state).
+    if (isReceivingOrder) return;
+    setIsReceivingOrder(true);
+    try {
     const { order, proposal } = receiveModal;
     if (!order || !proposal) return;
     const updatedItems = (order.items || []).map((item: any) => {
@@ -1674,6 +1694,9 @@ export default function MaterialCoordination({
     setReceiveQuantities({});
     window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
     window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
+    } finally {
+      setIsReceivingOrder(false);
+    }
   };
 
   // Mở modal Trả Hàng NCC — chỉ cho đơn ĐÃ NHẬN ĐỦ. Mặc định số lượng trả = 0
@@ -2711,10 +2734,10 @@ export default function MaterialCoordination({
                           <button
                             type="button"
                             onClick={() => createOrders(prop)}
-                            disabled={hasStockViolation}
+                            disabled={hasStockViolation || isCreatingOrder}
                             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[12px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                           >
-                            <FileText className="w-4 h-4" /> Tạo đơn hàng / Xuất kho
+                            <FileText className="w-4 h-4" /> {isCreatingOrder ? 'Đang xử lý...' : 'Tạo đơn hàng / Xuất kho'}
                           </button>
                         </>
                       ) : (
@@ -3588,10 +3611,10 @@ export default function MaterialCoordination({
                 <button
                   type="button"
                   onClick={handleReceiveOrder}
-                  disabled={Object.values(receiveQuantities).every((v) => (v as number) === 0)}
-                  className={`px-5 py-2 ${Object.values(receiveQuantities).every((v) => (v as number) === 0) ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black rounded-lg flex items-center gap-1.5 transition-all`}
+                  disabled={isReceivingOrder || Object.values(receiveQuantities).every((v) => (v as number) === 0)}
+                  className={`px-5 py-2 ${isReceivingOrder || Object.values(receiveQuantities).every((v) => (v as number) === 0) ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black rounded-lg flex items-center gap-1.5 transition-all`}
                 >
-                  <PackageCheck className="w-4 h-4" /> Nhận hàng
+                  <PackageCheck className="w-4 h-4" /> {isReceivingOrder ? 'Đang xử lý...' : 'Nhận hàng'}
                 </button>
               </div>
             </div>
