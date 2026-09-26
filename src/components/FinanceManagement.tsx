@@ -2012,6 +2012,20 @@ export default function FinanceManagement({
     }
   };
 
+  // Trả Hàng NCC: tự quản lý riêng (chưa có prop từ App.tsx) — chứng từ độc lập, tạo ra
+  // khoản "NCC Nợ (trả hàng)" dùng để trừ vào công nợ ở tab Công Nợ Trả (xem
+  // MaterialCoordination.tsx openReturnModal/handleReturnOrder).
+  // ⚠️ Khai báo SỚM (trước groupedLiabilities bên dưới thay vì chỗ cũ ~ dòng 2955) vì
+  // groupedLiabilities cần đọc supplierReturns[].applications để tính đúng "Đã Trả" khi có
+  // cấn trừ nợ (applySupplierCredit) — xem comment tại groupedLiabilities.
+  const [supplierReturns, setSupplierReturns] = useState<any[]>([]);
+  useEffect(() => {
+    const load = () => dbService.supplierReturns.list().then(setSupplierReturns).catch(() => {});
+    load();
+    window.addEventListener('hl-supplier-returns-updated', load);
+    return () => window.removeEventListener('hl-supplier-returns-updated', load);
+  }, []);
+
   // Tổng tongTien từ các PO đã ghi nhận vào 1 liability NCC (Phát Sinh tự động).
   const getRecordedPOSum = (liab: Liability): number => {
     if (!liab.recordedPurchaseOrderIds?.length) return liab.value || 0;
@@ -2694,12 +2708,27 @@ export default function FinanceManagement({
       const openingDebt = g.items.reduce((s: number, l: any) => s + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
       const value = g.items.reduce((s: number, l: any) => s + (l.value || 0), 0);
       const tongGiaTri = g.items.reduce((s: number, l: any) => s + (l.tongGiaTri || 0), 0);
-      const paid = g.rawItems.reduce((s: number, l: any) => s + (l.paid || 0), 0);
+      // ⚠️ FIX: "Đã Trả" gộp nhóm trước đây CHỈ tính theo phiếu chi (Payment) khớp tên NCC —
+      // không thấy được khoản đã "Cấn trừ nợ" bằng NCC Nợ (trả hàng, applySupplierCredit/
+      // netOwnReturnOnRecord ở trên), vì 2 hàm đó chỉ sửa thẳng thanhToanThucTe của PO, không
+      // tạo phiếu chi nào. Hậu quả: dòng CHI TIẾT theo từng đơn (đọc thanhToanThucTe trực
+      // tiếp) hiện đúng "Còn lại = 0" sau khi cấn trừ, nhưng dòng TỔNG HỢP theo NCC vẫn treo
+      // y nguyên như chưa xử lý gì — đúng lỗi thực tế đã gặp. Cộng thêm phần đã cấn trừ,
+      // lấy từ chính ledger supplierReturns[].applications (nguồn ghi nhận có sẵn, không cần
+      // tạo thêm phiếu chi giả) — chỉ cộng đúng phần ứng với các PO thuộc nhóm NCC này, tránh
+      // đếm trùng với phiếu chi thật (nếu có) đã tính ở rawItems bên dưới.
+      const poIdSet = new Set<string>();
+      g.rawItems.forEach((l: any) => (l.recordedPurchaseOrderIds || []).forEach((id: string) => poIdSet.add(id)));
+      const creditApplied = poIdSet.size === 0 ? 0 : supplierReturns.reduce((sum: number, r: any) => {
+        const apps = (r.applications || []).filter((a: any) => poIdSet.has(a.purchaseOrderId));
+        return sum + apps.reduce((s: number, a: any) => s + (a.amount || 0), 0);
+      }, 0);
+      const paid = g.rawItems.reduce((s: number, l: any) => s + (l.paid || 0), 0) + creditApplied;
       const remaining = tongGiaTri - paid;
       const notes = g.items.length === 1 ? g.items[0].notes : `${g.items.length} khoản nợ`;
       return { ...g, openingDebt, value, tongGiaTri, paid, remaining, notes };
     }).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
-  }, [mergedLiabilities, purchaseOrders, liabilityFilters.category, liabilityFilters.fromDate, liabilityFilters.toDate]);
+  }, [mergedLiabilities, purchaseOrders, supplierReturns, liabilityFilters.category, liabilityFilters.fromDate, liabilityFilters.toDate]);
 
   const filteredLiabilities = useMemo(() => {
     const kw = (searchTerm || '').toLowerCase().trim();
@@ -2948,17 +2977,6 @@ export default function FinanceManagement({
   useEffect(() => {
     setPurchaseOrders(purchaseOrdersProp);
   }, [purchaseOrdersProp]);
-
-  // ── Trả Hàng NCC: tự quản lý riêng (chưa có prop từ App.tsx) — chứng từ
-  // độc lập, tạo ra khoản "NCC Nợ (trả hàng)" dùng để trừ vào công nợ ở tab
-  // Công Nợ Trả (xem MaterialCoordination.tsx openReturnModal/handleReturnOrder). ──
-  const [supplierReturns, setSupplierReturns] = useState<any[]>([]);
-  useEffect(() => {
-    const load = () => dbService.supplierReturns.list().then(setSupplierReturns).catch(() => {});
-    load();
-    window.addEventListener('hl-supplier-returns-updated', load);
-    return () => window.removeEventListener('hl-supplier-returns-updated', load);
-  }, []);
 
   // Khoản NCC Nợ (trả hàng) hiện có của 1 NCC — tính động từ ledger (KHÔNG lưu field riêng),
   // đúng pattern cashFundBalance đã dùng cho Quỹ Tiền Mặt trong file này.
