@@ -6,16 +6,18 @@
 // v2: thêm SPA navigation fallback (sửa lỗi 404 khi bấm thông báo đẩy).
 // v3: bỏ SW can thiệp request Supabase/API — để supabase-js tự retry (trước đây
 //     networkFirst làm tải chậm + trả 503 Offline giả che mất lỗi thật).
-const CACHE_NAME = 'hl-erp-v3';
-const CACHE_STATIC = 'hl-erp-static-v3';
-const CACHE_DYNAMIC = 'hl-erp-dynamic-v3';
+// v4: đổi bộ nhận diện sang LoLo (icon PNG mới thay icon.svg cũ) — bump version
+//     để buộc client xóa cache tĩnh cũ còn giữ icon.svg.
+const CACHE_NAME = 'hl-erp-v4';
+const CACHE_STATIC = 'hl-erp-static-v4';
+const CACHE_DYNAMIC = 'hl-erp-dynamic-v4';
 
 // Assets to cache immediately on install (App Shell)
 // Chỉ include các file chắc chắn tồn tại, tránh lỗi addAll
 const STATIC_ASSETS = [
   '/',
   '/manifest.webmanifest',
-  '/icon.svg',
+  '/lolo-icon-512.png',
 ];
 
 // Install event - cache static assets (fault-tolerant)
@@ -235,14 +237,14 @@ self.addEventListener('push', (event) => {
   const data = event.data.json();
   const options = {
     body: data.body || '',
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: '/lolo-icon-512.png',
+    badge: '/lolo-icon-192.png',
     data: data.data || {},
     actions: data.actions || [],
     tag: data.tag || 'hl-erp-notification',
     requireInteraction: true,
   };
-  event.waitUntil(self.registration.showNotification(data.title || 'Hoàng Long ERP', options));
+  event.waitUntil(self.registration.showNotification(data.title || 'LoLo', options));
 });
 
 // Chuẩn hoá URL deep link về '/?taskId=...' (luôn ở đường dẫn gốc, tránh 404

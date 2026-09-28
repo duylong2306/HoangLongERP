@@ -97,21 +97,24 @@ export default function Login({
     setError(null);
   };
 
-  const accentTextClass = 
+  const accentTextClass =
+    primaryAccent === 'blue' ? 'text-blue-400' :
     primaryAccent === 'emerald' ? 'text-emerald-400' :
     primaryAccent === 'sky' ? 'text-sky-400' :
     primaryAccent === 'indigo' ? 'text-indigo-400' :
     primaryAccent === 'amber' ? 'text-amber-400' :
     primaryAccent === 'rose' ? 'text-rose-400' : 'text-violet-400';
 
-  const accentBgClass = 
+  const accentBgClass =
+    primaryAccent === 'blue' ? 'bg-blue-600 text-white' :
     primaryAccent === 'emerald' ? 'bg-emerald-500 text-slate-950' :
     primaryAccent === 'sky' ? 'bg-sky-500 text-slate-950' :
     primaryAccent === 'indigo' ? 'bg-indigo-500 text-white' :
     primaryAccent === 'amber' ? 'bg-amber-500 text-slate-950' :
     primaryAccent === 'rose' ? 'bg-rose-500 text-white' : 'bg-violet-500 text-white';
 
-  const accentBorderClass = 
+  const accentBorderClass =
+    primaryAccent === 'blue' ? 'focus:border-blue-500' :
     primaryAccent === 'emerald' ? 'focus:border-emerald-500' :
     primaryAccent === 'sky' ? 'focus:border-sky-500' :
     primaryAccent === 'indigo' ? 'focus:border-indigo-500' :
@@ -122,8 +125,8 @@ export default function Login({
     <div className="min-h-screen w-screen bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-y-auto select-none font-sans text-slate-200">
       
       {/* Decorative Background Elements */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/5 rounded-full blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-700/5 rounded-full blur-[100px] pointer-events-none" />
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -134,9 +137,7 @@ export default function Login({
       >
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center space-y-3 mb-6">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg font-black text-xl italic font-mono ${accentBgClass}`}>
-            {logoText}
-          </div>
+          <img src="/lolo-icon-192.png" alt={brandName} className="w-14 h-14 rounded-xl shadow-lg" />
           <div>
             <h1 className="font-black text-lg tracking-wider uppercase text-white">
               Hệ Thống Doanh Nghiệp {brandName}
@@ -254,7 +255,7 @@ export default function Login({
 
       {/* Footer Branding */}
       <div className="mt-6 text-center text-[10px] text-slate-500 tracking-wider select-none font-mono">
-        © 2026 {brandName} Lâm Đồng ERP. Toàn bộ thông tin được bảo mật nội bộ.
+        © 2026 {brandName}. {brandSlogan}. Toàn bộ thông tin được bảo mật nội bộ.
       </div>
     </div>
   );

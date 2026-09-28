@@ -11,10 +11,10 @@ export interface DisplaySettingsConfig {
 }
 
 const DEFAULT_DISPLAY_SETTINGS: DisplaySettingsConfig = {
-  primaryAccent: 'emerald',
-  logoText: 'HL',
-  brandName: 'Hoàng Long',
-  brandSlogan: 'Lâm Đồng ERP',
+  primaryAccent: 'blue',
+  logoText: 'Lo',
+  brandName: 'LoLo',
+  brandSlogan: 'Công nghệ tạo giá trị – Quản trị nâng tầm',
   dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
   motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
   fontFamily: 'Inter',

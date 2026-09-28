@@ -25,12 +25,12 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: body || '',
-    icon: icon || '/logo192.png',
+    icon: icon || '/lolo-icon-192.png',
     image: image || '',
     data: notificationData,
     tag: notificationData.tag || 'web-push-notification',
     requireInteraction: true,
-    badge: '/badge-72x72.png',
+    badge: '/lolo-badge-72.png',
     vibrate: [200, 100, 200],
     timestamp: Date.now(),
   };

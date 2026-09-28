@@ -6,7 +6,7 @@ import type { HrmRoleGroup, HrmApprovalConfig, HrmApprovalConfig as ApprovalPerm
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DisplaySettings {
-  primaryAccent: 'emerald' | 'sky' | 'indigo' | 'amber' | 'rose' | 'violet';
+  primaryAccent: 'blue' | 'emerald' | 'sky' | 'indigo' | 'amber' | 'rose' | 'violet';
   logoText: string;
   brandName: string;
   brandSlogan: string;
@@ -54,10 +54,10 @@ export interface HrmConfig {
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
-  primaryAccent: 'emerald',
-  logoText: 'HL',
-  brandName: 'Hoàng Long',
-  brandSlogan: 'Lâm Đồng ERP',
+  primaryAccent: 'blue',
+  logoText: 'Lo',
+  brandName: 'LoLo',
+  brandSlogan: 'Công nghệ tạo giá trị – Quản trị nâng tầm',
   dashboardTitle: 'Tổng Quan',
   motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
   fontFamily: 'Inter',
@@ -155,6 +155,7 @@ export function getEmployeePermissionGroupName(emp: any, hrmRoles?: any[]): stri
 
 export function getAccentClasses(accent: string) {
   const textClass =
+    accent === 'blue' ? 'text-blue-400' :
     accent === 'emerald' ? 'text-emerald-400' :
     accent === 'sky' ? 'text-sky-400' :
     accent === 'indigo' ? 'text-indigo-400' :
@@ -162,6 +163,7 @@ export function getAccentClasses(accent: string) {
     accent === 'rose' ? 'text-rose-400' : 'text-violet-400';
 
   const bgClass =
+    accent === 'blue' ? 'bg-blue-600 text-white font-black' :
     accent === 'emerald' ? 'bg-emerald-500 text-slate-950 font-black' :
     accent === 'sky' ? 'bg-sky-500 text-slate-100 font-black' :
     accent === 'indigo' ? 'bg-indigo-500 text-white font-black' :
@@ -169,6 +171,7 @@ export function getAccentClasses(accent: string) {
     accent === 'rose' ? 'bg-rose-500 text-white font-black' : 'bg-violet-500 text-white font-black';
 
   const borderClass =
+    accent === 'blue' ? 'border-blue-500/20' :
     accent === 'emerald' ? 'border-emerald-500/20' :
     accent === 'sky' ? 'border-sky-500/20' :
     accent === 'indigo' ? 'border-indigo-500/20' :
@@ -176,6 +179,7 @@ export function getAccentClasses(accent: string) {
     accent === 'rose' ? 'border-rose-500/20' : 'border-violet-500/20';
 
   const sidebarActiveClass =
+    accent === 'blue' ? 'bg-slate-800 text-blue-400 border-blue-500/20 font-bold' :
     accent === 'emerald' ? 'bg-slate-800 text-emerald-400 border-emerald-500/20 font-bold' :
     accent === 'sky' ? 'bg-slate-800 text-sky-400 border-sky-500/20 font-bold' :
     accent === 'indigo' ? 'bg-slate-800 text-indigo-400 border-indigo-500/20 font-bold' :

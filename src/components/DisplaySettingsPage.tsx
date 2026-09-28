@@ -15,10 +15,10 @@ interface DisplaySettingsConfig {
 
 // Giá trị mặc định cho DisplaySettings
 const DEFAULT_DISPLAY_SETTINGS: DisplaySettingsConfig = {
-  primaryAccent: 'emerald',
-  logoText: 'HL',
-  brandName: 'Hoàng Long',
-  brandSlogan: 'Lâm Đồng ERP',
+  primaryAccent: 'blue',
+  logoText: 'Lo',
+  brandName: 'LoLo',
+  brandSlogan: 'Công nghệ tạo giá trị – Quản trị nâng tầm',
   dashboardTitle: 'Hệ Thống Chỉ Số Doanh Nghiệp',
   motivationQuote: '"May mắn đứng về phía người dám đương đầu."',
   fontFamily: 'Inter',
@@ -108,6 +108,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
 
   // Helper cho Màu chủ đạo hiển thị động
   const accentTextClass =
+    displaySettings.primaryAccent === 'blue' ? 'text-blue-400' :
     displaySettings.primaryAccent === 'emerald' ? 'text-emerald-400' :
     displaySettings.primaryAccent === 'sky' ? 'text-sky-400' :
     displaySettings.primaryAccent === 'indigo' ? 'text-indigo-400' :
@@ -115,6 +116,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
     displaySettings.primaryAccent === 'rose' ? 'text-rose-400' : 'text-violet-400';
 
   const accentBorderClass =
+    displaySettings.primaryAccent === 'blue' ? 'border-blue-500' :
     displaySettings.primaryAccent === 'emerald' ? 'border-emerald-500' :
     displaySettings.primaryAccent === 'sky' ? 'border-sky-500' :
     displaySettings.primaryAccent === 'indigo' ? 'border-indigo-500' :
@@ -122,6 +124,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
     displaySettings.primaryAccent === 'rose' ? 'border-rose-500' : 'border-violet-500';
 
   const accentBgClass =
+    displaySettings.primaryAccent === 'blue' ? 'bg-blue-600' :
     displaySettings.primaryAccent === 'emerald' ? 'bg-emerald-500' :
     displaySettings.primaryAccent === 'sky' ? 'bg-sky-500' :
     displaySettings.primaryAccent === 'indigo' ? 'bg-indigo-500' :
@@ -129,6 +132,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
     displaySettings.primaryAccent === 'rose' ? 'bg-rose-500' : 'bg-violet-500';
 
   const accentBgLightClass =
+    displaySettings.primaryAccent === 'blue' ? 'bg-blue-500/10' :
     displaySettings.primaryAccent === 'emerald' ? 'bg-emerald-500/10' :
     displaySettings.primaryAccent === 'sky' ? 'bg-sky-500/10' :
     displaySettings.primaryAccent === 'indigo' ? 'bg-indigo-500/10' :
@@ -165,6 +169,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
               </div>
               <div className="grid grid-cols-3 gap-2.5">
                 {[
+                  { key: 'blue', label: 'Blue', desc: 'LoLo', color: '#155ee0' },
                   { key: 'emerald', label: 'Emerald', desc: 'Lâm Đồng', color: '#10b981' },
                   { key: 'sky', label: 'Sky', desc: 'Mây Đà Lạt', color: '#0ea5e9' },
                   { key: 'indigo', label: 'Marine', desc: 'Xanh thẳm', color: '#6366f1' },
@@ -258,11 +263,11 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
                 {/* Sidebar header */}
                 <div className={`p-3.5 ${accentBgLightClass} border-b border-slate-800/50 flex items-center gap-2.5`}>
                   <div className={`w-8 h-8 rounded-lg ${accentBgClass} flex items-center justify-center text-[10px] font-black text-white shadow`}>
-                    {displaySettings.logoText || 'HL'}
+                    {displaySettings.logoText || 'Lo'}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[10.5px] font-bold text-white truncate">{displaySettings.brandName || 'Hoàng Long'}</div>
-                    <div className={`text-[8px] ${accentTextClass} truncate`}>{displaySettings.brandSlogan || 'Lâm Đồng ERP'}</div>
+                    <div className="text-[10.5px] font-bold text-white truncate">{displaySettings.brandName || 'LoLo'}</div>
+                    <div className={`text-[8px] ${accentTextClass} truncate`}>{displaySettings.brandSlogan || 'Công nghệ tạo giá trị – Quản trị nâng tầm'}</div>
                   </div>
                 </div>
 

@@ -514,28 +514,32 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   });
 
   // Helper cho Màu chủ đạo hiển thị động
-  const accentTextClass = 
+  const accentTextClass =
+    displaySettings.primaryAccent === 'blue' ? 'text-blue-400' :
     displaySettings.primaryAccent === 'emerald' ? 'text-emerald-400' :
     displaySettings.primaryAccent === 'sky' ? 'text-sky-400' :
     displaySettings.primaryAccent === 'indigo' ? 'text-indigo-400' :
     displaySettings.primaryAccent === 'amber' ? 'text-amber-400' :
     displaySettings.primaryAccent === 'rose' ? 'text-rose-400' : 'text-violet-400';
 
-  const accentBgClass = 
+  const accentBgClass =
+    displaySettings.primaryAccent === 'blue' ? 'bg-blue-600 text-white font-black' :
     displaySettings.primaryAccent === 'emerald' ? 'bg-emerald-500 text-slate-950 font-black' :
     displaySettings.primaryAccent === 'sky' ? 'bg-sky-500 text-slate-100 font-black' :
     displaySettings.primaryAccent === 'indigo' ? 'bg-indigo-500 text-white font-black' :
     displaySettings.primaryAccent === 'amber' ? 'bg-amber-500 text-slate-950 font-black' :
     displaySettings.primaryAccent === 'rose' ? 'bg-rose-500 text-white font-black' : 'bg-violet-500 text-white font-black';
 
-  const accentBorderClass = 
+  const accentBorderClass =
+    displaySettings.primaryAccent === 'blue' ? 'border-blue-500/20' :
     displaySettings.primaryAccent === 'emerald' ? 'border-emerald-500/20' :
     displaySettings.primaryAccent === 'sky' ? 'border-sky-500/20' :
     displaySettings.primaryAccent === 'indigo' ? 'border-indigo-500/20' :
     displaySettings.primaryAccent === 'amber' ? 'border-amber-500/20' :
     displaySettings.primaryAccent === 'rose' ? 'border-rose-500/20' : 'border-violet-500/20';
 
-  const sidebarActiveTabClass = 
+  const sidebarActiveTabClass =
+    displaySettings.primaryAccent === 'blue' ? 'bg-slate-800 text-blue-400 border-blue-500/20 font-bold' :
     displaySettings.primaryAccent === 'emerald' ? 'bg-slate-800 text-emerald-400 border-emerald-500/20 font-bold' :
     displaySettings.primaryAccent === 'sky' ? 'bg-slate-800 text-sky-400 border-sky-500/20 font-bold' :
     displaySettings.primaryAccent === 'indigo' ? 'bg-slate-800 text-indigo-400 border-indigo-500/20 font-bold' :
@@ -3313,9 +3317,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             {/* LOGO & THƯƠNG HIỆU */}
             <div className="flex items-center justify-between border-b border-gray-200 pb-3 mb-3">
               <div className="flex items-center gap-2.5">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shadow-sm shrink-0 text-white ${accentBgClass}`}>
-                  <span className="font-black text-base tracking-wider italic font-mono">{displaySettings.logoText}</span>
-                </div>
+                <img src="/lolo-icon-192.png" alt={displaySettings.brandName} className="w-9 h-9 rounded-lg shadow-sm shrink-0" />
                 <div className="min-w-0">
                   <h2 className="font-extrabold text-xs tracking-wide leading-none uppercase text-gray-900 truncate">{displaySettings.brandName}</h2>
                   <span className="text-[9px] font-bold tracking-widest mt-1 block uppercase text-gray-500 truncate">{displaySettings.brandSlogan}</span>
