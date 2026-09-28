@@ -18,6 +18,40 @@ function readStoredAccessToken(): string | null {
   }
 }
 
+// Giải mã phần payload của JWT (KHÔNG xác minh chữ ký — chỉ đọc claim để dùng
+// phía client, việc xác minh thật đã do PostgREST/RLS làm ở server khi request
+// thật sự gửi lên). Trả null nếu token rỗng/hỏng thay vì ném lỗi, để không làm
+// vỡ luồng gọi (component gọi getCurrentCompanyId() không cần try/catch riêng).
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    const base64 = token.split('.')[1];
+    const json = decodeURIComponent(
+      atob(base64.replace(/-/g, '+').replace(/_/g, '/'))
+        .split('')
+        .map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+        .join('')
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * company_id của phiên đang đăng nhập — đọc trực tiếp từ claim trong JWT (xem
+ * setAuthToken/api/login.ts, Giai đoạn 2), KHÔNG lưu thành 1 state riêng để
+ * tránh 2 nguồn có thể lệch nhau. dbService.ts (Giai đoạn 4) dùng hàm này để
+ * tự gắn company_id vào mọi lượt đọc/ghi. Trả null khi chưa đăng nhập (JWT
+ * chưa có) — các hàm gọi phải tự xử lý graceful cho trường hợp này (xem
+ * comment tại querySupabase/saveSupabase).
+ */
+export function getCurrentCompanyId(): string | null {
+  const token = currentConfig.accessToken || readStoredAccessToken();
+  if (!token) return null;
+  const payload = decodeJwtPayload(token);
+  return (payload && typeof payload.company_id === 'string') ? payload.company_id : null;
+}
+
 /**
  * Dynamically initializes or updates the Supabase client with new credentials.
  * accessToken (tuỳ chọn): JWT từ /api/login chứa company_id — khi có, mọi

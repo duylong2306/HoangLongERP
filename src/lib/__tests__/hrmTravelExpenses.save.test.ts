@@ -17,7 +17,7 @@ const fakeSupabase: any = {
   }),
 };
 
-vi.mock('../supabase', () => ({ getSupabase: () => fakeSupabase }));
+vi.mock('../supabase', () => ({ getSupabase: () => fakeSupabase, getCurrentCompanyId: () => null }));
 
 import { dbService } from '../dbService';
 

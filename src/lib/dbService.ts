@@ -1,4 +1,4 @@
-import { getSupabase } from './supabase';
+import { getSupabase, getCurrentCompanyId } from './supabase';
 import { ensureProjectChatGroup } from './chatStore';
 import { parsePunchMeta, mergePunchMeta, hasAnyPunchMeta } from './attendanceMeta';
 import {
@@ -300,7 +300,14 @@ async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh
   const promise = (async () => {
     try {
       console.log(`[DB] Querying ${tableName}...`);
-      const { data, error } = await supabase.from(tableName).select(selectClause);
+      // Giai đoạn 4 (multi-tenant): lọc theo company_id khi ĐÃ đăng nhập (JWT có
+      // claim này — xem getCurrentCompanyId). Trước khi đăng nhập (vd lúc tải
+      // employees để hiện màn hình đăng nhập) chưa có JWT nên bỏ qua lọc — vẫn
+      // AN TOÀN ở giai đoạn này vì RLS thật (Giai đoạn 3) chưa bật, và hiện chỉ
+      // có 1 doanh nghiệp nên không có gì để lẫn.
+      const companyId = getCurrentCompanyId();
+      const query = supabase.from(tableName).select(selectClause);
+      const { data, error } = await (companyId ? query.eq('company_id', companyId) : query);
       if (error) {
         console.error(`[DB] ❌ Supabase load error for ${tableName}:`, error.message, error.details, error.hint);
         throw new Error(`Không thể tải dữ liệu ${tableName} từ Supabase: ${error.message}`);
@@ -330,6 +337,14 @@ async function saveSupabase(tableName: string, item: any): Promise<void> {
   }
   try {
     const snakeItem = keysToSnake(item);
+    // Giai đoạn 4 (multi-tenant): tự gắn company_id cho bản ghi MỚI (object do
+    // code tạo tay thường không có sẵn field này) — CHỈ điền khi thiếu, không
+    // ghi đè company_id đã có sẵn trên object (vd khi cập nhật 1 dòng đã tải
+    // về, object đó đã mang đúng company_id gốc từ lúc đọc lên).
+    const companyId = getCurrentCompanyId();
+    if (companyId && !snakeItem.company_id) {
+      snakeItem.company_id = companyId;
+    }
     console.log(`[DB] Saving to ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
     // Đưa request ghi vào queue giới hạn concurrency — tránh bắn N POST song
     // song làm vượt connection pool của PostgREST (nguồn gốc ERR_CONNECTION_CLOSED).
@@ -363,6 +378,12 @@ async function insertSupabase(tableName: string, item: any): Promise<boolean> {
     throw new Error(`Supabase chưa được cấu hình — không thể lưu ${tableName}`);
   }
   const snakeItem = keysToSnake(item);
+  // Giai đoạn 4 (multi-tenant): xem giải thích tại saveSupabase ở trên — cùng
+  // nguyên tắc, chỉ điền khi thiếu.
+  const companyId = getCurrentCompanyId();
+  if (companyId && !snakeItem.company_id) {
+    snakeItem.company_id = companyId;
+  }
   console.log(`[DB] Inserting into ${tableName}:`, { id: item.id, keys: Object.keys(snakeItem) });
   // Queue giới hạn concurrency (xem phần Write Queue ở trên).
   return await enqueueWrite(async () => {
@@ -657,7 +678,14 @@ async function deleteSupabase(tableName: string, id: string): Promise<void> {
   try {
     // Queue giới hạn concurrency (xem phần Write Queue ở trên).
     await enqueueWrite(async () => {
-      const { error } = await supabase.from(tableName).delete().eq('id', id);
+      // Giai đoạn 4 (multi-tenant): thêm điều kiện company_id vào WHERE khi đã
+      // đăng nhập — lớp an toàn bổ sung (defense-in-depth), phòng trường hợp id
+      // client gửi lên bị nhầm/giả mạo, xóa nhầm dòng của công ty khác. Không
+      // ảnh hưởng hành vi bình thường vì id vốn đã duy nhất trong toàn hệ thống.
+      const companyId = getCurrentCompanyId();
+      let query = supabase.from(tableName).delete().eq('id', id);
+      if (companyId) query = query.eq('company_id', companyId);
+      const { error } = await query;
       if (error) {
         console.error(`Supabase delete error for ${tableName}:`, error.message);
         throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);
@@ -680,7 +708,11 @@ async function deleteSupabaseByColumn(tableName: string, column: string, value: 
   try {
     // Queue giới hạn concurrency (xem phần Write Queue ở trên).
     await enqueueWrite(async () => {
-      const { error } = await supabase.from(tableName).delete().eq(column, value);
+      // Xem giải thích company_id tại deleteSupabase ở trên.
+      const companyId = getCurrentCompanyId();
+      let query = supabase.from(tableName).delete().eq(column, value);
+      if (companyId) query = query.eq('company_id', companyId);
+      const { error } = await query;
       if (error) {
         console.error(`Supabase delete error for ${tableName}:`, error.message);
         throw new Error(`Xóa ${tableName} thất bại: ${error.message}`);

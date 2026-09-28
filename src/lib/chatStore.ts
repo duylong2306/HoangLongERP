@@ -1,5 +1,5 @@
 import { Conversation, ChatMessage, ChatAttachment } from '../types';
-import { getSupabase } from './supabase';
+import { getSupabase, getCurrentCompanyId } from './supabase';
 import { buildPushUrl } from './pushDeepLink';
 
 // =====================================================================
@@ -64,6 +64,13 @@ function convToRow(c: Conversation): any {
     task_id: c.taskId ?? null,
     project_id: c.projectId ?? null,
     pinned: c.pinned ?? false,
+    // Giai đoạn 4 (multi-tenant): chatStore.ts tự gọi Supabase riêng, KHÔNG đi
+    // qua saveSupabase/insertSupabase ở dbService.ts nên phải tự gắn company_id
+    // ở đây — nếu không, upsert('conversations') sẽ lỗi NOT NULL (cột này bắt
+    // buộc từ Giai đoạn 1). getCurrentCompanyId() trả null khi chưa đăng nhập —
+    // spread `...` bên dưới sẽ KHÔNG thêm key company_id trong trường hợp đó
+    // (giữ nguyên hành vi cũ, tránh gửi company_id: null tường minh).
+    ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
   };
 }
 
@@ -123,6 +130,9 @@ function msgToRow(m: ChatMessage): any {
   if (m.relatedEntity) {
     row.related_entity = JSON.stringify(m.relatedEntity);
   }
+  // Giai đoạn 4 (multi-tenant): xem giải thích tại convToRow ở trên.
+  const companyId = getCurrentCompanyId();
+  if (companyId) row.company_id = companyId;
   return row;
 }
 
