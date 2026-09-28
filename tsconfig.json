@@ -23,6 +23,6 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src"],
+  "include": ["src", "api"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }

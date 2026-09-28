@@ -44,3 +44,10 @@ scripts/to_router.cjs
 MIGRATION_PLAN_SUPABASE.md
 PROGRESS.md
 README_FIXES.md
+.vercel
+
+# Bản dump schema/dữ liệu thật (Giai đoạn 0/1 multi-tenant) — file làm việc
+# tạm, chứa dữ liệu thật (dump_data.sql ~98MB) — KHÔNG commit lên git. Migration
+# thật đã lưu riêng ở supabase/migrations/.
+supabase/dump_schema.sql
+supabase/dump_data.sql

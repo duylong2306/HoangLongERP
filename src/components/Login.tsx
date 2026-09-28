@@ -11,14 +11,13 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { verifyPasswordSync } from '../lib/passwordUtils';
+import { setAuthToken } from '../lib/supabase';
 
 interface LoginProps {
   brandName: string;
   brandSlogan: string;
   logoText: string;
   primaryAccent: string;
-  employees: Employee[];
   onLoginSuccess: (employee: Employee, remember: boolean, autoLogin: boolean) => void;
 }
 
@@ -27,7 +26,6 @@ export default function Login({
   brandSlogan,
   logoText,
   primaryAccent,
-  employees,
   onLoginSuccess
 }: LoginProps) {
   const [username, setUsername] = useState('');
@@ -38,6 +36,8 @@ export default function Login({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [showDemoAccounts, setShowDemoAccounts] = useState(false);
+  // Chặn double-submit khi đang chờ /api/login phản hồi (xem handleSubmit).
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Load remembered credentials if they exist
   useEffect(() => {
@@ -60,7 +60,7 @@ export default function Login({
     }
   }, [autoLogin]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
@@ -73,21 +73,47 @@ export default function Login({
       return;
     }
 
-    // Find employee
-    const matchedEmployee = employees.find(
-      emp => (emp.username || '').toLowerCase() === cleanUsername && verifyPasswordSync(cleanPassword, emp.password || '123')
-    );
+    // Chặn bấm nhanh 2 lần trong lúc đang chờ /api/login phản hồi.
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
-    if (!matchedEmployee) {
-      setError('Tài khoản hoặc mật khẩu không đúng!');
-      return;
+    try {
+      // Xác thực ở SERVER (api/login.ts) — KHÔNG còn so khớp mật khẩu ngay
+      // trên trình duyệt như trước (Login.tsx cũ tự đọc employees + bcrypt
+      // tại chỗ), để không phải gửi password hash về trình duyệt, đồng thời
+      // để server ký kèm JWT chứa company_id (Giai đoạn 2 — chuẩn bị cho RLS
+      // multi-tenant ở Giai đoạn 3). subdomain: chưa có domain riêng (Giai
+      // đoạn 7 sẽ làm), tạm không truyền — server tự mặc định về công ty gốc.
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cleanUsername, password: cleanPassword }),
+      });
+      const body = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(body?.error || 'Tài khoản hoặc mật khẩu không đúng!');
+        return;
+      }
+
+      const { token, employee } = body as { token: string; employee: Employee };
+      // Gắn JWT vào Supabase client NGAY — mọi request kể từ giờ (kể cả tải
+      // dữ liệu ngay sau khi đăng nhập) đều gửi kèm company_id. persist=
+      // autoLogin, đúng quy ước đã dùng cho hl_erp_active_session bên dưới
+      // (AuthContext.tsx/App.tsx handleLoginSuccess) — 2 loại dữ liệu của
+      // cùng 1 phiên phải cùng "sống"/"chết" theo đúng lựa chọn của người dùng.
+      setAuthToken(token, autoLogin);
+
+      setSuccessMsg(`Đăng nhập thành công! Chào mừng ${employee.name}.`);
+
+      setTimeout(() => {
+        onLoginSuccess(employee, remember, autoLogin);
+      }, 600);
+    } catch (err) {
+      setError('Không kết nối được tới máy chủ. Vui lòng thử lại.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setSuccessMsg(`Đăng nhập thành công! Chào mừng ${matchedEmployee.name}.`);
-
-    setTimeout(() => {
-      onLoginSuccess(matchedEmployee, remember, autoLogin);
-    }, 600);
   };
 
   const handleQuickSelect = (emp: Employee) => {
@@ -244,10 +270,11 @@ export default function Login({
           <button
             type="submit"
             id="login_submit_btn"
-            className={`w-full py-2.5 rounded-lg font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md active:scale-[0.98] cursor-pointer ${accentBgClass} hover:opacity-90`}
+            disabled={isSubmitting}
+            className={`w-full py-2.5 rounded-lg font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md active:scale-[0.98] ${accentBgClass} ${isSubmitting ? 'opacity-60 cursor-not-allowed' : 'hover:opacity-90 cursor-pointer'}`}
           >
             <LogIn className="w-4 h-4" />
-            Vào hệ thống ERP
+            {isSubmitting ? 'Đang xác thực...' : 'Vào hệ thống ERP'}
           </button>
         </form>
 

@@ -111,7 +111,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getSupabase, initializeSupabase } from './lib/supabase';
+import { getSupabase, initializeSupabase, setAuthToken } from './lib/supabase';
 import {
   parsePushData,
   readDeepLinkFromLocation,
@@ -2339,6 +2339,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setCurrentUser(null);
     sessionStorage.removeItem('hl_erp_active_session');
     localStorage.removeItem('hl_erp_active_session');
+    // Gỡ JWT (chứa company_id) khỏi client — quay về dùng anon key trần, đúng
+    // trạng thái "chưa đăng nhập" (xem setAuthToken/api/login.ts — Giai đoạn 2).
+    setAuthToken(null, false);
     addToast({
       title: 'Đăng xuất thành công',
       message: 'Hẹn gặp lại bạn ở những phiên làm việc tiếp theo.',
@@ -3267,7 +3270,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         brandSlogan={displaySettings.brandSlogan}
         logoText={displaySettings.logoText}
         primaryAccent={displaySettings.primaryAccent}
-        employees={employees}
         onLoginSuccess={handleLoginSuccess}
       />
     );
