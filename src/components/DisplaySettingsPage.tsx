@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Palette, Loader2, AlertCircle, CheckCircle, Eye, Type, Sparkles } from 'lucide-react';
+import { Save, Palette, Loader2, AlertCircle, CheckCircle, Eye, Type } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 
 // Định nghĩa interface cho DisplaySettingsConfig
@@ -106,38 +106,12 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
     </div>
   ) : null;
 
-  // Helper cho Màu chủ đạo hiển thị động
-  const accentTextClass =
-    displaySettings.primaryAccent === 'blue' ? 'text-blue-400' :
-    displaySettings.primaryAccent === 'emerald' ? 'text-emerald-400' :
-    displaySettings.primaryAccent === 'sky' ? 'text-sky-400' :
-    displaySettings.primaryAccent === 'indigo' ? 'text-indigo-400' :
-    displaySettings.primaryAccent === 'amber' ? 'text-amber-400' :
-    displaySettings.primaryAccent === 'rose' ? 'text-rose-400' : 'text-violet-400';
-
-  const accentBorderClass =
-    displaySettings.primaryAccent === 'blue' ? 'border-blue-500' :
-    displaySettings.primaryAccent === 'emerald' ? 'border-emerald-500' :
-    displaySettings.primaryAccent === 'sky' ? 'border-sky-500' :
-    displaySettings.primaryAccent === 'indigo' ? 'border-indigo-500' :
-    displaySettings.primaryAccent === 'amber' ? 'border-amber-500' :
-    displaySettings.primaryAccent === 'rose' ? 'border-rose-500' : 'border-violet-500';
-
-  const accentBgClass =
-    displaySettings.primaryAccent === 'blue' ? 'bg-blue-600' :
-    displaySettings.primaryAccent === 'emerald' ? 'bg-emerald-500' :
-    displaySettings.primaryAccent === 'sky' ? 'bg-sky-500' :
-    displaySettings.primaryAccent === 'indigo' ? 'bg-indigo-500' :
-    displaySettings.primaryAccent === 'amber' ? 'bg-amber-500' :
-    displaySettings.primaryAccent === 'rose' ? 'bg-rose-500' : 'bg-violet-500';
-
-  const accentBgLightClass =
-    displaySettings.primaryAccent === 'blue' ? 'bg-blue-500/10' :
-    displaySettings.primaryAccent === 'emerald' ? 'bg-emerald-500/10' :
-    displaySettings.primaryAccent === 'sky' ? 'bg-sky-500/10' :
-    displaySettings.primaryAccent === 'indigo' ? 'bg-indigo-500/10' :
-    displaySettings.primaryAccent === 'amber' ? 'bg-amber-500/10' :
-    displaySettings.primaryAccent === 'rose' ? 'bg-rose-500/10' : 'bg-violet-500/10';
+  // Tông màu chủ đạo CỐ ĐỊNH theo bộ nhận diện LoLo — không còn cho người dùng
+  // tự chọn màu khác nữa (đã bỏ khối "Chọn Màu Sắc" bên dưới), toàn bộ app dùng
+  // thống nhất 1 tông xanh để tránh mỗi doanh nghiệp/mỗi màn hình một màu.
+  const accentTextClass = 'text-blue-400';
+  const accentBgClass = 'bg-blue-600';
+  const accentBgLightClass = 'bg-blue-500/10';
 
   return (
     <>
@@ -151,7 +125,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
           </div>
           <div>
             <h2 className="text-white font-bold text-[15px]">Cấu hình Giao Diện Cá Nhân</h2>
-            <p className="text-[10.5px] text-slate-500 font-medium">Tùy chỉnh tông màu và phông chữ theo sở thích của riêng bạn</p>
+            <p className="text-[10.5px] text-slate-500 font-medium">Tùy chỉnh phông chữ theo sở thích của riêng bạn</p>
           </div>
         </div>
 
@@ -160,49 +134,6 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
 
           {/* ═══ LEFT: Cài đặt (3 cols) ═══ */}
           <div className="lg:col-span-3 space-y-5">
-
-            {/* ── 🎨 CHỌN MÀU SẮC ── */}
-            <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/60 space-y-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <label className="text-[11px] text-slate-200 font-black uppercase tracking-wider">Tông Màu Chủ Đạo</label>
-              </div>
-              <div className="grid grid-cols-3 gap-2.5">
-                {[
-                  { key: 'blue', label: 'Blue', desc: 'LoLo', color: '#155ee0' },
-                  { key: 'emerald', label: 'Emerald', desc: 'Lâm Đồng', color: '#10b981' },
-                  { key: 'sky', label: 'Sky', desc: 'Mây Đà Lạt', color: '#0ea5e9' },
-                  { key: 'indigo', label: 'Marine', desc: 'Xanh thẳm', color: '#6366f1' },
-                  { key: 'amber', label: 'Amber', desc: 'Gỗ sồi', color: '#f59e0b' },
-                  { key: 'rose', label: 'Rose', desc: 'Ấm áp', color: '#f43f5e' },
-                  { key: 'violet', label: 'Amethyst', desc: 'Thủy chung', color: '#8b5cf6' },
-                ].map((c) => {
-                  const selected = displaySettings.primaryAccent === c.key;
-                  return (
-                    <button
-                      key={c.key}
-                      type="button"
-                      onClick={() => setDisplaySettings({ ...displaySettings, primaryAccent: c.key })}
-                      className={`relative p-3 rounded-xl border-2 transition-all duration-200 cursor-pointer flex flex-col items-center gap-1.5 ${
-                        selected
-                          ? 'border-white/20 bg-white/5 shadow-lg scale-[1.03]'
-                          : 'border-slate-800/60 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900'
-                      }`}
-                    >
-                      {selected && (
-                        <span className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 bg-white rounded-full flex items-center justify-center shadow text-[9px]">✓</span>
-                      )}
-                      <span
-                        className="w-5 h-5 rounded-full ring-2 ring-white/10 shadow-inner"
-                        style={{ backgroundColor: c.color }}
-                      />
-                      <span className="text-[10px] font-bold text-white leading-tight">{c.label}</span>
-                      <span className="text-[8px] text-slate-500 leading-tight">{c.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
 
             {/* ── ✍️ CHỌN PHÔNG CHỮ ── */}
             <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/60 space-y-3">
@@ -312,7 +243,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
               {/* Font info */}
               <div className="text-center pt-1">
                 <span className="text-[8px] text-slate-600 font-mono">
-                  Font: {displaySettings.fontFamily || 'Inter'} · Accent: {displaySettings.primaryAccent}
+                  Font: {displaySettings.fontFamily || 'Inter'}
                 </span>
               </div>
             </div>
