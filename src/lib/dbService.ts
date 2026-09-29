@@ -171,7 +171,8 @@ export async function seedTableToSupabase(tableName: string, data: any[]): Promi
   if (!supabase) return;
   try {
     console.log(`Seeding table ${tableName} to Supabase with ${data.length} items...`);
-    const snakeData = data.map(keysToSnake);
+    const companyId = getCurrentCompanyId();
+    const snakeData = data.map(keysToSnake).map((row: any) => (companyId && !row.company_id) ? { ...row, company_id: companyId } : row);
     const { error } = await supabase.from(tableName).upsert(snakeData, { onConflict: 'id' });
     if (error) {
       console.warn(`Error seeding table ${tableName} to Supabase:`, error);
@@ -858,7 +859,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        const { error } = await supabase.from('hrm_default_snapshots').upsert({ tab, data });
+        const { error } = await supabase.from('hrm_default_snapshots').upsert({ tab, data, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn(`Supabase save default snapshot ${tab} error:`, error.message);
       } catch (e) {
         console.warn(`Supabase save default snapshot ${tab} error:`, e);
@@ -922,7 +923,7 @@ export const dbService = {
       const sb = getSupabase();
       if (!sb) return;
       try {
-        const { error } = await sb.from('kanban_columns').upsert({ sector, columns, column_width: columnWidth });
+        const { error } = await sb.from('kanban_columns').upsert({ sector, columns, column_width: columnWidth, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn('kanbanColumns save error:', error.message);
       } catch (e) { console.warn('kanbanColumns save exception:', e); }
     }
@@ -966,7 +967,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        const { error } = await supabase.from('hrm_task_permissions').upsert({ id: 'task_permission_matrix_v1', matrix });
+        const { error } = await supabase.from('hrm_task_permissions').upsert({ id: 'task_permission_matrix_v1', matrix, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn('Supabase save task permissions error:', error.message);
       } catch (e) {
         console.warn('Supabase save task permissions error:', e);
@@ -1129,7 +1130,8 @@ export const dbService = {
         founding_year: profile.foundingYear,
         business_sector: profile.businessSector,
         bank_info: profile.bankInfo,
-        scale: profile.scale
+        scale: profile.scale,
+        ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {})
       });
       if (error) throw new Error(error.message);
     },
@@ -1201,6 +1203,7 @@ export const dbService = {
       try {
         const { error } = await supabase.from('shift_config').upsert({
           id: 'current',
+          ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           morning_in: config.morningIn,
           morning_out: config.morningOut,
           afternoon_in: config.afternoonIn,
@@ -1279,6 +1282,7 @@ export const dbService = {
       try {
         const { error } = await supabase.from('display_settings').upsert({
           id: 'current',
+          ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           primary_accent: settings.primaryAccent,
           logo_text: settings.logoText,
           brand_name: settings.brandName,
@@ -1772,6 +1776,7 @@ export const dbService = {
       try {
         const { error } = await supabase.from('archived_quotes').upsert({
           id: quote.id,
+          ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           sector: quote.sector || 'general',
           code: quote.code,
           customer_id: quote.customerId || null,
@@ -1997,6 +2002,7 @@ export const dbService = {
       try {
         const { error } = await supabase.from('document_templates').upsert({
           id: 'global',
+          ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           contract_template: templates.contractTemplate,
           acceptance_template: templates.acceptanceTemplate,
           liquidation_template: templates.liquidationTemplate,
@@ -2042,7 +2048,7 @@ export const dbService = {
         return;
       }
       try {
-        const { error } = await supabase.from('project_permissions').upsert({ id: 'global', matrix });
+        const { error } = await supabase.from('project_permissions').upsert({ id: 'global', matrix, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn('Supabase projectPermissions save error:', error.message);
       } catch (e) {
         console.warn('Supabase projectPermissions save error:', e);
@@ -2080,7 +2086,7 @@ export const dbService = {
       try {
         const { error } = await supabase
           .from('project_permission_overrides')
-          .upsert({ id: projectId, project_id: projectId, overrides: override });
+          .upsert({ id: projectId, project_id: projectId, overrides: override, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn('Supabase projectPermissionOverrides save error:', error.message);
       } catch (e) {
         console.warn('Supabase projectPermissionOverrides save error:', e);
@@ -2123,7 +2129,7 @@ export const dbService = {
       if (!supabase) {
         throw new Error('Supabase chưa cấu hình — không lưu được quotationConfigs');
       }
-      const { error } = await supabase.from('quotation_configs').upsert({ sector, config });
+      const { error } = await supabase.from('quotation_configs').upsert({ sector, config, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
       if (error) {
         console.error(`Supabase quotation_configs ${sector} save error:`, error.message);
         throw new Error(`Lỗi lưu lên Supabase: ${error.message}`);
@@ -2383,7 +2389,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        await supabase.from('construction_norms').upsert({ id: type, data: items, updated_at: new Date().toISOString() });
+        await supabase.from('construction_norms').upsert({ id: type, data: items, updated_at: new Date().toISOString(), ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
       } catch (err) {
         console.warn('[DB] Save construction_norms exception:', err);
       }
@@ -2413,6 +2419,7 @@ export const dbService = {
       try {
         const { error } = await supabase.from('product_prices').upsert({
           id: item.id,
+          ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           product_id: item.productId,
           ten_gia: item.tenGia,
           don_gia: item.donGia,
@@ -2453,6 +2460,7 @@ export const dbService = {
       try {
         const { error } = await supabase.from('product_materials').upsert({
           id: item.id,
+          ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           product_id: item.productId,
           ten_chat_lieu: item.tenChatLieu,
           ghi_chu: item.ghiChu || null,
@@ -2681,6 +2689,7 @@ export const dbService = {
 
       const row: any = {
         id: deterministicId,
+        ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
         emp_id: record.empId,
         emp_name: record.empName,
         date: record.date,

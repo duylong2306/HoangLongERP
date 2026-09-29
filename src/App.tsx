@@ -111,7 +111,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getSupabase, initializeSupabase, setAuthToken } from './lib/supabase';
+import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId } from './lib/supabase';
 import {
   parsePushData,
   readDeepLinkFromLocation,
@@ -1555,15 +1555,35 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Realtime message của Supabase — xem ghi chú POLLED_LOW_CHURN_MS bên dưới).
   const realtimeReconnectAttempts = useRef(0);
   useEffect(() => {
+    // Giai đoạn 5 (multi-tenant): LUÔN lắng nghe 'hl-supabase-client-ready' —
+    // TRƯỚC ĐÂY chỉ đăng ký listener này trong nhánh "sb chưa có" (client null
+    // lúc mount), nên khi đăng nhập/đăng xuất (setAuthToken() gọi lại
+    // initializeSupabase(), bắn CHÍNH event này) không ai lắng nghe cả — kênh
+    // Realtime bị "đóng băng" mãi mãi với client lúc mount (thường là client
+    // CHƯA có JWT, tức trước khi đăng nhập). Trước Giai đoạn 3, việc này vô
+    // hại vì anon vẫn đọc được mọi thứ; sau khi RLS thật chặn anon, kênh cũ đó
+    // không còn nhận được sự kiện nào nữa — bug tiềm ẩn bị Giai đoạn 3 làm lộ
+    // ra. Nay luôn resubscribe mỗi khi client đổi (đăng nhập HOẶC đăng xuất),
+    // để company_id filter bên dưới luôn khớp đúng phiên hiện tại.
+    const onClientReady = () => {
+      console.log('[Realtime] Client (re)initialized — resubscribing với company_id hiện tại');
+      setRealtimeRetry(n => n + 1);
+    };
+    window.addEventListener('hl-supabase-client-ready', onClientReady);
+
     const sb = getSupabase();
     if (!sb) {
       console.warn('[Realtime] Supabase not available yet, waiting for hl-supabase-client-ready');
-      const onReady = () => {
-        console.log('[Realtime] Client ready — (re)subscribing');
-        setRealtimeRetry(n => n + 1);
-      };
-      window.addEventListener('hl-supabase-client-ready', onReady);
-      return () => window.removeEventListener('hl-supabase-client-ready', onReady);
+      return () => window.removeEventListener('hl-supabase-client-ready', onClientReady);
+    }
+
+    // Chưa đăng nhập (chưa có company_id trong JWT) → RLS (Giai đoạn 3) chặn
+    // anon đọc mọi thứ, mở kênh lúc này chỉ tốn tài nguyên chờ vô ích. Bỏ qua,
+    // effect sẽ tự chạy lại (onClientReady ở trên) ngay khi đăng nhập xong.
+    const companyId = getCurrentCompanyId();
+    if (!companyId) {
+      console.log('[Realtime] Chưa đăng nhập (chưa có company_id) — bỏ qua, chờ đăng nhập.');
+      return () => window.removeEventListener('hl-supabase-client-ready', onClientReady);
     }
 
     // ─── Coalescer: gom burst realtime event trong 3s thành 1 lần chạy ──────
@@ -1886,10 +1906,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const channel = sb
       .channel('app-realtime-sync-v2')
       // ── Core tables (state setters) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: 'company_id=eq.' + companyId },
         withPatchAndCoalesce('projects', 'projects', setProjects as any,
           rowToCamel, isStandaloneProject))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: 'company_id=eq.' + companyId },
         withPatchAndCoalesce('tasks', 'tasks', setTasks as any, (row) => {
           // Cột tasks.missions cũ không còn được ghi mới (đã tách sang bảng
           // task_missions) — LOẠI hẳn key này khỏi bản vá realtime để merge ở
@@ -1898,8 +1918,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           const { missions, ...rest } = rowToCamel(row);
           return rest;
         }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_missions' }, fireTaskMissionsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_missions', filter: 'company_id=eq.' + companyId }, fireTaskMissionsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments', filter: 'company_id=eq.' + companyId }, (payload) => {
         withPatchAndCoalesce('payments', 'payments', setPayments as any, rowToCamel)(payload);
         // Trước đây bảng payments chỉ patch state RIÊNG của App.tsx, không bắn
         // event DOM nào — các component tự tải 1 bản `payments` RIÊNG (không
@@ -1909,30 +1929,30 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         // nghe được, giống cách purchase_orders đã làm.
         firePaymentsUpdatedEvent();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts' },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts', filter: 'company_id=eq.' + companyId },
         withPatchAndCoalesce('receipts', 'receipts', setReceipts as any, rowToCamel))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes' },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotes', filter: 'company_id=eq.' + companyId },
         withPatchAndCoalesce('quotes', 'quotes', setQuotes as any, rowToCamel))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: 'company_id=eq.' + companyId },
         withPatchAndCoalesce('customers', 'customers', setCustomers as any, rowToCamel))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, fireAttendanceEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances' }, fireAdvancesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records', filter: 'company_id=eq.' + companyId }, fireAttendanceEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subcontractor_advances', filter: 'company_id=eq.' + companyId }, fireAdvancesEvent)
       // ── Supporting tables (fire events) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, fireInventoryEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs' }, fireWarehouseLogsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_product_catalog' }, fireWarehouseDataEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_product_catalog' }, fireWarehouseDataEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory', filter: 'company_id=eq.' + companyId }, fireInventoryEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_logs', filter: 'company_id=eq.' + companyId }, fireWarehouseLogsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_product_catalog', filter: 'company_id=eq.' + companyId }, fireWarehouseDataEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_product_catalog', filter: 'company_id=eq.' + companyId }, fireWarehouseDataEvent)
       // suppliers/accounting_subcontractors/archived_quotes: đã bỏ khỏi realtime
       // — xem POLLED_LOW_CHURN_MS bên dưới.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, fireEmployeesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees', filter: 'company_id=eq.' + companyId }, fireEmployeesEvent)
       // hrm_task_permissions/hrm_role_groups/business_profile/shift_config: đã
       // bỏ khỏi realtime — xem POLLED_LOW_CHURN_MS bên dưới.
       // ── Orders (critical - realtime for instant updates) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders' },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_orders', filter: 'company_id=eq.' + companyId },
         withPatchAndCoalesce('sales_orders', 'sales_orders', setSalesOrders as any,
           (row) => normalizeOrderItems(rowToCamel(row))))
       // ── HRM Configuration & Payroll ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves' }, fireHrmLeavesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hrm_leaves', filter: 'company_id=eq.' + companyId }, fireHrmLeavesEvent)
       // hrm_approval_config/hrm_payroll_records/hrm_employee_errors/hrm_trips/
       // hrm_travel_expenses/hrm_leave_coefficients/hrm_holidays/hrm_performance_criteria/
       // hrm_salary_scales/kanban_columns/project_permissions: đã bỏ khỏi realtime
@@ -1946,14 +1966,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       // 21 bảng đã gỡ) để giảm rủi ro. Cần chạy kèm migration
       // 20260909_reenable_realtime_finance_tables.sql (thêm lại vào publication
       // phía server) — KHÔNG có tác dụng nếu chỉ sửa code mà không chạy SQL đó.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities' }, fireAccountingLiabilitiesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables' }, fireAccountingReceivablesEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts' }, fireAccountingSubContractsEvent)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_fund_config' }, fireCashFundConfigEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_liabilities', filter: 'company_id=eq.' + companyId }, fireAccountingLiabilitiesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_receivables', filter: 'company_id=eq.' + companyId }, fireAccountingReceivablesEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_sub_contracts', filter: 'company_id=eq.' + companyId }, fireAccountingSubContractsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_fund_config', filter: 'company_id=eq.' + companyId }, fireCashFundConfigEvent)
       // ── Material Proposals (Đề xuất vật tư) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'material_proposals' }, fireMaterialProposalsEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'material_proposals', filter: 'company_id=eq.' + companyId }, fireMaterialProposalsEvent)
       // ── Purchase Orders (đơn hàng mua — dispatch event cho MaterialCoordination sync cross-tab) ──
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders', filter: 'company_id=eq.' + companyId }, (payload) => {
         withPatchAndCoalesce('purchase_orders', 'purchase_orders', setPurchaseOrders as any,
           (row) => normalizeOrderItems(rowToCamel(row)))(payload);
         firePurchaseOrdersEvent();
@@ -2051,6 +2071,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       clearInterval(lowChurnInterval);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('hl-supabase-client-ready', onClientReady);
       sb.removeChannel(channel);
     };
   }, [realtimeRetry]);

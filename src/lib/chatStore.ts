@@ -983,9 +983,16 @@ function createConvChannel(userId: string): any {
   const sb = getSupabase();
   if (!sb) return null;
   _convIntentionalClose = false;
+  // Giai đoạn 5 (multi-tenant): lọc realtime theo company_id — sau khi RLS
+  // thật (Giai đoạn 3) chặn anon/công ty khác, filter này còn giúp giảm tải
+  // (không nhận broadcast của công ty khác dù RLS đã chặn ở tầng đọc dữ liệu).
+  const companyId = getCurrentCompanyId();
   return sb
     .channel(`conversations_${userId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'conversations',
+      ...(companyId ? { filter: `company_id=eq.${companyId}` } : {}),
+    },
       async () => {
         await loadConversationsFromCloud(userId);
         _convCallbacks.forEach(cb => cb());
