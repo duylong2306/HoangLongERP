@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
+import { companyScopedKey } from '../lib/supabase';
 import { refreshHrmConfigCache } from '../components/hr/hrCalculations';
 import type { HrmRoleGroup, HrmApprovalConfig, HrmApprovalConfig as ApprovalPermission } from '../types';
 
@@ -239,7 +240,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // không còn ghi ngược lại bảng business_profile từ đây nữa.
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo>(() => {
     try {
-      const saved = localStorage.getItem('hl_business_info');
+      const saved = localStorage.getItem(companyScopedKey('hl_business_info'));
       if (saved) return { ...DEFAULT_BUSINESS_INFO, ...JSON.parse(saved) };
     } catch {} /* eslint-disable-line no-empty */
     return DEFAULT_BUSINESS_INFO;
@@ -249,7 +250,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     dbService.businessProfile.get().then(profile => {
       if (!profile) return;
       setBusinessInfo(profile);
-      try { localStorage.setItem('hl_business_info', JSON.stringify(profile)); } catch {} /* eslint-disable-line no-empty */
+      try { localStorage.setItem(companyScopedKey('hl_business_info'), JSON.stringify(profile)); } catch {} /* eslint-disable-line no-empty */
     }).catch(() => {});
   }, []);
 

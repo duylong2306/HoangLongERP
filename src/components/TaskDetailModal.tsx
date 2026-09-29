@@ -58,6 +58,7 @@ const TRAVEL_NORMS_FALLBACK: TravelAllowanceNorm[] = [
 ];
 import { useNotification, isUserInRoleGroup, getConfiguredApprovers } from '../context';
 import { dbService } from '../lib/dbService';
+import { companyScopedKey } from '../lib/supabase';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { CTPStatus } from '../lib/travelExpenseStatus';
 import UserAvatar from './UserAvatar';
@@ -846,7 +847,7 @@ export default function TaskDetailModal({
   // xuống localStorage theo missionId — survive reload/remount/refresh.
   const [localTravelAllowances, setLocalTravelAllowances] = useState<Record<string, any[]>>(() => {
     try {
-      const raw = localStorage.getItem('hl_local_travel_allowances_v1');
+      const raw = localStorage.getItem(companyScopedKey('hl_local_travel_allowances_v1'));
       return raw ? JSON.parse(raw) : {};
     } catch {
       return {};
@@ -855,7 +856,7 @@ export default function TaskDetailModal({
   // Ghi mirror xuống localStorage mỗi khi thay đổi (an toàn nếu JSON lỗi)
   useEffect(() => {
     try {
-      localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(localTravelAllowances));
+      localStorage.setItem(companyScopedKey('hl_local_travel_allowances_v1'), JSON.stringify(localTravelAllowances));
     } catch {
       /* ignore quota / serialization errors */
     }
@@ -4313,7 +4314,7 @@ export default function TaskDetailModal({
                                     // Đồng bộ bản sao cục bộ (ghi đồng bộ xuống localStorage)
                                     setLocalTravelAllowances(prev => {
                                       const next = { ...prev, [mission.id]: (prev[mission.id] || []).filter(ta => ta.id !== item.id) };
-                                      try { localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(next)); } catch {}
+                                      try { localStorage.setItem(companyScopedKey('hl_local_travel_allowances_v1'), JSON.stringify(next)); } catch {}
                                       return next;
                                     });
                                     onUpdateTask(selectedTask.id, { missions: updatedMissions });
@@ -4445,7 +4446,7 @@ export default function TaskDetailModal({
                                 // để chắc chắn sống sót kể cả khi modal bị remount ngay sau đó.
                                 setLocalTravelAllowances(prev => {
                                   const next = { ...prev, [mission.id]: [...(prev[mission.id] || []), newAllowance] };
-                                  try { localStorage.setItem('hl_local_travel_allowances_v1', JSON.stringify(next)); } catch {}
+                                  try { localStorage.setItem(companyScopedKey('hl_local_travel_allowances_v1'), JSON.stringify(next)); } catch {}
                                   return next;
                                 });
                                 // ─── LƯU TỨC THÌ LÊN SUPABASE (bảng hrm_travel_expenses) ───

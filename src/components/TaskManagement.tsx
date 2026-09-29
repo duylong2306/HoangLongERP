@@ -8,6 +8,7 @@ import {
 import TaskDetailModal from './TaskDetailModal';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
+import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
@@ -217,7 +218,7 @@ export default function TaskManagement({
     }
     const getLeaveSymbol = (type: string) => {
       try {
-        const coefsSaved = localStorage.getItem('hl_hrm_leave_coefs_v6');
+        const coefsSaved = localStorage.getItem(companyScopedKey('hl_hrm_leave_coefs_v6'));
         if (coefsSaved) {
           const coefs = JSON.parse(coefsSaved);
           if (Array.isArray(coefs)) {

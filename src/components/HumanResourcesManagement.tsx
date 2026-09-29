@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
+import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
@@ -564,7 +565,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       });
     });
 
-    localStorage.setItem('hl_role_permissions', JSON.stringify(updatedAppPerms));
+    localStorage.setItem(companyScopedKey('hl_role_permissions'), JSON.stringify(updatedAppPerms));
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl-roles-updated'));
   };
@@ -988,7 +989,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
   // Ngày khởi tạo dữ liệu chấm công - chỉ chấm từ ngày này trở đi
   const [attendanceInitDate, setAttendanceInitDate] = useState<Date>(() => {
-    const stored = localStorage.getItem('hl_attendance_init_date');
+    const stored = localStorage.getItem(companyScopedKey('hl_attendance_init_date'));
     if (stored) return new Date(stored);
     return new Date();
   });

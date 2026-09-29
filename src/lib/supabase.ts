@@ -53,6 +53,23 @@ export function getCurrentCompanyId(): string | null {
 }
 
 /**
+ * Giai đoạn 6 (multi-tenant): gắn thêm company_id vào tên key localStorage
+ * cho các key LƯU DỮ LIỆU NGHIỆP VỤ (khách hàng, dự án, hoá đơn, cấu hình
+ * công ty...). Trước Phase 7 (routing theo subdomain), nhiều công ty vẫn có
+ * thể đăng nhập qua CÙNG 1 domain (api/login.ts nhận `subdomain` tuỳ chọn) —
+ * nếu không tách theo company_id, cache của công ty A sẽ "loé" ra ở màn hình
+ * công ty B trong khoảnh khắc load từ localStorage trước khi Supabase đồng
+ * bộ đè lên. Chưa đăng nhập (companyId null) → giữ nguyên key gốc (không đổi
+ * hành vi trước khi có JWT). Không dùng cho key thuần UI/preference (sidebar
+ * collapsed, page size...) — những key đó không phải dữ liệu nghiệp vụ nên
+ * dùng chung giữa các công ty không sao.
+ */
+export function companyScopedKey(baseKey: string): string {
+  const companyId = getCurrentCompanyId();
+  return companyId ? `${baseKey}__${companyId}` : baseKey;
+}
+
+/**
  * Dynamically initializes or updates the Supabase client with new credentials.
  * accessToken (tuỳ chọn): JWT từ /api/login chứa company_id — khi có, mọi
  * request REST/Realtime sau đó gửi kèm Authorization: Bearer <token> thay vì

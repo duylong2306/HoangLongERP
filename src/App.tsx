@@ -111,7 +111,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId } from './lib/supabase';
+import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
 import {
   parsePushData,
   readDeepLinkFromLocation,
@@ -585,7 +585,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // ── BƯỚC 2: Fetch employees từ cloud (bắt buộc cho auth) ──
   // ── BƯỚC 3: Sync tất cả data từ cloud ở background → update state + localStorage ──
   useEffect(() => {
-    const CACHE_KEY = 'hl_core_cache_v1';
+    // Giai đoạn 6 (multi-tenant): gắn company_id vào tên key — tránh cache của
+    // công ty A loé ra ở màn hình công ty B khi 2 công ty cùng dùng chung 1
+    // domain (trước khi có routing theo subdomain ở Giai đoạn 7). Tính lại mỗi
+    // lần gọi (không phải const cố định) vì companyId chỉ có SAU khi đăng nhập
+    // — lúc mount đầu (chưa đăng nhập) vẫn dùng key gốc không suffix.
+    const CACHE_KEY = () => companyScopedKey('hl_core_cache_v1');
     const CACHE_TABLES = ['customers', 'projects', 'tasks', 'receipts', 'payments', 'quotes'];
 
     const toCamel = (rows: any[]) => (rows || []).map((r: any) => {
@@ -599,16 +604,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     const saveToCache = (table: string, data: any[]) => {
       try {
-        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+        const key = CACHE_KEY();
+        const cache = JSON.parse(localStorage.getItem(key) || '{}');
         cache[table] = data;
         cache._ts = Date.now();
-        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+        localStorage.setItem(key, JSON.stringify(cache));
       } catch {}
     };
 
     const loadFromCache = (): Record<string, any[]> | null => {
       try {
-        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY()) || '{}');
         if (cache._ts && Object.keys(cache).length > 1) return cache;
       } catch {}
       return null;
@@ -2248,7 +2254,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Sync role permissions when updated from HRM
   useEffect(() => {
     const handleRolesUpdated = () => {
-      const saved = localStorage.getItem('hl_role_permissions');
+      const saved = localStorage.getItem(companyScopedKey('hl_role_permissions'));
       if (saved) {
         try {
           setRolePermissions(JSON.parse(saved));
