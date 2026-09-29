@@ -330,7 +330,11 @@ async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh
 }
 
 // Upsert helper
-async function saveSupabase(tableName: string, item: any): Promise<void> {
+// onConflict (tuỳ chọn): CHỈ truyền cho các bảng đã đổi PK sang khoá ghép
+// (company_id, <cột gốc>) — xem migration 20260929c_fix_cross_tenant_pk_collision.sql.
+// Các bảng có id do code tự sinh (Date.now()/random, đủ duy nhất thực tế)
+// KHÔNG cần truyền, giữ nguyên hành vi cũ (onConflict mặc định theo PK).
+async function saveSupabase(tableName: string, item: any, onConflict?: string): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) {
     console.error(`[DB] Supabase client is NULL — cannot save ${tableName}. Check VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in .env`);
@@ -350,7 +354,7 @@ async function saveSupabase(tableName: string, item: any): Promise<void> {
     // Đưa request ghi vào queue giới hạn concurrency — tránh bắn N POST song
     // song làm vượt connection pool của PostgREST (nguồn gốc ERR_CONNECTION_CLOSED).
     await enqueueWrite(async () => {
-      const { data, error } = await supabase.from(tableName).upsert(snakeItem).select();
+      const { data, error } = await supabase.from(tableName).upsert(snakeItem, onConflict ? { onConflict } : undefined).select();
       if (error) {
         console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
         throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
@@ -788,7 +792,7 @@ export const dbService = {
     },
     // Cho phép lưu bản ghi đầy đủ hoặc cập nhật một phần (upsert chỉ ghi đè các cột được truyền).
     async save(employee: Partial<Employee> & { id: string }): Promise<void> {
-      await saveSupabase('employees', employee);
+      await saveSupabase('employees', employee, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('employees', id);
@@ -981,7 +985,7 @@ export const dbService = {
       return querySupabase<any>('hrm_holidays', []);
     },
     async save(holiday: any): Promise<void> {
-      await saveSupabase('hrm_holidays', holiday);
+      await saveSupabase('hrm_holidays', holiday, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_holidays', id);
@@ -1047,7 +1051,7 @@ export const dbService = {
       if (Array.isArray(toSave.criteria)) {
         toSave.criteria = JSON.stringify(toSave.criteria);
       }
-      await saveSupabase('hrm_performance_criteria', toSave);
+      await saveSupabase('hrm_performance_criteria', toSave, 'company_id,id');
     }
   },
 
@@ -1057,7 +1061,7 @@ export const dbService = {
       return querySupabase<any>('hrm_salary_scales', []);
     },
     async save(scale: any): Promise<void> {
-      await saveSupabase('hrm_salary_scales', scale);
+      await saveSupabase('hrm_salary_scales', scale, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_salary_scales', id);
@@ -1070,7 +1074,7 @@ export const dbService = {
       return querySupabase<any>('travel_norms', []);
     },
     async save(norm: any): Promise<void> {
-      await saveSupabase('travel_norms', norm);
+      await saveSupabase('travel_norms', norm, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('travel_norms', id);
@@ -1304,7 +1308,7 @@ export const dbService = {
       return querySupabase<Customer>('customers', INITIAL_CUSTOMERS);
     },
     async save(customer: Customer): Promise<void> {
-      await saveSupabase('customers', customer);
+      await saveSupabase('customers', customer, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('customers', id);
@@ -2190,7 +2194,7 @@ export const dbService = {
       return querySupabase<any>('suppliers', []);
     },
     async save(supplier: any): Promise<void> {
-      await saveSupabase('suppliers', supplier);
+      await saveSupabase('suppliers', supplier, 'company_id,id');
       try {
         window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: supplier }));
       } catch (e) {
@@ -2236,7 +2240,7 @@ export const dbService = {
       return querySupabase<any>('inventory', []);
     },
     async save(item: any): Promise<void> {
-      await saveSupabase('inventory', item);
+      await saveSupabase('inventory', item, 'company_id,id');
       try {
         window.dispatchEvent(new CustomEvent('hl-inventory-updated', { detail: item }));
       } catch (e) {
@@ -2259,7 +2263,7 @@ export const dbService = {
       return querySupabase<any>('purchase_product_catalog', []);
     },
     async save(item: any): Promise<void> {
-      await saveSupabase('purchase_product_catalog', item);
+      await saveSupabase('purchase_product_catalog', item, 'company_id,ma_san_pham');
       try {
         window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated', { detail: item }));
       } catch (e) {
@@ -2282,7 +2286,7 @@ export const dbService = {
       return querySupabase<any>('sales_product_catalog', []);
     },
     async save(item: any): Promise<void> {
-      await saveSupabase('sales_product_catalog', item);
+      await saveSupabase('sales_product_catalog', item, 'company_id,ma_san_pham');
       try {
         window.dispatchEvent(new CustomEvent('hl-warehouse-data-updated', { detail: item }));
       } catch (e) {
@@ -2328,7 +2332,7 @@ export const dbService = {
       return querySupabase<any>('subcontractor_catalog_items', []);
     },
     async save(item: any): Promise<void> {
-      await saveSupabase('subcontractor_catalog_items', item);
+      await saveSupabase('subcontractor_catalog_items', item, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('subcontractor_catalog_items', id);
@@ -2490,7 +2494,7 @@ export const dbService = {
       return querySupabase<any>('accounting_product_catalog', []);
     },
     async save(item: any): Promise<void> {
-      await saveSupabase('accounting_product_catalog', item);
+      await saveSupabase('accounting_product_catalog', item, 'company_id,id');
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('accounting_product_catalog', id);
@@ -2792,7 +2796,15 @@ export const dbService = {
       // user chấm cùng lúc nếu bắn song song sẽ làm nghẽn connection pool PostgREST.
       try {
         await enqueueWrite(async () => {
-          const { error } = await supabase.from('attendance_records').upsert(row);
+          // onConflict theo khoá ghép (company_id, id) — xem migration
+          // 20260929c_fix_attendance_records_cross_tenant_pk_collision.sql:
+          // id được sinh từ empId (vd "AT-NV001-20260929"), mà empId lấy từ
+          // "Mã NV" người dùng tự nhập khi import Excel (HumanResourcesManagement.tsx)
+          // KHÔNG đảm bảo duy nhất giữa các công ty — 2 công ty cùng có nhân
+          // viên "NV001" sẽ sinh trùng id, nếu PK chỉ có id đơn sẽ đụng nhau
+          // (RLS chặn UPDATE vì company_id khác, y hệt lỗi đã gặp ở các bảng
+          // cấu hình singleton trước đây).
+          const { error } = await supabase.from('attendance_records').upsert(row, { onConflict: 'company_id,id' });
           if (error) throw new Error(`Lưu chấm công thất bại: ${error.message}`);
         });
         _attendanceRangeCache.clear(); // dữ liệu thay đổi → cache cũ không còn đúng

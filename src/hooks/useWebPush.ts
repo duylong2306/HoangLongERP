@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { getSupabase } from '../lib/supabase';
+import { getSupabase, getCurrentCompanyId } from '../lib/supabase';
 
 // VAPID public key
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_WEBPUSH_VAPID_PUBLIC_KEY || '';
@@ -87,12 +87,14 @@ async function subscribeToPush(userId: string): Promise<void> {
     }
 
     // Upsert subscription mới
+    const companyId = getCurrentCompanyId();
     const { error } = await supabase.from('push_subscriptions').upsert({
       user_id: userId,
       endpoint,
       p256dh,
       auth,
       platform: 'web',
+      ...(companyId ? { company_id: companyId } : {}),
     }, { onConflict: 'endpoint' });
 
     if (error) {

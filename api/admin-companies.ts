@@ -141,9 +141,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Tài khoản quản trị đầu tiên của công ty mới — bắt buộc phải có, nếu
     // không sẽ không ai đăng nhập được vào công ty vừa tạo.
+    //
+    // id CỐ ĐỊNH 'emp_admin' (không random) — đây là quy ước admin gốc mà
+    // isUserInRoleGroup() (src/context/SettingsContext.tsx) đã nhận diện sẵn
+    // qua fallback `empId === 'emp_admin'`, luôn full quyền bất kể công ty đó
+    // đã cấu hình hrm_role_groups hay chưa. Không dùng random UUID vì công ty
+    // MỚI TẠO CHƯA CÓ role_groups nào — nếu không rơi vào fallback này, tài
+    // khoản quản trị đầu tiên sẽ bị chặn "Không đủ quyền" ở mọi thao tác
+    // (phát hiện qua test thực tế: tạo công ty test, đăng nhập, bấm "Thêm vật
+    // tư" ở Kho → bị chặn vì permissions rỗng). An toàn đổi vì employees.id
+    // giờ là 1 vế của PK GHÉP (company_id, id) — mỗi công ty có "emp_admin"
+    // riêng, không đụng nhau (xem migration 20260929d).
     const passwordHash = await bcrypt.hash(cleanAdminPassword, 10);
     const { error: empErr } = await supabase.from('employees').insert({
-      id: randomUUID(),
+      id: 'emp_admin',
       company_id: companyId,
       name: 'Quản trị viên',
       role: 'director',
