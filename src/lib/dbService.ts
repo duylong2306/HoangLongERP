@@ -951,7 +951,7 @@ export const dbService = {
         const { data, error } = await supabase
           .from('hrm_task_permissions')
           .select('matrix')
-          .eq('id', 'task_permission_matrix_v1')
+          .eq('id', getCurrentCompanyId() || 'task_permission_matrix_v1')
           .limit(1);
         if (error) {
           console.warn('Supabase load task permissions error:', error.message);
@@ -967,7 +967,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        const { error } = await supabase.from('hrm_task_permissions').upsert({ id: 'task_permission_matrix_v1', matrix, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+        const { error } = await supabase.from('hrm_task_permissions').upsert({ id: getCurrentCompanyId() || 'task_permission_matrix_v1', matrix, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn('Supabase save task permissions error:', error.message);
       } catch (e) {
         console.warn('Supabase save task permissions error:', e);
@@ -1086,7 +1086,7 @@ export const dbService = {
         const { data, error } = await supabase
           .from('business_profile')
           .select('*')
-          .eq('id', 'current')
+          .eq('id', getCurrentCompanyId() || 'current')
           .single();
         if (error) {
           console.warn('Supabase business_profile load error:', error.message);
@@ -1120,7 +1120,7 @@ export const dbService = {
         throw new Error('Supabase chưa cấu hình — không lưu được business_profile');
       }
       const { error } = await supabase.from('business_profile').upsert({
-        id: 'current',
+        id: getCurrentCompanyId() || 'current',
         company_name: profile.companyName,
         tax_code: profile.taxCode,
         representative: profile.representative,
@@ -1152,7 +1152,7 @@ export const dbService = {
         const { data, error } = await supabase
           .from('shift_config')
           .select('*')
-          .eq('id', 'current')
+          .eq('id', getCurrentCompanyId() || 'current')
           .single();
         if (error) {
           console.warn('Supabase shift_config load error:', error.message);
@@ -1202,7 +1202,7 @@ export const dbService = {
       }
       try {
         const { error } = await supabase.from('shift_config').upsert({
-          id: 'current',
+          id: getCurrentCompanyId() || 'current',
           ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           morning_in: config.morningIn,
           morning_out: config.morningOut,
@@ -1256,7 +1256,7 @@ export const dbService = {
         const { data, error } = await supabase
           .from('display_settings')
           .select('*')
-          .eq('id', 'current')
+          .eq('id', getCurrentCompanyId() || 'current')
           .single();
         if (error) {
           console.warn('Supabase display_settings load error:', error.message);
@@ -1281,7 +1281,7 @@ export const dbService = {
       if (!supabase) return;
       try {
         const { error } = await supabase.from('display_settings').upsert({
-          id: 'current',
+          id: getCurrentCompanyId() || 'current',
           ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           primary_accent: settings.primaryAccent,
           logo_text: settings.logoText,
@@ -1966,7 +1966,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return null;
       try {
-        const { data, error } = await supabase.from('document_templates').select('*').eq('id', 'global').single();
+        const { data, error } = await supabase.from('document_templates').select('*').eq('id', getCurrentCompanyId() || 'global').single();
         if (error) {
           console.warn('Supabase document_templates load error:', error.message);
           return null;
@@ -2001,7 +2001,7 @@ export const dbService = {
       }
       try {
         const { error } = await supabase.from('document_templates').upsert({
-          id: 'global',
+          id: getCurrentCompanyId() || 'global',
           ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           contract_template: templates.contractTemplate,
           acceptance_template: templates.acceptanceTemplate,
@@ -2030,7 +2030,7 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return null;
       try {
-        const { data, error } = await supabase.from('project_permissions').select('matrix').eq('id', 'global').single();
+        const { data, error } = await supabase.from('project_permissions').select('matrix').eq('id', getCurrentCompanyId() || 'global').single();
         if (error) {
           console.warn('Supabase project_permissions load error:', error.message);
           return null;
@@ -2048,7 +2048,7 @@ export const dbService = {
         return;
       }
       try {
-        const { error } = await supabase.from('project_permissions').upsert({ id: 'global', matrix, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+        const { error } = await supabase.from('project_permissions').upsert({ id: getCurrentCompanyId() || 'global', matrix, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
         if (error) console.warn('Supabase projectPermissions save error:', error.message);
       } catch (e) {
         console.warn('Supabase projectPermissions save error:', e);
@@ -2129,7 +2129,10 @@ export const dbService = {
       if (!supabase) {
         throw new Error('Supabase chưa cấu hình — không lưu được quotationConfigs');
       }
-      const { error } = await supabase.from('quotation_configs').upsert({ sector, config, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+      const { error } = await supabase.from('quotation_configs').upsert(
+        { sector, config, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) },
+        { onConflict: 'company_id,sector' }
+      );
       if (error) {
         console.error(`Supabase quotation_configs ${sector} save error:`, error.message);
         throw new Error(`Lỗi lưu lên Supabase: ${error.message}`);
@@ -2389,7 +2392,10 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        await supabase.from('construction_norms').upsert({ id: type, data: items, updated_at: new Date().toISOString(), ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+        await supabase.from('construction_norms').upsert(
+          { id: type, data: items, updated_at: new Date().toISOString(), ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) },
+          { onConflict: 'company_id,id' }
+        );
       } catch (err) {
         console.warn('[DB] Save construction_norms exception:', err);
       }
