@@ -2217,7 +2217,7 @@ export const dbService = {
       return querySupabase<any>('accounting_subcontractors', []);
     },
     async save(supplier: any): Promise<void> {
-      await saveSupabase('accounting_subcontractors', supplier);
+      await saveSupabase('accounting_subcontractors', supplier, 'company_id,id');
       try {
         window.dispatchEvent(new CustomEvent('hl-suppliers-updated', { detail: supplier }));
       } catch (e) {
