@@ -8,7 +8,8 @@ import {
   ShieldCheck,
   AlertCircle,
   LogIn,
-  CheckCircle2
+  CheckCircle2,
+  Building2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { setAuthToken } from '../lib/supabase';
@@ -28,6 +29,14 @@ export default function Login({
   primaryAccent,
   onLoginSuccess
 }: LoginProps) {
+  // Giai đoạn 7 (multi-tenant): chưa có domain riêng để tách công ty theo
+  // subdomain thật, nên dùng "Mã công ty" nhập tay — gửi lên api/login.ts làm
+  // `subdomain` (server đã sẵn tham số này từ Giai đoạn 2). Nhớ lại như
+  // username (localStorage riêng, không phải dữ liệu nghiệp vụ nên không cần
+  // companyScopedKey) để người dùng không phải gõ lại mỗi lần.
+  const [companySlug, setCompanySlug] = useState(() => {
+    try { return localStorage.getItem('hl_erp_last_company_slug') || 'hoanglong'; } catch { return 'hoanglong'; }
+  });
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -65,11 +74,12 @@ export default function Login({
     setError(null);
     setSuccessMsg(null);
 
+    const cleanCompanySlug = companySlug.trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
     const cleanPassword = password.trim();
 
-    if (!cleanUsername || !cleanPassword) {
-      setError('Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!');
+    if (!cleanCompanySlug || !cleanUsername || !cleanPassword) {
+      setError('Vui lòng nhập đầy đủ mã công ty, tên đăng nhập và mật khẩu!');
       return;
     }
 
@@ -82,12 +92,12 @@ export default function Login({
       // trên trình duyệt như trước (Login.tsx cũ tự đọc employees + bcrypt
       // tại chỗ), để không phải gửi password hash về trình duyệt, đồng thời
       // để server ký kèm JWT chứa company_id (Giai đoạn 2 — chuẩn bị cho RLS
-      // multi-tenant ở Giai đoạn 3). subdomain: chưa có domain riêng (Giai
-      // đoạn 7 sẽ làm), tạm không truyền — server tự mặc định về công ty gốc.
+      // multi-tenant ở Giai đoạn 3). subdomain: Giai đoạn 7 — chưa có domain
+      // riêng nên dùng "Mã công ty" người dùng tự nhập thay cho subdomain thật.
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: cleanUsername, password: cleanPassword }),
+        body: JSON.stringify({ username: cleanUsername, password: cleanPassword, subdomain: cleanCompanySlug }),
       });
       const body = await res.json().catch(() => ({}));
 
@@ -97,6 +107,7 @@ export default function Login({
       }
 
       const { token, employee } = body as { token: string; employee: Employee };
+      try { localStorage.setItem('hl_erp_last_company_slug', cleanCompanySlug); } catch {}
       // Gắn JWT vào Supabase client NGAY — mọi request kể từ giờ (kể cả tải
       // dữ liệu ngay sau khi đăng nhập) đều gửi kèm company_id. persist=
       // autoLogin, đúng quy ước đã dùng cho hl_erp_active_session bên dưới
@@ -176,7 +187,26 @@ export default function Login({
 
         {/* Main form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          
+
+          {/* Mã công ty (Giai đoạn 7 — thay cho subdomain thật khi chưa có domain riêng) */}
+          <div className="space-y-1">
+            <label className="block text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+              Mã công ty
+            </label>
+            <div className="relative">
+              <input
+                id="login_company_slug_input"
+                type="text"
+                placeholder="Ví dụ: hoanglong"
+                value={companySlug}
+                onChange={(e) => setCompanySlug(e.target.value)}
+                className={`w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 pl-10 text-xs text-white outline-none placeholder-slate-600 transition-all font-bold ${accentBorderClass}`}
+                required
+              />
+              <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
+            </div>
+          </div>
+
           {/* Username */}
           <div className="space-y-1">
             <label className="block text-[11px] text-slate-400 font-bold uppercase tracking-wider">

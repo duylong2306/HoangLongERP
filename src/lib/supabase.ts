@@ -53,6 +53,15 @@ export function getCurrentCompanyId(): string | null {
 }
 
 /**
+ * JWT thô của phiên đang đăng nhập — dùng khi cần tự gọi 1 API server riêng
+ * (không qua supabase-js client), ví dụ api/admin-companies.ts (Giai đoạn 7)
+ * cần Authorization: Bearer <token> để server tự xác minh quyền quản trị.
+ */
+export function getCurrentAccessToken(): string | null {
+  return currentConfig.accessToken || readStoredAccessToken();
+}
+
+/**
  * Giai đoạn 6 (multi-tenant): gắn thêm company_id vào tên key localStorage
  * cho các key LƯU DỮ LIỆU NGHIỆP VỤ (khách hàng, dự án, hoá đơn, cấu hình
  * công ty...). Trước Phase 7 (routing theo subdomain), nhiều công ty vẫn có

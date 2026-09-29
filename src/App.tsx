@@ -64,6 +64,7 @@ import Login from './components/Login';
 import UserProfileModal from './components/UserProfileModal';
 import MessagesView from './components/MessagesView';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
+import CompanyManagement from './components/CompanyManagement';
 
 // ICONS
 import { 
@@ -108,7 +109,8 @@ import {
   Menu,
   RefreshCw,
   Calendar,
-  ArrowLeft
+  ArrowLeft,
+  Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
@@ -3151,6 +3153,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     children.forEach(child => { childParentMap[child] = parent; });
   }
 
+  // Giai đoạn 7 (multi-tenant): "Quản Lý Doanh Nghiệp" (tạo công ty mới) chỉ
+  // dành cho admin của công ty CHỦ NỀN TẢNG (Hoàng Long, id seed ở migration
+  // 20260928_multi_tenant_company_id.sql) — quyết định phạm vi đã xác nhận
+  // với chủ dự án khi lên kế hoạch, không mở cho admin của MỌI công ty. Chỉ
+  // gate UI ở đây (ẩn/hiện menu) — quyền THẬT được api/admin-companies.ts tự
+  // kiểm tra lại ở server bằng JWT, không tin riêng điều kiện phía client này.
+  const PLATFORM_OWNER_COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+  const isPlatformOwnerAdmin = !!currentUser
+    && getCurrentCompanyId() === PLATFORM_OWNER_COMPANY_ID
+    && isRoleAdmin(currentUser.id);
+
   const isAccessible = (tab: string): boolean => {
     if (!currentUser) return false;
     if (currentUser.username === 'admin') return true;
@@ -3721,6 +3734,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                       <button onClick={() => { setActiveTab('display-settings'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center px-2 py-2 mt-1 rounded-lg cursor-pointer transition-colors ${activeTab === 'display-settings' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
                         <Palette className="w-5 h-5 shrink-0 text-fuchsia-500 mr-2 transition duration-75" />
                         Cấu Hình Giao Diện
+                      </button>
+                    )}
+                    {isPlatformOwnerAdmin && (
+                      <button onClick={() => { setActiveTab('company-management'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center px-2 py-2 mt-1 rounded-lg cursor-pointer transition-colors ${activeTab === 'company-management' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+                        <Building2 className="w-5 h-5 shrink-0 text-blue-500 mr-2 transition duration-75" />
+                        Quản Lý Doanh Nghiệp
                       </button>
                     )}
                   </li>
@@ -4363,6 +4382,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           {activeTab === 'display-settings' && (
             <div className="space-y-6 animate-fadeIn p-4 md:p-6">
               <DisplaySettingsPage />
+            </div>
+          )}
+
+          {/* TAB: QUẢN LÝ DOANH NGHIỆP (Giai đoạn 7 — multi-tenant, chỉ admin công ty chủ nền tảng) */}
+          {activeTab === 'company-management' && isPlatformOwnerAdmin && (
+            <div className="space-y-6 animate-fadeIn p-4 md:p-6">
+              <CompanyManagement />
             </div>
           )}
 
