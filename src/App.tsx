@@ -4574,17 +4574,22 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                     <button
                       type="button"
                       onClick={async () => {
+                        // Multi-tenant: KHÔNG dùng dữ liệu thật của Hoàng Long làm fallback
+                        // khi để trống — trước đây nếu công ty khác bấm lưu mà bỏ trống 1
+                        // trường, tên/MST/SĐT/bank thật của Hoàng Long bị ghi thẳng vào
+                        // business_profile của CHÍNH công ty đó (phát hiện qua rà soát rò
+                        // rỉ 2026-09-30, cùng đợt với lỗi default businessInfo).
                         const updated = {
-                          companyName: editCorpName.trim() || 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
-                          taxCode: editCorpTax.trim() || '5801456789',
-                          representative: editCorpRep.trim() || 'Trương Hữu Long',
-                          phone: editCorpPhone.trim() || '0988.123.456',
-                          email: editCorpEmail.trim() || 'contact@hoanglonglamdong.vn',
-                          address: editCorpAddr.trim() || 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
-                          foundingYear: editCorpFounding.trim() || '2016',
-                          businessSector: editCorpSector.trim() || 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
-                          bankInfo: editCorpBank.trim() || '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
-                          scale: editCorpScale.trim() || 'Hơn 150 kỹ sư & thợ lành nghề'
+                          companyName: editCorpName.trim(),
+                          taxCode: editCorpTax.trim(),
+                          representative: editCorpRep.trim(),
+                          phone: editCorpPhone.trim(),
+                          email: editCorpEmail.trim(),
+                          address: editCorpAddr.trim(),
+                          foundingYear: editCorpFounding.trim(),
+                          businessSector: editCorpSector.trim(),
+                          bankInfo: editCorpBank.trim(),
+                          scale: editCorpScale.trim()
                         };
                         setBusinessInfo(updated);
                         // Trước đây bấm nút này luôn hiện alert "thành công" ngay lập tức dù
