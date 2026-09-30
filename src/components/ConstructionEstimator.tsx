@@ -724,12 +724,16 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
 
   // Save states reactively to sessionStorage for takeoff or integration
   useEffect(() => {
+    // Báo giá cũ nạp qua loadedQuote có thể mang giá trị null cho các trường số này
+    // (vd báo giá lập qua luồng Bóc Tách, không đi qua luồng "tính theo loại nhà" nên
+    // chieuDai/chieuRong/... chưa từng được nhập) — String(x ?? 0) thay cho x.toString()
+    // để không crash "Cannot read properties of null (reading 'toString')" khi bấm Sửa.
     sessionStorage.setItem('hl_construction_house_type', selectedHouseType);
-    sessionStorage.setItem('hl_construction_chieu_dai', chieuDai.toString());
-    sessionStorage.setItem('hl_construction_chieu_rong', chieuRong.toString());
-    sessionStorage.setItem('hl_construction_so_tang', soTang.toString());
-    sessionStorage.setItem('hl_construction_don_gia', donGiaKhaiToan.toString());
-    sessionStorage.setItem('hl_construction_ngan_sach', nganSachNoiThat.toString());
+    sessionStorage.setItem('hl_construction_chieu_dai', String(chieuDai ?? 0));
+    sessionStorage.setItem('hl_construction_chieu_rong', String(chieuRong ?? 0));
+    sessionStorage.setItem('hl_construction_so_tang', String(soTang ?? 0));
+    sessionStorage.setItem('hl_construction_don_gia', String(donGiaKhaiToan ?? 0));
+    sessionStorage.setItem('hl_construction_ngan_sach', String(nganSachNoiThat ?? 0));
     sessionStorage.setItem('hl_construction_items', JSON.stringify(quoteItems));
     sessionStorage.setItem('hl_construction_notes', quoteNotes);
     sessionStorage.setItem('hl_construction_payment_terms', paymentTerms);
@@ -778,12 +782,16 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
   // Load quote details reactively when loadedQuote changes from Quick Search
   useEffect(() => {
     if (loadedQuote) {
-      if (loadedQuote.chieuDai !== undefined) setChieuDai(loadedQuote.chieuDai);
-      if (loadedQuote.chieuRong !== undefined) setChieuRong(loadedQuote.chieuRong);
-      if (loadedQuote.soTang !== undefined) setSoTang(loadedQuote.soTang);
+      // ?? 0 thay vì gán thẳng: báo giá lập qua luồng Bóc Tách (không có
+      // selectedHouseType) lưu các trường này = null, gán null thẳng vào state
+      // số gây crash ở nơi khác gọi .toString() trên state đó (xem sessionStorage
+      // effect bên dưới) khi mở lại để Sửa.
+      if (loadedQuote.chieuDai !== undefined) setChieuDai(loadedQuote.chieuDai ?? 0);
+      if (loadedQuote.chieuRong !== undefined) setChieuRong(loadedQuote.chieuRong ?? 0);
+      if (loadedQuote.soTang !== undefined) setSoTang(loadedQuote.soTang ?? 0);
       if (loadedQuote.selectedHouseType) setSelectedHouseType(loadedQuote.selectedHouseType);
-      if (loadedQuote.donGiaKhaiToan !== undefined) setDonGiaKhaiToan(loadedQuote.donGiaKhaiToan);
-      if (loadedQuote.nganSachNoiThat !== undefined) setNganSachNoiThat(loadedQuote.nganSachNoiThat);
+      if (loadedQuote.donGiaKhaiToan !== undefined) setDonGiaKhaiToan(loadedQuote.donGiaKhaiToan ?? 0);
+      if (loadedQuote.nganSachNoiThat !== undefined) setNganSachNoiThat(loadedQuote.nganSachNoiThat ?? 0);
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
       if (loadedQuote.notes) setQuoteNotes(loadedQuote.notes);
       if (loadedQuote.paymentTerms) setPaymentTerms(loadedQuote.paymentTerms);

@@ -115,9 +115,20 @@ interface QuotationTableSheetProps {
 
 export default function QuotationTableSheet({ quoteData, initialTab, onApproved }: QuotationTableSheetProps) {
   const { addToast } = useNotification();
+  // Báo giá Xây dựng lập qua luồng Bóc Tách (không đi qua luồng "tính theo loại
+  // nhà" nên không có selectedHouseType) trước đây bị rơi nhầm vào giao diện
+  // Nội Thất mặc định (chỉ phân biệt house-type vs mechanical vs còn lại) — phát
+  // hiện qua báo cáo thực tế 2026-09-30 (báo giá BGXD-2026-762 hiện sai thành
+  // "BẢNG BÁO GIÁ NỘI THẤT"). Dùng cờ này để nhận đúng sector construction ở
+  // mọi nhánh còn lại (title/bảng hạng mục) thay vì chỉ dựa vào selectedHouseType.
+  const isGenericConstructionQuote = quoteData.sector === 'construction' && !quoteData.selectedHouseType;
   // If items list is missing, we try to create an item list from fallback or text content parsed
-  let items = quoteData.items || [];
-  
+  // finalItems: luồng "Bóc Tách → Chốt báo giá cuối" (ConstructionFinalQuote.tsx) lưu hạng mục
+  // vào field NÀY, không phải `items` — thiếu bước này khiến báo giá xây dựng đã bóc tách xong
+  // vẫn hiện rỗng khi xem lại (phát hiện qua báo cáo thực tế 2026-09-30: báo giá BGXD-2026-762
+  // có 17 dòng takeoffRows nhưng items rỗng, bị rơi vào fallback giả bên dưới).
+  let items = quoteData.items?.length ? quoteData.items : (quoteData.finalItems || []);
+
   if (items.length === 0 && quoteData.content) {
     // Attempt simple parsing of plaintext context if items is empty
     const lines = quoteData.content.split('\n');
@@ -156,20 +167,10 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
     }
   }
 
-  // Backup data if items list is still empty
-  if (items.length === 0) {
-    items = [
-      {
-        id: '1',
-        productName: 'Hệ tủ bếp gỗ cao cấp',
-        qty: 1,
-        material: 'Ván MDF chịu ẩm Ba Thanh phủ Melamine',
-        unit: 'Bộ',
-        unitPrice: quoteData.totalAmount || 15000000,
-        totalPrice: quoteData.totalAmount || 15000000,
-      }
-    ];
-  }
+  // Trước đây khi không tìm được hạng mục nào (items/finalItems/content) thì tự bịa 1 dòng
+  // "Hệ tủ bếp gỗ cao cấp" làm dữ liệu giả — khiến báo giá thật chưa/không có hạng mục hiện ra
+  // y như đã có nội dung, có thể bị in/gửi nhầm cho khách. Bỏ hẳn, để bảng hạng mục trống thật
+  // (UI bảng hạng mục bên dưới tự xử lý mảng rỗng, không cần hàng giả để tránh lỗi hiển thị).
 
   // Financial values
   const itemsTotal = items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
@@ -805,11 +806,13 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
       {/* 2. TITLE GRID: BẢNG BÁO GIÁ */}
       <div className="bg-[#00a651] py-2.5 px-4 mb-4 text-center rounded-md">
         <h2 className="text-lg font-black text-white uppercase tracking-widest m-0 font-sans">
-          {quoteData.selectedHouseType 
-            ? "BẢNG PHÂN BỔ KINH PHÍ & KHÁI TOÁN XÂY DỰNG" 
+          {quoteData.selectedHouseType
+            ? "BẢNG PHÂN BỔ KINH PHÍ & KHÁI TOÁN XÂY DỰNG"
             : quoteData.sector === 'mechanical'
               ? "BẢNG QUYẾT TOÁN CHI ĐỘNG CƠ KHÍ & GIA CÔNG"
-              : "BẢNG BÁO GIÁ NỘI THẤT CHI TIẾT"}
+              : isGenericConstructionQuote
+                ? "BẢNG BÁO GIÁ THI CÔNG XÂY DỰNG CHI TIẾT"
+                : "BẢNG BÁO GIÁ NỘI THẤT CHI TIẾT"}
         </h2>
       </div>
 
