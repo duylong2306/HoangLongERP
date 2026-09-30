@@ -994,7 +994,11 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
               // Build dynamic spec based on dimensions or predefined format
               const hasDimensions = item.width || item.height || item.depth;
               const unitVal = item.unit || 'm';
-              const unitPriceVal = item.unitPrice || Math.round(item.totalPrice / (item.qty || 1)) || 0;
+              // item.price/item.name: field cũ của finalItems (luồng Bóc Tách → Chốt báo
+              // giá cuối, xem takeoffToFinalItems() trong lib/takeoffCalc.ts) — báo giá đã
+              // chốt TRƯỚC khi hàm đó được bổ sung productName/unitPrice/totalPrice chỉ có
+              // 2 field cũ này, fallback qua đây để vẫn hiện đúng thay vì 0/rỗng.
+              const unitPriceVal = item.unitPrice || item.price || Math.round(item.totalPrice / (item.qty || 1)) || 0;
               const totalPriceVal = item.totalPrice || (unitPriceVal * (item.qty || 1)) || 0;
 
               return (
@@ -1110,7 +1114,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
 
                       {/* Tên sản phẩm */}
                       <td className="p-3 border border-black font-bold text-slate-900 leading-normal text-left">
-                        {item.productName}
+                        {item.productName || item.name}
                       </td>
 
                       {/* Hình ảnh */}
