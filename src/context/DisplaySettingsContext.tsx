@@ -47,6 +47,23 @@ export const DisplaySettingsProvider = ({ children }: { children: ReactNode }) =
     localStorage.setItem(companyScopedKey('hl_display_settings'), JSON.stringify(displaySettings));
   }, [displaySettings]);
 
+  // Đăng nhập company khác KHÔNG tự reload trang (chỉ đăng xuất mới reload —
+  // xem handleLogout ở App.tsx), nên state ở trên (đọc 1 lần lúc mount, khi
+  // CHƯA có company_id) vẫn treo giá trị cũ dù key đã đổi sang company mới.
+  // 'hl-supabase-client-ready' bắn ra mỗi khi setAuthToken() chạy xong sau
+  // đăng nhập (xem initializeSupabase() ở lib/supabase.ts) — nghe sự kiện này
+  // để đọc lại đúng key theo company vừa đăng nhập, thay vì treo dữ liệu công
+  // ty trước đó (phát hiện qua test thực tế: đăng xuất Hoàng Long → đăng nhập
+  // công ty test khác, sidebar vẫn hiện brandName/brandSlogan của Hoàng Long).
+  useEffect(() => {
+    const resync = () => {
+      const saved = localStorage.getItem(companyScopedKey('hl_display_settings'));
+      setDisplaySettings(saved ? JSON.parse(saved) : DEFAULT_DISPLAY_SETTINGS);
+    };
+    window.addEventListener('hl-supabase-client-ready', resync);
+    return () => window.removeEventListener('hl-supabase-client-ready', resync);
+  }, []);
+
   return (
     <DisplaySettingsContext.Provider value={{ displaySettings, setDisplaySettings }}>
       {children}

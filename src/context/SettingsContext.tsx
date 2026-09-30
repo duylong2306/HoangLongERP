@@ -235,6 +235,21 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(companyScopedKey('hl_display_settings'), JSON.stringify(displaySettings));
   }, [displaySettings]);
 
+  // Đăng nhập company khác không tự reload trang (chỉ đăng xuất mới reload) —
+  // state đọc 1 lần lúc mount (trước khi có company_id) sẽ treo dữ liệu cũ.
+  // Nghe 'hl-supabase-client-ready' (bắn sau khi setAuthToken() chạy xong,
+  // xem lib/supabase.ts) để đọc lại đúng key theo company vừa đăng nhập.
+  useEffect(() => {
+    const resync = () => {
+      try {
+        const saved = localStorage.getItem(companyScopedKey('hl_display_settings'));
+        setDisplaySettings(saved ? { ...DEFAULT_DISPLAY_SETTINGS, ...JSON.parse(saved) } : DEFAULT_DISPLAY_SETTINGS);
+      } catch {} /* eslint-disable-line no-empty */
+    };
+    window.addEventListener('hl-supabase-client-ready', resync);
+    return () => window.removeEventListener('hl-supabase-client-ready', resync);
+  }, []);
+
   const updateDisplaySettings = useCallback((updates: Partial<DisplaySettings>) => {
     setDisplaySettings(prev => ({ ...prev, ...updates }));
   }, []);
@@ -260,6 +275,26 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setBusinessInfo(profile);
       try { localStorage.setItem(companyScopedKey('hl_business_info'), JSON.stringify(profile)); } catch {} /* eslint-disable-line no-empty */
     }).catch(() => {});
+  }, []);
+
+  // Cùng lý do resync ở displaySettings phía trên: đăng nhập company khác mà
+  // không reload trang thì effect [] ở trên (chạy 1 lần lúc mount, trước khi
+  // có company_id) không tự chạy lại — businessInfo (dùng để in hợp đồng/
+  // phiếu/báo giá) có thể treo dữ liệu công ty trước đó. Nghe
+  // 'hl-supabase-client-ready' để tải lại đúng company vừa đăng nhập.
+  useEffect(() => {
+    const resync = () => {
+      dbService.businessProfile.get().then(profile => {
+        setBusinessInfo(profile || DEFAULT_BUSINESS_INFO);
+        try {
+          const key = companyScopedKey('hl_business_info');
+          if (profile) localStorage.setItem(key, JSON.stringify(profile));
+          else localStorage.removeItem(key);
+        } catch {} /* eslint-disable-line no-empty */
+      }).catch(() => {});
+    };
+    window.addEventListener('hl-supabase-client-ready', resync);
+    return () => window.removeEventListener('hl-supabase-client-ready', resync);
   }, []);
 
   // ── HRM Config ──
