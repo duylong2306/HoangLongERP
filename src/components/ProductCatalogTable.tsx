@@ -428,19 +428,25 @@ export default function ProductCatalogTable({ searchTerm }: ProductCatalogTableP
   const canEdit = hasModulePermission(currentUser?.id, 'quotes', 'edit');
   const canDelete = hasModulePermission(currentUser?.id, 'quotes', 'delete');
   const denyToast = (action: string) => addToast({ title: '⛔ Không đủ quyền', message: `Bạn không có quyền "${action}" ở phân hệ Danh Mục Sản Phẩm.`, type: 'warning' });
-  const [products, setProducts] = useState<ProductCatalogItem[]>(() => INITIAL_PRODUCTS);
+  // Multi-tenant: KHÔNG khởi tạo bằng INITIAL_PRODUCTS/PRICES/MATERIALS (dữ
+  // liệu mẫu hard-code) nữa — trước đây dùng làm giá trị "hiện tạm trước khi
+  // tải xong", nhưng công ty MỚI có bảng Supabase rỗng thì effect bên dưới
+  // (chỉ ghi đè khi cloud trả về length > 0) không bao giờ xoá state mẫu này
+  // đi, khiến 31 sản phẩm demo (Tủ bếp Acrylic, giá cụ thể...) hiện VĨNH VIỄN
+  // như catalog thật — công ty mới có thể nhầm dùng để báo giá cho khách
+  // (phát hiện qua rà soát rò rỉ multi-tenant 2026-09-30). Bắt đầu bằng mảng
+  // rỗng để công ty chưa nhập gì thấy đúng danh mục trống.
+  const [products, setProducts] = useState<ProductCatalogItem[]>(() => []);
 
-  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => INITIAL_PRICES);
+  const [pricesList, setPricesList] = useState<ProductPriceItem[]>(() => []);
 
-  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => INITIAL_MATERIALS);
+  const [materialsList, setMaterialsList] = useState<ProductMaterialItem[]>(() => []);
 
   // Cờ chặn "tự lưu lại toàn bộ danh mục lên Supabase ngay khi vừa tải xong":
-  // products/pricesList/materialsList khởi tạo bằng dữ liệu MẪU hard-code
-  // (INITIAL_PRODUCTS/PRICES/MATERIALS) — nếu không chặn, effect sync bên dưới
-  // chạy ngay ở lần render ĐẦU TIÊN (với dữ liệu mẫu) rồi LẦN NỮA khi
-  // setState(cloudData) thật xong, ghi đè lại TOÀN BỘ danh mục lên Supabase 2
-  // lần mỗi khi mở tab này — không phải do người dùng sửa gì. Bắt đầu = true
-  // để chặn luôn cả lần render với dữ liệu mẫu, tắt sau khi có dữ liệu thật.
+  // effect sync bên dưới chạy ngay ở lần render ĐẦU TIÊN rồi LẦN NỮA khi
+  // setState(cloudData) thật xong, có thể ghi đè lại TOÀN BỘ danh mục lên
+  // Supabase 2 lần mỗi khi mở tab này — không phải do người dùng sửa gì.
+  // Bắt đầu = true để chặn luôn lần render đầu, tắt sau khi có dữ liệu thật.
   const isSyncingProductsFromCloud = useRef(true);
   const isSyncingPricesFromCloud = useRef(true);
   const isSyncingMaterialsFromCloud = useRef(true);

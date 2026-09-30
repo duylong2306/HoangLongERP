@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { QuoteConfig, QuoteItem, ProductGroup, Quote, ArchivedQuote, ProductCatalogItem } from '../types';
 import { useNotification, hasModulePermission } from '../context';
 import { DEFAULT_QUOTE_CONFIG } from '../data';
-import { INITIAL_PRODUCTS } from './ProductCatalogTable';
 import { Plus, Trash2, Sliders, Calculator, FileSpreadsheet, FileText, CheckCircle2, DollarSign, Search, Send, Printer, AlertTriangle, Save, Edit, Check, XCircle, Download, Share2 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
@@ -1123,22 +1122,12 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
       })
       .catch(err => console.warn('Lỗi tải danh mục sản phẩm từ Supabase:', err))
       .finally(() => {
-        if (!Array.isArray(loadedProducts) || loadedProducts.length === 0) {
-          loadedProducts = INITIAL_PRODUCTS;
-        } else {
-          // Merge defaults if missing
-          const hasConst = loadedProducts.some(p => p.linhVuc === 'Xây dựng');
-          const hasMech = loadedProducts.some(p => p.linhVuc === 'Cơ khí');
-          if (!hasConst || !hasMech) {
-            const merged = [...loadedProducts];
-            INITIAL_PRODUCTS.forEach(item => {
-              if (!merged.some(m => m.id === item.id)) {
-                merged.push(item);
-              }
-            });
-            loadedProducts = merged;
-          }
-        }
+        // Multi-tenant: KHÔNG còn tự chèn INITIAL_PRODUCTS (31 sản phẩm mẫu
+        // hard-code) khi catalog rỗng hoặc thiếu lĩnh vực — trước đây làm vậy
+        // khiến công ty mới (catalog thật sự trống) thấy sản phẩm mẫu với giá
+        // cụ thể như thể là catalog đã có, dễ nhầm dùng báo giá cho khách
+        // thật (phát hiện qua rà soát rò rỉ multi-tenant 2026-09-30). Giờ
+        // catalog trống thì hiện đúng trống.
         const domainProducts = loadedProducts.filter(p => p.linhVuc === 'Xây dựng');
         setCatalogProducts(domainProducts);
       });
