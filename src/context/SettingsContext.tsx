@@ -66,17 +66,21 @@ const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
 
 // Dùng làm giá trị hiện tạm thời (trước khi tải xong từ Supabase) cho bản sao
 // CHỈ ĐỌC của businessInfo trong context này (xem ghi chú tại nơi khai báo state).
+// Multi-tenant: công ty MỚI chưa từng lưu hồ sơ sẽ giữ NGUYÊN giá trị này
+// vĩnh viễn (Supabase trả rỗng, không có gì ghi đè) — KHÔNG để dữ liệu thật
+// của Hoàng Long (MST, SĐT, số tài khoản ngân hàng) ở đây vì sẽ lộ sang mọi
+// công ty khác (đồng bộ với default tương ứng ở App.tsx).
 const DEFAULT_BUSINESS_INFO: BusinessInfo = {
-  companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
-  taxCode: '5801456789',
-  representative: 'Trương Hữu Long',
-  phone: '0988.123.456',
-  email: 'contact@hoanglonglamdong.vn',
-  address: 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
-  foundingYear: '2016',
-  businessSector: 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
-  bankInfo: '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
-  scale: 'Hơn 150 kỹ sư & thợ lành nghề',
+  companyName: 'Tên Công Ty Của Bạn',
+  taxCode: '',
+  representative: '',
+  phone: '',
+  email: '',
+  address: '',
+  foundingYear: '',
+  businessSector: '',
+  bankInfo: '',
+  scale: '',
 };
 
 const DEFAULT_HRM_CONFIG: HrmConfig = {

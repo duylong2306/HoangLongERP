@@ -549,17 +549,27 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     displaySettings.primaryAccent === 'rose' ? 'bg-slate-800 text-rose-400 border-rose-500/20 font-bold' : 'bg-slate-800 text-violet-400 border-violet-500/20 font-bold';
 
   // 3. Hồ sơ doanh nghiệp (nguồn: Supabase)
+  // Multi-tenant: giá trị khởi tạo CHỈ hiện tạm 1 nhịp trước khi cloud load
+  // xong (xem `if (cloudData.business_profile?.[0])` bên dưới) — với công ty
+  // MỚI chưa từng lưu hồ sơ, cloud trả về rỗng nên state giữ NGUYÊN giá trị
+  // này VĨNH VIỄN (không có gì ghi đè), hiện thẳng ra sidebar + mọi hợp đồng/
+  // phiếu/báo giá in ra. Trước đây để cứng thông tin thật của Hoàng Long (MST,
+  // SĐT, số tài khoản ngân hàng) ở đây → mọi công ty mới tạo chưa kịp tự cấu
+  // hình "Hồ Sơ Thông Tin Doanh Nghiệp" sẽ lộ thẳng dữ liệu thật của Hoàng
+  // Long (phát hiện qua test thực tế 2026-09-30, tạo công ty test mới thấy
+  // sidebar hiện "HOÀNG LONG"). Đổi thành placeholder trung lập, không gắn
+  // với công ty cụ thể nào.
   const [businessInfo, setBusinessInfo] = useState({
-    companyName: 'CÔNG TY TNHH LÂM NGHIỆP & XÂY DỰNG HOÀNG LONG',
-    taxCode: '5801456789',
-    representative: 'Trương Hữu Long',
-    phone: '0988.123.456',
-    email: 'contact@hoanglonglamdong.vn',
-    address: 'Số 120 Đường Trần Phú, Phường 2, TP. Bảo Lộc, Lâm Đồng',
-    foundingYear: '2016',
-    businessSector: 'Xây dựng dân dụng, sản xuất và thi công nội thất mộc cabinet, gia công cơ khí cấu kiện thép',
-    bankInfo: '1023456789 - Vietcombank Chi nhánh Bảo Lộc',
-    scale: 'Hơn 150 kỹ sư & thợ lành nghề'
+    companyName: 'Tên Công Ty Của Bạn',
+    taxCode: '',
+    representative: '',
+    phone: '',
+    email: '',
+    address: '',
+    foundingYear: '',
+    businessSector: '',
+    bankInfo: '',
+    scale: ''
   });
 
   const isBusinessInfoInitRef = React.useRef(true);
