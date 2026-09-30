@@ -43,3 +43,4 @@ scripts/to_router.cjs
 MIGRATION_PLAN_SUPABASE.md
 PROGRESS.md
 README_FIXES.md
+.vercel
