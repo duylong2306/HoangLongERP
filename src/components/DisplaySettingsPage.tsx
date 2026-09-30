@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Palette, Loader2, AlertCircle, CheckCircle, Eye, Type } from 'lucide-react';
 import { dbService } from '../lib/dbService';
+import { companyScopedKey } from '../lib/supabase';
 
 // Định nghĩa interface cho DisplaySettingsConfig
 interface DisplaySettingsConfig {
@@ -31,8 +32,11 @@ interface DisplaySettingsPageProps {
 }
 
 export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProps) {
+  // Multi-tenant: key cache PHẢI gắn company_id — key trần trước đây khiến
+  // brandName/brandSlogan công ty này lộ sang công ty khác (xem ghi chú ở
+  // DisplaySettingsContext.tsx, cùng loại lỗi).
   const [displaySettings, setDisplaySettings] = useState<DisplaySettingsConfig>(() => {
-    const saved = localStorage.getItem('hl_display_settings');
+    const saved = localStorage.getItem(companyScopedKey('hl_display_settings'));
     return saved ? JSON.parse(saved) : DEFAULT_DISPLAY_SETTINGS;
   });
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -62,14 +66,14 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
     dbService.displaySettings.get().then((settings) => {
       if (settings) {
         setDisplaySettings(prev => ({ ...prev, ...settings }));
-        localStorage.setItem('hl_display_settings', JSON.stringify(settings));
+        localStorage.setItem(companyScopedKey('hl_display_settings'), JSON.stringify(settings));
       }
     }).catch(e => console.error('Lỗi tải cài đặt hiển thị từ Supabase:', e));
   }, []);
 
   // Sync display settings to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
+    localStorage.setItem(companyScopedKey('hl_display_settings'), JSON.stringify(displaySettings));
   }, [displaySettings]);
 
   const handleSave = async () => {

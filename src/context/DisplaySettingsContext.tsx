@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { companyScopedKey } from '../lib/supabase';
 
 export interface DisplaySettingsConfig {
   primaryAccent: string;
@@ -28,14 +29,22 @@ interface DisplaySettingsContextType {
 const DisplaySettingsContext = createContext<DisplaySettingsContextType | undefined>(undefined);
 
 export const DisplaySettingsProvider = ({ children }: { children: ReactNode }) => {
+  // Multi-tenant: key localStorage PHẢI gắn company_id (companyScopedKey) —
+  // trước đây dùng thẳng 'hl_display_settings' (không gắn), nên brandName/
+  // brandSlogan (tên thương hiệu tuỳ biến, xem DisplaySettingsPage.tsx) của
+  // công ty A lưu 1 lần trên trình duyệt là HIỆN VĨNH VIỄN cho MỌI công ty
+  // khác đăng nhập sau đó trên cùng trình duyệt (context này chỉ đọc
+  // localStorage, không tự gọi Supabase để so khớp lại theo công ty đang
+  // đăng nhập). Phát hiện qua test thực tế 2026-09-30: công ty test mới tạo,
+  // chưa từng cấu hình gì, vẫn hiện brandName/brandSlogan cũ của Hoàng Long.
   const [displaySettings, setDisplaySettings] = useState<DisplaySettingsConfig>(() => {
-    const saved = localStorage.getItem('hl_display_settings');
+    const saved = localStorage.getItem(companyScopedKey('hl_display_settings'));
     return saved ? JSON.parse(saved) : DEFAULT_DISPLAY_SETTINGS;
   });
 
   // Chỉ dùng localStorage — không gọi Supabase
   useEffect(() => {
-    localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
+    localStorage.setItem(companyScopedKey('hl_display_settings'), JSON.stringify(displaySettings));
   }, [displaySettings]);
 
   return (

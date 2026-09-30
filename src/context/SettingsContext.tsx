@@ -219,16 +219,20 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   // ── Display Settings ──
+  // Multi-tenant: gắn company_id vào key cache (companyScopedKey) — key trần
+  // trước đây khiến brandName/brandSlogan tuỳ biến của công ty này lộ sang
+  // công ty khác đăng nhập sau trên cùng trình duyệt (cùng lỗi với
+  // DisplaySettingsContext.tsx, xem ghi chú ở đó).
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(() => {
     try {
-      const saved = localStorage.getItem('hl_display_settings');
+      const saved = localStorage.getItem(companyScopedKey('hl_display_settings'));
       if (saved) return { ...DEFAULT_DISPLAY_SETTINGS, ...JSON.parse(saved) };
     } catch {} /* eslint-disable-line no-empty */
     return DEFAULT_DISPLAY_SETTINGS;
   });
 
   useEffect(() => {
-    localStorage.setItem('hl_display_settings', JSON.stringify(displaySettings));
+    localStorage.setItem(companyScopedKey('hl_display_settings'), JSON.stringify(displaySettings));
   }, [displaySettings]);
 
   const updateDisplaySettings = useCallback((updates: Partial<DisplaySettings>) => {
