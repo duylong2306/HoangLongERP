@@ -2376,6 +2376,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       message: 'Hẹn gặp lại bạn ở những phiên làm việc tiếp theo.',
       type: 'info'
     });
+    // Multi-tenant: setCurrentUser(null) ở trên KHÔNG xoá các state dữ liệu
+    // nghiệp vụ khác (projects/tasks/receipts/payments/employees/customers/...)
+    // — chúng vẫn còn nguyên trong bộ nhớ React cho tới khi effect tải dữ liệu
+    // mới ghi đè xong. Nếu đăng nhập công ty KHÁC ngay sau đó mà không F5,
+    // người dùng có thể thoáng thấy số liệu của công ty cũ (phát hiện qua test
+    // thực tế 2026-09-30: Dashboard Tổng Hợp hiện đúng số liệu Hoàng Long dù
+    // đã đăng nhập công ty mới, biến mất sau khi tải lại trang — xác nhận đây
+    // là state cũ chưa được dọn, KHÔNG phải rò rỉ qua API/DB, RLS vẫn chặn
+    // đúng). Tải lại toàn bộ trang là cách chắc chắn nhất xoá sạch mọi state.
+    setTimeout(() => window.location.reload(), 400);
   };
 
   // Bộ xử lý cập nhật thông tin hồ sơ cá nhân
