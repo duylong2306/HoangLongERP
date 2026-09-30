@@ -810,13 +810,18 @@ export default function QuotationSystem({
   const [quoteItems, setQuoteItems] = useState<QuoteItem[]>([]);
 
   // Keep sessionStorage in sync so that other tabs/sub-components can read them
+  // Báo giá cũ lập qua luồng Bóc Tách có thể mang giá trị null cho các trường
+  // số này — String(x ?? 0) thay cho x.toString() để không crash "Cannot read
+  // properties of null (reading 'toString')" khi bấm Sửa (cùng lỗi/cùng fix đã
+  // áp dụng ở ConstructionEstimator.tsx — đây là bản sao state được lift lên
+  // component cha này).
   useEffect(() => {
     sessionStorage.setItem('hl_construction_house_type', selectedHouseType);
-    sessionStorage.setItem('hl_construction_chieu_dai', chieuDai.toString());
-    sessionStorage.setItem('hl_construction_chieu_rong', chieuRong.toString());
-    sessionStorage.setItem('hl_construction_so_tang', soTang.toString());
-    sessionStorage.setItem('hl_construction_don_gia', donGiaKhaiToan.toString());
-    sessionStorage.setItem('hl_construction_ngan_sach', nganSachNoiThat.toString());
+    sessionStorage.setItem('hl_construction_chieu_dai', String(chieuDai ?? 0));
+    sessionStorage.setItem('hl_construction_chieu_rong', String(chieuRong ?? 0));
+    sessionStorage.setItem('hl_construction_so_tang', String(soTang ?? 0));
+    sessionStorage.setItem('hl_construction_don_gia', String(donGiaKhaiToan ?? 0));
+    sessionStorage.setItem('hl_construction_ngan_sach', String(nganSachNoiThat ?? 0));
     sessionStorage.setItem('hl_construction_items', JSON.stringify(quoteItems));
   }, [selectedHouseType, chieuDai, chieuRong, soTang, donGiaKhaiToan, nganSachNoiThat, quoteItems]);
 
@@ -836,12 +841,12 @@ export default function QuotationSystem({
       if (loadedQuote.projectId) setSelectedProjectId(loadedQuote.projectId);
       if (loadedQuote.customerId) setSelectedCustomerId(loadedQuote.customerId);
 
-      if (loadedQuote.chieuDai !== undefined) setChieuDai(loadedQuote.chieuDai);
-      if (loadedQuote.chieuRong !== undefined) setChieuRong(loadedQuote.chieuRong);
-      if (loadedQuote.soTang !== undefined) setSoTang(loadedQuote.soTang);
+      if (loadedQuote.chieuDai !== undefined) setChieuDai(loadedQuote.chieuDai ?? 0);
+      if (loadedQuote.chieuRong !== undefined) setChieuRong(loadedQuote.chieuRong ?? 0);
+      if (loadedQuote.soTang !== undefined) setSoTang(loadedQuote.soTang ?? 0);
       if (loadedQuote.selectedHouseType) setSelectedHouseType(loadedQuote.selectedHouseType);
-      if (loadedQuote.donGiaKhaiToan !== undefined) setDonGiaKhaiToan(loadedQuote.donGiaKhaiToan);
-      if (loadedQuote.nganSachNoiThat !== undefined) setNganSachNoiThat(loadedQuote.nganSachNoiThat);
+      if (loadedQuote.donGiaKhaiToan !== undefined) setDonGiaKhaiToan(loadedQuote.donGiaKhaiToan ?? 0);
+      if (loadedQuote.nganSachNoiThat !== undefined) setNganSachNoiThat(loadedQuote.nganSachNoiThat ?? 0);
       if (loadedQuote.items) setQuoteItems(loadedQuote.items);
 
       setIsConstructionSaved(true);
