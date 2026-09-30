@@ -269,9 +269,24 @@ export function buildFinalSummary(rawRows: any): { sections: FinalSummarySection
   return { sections: sections.filter(s => s.items.length > 0), totals };
 }
 
-/** Danh sách hạng mục dạng phẳng (category = tên phần, qty = KL, price = đơn giá) để hồ sơ/hợp đồng đọc lại. */
+/**
+ * Danh sách hạng mục dạng phẳng (category = tên phần, qty = KL, price = đơn giá) để hồ sơ/hợp đồng đọc lại.
+ *
+ * Kèm thêm productName/unitPrice/totalPrice (giữ nguyên name/price cũ, KHÔNG
+ * đổi tên — 2 chỗ gọi hàm này ở ConstructionFinalQuote.tsx lưu thẳng kết quả
+ * xuống cột finalItems) — QuotationTableSheet.tsx (bảng hiển thị chung cho cả
+ * 3 lĩnh vực Xây dựng/Nội thất/Cơ khí) đọc productName/material/unitPrice/
+ * totalPrice, KHÔNG đọc name/price, nên thiếu field này khiến "Chốt báo giá
+ * cuối" xong vẫn hiện bảng rỗng/toàn 0 khi xem lại (phát hiện qua báo cáo
+ * thực tế 2026-09-30: báo giá BGXD-2026-762 đã chốt đúng 6 hạng mục, tổng
+ * 1.315.459.569đ trong DB, nhưng màn hình hiện tên trống + đơn giá/thành
+ * tiền = 0).
+ */
 export function takeoffToFinalItems(rawRows: any) {
   return buildFinalSummary(rawRows).sections.flatMap(s =>
-    s.items.map(i => ({ id: `${s.id}_${i.stt}`, category: s.name, name: i.name, unit: i.unit, qty: i.kl, price: i.donGia, note: '' }))
+    s.items.map(i => ({
+      id: `${s.id}_${i.stt}`, category: s.name, name: i.name, unit: i.unit, qty: i.kl, price: i.donGia, note: '',
+      productName: i.name, unitPrice: i.donGia, totalPrice: i.thanhTien,
+    }))
   );
 }
