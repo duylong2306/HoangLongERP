@@ -2885,7 +2885,14 @@ export const dbService = {
     // gần với tên người dùng đã chọn, thay vì chỉ có mã mission + timestamp.
     const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_\-\.]/g, '_').slice(0, 60) || 'baocao';
     const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
-    const path = `${safeTask}/${safeMission}_${ts}_${baseName}.${ext}`;
+    // Multi-tenant: gắn company_id làm thư mục gốc — storage.objects RLS (xem
+    // migration storage_tenant_isolation) so khớp (storage.foldername(name))[1]
+    // với company_id trong JWT. Thiếu tiền tố này thì taskId/missionId (mã tự
+    // sinh, CÓ THỂ TRÙNG giữa các công ty như VT-001/SP001) khiến đường dẫn dễ
+    // đụng/đoán chéo công ty (phát hiện qua rà soát bảo mật 2026-10-01: LIST
+    // bucket công khai bằng anon key không cần đăng nhập vẫn trả 200).
+    const companyFolder = getCurrentCompanyId() || 'noco';
+    const path = `${companyFolder}/${safeTask}/${safeMission}_${ts}_${baseName}.${ext}`;
 
     const doUpload = async (): Promise<string> => {
       const { error } = await supabase.storage
@@ -2947,7 +2954,9 @@ export const dbService = {
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
     const safeProduct = String(productId || 'product').replace(/[^a-zA-Z0-9_-]/g, '_');
     const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
-    const path = `products/${safeProduct}_${ts}.${safeExt}`;
+    // Multi-tenant: gắn company_id làm thư mục gốc (xem ghi chú tại uploadMissionReportImage).
+    const companyFolder = getCurrentCompanyId() || 'noco';
+    const path = `${companyFolder}/products/${safeProduct}_${ts}.${safeExt}`;
 
     const doUpload = async (): Promise<string> => {
       const { error } = await supabase.storage
@@ -3007,7 +3016,9 @@ export const dbService = {
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
     const safeQuote = String(quoteId || 'quote').replace(/[^a-zA-Z0-9_-]/g, '_');
     const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
-    const path = `quotes/${safeQuote}_${ts}.${safeExt}`;
+    // Multi-tenant: gắn company_id làm thư mục gốc (xem ghi chú tại uploadMissionReportImage).
+    const companyFolder = getCurrentCompanyId() || 'noco';
+    const path = `${companyFolder}/quotes/${safeQuote}_${ts}.${safeExt}`;
 
     const doUpload = async (): Promise<string> => {
       const { error } = await supabase.storage
@@ -3076,7 +3087,9 @@ export const dbService = {
       const uuid = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
         ? crypto.randomUUID()
         : `a${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
-      const path = `attendance/${uuid}.${ext}`;
+      // Multi-tenant: gắn company_id làm thư mục gốc (xem ghi chú tại uploadMissionReportImage).
+      const companyFolder = getCurrentCompanyId() || 'noco';
+      const path = `${companyFolder}/attendance/${uuid}.${ext}`;
 
       const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
         contentType: mime,
@@ -3113,7 +3126,9 @@ export const dbService = {
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
     const safeEmp = String(empId || 'emp').replace(/[^a-zA-Z0-9_-]/g, '_');
     const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
-    const path = `${safeEmp}/${ts}.${safeExt}`;
+    // Multi-tenant: gắn company_id làm thư mục gốc (xem ghi chú tại uploadMissionReportImage).
+    const companyFolder = getCurrentCompanyId() || 'noco';
+    const path = `${companyFolder}/${safeEmp}/${ts}.${safeExt}`;
 
     const doUpload = async (): Promise<string> => {
       const { error } = await supabase.storage
