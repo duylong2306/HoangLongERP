@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Trash2, Save, Check, FileText, Printer, Edit, LayoutTemplate, X } from 'lucide-react';
 import { dbService } from '../lib/dbService';
+import { companyScopedKey } from '../lib/supabase';
 import { useNotification, hasModulePermission } from '../context';
 import QuotationTableSheet from './QuotationTableSheet';
 import {
@@ -135,8 +136,13 @@ export default function ConstructionTakeoff({
 
   // ===== MẪU BÓC TÁCH do người dùng tự tạo (lưu chung trên hệ thống, có bản dự phòng trong máy) =====
   const TEMPLATE_KEY = 'takeoff_templates';
+  // Multi-tenant: key cache PHẢI gắn company_id (companyScopedKey) — key trần
+  // trước đây khiến mẫu Bóc Tách của công ty này hiện cho công ty khác đăng
+  // nhập sau trên cùng trình duyệt, y hệt lỗi hl_display_settings đã vá
+  // (dbService.constructionNorms đã lưu đúng company_id ở Supabase — chỉ
+  // cache localStorage là chưa).
   const [templates, setTemplates] = useState<TakeoffTemplate[]>(() => {
-    try { return JSON.parse(localStorage.getItem('hl_' + TEMPLATE_KEY) || '[]'); } catch (e) { return []; }
+    try { return JSON.parse(localStorage.getItem(companyScopedKey('hl_' + TEMPLATE_KEY)) || '[]'); } catch (e) { return []; }
   });
   const [showTemplates, setShowTemplates] = useState(false);
   // Hộp xác nhận nằm trong ứng dụng, thay cho window.confirm (dễ bị trình duyệt chặn khiến nút không phản hồi)
@@ -153,7 +159,7 @@ export default function ConstructionTakeoff({
   // Ghi danh sách mẫu lên hệ thống + bản dự phòng cục bộ
   const persistTemplates = (list: TakeoffTemplate[]) => {
     setTemplates(list);
-    try { localStorage.setItem('hl_' + TEMPLATE_KEY, JSON.stringify(list)); } catch (e) { /* bỏ qua */ }
+    try { localStorage.setItem(companyScopedKey('hl_' + TEMPLATE_KEY), JSON.stringify(list)); } catch (e) { /* bỏ qua */ }
     dbService.constructionNorms.save(TEMPLATE_KEY, list).catch(() => {});
   };
 
