@@ -195,15 +195,33 @@ export const canDoTaskAction = (
 ): boolean => {
   if (!currentUser) return false;
 
-  // Admin/Director luôn được làm mọi action
-  if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
+  // "Nhận Việc" / "Hoàn thành" là hành động CỦA NGƯỜI ĐƯỢC GIAO — Admin/Director/Superadmin
+  // KHÔNG được ghi đè như các action quản lý khác. Trước đây họ thấy nút này trên MỌI công
+  // việc: bấm vào là việc của người khác chuyển "Đang làm" và nhật ký/chat ghi tên họ ("Trương
+  // Hữu Long đã Nhận Việc") dù người phụ trách vẫn là người cũ (xem rà soát 2026-10-03).
+  // getTaskRoleScope() trả 'director' TRƯỚC 'assignee' nên không dùng được cho 2 action này
+  // — phải so trực tiếp với assigneeId / mainAssigneeId của nhiệm vụ.
+  if (action === 'receiveTask' || action === 'completeTask') {
+    const allowed = matrix.actions[action] || [];
+    const isAssignee = task.assigneeId === currentUser.id;
+    const isMissionAssignee = !!task.missions?.some(m => m.mainAssigneeId === currentUser.id);
+    // Trả về luôn, KHÔNG rơi xuống khối roleGroupMatrix bên dưới: dữ liệu thật (bảng
+    // project_permissions) đã cấp receiveTask/completeTask cho role_superadmin và hầu hết
+    // các nhóm tùy chỉnh — để rơi xuống thì mọi nhân viên trong các nhóm đó lại nhận được
+    // việc của người khác như cũ.
+    return (isAssignee && allowed.includes('assignee')) ||
+           (isMissionAssignee && allowed.includes('missionAssignee'));
+  } else {
+    // Admin/Director luôn được làm mọi action
+    if (IS_ADMIN(currentUser.id) || IS_DIRECTOR(currentUser.id)) return true;
 
-  // Superadmin check (dự phòng cho user không trong role_admin nhưng là superadmin)
-  if (isUserInRoleGroup(currentUser.id, 'role_superadmin')) return true;
+    // Superadmin check (dự phòng cho user không trong role_admin nhưng là superadmin)
+    if (isUserInRoleGroup(currentUser.id, 'role_superadmin')) return true;
 
-  const roleScope = getTaskRoleScope(currentUser, task, project);
-  const allowedRoles = matrix.actions[action] || [];
-  if (allowedRoles.includes(roleScope)) return true;
+    const roleScope = getTaskRoleScope(currentUser, task, project);
+    const allowedRoles = matrix.actions[action] || [];
+    if (allowedRoles.includes(roleScope)) return true;
+  }
 
   // Kiểm tra roleGroupMatrix từ Quyền Dự Án (Hệ thống mới — tab "Vai trò nhóm HRM")
   // Cho phép HRM Role Group cấp quyền đặc biệt trong mọi task
