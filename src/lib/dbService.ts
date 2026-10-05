@@ -889,10 +889,29 @@ export const dbService = {
     async save(sector: string, columns: any[], columnWidth: number): Promise<void> {
       const sb = getSupabase();
       if (!sb) return;
+      // KHÔNG BAO GIỜ ghi mảng cột rỗng: bảng Kanban phải có ít nhất 1 cột. Sự cố thực tế
+      // 2026-10-05: cấu hình cột lĩnh vực Nội thất bị ghi `[]` (state `columns` còn rỗng lúc
+      // chưa tải xong mà người dùng bấm "Thu phóng") → app rơi về bộ cột mặc định, 12/17 dự án
+      // trỏ vào cột tùy chỉnh đã mất nên bị dồn về cột đầu, thẻ "nhảy lung tung".
+      if (!Array.isArray(columns) || columns.length === 0) {
+        console.warn(`kanbanColumns save: bỏ qua — danh sách cột của "${sector}" rỗng, không ghi đè cấu hình đã lưu.`);
+        return;
+      }
       try {
         const { error } = await sb.from('kanban_columns').upsert({ sector, columns, column_width: columnWidth });
         if (error) console.warn('kanbanColumns save error:', error.message);
       } catch (e) { console.warn('kanbanColumns save exception:', e); }
+    },
+    // Chỉ cập nhật độ rộng cột (nút/thanh "Thu phóng") — KHÔNG đụng tới `columns`. Trước đây
+    // thanh Thu phóng gọi save() kèm cả mảng `columns` đang có trong state (có thể rỗng hoặc là
+    // bộ cột mặc định do lỗi tải) nên ghi đè mất cấu hình cột thật chỉ vì đổi độ rộng.
+    async saveWidth(sector: string, columnWidth: number): Promise<void> {
+      const sb = getSupabase();
+      if (!sb) return;
+      try {
+        const { error } = await sb.from('kanban_columns').update({ column_width: columnWidth }).eq('sector', sector);
+        if (error) console.warn('kanbanColumns saveWidth error:', error.message);
+      } catch (e) { console.warn('kanbanColumns saveWidth exception:', e); }
     }
   },
 
