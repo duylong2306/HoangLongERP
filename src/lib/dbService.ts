@@ -818,7 +818,7 @@ export const dbService = {
       }));
     },
     async save(group: HrmRoleGroup): Promise<void> {
-      await saveSupabase('hrm_role_groups', group);
+      await saveSupabase('hrm_role_groups', group, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_role_groups', id);
@@ -831,7 +831,7 @@ export const dbService = {
       return querySupabase<HrmApprovalConfig>('hrm_approval_config', []);
     },
     async save(config: HrmApprovalConfig): Promise<void> {
-      await saveSupabase('hrm_approval_config', config);
+      await saveSupabase('hrm_approval_config', config, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_approval_config', id);
@@ -863,7 +863,10 @@ export const dbService = {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        const { error } = await supabase.from('hrm_default_snapshots').upsert({ tab, data, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+        const { error } = await supabase.from('hrm_default_snapshots').upsert(
+          { tab, data, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) },
+          { onConflict: 'company_id,tab' } // PK ghép — migration 20261006
+        );
         if (error) console.warn(`Supabase save default snapshot ${tab} error:`, error.message);
       } catch (e) {
         console.warn(`Supabase save default snapshot ${tab} error:`, e);
@@ -877,7 +880,7 @@ export const dbService = {
       return querySupabase<any>('hrm_leaves', []);
     },
     async save(leave: any): Promise<void> {
-      await saveSupabase('hrm_leaves', leave);
+      await saveSupabase('hrm_leaves', leave, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_leaves', id);
@@ -890,7 +893,7 @@ export const dbService = {
       return querySupabase<any>('hrm_leave_coefficients', []);
     },
     async save(coef: any): Promise<void> {
-      await saveSupabase('hrm_leave_coefficients', coef);
+      await saveSupabase('hrm_leave_coefficients', coef, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_leave_coefficients', id);
@@ -903,7 +906,7 @@ export const dbService = {
       return querySupabase<any>('hrm_payroll_records', []);
     },
     async save(record: any): Promise<void> {
-      await saveSupabase('hrm_payroll_records', record);
+      await saveSupabase('hrm_payroll_records', record, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_payroll_records', id);
@@ -973,7 +976,7 @@ export const dbService = {
       return querySupabase<any>('hrm_employee_errors', []);
     },
     async save(error: any): Promise<void> {
-      await saveSupabase('hrm_employee_errors', error);
+      await saveSupabase('hrm_employee_errors', error, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_employee_errors', id);
@@ -1929,7 +1932,7 @@ export const dbService = {
       return querySupabase<SubcontractorAdvanceProposal>('subcontractor_advances', [], true);
     },
     async save(proposal: SubcontractorAdvanceProposal): Promise<void> {
-      await saveSupabase('subcontractor_advances', proposal);
+      await saveSupabase('subcontractor_advances', proposal, 'company_id,id'); // PK ghép — migration 20261006
       try {
         window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: proposal }));
       } catch (e) {
@@ -2379,7 +2382,7 @@ export const dbService = {
       return querySupabase<any>('accounting_liabilities', []);
     },
     async save(liability: any): Promise<void> {
-      await saveSupabase('accounting_liabilities', liability);
+      await saveSupabase('accounting_liabilities', liability, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('accounting_liabilities', id);
@@ -2392,7 +2395,7 @@ export const dbService = {
       return querySupabase<any>('accounting_receivables', []);
     },
     async save(receivable: any): Promise<void> {
-      await saveSupabase('accounting_receivables', receivable);
+      await saveSupabase('accounting_receivables', receivable, 'company_id,id'); // PK ghép — migration 20261006
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('accounting_receivables', id);
