@@ -427,6 +427,14 @@ export default function ProjectKanbanBoard({
   // Load columns từ Supabase khi sector thay đổi + lắng nghe realtime
   useEffect(() => {
     let active = true;
+    // Component được tái sử dụng khi đổi lĩnh vực (Xây dựng ↔ Nội thất ↔ Cơ khí): nếu không
+    // xóa state, thẻ dự án của lĩnh vực mới bị xếp theo bộ cột của lĩnh vực CŨ cho tới khi tải
+    // xong rồi mới "nhảy" về đúng cột. Đặt về [] để không dựng bảng sai trong lúc chờ.
+    setColumns([]);
+    // Khi không tải được (lỗi mạng / hàng rỗng) chỉ dùng bộ cột mặc định NẾU chưa có cột nào;
+    // nếu đã có cấu hình thật từ lần tải trước (vd realtime refetch gặp lỗi tạm) thì giữ nguyên,
+    // tránh đang yên đang lành đổi sang bộ mặc định làm mọi thẻ rơi về cột đầu.
+    const fallbackToDefault = () => setColumns(prev => (prev.length > 0 ? prev : getDefaultColumns()));
     const fetchColumns = () => {
       dbService.kanbanColumns.get(sector).then(data => {
         if (!active) return;
@@ -437,9 +445,9 @@ export default function ProjectKanbanBoard({
           setColumns(ensureColumnsHaveAutomationDefaults(data.columns));
           setColumnWidth(data.columnWidth);
         } else {
-          setColumns(getDefaultColumns());
+          fallbackToDefault();
         }
-      }).catch(() => { if (active) setColumns(getDefaultColumns()); });
+      }).catch(() => { if (active) fallbackToDefault(); });
     };
     fetchColumns();
 
@@ -1516,6 +1524,9 @@ export default function ProjectKanbanBoard({
   const autoMovedDoneRef = useRef<Set<string>>(new Set());
 
   const checkAutoMoveProject = useCallback(async (projectId: string) => {
+    // Danh sách cột chưa tải xong → chưa biết cột thật của dự án và quy tắc tự động của từng
+    // cột, không được cập nhật cờ theo dõi hay tự chuyển cột (xem ghi chú ở useEffect bên dưới).
+    if (columns.length === 0) return;
     const proj = projects.find(p => p.id === projectId);
     if (!proj) return;
 
@@ -1563,6 +1574,11 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
+    // Chưa tải xong danh sách cột thì getProjectColumnId() chỉ trả về cột giữ chỗ 'col_design'
+    // cho MỌI dự án. Nếu ghi nhận lúc này, khi cột thật tải xong hệ thống tưởng mọi dự án vừa
+    // "di chuyển cột", đặt lại cờ hoàn thành và có thể tự chuyển cột (chain auto-move) mỗi lần
+    // mở trang — nguyên nhân thẻ Nội thất nhảy cột. Đợi có cột thật rồi mới theo dõi.
+    if (columns.length === 0) return;
 
     // Ghi nhận trạng thái "đã hoàn thành" cho các dự án chưa được theo dõi
     // (ví dụ: dự án đã hoàn thành từ trước khi vừa tải trang, hoặc dự án mới tạo).
@@ -1601,7 +1617,7 @@ export default function ProjectKanbanBoard({
         checkAutoMoveProject(proj.id);
       }, 100);
     });
-  }, [tasks, checkAutoMoveProject, projects, sector]);
+  }, [tasks, checkAutoMoveProject, projects, sector, columns]);
 
   // ===========================================================================
   // localUpdateTask() → Cập nhật Task qua callback onUpdateTask rồi đồng bộ local state tasks
@@ -2393,7 +2409,7 @@ export default function ProjectKanbanBoard({
               onClick={() => {
                 const newVal = Math.max(180, columnWidth - 20);
                 setColumnWidth(newVal);
-                dbService.kanbanColumns.save(sector, columns, newVal).catch(() => {});
+                dbService.kanbanColumns.saveWidth(sector, newVal).catch(() => {});
               }}
               className="text-slate-400 hover:text-white px-1 py-0.5 rounded hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-center"
               title="Thu nhỏ cột"
@@ -2408,7 +2424,7 @@ export default function ProjectKanbanBoard({
               onChange={(e) => {
                 const newVal = parseInt(e.target.value, 10);
                 setColumnWidth(newVal);
-                dbService.kanbanColumns.save(sector, columns, newVal).catch(() => {});
+                dbService.kanbanColumns.saveWidth(sector, newVal).catch(() => {});
               }}
               className="w-16 accent-emerald-500 h-1 cursor-pointer"
               title="Kéo để chỉnh kích thước cột"
@@ -2418,7 +2434,7 @@ export default function ProjectKanbanBoard({
               onClick={() => {
                 const newVal = Math.min(400, columnWidth + 20);
                 setColumnWidth(newVal);
-                dbService.kanbanColumns.save(sector, columns, newVal).catch(() => {});
+                dbService.kanbanColumns.saveWidth(sector, newVal).catch(() => {});
               }}
               className="text-slate-400 hover:text-white px-1 py-0.5 rounded hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-center"
               title="Phóng to cột"
