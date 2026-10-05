@@ -6939,7 +6939,13 @@ export default function FinanceManagement({
                                 <SearchableSelect
                                   options={suppliers.map((s: any) => ({ id: s.id, label: `${s.name} (${s.field || 'NCC'})` }))}
                                   value={quickProposalSubId}
-                                  onChange={(id) => { setQuickProposalSubId(id); setQuickProposalPoAlloc({}); }}
+                                  onChange={(id) => {
+                                    setQuickProposalSubId(id);
+                                    // Đổi NCC → bỏ lựa chọn đơn cũ (đơn thuộc NCC khác). Nếu trước đó đã chọn đơn
+                                    // thì "Số tiền đề xuất" là số tự điền từ các đơn đó → xóa luôn để khỏi nhầm.
+                                    if (Object.keys(quickProposalPoAlloc).length > 0) setQuickProposalAmount('');
+                                    setQuickProposalPoAlloc({});
+                                  }}
                                   placeholder="— Chọn nhà cung cấp —"
                                   searchPlaceholder="🔍 Gõ tên / lĩnh vực NCC..."
                                   required
