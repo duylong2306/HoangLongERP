@@ -71,3 +71,55 @@ describe('planPoRevert', () => {
     expect(o.thanhToanThucTe).toBe(0);
   });
 });
+
+// Tự phân bổ phần tiền chưa gắn đơn vào các đơn CŨ NHẤT còn nợ — sau khi trả công nợ đầu kỳ.
+describe('planPoAllocations — tự phân bổ phần dư', () => {
+  const pool = () => [
+    po('NEW', 100, 0, { createdAt: '2026-09-01', status: 'confirmed' }),
+    po('OLD', 30, 0, { createdAt: '2026-07-01', status: 'confirmed' }),
+  ];
+
+  it('không chọn đơn nào → tự trừ vào đơn cũ nhất trước, rồi tới đơn kế tiếp', () => {
+    const { applied, autoApplied, updatedOrders } = planPoAllocations([], pool(), 50, { pool: pool(), openingDebt: 0, priorPaid: 0 });
+    expect(applied).toEqual([{ purchaseOrderId: 'OLD', amount: 30 }, { purchaseOrderId: 'NEW', amount: 20 }]);
+    expect(autoApplied).toEqual(applied);
+    expect(updatedOrders.find(o => o.id === 'OLD')).toMatchObject({ thanhToanThucTe: 30, congNo: 0, status: 'completed' });
+    expect(updatedOrders.find(o => o.id === 'NEW')).toMatchObject({ thanhToanThucTe: 20, congNo: 80, status: 'confirmed' });
+  });
+
+  it('nợ cũ trả trước: khoản trả chưa vượt công nợ đầu kỳ → KHÔNG gắn vào đơn nào', () => {
+    const { applied, updatedOrders } = planPoAllocations([], pool(), 778, { pool: pool(), openingDebt: 787, priorPaid: 0 });
+    expect(applied).toEqual([]);
+    expect(updatedOrders).toEqual([]);
+  });
+
+  it('chỉ phần VƯỢT công nợ đầu kỳ mới được tự phân bổ (tính cả các phiếu đã trả trước đó)', () => {
+    // đầu kỳ 100, đã trả trước 60, phiếu này 100 → tổng 160 − 100 = 60 dùng được cho đơn
+    const { applied } = planPoAllocations([], pool(), 100, { pool: pool(), openingDebt: 100, priorPaid: 60 });
+    expect(applied.reduce((s, a) => s + a.amount, 0)).toBe(60);
+  });
+
+  it('có chọn đơn: trừ đơn đã chọn trước, phần dư mới tự phân bổ; đơn được cộng dồn, không lặp', () => {
+    // chọn NEW 40; phiếu 100 → dư 60 tự phân bổ: OLD 30 (cũ nhất), NEW thêm 30
+    const { applied, autoApplied } = planPoAllocations(
+      [{ purchaseOrderId: 'NEW', amount: 40 }], pool(), 100, { pool: pool(), openingDebt: 0, priorPaid: 0 });
+    expect(applied).toEqual(expect.arrayContaining([{ purchaseOrderId: 'NEW', amount: 70 }, { purchaseOrderId: 'OLD', amount: 30 }]));
+    expect(applied).toHaveLength(2);
+    expect(autoApplied).toEqual(expect.arrayContaining([{ purchaseOrderId: 'OLD', amount: 30 }, { purchaseOrderId: 'NEW', amount: 30 }]));
+  });
+
+  it('không vượt tổng còn phải trả của các đơn', () => {
+    const { applied } = planPoAllocations([], pool(), 1000, { pool: pool(), openingDebt: 0, priorPaid: 0 });
+    expect(applied.reduce((s, a) => s + a.amount, 0)).toBe(130);
+  });
+
+  it('không truyền auto → hành vi cũ (không tự phân bổ)', () => {
+    expect(planPoAllocations([], pool(), 50).applied).toEqual([]);
+  });
+
+  it('tự phân bổ rồi hoàn lại → các đơn về đúng số ban đầu', () => {
+    const { applied, updatedOrders } = planPoAllocations([], pool(), 50, { pool: pool(), openingDebt: 0, priorPaid: 0 });
+    const back = planPoRevert(applied, updatedOrders);
+    expect(back.map(o => [o.id, o.thanhToanThucTe, o.congNo]).sort()).toEqual([['NEW', 0, 100], ['OLD', 0, 30]]);
+  });
+});
