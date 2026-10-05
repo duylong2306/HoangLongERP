@@ -944,6 +944,12 @@ export interface SubcontractorAdvanceProposal {
   // tượng nhận = tên công trình (không hợp lý vì công trình không "nhận tiền").
   expenseItems?: { id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[];
   approvals?: ApprovalStep[]; // Chuỗi duyệt nhiều cấp từ matrix config
+  // CHỈ dùng cho đề xuất "Chi Nhà Cung Cấp" (supplier_payment_proposal): các Đơn Mua Hàng (PO)
+  // mà khoản chi này thanh toán. Kế toán chọn khi lập đề xuất (số tiền dự kiến trả cho từng
+  // đơn); khi "Lập phiếu" hệ thống trừ vào thanhToanThucTe/congNo của từng PO rồi ghi lại
+  // SỐ TIỀN THỰC ÁP DỤNG vào chính mảng này — để xóa phiếu chi thì hoàn lại đúng từng đơn.
+  // Không chọn đơn nào = trả công nợ chung (đầu kỳ/không theo đơn) như trước đây.
+  purchaseOrderAllocations?: { purchaseOrderId: string; amount: number }[];
 }
 export interface Liability {
   id: string;

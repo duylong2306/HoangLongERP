@@ -9,6 +9,7 @@ import VoucherPrintModal from './VoucherPrintModal';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import { numberToVietnameseWords } from '../lib/numberToWords';
+import { getPoPayableRemaining, planPoAllocations, planPoRevert, type PoAllocation } from '../lib/poAllocation';
 
 import SearchableCustomerSelect from './SearchableCustomerSelect';
 import SearchableSupplierSelect from './SearchableSupplierSelect';
@@ -921,6 +922,9 @@ export default function FinanceManagement({
   // projectId/projectName: công trình của TỪNG dòng chi tiêu (xem giải thích ở types.ts).
   const [quickProposalExpenseItems, setQuickProposalExpenseItems] = useState<{ id: string; item: string; amount: number; note: string; projectId?: string; projectName?: string }[]>([]);
   const [quickProposalSettlerId, setQuickProposalSettlerId] = useState('');
+  // Chỉ dùng cho "Chi Nhà Cung Cấp": các Đơn Mua Hàng (PO) được chọn để thanh toán.
+  // key = mã PO, value = số tiền dự kiến trả cho đơn đó (chuỗi để gõ tự do trong ô nhập).
+  const [quickProposalPoAlloc, setQuickProposalPoAlloc] = useState<Record<string, string>>({});
 
   // Helper: Mở thẳng form tạo đề xuất (bỏ qua bước chọn trong launcher) theo loại đã định.
   // Dùng cho lối tắt nhanh "Đề Xuất Chi Phí" / "Tạm Ứng Thầu Phụ" — tương thích với nút trong Công Việc.
@@ -954,6 +958,7 @@ export default function FinanceManagement({
     setQuickProposalTaskName('');
     setQuickProposalExpenseItems([]);
     setQuickProposalSettlerId('');
+    setQuickProposalPoAlloc({});
     setQuickLaunchItem(item);
     setShowQuickProposalModal(true);
   }, [projects]);
@@ -2325,6 +2330,41 @@ export default function FinanceManagement({
   // Đơn hàng đã ghi nhận vào Công nợ Trả?
   const isPoRecorded = (poId: string): boolean =>
     customLiabilities.some(l => l.category === 'Nhà Cung Cấp' && Array.isArray(l.recordedPurchaseOrderIds) && (l.recordedPurchaseOrderIds as string[]).includes(poId));
+
+  // Áp khoản chi của đề xuất "Chi Nhà Cung Cấp" vào các đơn đã chọn (khi LẬP PHIẾU) — tính toán ở
+  // src/lib/poAllocation.ts, ở đây chỉ lưu. Phiếu chi sinh từ đề xuất được duyệt sẵn nên không đi qua
+  // handleApprovePayment (nơi giảm công nợ đơn hàng cho phiếu chi thủ công) → phải tự trừ ở đây.
+  // Trả về danh sách THỰC ÁP DỤNG (đơn nào lưu lỗi thì không nằm trong danh sách) để ghi vào đề xuất.
+  const applyProposalPoAllocations = async (allocations: PoAllocation[], payTotal: number): Promise<PoAllocation[]> => {
+    const { applied, updatedOrders } = planPoAllocations(allocations, purchaseOrders, payTotal);
+    const saved: PoAllocation[] = [];
+    for (const updatedPo of updatedOrders) {
+      try {
+        await dbService.purchaseOrders.save(updatedPo);
+        setPurchaseOrders(prev => prev.map(o => o.id === updatedPo.id ? updatedPo : o));
+        const a = applied.find(x => x.purchaseOrderId === updatedPo.id);
+        if (a) saved.push(a);
+      } catch (err) {
+        console.error('[FinanceManagement] Lỗi cập nhật công nợ đơn hàng từ đề xuất:', updatedPo.id, err);
+      }
+    }
+    if (saved.length > 0) window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+    return saved;
+  };
+
+  // Hoàn lại công nợ các đơn đã trừ ở applyProposalPoAllocations (khi xóa phiếu chi).
+  const revertProposalPoAllocations = async (allocations: PoAllocation[]) => {
+    const updatedOrders = planPoRevert(allocations, purchaseOrders);
+    for (const updatedPo of updatedOrders) {
+      try {
+        await dbService.purchaseOrders.save(updatedPo);
+        setPurchaseOrders(prev => prev.map(o => o.id === updatedPo.id ? updatedPo : o));
+      } catch (err) {
+        console.error('[FinanceManagement] Lỗi hoàn lại công nợ đơn hàng:', updatedPo.id, err);
+      }
+    }
+    if (updatedOrders.length > 0) window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+  };
 
   // Trạng thái dòng đơn hàng: Công Nợ (đã ghi nhận) / Chưa ghi nhận
   const getPoRowStatus = (order: PurchaseOrder): { label: string; tone: string } => {
@@ -3815,6 +3855,31 @@ export default function FinanceManagement({
       settlerName = configuredSettler.name;
     }
 
+    // Chi Nhà Cung Cấp: gom các đơn hàng được chọn (chỉ lấy dòng có số tiền > 0).
+    // Kiểm tra: mỗi đơn không quá số còn phải trả, tổng các đơn không quá số tiền đề xuất.
+    let poAllocations: { purchaseOrderId: string; amount: number }[] | undefined;
+    if (quickProposalType === 'supplier_payment_proposal') {
+      const picked = Object.entries(quickProposalPoAlloc)
+        .map(([purchaseOrderId, v]) => ({ purchaseOrderId, amount: Number(v) || 0 }))
+        .filter(a => a.amount > 0);
+      if (picked.length > 0) {
+        const overPo = picked.find(a => {
+          const po = purchaseOrders.find(o => o.id === a.purchaseOrderId);
+          return !po || a.amount > getPoPayableRemaining(po) + 1;
+        });
+        if (overPo) {
+          addToast({ title: '⚠️ Lỗi nhập liệu', message: `Số tiền trả cho đơn ${overPo.purchaseOrderId} vượt số còn phải trả của đơn.`, type: 'error' });
+          return;
+        }
+        const totalPicked = picked.reduce((s, a) => s + a.amount, 0);
+        if (totalPicked > amount + 1) {
+          addToast({ title: '⚠️ Lỗi nhập liệu', message: `Tổng tiền các đơn đã chọn (${totalPicked.toLocaleString('vi-VN')}đ) lớn hơn số tiền đề xuất (${amount.toLocaleString('vi-VN')}đ).`, type: 'error' });
+          return;
+        }
+        poAllocations = picked;
+      }
+    }
+
     const newProposal: SubcontractorAdvanceProposal = {
       id: proposalCode,
       subcontractorId: subId,
@@ -3843,6 +3908,8 @@ export default function FinanceManagement({
       expenseItems: expenseItems,
       settlerId: settlerId || undefined,
       settlerName: settlerName || undefined,
+      // Chỉ thêm khi có chọn đơn — không chọn thì KHÔNG gửi key này (tránh lỗi nếu cột chưa tồn tại).
+      ...(poAllocations ? { purchaseOrderAllocations: poAllocations } : {}),
     };
 
     try {
@@ -3885,6 +3952,7 @@ export default function FinanceManagement({
     setQuickProposalAmount('');
     setQuickProposalReason('');
     setQuickProposalSubMode('advance');
+    setQuickProposalPoAlloc({});
   };
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
@@ -4027,12 +4095,19 @@ export default function FinanceManagement({
     // Check if we are finalizing a subcontractor advance proposal
     if (activeProposalForPayment) {
       try {
+        // Chi Nhà Cung Cấp có chọn đơn hàng → trừ công nợ từng đơn rồi ghi lại số tiền thực áp dụng.
+        // Không chọn đơn nào thì giữ nguyên hành vi cũ (không đụng tới đơn hàng, không ghi key mới).
+        const chosenAllocs = proposalIsSupplierPayment ? (activeProposalForPayment.purchaseOrderAllocations || []) : [];
+        const appliedAllocs = chosenAllocs.length > 0
+          ? await applyProposalPoAllocations(chosenAllocs, Number(payAmount))
+          : undefined;
         const updatedProposal: SubcontractorAdvanceProposal = {
           ...activeProposalForPayment,
           status: 'awaiting_voucher_update',
           paymentId: newPay.id,
           payCreatorId: (currentUser as any)?.id || activeProposalForPayment.payCreatorId,
-          payCreatorName: currentUser.name || activeProposalForPayment.payCreatorName
+          payCreatorName: currentUser.name || activeProposalForPayment.payCreatorName,
+          ...(appliedAllocs ? { purchaseOrderAllocations: appliedAllocs } : {})
         };
         await dbService.subcontractorAdvances.save(updatedProposal);
 
@@ -4312,6 +4387,12 @@ export default function FinanceManagement({
       } catch (err) {
         console.error('[FinanceManagement] Lỗi trả đề xuất về Chờ Lập Phiếu:', err);
       }
+    }
+
+    // Phiếu chi từ đề xuất Chi NCC đã trừ vào các đơn hàng → hoàn lại đúng số đã trừ.
+    // Chỉ làm khi phiếu đã được duyệt/áp dụng (đề xuất đã rời 'pending_payment'), tránh hoàn 2 lần.
+    if (linkedProposal?.purchaseOrderAllocations?.length && linkedProposal.status !== 'pending_payment') {
+      await revertProposalPoAllocations(linkedProposal.purchaseOrderAllocations);
     }
 
     if (onDeletePayment) onDeletePayment(p.id);
@@ -6858,7 +6939,7 @@ export default function FinanceManagement({
                                 <SearchableSelect
                                   options={suppliers.map((s: any) => ({ id: s.id, label: `${s.name} (${s.field || 'NCC'})` }))}
                                   value={quickProposalSubId}
-                                  onChange={(id) => setQuickProposalSubId(id)}
+                                  onChange={(id) => { setQuickProposalSubId(id); setQuickProposalPoAlloc({}); }}
                                   placeholder="— Chọn nhà cung cấp —"
                                   searchPlaceholder="🔍 Gõ tên / lĩnh vực NCC..."
                                   required
@@ -6923,6 +7004,65 @@ export default function FinanceManagement({
                             {selSub && !subLiab && (
                               <div className="text-[9px] text-slate-500 italic">Chưa có thông tin công nợ của đối tượng này trong Công nợ Trả.</div>
                             )}
+
+                            {/* Chi Nhà Cung Cấp: chọn các Đơn Mua Hàng mà khoản chi này thanh toán.
+                                Khi lập phiếu, hệ thống trừ công nợ đúng từng đơn đã chọn. Không bắt buộc —
+                                không chọn đơn nào = trả công nợ chung (đầu kỳ / không theo đơn). */}
+                            {quickProposalType === 'supplier_payment_proposal' && selSub && (() => {
+                              const supplierPos = purchaseOrders
+                                .filter(po => po.supplierId === selSub.id && isPoRecorded(po.id) && getPoPayableRemaining(po) > 0)
+                                .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+                              if (supplierPos.length === 0) {
+                                return <div className="text-[9px] text-slate-500 italic">Nhà cung cấp này chưa có đơn hàng nào còn phải trả (đã ghi nhận công nợ).</div>;
+                              }
+                              // Đổi lựa chọn → tự cập nhật "Số tiền đề xuất" = tổng các đơn đã chọn (vẫn sửa tay được).
+                              const applyAlloc = (next: Record<string, string>) => {
+                                setQuickProposalPoAlloc(next);
+                                const total = Object.values(next).reduce((sum, v) => sum + (Number(v) || 0), 0);
+                                if (total > 0) setQuickProposalAmount(total);
+                              };
+                              const pickedTotal = Object.values(quickProposalPoAlloc).reduce((sum, v) => sum + (Number(v) || 0), 0);
+                              return (
+                                <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[10px] space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-slate-700 font-bold uppercase tracking-wide">Chọn đơn hàng thanh toán (không bắt buộc)</div>
+                                    <div className="text-slate-500">Đã chọn: <b className="text-amber-700 font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
+                                  </div>
+                                  <div className="max-h-44 overflow-y-auto space-y-1">
+                                    {supplierPos.map(po => {
+                                      const remain = getPoPayableRemaining(po);
+                                      const checked = quickProposalPoAlloc[po.id] !== undefined;
+                                      return (
+                                        <div key={po.id} className={`flex items-center gap-2 border rounded-lg px-2 py-1 ${checked ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={(e) => {
+                                              const next = { ...quickProposalPoAlloc };
+                                              if (e.target.checked) next[po.id] = String(Math.round(remain)); else delete next[po.id];
+                                              applyAlloc(next);
+                                            }}
+                                            className="cursor-pointer"
+                                          />
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-mono font-bold text-slate-800 truncate">{po.id}</div>
+                                            <div className="text-slate-500 truncate">{po.projectName || 'Không gắn dự án'} · còn phải trả <b className="text-amber-700">{Math.round(remain).toLocaleString('vi-VN')} đ</b></div>
+                                          </div>
+                                          {checked && (
+                                            <input
+                                              type="number"
+                                              value={quickProposalPoAlloc[po.id]}
+                                              onChange={(e) => applyAlloc({ ...quickProposalPoAlloc, [po.id]: e.target.value })}
+                                              className="w-28 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-white font-mono font-bold text-right"
+                                            />
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })()}
