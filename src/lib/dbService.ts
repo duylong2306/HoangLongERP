@@ -917,7 +917,11 @@ export const dbService = {
       if (!sb) return null;
       try {
         // Use select without .single() to avoid 406 when table is empty or has no matching row
-        const { data, error } = await sb.from('kanban_columns').select('*').eq('sector', sector);
+        // Lọc thêm theo company_id (RLS đã lọc sẵn) cho chắc — không lấy nhầm hàng cùng sector của công ty khác.
+        const companyId = getCurrentCompanyId();
+        let q = sb.from('kanban_columns').select('*').eq('sector', sector);
+        if (companyId) q = q.eq('company_id', companyId);
+        const { data, error } = await q;
         if (error || !data || data.length === 0) return null;
         const row = data[0];
         return { columns: row.columns || [], columnWidth: row.column_width || 280 };
@@ -935,7 +939,15 @@ export const dbService = {
         return;
       }
       try {
-        const { error } = await sb.from('kanban_columns').upsert({ sector, columns, column_width: columnWidth, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+        // Multi-tenant: khóa chính phải là (company_id, sector). Trước đây upsert để mặc định
+        // (xung đột theo `sector`) nên công ty thứ 2 trở đi lưu cột Kanban sẽ đụng hàng cùng
+        // sector của công ty khác → RLS từ chối ("new row violates row-level security policy").
+        // Cần chạy migration 20261005_kanban_columns_company_key.sql để đổi khóa chính tương ứng.
+        const companyId = getCurrentCompanyId();
+        const { error } = await sb.from('kanban_columns').upsert(
+          { sector, columns, column_width: columnWidth, ...(companyId ? { company_id: companyId } : {}) },
+          { onConflict: companyId ? 'company_id,sector' : 'sector' }
+        );
         if (error) console.warn('kanbanColumns save error:', error.message);
       } catch (e) { console.warn('kanbanColumns save exception:', e); }
     },
@@ -946,7 +958,10 @@ export const dbService = {
       const sb = getSupabase();
       if (!sb) return;
       try {
-        const { error } = await sb.from('kanban_columns').update({ column_width: columnWidth }).eq('sector', sector);
+        let q = sb.from('kanban_columns').update({ column_width: columnWidth }).eq('sector', sector);
+        const companyId = getCurrentCompanyId();
+        if (companyId) q = q.eq('company_id', companyId);
+        const { error } = await q;
         if (error) console.warn('kanbanColumns saveWidth error:', error.message);
       } catch (e) { console.warn('kanbanColumns saveWidth exception:', e); }
     }
