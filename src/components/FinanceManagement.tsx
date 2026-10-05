@@ -2331,25 +2331,48 @@ export default function FinanceManagement({
   const isPoRecorded = (poId: string): boolean =>
     customLiabilities.some(l => l.category === 'Nhà Cung Cấp' && Array.isArray(l.recordedPurchaseOrderIds) && (l.recordedPurchaseOrderIds as string[]).includes(poId));
 
-  // Áp khoản chi của đề xuất "Chi Nhà Cung Cấp" vào các đơn đã chọn (khi LẬP PHIẾU) — tính toán ở
-  // src/lib/poAllocation.ts, ở đây chỉ lưu. Phiếu chi sinh từ đề xuất được duyệt sẵn nên không đi qua
-  // handleApprovePayment (nơi giảm công nợ đơn hàng cho phiếu chi thủ công) → phải tự trừ ở đây.
-  // Trả về danh sách THỰC ÁP DỤNG (đơn nào lưu lỗi thì không nằm trong danh sách) để ghi vào đề xuất.
-  const applyProposalPoAllocations = async (allocations: PoAllocation[], payTotal: number): Promise<PoAllocation[]> => {
-    const { applied, updatedOrders } = planPoAllocations(allocations, purchaseOrders, payTotal);
+  // Áp khoản chi của đề xuất "Chi Nhà Cung Cấp" vào các đơn hàng (khi LẬP PHIẾU) — tính toán ở
+  // src/lib/poAllocation.ts, ở đây chỉ dựng bối cảnh và lưu. Phiếu chi sinh từ đề xuất được duyệt
+  // sẵn nên không đi qua handleApprovePayment (nơi giảm công nợ đơn hàng cho phiếu chi thủ công)
+  // → phải tự trừ ở đây. Gồm: (1) các đơn kế toán đã chọn; (2) phần tiền dư/không chọn đơn được
+  // TỰ PHÂN BỔ vào các đơn cũ nhất còn nợ (sau khi trả công nợ đầu kỳ — xem planPoAllocations).
+  // Trả về danh sách THỰC ÁP DỤNG (đơn nào lưu lỗi thì không nằm trong danh sách) để ghi vào đề
+  // xuất, và riêng phần tự phân bổ để báo người dùng.
+  const applyProposalPoAllocations = async (
+    proposal: SubcontractorAdvanceProposal,
+    allocations: PoAllocation[],
+    payTotal: number,
+    paymentId: string
+  ): Promise<{ saved: PoAllocation[]; autoSaved: PoAllocation[] }> => {
+    const supplierName = proposal.subcontractorName;
+    // Đơn của đúng NCC (theo mã), đã ghi nhận công nợ
+    const pool = purchaseOrders.filter(po => po.supplierId === proposal.subcontractorId && isPoRecorded(po.id));
+    // Công nợ đầu kỳ của NCC (cùng cách tính ở mergedLiabilities/expandToDetailRows)
+    const openingDebt = customLiabilities
+      .filter(l => l.category === 'Nhà Cung Cấp' && l.name === supplierName)
+      .reduce((sum, l) => sum + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
+    // Các phiếu chi đã duyệt trước đó cho NCC (khớp theo TÊN người nhận như Công nợ Trả), trừ phiếu đang lập
+    const priorPaid = payments
+      .filter(p => p.status === 'approved' && p.recipient === supplierName && p.id !== paymentId)
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    const { applied, autoApplied, updatedOrders } = planPoAllocations(allocations, purchaseOrders, payTotal, { pool, openingDebt, priorPaid });
     const saved: PoAllocation[] = [];
+    const autoSaved: PoAllocation[] = [];
     for (const updatedPo of updatedOrders) {
       try {
         await dbService.purchaseOrders.save(updatedPo);
         setPurchaseOrders(prev => prev.map(o => o.id === updatedPo.id ? updatedPo : o));
         const a = applied.find(x => x.purchaseOrderId === updatedPo.id);
         if (a) saved.push(a);
+        const au = autoApplied.find(x => x.purchaseOrderId === updatedPo.id);
+        if (au) autoSaved.push(au);
       } catch (err) {
         console.error('[FinanceManagement] Lỗi cập nhật công nợ đơn hàng từ đề xuất:', updatedPo.id, err);
       }
     }
     if (saved.length > 0) window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
-    return saved;
+    return { saved, autoSaved };
   };
 
   // Hoàn lại công nợ các đơn đã trừ ở applyProposalPoAllocations (khi xóa phiếu chi).
@@ -4097,10 +4120,25 @@ export default function FinanceManagement({
       try {
         // Chi Nhà Cung Cấp có chọn đơn hàng → trừ công nợ từng đơn rồi ghi lại số tiền thực áp dụng.
         // Không chọn đơn nào thì giữ nguyên hành vi cũ (không đụng tới đơn hàng, không ghi key mới).
-        const chosenAllocs = proposalIsSupplierPayment ? (activeProposalForPayment.purchaseOrderAllocations || []) : [];
-        const appliedAllocs = chosenAllocs.length > 0
-          ? await applyProposalPoAllocations(chosenAllocs, Number(payAmount))
-          : undefined;
+        // Mọi đề xuất Chi NCC đều qua bước này (kể cả không chọn đơn) để phần tiền chưa gắn đơn được tự phân bổ.
+        let appliedAllocs: PoAllocation[] | undefined;
+        if (proposalIsSupplierPayment) {
+          const { saved, autoSaved } = await applyProposalPoAllocations(
+            activeProposalForPayment,
+            activeProposalForPayment.purchaseOrderAllocations || [],
+            Number(payAmount),
+            newPay.id
+          );
+          if (saved.length > 0) appliedAllocs = saved;
+          const autoTotal = autoSaved.reduce((sum, a) => sum + a.amount, 0);
+          if (autoTotal > 0) {
+            addToast({
+              title: 'ℹ️ Đã tự phân bổ vào đơn hàng',
+              message: `${autoTotal.toLocaleString('vi-VN')}đ phần chưa gắn đơn đã được trừ vào ${autoSaved.length} đơn cũ nhất còn nợ: ${autoSaved.map(a => a.purchaseOrderId).join(', ')}.`,
+              type: 'info'
+            });
+          }
+        }
         const updatedProposal: SubcontractorAdvanceProposal = {
           ...activeProposalForPayment,
           status: 'awaiting_voucher_update',
@@ -7034,6 +7072,7 @@ export default function FinanceManagement({
                                     <div className="text-slate-700 font-bold uppercase tracking-wide">Chọn đơn hàng thanh toán (không bắt buộc)</div>
                                     <div className="text-slate-500">Đã chọn: <b className="text-amber-700 font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
                                   </div>
+                                  <div className="text-slate-500">Phần tiền chi chưa gắn vào đơn nào (chi lệch / không chọn đơn) sẽ tự trừ vào các đơn cũ nhất còn nợ, sau khi trả công nợ đầu kỳ.</div>
                                   <div className="max-h-44 overflow-y-auto space-y-1">
                                     {supplierPos.map(po => {
                                       const remain = getPoPayableRemaining(po);
