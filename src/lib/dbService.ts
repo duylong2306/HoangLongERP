@@ -173,7 +173,7 @@ export async function seedTableToSupabase(tableName: string, data: any[]): Promi
     console.log(`Seeding table ${tableName} to Supabase with ${data.length} items...`);
     const companyId = getCurrentCompanyId();
     const snakeData = data.map(keysToSnake).map((row: any) => (companyId && !row.company_id) ? { ...row, company_id: companyId } : row);
-    const { error } = await supabase.from(tableName).upsert(snakeData, { onConflict: 'id' });
+    const { error } = await supabase.from(tableName).upsert(snakeData, { onConflict: companyId ? 'company_id,id' : 'id' });
     if (error) {
       console.warn(`Error seeding table ${tableName} to Supabase:`, error);
     } else {
@@ -1035,7 +1035,7 @@ export const dbService = {
       return querySupabase<any>('hrm_trips', []);
     },
     async save(trip: any): Promise<void> {
-      await saveSupabase('hrm_trips', trip);
+      await saveSupabase('hrm_trips', trip, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('hrm_trips', id);
@@ -1358,7 +1358,7 @@ export const dbService = {
       return querySupabase<Project>('projects', INITIAL_PROJECTS);
     },
     async save(project: Project): Promise<void> {
-      await saveSupabase('projects', project);
+      await saveSupabase('projects', project, 'company_id,id'); // PK ghép — migration 20261008
       // Tự động tạo NHÓM CHAT DỰ ÁN khi khởi tạo/cập nhật dự án
       // (idempotent: không tạo trùng, đồng bộ thành viên khi dự án thay đổi)
       ensureProjectChatGroup(project).catch(err =>
@@ -1537,7 +1537,7 @@ export const dbService = {
       // delete() (cần biết bản CŨ để chỉ ghi mission thực sự thay đổi, xem
       // App.tsx performUpdateTask), tasks.save() không tự làm việc đó.
       const { missions, ...taskRow } = task as any;
-      await saveSupabase('tasks', taskRow);
+      await saveSupabase('tasks', taskRow, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('tasks', id);
@@ -1597,7 +1597,7 @@ export const dbService = {
       // saveSupabase() chỉ convert key TẦNG NGOÀI (id/taskId/data) sang
       // snake_case — nội dung "data" (toàn bộ mission, gồm cả id gốc) giữ
       // nguyên camelCase, đúng hành vi mảng missions jsonb cũ trước khi tách bảng.
-      await saveSupabase('task_missions', { id: rowId, taskId, data: mission });
+      await saveSupabase('task_missions', { id: rowId, taskId, data: mission }, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(taskId: string, missionId: string): Promise<void> {
       await deleteSupabase('task_missions', `${taskId}::${missionId}`);
@@ -1610,7 +1610,7 @@ export const dbService = {
       return querySupabase<Receipt>('receipts', INITIAL_RECEIPTS);
     },
     async save(receipt: Receipt): Promise<void> {
-      await saveSupabase('receipts', receipt);
+      await saveSupabase('receipts', receipt, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('receipts', id);
@@ -1706,7 +1706,7 @@ export const dbService = {
       // nguyên vẹn, PostgREST sẽ báo lỗi "column image_count does not exist"
       // vì cố ghi vào 1 cột không tồn tại. Luôn loại field này trước khi lưu.
       const { imageCount, ...toSave } = payment as Payment & { imageCount?: number };
-      await saveSupabase('payments', toSave);
+      await saveSupabase('payments', toSave, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('payments', id);
@@ -1719,7 +1719,7 @@ export const dbService = {
       return querySupabase<Quote>('quotes', INITIAL_QUOTES);
     },
     async save(quote: Quote): Promise<void> {
-      await saveSupabase('quotes', quote);
+      await saveSupabase('quotes', quote, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('quotes', id);
@@ -1882,7 +1882,7 @@ export const dbService = {
           is_final_quote: quote.isFinalQuote || null,
           created_at: quote.createdAt || null,
           updated_at: quote.updatedAt || new Date().toISOString(),
-        });
+        }, { onConflict: 'company_id,id' }); // PK ghép — migration 20261008
         if (error) throw new Error(`Lưu archived_quotes thất bại: ${error.message}`);
       } catch (e) {
         console.error('Supabase archived_quotes save error:', e);
@@ -2127,7 +2127,10 @@ export const dbService = {
       try {
         const { error } = await supabase
           .from('project_permission_overrides')
-          .upsert({ id: projectId, project_id: projectId, overrides: override, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) });
+          .upsert(
+            { id: projectId, project_id: projectId, overrides: override, ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}) },
+            { onConflict: 'company_id,id' } // PK ghép — migration 20261008
+          );
         if (error) console.warn('Supabase projectPermissionOverrides save error:', error.message);
       } catch (e) {
         console.warn('Supabase projectPermissionOverrides save error:', e);
@@ -2346,7 +2349,7 @@ export const dbService = {
       return querySupabase<any>('warehouse_logs', []);
     },
     async save(log: any): Promise<void> {
-      await saveSupabase('warehouse_logs', log);
+      await saveSupabase('warehouse_logs', log, 'company_id,id'); // PK ghép — migration 20261008
       try {
         window.dispatchEvent(new CustomEvent('hl-warehouse-logs-updated', { detail: log }));
       } catch (e) {
@@ -2408,7 +2411,7 @@ export const dbService = {
       return querySupabase<any>('accounting_sub_contracts', []);
     },
     async save(contract: any): Promise<void> {
-      await saveSupabase('accounting_sub_contracts', contract);
+      await saveSupabase('accounting_sub_contracts', contract, 'company_id,id'); // PK ghép — migration 20261008
     },
     async delete(id: string): Promise<void> {
       await deleteSupabase('accounting_sub_contracts', id);
@@ -2471,7 +2474,7 @@ export const dbService = {
           ten_gia: item.tenGia,
           don_gia: item.donGia,
           ghi_chu: item.ghiChu || null,
-        });
+        }, { onConflict: 'company_id,id' }); // PK ghép — migration 20261008
         if (error) console.warn('[DB] Save product_prices error:', error.message);
       } catch (err) { console.warn('[DB] Save product_prices exception:', err); }
     },
@@ -2511,7 +2514,7 @@ export const dbService = {
           product_id: item.productId,
           ten_chat_lieu: item.tenChatLieu,
           ghi_chu: item.ghiChu || null,
-        });
+        }, { onConflict: 'company_id,id' }); // PK ghép — migration 20261008
         if (error) console.warn('[DB] Save product_materials error:', error.message);
       } catch (err) { console.warn('[DB] Save product_materials exception:', err); }
     },
@@ -2549,7 +2552,7 @@ export const dbService = {
       // (keysToSnake không đệ quy vào value nên key camelCase bên trong
       //  items vẫn được giữ nguyên. Stringify sẽ khiến Postgres lưu thành
       //  JSON scalar string → đọc ra không phải array → crash khi .map)
-      await saveSupabase('sales_orders', order);
+      await saveSupabase('sales_orders', order, 'company_id,id'); // PK ghép — migration 20261008
     },
     /** Tạo đơn MỚI — không bao giờ ghi đè đơn cũ; tự cấp lại mã nếu trùng. */
     async create(order: any): Promise<any> {
@@ -2571,7 +2574,7 @@ export const dbService = {
       return rows.map(normalizeOrderItems);
     },
     async save(order: any): Promise<void> {
-      await saveSupabase('purchase_orders', order);
+      await saveSupabase('purchase_orders', order, 'company_id,id'); // PK ghép — migration 20261008
     },
     /** Tạo đơn MỚI — không bao giờ ghi đè đơn cũ; tự cấp lại mã nếu trùng. */
     async create(order: any): Promise<any> {
@@ -2596,7 +2599,7 @@ export const dbService = {
       }));
     },
     async save(ret: any): Promise<void> {
-      await saveSupabase('supplier_returns', ret);
+      await saveSupabase('supplier_returns', ret, 'company_id,id'); // PK ghép — migration 20261008
     },
     /** Tạo chứng từ trả hàng MỚI — không bao giờ ghi đè chứng từ cũ. */
     async create(ret: any): Promise<any> {
@@ -2619,7 +2622,7 @@ export const dbService = {
       }));
     },
     async save(proposal: any): Promise<void> {
-      await saveSupabase('material_proposals', proposal);
+      await saveSupabase('material_proposals', proposal, 'company_id,id'); // PK ghép — migration 20261008
     },
     /** Tạo đề xuất MỚI — không bao giờ ghi đè đề xuất cũ; tự cấp lại mã nếu trùng. */
     async create(proposal: any): Promise<any> {
@@ -2637,7 +2640,7 @@ export const dbService = {
       return rows[0] || null;
     },
     async save(cfg: any): Promise<void> {
-      await saveSupabase('cash_fund_config', cfg);
+      await saveSupabase('cash_fund_config', cfg, 'company_id,id'); // PK ghép — migration 20261008
       try {
         window.dispatchEvent(new CustomEvent('hl-cash-fund-config-updated', { detail: cfg }));
       } catch (e) {

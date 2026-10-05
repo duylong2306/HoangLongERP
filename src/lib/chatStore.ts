@@ -160,7 +160,7 @@ export function saveMessages(conversationId: string, msgs: ChatMessage[]): void 
 async function pushConversation(conv: Conversation): Promise<any | null> {
   const sb = getSupabase();
   if (!sb) return null;
-  const { error } = await sb.from('conversations').upsert(convToRow(conv));
+  const { error } = await sb.from('conversations').upsert(convToRow(conv), { onConflict: 'company_id,id' }); // PK ghép — migration 20261008
   if (error) {
     console.error('pushConversation error:', error.message);
     return error;
