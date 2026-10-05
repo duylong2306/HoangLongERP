@@ -2338,12 +2338,8 @@ export default function FinanceManagement({
   // TỰ PHÂN BỔ vào các đơn cũ nhất còn nợ (sau khi trả công nợ đầu kỳ — xem planPoAllocations).
   // Trả về danh sách THỰC ÁP DỤNG (đơn nào lưu lỗi thì không nằm trong danh sách) để ghi vào đề
   // xuất, và riêng phần tự phân bổ để báo người dùng.
-  const applyProposalPoAllocations = async (
-    proposal: SubcontractorAdvanceProposal,
-    allocations: PoAllocation[],
-    payTotal: number,
-    paymentId: string
-  ): Promise<{ saved: PoAllocation[]; autoSaved: PoAllocation[] }> => {
+  // Dựng bối cảnh tự phân bổ của 1 đề xuất Chi NCC (đơn của NCC, công nợ đầu kỳ, tiền đã trả trước).
+  const buildAutoAllocateContext = (proposal: SubcontractorAdvanceProposal, paymentId: string) => {
     const supplierName = proposal.subcontractorName;
     // Đơn của đúng NCC (theo mã), đã ghi nhận công nợ
     const pool = purchaseOrders.filter(po => po.supplierId === proposal.subcontractorId && isPoRecorded(po.id));
@@ -2355,8 +2351,21 @@ export default function FinanceManagement({
     const priorPaid = payments
       .filter(p => p.status === 'approved' && p.recipient === supplierName && p.id !== paymentId)
       .reduce((sum, p) => sum + (p.amount || 0), 0);
+    return { pool, openingDebt, priorPaid };
+  };
 
-    const { applied, autoApplied, updatedOrders } = planPoAllocations(allocations, purchaseOrders, payTotal, { pool, openingDebt, priorPaid });
+  // allowAuto = false khi người lập phiếu KHÔNG đồng ý tự phân bổ → chỉ trừ vào các đơn đã chọn.
+  const applyProposalPoAllocations = async (
+    proposal: SubcontractorAdvanceProposal,
+    allocations: PoAllocation[],
+    payTotal: number,
+    paymentId: string,
+    allowAuto: boolean
+  ): Promise<{ saved: PoAllocation[]; autoSaved: PoAllocation[] }> => {
+    const { applied, autoApplied, updatedOrders } = planPoAllocations(
+      allocations, purchaseOrders, payTotal,
+      allowAuto ? buildAutoAllocateContext(proposal, paymentId) : undefined
+    );
     const saved: PoAllocation[] = [];
     const autoSaved: PoAllocation[] = [];
     for (const updatedPo of updatedOrders) {
@@ -4113,6 +4122,27 @@ export default function FinanceManagement({
     // isSubmittingPayment ở handleAddPaymentSubmit) nhờ vậy chỉ mở khóa lại sau
     // khi phiếu chi đã lưu thành công, không còn khoảng hở vài mili-giây khiến
     // người dùng tưởng chưa bấm được rồi bấm lại (nguyên nhân gây trùng phiếu).
+    // Chi NCC sắp TỰ PHÂN BỔ phần tiền chưa gắn đơn → cho người lập phiếu thấy rõ & chấp nhận.
+    // Hệ thống chỉ đoán theo thứ tự cũ nhất, không biết hóa đơn thực tế → có thể gắn không đúng hóa đơn.
+    let allowAutoAlloc = true;
+    if (proposalIsSupplierPayment && activeProposalForPayment) {
+      const preview = planPoAllocations(
+        activeProposalForPayment.purchaseOrderAllocations || [], purchaseOrders, Number(payAmount),
+        buildAutoAllocateContext(activeProposalForPayment, newPay.id)
+      );
+      if (preview.autoApplied.length > 0) {
+        const total = preview.autoApplied.reduce((sum, a) => sum + a.amount, 0);
+        allowAutoAlloc = window.confirm(
+          `⚠️ TỰ PHÂN BỔ VÀO ĐƠN HÀNG\n\n` +
+          `${total.toLocaleString('vi-VN')}đ của phiếu chi này chưa được gắn vào đơn hàng nào (chi lệch hoặc không chọn đơn). ` +
+          `Hệ thống sẽ tự trừ vào ${preview.autoApplied.length} đơn cũ nhất còn nợ của nhà cung cấp:\n` +
+          preview.autoApplied.map(a => `  • ${a.purchaseOrderId}: ${a.amount.toLocaleString('vi-VN')}đ`).join('\n') +
+          `\n\n⚠️ Có thể gắn KHÔNG ĐÚNG hóa đơn thực tế (hệ thống chỉ đoán theo thứ tự cũ nhất).\n\n` +
+          `• Bấm OK: đồng ý tự phân bổ.\n` +
+          `• Bấm Hủy: KHÔNG tự phân bổ — chỉ trừ vào các đơn đã chọn (nếu có), phần còn lại tính vào công nợ chung của nhà cung cấp.`
+        );
+      }
+    }
     await onAddPayment(newPay);
 
     // Check if we are finalizing a subcontractor advance proposal
@@ -4127,7 +4157,8 @@ export default function FinanceManagement({
             activeProposalForPayment,
             activeProposalForPayment.purchaseOrderAllocations || [],
             Number(payAmount),
-            newPay.id
+            newPay.id,
+            allowAutoAlloc
           );
           if (saved.length > 0) appliedAllocs = saved;
           const autoTotal = autoSaved.reduce((sum, a) => sum + a.amount, 0);
@@ -7072,7 +7103,10 @@ export default function FinanceManagement({
                                     <div className="text-slate-700 font-bold uppercase tracking-wide">Chọn đơn hàng thanh toán (không bắt buộc)</div>
                                     <div className="text-slate-500">Đã chọn: <b className="text-amber-700 font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
                                   </div>
-                                  <div className="text-slate-500">Phần tiền chi chưa gắn vào đơn nào (chi lệch / không chọn đơn) sẽ tự trừ vào các đơn cũ nhất còn nợ, sau khi trả công nợ đầu kỳ.</div>
+                                  <div className="bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5 text-amber-800">
+                                    ⚠️ <b>Lưu ý:</b> phần tiền chi chưa gắn vào đơn nào (chi lệch / không chọn đơn) sẽ được <b>tự trừ vào các đơn cũ nhất còn nợ</b> (sau khi trả công nợ đầu kỳ).
+                                    Hệ thống chỉ đoán theo thứ tự cũ nhất nên <b>có thể gắn không đúng hóa đơn</b> — muốn chính xác, hãy chọn đúng đơn ở đây. Khi lập phiếu sẽ có bước xác nhận.
+                                  </div>
                                   <div className="max-h-44 overflow-y-auto space-y-1">
                                     {supplierPos.map(po => {
                                       const remain = getPoPayableRemaining(po);
