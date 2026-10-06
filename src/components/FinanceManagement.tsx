@@ -7109,7 +7109,7 @@ export default function FinanceManagement({
                                 <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[10px] space-y-1.5">
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="text-slate-700 font-bold uppercase tracking-wide">Chọn đơn hàng thanh toán (không bắt buộc)</div>
-                                    <div className="text-slate-500">Đã chọn: <b className="text-amber-700 font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
+                                    <div className="text-slate-500">Đã chọn: <b className="text-blue-700 font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
                                   </div>
                                   <div className="bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5 text-amber-800">
                                     ⚠️ <b>Lưu ý:</b> phần tiền chi chưa gắn vào đơn nào (chi lệch / không chọn đơn) sẽ được <b>tự trừ vào các đơn cũ nhất còn nợ</b> (sau khi trả công nợ đầu kỳ).
@@ -7120,7 +7120,7 @@ export default function FinanceManagement({
                                       const remain = getPoPayableRemaining(po);
                                       const checked = quickProposalPoAlloc[po.id] !== undefined;
                                       return (
-                                        <div key={po.id} className={`flex items-center gap-2 border rounded-lg px-2 py-1 ${checked ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
+                                        <div key={po.id} className={`flex items-center gap-2 border rounded-lg px-2 py-1 ${checked ? 'border-blue-300 bg-blue-50' : 'border-slate-200'}`}>
                                           <input
                                             type="checkbox"
                                             checked={checked}
