@@ -2719,6 +2719,10 @@ export default function FinanceManagement({
         rows.push({
           ...l,
           id: `${l.id}_cdk`,
+          // Dòng này vẫn nằm trong items để dòng TỔNG HỢP cộng đúng công nợ đầu kỳ, nhưng KHÔNG hiện
+          // khi xổ xuống (isOpeningRow): khoản trả công nợ đầu kỳ chỉ tính ở dòng tổng hợp nên dòng
+          // này luôn hiện "chưa trả" → gây nhầm lẫn với số liệu tổng hợp.
+          isOpeningRow: true,
           notes: 'Công nợ đầu kỳ',
           value: 0,
           openingDebt,
@@ -2797,8 +2801,12 @@ export default function FinanceManagement({
       }, 0);
       const paid = g.rawItems.reduce((s: number, l: any) => s + (l.paid || 0), 0) + creditApplied;
       const remaining = tongGiaTri - paid;
-      const notes = g.items.length === 1 ? g.items[0].notes : `${g.items.length} khoản nợ`;
-      return { ...g, openingDebt, value, tongGiaTri, paid, remaining, notes };
+      // Các dòng hiển thị khi xổ xuống = bỏ dòng "Công nợ đầu kỳ" (xem isOpeningRow). Nếu chỉ còn dòng
+      // đó (mọi đơn đã bị xóa) thì giữ lại để không xổ ra trống.
+      const nonOpening = g.items.filter((it: any) => !it.isOpeningRow);
+      const visibleItems = nonOpening.length > 0 ? nonOpening : g.items;
+      const notes = visibleItems.length === 1 ? visibleItems[0].notes : `${visibleItems.length} khoản nợ`;
+      return { ...g, openingDebt, value, tongGiaTri, paid, remaining, notes, visibleItems };
     }).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
   }, [mergedLiabilities, purchaseOrders, supplierReturns, liabilityFilters.category, liabilityFilters.fromDate, liabilityFilters.toDate]);
 
@@ -9795,10 +9803,10 @@ export default function FinanceManagement({
                           const kw = (searchTerm || '').toLowerCase().trim();
                           const nameOrCategoryMatches = !!kw && `${g.name || ''} ${g.category || ''}`.toLowerCase().includes(kw);
                           const itemMatches = kw && !nameOrCategoryMatches
-                            ? g.items.filter((it: any) => (it.notes || '').toLowerCase().includes(kw))
+                            ? g.visibleItems.filter((it: any) => (it.notes || '').toLowerCase().includes(kw))
                             : null;
-                          const displayItems = itemMatches && itemMatches.length > 0 ? itemMatches : g.items;
-                          const isNarrowed = displayItems !== g.items;
+                          const displayItems = itemMatches && itemMatches.length > 0 ? itemMatches : g.visibleItems;
+                          const isNarrowed = displayItems !== g.visibleItems;
                           const expanded = isNarrowed || expandedLiabilities.has(g.key);
                           const toggle = () => setExpandedLiabilities(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
                           return (
@@ -9823,11 +9831,11 @@ export default function FinanceManagement({
                                         {g.name}
                                       </button>
                                       <div className="text-[9px] text-slate-400 mt-0.5">
-                                        {isNarrowed ? `${displayItems.length}/${g.items.length} khoản nợ (đang lọc theo tìm kiếm)` : `${g.items.length} khoản nợ`}
+                                        {isNarrowed ? `${displayItems.length}/${g.visibleItems.length} khoản nợ (đang lọc theo tìm kiếm)` : `${g.visibleItems.length} khoản nợ`}
                                       </div>
                                       {/* NCC Nợ (trả hàng chưa áp dụng hết) — chỉ hiện cho NCC vật tư */}
                                       {g.category === 'Nhà Cung Cấp' && (() => {
-                                        const poItem = g.items.find((it: any) => it.purchaseOrderId);
+                                        const poItem = g.visibleItems.find((it: any) => it.purchaseOrderId);
                                         const supplierId = poItem ? purchaseOrders.find(p => p.id === poItem.purchaseOrderId)?.supplierId : undefined;
                                         const balance = supplierId ? supplierCreditBalance(supplierId) : 0;
                                         if (balance <= 0) return null;
