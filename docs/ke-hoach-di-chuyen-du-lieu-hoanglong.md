@@ -15,7 +15,16 @@
 | Dữ liệu `hoanglong` hiện có trên LoLo | — | là **bản sao cũ chụp ngày 28/9/2026** (24 nhân viên, 41 dự án…); production đã thay đổi nhiều từ đó (đề xuất chi NCC, phân bổ đơn mua, sửa dữ liệu bằng SQL…) → **không dùng được, phải nạp lại từ đầu** |
 | Giới hạn số nhân viên | — | trigger `enforce_employee_limit` **không chặn** Hoàng Long (không gói, không dùng thử = không giới hạn) |
 
-Chưa kiểm chứng được (cần số liệu thật từ production — xem Bước 0): số dòng thật từng bảng, dung lượng/số tệp Storage, cột mới thêm vào production sau 28/9, trạng thái RLS thật trên production.
+### Kết quả kiểm kê thật (chạy chỉ-đọc ngày 7/10/2026 bằng khóa production)
+
+- **Cấu trúc khớp hoàn toàn:** production 57 bảng, LoLo 65 bảng = 57 bảng nghiệp vụ giống hệt + 8 bảng nền tảng (`companies`, `plans`, `platform_*`, `signup_attempts`, `subscription_orders`). **Không có cột nào** của production mà LoLo thiếu (và ngược lại) → không nguy cơ mất cột.
+- **Khối lượng nhỏ:** tổng **10.072 dòng** (lớn nhất: `chat_messages` 4.916, `attendance_records` 1.400, `material_proposals` 322, `purchase_orders` 298, `subcontractor_advances` 327, `payments` 309). Dữ liệu cũ trên LoLo thiếu rất nhiều so với hiện tại (ví dụ `chat_messages` 4.215 → 4.916, `purchase_orders` 239 → 298, `projects` 41 → 44).
+- **Có dòng ở LoLo mà production không còn** (ví dụ `hrm_employee_errors` LoLo 25 > production 12, `archived_quotes` 51 > 50): bản sao cũ chứa dòng đã bị xóa ở production → **bắt buộc xóa sạch dữ liệu `hoanglong` cũ rồi nạp lại** (không "gộp thêm"), mới ra bản sao chính xác.
+- **Storage production: 5.293 tệp, khoảng 1,39 GB:** `mission-report-images` 836 tệp (1,26 GB — chiếm gần hết), `attendance-photos` 4.361 tệp (112 MB), `quote-images` 90 (18,5 MB), `avatars` 4 (2,7 MB), `product-catalog-images` 1. **Bucket thứ 6 `purchase-order-pdfs` (1 tệp 0,3 MB) là di sản:** repo có migration *xóa* bucket này và mã nguồn không còn dùng → **không chuyển**, chỉ sao lưu 1 tệp về máy.
+- Thông báo đẩy: production có 35 `push_subscriptions` (gắn tên miền cũ, không chuyển được — xem §6), `fcm_tokens` 0 dòng.
+- Việc dọn sẵn: LoLo còn bucket thử `zz-policy-test` (của lần kiểm tra bảo mật cũ) cần xóa.
+
+Chưa kiểm chứng: trạng thái RLS thật trên production, cấu hình cron/Edge Function trên production (sẽ xem ở bước diễn tập).
 
 ## 2. Những rủi ro chính và cách chặn
 
