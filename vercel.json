@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/((?!sw\\.js$|web-push-sw\\.js$).*)",
+      "destination": "https://hoanglong.lolo.io.vn/$1",
+      "permanent": false
+    }
+  ]
+}

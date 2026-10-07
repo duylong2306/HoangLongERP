@@ -2,6 +2,15 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
+    <!-- HỆ THỐNG ĐÃ CHUYỂN: mọi địa chỉ cũ chuyển sang hoanglong.lolo.io.vn (giữ nguyên đường dẫn, tham số và phần #). Phòng khi trang này đến từ
+         bộ nhớ đệm mà máy chủ chưa kịp chuyển hướng. Không chạy trên localhost (để vẫn phát triển được). -->
+    <script>
+      (function () {
+        var h = location.hostname;
+        if (h === 'localhost' || h === '127.0.0.1' || h === 'hoanglong.lolo.io.vn') return;
+        location.replace('https://hoanglong.lolo.io.vn' + location.pathname + location.search + location.hash);
+      })();
+    </script>
     <!-- Mặc định vừa khít màn hình (initial-scale=1) nhưng cho phép người dùng tự co dãn tới 5x -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
     <title>Hoàng Long ERP - Hệ thống Thiết kế & Dự toán Nội thất</title>
