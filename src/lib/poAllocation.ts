@@ -25,7 +25,7 @@ export function getPoPayableRemaining(po: PurchaseOrder): number {
 export interface AutoAllocateContext { pool: PurchaseOrder[]; openingDebt: number; priorPaid: number }
 
 // Lập phiếu: trừ khoản chi vào các đơn đã chọn. Công thức giống handleApprovePayment (App.tsx):
-// thanhToanThucTe += số tiền; congNo = tongTien − thanhToanThucTe; trả hết thì 'completed'.
+// thanhToanThucTe += số tiền; congNo = tongTien − thanhToanThucTe (trạng thái đơn giữ nguyên).
 // Bước 1: phân bổ lần lượt theo thứ tự chọn, KHÔNG vượt số còn phải trả của đơn và KHÔNG vượt tổng
 //   tiền phiếu chi (người duyệt có thể duyệt thấp hơn số đề xuất).
 // Bước 2 (nếu có `auto`): phần tiền phiếu còn dư được TỰ PHÂN BỔ vào các đơn CŨ NHẤT còn nợ của NCC.
@@ -50,7 +50,10 @@ export function planPoAllocations(
   const applyTo = (po: PurchaseOrder, use: number, bucket: Map<string, number>) => {
     const newPaid = (po.thanhToanThucTe || 0) + use;
     const newCongNo = Math.max(0, (po.tongTien || 0) - newPaid);
-    current.set(po.id, { ...po, thanhToanThucTe: newPaid, congNo: newCongNo, status: newCongNo <= 0 ? 'completed' : (po.status || 'confirmed') } as PurchaseOrder);
+    // KHÔNG đổi status: với đơn mua, 'completed' nghĩa là đã nhận hàng xong chứ không phải đã thanh toán —
+    // đơn còn nợ vẫn 'completed' (kiểm chứng trên dữ liệu thật). Đổi status ở đây rồi hoàn lại sẽ làm
+    // sai trạng thái nhận hàng (completed → confirmed).
+    current.set(po.id, { ...po, thanhToanThucTe: newPaid, congNo: newCongNo } as PurchaseOrder);
     appliedMap.set(po.id, (appliedMap.get(po.id) || 0) + use);
     bucket.set(po.id, (bucket.get(po.id) || 0) + use);
     touched.add(po.id);
@@ -94,8 +97,7 @@ export function planPoAllocations(
   };
 }
 
-// Xóa phiếu chi: hoàn lại đúng số đã trừ. Chỉ hạ 'completed' → 'confirmed' khi đơn còn nợ,
-// không đụng các trạng thái khác (nháp/hủy...).
+// Xóa phiếu chi: hoàn lại đúng số đã trừ (trạng thái đơn giữ nguyên).
 export function planPoRevert(allocations: PoAllocation[], orders: PurchaseOrder[]): PurchaseOrder[] {
   const updatedOrders: PurchaseOrder[] = [];
   for (const alloc of allocations) {
@@ -103,7 +105,8 @@ export function planPoRevert(allocations: PoAllocation[], orders: PurchaseOrder[
     if (!po) continue;
     const newPaid = Math.max(0, (po.thanhToanThucTe || 0) - (alloc.amount || 0));
     const newCongNo = Math.max(0, (po.tongTien || 0) - newPaid);
-    updatedOrders.push({ ...po, thanhToanThucTe: newPaid, congNo: newCongNo, status: (newCongNo > 0 && po.status === 'completed') ? 'confirmed' : po.status } as PurchaseOrder);
+    // Không đổi status (xem giải thích ở planPoAllocations).
+    updatedOrders.push({ ...po, thanhToanThucTe: newPaid, congNo: newCongNo } as PurchaseOrder);
   }
   return updatedOrders;
 }
