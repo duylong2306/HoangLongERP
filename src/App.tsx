@@ -2371,6 +2371,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       message: `Chào mừng ${loggedInUser.name} đã quay trở lại làm việc.`,
       type: 'success'
     });
+
+    // Multi-tenant: khối nạp dữ liệu khởi động (initAndSync ở trên) chỉ chạy MỘT LẦN lúc mở
+    // trang — lúc đó chưa đăng nhập (chưa có JWT/company_id) nên RLS trả về rỗng. Không nạp lại
+    // sau khi đăng nhập thì các màn hình (Tài Chính, Đơn Hàng, Việc của tôi...) trống cho tới
+    // khi người dùng tự bấm F5. Tải lại trang NGAY SAU đăng nhập (đối xứng với handleLogout):
+    // phiên (JWT + người dùng) đã nằm trong sessionStorage/localStorage nên app khởi động lại
+    // trong trạng thái đã đăng nhập và nạp đúng dữ liệu của công ty này.
+    setTimeout(() => window.location.reload(), 300);
   };
 
   // Bộ xử lý Đăng xuất
