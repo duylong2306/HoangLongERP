@@ -16,7 +16,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
-import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST, passwordProblem, ADMIN_USERNAME_RE } from './_platformAuth.js';
+import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST, passwordProblem, ADMIN_USERNAME_RE, signTotpChallenge, verifyTotpChallenge } from './_platformAuth.js';
+import { generateTotpSecret, otpauthUri, verifyTotp, encryptSecret, decryptSecret, generateRecoveryCodes, hashRecovery } from './_totp.js';
 import { sendTelegram, telegramConfigured } from './_telegram.js';
 import { writeAudit, purgeOldAudit, diffFields, AUDIT_RETENTION_DAYS, type AuditCtx } from './_audit.js';
 import { getClientIp, hashIp, slugProblem, SLUG_MESSAGES } from './_signup.js';
@@ -40,12 +41,10 @@ async function readSetting(db: SupabaseClient, key: string): Promise<any> {
 }
 
 // ─── Đăng nhập ───────────────────────────────────────────────────────────────────────────────────
-async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelResponse, body: any, jwtSecret: string) {
-  const username = String(body.username || '').trim().toLowerCase();
-  const password = String(body.password || '');
-  if (!username || !password) return fail(res, 400, 'Vui lòng nhập tên đăng nhập và mật khẩu.');
-
-  const ipHash = hashIp(getClientIp(req), jwtSecret);
+// Kiểm tra giới hạn đăng nhập sai (dùng cho cả bước mật khẩu lẫn bước mã 2FA — mã 2FA sai cũng tính vào cùng bộ đếm).
+// Khóa theo CẶP (IP + tên đăng nhập) là chính: kẻ ngoài gõ sai tên quản trị từ IP của họ chỉ khóa được CHÍNH IP đó, không khóa
+// được quản trị thật đăng nhập từ IP khác. Ngưỡng theo tên (cao hơn nhiều) chỉ để chặn dò phân tán.
+async function throttleState(db: SupabaseClient, ipHash: string, username: string): Promise<'ok' | 'blocked' | 'error'> {
   const since = new Date(Date.now() - LOGIN_WINDOW_MS).toISOString();
   const [byIp, byUser, byPair] = await Promise.all([
     db.from('platform_login_attempts').select('id', { count: 'exact', head: true }).eq('ip_hash', ipHash).eq('success', false).gte('created_at', since),
@@ -55,13 +54,29 @@ async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelRe
   if (byIp.error || byUser.error || byPair.error) {
     // Chưa chạy migration 20261011 → từ chối (KHÔNG bỏ qua giới hạn đăng nhập)
     console.error('[api/platform] Lỗi bảng platform_login_attempts:', (byIp.error || byUser.error || byPair.error)?.message);
-    return fail(res, 500, 'Hệ thống chưa sẵn sàng.');
+    return 'error';
   }
-  // Khóa theo CẶP (IP + tên đăng nhập) là chính: kẻ ngoài gõ sai tên quản trị từ IP của họ chỉ khóa được CHÍNH IP đó,
-  // không khóa được quản trị thật đăng nhập từ IP khác. Ngưỡng theo tên (cao hơn nhiều) chỉ để chặn dò mật khẩu phân tán.
-  if ((byIp.count || 0) >= MAX_FAILS_PER_IP || (byPair.count || 0) >= MAX_FAILS_PER_PAIR || (byUser.count || 0) >= MAX_FAILS_PER_USERNAME) {
-    return fail(res, 429, 'Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.');
-  }
+  return (byIp.count || 0) >= MAX_FAILS_PER_IP || (byPair.count || 0) >= MAX_FAILS_PER_PAIR || (byUser.count || 0) >= MAX_FAILS_PER_USERNAME ? 'blocked' : 'ok';
+}
+const TOO_MANY = 'Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.';
+
+// Hoàn tất đăng nhập: ghi thời điểm, nhật ký, dọn nhật ký cũ, cấp phiên.
+async function finishLogin(db: SupabaseClient, res: VercelResponse, admin: any, ipHash: string, jwtSecret: string, how: string) {
+  await db.from('platform_admins').update({ last_login_at: new Date().toISOString() }).eq('id', admin.id);
+  await writeAudit(db, { adminId: admin.id, username: admin.username, ipHash }, { action: 'login', targetType: 'account', targetId: admin.id, summary: how });
+  await purgeOldAudit(db);   // dọn nhật ký quá 30 ngày
+  res.status(200).json({ token: signPlatformToken({ id: admin.id, username: admin.username, ver: admin.token_version ?? 0 }, jwtSecret), admin: { id: admin.id, username: admin.username, name: admin.name, isOwner: admin.is_owner === true, totpEnabled: admin.totp_enabled === true } });
+}
+
+async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelResponse, body: any, jwtSecret: string) {
+  const username = String(body.username || '').trim().toLowerCase();
+  const password = String(body.password || '');
+  if (!username || !password) return fail(res, 400, 'Vui lòng nhập tên đăng nhập và mật khẩu.');
+
+  const ipHash = hashIp(getClientIp(req), jwtSecret);
+  const st = await throttleState(db, ipHash, username);
+  if (st === 'error') return fail(res, 500, 'Hệ thống chưa sẵn sàng.');
+  if (st === 'blocked') return fail(res, 429, TOO_MANY);
 
   const { data: admin } = await db.from('platform_admins').select('*').eq('username', username).maybeSingle();
   const ok = await bcrypt.compare(password, admin?.password_hash || DUMMY_HASH);
@@ -70,10 +85,51 @@ async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelRe
   await db.from('platform_login_attempts').insert({ ip_hash: ipHash, username, success: passed });
   if (!passed) return fail(res, 401, 'Tên đăng nhập hoặc mật khẩu không đúng.');
 
-  await db.from('platform_admins').update({ last_login_at: new Date().toISOString() }).eq('id', admin!.id);
-  await writeAudit(db, { adminId: admin!.id, username: admin!.username, ipHash }, { action: 'login', targetType: 'account', targetId: admin!.id, summary: 'Đăng nhập trang quản trị' });
-  await purgeOldAudit(db);   // dọn nhật ký quá 30 ngày
-  res.status(200).json({ token: signPlatformToken({ id: admin!.id, username: admin!.username, ver: admin!.token_version ?? 0 }, jwtSecret), admin: { id: admin!.id, username: admin!.username, name: admin!.name, isOwner: admin!.is_owner === true } });
+  // Tài khoản bật 2FA: mới đúng mật khẩu thôi → CHƯA cấp phiên, chỉ cấp thẻ thử thách 5 phút để nhập mã 6 số ở bước kế tiếp.
+  if (admin!.totp_enabled === true) {
+    return void res.status(200).json({ needTotp: true, challenge: signTotpChallenge({ id: admin!.id, username: admin!.username, ver: admin!.token_version ?? 0 }, jwtSecret) });
+  }
+  await finishLogin(db, res, admin, ipHash, jwtSecret, 'Đăng nhập trang quản trị');
+}
+
+// Bước 2 của đăng nhập có 2FA: thẻ thử thách + (mã 6 số HOẶC mã khôi phục). Sai → tính vào giới hạn đăng nhập sai như sai mật khẩu.
+async function actionLoginTotp(db: SupabaseClient, req: VercelRequest, res: VercelResponse, body: any, jwtSecret: string) {
+  const ch = verifyTotpChallenge(String(body.challenge || ''), jwtSecret);
+  if (!ch) return fail(res, 401, 'Phiên xác thực đã hết hạn. Vui lòng đăng nhập lại từ đầu.');
+  const ipHash = hashIp(getClientIp(req), jwtSecret);
+  const st = await throttleState(db, ipHash, ch.username);
+  if (st === 'error') return fail(res, 500, 'Hệ thống chưa sẵn sàng.');
+  if (st === 'blocked') return fail(res, 429, TOO_MANY);
+
+  const { data: admin } = await db.from('platform_admins').select('*').eq('id', ch.sub).maybeSingle();
+  // Tài khoản bị khóa / đổi mật khẩu / đăng xuất / tắt 2FA trong 5 phút qua → thẻ vô hiệu
+  if (!admin || admin.active !== true || admin.totp_enabled !== true || (admin.token_version ?? 0) !== ch.ver) {
+    return fail(res, 401, 'Phiên xác thực không còn hiệu lực. Vui lòng đăng nhập lại.');
+  }
+  const verdict = await checkSecondFactor(db, admin, body, jwtSecret);
+  await db.from('platform_login_attempts').insert({ ip_hash: ipHash, username: admin.username, success: verdict.ok });
+  if (!verdict.ok) return fail(res, 401, 'Mã xác thực không đúng.');
+  await finishLogin(db, res, admin, ipHash, jwtSecret, verdict.recovery ? `Đăng nhập bằng mã khôi phục (còn ${verdict.recoveryLeft} mã)` : 'Đăng nhập trang quản trị (có xác thực 2FA)');
+}
+
+// Kiểm tra yếu tố thứ hai của 1 tài khoản (dùng khi đăng nhập và khi tắt 2FA): mã 6 số (mỗi mã dùng 1 lần) hoặc mã khôi phục (xóa sau khi dùng).
+async function checkSecondFactor(db: SupabaseClient, admin: any, body: any, jwtSecret: string): Promise<{ ok: boolean; recovery?: boolean; recoveryLeft?: number }> {
+  const recovery = String(body.recoveryCode || '').trim();
+  if (recovery) {
+    const list: string[] = Array.isArray(admin.totp_recovery) ? admin.totp_recovery : [];
+    const h = hashRecovery(recovery, jwtSecret);
+    if (!list.includes(h)) return { ok: false };
+    const left = list.filter(x => x !== h);
+    const { error } = await db.from('platform_admins').update({ totp_recovery: left }).eq('id', admin.id);
+    if (error) return { ok: false };
+    return { ok: true, recovery: true, recoveryLeft: left.length };
+  }
+  const secret = admin.totp_secret ? decryptSecret(admin.totp_secret, jwtSecret) : null;
+  if (!secret) return { ok: false };
+  const v = verifyTotp(secret, String(body.code || ''), Number(admin.totp_last_step) || 0);
+  if (!v.ok) return { ok: false };
+  await db.from('platform_admins').update({ totp_last_step: v.step }).eq('id', admin.id);   // chống dùng lại mã này
+  return { ok: true };
 }
 
 // ─── Doanh nghiệp ────────────────────────────────────────────────────────────────────────────────
@@ -327,10 +383,59 @@ async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, bod
   res.status(200).json({ ok: true, token: signPlatformToken({ id: adminId, username: adminRow.username, ver }, jwtSecret) });
 }
 
+// ─── Bật / tắt 2FA của chính mình ────────────────────────────────────────────────────────────────
+// Bước 1: tạo khóa bí mật mới (lưu MÃ HÓA, chưa bật) và trả về khóa + địa chỉ otpauth để hiện mã QR. Gọi lại sẽ tạo khóa khác.
+async function actionTotpSetup(db: SupabaseClient, res: VercelResponse, admin: any, jwtSecret: string) {
+  if (admin.totp_enabled === true) return fail(res, 409, 'Xác thực hai lớp đã được bật. Hãy tắt trước nếu muốn thiết lập lại.');
+  const secret = generateTotpSecret();
+  const { error } = await db.from('platform_admins').update({ totp_secret: encryptSecret(secret, jwtSecret) }).eq('id', admin.id);
+  if (error) return fail(res, 500, 'Hệ thống chưa sẵn sàng. Vui lòng thử lại sau.');
+  res.status(200).json({ secret, uri: otpauthUri(secret, admin.username) });
+}
+
+// Bước 2: nhập mã 6 số đầu tiên từ ứng dụng để chứng minh đã quét đúng → mới BẬT; trả về mã khôi phục (chỉ hiện đúng 1 lần).
+async function actionTotpEnable(db: SupabaseClient, res: VercelResponse, body: any, admin: any, jwtSecret: string, ctx: AuditCtx) {
+  if (admin.totp_enabled === true) return fail(res, 409, 'Xác thực hai lớp đã được bật.');
+  const secret = admin.totp_secret ? decryptSecret(admin.totp_secret, jwtSecret) : null;
+  if (!secret) return fail(res, 400, 'Chưa tạo khóa. Hãy bấm "Bật xác thực hai lớp" để bắt đầu lại.');
+  const v = verifyTotp(secret, String(body.code || ''), 0);
+  if (!v.ok) return fail(res, 400, 'Mã không đúng. Kiểm tra lại mã 6 số hiện trong ứng dụng (và giờ trên điện thoại).');
+  const codes = generateRecoveryCodes();
+  const { error } = await db.from('platform_admins').update({ totp_enabled: true, totp_recovery: codes.map(c => hashRecovery(c, jwtSecret)), totp_last_step: v.step }).eq('id', admin.id);
+  if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, { action: 'totp.enable', targetType: 'account', targetId: admin.id, summary: 'Bật xác thực hai lớp (Google Authenticator)' });
+  res.status(200).json({ ok: true, recoveryCodes: codes });
+}
+
+// Tắt 2FA: phải nhập ĐÚNG mật khẩu hiện tại VÀ mã 6 số (hoặc mã khôi phục) — để người cầm máy đang mở sẵn không tắt được.
+// Thu hồi mọi phiên cũ và trả phiên mới (như đổi mật khẩu).
+async function actionTotpDisable(db: SupabaseClient, res: VercelResponse, body: any, admin: any, jwtSecret: string, ctx: AuditCtx) {
+  if (admin.totp_enabled !== true) return fail(res, 409, 'Xác thực hai lớp chưa được bật.');
+  if (!(await bcrypt.compare(String(body.password || ''), admin.password_hash))) return fail(res, 400, 'Mật khẩu không đúng.');
+  const f = await checkSecondFactor(db, admin, body, jwtSecret);
+  if (!f.ok) return fail(res, 400, 'Mã xác thực không đúng.');
+  const ver = (admin.token_version ?? 0) + 1;
+  const { error } = await db.from('platform_admins').update({ totp_enabled: false, totp_secret: null, totp_recovery: [], totp_last_step: 0, token_version: ver }).eq('id', admin.id);
+  if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, { action: 'totp.disable', targetType: 'account', targetId: admin.id, summary: 'Tắt xác thực hai lớp' });
+  res.status(200).json({ ok: true, token: signPlatformToken({ id: admin.id, username: admin.username, ver }, jwtSecret) });
+}
+
+// Chủ nền tảng đặt lại 2FA của quản trị viên khác (khi họ mất điện thoại và mã khôi phục): họ đăng nhập chỉ bằng mật khẩu rồi tự bật lại.
+async function actionAccountsResetTotp(db: SupabaseClient, res: VercelResponse, body: any, actor: any, ctx: AuditCtx) {
+  const target = await loadTarget(db, res, String(body.id || ''), actor);
+  if (!target) return;
+  if (target.id === actor.id) return fail(res, 400, 'Tự tắt 2FA của mình ở mục "Xác thực hai lớp".');
+  const { error } = await db.from('platform_admins').update({ totp_enabled: false, totp_secret: null, totp_recovery: [], totp_last_step: 0, token_version: (target.token_version ?? 0) + 1 }).eq('id', target.id);
+  if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, { action: 'accounts.resetTotp', targetType: 'account', targetId: target.id, summary: `Đặt lại xác thực hai lớp cho tài khoản "${target.username}"` });
+  res.status(200).json({ ok: true });
+}
+
 // ─── Tài khoản quản trị (chỉ chủ nền tảng) ────────────────────────────────────────────────────────
 const accountToApi = (a: any) => ({
   id: a.id, username: a.username, name: a.name, active: a.active === true, isOwner: a.is_owner === true,
-  lastLoginAt: a.last_login_at ?? null, createdAt: a.created_at,
+  lastLoginAt: a.last_login_at ?? null, createdAt: a.created_at, totpEnabled: a.totp_enabled === true,
 });
 
 async function actionAccountsList(db: SupabaseClient, res: VercelResponse) {
@@ -445,6 +550,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = String(body.action || '');
 
   if (action === 'login') return actionLogin(db, req, res, body, jwtSecret);
+  if (action === 'login.totp') return actionLoginTotp(db, req, res, body, jwtSecret);
 
   // Mọi action còn lại: token quản trị hợp lệ + tài khoản còn active (tra lại DB mỗi lần).
   const token = verifyPlatformToken(bearerToken(req.headers.authorization), jwtSecret);
@@ -459,7 +565,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isOwner = admin.is_owner === true;
 
   switch (action) {
-    case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name, isOwner } });
+    case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name, isOwner, totpEnabled: admin.totp_enabled === true } });
     case 'companies.list': return actionCompaniesList(db, res);
     case 'companies.create': return actionCompaniesCreate(db, res, body, ctx);
     case 'companies.update': return actionCompaniesUpdate(db, res, body, ctx);
@@ -473,11 +579,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case 'telegram.test': return actionTelegramTest(res, ctx, db);
     case 'password.change': return actionPasswordChange(db, res, body, admin, jwtSecret, ctx);
     case 'logout': return actionLogout(db, res, admin, ctx);
+    case 'totp.setup': return actionTotpSetup(db, res, admin, jwtSecret);
+    case 'totp.enable': return actionTotpEnable(db, res, body, admin, jwtSecret, ctx);
+    case 'totp.disable': return actionTotpDisable(db, res, body, admin, jwtSecret, ctx);
     // Quản lý tài khoản quản trị: chỉ CHỦ nền tảng (is_owner). Nhật ký: mọi quản trị viên xem được, không ai sửa/xóa được.
     case 'accounts.list': return isOwner ? actionAccountsList(db, res) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
     case 'accounts.create': return isOwner ? actionAccountsCreate(db, res, body, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
     case 'accounts.update': return isOwner ? actionAccountsUpdate(db, res, body, admin, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
     case 'accounts.resetPassword': return isOwner ? actionAccountsReset(db, res, body, admin, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
+    case 'accounts.resetTotp': return isOwner ? actionAccountsResetTotp(db, res, body, admin, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
     case 'logs.list': return actionLogsList(db, res, body);
     default: return fail(res, 400, 'Thao tác không hợp lệ.');
   }

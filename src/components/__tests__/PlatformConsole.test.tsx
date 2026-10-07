@@ -22,6 +22,7 @@ const db = new FakeDb();
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => db.client() }));
 import platformHandler from '../../../api/platform';
 import PlatformConsole from '../platform/PlatformConsole';
+import { totpAt, encryptSecret, generateRecoveryCodes, hashRecovery, generateTotpSecret } from '../../../api/_totp';
 
 const SECRET = 'jwt-secret-thu';
 const DAY = 86400000;
@@ -399,5 +400,128 @@ describe('tab Tài khoản & Nhật ký', () => {
     await u.click(screen.getByRole('button', { name: /Nhật ký/ }));
     expect(await screen.findByText(/Khóa doanh nghiệp/)).toBeTruthy();
     expect(JSON.stringify(db.table('platform_audit_logs'))).not.toMatch(/MatKhauTot123|\$2[aby]\$/);
+  });
+});
+
+
+describe('xác thực hai lớp (giao diện)', () => {
+  const KHOA = 'jwt-secret-thu';
+  // Gắn sẵn 2FA cho tài khoản chủ (như đã bật trước đó), trả khóa + mã khôi phục
+  const batSan = () => {
+    const secret = generateTotpSecret(); const codes = generateRecoveryCodes();
+    Object.assign(db.table('platform_admins')[0], { totp_enabled: true, totp_secret: encryptSecret(secret, KHOA), totp_recovery: codes.map(c => hashRecovery(c, KHOA)), totp_last_step: 0 });
+    return { secret, codes };
+  };
+  const nhapMatKhau = async () => {
+    const u = userEvent.setup();
+    render(<PlatformConsole />);
+    await u.type(await screen.findByLabelText(/Tên đăng nhập/i), 'chu');
+    await u.type(screen.getByLabelText(/Mật khẩu/i), 'MatKhauTot123');
+    await u.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+    return u;
+  };
+
+  it('bật 2FA: hiện mã QR + khóa nhập tay; mã sai không bật; mã đúng bật và hiện 8 mã khôi phục một lần (phải tick đã lưu mới Hoàn tất)', async () => {
+    const u = await dangNhap();
+    await u.click(screen.getByRole('button', { name: /Tài khoản/ }));
+    const the = await waitFor(() => { const c = document.getElementById('totp_card'); if (!c) throw new Error('chưa có'); return c; });
+    expect(within(the).getByText('Chưa bật')).toBeTruthy();
+    await u.click(within(the).getByRole('button', { name: 'Bật xác thực hai lớp' }));
+    const secret = (await screen.findByText(/^[A-Z2-7]{32}$/, { selector: '#totp_secret_text' })).textContent!;
+    expect(await within(the).findByAltText(/Mã QR để thêm tài khoản/)).toBeTruthy();
+    expect(db.table('platform_admins')[0].totp_enabled).toBeFalsy();                      // mới tạo khóa, chưa bật
+    await u.type(within(the).getByLabelText(/Mã 6 số trong ứng dụng/), '000000');
+    await u.click(within(the).getByRole('button', { name: 'Xác nhận và bật' }));
+    expect(await within(the).findByRole('alert')).toHaveTextContent(/Mã không đúng/);
+    expect(db.table('platform_admins')[0].totp_enabled).toBeFalsy();
+
+    await u.clear(within(the).getByLabelText(/Mã 6 số trong ứng dụng/));
+    await u.type(within(the).getByLabelText(/Mã 6 số trong ứng dụng/), totpAt(secret));
+    await u.click(within(the).getByRole('button', { name: 'Xác nhận và bật' }));
+    const hop = await screen.findByRole('list', { name: 'Mã khôi phục' });
+    expect(within(hop).getAllByRole('listitem')).toHaveLength(8);
+    expect(db.table('platform_admins')[0].totp_enabled).toBe(true);
+    expect(within(the).getByText('Đang bật')).toBeTruthy();
+    const xong = within(the).getByRole('button', { name: 'Hoàn tất' });
+    expect(xong).toBeDisabled();                                                          // chưa tick "đã lưu"
+    await u.click(within(the).getByLabelText(/Tôi đã lưu các mã khôi phục/));
+    expect(xong).not.toBeDisabled();
+    await u.click(xong);
+    expect(document.getElementById('totp_recovery_box')).toBeNull();                      // mã khôi phục không hiện lại nữa
+  });
+
+  it('đăng nhập có 2FA: sau mật khẩu hiện ô nhập mã; mã sai báo lỗi; mã đúng vào trang quản trị', async () => {
+    const { secret } = batSan();
+    const u = await nhapMatKhau();
+    expect(await screen.findByText('Xác thực hai lớp')).toBeTruthy();
+    expect(screen.queryByText('Doanh nghiệp (3)')).toBeNull();                            // chưa có phiên
+    await u.type(screen.getByLabelText(/Mã xác thực 6 số/), '000000');
+    await u.click(screen.getByRole('button', { name: 'Xác nhận' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Mã xác thực không đúng/);
+    await u.type(screen.getByLabelText(/Mã xác thực 6 số/), totpAt(secret));
+    await u.click(screen.getByRole('button', { name: 'Xác nhận' }));
+    expect(await screen.findByText('Doanh nghiệp (3)')).toBeTruthy();
+  });
+
+  it('mất điện thoại: đăng nhập bằng mã khôi phục (dùng 1 lần)', async () => {
+    const { codes } = batSan();
+    const u = await nhapMatKhau();
+    await u.click(await screen.findByRole('button', { name: /Mất điện thoại/ }));
+    await u.type(screen.getByLabelText('Mã khôi phục'), codes[0]);
+    await u.click(screen.getByRole('button', { name: 'Xác nhận' }));
+    expect(await screen.findByText('Doanh nghiệp (3)')).toBeTruthy();
+    expect(db.table('platform_admins')[0].totp_recovery).toHaveLength(7);
+  });
+
+  it('"Quay lại" ở bước nhập mã → về ô tên/mật khẩu', async () => {
+    batSan();
+    const u = await nhapMatKhau();
+    await u.click(await screen.findByRole('button', { name: 'Quay lại' }));
+    expect(await screen.findByLabelText(/Tên đăng nhập/i)).toBeTruthy();
+  });
+
+  it('tắt 2FA: cần mật khẩu + mã; mã sai báo lỗi, đúng thì tắt và vẫn ở lại trang', async () => {
+    const { secret } = batSan();
+    const u = await nhapMatKhau();
+    await u.type(await screen.findByLabelText(/Mã xác thực 6 số/), totpAt(secret));
+    await u.click(screen.getByRole('button', { name: 'Xác nhận' }));
+    await screen.findByText('Doanh nghiệp (3)');
+    await u.click(screen.getByRole('button', { name: /Tài khoản/ }));
+    const the = await waitFor(() => { const c = document.getElementById('totp_card'); if (!c) throw new Error('chưa có'); return c; });
+    expect(within(the).getByText('Đang bật')).toBeTruthy();
+    await u.click(within(the).getByRole('button', { name: 'Tắt xác thực hai lớp' }));
+    await u.type(within(the).getByLabelText('Mật khẩu hiện tại'), 'MatKhauTot123');
+    await u.type(within(the).getByLabelText(/Mã 6 số trong ứng dụng/), '000000');
+    await u.click(within(the).getByRole('button', { name: 'Tắt xác thực hai lớp' }));
+    expect(await within(the).findByRole('alert')).toHaveTextContent(/Mã xác thực không đúng/);
+    expect(db.table('platform_admins')[0].totp_enabled).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });                     // sang bước mã kế tiếp (mã đăng nhập vừa dùng không dùng lại được)
+    await u.clear(within(the).getByLabelText(/Mã 6 số trong ứng dụng/));
+    await u.type(within(the).getByLabelText(/Mã 6 số trong ứng dụng/), totpAt(secret, Date.now()));
+    await u.click(within(the).getByRole('button', { name: 'Tắt xác thực hai lớp' }));
+    expect(await within(the).findByRole('status')).toHaveTextContent('Đã tắt xác thực hai lớp');
+    expect(db.table('platform_admins')[0]).toMatchObject({ totp_enabled: false, totp_secret: null });
+    expect(within(the).getByText('Chưa bật')).toBeTruthy();
+    expect(screen.getByText('Doanh nghiệp', { selector: 'nav button' })).toBeTruthy();   // vẫn đăng nhập (đã nhận phiên mới)
+    vi.useRealTimers();
+  });
+
+  it('chủ nền tảng: danh sách có cột 2FA; "Đặt lại 2FA" hỏi xác nhận trong trang rồi mới đặt lại', async () => {
+    db.seed('platform_admins', [{ id: 'ad-2', username: 'nv', password_hash: await bcrypt.hash('MatKhauNV12345', 4), name: 'NV', active: true, is_owner: false, totp_enabled: true, totp_secret: 'x', totp_recovery: ['h'], token_version: 0 }]);
+    const u = await dangNhap();
+    await u.click(screen.getByRole('button', { name: /Tài khoản/ }));
+    const dong = (await screen.findByText('nv', { selector: 'td' })).closest('tr') as HTMLElement;
+    expect(within(dong).getByText('Đã bật')).toBeTruthy();
+    await u.click(within(dong).getByRole('button', { name: /Đặt lại 2FA/ }));
+    const hop = await screen.findByRole('alertdialog');
+    expect(hop).toHaveTextContent('Đặt lại 2FA của "nv"?');
+    expect(db.table('platform_admins').find(a => a.id === 'ad-2')!.totp_enabled).toBe(true);   // mới cảnh báo
+    await u.click(within(hop).getByRole('button', { name: 'Hủy bỏ' }));
+    expect(db.table('platform_admins').find(a => a.id === 'ad-2')!.totp_enabled).toBe(true);
+    await u.click(within(dong).getByRole('button', { name: /Đặt lại 2FA/ }));
+    await u.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Đặt lại 2FA' }));
+    await waitFor(() => expect(db.table('platform_admins').find(a => a.id === 'ad-2')!.totp_enabled).toBe(false));
+    expect(await screen.findByText(/Đã đặt lại xác thực hai lớp cho "nv"/)).toBeTruthy();
   });
 });

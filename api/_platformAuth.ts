@@ -55,3 +55,19 @@ export function passwordProblem(pw: string): string | null {
   return null;
 }
 export const ADMIN_USERNAME_RE = /^[a-z0-9._-]{3,40}$/;
+
+// ─── Thử thách 2FA ───────────────────────────────────────────────────────────────────────────────
+// Sau khi nhập ĐÚNG mật khẩu mà tài khoản bật 2FA, máy chủ chưa cấp phiên mà cấp "thẻ thử thách" sống 5 phút (typ khác hẳn
+// phiên nên KHÔNG dùng được để gọi API quản trị). Chỉ khi nộp thẻ này cùng mã 6 số đúng mới nhận phiên thật.
+export const TOTP_CHALLENGE_TTL_SECONDS = 5 * 60;
+
+export function signTotpChallenge(admin: { id: string; username: string; ver?: number }, jwtSecret: string): string {
+  return jwt.sign({ sub: admin.id, username: admin.username, ver: admin.ver ?? 0, typ: 'platform_totp_challenge' }, platformSecret(jwtSecret), { algorithm: 'HS256', expiresIn: TOTP_CHALLENGE_TTL_SECONDS });
+}
+export function verifyTotpChallenge(token: string, jwtSecret: string): { sub: string; username: string; ver: number } | null {
+  try {
+    const p: any = jwt.verify(token, platformSecret(jwtSecret), { algorithms: ['HS256'] });
+    if (p?.typ !== 'platform_totp_challenge' || typeof p.sub !== 'string') return null;
+    return { sub: p.sub, username: String(p.username || ''), ver: Number.isInteger(p.ver) ? p.ver : 0 };
+  } catch { return null; }
+}

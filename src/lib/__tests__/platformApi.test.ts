@@ -8,7 +8,8 @@ const db = new FakeDb();
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => db.client() }));
 
 import handler from '../../../api/platform';
-import { signPlatformToken } from '../../../api/_platformAuth';
+import { signPlatformToken, signTotpChallenge, verifyPlatformToken } from '../../../api/_platformAuth';
+import { totpAt, decryptSecret } from '../../../api/_totp';
 
 const SECRET = 'jwt-secret-thu';
 const res = () => {
@@ -449,5 +450,155 @@ describe('quyền lợi gói + đơn khách báo chuyển khoản + Telegram th�
       expect(g.body.telegramConfigured).toBe(true);
       expect(JSON.stringify(g.body)).not.toContain('BOT-TOKEN-BI-MAT');
     } finally { globalThis.fetch = f; }
+  });
+});
+
+
+describe('xác thực hai lớp (TOTP)', () => {
+  const MK = 'MatKhauTot123';
+  const bat = async () => {   // bật 2FA cho tài khoản chủ, trả khóa + mã khôi phục + (thời điểm đã dùng)
+    const t0 = tok();
+    const st = await call({ action: 'totp.setup' }, { token: t0 });
+    const secret: string = st.body.secret;
+    const en = await call({ action: 'totp.enable', code: totpAt(secret) }, { token: t0 });
+    return { secret, codes: en.body.recoveryCodes as string[], st, en };
+  };
+  const dangNhapMK = (u = 'chu') => call({ action: 'login', username: u, password: MK });
+
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-07T10:00:00Z') }); });
+
+  it('thiết lập: setup trả khóa + địa chỉ otpauth, khóa lưu MÃ HÓA (chưa bật); mã sai không bật; mã đúng bật và trả 8 mã khôi phục (DB chỉ lưu băm)', async () => {
+    const st = await call({ action: 'totp.setup' }, { token: tok() });
+    expect(st.code).toBe(200);
+    expect(st.body.secret).toMatch(/^[A-Z2-7]{32}$/);
+    expect(st.body.uri).toContain(`secret=${st.body.secret}`); expect(st.body.uri).toContain('LoLo:chu');
+    const row = db.table('platform_admins')[0];
+    expect(row.totp_enabled).toBeFalsy();
+    expect(row.totp_secret).not.toContain(st.body.secret);                       // không lưu bản rõ
+    expect(decryptSecret(row.totp_secret, SECRET)).toBe(st.body.secret);
+
+    expect((await call({ action: 'totp.enable', code: '000000' }, { token: tok() })).code).toBe(400);
+    expect(db.table('platform_admins')[0].totp_enabled).toBeFalsy();
+    const en = await call({ action: 'totp.enable', code: totpAt(st.body.secret) }, { token: tok() });
+    expect(en.code).toBe(200);
+    expect(en.body.recoveryCodes).toHaveLength(8);
+    const sau = db.table('platform_admins')[0];
+    expect(sau.totp_enabled).toBe(true);
+    expect(JSON.stringify(sau.totp_recovery)).not.toContain(en.body.recoveryCodes[0].replace(/-/g, ''));   // chỉ băm
+    expect(sau.totp_recovery).toHaveLength(8);
+    expect((await call({ action: 'totp.setup' }, { token: tok() })).code).toBe(409);   // đã bật thì không setup lại
+  });
+
+  it('đăng nhập có 2FA: đúng mật khẩu CHƯA có phiên (chỉ thẻ thử thách); thẻ không gọi được API; nhập mã đúng mới có phiên', async () => {
+    const { secret } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));      // sang bước mã mới (mã dùng để bật không dùng lại được)
+    const r1 = await dangNhapMK();
+    expect(r1.code).toBe(200);
+    expect(r1.body.needTotp).toBe(true); expect(r1.body.token).toBeUndefined();
+    expect((await call({ action: 'me' }, { token: r1.body.challenge })).code).toBe(401);          // thẻ KHÔNG phải phiên
+    const r2 = await call({ action: 'login.totp', challenge: r1.body.challenge, code: totpAt(secret) });
+    expect(r2.code).toBe(200);
+    expect(verifyPlatformToken(r2.body.token, SECRET)).toMatchObject({ username: 'chu' });
+    expect(r2.body.admin.totpEnabled).toBe(true);
+    expect((await call({ action: 'me' }, { token: r2.body.token })).body.admin.totpEnabled).toBe(true);
+  });
+
+  it('phiên thật KHÔNG dùng được làm thẻ thử thách; thẻ thiếu/rác/hết hạn 5 phút → 401', async () => {
+    const { secret } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));
+    expect((await call({ action: 'login.totp', challenge: tok(), code: totpAt(secret) })).code).toBe(401);   // phiên ≠ thẻ
+    expect((await call({ action: 'login.totp', code: totpAt(secret) })).code).toBe(401);
+    expect((await call({ action: 'login.totp', challenge: 'rac.rac.rac', code: totpAt(secret) })).code).toBe(401);
+    const ch = (await dangNhapMK()).body.challenge;
+    vi.setSystemTime(new Date('2026-10-07T10:11:00Z'));      // quá 5 phút
+    expect((await call({ action: 'login.totp', challenge: ch, code: totpAt(secret) })).code).toBe(401);
+  });
+
+  it('mã sai → 401 và tính vào giới hạn (5 lần sai → 429, kể cả khi sau đó nhập đúng)', async () => {
+    const { secret } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));
+    const ch = (await dangNhapMK()).body.challenge;
+    for (let i = 0; i < 5; i++) expect((await call({ action: 'login.totp', challenge: ch, code: '000000' })).code).toBe(401);
+    expect((await call({ action: 'login.totp', challenge: ch, code: totpAt(secret) })).code).toBe(429);
+  });
+
+  it('CHỐNG DÙNG LẠI mã: cùng 1 mã đã đăng nhập thành công thì không đăng nhập lần nữa được', async () => {
+    const { secret } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));
+    const code = totpAt(secret);
+    const c1 = (await dangNhapMK()).body.challenge;
+    expect((await call({ action: 'login.totp', challenge: c1, code })).code).toBe(200);
+    const c2 = (await dangNhapMK()).body.challenge;
+    expect((await call({ action: 'login.totp', challenge: c2, code })).code).toBe(401);        // kẻ nhìn trộm mã vừa nhập cũng vô dụng
+    vi.setSystemTime(new Date('2026-10-07T10:05:30Z'));                                          // bước kế tiếp thì mã mới dùng được
+    expect((await call({ action: 'login.totp', challenge: c2, code: totpAt(secret) })).code).toBe(200);
+  });
+
+  it('mã khôi phục: đăng nhập được, mỗi mã chỉ dùng 1 lần, ghi nhật ký còn bao nhiêu mã', async () => {
+    const { codes } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));
+    const c1 = (await dangNhapMK()).body.challenge;
+    expect((await call({ action: 'login.totp', challenge: c1, recoveryCode: codes[0].toLowerCase() })).code).toBe(200);   // không phân biệt hoa/thường
+    expect(db.table('platform_admins')[0].totp_recovery).toHaveLength(7);
+    const c2 = (await dangNhapMK()).body.challenge;
+    expect((await call({ action: 'login.totp', challenge: c2, recoveryCode: codes[0] })).code).toBe(401);                // đã dùng
+    expect((await call({ action: 'login.totp', challenge: c2, recoveryCode: 'AAAA-AAAA-AA' })).code).toBe(401);          // mã bậy
+    expect(db.table('platform_audit_logs').some(l => /mã khôi phục \(còn 7 mã\)/.test(l.summary))).toBe(true);
+  });
+
+  it('tài khoản bị khóa / đổi mật khẩu sau khi có thẻ thử thách → thẻ vô hiệu', async () => {
+    const { secret } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));
+    const ch = (await dangNhapMK()).body.challenge;
+    db.table('platform_admins')[0].token_version = 99;       // đã đổi mật khẩu / đăng xuất ở nơi khác
+    expect((await call({ action: 'login.totp', challenge: ch, code: totpAt(secret) })).code).toBe(401);
+  });
+
+  it('tắt 2FA: cần ĐÚNG mật khẩu và mã; thu hồi phiên cũ, trả phiên mới; sau đó đăng nhập chỉ cần mật khẩu', async () => {
+    const { secret } = await bat();
+    vi.setSystemTime(new Date('2026-10-07T10:05:00Z'));
+    const t = tok();
+    expect((await call({ action: 'totp.disable', password: 'sai', code: totpAt(secret) }, { token: t })).code).toBe(400);
+    expect((await call({ action: 'totp.disable', password: MK, code: '000000' }, { token: t })).code).toBe(400);
+    expect(db.table('platform_admins')[0].totp_enabled).toBe(true);
+    const r = await call({ action: 'totp.disable', password: MK, code: totpAt(secret) }, { token: t });
+    expect(r.code).toBe(200);
+    expect(db.table('platform_admins')[0]).toMatchObject({ totp_enabled: false, totp_secret: null, totp_recovery: [] });
+    expect((await call({ action: 'me' }, { token: t })).code).toBe(401);                 // phiên cũ bị thu hồi
+    expect((await call({ action: 'me' }, { token: r.body.token })).code).toBe(200);      // phiên mới dùng được
+    const l = await dangNhapMK();
+    expect(l.body.token).toBeTruthy(); expect(l.body.needTotp).toBeUndefined();
+    expect((await call({ action: 'totp.disable', password: MK, code: '123456' }, { token: l.body.token })).code).toBe(409);   // chưa bật
+  });
+
+  it('chủ nền tảng đặt lại 2FA của quản trị viên khác (không phải chính mình); người không phải chủ bị từ chối', async () => {
+    db.seed('platform_admins', [{ id: 'ad-2', username: 'nv', password_hash: matKhauHash, name: 'NV', active: true, is_owner: false, totp_enabled: true, totp_secret: 'x', totp_recovery: ['h'], totp_last_step: 5, token_version: 0 }]);
+    const tNv = signPlatformToken({ id: 'ad-2', username: 'nv', ver: 0 }, SECRET);
+    expect((await call({ action: 'accounts.resetTotp', id: ADMIN_ID }, { token: tNv })).code).toBe(403);
+    expect((await call({ action: 'accounts.resetTotp', id: ADMIN_ID }, { token: tok() })).code).toBe(400);        // không tự reset mình
+    expect((await call({ action: 'accounts.resetTotp', id: 'ad-2' }, { token: tok() })).code).toBe(200);
+    expect(db.table('platform_admins').find(a => a.id === 'ad-2')).toMatchObject({ totp_enabled: false, totp_secret: null, totp_recovery: [], token_version: 1 });
+    expect((await call({ action: 'me' }, { token: tNv })).code).toBe(401);                                          // phiên cũ của họ bị thu hồi
+    expect((await call({ action: 'login', username: 'nv', password: MK })).body.token).toBeTruthy();               // giờ chỉ cần mật khẩu
+    expect(db.table('platform_audit_logs').some(l => l.action === 'accounts.resetTotp')).toBe(true);
+  });
+
+  it('accounts.list cho biết ai đã bật 2FA; sai mật khẩu vẫn 401 (không lộ tài khoản có 2FA hay không)', async () => {
+    await bat();
+    const l = await call({ action: 'accounts.list' }, { token: tok() });
+    expect(l.body.accounts[0].totpEnabled).toBe(true);
+    const sai = await call({ action: 'login', username: 'chu', password: 'sai' });
+    expect(sai.code).toBe(401); expect(sai.body.needTotp).toBeUndefined();
+  });
+
+  it('nhật ký ghi bật/tắt 2FA và KHÔNG chứa khóa/mã khôi phục/mật khẩu', async () => {
+    const { secret, codes } = await bat();
+    const moi = (await call({ action: 'totp.disable', password: MK, code: totpAt(secret, Date.now() + 30000) }, { token: tok() }));
+    const logs = JSON.stringify(db.table('platform_audit_logs'));
+    expect(logs).toContain('totp.enable');
+    expect(logs).not.toContain(secret);
+    for (const c of codes) expect(logs).not.toContain(c);
+    expect(logs).not.toContain(MK);
+    void moi;
   });
 });

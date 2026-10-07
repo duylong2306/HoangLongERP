@@ -7,7 +7,7 @@ import OrdersTab from './OrdersTab';
 import SettingsTab from './SettingsTab';
 import AccountsTab from './AccountsTab';
 import LogsTab from './LogsTab';
-import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT } from './platformApi';
+import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT, type PlatformAdmin } from './platformApi';
 
 // TRANG QUẢN TRỊ NỀN TẢNG (lolo.io.vn/quantri) — tách hẳn khỏi ERP của các doanh nghiệp.
 // Được src/main.tsx chọn khi đường dẫn bắt đầu bằng /quantri ở địa chỉ gốc (không bao giờ ở subdomain doanh nghiệp).
@@ -15,7 +15,6 @@ import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT } 
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
 
 type TabKey = 'companies' | 'orders' | 'plans' | 'settings' | 'accounts' | 'logs';
-interface Admin { id: string; username: string; name: string; isOwner: boolean }
 const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'companies', label: 'Doanh nghiệp', icon: Building2 },
   { key: 'orders', label: 'Đơn đăng ký', icon: ReceiptText },
@@ -26,14 +25,14 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?
 ];
 
 export default function PlatformConsole() {
-  const [admin, setAdmin] = useState<Admin | null>(null);
+  const [admin, setAdmin] = useState<PlatformAdmin | null>(null);
   const [checking, setChecking] = useState(!!getPlatformToken());   // có token cũ → hỏi máy chủ còn hiệu lực không
   const [tab, setTab] = useState<TabKey>('companies');
 
   // Khôi phục phiên: token còn trong sessionStorage thì xác nhận lại với máy chủ (token có thể đã hết hạn/bị khóa).
   useEffect(() => {
     if (!getPlatformToken()) return;
-    platformCall<{ admin: Admin }>('me')
+    platformCall<{ admin: PlatformAdmin }>('me')
       .then(r => setAdmin(r.admin))
       .catch(() => setPlatformToken(null))
       .finally(() => setChecking(false));
@@ -90,7 +89,7 @@ export default function PlatformConsole() {
         {tab === 'orders' && <OrdersTab />}
         {tab === 'plans' && <PlansTab />}
         {tab === 'settings' && <SettingsTab />}
-        {tab === 'accounts' && <AccountsTab myId={admin.id} isOwner={admin.isOwner} />}
+        {tab === 'accounts' && <AccountsTab myId={admin.id} isOwner={admin.isOwner} totpEnabled={admin.totpEnabled === true} onTotpChanged={(on) => setAdmin(a => (a ? { ...a, totpEnabled: on } : a))} />}
         {tab === 'logs' && <LogsTab />}
       </main>
     </div>
