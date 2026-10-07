@@ -7,6 +7,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { getHostInfo } from './lib/tenant';
 import { getStoredTokenClaims, clearStoredSession } from './lib/supabase';
 import { chooseScreen } from './lib/boot';
+import { mountEnvRibbon } from './lib/envRibbon';
 import './index.css';
 
 // Địa chỉ gốc (www.<tên-miền-gốc>, xem src/lib/tenant.ts) = website giới thiệu + đăng ký doanh nghiệp.
@@ -18,6 +19,9 @@ const LandingPage = lazy(() => import('./components/landing/LandingPage'));
 const PlatformConsole = lazy(() => import('./components/platform/PlatformConsole'));
 // Trang GIA HẠN: thay toàn bộ ERP khi doanh nghiệp hết hạn gói/dùng thử (đăng nhập bằng "token khóa" — xem api/login.ts).
 const RenewalPage = lazy(() => import('./components/subscription/RenewalPage'));
+
+// Môi trường dev: hiện nhãn "THỬ NGHIỆM" ở góc (môi trường thật không đặt VITE_APP_ENV nên không hiện gì)
+mountEnvRibbon();
 
 const hostKind = getHostInfo().kind;
 const boot = chooseScreen(hostKind, window.location.pathname, getStoredTokenClaims(), Date.now());
