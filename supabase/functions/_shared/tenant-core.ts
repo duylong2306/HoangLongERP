@@ -116,10 +116,13 @@ export interface PushEnv { SUPABASE_URL?: string; SERVICE_KEY?: string; ANON_KEY
 // Xử lý yêu cầu /send-push: xác thực → xác định công ty (từ TOKEN; chỉ khóa service_role mới được chỉ định companyId) → gửi.
 export async function handleSendPush(req: PushRequest, env: PushEnv, deps: { fetchFn: PushDeps['fetchFn']; webPush: PushDeps['webPush'] }): Promise<{ status: number; json: any }> {
   if (req.method !== 'POST') return { status: 405, json: { error: 'Method not allowed' } };
-  if (!env.SUPABASE_URL || !env.SERVICE_KEY || !env.ANON_KEY || !env.VAPID_PRIV || !env.VAPID_PUB) return { status: 500, json: { error: 'Missing env vars' } };
+  if (!env.SUPABASE_URL || !env.SERVICE_KEY || !env.ANON_KEY) return { status: 500, json: { error: 'Missing env vars' } };
 
   const auth = await authenticateCaller({ authorization: req.authorization, serviceKey: env.SERVICE_KEY, anonKey: env.ANON_KEY, supabaseUrl: env.SUPABASE_URL, fetchFn: deps.fetchFn as any });
   if (!auth.ok) return { status: auth.status, json: { error: auth.error } };
+
+  // Khóa VAPID kiểm sau khi xác thực: người chưa đăng nhập luôn nhận 401, không biết cấu hình máy chủ thiếu gì.
+  if (!env.VAPID_PRIV || !env.VAPID_PUB) return { status: 500, json: { error: 'Missing VAPID keys' } };
 
   const b = req.body || {};
   const userIds = sanitizeIds(b.userIds);

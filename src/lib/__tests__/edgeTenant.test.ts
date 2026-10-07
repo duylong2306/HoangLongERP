@@ -139,6 +139,8 @@ describe('send-push đa doanh nghiệp', () => {
     expect((await send(tokA, { userIds: ['x"),a=eq.1', 'a,b'] })).status).toBe(400);
     expect((await handleSendPush({ method: 'GET', authorization: null, body: {} }, ENV, { fetchFn: rest.fetchFn as any, webPush: makeWebPush().webPush })).status).toBe(405);
     expect((await send(tokA, { userIds: ['a'] }, makeWebPush(), { ...ENV, VAPID_PRIV: undefined })).status).toBe(500);
+    // thiếu khóa VAPID nhưng người gọi CHƯA đăng nhập → vẫn 401 (không lộ cấu hình thiếu gì)
+    expect((await send(ANON, { userIds: ['a'] }, makeWebPush(), { ...ENV, VAPID_PRIV: undefined, VAPID_PUB: undefined })).status).toBe(401);
   });
   it('endpoint chết thật (410) bị xóa CHỈ trong công ty gửi; lỗi tạm thời (503) giữ lại; endpoint cùng tên ở công ty khác không đụng', async () => {
     db.push_subscriptions.push({ id: 'sb-trung', company_id: B, user_id: 'emp_admin', endpoint: 'https://push/A-admin', p256dh: 'k', auth: 'a', created_at: new Date().toISOString() });   // trùng endpoint nhưng ở công ty B

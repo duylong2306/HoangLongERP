@@ -22,11 +22,12 @@ serve(async (req) => {
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const VAPID_PRIV = Deno.env.get("VAPID_PRIVATE_KEY");
     const VAPID_PUB = Deno.env.get("VAPID_PUBLIC_KEY");
-    if (!SUPABASE_URL || !SERVICE_KEY || !VAPID_PRIV || !VAPID_PUB) return json(500, { error: "Missing env vars" });
+    if (!SUPABASE_URL || !SERVICE_KEY) return json(500, { error: "Missing env vars" });
 
     // Chỉ khóa service_role mới được kích hoạt nhắc điểm danh (nếu không, ai có khóa anon công khai cũng gọi được)
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
     if (token !== SERVICE_KEY) return json(401, { error: "Chỉ máy chủ (service_role) được gọi hàm này." });
+    if (!VAPID_PRIV || !VAPID_PUB) return json(500, { error: "Missing VAPID keys" });
 
     webPush.setVapidDetails("mailto:admin@hoanglonglamdong.vn", VAPID_PUB, VAPID_PRIV);
     const result = await runAttendanceReminders({ supabaseUrl: SUPABASE_URL, serviceKey: SERVICE_KEY, fetchFn: fetch, webPush });
