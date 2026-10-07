@@ -9,7 +9,7 @@
 import jwt from 'jsonwebtoken';
 import { createHash } from 'crypto';
 
-export const PLATFORM_TOKEN_TTL_SECONDS = 12 * 60 * 60;   // phiên quản trị tối đa 12 giờ
+export const PLATFORM_TOKEN_TTL_SECONDS = 2 * 60 * 60;    // phiên quản trị tối đa 2 giờ (token lộ cũng chỉ dùng được tối đa 2 giờ)
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;            // cửa sổ đếm lượt đăng nhập sai
 export const MAX_FAILS_PER_IP = 10;
 export const MAX_FAILS_PER_PAIR = 5;        // sai quá 5 lần với CÙNG (IP + tên đăng nhập) → khóa cặp đó
@@ -20,20 +20,22 @@ export function platformSecret(jwtSecret: string): string {
   return createHash('sha256').update(`${jwtSecret}|platform-admin`).digest('hex');
 }
 
-export function signPlatformToken(admin: { id: string; username: string }, jwtSecret: string): string {
+export function signPlatformToken(admin: { id: string; username: string; ver?: number }, jwtSecret: string): string {
   return jwt.sign(
-    { sub: admin.id, username: admin.username, typ: 'platform_admin' },
+    // ver = số phiên bản token của tài khoản (platform_admins.token_version): đăng xuất / đổi mật khẩu tăng số này
+    // → mọi token cũ (ver nhỏ hơn) bị máy chủ từ chối ngay, không chờ hết hạn.
+    { sub: admin.id, username: admin.username, ver: admin.ver ?? 0, typ: 'platform_admin' },
     platformSecret(jwtSecret),
     { algorithm: 'HS256', expiresIn: PLATFORM_TOKEN_TTL_SECONDS },
   );
 }
 
 // Trả về { sub, username } nếu token đúng chữ ký, còn hạn VÀ đúng loại 'platform_admin'; ngược lại null.
-export function verifyPlatformToken(token: string, jwtSecret: string): { sub: string; username: string } | null {
+export function verifyPlatformToken(token: string, jwtSecret: string): { sub: string; username: string; ver: number } | null {
   try {
     const p: any = jwt.verify(token, platformSecret(jwtSecret), { algorithms: ['HS256'] });
     if (p?.typ !== 'platform_admin' || typeof p.sub !== 'string') return null;
-    return { sub: p.sub, username: String(p.username || '') };
+    return { sub: p.sub, username: String(p.username || ''), ver: Number.isInteger(p.ver) ? p.ver : 0 };
   } catch {
     return null;
   }

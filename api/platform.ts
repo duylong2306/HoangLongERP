@@ -61,7 +61,7 @@ async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelRe
     return fail(res, 429, 'Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.');
   }
 
-  const { data: admin } = await db.from('platform_admins').select('id, username, password_hash, name, active').eq('username', username).maybeSingle();
+  const { data: admin } = await db.from('platform_admins').select('*').eq('username', username).maybeSingle();
   const ok = await bcrypt.compare(password, admin?.password_hash || DUMMY_HASH);
   const passed = !!admin && admin.active === true && ok;
 
@@ -69,7 +69,7 @@ async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelRe
   if (!passed) return fail(res, 401, 'Tên đăng nhập hoặc mật khẩu không đúng.');
 
   await db.from('platform_admins').update({ last_login_at: new Date().toISOString() }).eq('id', admin!.id);
-  res.status(200).json({ token: signPlatformToken({ id: admin!.id, username: admin!.username }, jwtSecret), admin: { id: admin!.id, username: admin!.username, name: admin!.name } });
+  res.status(200).json({ token: signPlatformToken({ id: admin!.id, username: admin!.username, ver: admin!.token_version ?? 0 }, jwtSecret), admin: { id: admin!.id, username: admin!.username, name: admin!.name } });
 }
 
 // ─── Doanh nghiệp ────────────────────────────────────────────────────────────────────────────────
@@ -257,7 +257,15 @@ async function actionSettingsSave(db: SupabaseClient, res: VercelResponse, body:
   res.status(200).json({ ok: true });
 }
 
-async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, body: any, adminId: string) {
+// Đăng xuất THẬT: tăng token_version → token hiện tại (và mọi token cũ) hết hiệu lực ở máy chủ.
+async function actionLogout(db: SupabaseClient, res: VercelResponse, admin: any) {
+  const { error } = await db.from('platform_admins').update({ token_version: (admin.token_version ?? 0) + 1 }).eq('id', admin.id);
+  if (error) return fail(res, 500, error.message);
+  res.status(200).json({ ok: true });
+}
+
+async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, body: any, adminRow: any, jwtSecret: string) {
+  const adminId = adminRow.id as string;
   const current = String(body.currentPassword || '');
   const next = String(body.newPassword || '');
   if (next.length < 10 || next.length > 72 || !/[A-Za-z]/.test(next) || !/\d/.test(next)) {
@@ -265,9 +273,11 @@ async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, bod
   }
   const { data: admin } = await db.from('platform_admins').select('password_hash').eq('id', adminId).maybeSingle();
   if (!admin || !(await bcrypt.compare(current, admin.password_hash))) return fail(res, 400, 'Mật khẩu hiện tại không đúng.');
-  const { error } = await db.from('platform_admins').update({ password_hash: await bcrypt.hash(next, PLATFORM_BCRYPT_COST) }).eq('id', adminId);
+  const ver = (adminRow.token_version ?? 0) + 1;
+  const { error } = await db.from('platform_admins').update({ password_hash: await bcrypt.hash(next, PLATFORM_BCRYPT_COST), token_version: ver }).eq('id', adminId);
   if (error) return fail(res, 500, error.message);
-  res.status(200).json({ ok: true });
+  // Đổi mật khẩu thu hồi MỌI token cũ (kể cả của kẻ đang giữ token bị lộ); trả token mới để phiên hiện tại không bị đá ra.
+  res.status(200).json({ ok: true, token: signPlatformToken({ id: adminId, username: adminRow.username, ver }, jwtSecret) });
 }
 
 // ─── Điểm vào ────────────────────────────────────────────────────────────────────────────────────
@@ -296,8 +306,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Mọi action còn lại: token quản trị hợp lệ + tài khoản còn active (tra lại DB mỗi lần).
   const token = verifyPlatformToken(bearerToken(req.headers.authorization), jwtSecret);
   if (!token) return fail(res, 401, 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.');
-  const { data: admin } = await db.from('platform_admins').select('id, username, name, active').eq('id', token.sub).maybeSingle();
+  const { data: admin } = await db.from('platform_admins').select('*').eq('id', token.sub).maybeSingle();
   if (!admin || admin.active !== true) return fail(res, 401, 'Tài khoản không còn hiệu lực.');
+  // Token cũ hơn phiên bản hiện tại (đã đăng xuất / đổi mật khẩu) → thu hồi.
+  if (token.ver !== (admin.token_version ?? 0)) return fail(res, 401, 'Phiên đăng nhập đã bị thu hồi. Vui lòng đăng nhập lại.');
 
   switch (action) {
     case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name } });
@@ -311,7 +323,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case 'orders.cancel': return actionOrdersCancel(db, res, body);
     case 'settings.get': return actionSettingsGet(db, res);
     case 'settings.save': return actionSettingsSave(db, res, body);
-    case 'password.change': return actionPasswordChange(db, res, body, admin.id);
+    case 'password.change': return actionPasswordChange(db, res, body, admin, jwtSecret);
+    case 'logout': return actionLogout(db, res, admin);
     default: return fail(res, 400, 'Thao tác không hợp lệ.');
   }
 }

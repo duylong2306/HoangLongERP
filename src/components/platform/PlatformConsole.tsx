@@ -41,7 +41,11 @@ export default function PlatformConsole() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onExpired);
   }, []);
 
-  const logout = () => { setPlatformToken(null); setAdmin(null); };
+  // Đăng xuất thật: báo máy chủ thu hồi token (không chờ được thì vẫn xóa token phía trình duyệt).
+  const logout = () => {
+    platformCall('logout').catch(() => { /* bỏ qua: token cũng sẽ tự hết hạn */ });
+    setPlatformToken(null); setAdmin(null);
+  };
 
   if (checking) {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500"><Loader2 className="w-6 h-6 animate-spin" /></div>;

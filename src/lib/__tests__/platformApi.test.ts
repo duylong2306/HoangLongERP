@@ -298,4 +298,22 @@ describe('cấu hình & mật khẩu', () => {
     expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(401);
     expect((await call({ action: 'login', username: 'chu', password: 'MatKhauMoi12345' })).code).toBe(200);
   });
+
+  it('đăng xuất thật: token cũ bị từ chối ngay (kể cả còn hạn); đăng nhập lại cho token mới dùng được', async () => {
+    const login = await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' });
+    const t1 = login.body.token;
+    expect((await call({ action: 'me' }, { token: t1 })).code).toBe(200);
+    expect((await call({ action: 'logout' }, { token: t1 })).code).toBe(200);
+    expect((await call({ action: 'me' }, { token: t1 })).code).toBe(401);
+    const t2 = (await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).body.token;
+    expect((await call({ action: 'me' }, { token: t2 })).code).toBe(200);
+  });
+
+  it('đổi mật khẩu thu hồi token cũ nhưng trả token MỚI cho phiên hiện tại', async () => {
+    const old = (await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).body.token;
+    const r = await call({ action: 'password.change', currentPassword: 'MatKhauTot123', newPassword: 'MatKhauMoi12345' }, { token: old });
+    expect(r.code).toBe(200);
+    expect((await call({ action: 'me' }, { token: old })).code).toBe(401);
+    expect((await call({ action: 'me' }, { token: r.body.token })).code).toBe(200);
+  });
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { platformCall } from './platformApi';
+import { platformCall, setPlatformToken } from './platformApi';
 
 // TAB "CẤU HÌNH" — số ngày dùng thử, tài khoản ngân hàng nhận tiền (hiện cho khách khi đặt mua) và đổi mật khẩu quản trị.
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
@@ -49,7 +49,9 @@ export default function SettingsTab() {
     if (pw.newPassword !== pw.confirm) { setPwMsg({ ok: false, text: 'Hai lần nhập mật khẩu mới không khớp.' }); return; }
     setPwBusy(true); setPwMsg(null);
     try {
-      await platformCall('password.change', { currentPassword: pw.currentPassword, newPassword: pw.newPassword });
+      const r = await platformCall<{ token?: string }>('password.change', { currentPassword: pw.currentPassword, newPassword: pw.newPassword });
+      // Đổi mật khẩu đã thu hồi mọi token cũ → lưu token mới máy chủ trả về để phiên này không bị đá ra.
+      if (r?.token) setPlatformToken(r.token);
       setPw({ currentPassword: '', newPassword: '', confirm: '' });
       setPwMsg({ ok: true, text: 'Đã đổi mật khẩu.' });
     } catch (err: any) { setPwMsg({ ok: false, text: err.message }); } finally { setPwBusy(false); }
