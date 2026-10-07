@@ -70,7 +70,10 @@ describe('api/register-company', () => {
     const r = res();
     await register(post(hopLe), r);
     expect(r.code).toBe(201);
-    expect(r.body).toEqual({ company: { slug: 'congty-abc', name: 'Công ty ABC' }, adminUsername: 'admin' });
+    expect(r.body).toMatchObject({ company: { slug: 'congty-abc', name: 'Công ty ABC' }, adminUsername: 'admin' });
+    // Doanh nghiệp mới được DÙNG THỬ 7 ngày (mặc định khi chưa cấu hình): kết quả có ngày hết hạn, công ty lưu cùng hạn đó
+    expect(r.body.trial.days).toBe(7);
+    expect(db.companyRows[0]).toMatchObject({ is_trial: true, expires_at: r.body.trial.endsAt });
     expect(db.companyRows[0]).toMatchObject({ slug: 'congty-abc', name: 'Công ty ABC', active: true });
     const emp = db.employeeRows[0];
     expect(emp).toMatchObject({ id: 'emp_admin', username: 'admin', name: 'Nguyễn Văn A', email: 'a@abc.vn', phone: '0912345678', role_group_ids: ['role_admin'], company_id: db.companyRows[0].id });

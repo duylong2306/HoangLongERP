@@ -22,6 +22,7 @@ import { createClient } from '@supabase/supabase-js';
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
 import { validateSignup, getClientIp, hashIp, SLUG_MESSAGES, SIGNUP_LIMIT_PER_HOUR, SIGNUP_LIMIT_PER_DAY } from './_signup.js';
 import { createCompanyWithAdmin } from './_company.js';
+import { readTrial, DAY_MS } from './_subscription.js';
 
 // Tên đăng nhập quản trị mặc định của mọi công ty mới (mỗi công ty có không gian tên riêng nên không đụng nhau).
 const ADMIN_USERNAME = 'admin';
@@ -119,8 +120,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 6) Tạo công ty + tài khoản quản trị
+  // 6) Tạo công ty + tài khoản quản trị. Doanh nghiệp mới được DÙNG THỬ số ngày cấu hình ở trang quản trị
+  // (mặc định 7); hết hạn thì chỉ vào được trang gia hạn (xem api/login.ts).
+  const { data: trialRow } = await supabase.from('platform_settings').select('value').eq('key', 'trial').maybeSingle();
+  const trial = readTrial(trialRow?.value);
+  const trialEndsAt = new Date(Date.now() + trial.days * DAY_MS).toISOString();
   const created = await createCompanyWithAdmin(supabase, {
+    expiresAt: trialEndsAt,
+    isTrial: true,
     slug: data.slug,
     name: data.companyName,
     adminUsername: ADMIN_USERNAME,
@@ -142,5 +149,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.status(201).json({
     company: { slug: created.company!.slug, name: created.company!.name },
     adminUsername: ADMIN_USERNAME,
+    trial: { days: trial.days, endsAt: trialEndsAt },
   });
 }

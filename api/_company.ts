@@ -15,6 +15,10 @@ export interface NewCompanyInput {
   adminName?: string;      // họ tên người quản trị (mặc định "Quản trị viên")
   adminEmail?: string;
   adminPhone?: string;
+  // Hạn dùng ban đầu: expiresAt=null (hoặc bỏ trống) = KHÔNG giới hạn; isTrial=true = đang dùng thử.
+  // Chỉ gửi 2 cột này khi được truyền → thiếu cột (chưa chạy migration 20261011) không làm hỏng luồng cũ.
+  expiresAt?: string | null;
+  isTrial?: boolean;
 }
 
 // ok=true → có `company`; ok=false → có `status` + `error`. (Không dùng union phân biệt vì tsconfig của dự án
@@ -37,6 +41,8 @@ export async function createCompanyWithAdmin(supabase: SupabaseClient, input: Ne
   const companyId = randomUUID();
   const { error: companyErr } = await supabase.from('companies').insert({
     id: companyId, slug, name, active: true,
+    ...(input.expiresAt !== undefined ? { expires_at: input.expiresAt } : {}),
+    ...(input.isTrial !== undefined ? { is_trial: input.isTrial } : {}),
   });
   if (companyErr) {
     // 23505 = trùng slug do 2 yêu cầu cùng lúc lọt qua bước kiểm tra ở trên (slug có ràng buộc unique)

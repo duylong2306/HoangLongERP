@@ -21,6 +21,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { getSubscriptionState, tokenTtlSeconds } from './_subscription.js'; // ⚠️ bắt buộc đuôi .js (Node ESM)
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ BẮT BUỘC đuôi .js: package.json "type":"module" → Node ESM không tự thêm đuôi (thiếu → ERR_MODULE_NOT_FOUND, đã gây sập đăng nhập staging)
 
 // Chuyển 1 object snake_case (row thô từ Postgres) sang camelCase — bản rút
@@ -81,11 +82,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const slug = hostInfo.kind === 'tenant'
     ? hostInfo.slug
     : (subdomain || 'hoanglong').trim().toLowerCase();
-  const { data: company, error: companyErr } = await supabase
+  // Lấy kèm thông tin HẠN DÙNG (expires_at, is_trial — migration 20261011). Nếu các cột này chưa có (chưa chạy migration)
+  // thì lấy bản cũ và coi công ty là KHÔNG GIỚI HẠN → đăng nhập không bị hỏng chỉ vì chạy SQL/deploy lệch thứ tự.
+  let { data: company, error: companyErr } = await supabase
     .from('companies')
-    .select('id, name, slug, active')
+    .select('id, name, slug, active, expires_at, is_trial')
     .eq('slug', slug)
     .maybeSingle();
+  if (companyErr && (companyErr as any).code === '42703') {
+    ({ data: company, error: companyErr } = await supabase
+      .from('companies')
+      .select('id, name, slug, active')
+      .eq('slug', slug)
+      .maybeSingle());
+  }
 
   if (companyErr) {
     console.error('[api/login] Lỗi tra công ty:', companyErr.message);
@@ -130,17 +140,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 4. Ký JWT chứa company_id — thời hạn 7 ngày (khớp thói quen "Tự động đăng
-  //    nhập" hiện có, giữ phiên lâu dài trên thiết bị cá nhân).
-  const token = jwt.sign(
-    {
-      sub: employeeRow.id,
-      role: 'authenticated',
-      company_id: company.id,
-    },
-    jwtSecret,
-    { expiresIn: '7d' }
-  );
+  // 4. Ký JWT. Phụ thuộc HẠN DÙNG của công ty (gói/dùng thử):
+  //   • CÒN HẠN (hoặc không giới hạn): token thường chứa company_id; thời hạn = min(7 ngày, thời gian còn lại của gói)
+  //     để token TỰ HẾT HẠN đúng lúc gói hết — không thể tiếp tục đọc/ghi dữ liệu ERP bằng token cũ sau khi hết hạn.
+  //   • ĐÃ HẾT HẠN: token KHÓA — role 'anon' và KHÔNG có claim company_id, chỉ có locked_company_id. Các chính sách bảo
+  //     mật dữ liệu (RLS) và hàm load_all_core_data đều dựa vào claim company_id nên token này đọc/ghi được 0 dòng dữ
+  //     liệu ERP; nó chỉ đủ để gọi api/subscription.ts (xem gói, đặt mua/gia hạn). Dữ liệu doanh nghiệp được giữ nguyên.
+  const sub = getSubscriptionState(company as any);
+  const token = sub.locked
+    ? jwt.sign(
+        { sub: employeeRow.id, role: 'anon', locked_company_id: company.id },
+        jwtSecret,
+        { expiresIn: 24 * 60 * 60 }
+      )
+    : jwt.sign(
+        { sub: employeeRow.id, role: 'authenticated', company_id: company.id },
+        jwtSecret,
+        { expiresIn: tokenTtlSeconds(sub.expiresAt) }
+      );
 
   // 5. Trả về nhân viên (camelCase, ĐÃ loại bỏ password) + JWT cho client.
   const { password: _pw, ...safeRow } = employeeRow;
@@ -150,5 +167,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     token,
     employee,
     company: { id: company.id, name: company.name, slug: company.slug },
+    subscription: { status: sub.status, expiresAt: sub.expiresAt, daysLeft: sub.daysLeft, isTrial: sub.isTrial, locked: sub.locked },
   });
 }
