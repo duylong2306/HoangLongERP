@@ -19,8 +19,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import { randomUUID } from 'crypto';
+import { createCompanyWithAdmin } from './_company.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
 
 // Công ty gốc (seed ở migration 20260928_multi_tenant_company_id.sql) — đóng
 // vai "chủ nền tảng" duy nhất được quản lý danh sách công ty.
@@ -124,56 +123,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const { data: existing } = await supabase.from('companies').select('id').eq('slug', cleanSlug).maybeSingle();
-    if (existing) {
-      res.status(409).json({ error: `Mã công ty "${cleanSlug}" đã tồn tại.` });
-      return;
-    }
-
-    const companyId = randomUUID();
-    const { error: companyErr } = await supabase.from('companies').insert({
-      id: companyId, slug: cleanSlug, name: cleanName, active: true,
+    // Tạo công ty + tài khoản quản trị: dùng chung với đăng ký công khai (api/_company.ts) để 2 luồng
+    // luôn giống hệt nhau (kể cả quy ước admin id 'emp_admin' và dọn dẹp khi lỗi giữa chừng).
+    const created = await createCompanyWithAdmin(supabase, {
+      slug: cleanSlug, name: cleanName, adminUsername: cleanAdminUsername, adminPassword: cleanAdminPassword,
     });
-    if (companyErr) {
-      res.status(500).json({ error: `Tạo công ty thất bại: ${companyErr.message}` });
+    if (!created.ok) {
+      res.status(created.status).json({ error: created.error });
       return;
     }
-
-    // Tài khoản quản trị đầu tiên của công ty mới — bắt buộc phải có, nếu
-    // không sẽ không ai đăng nhập được vào công ty vừa tạo.
-    //
-    // id CỐ ĐỊNH 'emp_admin' (không random) — đây là quy ước admin gốc mà
-    // isUserInRoleGroup() (src/context/SettingsContext.tsx) đã nhận diện sẵn
-    // qua fallback `empId === 'emp_admin'`, luôn full quyền bất kể công ty đó
-    // đã cấu hình hrm_role_groups hay chưa. Không dùng random UUID vì công ty
-    // MỚI TẠO CHƯA CÓ role_groups nào — nếu không rơi vào fallback này, tài
-    // khoản quản trị đầu tiên sẽ bị chặn "Không đủ quyền" ở mọi thao tác
-    // (phát hiện qua test thực tế: tạo công ty test, đăng nhập, bấm "Thêm vật
-    // tư" ở Kho → bị chặn vì permissions rỗng). An toàn đổi vì employees.id
-    // giờ là 1 vế của PK GHÉP (company_id, id) — mỗi công ty có "emp_admin"
-    // riêng, không đụng nhau (xem migration 20260929d).
-    const passwordHash = await bcrypt.hash(cleanAdminPassword, 10);
-    const { error: empErr } = await supabase.from('employees').insert({
-      id: 'emp_admin',
-      company_id: companyId,
-      name: 'Quản trị viên',
-      role: 'director',
-      department: 'Ban Giám Đốc',
-      username: cleanAdminUsername,
-      password: passwordHash,
-      role_group_ids: ['role_admin'],
-      status: 'working',
-      has_system_account: true,
-    });
-    if (empErr) {
-      // Dọn lại công ty vừa tạo nếu tạo tài khoản admin thất bại — tránh để lại
-      // 1 công ty "mồ côi" không ai đăng nhập được.
-      await supabase.from('companies').delete().eq('id', companyId);
-      res.status(500).json({ error: `Tạo tài khoản quản trị thất bại: ${empErr.message}` });
-      return;
-    }
-
-    res.status(201).json({ company: { id: companyId, slug: cleanSlug, name: cleanName, active: true } });
+    res.status(201).json({ company: created.company });
     return;
   }
 
