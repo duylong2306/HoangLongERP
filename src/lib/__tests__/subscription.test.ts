@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   getSubscriptionState, tokenTtlSeconds, addMonths, computeRenewal, orderAmount, makeOrderCode,
-  validatePlan, readTrial, readBank, DAY_MS, MAX_TOKEN_SECONDS,
+  validatePlan, readTrial, readBank, cleanFeatures, DAY_MS, MAX_TOKEN_SECONDS,
 } from '../../../api/_subscription';
 
 // Logic gói dịch vụ / hạn dùng / đơn đăng ký (trang quản trị nền tảng).
@@ -108,7 +108,7 @@ describe('validatePlan', () => {
   it('hợp lệ → làm sạch', () => {
     const r = validatePlan(hopLe);
     expect(r.ok).toBe(true);
-    expect(r.data).toEqual({ id: 'co-ban', name: 'Cơ bản', description: 'Mô tả', price_monthly: 299000, price_yearly: 2990000, max_employees: 10, active: true, sort_order: 5 });
+    expect(r.data).toEqual({ id: 'co-ban', name: 'Cơ bản', description: 'Mô tả', badge: '', features: [], price_monthly: 299000, price_yearly: 2990000, max_employees: 10, active: true, sort_order: 5 });
   });
   it('số nhân viên trống → không giới hạn; active mặc định false', () => {
     const r = validatePlan({ ...hopLe, maxEmployees: '', active: undefined });
@@ -139,7 +139,20 @@ describe('readTrial / readBank', () => {
   });
   it('ngân hàng: cắt độ dài, bỏ giá trị không phải chuỗi', () => {
     expect(readBank({ bankName: ' VCB ', accountNumber: 123, accountName: 'A', note: 'x'.repeat(500) }))
-      .toEqual({ bankName: 'VCB', accountNumber: '', accountName: 'A', note: 'x'.repeat(300) });
-    expect(readBank(undefined)).toEqual({ bankName: '', accountNumber: '', accountName: '', note: '' });
+      .toEqual({ bankName: 'VCB', bankBin: '', accountNumber: '', accountName: 'A', note: 'x'.repeat(300) });
+    expect(readBank(undefined)).toEqual({ bankName: '', bankBin: '', accountNumber: '', accountName: '', note: '' });
+    // Mã BIN chỉ nhận đúng 6 chữ số
+    expect(readBank({ bankBin: '970436' }).bankBin).toBe('970436');
+    for (const bad of ['97043', '9704361', '97043a', 970436]) expect(readBank({ bankBin: bad }).bankBin).toBe('');
+  });
+});
+
+describe('cleanFeatures', () => {
+  it('chuẩn hóa: bỏ dòng rỗng, gộp khoảng trắng, mặc định được nhận, cắt 120 ký tự, tối đa 30 dòng', () => {
+    expect(cleanFeatures([{ text: '  Quản   lý ', included: true }, { text: '', included: true }, { text: 'Không có', included: false }, { text: 'Mặc định' }]))
+      .toEqual([{ text: 'Quản lý', included: true }, { text: 'Không có', included: false }, { text: 'Mặc định', included: true }]);
+    expect(cleanFeatures([{ text: 'x'.repeat(200) }])[0].text).toHaveLength(120);
+    expect(cleanFeatures(Array.from({ length: 50 }, (_, i) => ({ text: `d${i}` })))).toHaveLength(30);
+    for (const bad of [null, undefined, 'abc', 5, {}]) expect(cleanFeatures(bad)).toEqual([]);
   });
 });

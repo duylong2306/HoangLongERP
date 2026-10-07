@@ -5,7 +5,8 @@
 //   • plans   : (công khai) các gói đang bán — dùng cho trang giới thiệu/đăng ký;
 //   • status  : hạn dùng + gói hiện tại + đơn gần đây của CÔNG TY đang đăng nhập;
 //   • order   : (admin doanh nghiệp) đặt mua/gia hạn 1 gói theo tháng/năm → tạo đơn chờ + thông tin chuyển khoản;
-//   • cancel  : (admin doanh nghiệp) hủy đơn đang chờ của chính công ty mình.
+//   • cancel  : (admin doanh nghiệp) hủy đơn đang chờ của chính công ty mình;
+//   • claim   : (admin doanh nghiệp) bấm "Xác nhận chuyển khoản thành công" → đánh dấu đơn "khách báo đã chuyển" + báo Telegram cho quản trị.
 //
 // Xác thực = token đăng nhập ERP (SUPABASE_JWT_SECRET). Chấp nhận 2 loại:
 //   • token thường (có company_id) — doanh nghiệp còn hạn;
@@ -18,7 +19,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { bearerToken } from './_platformAuth.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
-import { getSubscriptionState, orderAmount, makeOrderCode, readBank, readTrial, DEFAULT_BANK } from './_subscription.js';
+import { getSubscriptionState, orderAmount, makeOrderCode, readBank, readTrial, cleanFeatures, DEFAULT_BANK } from './_subscription.js';
+import { sendTelegram, escapeHtml } from './_telegram.js';
+import { getServerBaseDomains } from './_tenant.js';
 
 const MAX_PENDING_ORDERS = 3;   // mỗi công ty tối đa 3 đơn chờ xác nhận cùng lúc (chống tạo đơn rác)
 
@@ -47,11 +50,13 @@ async function authenticate(req: VercelRequest, db: SupabaseClient, jwtSecret: s
 const planToApi = (p: any) => ({
   id: p.id, name: p.name, description: p.description,
   priceMonthly: Number(p.price_monthly), priceYearly: Number(p.price_yearly), maxEmployees: p.max_employees ?? null,
+  badge: p.badge || '', features: cleanFeatures(p.features),   // mô tả được nhận / không được nhận
 });
 
 const orderToApi = (o: any, planName: string) => ({
   id: o.id, code: o.code, planId: o.plan_id, planName, period: o.period, months: o.months, amount: Number(o.amount),
   status: o.status, createdAt: o.created_at, confirmedAt: o.confirmed_at ?? null, periodEnd: o.period_end ?? null,
+  paidClaimedAt: o.paid_claimed_at ?? null,   // lúc khách báo đã chuyển khoản (null = chưa báo)
 });
 
 async function listPlans(db: SupabaseClient) {
@@ -121,6 +126,50 @@ async function actionOrder(db: SupabaseClient, res: VercelResponse, a: TenantAut
   fail(res, 500, 'Không tạo được đơn. Vui lòng thử lại.');
 }
 
+// Khách bấm "Xác nhận chuyển khoản thành công": CHƯA kích hoạt gói (chỉ quản trị nền tảng xác nhận khi thấy tiền về) —
+// chỉ đánh dấu đơn để quản trị ưu tiên duyệt và gửi tin Telegram. Gọi lại nhiều lần vẫn an toàn (không gửi trùng tin):
+//   • paid_claimed_at chỉ ghi 1 lần (cập nhật có điều kiện còn null);
+//   • telegram_notified_at ghi khi gửi Telegram thành công; chưa thành công thì lần bấm sau thử gửi lại.
+async function actionClaim(db: SupabaseClient, res: VercelResponse, a: TenantAuth, body: any) {
+  if (!a.isAdmin) return fail(res, 403, 'Chỉ quản trị viên của doanh nghiệp mới xác nhận chuyển khoản được.');
+  const id = String(body.id || '');
+  const { data: order } = await db.from('subscription_orders').select('*').eq('id', id).eq('company_id', a.companyId).maybeSingle();
+  if (!order) return fail(res, 404, 'Không tìm thấy đơn.');
+  if (order.status !== 'pending') return fail(res, 409, 'Đơn này không còn ở trạng thái chờ thanh toán.');
+
+  let claimedAt: string | null = order.paid_claimed_at ?? null;
+  if (!claimedAt) {
+    const now = new Date().toISOString();
+    const { data, error } = await db.from('subscription_orders').update({ paid_claimed_at: now }).eq('id', id).eq('company_id', a.companyId).eq('status', 'pending').select('paid_claimed_at').maybeSingle();
+    if (error) { console.error('[api/subscription] Không ghi được xác nhận chuyển khoản:', error.message); return fail(res, 500, 'Hệ thống chưa sẵn sàng. Vui lòng thử lại sau.'); }
+    claimedAt = data?.paid_claimed_at ?? now;
+  }
+
+  let notified = !!order.telegram_notified_at;
+  if (!notified) {
+    const [{ data: company }, { data: plan }] = await Promise.all([
+      db.from('companies').select('name, slug').eq('id', a.companyId).maybeSingle(),
+      db.from('plans').select('name').eq('id', order.plan_id).maybeSingle(),
+    ]);
+    const base = getServerBaseDomains()[0];
+    const text = [
+      '🔔 <b>Khách báo đã chuyển khoản — cần duyệt đơn</b>',
+      `🏢 Doanh nghiệp: <b>${escapeHtml(company?.name || '—')}</b> (${escapeHtml(company?.slug || '')})`,
+      `📦 Gói: ${escapeHtml(plan?.name || order.plan_id)} — ${order.period === 'year' ? 'theo năm' : 'theo tháng'} (${order.months} tháng)`,
+      `💰 Số tiền: <b>${new Intl.NumberFormat('vi-VN').format(Number(order.amount))} đ</b>`,
+      `🧾 Mã đơn / nội dung CK: <code>${escapeHtml(order.code)}</code>`,
+      `🕒 Lúc: ${new Date(claimedAt!).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`,
+      base ? `👉 Duyệt tại: https://www.${base}/quantri (tab Đơn đăng ký)` : '👉 Duyệt tại trang quản trị (tab Đơn đăng ký)',
+    ].join('\n');
+    const r = await sendTelegram(text);
+    if (r.ok) {
+      notified = true;
+      await db.from('subscription_orders').update({ telegram_notified_at: new Date().toISOString() }).eq('id', id);
+    }
+  }
+  res.status(200).json({ ok: true, claimedAt, notified });
+}
+
 async function actionCancel(db: SupabaseClient, res: VercelResponse, a: TenantAuth, body: any) {
   if (!a.isAdmin) return fail(res, 403, 'Chỉ quản trị viên của doanh nghiệp mới hủy được đơn.');
   // Điều kiện company_id: chỉ hủy được đơn của CHÍNH công ty mình, không đụng đơn công ty khác.
@@ -158,6 +207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case 'status': return actionStatus(db, res, auth);
     case 'order': return actionOrder(db, res, auth, body);
     case 'cancel': return actionCancel(db, res, auth, body);
+    case 'claim': return actionClaim(db, res, auth, body);
     default: return fail(res, 400, 'Thao tác không hợp lệ.');
   }
 }

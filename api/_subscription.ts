@@ -94,8 +94,24 @@ export function makeOrderCode(): string {
 }
 
 // ─── Kiểm tra dữ liệu gói (trang quản trị) ───────────────────────────────────────────────────────
+// Một dòng mô tả quyền lợi của gói: "included" = được nhận (✓) hoặc không được nhận (✗) — để khách so sánh các gói.
+export interface PlanFeature { text: string; included: boolean }
+export const MAX_PLAN_FEATURES = 30;
+
+// Chuẩn hóa danh sách quyền lợi từ dữ liệu bất kỳ (client gửi / DB jsonb): bỏ dòng rỗng, cắt dài, tối đa 30 dòng.
+export function cleanFeatures(v: unknown): PlanFeature[] {
+  if (!Array.isArray(v)) return [];
+  const out: PlanFeature[] = [];
+  for (const it of v) {
+    const text = String((it as any)?.text ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    if (text) out.push({ text, included: (it as any)?.included !== false });   // mặc định = được nhận
+    if (out.length >= MAX_PLAN_FEATURES) break;
+  }
+  return out;
+}
+
 export interface CleanPlan {
-  id: string; name: string; description: string;
+  id: string; name: string; description: string; badge: string; features: PlanFeature[];
   price_monthly: number; price_yearly: number;
   max_employees: number | null; active: boolean; sort_order: number;
 }
@@ -112,6 +128,7 @@ export function validatePlan(input: Record<string, unknown>): PlanValidation {
   const id = String(input.id ?? '').trim().toLowerCase();
   const name = String(input.name ?? '').trim().replace(/\s+/g, ' ');
   const description = String(input.description ?? '').trim();
+  const badge = String(input.badge ?? '').trim().replace(/\s+/g, ' ');
   const pm = intOrNull(input.priceMonthly);
   const py = intOrNull(input.priceYearly);
   const me = intOrNull(input.maxEmployees);
@@ -120,6 +137,8 @@ export function validatePlan(input: Record<string, unknown>): PlanValidation {
   if (!/^[a-z0-9-]{2,40}$/.test(id)) errors.id = 'Mã gói chỉ gồm chữ thường không dấu, số, dấu gạch ngang (2–40 ký tự).';
   if (name.length < 1 || name.length > 60) errors.name = 'Tên gói từ 1 đến 60 ký tự.';
   if (description.length > 300) errors.description = 'Mô tả tối đa 300 ký tự.';
+  if (badge.length > 20) errors.badge = 'Nhãn nổi bật tối đa 20 ký tự.';
+  if (Array.isArray(input.features) && input.features.length > MAX_PLAN_FEATURES) errors.features = `Tối đa ${MAX_PLAN_FEATURES} dòng quyền lợi.`;
   if (pm === 'bad' || pm === null || pm < 0 || pm > 10_000_000_000) errors.priceMonthly = 'Giá theo tháng phải là số nguyên từ 0 đến 10 tỷ.';
   if (py === 'bad' || py === null || py < 0 || py > 10_000_000_000) errors.priceYearly = 'Giá theo năm phải là số nguyên từ 0 đến 10 tỷ.';
   if (me === 'bad' || (me !== null && (me < 1 || me > 100000))) errors.maxEmployees = 'Số nhân viên tối đa phải là số nguyên từ 1 đến 100000 (để trống = không giới hạn).';
@@ -129,7 +148,7 @@ export function validatePlan(input: Record<string, unknown>): PlanValidation {
   return {
     ok: true,
     data: {
-      id, name, description,
+      id, name, description, badge, features: cleanFeatures(input.features),
       price_monthly: pm as number, price_yearly: py as number,
       max_employees: me as number | null,
       active: input.active === true,
@@ -140,10 +159,11 @@ export function validatePlan(input: Record<string, unknown>): PlanValidation {
 
 // ─── Cấu hình dùng thử / ngân hàng ───────────────────────────────────────────────────────────────
 export interface TrialSettings { days: number; maxEmployees: number | null }
-export interface BankSettings { bankName: string; accountNumber: string; accountName: string; note: string }
+// bankBin = mã BIN 6 số của ngân hàng (chuẩn VietQR/Napas) — cần để tạo mã QR chuyển khoản; rỗng = chưa cấu hình, không hiện QR.
+export interface BankSettings { bankName: string; bankBin: string; accountNumber: string; accountName: string; note: string }
 
 export const DEFAULT_TRIAL: TrialSettings = { days: 7, maxEmployees: null };
-export const DEFAULT_BANK: BankSettings = { bankName: '', accountNumber: '', accountName: '', note: '' };
+export const DEFAULT_BANK: BankSettings = { bankName: '', bankBin: '', accountNumber: '', accountName: '', note: '' };
 
 // Đọc giá trị cấu hình từ DB (jsonb) về dạng an toàn; sai/thiếu thì dùng mặc định.
 export function readTrial(v: any): TrialSettings {
@@ -157,7 +177,8 @@ export function readTrial(v: any): TrialSettings {
 export function readBank(v: any): BankSettings {
   const s = (x: unknown, max: number) => (typeof x === 'string' ? x.trim().slice(0, max) : '');
   return {
-    bankName: s(v?.bankName, 80), accountNumber: s(v?.accountNumber, 40),
+    // Mã BIN: đúng 6 chữ số, KHÔNG tự cắt bớt (7 số là sai, không được tự cắt thành 6 rồi chấp nhận)
+    bankName: s(v?.bankName, 80), bankBin: /^\d{6}$/.test(s(v?.bankBin, 20)) ? s(v?.bankBin, 20) : '', accountNumber: s(v?.accountNumber, 40),
     accountName: s(v?.accountName, 80), note: s(v?.note, 300),
   };
 }

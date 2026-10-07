@@ -124,7 +124,7 @@ describe('đăng nhập', () => {
     expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(429);
   });
 
-  it('sai 10 lần từ 1 IP (nhiều tên khác nhau) → 429', async () => {
+  it('sai 10 lần từ 1 IP (nhiều tên khác nhau) → 429', { timeout: 30000 }, async () => {   // 10 lần băm bcrypt cost 12 (cố ý chậm)
     for (let i = 0; i < 10; i++) await call({ action: 'login', username: `ten${i}`, password: 'x' });
     expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(429);
   });
@@ -279,9 +279,9 @@ describe('cấu hình & mật khẩu', () => {
   it('settings.save/get: dùng thử + ngân hàng; từ chối giá trị sai', async () => {
     expect((await call({ action: 'settings.save', trial: { days: 0 } }, { token: tok() })).code).toBe(400);
     expect((await call({ action: 'settings.save', trial: { days: 7, maxEmployees: 0 } }, { token: tok() })).code).toBe(400);
-    expect((await call({ action: 'settings.save', trial: { days: 14, maxEmployees: '' }, bank: { bankName: 'VCB', accountNumber: '0123', accountName: 'CTY LOLO', note: 'ghi chú' } }, { token: tok() })).code).toBe(200);
+    expect((await call({ action: 'settings.save', trial: { days: 14, maxEmployees: '' }, bank: { bankName: 'VCB', bankBin: '970436', accountNumber: '0123', accountName: 'CTY LOLO', note: 'ghi chú' } }, { token: tok() })).code).toBe(200);
     const g = await call({ action: 'settings.get' }, { token: tok() });
-    expect(g.body).toEqual({ trial: { days: 14, maxEmployees: null }, bank: { bankName: 'VCB', accountNumber: '0123', accountName: 'CTY LOLO', note: 'ghi chú' } });
+    expect(g.body).toEqual({ trial: { days: 14, maxEmployees: null }, bank: { bankName: 'VCB', bankBin: '970436', accountNumber: '0123', accountName: 'CTY LOLO', note: 'ghi chú' }, telegramConfigured: false });
   });
 
   it('chưa có cấu hình trong DB → trả mặc định (7 ngày, ngân hàng trống)', async () => {
@@ -404,5 +404,50 @@ describe('tài khoản quản trị & nhật ký', () => {
   it('thao tác thành công cả khi ghi nhật ký lỗi (không làm hỏng thao tác chính)', async () => {
     db.fail['platform_audit_logs.insert'] = 'boom';
     expect((await tao()).code).toBe(201);
+  });
+
+  it('mã BIN sai (không đủ 6 số) bị bỏ, không lưu rác', async () => {
+    await call({ action: 'settings.save', bank: { bankName: 'X', bankBin: '12ab', accountNumber: '1', accountName: 'A', note: '' } }, { token: tok() });
+    expect((await call({ action: 'settings.get' }, { token: tok() })).body.bank.bankBin).toBe('');
+  });
+});
+
+describe('quyền lợi gói + đơn khách báo chuyển khoản + Telegram thử', () => {
+  const ft = [{ text: ' Quản lý dự án ', included: true }, { text: 'Báo cáo nâng cao', included: false }, { text: '   ', included: true }];
+  it('plans.save lưu mô tả quyền lợi (bỏ dòng rỗng, chuẩn hóa) + nhãn nổi bật; plans.list trả lại', async () => {
+    const r = await call({ action: 'plans.save', id: 'pro', name: 'Pro', description: '', priceMonthly: 700000, priceYearly: 7000000, maxEmployees: 50, active: true, sortOrder: 2, badge: 'Phổ biến nhất', features: ft }, { token: tok() });
+    expect(r.code).toBe(200);
+    const row = db.table('plans').find(p => p.id === 'pro')!;
+    expect(row.badge).toBe('Phổ biến nhất');
+    expect(row.features).toEqual([{ text: 'Quản lý dự án', included: true }, { text: 'Báo cáo nâng cao', included: false }]);
+    const list = await call({ action: 'plans.list' }, { token: tok() });
+    expect(list.body.plans.find((p: any) => p.id === 'pro')).toMatchObject({ badge: 'Phổ biến nhất', features: row.features });
+  });
+
+  it('plans.save từ chối nhãn > 20 ký tự và > 30 dòng quyền lợi', async () => {
+    const base = { id: 'pro', name: 'Pro', priceMonthly: 1, priceYearly: 1 };
+    expect((await call({ action: 'plans.save', ...base, badge: 'x'.repeat(21) }, { token: tok() })).code).toBe(400);
+    expect((await call({ action: 'plans.save', ...base, features: Array.from({ length: 31 }, (_, i) => ({ text: `d${i}`, included: true })) }, { token: tok() })).code).toBe(400);
+  });
+
+  it('orders.list trả paidClaimedAt', async () => {
+    db.seed('companies', [{ id: 'c1', slug: 'a', name: 'A', active: true }]);
+    db.seed('subscription_orders', [{ id: 'o1', code: 'LOLOAAAA2222', company_id: 'c1', plan_id: 'co-ban', period: 'month', months: 1, amount: 1, status: 'pending', created_at: new Date().toISOString(), paid_claimed_at: '2026-10-07T10:00:00Z' }]);
+    expect((await call({ action: 'orders.list' }, { token: tok() })).body.orders[0].paidClaimedAt).toBe('2026-10-07T10:00:00Z');
+  });
+
+  it('telegram.test: chưa cấu hình → 400 (hướng dẫn); đã cấu hình → gửi 1 tin và trả ok; settings.get báo đã cấu hình (không lộ token)', async () => {
+    delete process.env.TELEGRAM_BOT_TOKEN; delete process.env.TELEGRAM_CHAT_ID;
+    expect((await call({ action: 'telegram.test' }, { token: tok() })).code).toBe(400);
+    process.env.TELEGRAM_BOT_TOKEN = 'BOT-TOKEN-BI-MAT'; process.env.TELEGRAM_CHAT_ID = '99';
+    const gui: any[] = []; const f = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: any, init: any) => { gui.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({}) } as any; }) as any;
+    try {
+      expect((await call({ action: 'telegram.test' }, { token: tok() })).code).toBe(200);
+      expect(gui).toHaveLength(1); expect(gui[0].body.chat_id).toBe('99');
+      const g = await call({ action: 'settings.get' }, { token: tok() });
+      expect(g.body.telegramConfigured).toBe(true);
+      expect(JSON.stringify(g.body)).not.toContain('BOT-TOKEN-BI-MAT');
+    } finally { globalThis.fetch = f; }
   });
 });

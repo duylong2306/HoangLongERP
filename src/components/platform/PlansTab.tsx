@@ -1,13 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Loader2, AlertCircle, CheckCircle2, Pencil, X } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, CheckCircle2, Pencil, X, Trash2, Check } from 'lucide-react';
 import { platformCall, ApiError } from './platformApi';
 import { formatVnd } from './format';
 
 // TAB "GÓI DỊCH VỤ" — cấu hình tên gói, giá theo THÁNG và theo NĂM, số nhân viên tối đa, bật/tắt bán.
 // Giá đổi ở đây chỉ áp dụng cho đơn MỚI; đơn đã tạo giữ nguyên số tiền lúc đặt.
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
-interface Plan { id: string; name: string; description: string; priceMonthly: number; priceYearly: number; maxEmployees: number | null; active: boolean; sortOrder: number }
-const EMPTY: Plan = { id: '', name: '', description: '', priceMonthly: 0, priceYearly: 0, maxEmployees: null, active: false, sortOrder: 0 };
+interface Feature { text: string; included: boolean }
+interface Plan { id: string; name: string; description: string; priceMonthly: number; priceYearly: number; maxEmployees: number | null; active: boolean; sortOrder: number; badge: string; features: Feature[] }
+const EMPTY: Plan = { id: '', name: '', description: '', priceMonthly: 0, priceYearly: 0, maxEmployees: null, active: false, sortOrder: 0, badge: '', features: [] };
+
+// Mẫu mô tả theo các phân hệ có thật trong hệ thống — quản trị tự bỏ tích dòng nào gói đó KHÔNG có.
+const FEATURE_TEMPLATE: Feature[] = [
+  'Quản lý dự án & công việc (bảng Kanban)', 'Nhân sự, chấm công, nghỉ phép, bảng lương', 'Kế toán: thu chi, công nợ phải thu/phải trả',
+  'Báo giá & hợp đồng', 'Kho & điều phối vật tư, đơn mua hàng', 'Quản lý thầu phụ & tạm ứng', 'Thông báo đẩy & trò chuyện nội bộ', 'Hỗ trợ qua tin nhắn/điện thoại',
+].map(text => ({ text, included: true }));
 
 const btn = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors';
 const input = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
@@ -53,7 +60,7 @@ export default function PlansTab() {
             <tbody>
               {plans.map(p => (
                 <tr key={p.id} className="border-b border-slate-100 last:border-0 align-top">
-                  <td className="py-2.5 px-3"><div className="font-bold text-slate-900">{p.name}</div><div className="font-mono text-xs text-slate-500">{p.id}</div>{p.description && <div className="text-xs text-slate-500 mt-0.5">{p.description}</div>}</td>
+                  <td className="py-2.5 px-3"><div className="font-bold text-slate-900">{p.name}{p.badge && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-300">{p.badge}</span>}</div><div className="font-mono text-xs text-slate-500">{p.id}</div>{p.description && <div className="text-xs text-slate-500 mt-0.5">{p.description}</div>}</td>
                   <td className="py-2.5 px-3 text-right font-mono">{p.priceMonthly > 0 ? formatVnd(p.priceMonthly) : <span className="text-slate-400">Chưa đặt giá</span>}</td>
                   <td className="py-2.5 px-3 text-right font-mono">{p.priceYearly > 0 ? formatVnd(p.priceYearly) : <span className="text-slate-400">Chưa đặt giá</span>}</td>
                   <td className="py-2.5 px-3">{p.maxEmployees ?? 'Không giới hạn'}</td>
@@ -77,7 +84,11 @@ function PlanModal({ initial, isNew, onClose, onSaved }: { initial: Plan; isNew:
     id: initial.id, name: initial.name, description: initial.description,
     priceMonthly: String(initial.priceMonthly), priceYearly: String(initial.priceYearly),
     maxEmployees: initial.maxEmployees === null ? '' : String(initial.maxEmployees), active: initial.active, sortOrder: String(initial.sortOrder),
+    badge: initial.badge || '',
   });
+  // Danh sách quyền lợi hiển thị cho khách: ✓ được nhận / ✗ không được nhận
+  const [features, setFeatures] = useState<Feature[]>(initial.features || []);
+  const setFeature = (i: number, patch: Partial<Feature>) => setFeatures(list => list.map((x, k) => (k === i ? { ...x, ...patch } : x)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -87,7 +98,7 @@ function PlanModal({ initial, isNew, onClose, onSaved }: { initial: Plan; isNew:
     if (busy) return;
     setBusy(true); setError(null); setErrors({});
     try {
-      await platformCall('plans.save', { ...f, priceMonthly: f.priceMonthly === '' ? null : Number(f.priceMonthly), priceYearly: f.priceYearly === '' ? null : Number(f.priceYearly) });
+      await platformCall('plans.save', { ...f, features, priceMonthly: f.priceMonthly === '' ? null : Number(f.priceMonthly), priceYearly: f.priceYearly === '' ? null : Number(f.priceYearly) });
       onSaved(`Đã lưu gói "${f.name}".`);
     } catch (err: any) {
       setError(err.message);
@@ -98,7 +109,7 @@ function PlanModal({ initial, isNew, onClose, onSaved }: { initial: Plan; isNew:
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label={isNew ? 'Thêm gói' : 'Sửa gói'}>
-      <form onSubmit={save} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-4 my-auto" id="plan_form">
+      <form onSubmit={save} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-5 space-y-4 my-auto" id="plan_form">
         <div className="flex items-start justify-between gap-3">
           <h3 className="font-black text-slate-900">{isNew ? 'Thêm gói dịch vụ' : `Sửa gói: ${initial.name}`}</h3>
           <button type="button" onClick={onClose} aria-label="Đóng" className="text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
@@ -112,6 +123,27 @@ function PlanModal({ initial, isNew, onClose, onSaved }: { initial: Plan; isNew:
           <div><label className={label} htmlFor="pl_so_nhan_vien_toi_da">Số nhân viên tối đa</label><input id="pl_so_nhan_vien_toi_da" type="number" min={1} className={input} value={f.maxEmployees} onChange={e => setF(p => ({ ...p, maxEmployees: e.target.value }))} placeholder="Để trống = không giới hạn" />{err('maxEmployees')}</div>
           <div><label className={label} htmlFor="pl_thu_tu_hien_thi">Thứ tự hiển thị</label><input id="pl_thu_tu_hien_thi" type="number" className={input} value={f.sortOrder} onChange={e => setF(p => ({ ...p, sortOrder: e.target.value }))} />{err('sortOrder')}</div>
         </div>
+        <div><label className={label} htmlFor="pl_nhan_noi_bat">Nhãn nổi bật</label><input id="pl_nhan_noi_bat" className={input} value={f.badge} onChange={e => setF(p => ({ ...p, badge: e.target.value }))} maxLength={20} placeholder="vd: Phổ biến nhất (để trống = không hiện)" />{err('badge')}</div>
+
+        {/* Mô tả quyền lợi: khách thấy ở bảng giá và trang thanh toán */}
+        <fieldset className="space-y-2">
+          <legend className="text-xs font-bold text-slate-600 uppercase tracking-wide">Mô tả chức năng của gói (khách thấy khi chọn mua)</legend>
+          <p className="text-xs text-slate-500">Tích = <b>được nhận</b>, bỏ tích = <b>không có</b> trong gói (hiện mờ, gạch ngang). Lưu ý: hệ thống chỉ tự giới hạn <b>số nhân viên</b>; các dòng còn lại là mô tả hiển thị.</p>
+          <div className="space-y-1.5" id="plan_features">
+            {features.map((ft, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input type="checkbox" aria-label={`Được nhận: dòng ${i + 1}`} checked={ft.included} onChange={e => setFeature(i, { included: e.target.checked })} className="shrink-0" />
+                <input aria-label={`Nội dung dòng ${i + 1}`} className={input} value={ft.text} maxLength={120} onChange={e => setFeature(i, { text: e.target.value })} placeholder="vd: Quản lý dự án & công việc" />
+                <button type="button" aria-label={`Xóa dòng ${i + 1}`} onClick={() => setFeatures(list => list.filter((_, k) => k !== i))} className="text-slate-400 hover:text-rose-600 shrink-0"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setFeatures(l => (l.length < 30 ? [...l, { text: '', included: true }] : l))} className={`${btn} border border-slate-300 text-slate-700 hover:bg-slate-100`}><Plus className="w-3.5 h-3.5" /> Thêm dòng</button>
+            {features.length === 0 && <button type="button" onClick={() => setFeatures(FEATURE_TEMPLATE.map(x => ({ ...x })))} className={`${btn} border border-slate-300 text-slate-700 hover:bg-slate-100`}><Check className="w-3.5 h-3.5" /> Chèn mẫu theo các phân hệ</button>}
+          </div>
+          {err('features')}
+        </fieldset>
         <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={f.active} onChange={e => setF(p => ({ ...p, active: e.target.checked }))} /> Đang bán (hiện cho khách mua)</label>
         {error && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}</div>}
         <div className="flex justify-end gap-2">

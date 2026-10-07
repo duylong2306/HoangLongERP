@@ -32,7 +32,7 @@ describe('trang giới thiệu', () => {
 
   it('có gói → hiện bảng giá (giá tháng/năm, tiết kiệm khi mua năm, giới hạn nhân viên) và số ngày dùng thử theo cấu hình', async () => {
     plansBody = { trialDays: 14, plans: [
-      { id: 'co-ban', name: 'Cơ bản', description: 'Cho doanh nghiệp nhỏ', priceMonthly: 300000, priceYearly: 3000000, maxEmployees: 10 },
+      { id: 'co-ban', name: 'Cơ bản', description: 'Cho doanh nghiệp nhỏ', priceMonthly: 300000, priceYearly: 3000000, maxEmployees: 10, badge: 'Phổ biến nhất', features: [{ text: 'Quản lý dự án', included: true }, { text: 'Báo cáo nâng cao', included: false }] },
       { id: 'pro', name: 'Chuyên nghiệp', description: '', priceMonthly: 700000, priceYearly: 0, maxEmployees: null },
     ] };
     render(<LandingPage />);
@@ -42,7 +42,12 @@ describe('trang giới thiệu', () => {
     expect(within(bang).getByText('3.000.000 đ')).toBeTruthy();
     expect(within(bang).getByText(/tiết kiệm 600\.000 đ/)).toBeTruthy();       // 300k×12 − 3tr
     expect(within(bang).getByText('Tối đa 10 nhân viên')).toBeTruthy();
-    expect(within(bang).getByText('Không giới hạn nhân viên')).toBeTruthy();
+    expect(within(bang).getByText('Không giới hạn số nhân viên')).toBeTruthy();
+    // Mô tả chi tiết: được nhận (có) / không được nhận (không có) + nhãn nổi bật + nút dùng thử
+    expect(within(bang).getByText('Phổ biến nhất')).toBeTruthy();
+    expect(within(bang).getByText('Quản lý dự án').textContent).toContain('(có)');
+    expect(within(bang).getByText('Báo cáo nâng cao').textContent).toContain('(không có)');
+    expect(within(bang).getAllByRole('link', { name: /Dùng thử miễn phí 14 ngày/ })).toHaveLength(2);
     expect(within(bang).getByText('Chuyên nghiệp')).toBeTruthy();
     expect(screen.getAllByText(/14 ngày/).length).toBeGreaterThan(0);
   });

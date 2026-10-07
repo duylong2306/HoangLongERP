@@ -19,6 +19,8 @@ const goc = { ...process.env };
 
 function installFetch() {
   globalThis.fetch = vi.fn(async (url: any, init: any) => {
+    // Máy chủ (api/subscription) gọi Telegram qua cùng fetch → ghi lại thay vì ra mạng thật
+    if (String(url).startsWith('https://api.telegram.org/')) { tinTelegram.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({}) } as any; }
     expect(String(url)).toBe('/api/subscription');
     const r: any = { code: 200, body: null, setHeader() { return r; }, status(c: number) { r.code = c; return r; }, json(b: any) { r.body = b; return r; } };
     await subscriptionHandler({ method: init.method, body: JSON.parse(init.body), headers: { host: 'abc.lolo.io.vn', ...Object.fromEntries(Object.entries(init.headers || {}).map(([k, v]) => [k.toLowerCase(), v])) } } as any, r);
@@ -29,16 +31,18 @@ const luuToken = (claims: any) => sessionStorage.setItem('hl_erp_jwt', jwt.sign(
 const tokenKhoa = (sub = 'emp_admin') => luuToken({ sub, role: 'anon', locked_company_id: 'c1' });
 const tokenThuong = (sub = 'emp_admin') => luuToken({ sub, role: 'authenticated', company_id: 'c1' });
 const reload = vi.fn();
+let tinTelegram: any[] = [];
 
 beforeEach(() => {
-  sessionStorage.clear(); localStorage.clear(); reload.mockClear();
+  sessionStorage.clear(); localStorage.clear(); reload.mockClear(); tinTelegram = [];
+  process.env.TELEGRAM_BOT_TOKEN = 'bot-thu'; process.env.TELEGRAM_CHAT_ID = '42';
   db.tables = {}; db.fail = {}; db.log = [];
   db.unique = { subscription_orders: ['code'] }; db.autoId = new Set(['subscription_orders']);
   db.seed('plans', [
-    { id: 'co-ban', name: 'Cơ bản', description: 'Cho doanh nghiệp nhỏ', price_monthly: 300000, price_yearly: 3000000, max_employees: 10, active: true, sort_order: 1 },
-    { id: 'pro', name: 'Chuyên nghiệp', description: '', price_monthly: 700000, price_yearly: 7000000, max_employees: null, active: true, sort_order: 2 },
+    { id: 'co-ban', name: 'Cơ bản', description: 'Cho doanh nghiệp nhỏ', price_monthly: 300000, price_yearly: 3000000, max_employees: 10, active: true, sort_order: 1, badge: '', features: [{ text: 'Quản lý dự án', included: true }, { text: 'Báo cáo nâng cao', included: false }] },
+    { id: 'pro', name: 'Chuyên nghiệp', description: '', price_monthly: 700000, price_yearly: 7000000, max_employees: null, active: true, sort_order: 2, badge: 'Phổ biến nhất', features: [] },
   ]);
-  db.seed('platform_settings', [{ key: 'bank', value: { bankName: 'Vietcombank', accountNumber: '0123456789', accountName: 'CONG TY LOLO', note: 'Ghi đúng mã.' } }]);
+  db.seed('platform_settings', [{ key: 'bank', value: { bankName: 'Vietcombank', bankBin: '970436', accountNumber: '0123456789', accountName: 'CONG TY LOLO', note: 'Ghi đúng mã.' } }]);
   db.seed('companies', [{ id: 'c1', slug: 'abc', name: 'Công ty ABC', active: true, plan_id: null, expires_at: new Date(Date.now() - 2 * DAY).toISOString(), is_trial: true }]);
   db.seed('employees', [
     { id: 'emp_admin', company_id: 'c1', name: 'Admin', username: 'admin', role_group_ids: ['role_admin'] },
@@ -63,7 +67,10 @@ describe('trang gia hạn (doanh nghiệp hết hạn, token khóa)', () => {
     expect(within(panel).getByText('Cơ bản')).toBeTruthy();
     expect(within(panel).getByText('300.000 đ')).toBeTruthy();
     expect(within(panel).getByText('Tối đa 10 nhân viên')).toBeTruthy();
-    expect(within(panel).getByText('Không giới hạn nhân viên')).toBeTruthy();
+    expect(within(panel).getByText('Không giới hạn số nhân viên')).toBeTruthy();
+    expect(within(panel).getByText('Quản lý dự án').textContent).toContain('(có)');            // mô tả được nhận
+    expect(within(panel).getByText('Báo cáo nâng cao').textContent).toContain('(không có)');   // không được nhận
+    expect(within(panel).getByText('Phổ biến nhất')).toBeTruthy();
     fireEvent.click(within(panel).getByRole('tab', { name: 'Theo năm' }));
     expect(within(panel).getByText('3.000.000 đ')).toBeTruthy();
     expect(within(panel).getByText(/≈ 250\.000 đ \/ tháng/)).toBeTruthy();
@@ -76,7 +83,7 @@ describe('trang gia hạn (doanh nghiệp hết hạn, token khóa)', () => {
     expect(await screen.findByText('Gói dịch vụ đã hết hạn')).toBeTruthy();
   });
 
-  it('chọn gói theo NĂM → tạo đơn đúng số tiền, hiện hướng dẫn chuyển khoản (số tiền, mã, ngân hàng); chọn lại không tạo đơn trùng', async () => {
+  it('chọn gói theo NĂM → tạo đơn đúng số tiền, mở trang thanh toán QR, xác nhận chuyển khoản gửi Telegram; chọn lại không tạo đơn trùng', async () => {
     tokenKhoa();
     render(<RenewalPage />);
     const panel = await waitFor(() => { const p = document.getElementById('subscription_panel'); if (!p) throw new Error('chưa có'); return p; });
@@ -84,15 +91,30 @@ describe('trang gia hạn (doanh nghiệp hết hạn, token khóa)', () => {
     const theCoBan = within(panel).getByText('Cơ bản').closest('div.flex-col') as HTMLElement;
     fireEvent.click(within(theCoBan).getByRole('button', { name: /Chọn gói này/ }));
 
-    const don = await waitFor(() => { const d = document.getElementById('pending_orders'); if (!d) throw new Error('chưa có đơn'); return d; });
-    expect(within(don).getByText(/Gói Cơ bản — theo năm \(12 tháng\)/)).toBeTruthy();
-    expect(within(don).getByText('3.000.000 đ')).toBeTruthy();
-    expect(within(don).getByText(/^LOLO[A-HJ-NP-Z2-9]{8}$/)).toBeTruthy();
-    expect(within(don).getByText('Vietcombank')).toBeTruthy();
-    expect(within(don).getByText('0123456789')).toBeTruthy();
-    expect(within(don).getByText('CONG TY LOLO')).toBeTruthy();
+    // Bấm mua → mở TRANG THANH TOÁN (mã QR + thông tin chuyển khoản + nút xác nhận)
+    const tt = await waitFor(() => { const d = document.getElementById('checkout_modal'); if (!d) throw new Error('chưa mở trang thanh toán'); return d; });
+    expect(within(tt).getByText('Thanh toán gói Cơ bản')).toBeTruthy();
+    expect(within(tt).getAllByText('3.000.000 đ').length).toBeGreaterThan(0);
+    const ma = within(tt).getAllByText(/^LOLO[A-HJ-NP-Z2-9]{8}$/)[0].textContent!;
+    expect(within(tt).getByText('Vietcombank')).toBeTruthy();
+    expect(within(tt).getByText('0123456789')).toBeTruthy();
+    expect(within(tt).getByText('CONG TY LOLO')).toBeTruthy();
+    expect(await within(tt).findByAltText(/Mã QR chuyển khoản/)).toBeTruthy();      // QR đã vẽ (có ngân hàng + BIN)
     expect(db.table('subscription_orders')).toHaveLength(1);
-    expect(db.table('subscription_orders')[0]).toMatchObject({ company_id: 'c1', plan_id: 'co-ban', period: 'year', months: 12, amount: 3000000, status: 'pending' });
+    expect(db.table('subscription_orders')[0]).toMatchObject({ company_id: 'c1', plan_id: 'co-ban', period: 'year', months: 12, amount: 3000000, status: 'pending', code: ma });
+
+    // Bấm "Xác nhận chuyển khoản thành công" → đơn được đánh dấu + Telegram báo quản trị; gói CHƯA kích hoạt
+    fireEvent.click(within(tt).getByRole('button', { name: 'Xác nhận chuyển khoản thành công' }));
+    expect(await within(tt).findByText('Đã gửi yêu cầu xác nhận chuyển khoản')).toBeTruthy();
+    expect(db.table('subscription_orders')[0].paid_claimed_at).toBeTruthy();
+    expect(db.table('subscription_orders')[0].status).toBe('pending');
+    expect(tinTelegram).toHaveLength(1);
+    expect(tinTelegram[0].text).toContain(ma);
+    expect(within(tt).queryByRole('button', { name: 'Xác nhận chuyển khoản thành công' })).toBeNull();   // không bấm lại được
+    fireEvent.click(within(tt).getByText('Đóng', { selector: 'button' }));
+    expect(document.getElementById('checkout_modal')).toBeNull();
+    // Đơn vẫn hiện ở danh sách chờ, kèm nhãn đã báo chuyển khoản
+    expect(await within(document.getElementById('pending_orders')!).findByText(/Đã báo chuyển khoản/)).toBeTruthy();
 
     fireEvent.click(within(theCoBan).getByRole('button', { name: /Chọn gói này/ }));
     await waitFor(() => expect(db.log.filter(l => l === 'insert:subscription_orders').length).toBe(1));   // không tạo thêm

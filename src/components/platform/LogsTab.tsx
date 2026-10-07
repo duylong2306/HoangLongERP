@@ -11,7 +11,7 @@ interface Log { id: string; createdAt: string; adminUsername: string; action: st
 const ACTION_LABEL: Record<string, string> = {
   login: 'Đăng nhập', logout: 'Đăng xuất', 'password.change': 'Đổi mật khẩu',
   'companies.create': 'Tạo doanh nghiệp', 'companies.update': 'Sửa doanh nghiệp',
-  'plans.save': 'Lưu gói', 'orders.confirm': 'Xác nhận đơn', 'orders.cancel': 'Hủy đơn', 'settings.save': 'Sửa cấu hình',
+  'plans.save': 'Lưu gói', 'telegram.test': 'Gửi thử Telegram', 'orders.confirm': 'Xác nhận đơn', 'orders.cancel': 'Hủy đơn', 'settings.save': 'Sửa cấu hình',
   'accounts.create': 'Tạo tài khoản', 'accounts.update': 'Sửa tài khoản', 'accounts.resetPassword': 'Đặt lại mật khẩu',
 };
 const input = 'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';

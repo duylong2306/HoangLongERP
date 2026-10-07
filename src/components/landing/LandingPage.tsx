@@ -3,6 +3,7 @@ import {
   Building2, Users, Wallet, Warehouse, HardHat, FolderKanban, CheckCircle2, AlertCircle,
   Eye, EyeOff, ArrowRight, Loader2, ExternalLink,
 } from 'lucide-react';
+import PlanFeatures from '../subscription/PlanFeatures';
 import { slugify } from '../../lib/slug';
 import { getBaseDomainForDisplay, getTenantUrl } from '../../lib/tenant';
 
@@ -23,7 +24,7 @@ const FEATURES = [
   { icon: Building2, title: 'Mỗi doanh nghiệp một địa chỉ riêng', text: 'Dữ liệu tách biệt hoàn toàn, truy cập qua địa chỉ riêng của doanh nghiệp bạn.' },
 ];
 
-interface PublicPlan { id: string; name: string; description: string; priceMonthly: number; priceYearly: number; maxEmployees: number | null }
+interface PublicPlan { id: string; name: string; description: string; priceMonthly: number; priceYearly: number; maxEmployees: number | null; badge?: string; features?: { text: string; included: boolean }[] }
 const vnd = (n: number) => `${new Intl.NumberFormat('vi-VN').format(Math.round(n))} đ`;
 
 interface FieldErrors { [k: string]: string | undefined }
@@ -215,17 +216,19 @@ export default function LandingPage() {
             <p className="text-center text-sm text-slate-600 mt-1">Dùng thử miễn phí {trialDays} ngày, sau đó chọn gói phù hợp. Thanh toán theo tháng hoặc theo năm.</p>
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {plans.map(p => (
-                <div key={p.id} className="border border-slate-200 rounded-xl p-5 flex flex-col">
-                  <h3 className="font-black text-slate-900 text-lg">{p.name}</h3>
+                <div key={p.id} className={`rounded-xl p-5 flex flex-col ${p.badge ? 'border-2 border-blue-500 shadow-md' : 'border border-slate-200'}`}>
+                  <h3 className="font-black text-slate-900 text-lg">{p.name}{p.badge && <span className="ml-2 align-middle text-[11px] font-bold text-[#ffffff] bg-blue-600 rounded-full px-2 py-0.5">{p.badge}</span>}</h3>
                   {p.description && <p className="text-sm text-slate-500 mt-1">{p.description}</p>}
                   <div className="mt-4 space-y-1">
                     {p.priceMonthly > 0 && <div><span className="text-2xl font-black text-slate-900 font-mono">{vnd(p.priceMonthly)}</span> <span className="text-sm text-slate-500">/ tháng</span></div>}
                     {p.priceYearly > 0 && <div className="text-sm text-slate-600"><b className="font-mono">{vnd(p.priceYearly)}</b> / năm{p.priceMonthly > 0 && p.priceYearly < p.priceMonthly * 12 ? <span className="ml-1 text-emerald-700 font-bold">(tiết kiệm {vnd(p.priceMonthly * 12 - p.priceYearly)})</span> : null}</div>}
                   </div>
-                  <div className="mt-3 text-sm text-slate-700 inline-flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> {p.maxEmployees === null ? 'Không giới hạn nhân viên' : `Tối đa ${p.maxEmployees} nhân viên`}</div>
+                  <div className="mt-4 pt-4 border-t border-slate-100 flex-1"><PlanFeatures plan={p} /></div>
+                  <a href="#dang-ky" className="mt-5 block text-center bg-blue-600 hover:bg-blue-700 text-[#ffffff] font-bold py-2.5 rounded-lg transition-colors">Dùng thử miễn phí {trialDays} ngày</a>
                 </div>
               ))}
             </div>
+            <p className="text-center text-xs text-slate-500 mt-5">Mua hoặc gia hạn gói ngay trong hệ thống: đăng nhập địa chỉ riêng của doanh nghiệp → mở mục <b>Gói dịch vụ</b> → quét mã QR chuyển khoản. Gói được kích hoạt sau khi chúng tôi xác nhận thanh toán.</p>
           </div>
         </section>
       )}

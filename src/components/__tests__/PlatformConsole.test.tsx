@@ -249,11 +249,11 @@ describe('tab Cấu hình', () => {
     await u.click(screen.getByRole('button', { name: /Cấu hình/ }));
     const form = await waitFor(() => { const f = document.getElementById('settings_form'); if (!f) throw new Error('chưa có'); return f; });
     await u.clear(within(form).getAllByRole('spinbutton')[0]); await u.type(within(form).getAllByRole('spinbutton')[0], '14');
-    await u.type(within(form).getByPlaceholderText('vd: Vietcombank'), 'Vietcombank');
+    await u.selectOptions(within(form).getByLabelText('Ngân hàng'), '970436');   // Vietcombank → tự lấy mã BIN
     await u.click(within(form).getByRole('button', { name: /Lưu cấu hình/ }));
     expect(await within(form).findByRole('status')).toHaveTextContent('Đã lưu cấu hình');
     expect(db.table('platform_settings').find(r => r.key === 'trial')!.value).toEqual({ days: 14, maxEmployees: null });
-    expect(db.table('platform_settings').find(r => r.key === 'bank')!.value.bankName).toBe('Vietcombank');
+    expect(db.table('platform_settings').find(r => r.key === 'bank')!.value).toMatchObject({ bankName: 'Vietcombank', bankBin: '970436' });
 
   });
 });

@@ -17,11 +17,12 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
 import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST, passwordProblem, ADMIN_USERNAME_RE } from './_platformAuth.js';
+import { sendTelegram, telegramConfigured } from './_telegram.js';
 import { writeAudit, purgeOldAudit, diffFields, AUDIT_RETENTION_DAYS, type AuditCtx } from './_audit.js';
 import { getClientIp, hashIp, slugProblem, SLUG_MESSAGES } from './_signup.js';
 import { createCompanyWithAdmin } from './_company.js';
 import {
-  getSubscriptionState, computeRenewal, validatePlan, readTrial, readBank, DEFAULT_TRIAL, DEFAULT_BANK, DAY_MS,
+  getSubscriptionState, computeRenewal, validatePlan, cleanFeatures, readTrial, readBank, DEFAULT_TRIAL, DEFAULT_BANK, DAY_MS,
 } from './_subscription.js';
 
 // Băm "giả" để thời gian phản hồi khi sai TÊN đăng nhập ≈ khi sai MẬT KHẨU (không lộ tài khoản nào tồn tại).
@@ -172,7 +173,7 @@ async function actionCompaniesUpdate(db: SupabaseClient, res: VercelResponse, bo
 // ─── Gói dịch vụ ─────────────────────────────────────────────────────────────────────────────────
 const planToApi = (p: any) => ({
   id: p.id, name: p.name, description: p.description, priceMonthly: Number(p.price_monthly), priceYearly: Number(p.price_yearly),
-  maxEmployees: p.max_employees, active: p.active, sortOrder: p.sort_order,
+  maxEmployees: p.max_employees, active: p.active, sortOrder: p.sort_order, badge: p.badge || '', features: cleanFeatures(p.features),
 });
 
 async function actionPlansList(db: SupabaseClient, res: VercelResponse) {
@@ -187,7 +188,7 @@ async function actionPlansSave(db: SupabaseClient, res: VercelResponse, body: an
   const { data: before } = await db.from('plans').select('*').eq('id', v.data!.id).maybeSingle();
   const { error } = await db.from('plans').upsert({ ...v.data, updated_at: new Date().toISOString() }, { onConflict: 'id' });
   if (error) return fail(res, 500, error.message);
-  const campos = ['name', 'description', 'price_monthly', 'price_yearly', 'max_employees', 'active', 'sort_order'];
+  const campos = ['name', 'description', 'badge', 'features', 'price_monthly', 'price_yearly', 'max_employees', 'active', 'sort_order'];
   await writeAudit(db, ctx, {
     action: 'plans.save', targetType: 'plan', targetId: v.data!.id,
     summary: before ? `Sửa gói "${v.data!.name}"` : `Tạo gói "${v.data!.name}"`,
@@ -214,6 +215,7 @@ async function actionOrdersList(db: SupabaseClient, res: VercelResponse, body: a
       id: o.id, code: o.code, companyId: o.company_id, companyName: coMap.get(o.company_id)?.name || '—', companySlug: coMap.get(o.company_id)?.slug || '',
       planId: o.plan_id, planName: planMap.get(o.plan_id)?.name || o.plan_id, period: o.period, months: o.months, amount: Number(o.amount),
       status: o.status, createdAt: o.created_at, confirmedAt: o.confirmed_at, periodStart: o.period_start, periodEnd: o.period_end, note: o.note,
+      paidClaimedAt: o.paid_claimed_at ?? null,   // khách đã bấm "Xác nhận chuyển khoản thành công"
     })),
   });
 }
@@ -263,6 +265,7 @@ async function actionSettingsGet(db: SupabaseClient, res: VercelResponse) {
   res.status(200).json({
     trial: readTrial((await readSetting(db, 'trial')) ?? DEFAULT_TRIAL),
     bank: readBank((await readSetting(db, 'bank')) ?? DEFAULT_BANK),
+    telegramConfigured: telegramConfigured(),   // chỉ cho biết đã cấu hình hay chưa — KHÔNG bao giờ trả token/chat id
   });
 }
 
@@ -288,6 +291,15 @@ async function actionSettingsSave(db: SupabaseClient, res: VercelResponse, body:
     summary: `Sửa cấu hình: ${rows.map(r => (r.key === 'trial' ? 'dùng thử' : 'tài khoản ngân hàng')).join(', ')}`,
     detail: Object.fromEntries(rows.map(r => [r.key, { from: cu.get(r.key) ?? null, to: r.value }])),
   });
+  res.status(200).json({ ok: true });
+}
+
+// Gửi thử 1 tin nhắn để kiểm tra bot Telegram đã cấu hình đúng chưa.
+async function actionTelegramTest(res: VercelResponse, ctx: AuditCtx, db: SupabaseClient) {
+  const r = await sendTelegram(`✅ Thử kết nối từ trang quản trị LoLo (bởi ${ctx.username}). Nếu bạn thấy tin này, bot Telegram đã hoạt động.`);
+  await writeAudit(db, ctx, { action: 'telegram.test', targetType: 'setting', targetId: 'telegram', summary: r.ok ? 'Gửi thử Telegram: thành công' : `Gửi thử Telegram: thất bại${r.configured ? '' : ' (chưa cấu hình)'}` });
+  if (!r.configured) return fail(res, 400, 'Chưa cấu hình Telegram: cần đặt biến môi trường TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID trên máy chủ (Vercel) rồi deploy lại.');
+  if (!r.ok) return fail(res, 502, r.error || 'Không gửi được tin nhắn Telegram.');
   res.status(200).json({ ok: true });
 }
 
@@ -458,6 +470,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case 'orders.cancel': return actionOrdersCancel(db, res, body, ctx);
     case 'settings.get': return actionSettingsGet(db, res);
     case 'settings.save': return actionSettingsSave(db, res, body, ctx);
+    case 'telegram.test': return actionTelegramTest(res, ctx, db);
     case 'password.change': return actionPasswordChange(db, res, body, admin, jwtSecret, ctx);
     case 'logout': return actionLogout(db, res, admin, ctx);
     // Quản lý tài khoản quản trị: chỉ CHỦ nền tảng (is_owner). Nhật ký: mọi quản trị viên xem được, không ai sửa/xóa được.

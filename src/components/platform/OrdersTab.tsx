@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, Check, X } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, Check, X, BellRing } from 'lucide-react';
 import { platformCall } from './platformApi';
 import { formatVnd, formatDate, formatDateTime, PERIOD_LABEL, ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from './format';
 
@@ -10,6 +10,7 @@ interface Order {
   id: string; code: string; companyId: string; companyName: string; companySlug: string; planName: string;
   period: string; months: number; amount: number; status: 'pending' | 'confirmed' | 'cancelled';
   createdAt: string; confirmedAt: string | null; periodStart: string | null; periodEnd: string | null; note: string;
+  paidClaimedAt: string | null;   // khách đã bấm "Xác nhận chuyển khoản thành công"
 }
 
 const btn = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors';
@@ -24,7 +25,12 @@ export default function OrdersTab() {
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(null);
-    try { setOrders((await platformCall<{ orders: Order[] }>('orders.list', filter === 'pending' ? { status: 'pending' } : {})).orders); }
+    try {
+      const list = (await platformCall<{ orders: Order[] }>('orders.list', filter === 'pending' ? { status: 'pending' } : {})).orders;
+      // Đơn khách đã báo chuyển khoản lên đầu (cần duyệt gấp), trong nhóm xếp theo thời điểm báo/đặt mới nhất trước.
+      const key = (o: Order) => (o.status === 'pending' && o.paidClaimedAt ? 1 : 0);
+      setOrders([...list].sort((a, b) => key(b) - key(a) || (b.paidClaimedAt || b.createdAt).localeCompare(a.paidClaimedAt || a.createdAt)));
+    }
     catch (e: any) { setLoadError(e.message); } finally { setLoading(false); }
   }, [filter]);
   useEffect(() => { load(); }, [load]);
@@ -61,6 +67,11 @@ export default function OrdersTab() {
         </div>
       </div>
 
+      {orders.some(o => o.status === 'pending' && o.paidClaimedAt) && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg px-3 py-2.5 text-sm" role="status">
+          <BellRing className="w-4 h-4 mt-0.5 shrink-0" /> Có <b>{orders.filter(o => o.status === 'pending' && o.paidClaimedAt).length}</b> đơn khách đã báo chuyển khoản — hãy đối chiếu tiền về rồi xác nhận.
+        </div>
+      )}
       {notice && <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-3 py-2.5 text-sm" role="status"><CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> {notice}</div>}
       {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>}
       {loadError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2.5 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {loadError}</div>}
@@ -76,7 +87,7 @@ export default function OrdersTab() {
             </thead>
             <tbody>
               {orders.map(o => (
-                <tr key={o.id} className="border-b border-slate-100 last:border-0 align-top">
+                <tr key={o.id} className={`border-b border-slate-100 last:border-0 align-top ${o.status === 'pending' && o.paidClaimedAt ? 'bg-amber-50/60' : ''}`}>
                   <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{o.code}</td>
                   <td className="py-2.5 px-3"><div className="font-semibold text-slate-800">{o.companyName}</div><div className="font-mono text-xs text-slate-500">{o.companySlug}</div></td>
                   <td className="py-2.5 px-3"><div>{o.planName}</div><div className="text-xs text-slate-500">{PERIOD_LABEL[o.period]} · {o.months} tháng</div></td>
@@ -84,6 +95,7 @@ export default function OrdersTab() {
                   <td className="py-2.5 px-3 whitespace-nowrap text-slate-600">{formatDateTime(o.createdAt)}</td>
                   <td className="py-2.5 px-3 whitespace-nowrap">
                     <span className={`inline-block px-2 py-0.5 rounded border text-xs font-bold ${ORDER_STATUS_BADGE[o.status]}`}>{ORDER_STATUS_LABEL[o.status]}</span>
+                    {o.status === 'pending' && o.paidClaimedAt && <div className="text-xs font-bold text-amber-800 mt-1 inline-flex items-center gap-1"><BellRing className="w-3.5 h-3.5" /> Khách báo đã chuyển khoản<br />{formatDateTime(o.paidClaimedAt)}</div>}
                     {o.status === 'confirmed' && <div className="text-xs text-slate-500 mt-0.5">Hạn đến {formatDate(o.periodEnd)}</div>}
                     {o.status === 'cancelled' && o.note && <div className="text-xs text-slate-500 mt-0.5">{o.note}</div>}
                   </td>

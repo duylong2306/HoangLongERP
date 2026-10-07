@@ -4,14 +4,18 @@ import { getCurrentAccessToken } from './supabase';
 
 export type SubStatus = 'unlimited' | 'trial' | 'active' | 'expired';
 
+// Một dòng quyền lợi của gói: included = được nhận (✓) / không được nhận (✗).
+export interface PlanFeature { text: string; included: boolean }
 export interface SubscriptionPlan {
   id: string; name: string; description: string; priceMonthly: number; priceYearly: number; maxEmployees: number | null;
+  badge?: string; features?: PlanFeature[];
 }
 export interface SubscriptionOrder {
   id: string; code: string; planId: string; planName: string; period: 'month' | 'year'; months: number; amount: number;
   status: 'pending' | 'confirmed' | 'cancelled'; createdAt: string; confirmedAt: string | null; periodEnd: string | null;
+  paidClaimedAt?: string | null;   // lúc khách bấm "Xác nhận chuyển khoản thành công"
 }
-export interface BankInfo { bankName: string; accountNumber: string; accountName: string; note: string }
+export interface BankInfo { bankName: string; bankBin?: string; accountNumber: string; accountName: string; note: string }
 export interface SubscriptionStatus {
   company: { name: string; slug: string };
   subscription: { status: SubStatus; expiresAt: string | null; daysLeft: number | null; isTrial: boolean; locked: boolean; planId: string | null; planName: string | null; maxEmployees: number | null };

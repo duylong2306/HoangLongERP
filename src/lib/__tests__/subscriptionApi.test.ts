@@ -110,7 +110,7 @@ describe('api/subscription — plans (công khai)', () => {
     const r = await goi({ action: 'plans' });
     expect(r.code).toBe(200);
     expect(r.body.plans.map((p: any) => p.id)).toEqual(['co-ban', 'pro']);     // 'an' (tắt) và 'chua-gia' (giá 0) bị ẩn
-    expect(r.body.plans[0]).toEqual({ id: 'co-ban', name: 'Cơ bản', description: 'Nhỏ', priceMonthly: 300000, priceYearly: 3000000, maxEmployees: 10 });
+    expect(r.body.plans[0]).toEqual({ id: 'co-ban', name: 'Cơ bản', description: 'Nhỏ', priceMonthly: 300000, priceYearly: 3000000, maxEmployees: 10, badge: '', features: [] });
     expect(r.body.trialDays).toBe(7);                                    // mặc định khi chưa cấu hình
     db.seed('platform_settings', [{ key: 'trial', value: { days: 14, maxEmployees: null } }]);
     expect((await goi({ action: 'plans' })).body.trialDays).toBe(14);   // theo cấu hình ở trang quản trị
@@ -216,6 +216,107 @@ describe('api/subscription — status / order / cancel', () => {
     expect((await goi({ action: 'cancel', id: o.body.order.id }, tokenThuong())).code).toBe(200);
     expect(db.table('subscription_orders').find(x => x.id === o.body.order.id)!.status).toBe('cancelled');
     expect((await goi({ action: 'cancel', id: o.body.order.id }, tokenThuong())).code).toBe(404);   // đã hủy rồi
+  });
+});
+
+describe('api/subscription — xác nhận chuyển khoản (claim) + Telegram', () => {
+  const tokenAdmin = () => jwt.sign({ sub: 'emp_admin', role: 'authenticated', company_id: 'c1' }, SECRET);
+  const tokenNV = () => jwt.sign({ sub: 'nv1', role: 'authenticated', company_id: 'c1' }, SECRET);
+  let guiTin: { url: string; body: any }[];
+  const fetchGoc = globalThis.fetch;
+  const donCho = (over: any = {}) => ({ id: 'o1', code: 'LOLOAAAA2222', company_id: 'c1', plan_id: 'co-ban', period: 'year', months: 12, amount: 3000000, status: 'pending', created_at: new Date().toISOString(), ...over });
+
+  beforeEach(() => {
+    db.seed('companies', [congTy({ expires_at: new Date(Date.now() + 2 * DAY).toISOString(), is_trial: true })]);
+    db.seed('employees', [nhanVien(), nhanVien({ id: 'nv1', username: 'nv', role_group_ids: ['role_office'] })]);
+    db.seed('subscription_orders', [donCho()]);
+    process.env.TELEGRAM_BOT_TOKEN = 'BOT-TOKEN-BI-MAT'; process.env.TELEGRAM_CHAT_ID = '12345';
+    guiTin = [];
+    globalThis.fetch = vi.fn(async (url: any, init: any) => { guiTin.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ ok: true }) } as any; }) as any;
+  });
+  afterEach(() => { globalThis.fetch = fetchGoc; });
+
+  it('admin bấm xác nhận: đơn được đánh dấu paid_claimed_at (VẪN pending), gửi đúng 1 tin Telegram có đủ thông tin', async () => {
+    const r = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r.code).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, notified: true });
+    const o = db.table('subscription_orders')[0];
+    expect(o.status).toBe('pending');                 // CHƯA kích hoạt — chờ quản trị nền tảng xác nhận tiền về
+    expect(o.paid_claimed_at).toBeTruthy(); expect(o.telegram_notified_at).toBeTruthy();
+    expect(guiTin).toHaveLength(1);
+    expect(guiTin[0].url).toBe('https://api.telegram.org/botBOT-TOKEN-BI-MAT/sendMessage');
+    expect(guiTin[0].body.chat_id).toBe('12345');
+    expect(guiTin[0].body.parse_mode).toBe('HTML');
+    const t: string = guiTin[0].body.text;
+    expect(t).toContain('Công ty ABC'); expect(t).toContain('LOLOAAAA2222'); expect(t).toContain('3.000.000'); expect(t).toContain('Cơ bản');
+    expect(t).toContain('/quantri');
+    // Công ty không bị kích hoạt
+    expect(db.table('companies')[0].is_trial).toBe(true);
+  });
+
+  it('bấm nhiều lần: chỉ gửi 1 tin (không spam), paid_claimed_at giữ nguyên lần đầu', async () => {
+    await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    const lan1 = db.table('subscription_orders')[0].paid_claimed_at;
+    const r2 = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r2.code).toBe(200);
+    expect(guiTin).toHaveLength(1);
+    expect(db.table('subscription_orders')[0].paid_claimed_at).toBe(lan1);
+  });
+
+  it('Telegram lỗi: vẫn ghi nhận yêu cầu (notified=false); lần bấm sau thử gửi lại và thành công', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ description: 'chat not found' }) } as any)) as any;
+    const r1 = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r1.code).toBe(200); expect(r1.body.notified).toBe(false);
+    expect(db.table('subscription_orders')[0].paid_claimed_at).toBeTruthy();
+    expect(db.table('subscription_orders')[0].telegram_notified_at ?? null).toBeNull();
+    globalThis.fetch = vi.fn(async (url: any, init: any) => { guiTin.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({}) } as any; }) as any;
+    const r2 = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r2.body.notified).toBe(true); expect(guiTin).toHaveLength(1);
+  });
+
+  it('Telegram mất kết nối (fetch ném lỗi) → vẫn 200 và KHÔNG lộ token trong phản hồi', async () => {
+    globalThis.fetch = vi.fn(async () => { throw new Error('network down: https://api.telegram.org/botBOT-TOKEN-BI-MAT/sendMessage'); }) as any;
+    const r = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r.code).toBe(200); expect(r.body.notified).toBe(false);
+    expect(JSON.stringify(r.body)).not.toContain('BOT-TOKEN-BI-MAT');
+  });
+
+  it('chưa cấu hình Telegram: vẫn ghi nhận yêu cầu, không gọi mạng', async () => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    const r = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r.code).toBe(200); expect(r.body.notified).toBe(false);
+    expect(db.table('subscription_orders')[0].paid_claimed_at).toBeTruthy();
+    expect(guiTin).toHaveLength(0);
+  });
+
+  it('thoát HTML: tên công ty chứa thẻ không chèn được vào tin nhắn', async () => {
+    db.table('companies')[0].name = '<b>Giả</b> & <i>mạo</i>';
+    await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    const t: string = guiTin[0].body.text;
+    expect(t).toContain('&lt;b&gt;Giả&lt;/b&gt; &amp; &lt;i&gt;mạo&lt;/i&gt;');
+    expect(t).not.toContain('<b>Giả</b>');
+  });
+
+  it('từ chối: nhân viên thường (403), đơn công ty khác (404), đơn đã xử lý (409), thiếu id (404)', async () => {
+    expect((await goi({ action: 'claim', id: 'o1' }, tokenNV())).code).toBe(403);
+    db.seed('subscription_orders', [donCho({ id: 'o2', code: 'LOLOBBBB3333', company_id: 'c-khac' })]);
+    expect((await goi({ action: 'claim', id: 'o2' }, tokenAdmin())).code).toBe(404);
+    db.table('subscription_orders')[0].status = 'confirmed';
+    expect((await goi({ action: 'claim', id: 'o1' }, tokenAdmin())).code).toBe(409);
+    expect((await goi({ action: 'claim' }, tokenAdmin())).code).toBe(404);
+    expect(guiTin).toHaveLength(0);
+  });
+
+  it('chưa chạy migration (thiếu cột paid_claimed_at): báo lỗi hệ thống chưa sẵn sàng, không gửi Telegram', async () => {
+    db.fail['subscription_orders.update'] = 'column paid_claimed_at does not exist';
+    const r = await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    expect(r.code).toBe(500); expect(guiTin).toHaveLength(0);
+  });
+
+  it('status trả paidClaimedAt trong danh sách đơn', async () => {
+    await goi({ action: 'claim', id: 'o1' }, tokenAdmin());
+    const st = await goi({ action: 'status' }, tokenAdmin());
+    expect(st.body.orders[0].paidClaimedAt).toBeTruthy();
   });
 });
 
