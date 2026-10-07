@@ -15,7 +15,7 @@
 // KHÔNG import từ src/ (xem giải thích ở api/login.ts).
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { resolveHost, getRequestHostname, getServerBaseDomains, SLUG_PATTERN } from './_tenant';
+import { resolveHost, getRequestHostname, getServerBaseDomains, SLUG_PATTERN } from './_tenant.js'; // ⚠️ BẮT BUỘC đuôi .js: package.json "type":"module" → Node ESM không tự thêm đuôi (thiếu → ERR_MODULE_NOT_FOUND, đã gây sập đăng nhập staging)
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {

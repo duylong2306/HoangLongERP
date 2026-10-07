@@ -21,7 +21,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant';
+import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ BẮT BUỘC đuôi .js: package.json "type":"module" → Node ESM không tự thêm đuôi (thiếu → ERR_MODULE_NOT_FOUND, đã gây sập đăng nhập staging)
 
 // Chuyển 1 object snake_case (row thô từ Postgres) sang camelCase — bản rút
 // gọn, tự chứa trong file này (KHÔNG import từ dbService.ts, xem lý do ở trên).
