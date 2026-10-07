@@ -148,7 +148,8 @@ describe('tab Doanh nghiệp', () => {
     await u.click(within(dong).getByRole('button', { name: /Khóa/ }));
     const hop = await screen.findByRole('alertdialog');
     expect(hop).toHaveTextContent('Khóa doanh nghiệp "Công ty Dùng Thử"?');
-    expect(hop).toHaveTextContent(/bị chặn ngay/);
+    expect(hop).toHaveTextContent(/không đăng nhập được/);
+    expect(hop).toHaveTextContent(/ngay lập tức/);
     expect(hop).toHaveTextContent(/Dữ liệu của doanh nghiệp được giữ nguyên/);
     expect(db.table('companies').find(c => c.id === 'c2')!.active).toBe(true);   // mới chỉ cảnh báo, chưa khóa
     expect(window.confirm).not.toHaveBeenCalled();                                  // không dựa vào hộp thoại gốc của trình duyệt

@@ -162,7 +162,7 @@ export default function CompaniesTab() {
       {lockTarget && (
         lockTarget.active ? (
           <ConfirmDialog title={`Khóa doanh nghiệp "${lockTarget.name}"?`} confirmLabel="Khóa doanh nghiệp" danger busy={lockBusy} error={lockError} onConfirm={doToggle} onClose={() => setLockTarget(null)}>
-            <p><b>Toàn bộ nhân viên</b> của doanh nghiệp này sẽ <b>bị chặn ngay</b> (người đang dùng bị đẩy ra trong khoảng 1 phút) và <b>không đăng nhập được</b> cho tới khi bạn mở lại.</p>
+            <p><b>Toàn bộ nhân viên</b> của doanh nghiệp này sẽ <b>không đăng nhập được</b> và <b>không đọc/ghi được dữ liệu ngay lập tức</b>; ai đang mở ERP sẽ thấy thông báo khóa khi tải lại trang. Chặn cho tới khi bạn mở lại.</p>
             <p>Dữ liệu của doanh nghiệp được giữ nguyên, không bị xóa.</p>
           </ConfirmDialog>
         ) : (
