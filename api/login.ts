@@ -21,6 +21,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant';
 
 // Chuyển 1 object snake_case (row thô từ Postgres) sang camelCase — bản rút
 // gọn, tự chứa trong file này (KHÔNG import từ dbService.ts, xem lý do ở trên).
@@ -67,9 +68,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { persistSession: false },
   });
 
-  // 1. Xác định công ty theo subdomain. Chưa có domain riêng (Giai đoạn 7) nên
-  //    mặc định về công ty gốc 'hoanglong' khi không truyền/không khớp subdomain.
-  const slug = (subdomain || 'hoanglong').trim().toLowerCase();
+  // 1. Xác định công ty. Nếu truy cập bằng subdomain thật (hoanglong.<tên-miền-gốc>) thì công ty do TÊN MIỀN
+  // quyết định — KHÔNG tin `subdomain` trong nội dung yêu cầu, để không ai vào địa chỉ công ty A mà đăng
+  // nhập được công ty B bằng cách sửa tham số. Địa chỉ gốc (trang giới thiệu/đăng ký) không có ERP để
+  // đăng nhập. Địa chỉ khác (vercel.app, localhost... chưa/không thuộc tên miền gốc) giữ cách cũ: lấy
+  // theo "Mã công ty" người dùng nhập.
+  const hostInfo = resolveHost(getRequestHostname(req), getServerBaseDomains());
+  if (hostInfo.kind === 'root') {
+    res.status(400).json({ error: 'Vui lòng đăng nhập tại địa chỉ riêng của doanh nghiệp (ví dụ: tên-doanh-nghiệp.tên-miền).' });
+    return;
+  }
+  const slug = hostInfo.kind === 'tenant'
+    ? hostInfo.slug
+    : (subdomain || 'hoanglong').trim().toLowerCase();
   const { data: company, error: companyErr } = await supabase
     .from('companies')
     .select('id, name, slug, active')

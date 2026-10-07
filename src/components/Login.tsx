@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Employee } from '../types';
 import {
   Lock,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { setAuthToken } from '../lib/supabase';
+import { getHostInfo, getBaseDomainForDisplay } from '../lib/tenant';
 
 interface LoginProps {
   brandName: string;
@@ -29,9 +30,17 @@ export default function Login({
   primaryAccent,
   onLoginSuccess
 }: LoginProps) {
-  // Giai đoạn 7 (multi-tenant): chưa có domain riêng để tách công ty theo
-  // subdomain thật, nên dùng "Mã công ty" nhập tay — gửi lên api/login.ts làm
-  // `subdomain` (server đã sẵn tham số này từ Giai đoạn 2). Nhớ lại như
+  // Doanh nghiệp theo TÊN MIỀN (xem src/lib/tenant.ts):
+  //  - 'tenant': đang ở hoanglong.<tên-miền-gốc> → công ty đã xác định, KHÔNG hiện ô "Mã công ty";
+  //  - 'root'  : địa chỉ gốc (trang giới thiệu/đăng ký — Giai đoạn 2), không có ERP để đăng nhập;
+  //  - 'other' : vercel.app/localhost... (chưa cấu hình VITE_BASE_DOMAIN) → giữ cách cũ, nhập "Mã công ty".
+  const hostInfo = useMemo(() => getHostInfo(), []);
+  const tenantSlug = hostInfo.kind === 'tenant' ? hostInfo.slug : null;
+  // Trạng thái tra cứu doanh nghiệp từ server (chỉ dùng khi ở subdomain).
+  const [tenantState, setTenantState] = useState<{ status: 'loading' | 'ok' | 'notfound' | 'error'; name?: string }>({ status: 'loading' });
+
+  // Giai đoạn 7 (multi-tenant): với địa chỉ KHÔNG có subdomain thật (staging *.vercel.app, máy dev) vẫn
+  // dùng "Mã công ty" nhập tay — gửi lên api/login.ts làm `subdomain`. Nhớ lại như
   // username (localStorage riêng, không phải dữ liệu nghiệp vụ nên không cần
   // companyScopedKey) để người dùng không phải gõ lại mỗi lần.
   const [companySlug, setCompanySlug] = useState(() => {
@@ -47,6 +56,23 @@ export default function Login({
   const [showDemoAccounts, setShowDemoAccounts] = useState(false);
   // Chặn double-submit khi đang chờ /api/login phản hồi (xem handleSubmit).
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Ở subdomain: hỏi server doanh nghiệp này có tồn tại/đang hoạt động không + lấy tên hiển thị.
+  // Lỗi mạng/server (status 'error') KHÔNG chặn đăng nhập — api/login.ts vẫn tự kiểm tra lại ở server.
+  useEffect(() => {
+    if (!tenantSlug) return;
+    let active = true;
+    fetch('/api/tenant-info')
+      .then(r => r.json().then(body => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!active) return;
+        if (!ok) setTenantState({ status: 'error' });
+        else if (body?.exists) setTenantState({ status: 'ok', name: body.name });
+        else setTenantState({ status: 'notfound' });
+      })
+      .catch(() => { if (active) setTenantState({ status: 'error' }); });
+    return () => { active = false; };
+  }, [tenantSlug]);
 
   // Load remembered credentials if they exist
   useEffect(() => {
@@ -74,12 +100,13 @@ export default function Login({
     setError(null);
     setSuccessMsg(null);
 
-    const cleanCompanySlug = companySlug.trim().toLowerCase();
+    // Subdomain: công ty do tên miền quyết định (server cũng tự lấy từ tên miền, không tin giá trị này).
+    const cleanCompanySlug = (tenantSlug ?? companySlug).trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
     const cleanPassword = password.trim();
 
     if (!cleanCompanySlug || !cleanUsername || !cleanPassword) {
-      setError('Vui lòng nhập đầy đủ mã công ty, tên đăng nhập và mật khẩu!');
+      setError(tenantSlug ? 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!' : 'Vui lòng nhập đầy đủ mã công ty, tên đăng nhập và mật khẩu!');
       return;
     }
 
@@ -158,6 +185,30 @@ export default function Login({
     primaryAccent === 'amber' ? 'focus:border-amber-500' :
     primaryAccent === 'rose' ? 'focus:border-rose-500' : 'focus:border-violet-500';
 
+  // Địa chỉ gốc (chưa có trang đăng ký — Giai đoạn 2) hoặc subdomain KHÔNG có doanh nghiệp tương ứng
+  // → không hiện form đăng nhập, báo rõ lý do thay vì để người dùng đoán.
+  const khongTonTai = tenantSlug !== null && tenantState.status === 'notfound';
+  if (hostInfo.kind === 'root' || khongTonTai) {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 flex flex-col justify-center items-center p-4 font-sans text-slate-200">
+        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-4" id="login_tenant_notice">
+          <img src="/lolo-icon-192.png" alt={brandName} className="w-14 h-14 rounded-xl shadow-lg mx-auto" />
+          <div className="flex items-center justify-center gap-2 text-amber-400">
+            <AlertCircle className="w-5 h-5" />
+            <h1 className="font-black text-base uppercase tracking-wider">
+              {khongTonTai ? 'Doanh nghiệp không tồn tại' : 'Chưa chọn doanh nghiệp'}
+            </h1>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            {khongTonTai
+              ? <>Địa chỉ <b className="text-slate-200">{window.location.hostname}</b> chưa được đăng ký hoặc doanh nghiệp đã ngừng hoạt động. Vui lòng kiểm tra lại đường dẫn mà quản trị viên đã gửi cho bạn.</>
+              : <>Mỗi doanh nghiệp đăng nhập tại địa chỉ riêng dạng <b className="text-slate-200">tên-doanh-nghiệp.{getBaseDomainForDisplay()}</b>. Vui lòng truy cập đúng địa chỉ của doanh nghiệp bạn.</>}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-screen bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-y-auto select-none font-sans text-slate-200">
       
@@ -188,7 +239,24 @@ export default function Login({
         {/* Main form */}
         <form onSubmit={handleSubmit} className="space-y-4">
 
-          {/* Mã công ty (Giai đoạn 7 — thay cho subdomain thật khi chưa có domain riêng) */}
+          {/* Doanh nghiệp: subdomain → chỉ HIỂN THỊ tên (không cho đổi); địa chỉ khác → ô nhập "Mã công ty" như cũ */}
+          {tenantSlug ? (
+            <div className="space-y-1">
+              <label className="block text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                Doanh nghiệp
+              </label>
+              <div className="relative">
+                <div
+                  id="login_company_fixed"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 pl-10 text-xs text-white font-bold truncate"
+                  title={tenantSlug}
+                >
+                  {tenantState.name || tenantSlug}
+                </div>
+                <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
+              </div>
+            </div>
+          ) : (
           <div className="space-y-1">
             <label className="block text-[11px] text-slate-400 font-bold uppercase tracking-wider">
               Mã công ty
@@ -206,6 +274,7 @@ export default function Login({
               <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
             </div>
           </div>
+          )}
 
           {/* Username */}
           <div className="space-y-1">
