@@ -16,7 +16,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
-import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST } from './_platformAuth.js';
+import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST, passwordProblem, ADMIN_USERNAME_RE } from './_platformAuth.js';
+import { writeAudit, purgeOldAudit, diffFields, AUDIT_RETENTION_DAYS, type AuditCtx } from './_audit.js';
 import { getClientIp, hashIp, slugProblem, SLUG_MESSAGES } from './_signup.js';
 import { createCompanyWithAdmin } from './_company.js';
 import {
@@ -24,7 +25,7 @@ import {
 } from './_subscription.js';
 
 // Băm "giả" để thời gian phản hồi khi sai TÊN đăng nhập ≈ khi sai MẬT KHẨU (không lộ tài khoản nào tồn tại).
-// ⚠️ Phải CÙNG cost với hash thật (12 — xem scripts/create-platform-admin.mjs và PLATFORM_BCRYPT_COST), nếu lệch thì
+// ⚠️ Phải CÙNG cost với hash thật (12 — xem PLATFORM_BCRYPT_COST trong _platformAuth.ts), nếu lệch thì
 // thời gian phản hồi vẫn lộ tên nào có thật (đã đo: cost 10 ≈ 69ms vs cost 12 ≈ 276ms).
 const DUMMY_HASH = '$2b$12$AkoYIfsxx4z9bO39IRYgfOYUNUQQV.3XleyxoTbkpzFhuCPXJSL7i';
 
@@ -69,7 +70,9 @@ async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelRe
   if (!passed) return fail(res, 401, 'Tên đăng nhập hoặc mật khẩu không đúng.');
 
   await db.from('platform_admins').update({ last_login_at: new Date().toISOString() }).eq('id', admin!.id);
-  res.status(200).json({ token: signPlatformToken({ id: admin!.id, username: admin!.username, ver: admin!.token_version ?? 0 }, jwtSecret), admin: { id: admin!.id, username: admin!.username, name: admin!.name } });
+  await writeAudit(db, { adminId: admin!.id, username: admin!.username, ipHash }, { action: 'login', targetType: 'account', targetId: admin!.id, summary: 'Đăng nhập trang quản trị' });
+  await purgeOldAudit(db);   // dọn nhật ký quá 30 ngày
+  res.status(200).json({ token: signPlatformToken({ id: admin!.id, username: admin!.username, ver: admin!.token_version ?? 0 }, jwtSecret), admin: { id: admin!.id, username: admin!.username, name: admin!.name, isOwner: admin!.is_owner === true } });
 }
 
 // ─── Doanh nghiệp ────────────────────────────────────────────────────────────────────────────────
@@ -97,7 +100,7 @@ async function actionCompaniesList(db: SupabaseClient, res: VercelResponse) {
   });
 }
 
-async function actionCompaniesCreate(db: SupabaseClient, res: VercelResponse, body: any) {
+async function actionCompaniesCreate(db: SupabaseClient, res: VercelResponse, body: any, ctx: AuditCtx) {
   const slug = String(body.slug || '').trim().toLowerCase();
   const name = String(body.name || '').trim();
   const adminUsername = String(body.adminUsername || '').trim().toLowerCase();
@@ -120,10 +123,14 @@ async function actionCompaniesCreate(db: SupabaseClient, res: VercelResponse, bo
     expiresAt, isTrial: mode === 'trial',
   });
   if (!created.ok) return fail(res, created.status!, created.error!);
+  await writeAudit(db, ctx, {
+    action: 'companies.create', targetType: 'company', targetId: created.company!.id, summary: `Tạo doanh nghiệp "${name}" (${slug})`,
+    detail: { slug, name, adminUsername, subscription: mode, expiresAt },   // KHÔNG lưu mật khẩu admin công ty
+  });
   res.status(201).json({ company: created.company });
 }
 
-async function actionCompaniesUpdate(db: SupabaseClient, res: VercelResponse, body: any) {
+async function actionCompaniesUpdate(db: SupabaseClient, res: VercelResponse, body: any, ctx: AuditCtx) {
   const id = String(body.id || '');
   if (!id) return fail(res, 400, 'Thiếu mã công ty.');
   const patch: Record<string, unknown> = {};
@@ -148,9 +155,17 @@ async function actionCompaniesUpdate(db: SupabaseClient, res: VercelResponse, bo
   if (body.isTrial !== undefined) patch.is_trial = body.isTrial === true;
   if (Object.keys(patch).length === 0) return fail(res, 400, 'Không có thông tin nào để cập nhật.');
 
+  // Đọc bản ghi TRƯỚC khi sửa để nhật ký lưu được giá trị cũ → mới
+  const { data: before } = await db.from('companies').select('id, slug, name, active, plan_id, expires_at, is_trial').eq('id', id).maybeSingle();
   const { data, error } = await db.from('companies').update(patch).eq('id', id).select('id').maybeSingle();
   if (error) return fail(res, 500, error.message);
   if (!data) return fail(res, 404, 'Không tìm thấy công ty.');
+  const changes = diffFields(before, patch, ['active', 'plan_id', 'expires_at', 'is_trial']);
+  if (Object.keys(changes).length > 0) {
+    const nhan = before ? `"${before.name}" (${before.slug})` : id;
+    const tom = patch.active !== undefined && changes.active ? (patch.active ? `Mở khóa doanh nghiệp ${nhan}` : `Khóa doanh nghiệp ${nhan}`) : `Sửa thông tin doanh nghiệp ${nhan}`;
+    await writeAudit(db, ctx, { action: 'companies.update', targetType: 'company', targetId: id, summary: tom, detail: changes });
+  }
   res.status(200).json({ ok: true });
 }
 
@@ -166,11 +181,18 @@ async function actionPlansList(db: SupabaseClient, res: VercelResponse) {
   res.status(200).json({ plans: (data || []).map(planToApi) });
 }
 
-async function actionPlansSave(db: SupabaseClient, res: VercelResponse, body: any) {
+async function actionPlansSave(db: SupabaseClient, res: VercelResponse, body: any, ctx: AuditCtx) {
   const v = validatePlan(body);
   if (!v.ok) return fail(res, 400, 'Thông tin gói chưa hợp lệ.', { errors: v.errors });
+  const { data: before } = await db.from('plans').select('*').eq('id', v.data!.id).maybeSingle();
   const { error } = await db.from('plans').upsert({ ...v.data, updated_at: new Date().toISOString() }, { onConflict: 'id' });
   if (error) return fail(res, 500, error.message);
+  const campos = ['name', 'description', 'price_monthly', 'price_yearly', 'max_employees', 'active', 'sort_order'];
+  await writeAudit(db, ctx, {
+    action: 'plans.save', targetType: 'plan', targetId: v.data!.id,
+    summary: before ? `Sửa gói "${v.data!.name}"` : `Tạo gói "${v.data!.name}"`,
+    detail: before ? diffFields(before, v.data as any, campos) : v.data,
+  });
   res.status(200).json({ ok: true });
 }
 
@@ -199,7 +221,7 @@ async function actionOrdersList(db: SupabaseClient, res: VercelResponse, body: a
 // Xác nhận đơn = đã nhận đủ tiền → kích hoạt/gia hạn công ty. Thứ tự an toàn khi 2 admin bấm cùng lúc:
 //   1) "chiếm" đơn bằng cập nhật có điều kiện status='pending' (chỉ 1 yêu cầu thắng);
 //   2) cập nhật công ty; nếu lỗi → trả đơn về 'pending' (không để đơn đã xác nhận mà công ty chưa được gia hạn).
-async function actionOrdersConfirm(db: SupabaseClient, res: VercelResponse, body: any, adminId: string) {
+async function actionOrdersConfirm(db: SupabaseClient, res: VercelResponse, body: any, adminId: string, ctx: AuditCtx) {
   const id = String(body.id || '');
   const { data: order } = await db.from('subscription_orders').select('*').eq('id', id).maybeSingle();
   if (!order) return fail(res, 404, 'Không tìm thấy đơn.');
@@ -219,15 +241,20 @@ async function actionOrdersConfirm(db: SupabaseClient, res: VercelResponse, body
     await db.from('subscription_orders').update({ status: 'pending', confirmed_at: null, confirmed_by: null, period_start: null, period_end: null }).eq('id', id);
     return fail(res, 500, `Không kích hoạt được gói: ${coErr.message}`);
   }
+  await writeAudit(db, ctx, {
+    action: 'orders.confirm', targetType: 'order', targetId: id, summary: `Xác nhận đơn ${order.code} — kích hoạt/gia hạn gói "${order.plan_id}" (${order.months} tháng)`,
+    detail: { code: order.code, companyId: order.company_id, planId: order.plan_id, amount: Number(order.amount), months: order.months, expiresFrom: company.expires_at, expiresTo: end.toISOString() },
+  });
   res.status(200).json({ ok: true, expiresAt: end.toISOString() });
 }
 
-async function actionOrdersCancel(db: SupabaseClient, res: VercelResponse, body: any) {
+async function actionOrdersCancel(db: SupabaseClient, res: VercelResponse, body: any, ctx: AuditCtx) {
   const id = String(body.id || '');
   const note = String(body.note || '').trim().slice(0, 300);
   const { data, error } = await db.from('subscription_orders').update({ status: 'cancelled', note }).eq('id', id).eq('status', 'pending').select('id').maybeSingle();
   if (error) return fail(res, 500, error.message);
   if (!data) return fail(res, 409, 'Đơn không còn ở trạng thái chờ xác nhận.');
+  await writeAudit(db, ctx, { action: 'orders.cancel', targetType: 'order', targetId: id, summary: 'Hủy đơn đăng ký chờ xác nhận', detail: { note } });
   res.status(200).json({ ok: true });
 }
 
@@ -239,7 +266,7 @@ async function actionSettingsGet(db: SupabaseClient, res: VercelResponse) {
   });
 }
 
-async function actionSettingsSave(db: SupabaseClient, res: VercelResponse, body: any) {
+async function actionSettingsSave(db: SupabaseClient, res: VercelResponse, body: any, ctx: AuditCtx) {
   const rows: { key: string; value: unknown; updated_at: string }[] = [];
   const now = new Date().toISOString();
   if (body.trial !== undefined) {
@@ -252,32 +279,136 @@ async function actionSettingsSave(db: SupabaseClient, res: VercelResponse, body:
   }
   if (body.bank !== undefined) rows.push({ key: 'bank', value: readBank(body.bank), updated_at: now });
   if (rows.length === 0) return fail(res, 400, 'Không có cấu hình nào để lưu.');
+  const cu = new Map<string, unknown>();
+  for (const r of rows) cu.set(r.key, await readSetting(db, r.key));   // giá trị CŨ để ghi nhật ký
   const { error } = await db.from('platform_settings').upsert(rows, { onConflict: 'key' });
   if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, {
+    action: 'settings.save', targetType: 'setting', targetId: rows.map(r => r.key).join(','),
+    summary: `Sửa cấu hình: ${rows.map(r => (r.key === 'trial' ? 'dùng thử' : 'tài khoản ngân hàng')).join(', ')}`,
+    detail: Object.fromEntries(rows.map(r => [r.key, { from: cu.get(r.key) ?? null, to: r.value }])),
+  });
   res.status(200).json({ ok: true });
 }
 
 // Đăng xuất THẬT: tăng token_version → token hiện tại (và mọi token cũ) hết hiệu lực ở máy chủ.
-async function actionLogout(db: SupabaseClient, res: VercelResponse, admin: any) {
+async function actionLogout(db: SupabaseClient, res: VercelResponse, admin: any, ctx: AuditCtx) {
   const { error } = await db.from('platform_admins').update({ token_version: (admin.token_version ?? 0) + 1 }).eq('id', admin.id);
   if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, { action: 'logout', targetType: 'account', targetId: admin.id, summary: 'Đăng xuất (thu hồi phiên)' });
   res.status(200).json({ ok: true });
 }
 
-async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, body: any, adminRow: any, jwtSecret: string) {
+async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, body: any, adminRow: any, jwtSecret: string, ctx: AuditCtx) {
   const adminId = adminRow.id as string;
   const current = String(body.currentPassword || '');
   const next = String(body.newPassword || '');
-  if (next.length < 10 || next.length > 72 || !/[A-Za-z]/.test(next) || !/\d/.test(next)) {
-    return fail(res, 400, 'Mật khẩu mới từ 10 đến 72 ký tự, có cả chữ và số.');
-  }
+  const problem = passwordProblem(next);
+  if (problem) return fail(res, 400, problem);
   const { data: admin } = await db.from('platform_admins').select('password_hash').eq('id', adminId).maybeSingle();
   if (!admin || !(await bcrypt.compare(current, admin.password_hash))) return fail(res, 400, 'Mật khẩu hiện tại không đúng.');
   const ver = (adminRow.token_version ?? 0) + 1;
   const { error } = await db.from('platform_admins').update({ password_hash: await bcrypt.hash(next, PLATFORM_BCRYPT_COST), token_version: ver }).eq('id', adminId);
   if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, { action: 'password.change', targetType: 'account', targetId: adminId, summary: 'Tự đổi mật khẩu' });   // không lưu mật khẩu
   // Đổi mật khẩu thu hồi MỌI token cũ (kể cả của kẻ đang giữ token bị lộ); trả token mới để phiên hiện tại không bị đá ra.
   res.status(200).json({ ok: true, token: signPlatformToken({ id: adminId, username: adminRow.username, ver }, jwtSecret) });
+}
+
+// ─── Tài khoản quản trị (chỉ chủ nền tảng) ────────────────────────────────────────────────────────
+const accountToApi = (a: any) => ({
+  id: a.id, username: a.username, name: a.name, active: a.active === true, isOwner: a.is_owner === true,
+  lastLoginAt: a.last_login_at ?? null, createdAt: a.created_at,
+});
+
+async function actionAccountsList(db: SupabaseClient, res: VercelResponse) {
+  const { data, error } = await db.from('platform_admins').select('*').order('created_at', { ascending: true });
+  if (error) return fail(res, 500, error.message);
+  res.status(200).json({ accounts: (data || []).map(accountToApi) });
+}
+
+async function actionAccountsCreate(db: SupabaseClient, res: VercelResponse, body: any, ctx: AuditCtx) {
+  const username = String(body.username || '').trim().toLowerCase();
+  const name = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  const password = String(body.password || '');
+  if (!ADMIN_USERNAME_RE.test(username)) return fail(res, 400, 'Tên đăng nhập chỉ gồm chữ thường, số, dấu . _ - (3–40 ký tự).');
+  const problem = passwordProblem(password);
+  if (problem) return fail(res, 400, problem);
+
+  const { data, error } = await db.from('platform_admins').insert({
+    username, name: name || username, password_hash: await bcrypt.hash(password, PLATFORM_BCRYPT_COST), active: true,   // is_owner mặc định false
+  }).select('id').maybeSingle();
+  if (error) return fail(res, (error as any).code === '23505' ? 409 : 500, (error as any).code === '23505' ? 'Tên đăng nhập này đã tồn tại.' : error.message);
+  await writeAudit(db, ctx, { action: 'accounts.create', targetType: 'account', targetId: data?.id, summary: `Tạo tài khoản quản trị "${username}"`, detail: { username, name: name || username } });
+  res.status(201).json({ ok: true, id: data?.id });
+}
+
+// Tài khoản mục tiêu: chỉ thao tác được trên tài khoản KHÔNG phải chủ (chủ tự đổi mật khẩu ở mục riêng).
+async function loadTarget(db: SupabaseClient, res: VercelResponse, id: string, actor: any): Promise<any | null> {
+  const { data } = await db.from('platform_admins').select('*').eq('id', id).maybeSingle();
+  if (!data) { fail(res, 404, 'Không tìm thấy tài khoản.'); return null; }
+  if (data.is_owner === true && data.id !== actor.id) { fail(res, 403, 'Không thể thao tác trên tài khoản chủ nền tảng khác.'); return null; }
+  return data;
+}
+
+async function actionAccountsUpdate(db: SupabaseClient, res: VercelResponse, body: any, actor: any, ctx: AuditCtx) {
+  const target = await loadTarget(db, res, String(body.id || ''), actor);
+  if (!target) return;
+  const patch: Record<string, unknown> = {};
+  if (body.name !== undefined) patch.name = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 80) || target.username;
+  if (body.active !== undefined) {
+    const active = body.active === true;
+    // Không tự khóa chính mình (sẽ mất quyền quản trị) — chủ nền tảng không bao giờ bị khóa.
+    if (!active && target.id === actor.id) return fail(res, 400, 'Không thể tự khóa tài khoản của chính mình.');
+    patch.active = active;
+    if (!active) patch.token_version = (target.token_version ?? 0) + 1;   // khóa → thu hồi luôn phiên đang mở
+  }
+  if (Object.keys(patch).length === 0) return fail(res, 400, 'Không có thông tin nào để cập nhật.');
+  const { error } = await db.from('platform_admins').update(patch).eq('id', target.id);
+  if (error) return fail(res, 500, error.message);
+  const changes = diffFields(target, patch, ['name', 'active']);
+  await writeAudit(db, ctx, {
+    action: 'accounts.update', targetType: 'account', targetId: target.id,
+    summary: patch.active === false ? `Khóa tài khoản "${target.username}"` : patch.active === true && target.active !== true ? `Mở khóa tài khoản "${target.username}"` : `Sửa thông tin tài khoản "${target.username}"`,
+    detail: changes,
+  });
+  res.status(200).json({ ok: true });
+}
+
+async function actionAccountsReset(db: SupabaseClient, res: VercelResponse, body: any, actor: any, ctx: AuditCtx) {
+  const target = await loadTarget(db, res, String(body.id || ''), actor);
+  if (!target) return;
+  if (target.id === actor.id) return fail(res, 400, 'Tự đổi mật khẩu của mình ở mục "Đổi mật khẩu của tôi".');
+  const password = String(body.newPassword || '');
+  const problem = passwordProblem(password);
+  if (problem) return fail(res, 400, problem);
+  const { error } = await db.from('platform_admins').update({
+    password_hash: await bcrypt.hash(password, PLATFORM_BCRYPT_COST), token_version: (target.token_version ?? 0) + 1,   // thu hồi mọi phiên cũ của họ
+  }).eq('id', target.id);
+  if (error) return fail(res, 500, error.message);
+  await writeAudit(db, ctx, { action: 'accounts.resetPassword', targetType: 'account', targetId: target.id, summary: `Đặt lại mật khẩu cho tài khoản "${target.username}"` });
+  res.status(200).json({ ok: true });
+}
+
+// ─── Nhật ký thao tác ────────────────────────────────────────────────────────────────────────────
+async function actionLogsList(db: SupabaseClient, res: VercelResponse, body: any) {
+  await purgeOldAudit(db);   // đảm bảo không trả bản ghi quá 30 ngày
+  const limit = Math.min(Math.max(parseInt(String(body.limit), 10) || 200, 1), 500);
+  let q = db.from('platform_audit_logs').select('*').order('created_at', { ascending: false }).limit(limit);
+  const who = String(body.adminUsername || '').trim().toLowerCase();
+  if (who) q = q.eq('admin_username', who);
+  // ⚠️ Không dùng khóa `action` cho bộ lọc: `action` đã là tên thao tác API (logs.list) — trùng sẽ lọc nhầm thành "không có gì".
+  const act = String(body.actionFilter || '').trim();
+  if (act) q = q.eq('action', act);
+  const { data, error } = await q;
+  if (error) return fail(res, 500, error.message);
+  res.status(200).json({
+    retentionDays: AUDIT_RETENTION_DAYS,
+    logs: (data || []).map((l: any) => ({
+      id: l.id, createdAt: l.created_at, adminUsername: l.admin_username, action: l.action,
+      targetType: l.target_type, targetId: l.target_id, summary: l.summary, detail: l.detail,
+    })),
+  });
 }
 
 // ─── Điểm vào ────────────────────────────────────────────────────────────────────────────────────
@@ -311,20 +442,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Token cũ hơn phiên bản hiện tại (đã đăng xuất / đổi mật khẩu) → thu hồi.
   if (token.ver !== (admin.token_version ?? 0)) return fail(res, 401, 'Phiên đăng nhập đã bị thu hồi. Vui lòng đăng nhập lại.');
 
+  // Ngữ cảnh ghi nhật ký: ai (tài khoản trong DB — không tin tên trong token) + băm IP
+  const ctx: AuditCtx = { adminId: admin.id, username: admin.username, ipHash: hashIp(getClientIp(req), jwtSecret) };
+  const isOwner = admin.is_owner === true;
+
   switch (action) {
-    case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name } });
+    case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name, isOwner } });
     case 'companies.list': return actionCompaniesList(db, res);
-    case 'companies.create': return actionCompaniesCreate(db, res, body);
-    case 'companies.update': return actionCompaniesUpdate(db, res, body);
+    case 'companies.create': return actionCompaniesCreate(db, res, body, ctx);
+    case 'companies.update': return actionCompaniesUpdate(db, res, body, ctx);
     case 'plans.list': return actionPlansList(db, res);
-    case 'plans.save': return actionPlansSave(db, res, body);
+    case 'plans.save': return actionPlansSave(db, res, body, ctx);
     case 'orders.list': return actionOrdersList(db, res, body);
-    case 'orders.confirm': return actionOrdersConfirm(db, res, body, admin.id);
-    case 'orders.cancel': return actionOrdersCancel(db, res, body);
+    case 'orders.confirm': return actionOrdersConfirm(db, res, body, admin.id, ctx);
+    case 'orders.cancel': return actionOrdersCancel(db, res, body, ctx);
     case 'settings.get': return actionSettingsGet(db, res);
-    case 'settings.save': return actionSettingsSave(db, res, body);
-    case 'password.change': return actionPasswordChange(db, res, body, admin, jwtSecret);
-    case 'logout': return actionLogout(db, res, admin);
+    case 'settings.save': return actionSettingsSave(db, res, body, ctx);
+    case 'password.change': return actionPasswordChange(db, res, body, admin, jwtSecret, ctx);
+    case 'logout': return actionLogout(db, res, admin, ctx);
+    // Quản lý tài khoản quản trị: chỉ CHỦ nền tảng (is_owner). Nhật ký: mọi quản trị viên xem được, không ai sửa/xóa được.
+    case 'accounts.list': return isOwner ? actionAccountsList(db, res) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
+    case 'accounts.create': return isOwner ? actionAccountsCreate(db, res, body, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
+    case 'accounts.update': return isOwner ? actionAccountsUpdate(db, res, body, admin, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
+    case 'accounts.resetPassword': return isOwner ? actionAccountsReset(db, res, body, admin, ctx) : fail(res, 403, 'Chỉ chủ nền tảng mới quản lý được tài khoản quản trị.');
+    case 'logs.list': return actionLogsList(db, res, body);
     default: return fail(res, 400, 'Thao tác không hợp lệ.');
   }
 }

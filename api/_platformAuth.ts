@@ -45,3 +45,13 @@ export function bearerToken(authorization: string | undefined): string {
   const h = authorization || '';
   return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
 }
+
+// ─── Quy tắc tài khoản quản trị (dùng chung cho đổi mật khẩu / tạo tài khoản) ─────────────────────
+// Trả về thông báo lỗi tiếng Việt, hoặc null nếu hợp lệ.
+export function passwordProblem(pw: string): string | null {
+  if (pw.length < 10 || pw.length > 72 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+    return 'Mật khẩu từ 10 đến 72 ký tự, có cả chữ và số.';
+  }
+  return null;
+}
+export const ADMIN_USERNAME_RE = /^[a-z0-9._-]{3,40}$/;

@@ -34,9 +34,9 @@ let matKhauHash: string;
 beforeEach(async () => {
   db.tables = {}; db.fail = {}; db.log = []; db.rpcs = {};
   db.unique = { companies: ['slug'], subscription_orders: ['code'], platform_admins: ['username'] };
-  db.autoId = new Set(['platform_login_attempts', 'subscription_orders']);
+  db.autoId = new Set(['platform_login_attempts', 'subscription_orders', 'platform_audit_logs', 'platform_admins']);
   matKhauHash ||= await bcrypt.hash('MatKhauTot123', 4);
-  db.seed('platform_admins', [{ id: ADMIN_ID, username: 'chu', password_hash: matKhauHash, name: 'Chủ nền tảng', active: true }]);
+  db.seed('platform_admins', [{ id: ADMIN_ID, username: 'chu', password_hash: matKhauHash, name: 'Chủ nền tảng', active: true, is_owner: true }]);
   db.seed('plans', [
     { id: 'co-ban', name: 'Cơ bản', description: '', price_monthly: 300000, price_yearly: 3000000, max_employees: 10, active: true, sort_order: 1 },
   ]);
@@ -315,5 +315,94 @@ describe('cấu hình & mật khẩu', () => {
     expect(r.code).toBe(200);
     expect((await call({ action: 'me' }, { token: old })).code).toBe(401);
     expect((await call({ action: 'me' }, { token: r.body.token })).code).toBe(200);
+  });
+});
+
+describe('tài khoản quản trị & nhật ký', () => {
+  const mk = 'MatKhauBanDau1';
+  const tao = (u = 'nv1') => call({ action: 'accounts.create', username: u, name: 'Nhân viên', password: mk }, { token: tok() });
+
+  it('chủ tạo được tài khoản: băm mật khẩu, không phải chủ, trùng tên → 409, mật khẩu yếu/tên sai → 400', async () => {
+    const r = await tao();
+    expect(r.code).toBe(201);
+    const row = db.table('platform_admins').find(a => a.username === 'nv1')!;
+    expect(row.is_owner).toBeFalsy();
+    expect(await bcrypt.compare(mk, row.password_hash)).toBe(true);
+    expect((await tao()).code).toBe(409);
+    expect((await call({ action: 'accounts.create', username: 'x y', password: mk }, { token: tok() })).code).toBe(400);
+    expect((await call({ action: 'accounts.create', username: 'nv2', password: 'ngan' }, { token: tok() })).code).toBe(400);
+    // Tài khoản mới đăng nhập được
+    expect((await call({ action: 'login', username: 'nv1', password: mk })).code).toBe(200);
+  });
+
+  it('quản trị viên không phải chủ bị từ chối mọi action accounts.* (403) nhưng xem được nhật ký', async () => {
+    await tao();
+    const nv = db.table('platform_admins').find(a => a.username === 'nv1')!;
+    const t = signPlatformToken({ id: nv.id, username: 'nv1', ver: 0 }, SECRET);
+    for (const a of ['accounts.list', 'accounts.create', 'accounts.update', 'accounts.resetPassword']) {
+      expect((await call({ action: a, id: ADMIN_ID, username: 'nv9', password: mk }, { token: t })).code).toBe(403);
+    }
+    expect((await call({ action: 'logs.list' }, { token: t })).code).toBe(200);
+  });
+
+  it('khóa tài khoản: phiên đang mở bị thu hồi + không đăng nhập được; không tự khóa mình; không đụng chủ', async () => {
+    await tao();
+    const nvTok = (await call({ action: 'login', username: 'nv1', password: mk })).body.token;
+    const nv = db.table('platform_admins').find(a => a.username === 'nv1')!;
+    expect((await call({ action: 'accounts.update', id: nv.id, active: false }, { token: tok() })).code).toBe(200);
+    expect((await call({ action: 'me' }, { token: nvTok })).code).toBe(401);
+    expect((await call({ action: 'login', username: 'nv1', password: mk })).code).toBe(401);
+    expect((await call({ action: 'accounts.update', id: ADMIN_ID, active: false }, { token: tok() })).code).toBe(400);
+    expect((await call({ action: 'accounts.update', id: nv.id, active: true }, { token: tok() })).code).toBe(200);
+    expect((await call({ action: 'login', username: 'nv1', password: mk })).code).toBe(200);
+  });
+
+  it('đặt lại mật khẩu: mật khẩu cũ hết tác dụng, phiên cũ bị thu hồi', async () => {
+    await tao();
+    const nvTok = (await call({ action: 'login', username: 'nv1', password: mk })).body.token;
+    const nv = db.table('platform_admins').find(a => a.username === 'nv1')!;
+    expect((await call({ action: 'accounts.resetPassword', id: nv.id, newPassword: 'MatKhauMoi99999' }, { token: tok() })).code).toBe(200);
+    expect((await call({ action: 'me' }, { token: nvTok })).code).toBe(401);
+    expect((await call({ action: 'login', username: 'nv1', password: mk })).code).toBe(401);
+    expect((await call({ action: 'login', username: 'nv1', password: 'MatKhauMoi99999' })).code).toBe(200);
+    expect((await call({ action: 'accounts.resetPassword', id: ADMIN_ID, newPassword: 'MatKhauMoi99999' }, { token: tok() })).code).toBe(400);   // chủ tự đổi ở password.change
+  });
+
+  it('nhật ký ghi thao tác kèm trước/sau, KHÔNG chứa mật khẩu/hash; xem được qua logs.list', async () => {
+    db.seed('companies', [{ id: 'c1', slug: 'a', name: 'Công ty A', active: true, plan_id: null, expires_at: null, is_trial: false }]);
+    await tao();
+    await call({ action: 'companies.update', id: 'c1', active: false }, { token: tok() });
+    // Đổi mật khẩu thu hồi token cũ → từ đây dùng token MỚI trả về
+    const moiTok = (await call({ action: 'password.change', currentPassword: 'MatKhauTot123', newPassword: 'MatKhauMoi99999' }, { token: tok() })).body.token;
+    const logs = db.table('platform_audit_logs');
+    const kh = logs.find(l => l.action === 'companies.update')!;
+    expect(kh.admin_username).toBe('chu');
+    expect(kh.detail).toEqual({ active: { from: true, to: false } });
+    expect(kh.summary).toMatch(/Khóa doanh nghiệp/);
+    expect(logs.some(l => l.action === 'accounts.create')).toBe(true);
+    expect(JSON.stringify(logs)).not.toMatch(/MatKhauBanDau1|MatKhauMoi99999|MatKhauTot123|\$2[aby]\$/);
+    const list = await call({ action: 'logs.list' }, { token: moiTok });
+    expect(list.body.retentionDays).toBe(30);
+    expect(list.body.logs.length).toBe(logs.length);
+    // Lọc theo người / theo thao tác
+    expect((await call({ action: 'logs.list', adminUsername: 'khong-co' }, { token: moiTok })).body.logs).toEqual([]);
+    const loc = (await call({ action: 'logs.list', actionFilter: 'companies.update' }, { token: moiTok })).body.logs;
+    expect(loc.length).toBe(1);
+  });
+
+  it('chỉ giữ 30 ngày: bản ghi cũ hơn bị xóa khi mở nhật ký', async () => {
+    const cu = new Date(Date.now() - 31 * 86400000).toISOString(), moi = new Date(Date.now() - 29 * 86400000).toISOString();
+    db.seed('platform_audit_logs', [
+      { id: 'a', created_at: cu, admin_username: 'chu', action: 'x', summary: 'cũ' },
+      { id: 'b', created_at: moi, admin_username: 'chu', action: 'x', summary: 'mới' },
+    ]);
+    const r = await call({ action: 'logs.list' }, { token: tok() });
+    expect(r.body.logs.map((l: any) => l.summary)).toEqual(['mới']);
+    expect(db.table('platform_audit_logs').map(l => l.id)).toEqual(['b']);
+  });
+
+  it('thao tác thành công cả khi ghi nhật ký lỗi (không làm hỏng thao tác chính)', async () => {
+    db.fail['platform_audit_logs.insert'] = 'boom';
+    expect((await tao()).code).toBe(201);
   });
 });

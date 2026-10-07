@@ -42,8 +42,8 @@ beforeEach(async () => {
   sessionStorage.clear();
   db.tables = {}; db.fail = {}; db.log = []; db.rpcs = {}; db.missingColumns = {};
   db.unique = { companies: ['slug'], subscription_orders: ['code'], platform_admins: ['username'] };
-  db.autoId = new Set(['platform_login_attempts', 'subscription_orders']);
-  db.seed('platform_admins', [{ id: 'ad-1', username: 'chu', password_hash: await bcrypt.hash('MatKhauTot123', 4), name: 'Chủ nền tảng', active: true }]);
+  db.autoId = new Set(['platform_login_attempts', 'subscription_orders', 'platform_audit_logs', 'platform_admins']);
+  db.seed('platform_admins', [{ id: 'ad-1', username: 'chu', password_hash: await bcrypt.hash('MatKhauTot123', 4), name: 'Chủ nền tảng', active: true, is_owner: true }]);
   db.seed('plans', [
     { id: 'co-ban', name: 'Cơ bản', description: 'Nhỏ', price_monthly: 300000, price_yearly: 3000000, max_employees: 10, active: true, sort_order: 1 },
     { id: 'pro', name: 'Chuyên nghiệp', description: '', price_monthly: 0, price_yearly: 0, max_employees: null, active: false, sort_order: 2 },
@@ -244,7 +244,7 @@ describe('tab Đơn đăng ký', () => {
 });
 
 describe('tab Cấu hình', () => {
-  it('lưu số ngày dùng thử + tài khoản ngân hàng; đổi mật khẩu', async () => {
+  it('lưu số ngày dùng thử + tài khoản ngân hàng', async () => {
     const u = await dangNhap();
     await u.click(screen.getByRole('button', { name: /Cấu hình/ }));
     const form = await waitFor(() => { const f = document.getElementById('settings_form'); if (!f) throw new Error('chưa có'); return f; });
@@ -255,11 +255,49 @@ describe('tab Cấu hình', () => {
     expect(db.table('platform_settings').find(r => r.key === 'trial')!.value).toEqual({ days: 14, maxEmployees: null });
     expect(db.table('platform_settings').find(r => r.key === 'bank')!.value.bankName).toBe('Vietcombank');
 
-    const pwForm = document.getElementById('password_form')!;
+  });
+});
+
+describe('tab Tài khoản & Nhật ký', () => {
+  it('đổi mật khẩu của tôi, rồi chủ nền tảng tạo + khóa tài khoản mới', async () => {
+    const u = await dangNhap();
+    await u.click(screen.getByRole('button', { name: /Tài khoản/ }));
+    const pwForm = await waitFor(() => { const f = document.getElementById('password_form'); if (!f) throw new Error('chưa có'); return f; });
     const o = within(pwForm).getAllByLabelText(/mật khẩu/i);
     await u.type(o[0], 'MatKhauTot123'); await u.type(o[1], 'MatKhauMoi99999'); await u.type(o[2], 'MatKhauMoi99999');
     await u.click(within(pwForm).getByRole('button', { name: /Đổi mật khẩu/ }));
     expect(await within(pwForm).findByRole('status')).toHaveTextContent('Đã đổi mật khẩu');
     expect(await bcrypt.compare('MatKhauMoi99999', db.table('platform_admins')[0].password_hash)).toBe(true);
+
+    const form = document.getElementById('account_create_form')!;
+    await u.type(within(form).getByLabelText(/Tên đăng nhập/), 'nhanvien1');
+    await u.type(within(form).getByLabelText(/Mật khẩu ban đầu/), 'MatKhauBanDau1');
+    await u.click(within(form).getByRole('button', { name: /Tạo tài khoản/ }));
+    expect(await screen.findByText(/Đã tạo tài khoản "nhanvien1"/)).toBeTruthy();
+    const moi = db.table('platform_admins').find(a => a.username === 'nhanvien1')!;
+    expect(moi.is_owner).toBeFalsy();
+    expect(moi.password_hash).not.toContain('MatKhauBanDau1');
+
+    await u.click(await screen.findByRole('button', { name: /^Khóa$/ }));
+    await waitFor(() => expect(db.table('platform_admins').find(a => a.username === 'nhanvien1')!.active).toBe(false));
+  });
+
+  it('quản trị viên KHÔNG phải chủ chỉ thấy form đổi mật khẩu, không thấy phần quản lý tài khoản', async () => {
+    db.table('platform_admins')[0].is_owner = false;
+    const u = await dangNhap();
+    await u.click(screen.getByRole('button', { name: /Tài khoản/ }));
+    await waitFor(() => expect(document.getElementById('password_form')).toBeTruthy());
+    expect(document.getElementById('account_create_form')).toBeNull();
+  });
+
+  it('nhật ký hiện thao tác vừa làm (khóa công ty) và không chứa mật khẩu', async () => {
+    const u = await dangNhap();
+    await u.click(screen.getByRole('button', { name: /Doanh nghiệp/ }));
+    const khoa = await screen.findAllByRole('button', { name: /Khóa/ });
+    await u.click(khoa[0]);
+    await waitFor(() => expect(db.table('platform_audit_logs').some(l => l.action === 'companies.update')).toBe(true));
+    await u.click(screen.getByRole('button', { name: /Nhật ký/ }));
+    expect(await screen.findByText(/Khóa doanh nghiệp/)).toBeTruthy();
+    expect(JSON.stringify(db.table('platform_audit_logs'))).not.toMatch(/MatKhauTot123|\$2[aby]\$/);
   });
 });

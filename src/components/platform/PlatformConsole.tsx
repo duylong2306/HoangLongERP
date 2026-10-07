@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Package, ReceiptText, Settings, LogOut, Loader2 } from 'lucide-react';
+import { Building2, Package, ReceiptText, Settings, Users, ScrollText, LogOut, Loader2 } from 'lucide-react';
 import PlatformLogin from './PlatformLogin';
 import CompaniesTab from './CompaniesTab';
 import PlansTab from './PlansTab';
 import OrdersTab from './OrdersTab';
 import SettingsTab from './SettingsTab';
+import AccountsTab from './AccountsTab';
+import LogsTab from './LogsTab';
 import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT } from './platformApi';
 
 // TRANG QUẢN TRỊ NỀN TẢNG (lolo.io.vn/quantri) — tách hẳn khỏi ERP của các doanh nghiệp.
@@ -12,23 +14,26 @@ import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT } 
 // Quyền thật nằm ở máy chủ (api/platform.ts kiểm tra token + tài khoản mỗi lần); giao diện này chỉ là vỏ.
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
 
-type TabKey = 'companies' | 'orders' | 'plans' | 'settings';
+type TabKey = 'companies' | 'orders' | 'plans' | 'settings' | 'accounts' | 'logs';
+interface Admin { id: string; username: string; name: string; isOwner: boolean }
 const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'companies', label: 'Doanh nghiệp', icon: Building2 },
   { key: 'orders', label: 'Đơn đăng ký', icon: ReceiptText },
   { key: 'plans', label: 'Gói dịch vụ', icon: Package },
   { key: 'settings', label: 'Cấu hình', icon: Settings },
+  { key: 'accounts', label: 'Tài khoản', icon: Users },
+  { key: 'logs', label: 'Nhật ký', icon: ScrollText },
 ];
 
 export default function PlatformConsole() {
-  const [admin, setAdmin] = useState<{ username: string; name: string } | null>(null);
+  const [admin, setAdmin] = useState<Admin | null>(null);
   const [checking, setChecking] = useState(!!getPlatformToken());   // có token cũ → hỏi máy chủ còn hiệu lực không
   const [tab, setTab] = useState<TabKey>('companies');
 
   // Khôi phục phiên: token còn trong sessionStorage thì xác nhận lại với máy chủ (token có thể đã hết hạn/bị khóa).
   useEffect(() => {
     if (!getPlatformToken()) return;
-    platformCall<{ admin: { username: string; name: string } }>('me')
+    platformCall<{ admin: Admin }>('me')
       .then(r => setAdmin(r.admin))
       .catch(() => setPlatformToken(null))
       .finally(() => setChecking(false));
@@ -85,6 +90,8 @@ export default function PlatformConsole() {
         {tab === 'orders' && <OrdersTab />}
         {tab === 'plans' && <PlansTab />}
         {tab === 'settings' && <SettingsTab />}
+        {tab === 'accounts' && <AccountsTab myId={admin.id} isOwner={admin.isOwner} />}
+        {tab === 'logs' && <LogsTab />}
       </main>
     </div>
   );

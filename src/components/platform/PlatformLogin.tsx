@@ -4,7 +4,7 @@ import { platformCall, setPlatformToken } from './platformApi';
 
 // ĐĂNG NHẬP TRANG QUẢN TRỊ NỀN TẢNG — tài khoản riêng (không phải nhân viên của doanh nghiệp nào).
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
-export default function PlatformLogin({ onLoggedIn }: { onLoggedIn: (admin: { username: string; name: string }) => void }) {
+export default function PlatformLogin({ onLoggedIn }: { onLoggedIn: (admin: { id: string; username: string; name: string; isOwner: boolean }) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,7 +15,7 @@ export default function PlatformLogin({ onLoggedIn }: { onLoggedIn: (admin: { us
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      const r = await platformCall<{ token: string; admin: { username: string; name: string } }>('login', { username, password });
+      const r = await platformCall<{ token: string; admin: { id: string; username: string; name: string; isOwner: boolean } }>('login', { username, password });
       setPlatformToken(r.token);
       onLoggedIn(r.admin);
     } catch (err: any) {

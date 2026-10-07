@@ -14,7 +14,7 @@
 begin;
 
 -- 1) Tài khoản quản trị nền tảng ------------------------------------------------------------------
--- Tài khoản ĐẦU TIÊN tạo bằng scripts/create-platform-admin.mjs (nhập mật khẩu tại máy, in ra câu INSERT đã băm).
+-- Tài khoản đầu tiên tạo bằng SQL (băm bcrypt); các tài khoản sau tạo ngay trên trang quản trị (tab "Tài khoản", xem migration 20261014).
 create table if not exists public.platform_admins (
   id            uuid primary key default gen_random_uuid(),
   username      text not null unique,

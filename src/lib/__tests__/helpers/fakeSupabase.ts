@@ -42,6 +42,7 @@ class Query {
   eq(c: string, v: any) { this.filters.push(r => r[c] === v); return this; }
   neq(c: string, v: any) { this.filters.push(r => r[c] !== v); return this; }
   gte(c: string, v: any) { this.filters.push(r => r[c] >= v); return this; }
+  lt(c: string, v: any) { this.filters.push(r => r[c] < v); return this; }
   ilike(c: string, v: string) { const x = String(v).toLowerCase(); this.filters.push(r => String(r[c] ?? '').toLowerCase() === x); return this; }   // (chỉ so sánh bằng, không có ký tự đại diện %)
   in(c: string, vs: any[]) { this.filters.push(r => vs.includes(r[c])); return this; }
   order(c: string, o?: { ascending?: boolean }) { this.ord.push({ col: c, asc: o?.ascending !== false }); return this; }

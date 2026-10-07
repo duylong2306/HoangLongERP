@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { platformCall, setPlatformToken } from './platformApi';
+import { platformCall } from './platformApi';
 
-// TAB "CẤU HÌNH" — số ngày dùng thử, tài khoản ngân hàng nhận tiền (hiện cho khách khi đặt mua) và đổi mật khẩu quản trị.
+// TAB "CẤU HÌNH" — số ngày dùng thử, tài khoản ngân hàng nhận tiền (hiện cho khách khi đặt mua) (đổi mật khẩu nằm ở tab "Tài khoản").
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
 const btn = 'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-colors bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff]';
 const input = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
@@ -23,10 +23,6 @@ export default function SettingsTab() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const [pw, setPw] = useState({ currentPassword: '', newPassword: '', confirm: '' });
-  const [pwBusy, setPwBusy] = useState(false);
-  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
   useEffect(() => {
     platformCall<{ trial: { days: number; maxEmployees: number | null }; bank: typeof bank }>('settings.get')
       .then(r => { setTrialDays(String(r.trial.days)); setTrialMax(r.trial.maxEmployees === null ? '' : String(r.trial.maxEmployees)); setBank(r.bank); setLoaded(true); })
@@ -43,25 +39,11 @@ export default function SettingsTab() {
     } catch (err: any) { setMsg({ ok: false, text: err.message }); } finally { setBusy(false); }
   };
 
-  const changePw = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pwBusy) return;
-    if (pw.newPassword !== pw.confirm) { setPwMsg({ ok: false, text: 'Hai lần nhập mật khẩu mới không khớp.' }); return; }
-    setPwBusy(true); setPwMsg(null);
-    try {
-      const r = await platformCall<{ token?: string }>('password.change', { currentPassword: pw.currentPassword, newPassword: pw.newPassword });
-      // Đổi mật khẩu đã thu hồi mọi token cũ → lưu token mới máy chủ trả về để phiên này không bị đá ra.
-      if (r?.token) setPlatformToken(r.token);
-      setPw({ currentPassword: '', newPassword: '', confirm: '' });
-      setPwMsg({ ok: true, text: 'Đã đổi mật khẩu.' });
-    } catch (err: any) { setPwMsg({ ok: false, text: err.message }); } finally { setPwBusy(false); }
-  };
-
   if (loadError) return <Msg ok={false} text={loadError} />;
   if (!loaded) return <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2 items-start">
+    <div className="max-w-3xl">
       <form onSubmit={save} className="bg-white border border-slate-200 rounded-xl p-5 space-y-4" id="settings_form">
         <h2 className="text-base font-black text-slate-900">Dùng thử & nhận thanh toán</h2>
 
@@ -88,14 +70,6 @@ export default function SettingsTab() {
         <button type="submit" disabled={busy} className={btn}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Lưu cấu hình</button>
       </form>
 
-      <form onSubmit={changePw} className="bg-white border border-slate-200 rounded-xl p-5 space-y-4" id="password_form">
-        <h2 className="text-base font-black text-slate-900">Đổi mật khẩu quản trị</h2>
-        <div><label className={label} htmlFor="st_mat_khau_hien_tai">Mật khẩu hiện tại</label><input id="st_mat_khau_hien_tai" type="password" className={input} value={pw.currentPassword} onChange={e => setPw(p => ({ ...p, currentPassword: e.target.value }))} autoComplete="current-password" required /></div>
-        <div><label className={label} htmlFor="st_mat_khau_moi">Mật khẩu mới</label><input id="st_mat_khau_moi" type="password" className={input} value={pw.newPassword} onChange={e => setPw(p => ({ ...p, newPassword: e.target.value }))} autoComplete="new-password" required /><p className="text-xs text-slate-500 mt-1">Từ 10 đến 72 ký tự, có cả chữ và số.</p></div>
-        <div><label className={label} htmlFor="st_nhap_lai_mat_khau_moi">Nhập lại mật khẩu mới</label><input id="st_nhap_lai_mat_khau_moi" type="password" className={input} value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} autoComplete="new-password" required /></div>
-        {pwMsg && <Msg {...pwMsg} />}
-        <button type="submit" disabled={pwBusy} className={btn}>{pwBusy && <Loader2 className="w-4 h-4 animate-spin" />} Đổi mật khẩu</button>
-      </form>
     </div>
   );
 }
