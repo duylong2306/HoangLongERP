@@ -9,10 +9,10 @@ import { clearStoredSession } from '../../lib/supabase';
 //  • Không giới hạn (doanh nghiệp cũ) → không hiện gì.
 // Lỗi tải/chưa đăng nhập → ẩn im lặng (không làm phiền người dùng ERP). Làm mới mỗi 10 phút.
 //
-// CHẶN NGAY khi doanh nghiệp bị KHÓA hoặc HẾT HẠN lúc đang dùng: dữ liệu ở máy chủ đã bị chặn (RLS company_live), nhưng giao
-// diện ERP còn dữ liệu trong bộ nhớ/bộ đệm nên trông vẫn dùng bình thường — vì vậy cứ ~60 giây (và khi quay lại tab) hỏi máy
-// chủ 1 lần (action 'check'); bị chặn thì phủ kín màn hình bằng thông báo, không cho thao tác tiếp.
-const CHECK_EVERY_MS = 60 * 1000;
+// CHẶN khi doanh nghiệp bị KHÓA hoặc HẾT HẠN: hỏi máy chủ 1 LẦN mỗi khi ERP được mở/tải lại (action 'check'); bị chặn thì phủ kín
+// màn hình bằng thông báo, không cho thao tác tiếp. KHÔNG hỏi định kỳ — khóa là việc hiếm, hỏi liên tục chỉ tốn lượt gọi hàm
+// máy chủ. Người đang mở sẵn ERP lúc bị khóa vẫn không đọc/ghi được dữ liệu mới (RLS company_live chặn ngay ở cơ sở dữ liệu);
+// thông báo sẽ hiện ở lần tải lại trang kế tiếp.
 const dateVi = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('vi-VN') : '');
 
 export default function SubscriptionBanner() {
@@ -29,16 +29,9 @@ export default function SubscriptionBanner() {
     return () => clearInterval(t);
   }, [load]);
 
-  // Hỏi máy chủ định kỳ + khi người dùng quay lại tab. Lỗi mạng/phiên → bỏ qua (không chặn nhầm).
+  // Kiểm tra khóa/hết hạn đúng 1 lần khi mở/tải lại ERP. Lỗi mạng/phiên → bỏ qua (không chặn nhầm).
   useEffect(() => {
-    const check = () => {
-      subscriptionCall<SubscriptionCheck>('check').then(r => setBlocked(r.blocked ? r.reason : null)).catch(() => { /* bỏ qua */ });
-    };
-    check();
-    const t = setInterval(check, CHECK_EVERY_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
+    subscriptionCall<SubscriptionCheck>('check').then(r => setBlocked(r.blocked ? r.reason : null)).catch(() => { /* bỏ qua */ });
   }, []);
 
   if (blocked) {
