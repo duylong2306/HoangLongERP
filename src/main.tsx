@@ -11,8 +11,22 @@ import './index.css';
 // Chỉ nạp trang này (tải trễ) — KHÔNG khởi động ứng dụng ERP/Supabase/Service Worker ở địa chỉ gốc.
 // Mọi địa chỉ khác (subdomain doanh nghiệp, vercel.app, localhost...) chạy ứng dụng như cũ.
 const LandingPage = lazy(() => import('./components/landing/LandingPage'));
+// Trang QUẢN TRỊ NỀN TẢNG (đường dẫn /quantri): tách hẳn khỏi ERP, tài khoản riêng. Chỉ mở ở địa chỉ gốc hoặc địa chỉ
+// "other" (vercel.app/localhost, để thử); TUYỆT ĐỐI không mở ở subdomain doanh nghiệp (ở đó /quantri vẫn là ERP).
+const PlatformConsole = lazy(() => import('./components/platform/PlatformConsole'));
 
-if (getHostInfo().kind === 'root') {
+const hostKind = getHostInfo().kind;
+const laTrangQuanTri = hostKind !== 'tenant' && /^\/quantri(\/|$)/.test(window.location.pathname);
+
+if (laTrangQuanTri) {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <Suspense fallback={null}>
+        <PlatformConsole />
+      </Suspense>
+    </StrictMode>,
+  );
+} else if (hostKind === 'root') {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <Suspense fallback={null}>
