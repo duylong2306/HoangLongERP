@@ -21,7 +21,7 @@ export const RESERVED_SUBDOMAINS: readonly string[] = [
 ];
 
 // Mã công ty hợp lệ: chữ thường/số/gạch ngang, 2–40 ký tự, không bắt đầu/kết thúc bằng gạch ngang
-// (khớp kiểm tra ở api/admin-companies.ts + chuẩn nhãn DNS).
+// (khớp kiểm tra ở api/platform.ts + chuẩn nhãn DNS).
 export const SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])$/;
 
 export type HostInfo =

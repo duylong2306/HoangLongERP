@@ -54,8 +54,8 @@ export function getCurrentCompanyId(): string | null {
 
 /**
  * JWT thô của phiên đang đăng nhập — dùng khi cần tự gọi 1 API server riêng
- * (không qua supabase-js client), ví dụ api/admin-companies.ts (Giai đoạn 7)
- * cần Authorization: Bearer <token> để server tự xác minh quyền quản trị.
+ * (không qua supabase-js client), ví dụ api/subscription.ts (xem gói/hạn dùng, đặt mua gia hạn)
+ * cần Authorization: Bearer <token> để server tự xác minh công ty và quyền admin doanh nghiệp.
  */
 export function getCurrentAccessToken(): string | null {
   return currentConfig.accessToken || readStoredAccessToken();

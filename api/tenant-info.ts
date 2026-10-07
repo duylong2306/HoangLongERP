@@ -5,7 +5,7 @@
 // doanh nghiệp đó CÓ TỒN TẠI/đang hoạt động không, tên hiển thị là gì — từ đó hiện "Đăng nhập — <tên>"
 // hoặc "Doanh nghiệp không tồn tại" thay vì để người dùng nhập mã công ty.
 //
-// Bảng `companies` bị khoá với anon (chỉ service_role đọc được — xem api/admin-companies.ts) nên phải đi qua
+// Bảng `companies` bị khoá với anon (chỉ service_role đọc được — xem api/platform.ts) nên phải đi qua
 // server. CHỈ trả đúng những gì cần cho trang đăng nhập: kind, slug, exists, name. KHÔNG trả id công ty,
 // ngày tạo hay bất kỳ thông tin nội bộ nào.
 //
