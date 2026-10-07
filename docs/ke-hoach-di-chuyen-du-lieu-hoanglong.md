@@ -109,3 +109,14 @@ Lệnh: `node scripts/migrate-production-to-company.mjs --slug hoanglong` (chạ
 | Viết script + test tự động | khoảng 1 ngày làm việc |
 | Kiểm kê + diễn tập + sửa lỗi phát sinh | 0,5–1 ngày (phụ thuộc số lỗi dữ liệu mồ côi) |
 | Cửa sổ chuyển chính thức | khoảng 1–3 giờ (đóng băng ghi ngắn hơn: chỉ trong lúc xuất + nạp) |
+
+## 9. Đường lui: đưa dữ liệu từ LoLo QUAY VỀ production cũ
+
+Script: `scripts/rollback-company-to-production.mjs` (lõi: `scripts/lib/rollback-core.mjs`). Dùng khi sau khi chuyển sang nền tảng mới có sự cố nghiêm trọng mà phải quay về hệ thống cũ, **mà không muốn mất dữ liệu nhân viên đã nhập trong thời gian dùng LoLo**.
+
+- **Đồng bộ có so sánh, không xóa trắng production:** dòng mới ở LoLo → thêm vào production; dòng đã sửa → cập nhật; dòng đã xóa → xóa; dòng giống nhau → không đụng. Bỏ cột `company_id`, đổi `id` của 5 bảng cấu hình về lại `current`/`global`/`task_permission_matrix_v1`, viết lại địa chỉ ảnh về production (bỏ thư mục `<company_id>/`), chép ảnh mới tạo ở LoLo về Storage production.
+- **Chạy thử (mặc định, an toàn mọi lúc):** `node scripts/rollback-company-to-production.mjs --slug hoanglong` — chỉ liệt kê "từ lúc chuyển đến nay LoLo khác production những gì" (số dòng mới/sửa/xóa theo từng bảng, số ảnh cần chép). Có thể chạy hằng ngày để theo dõi tuần thử nghiệm.
+- **Ghi thật:** thêm `--ghi --xac-nhan-production`, rồi gõ đúng câu `KHOI-PHUC production`. Script **lưu bản sao lưu production** vào `migration-snapshot/rollback-…` trước khi ghi, rồi tự kiểm chứng từng bảng.
+- **Chốt chặn:** đích có bảng `companies`/`platform_admins` (là LoLo chứ không phải production cũ) → dừng; LoLo có cột mà production chưa có (sẽ mất dữ liệu cột đó) → dừng; dòng vướng khóa ngoại → dừng và ghi rõ, không bỏ âm thầm; chỉ đọc đúng `company_id` của doanh nghiệp nguồn, không bao giờ đọc công ty khác.
+- **Trước khi ghi thật:** đóng băng ghi production (không ai nhập thêm) và báo nhân viên chuyển về địa chỉ cũ. Thông báo đẩy của production giữ nguyên (chỉ xóa đăng ký mồ côi của nhân viên đã bị xóa).
+- **Kết quả chạy thử ngày 8/10/2026 trên dữ liệu thật:** LoLo và production chỉ khác **1 dòng** (`business_profile.updated_at`, do ứng dụng tự lưu lại hồ sơ khi đăng nhập) và 2 tệp avatar cũ chỉ có ở LoLo.
