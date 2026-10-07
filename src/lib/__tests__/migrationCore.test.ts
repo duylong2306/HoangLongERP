@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { FakeDb } from './helpers/fakeSupabase';
 // @ts-ignore — tệp .mjs ở thư mục scripts (không có kiểu)
-import { migrate, parseOpenApi, topoOrder, splitBatches, canonical, diffRowSets, makeUrlRewriter, countHostLeft, readAll, parseFkMigrations, SINGLETON_ID_TABLES } from '../../../scripts/lib/migration-core.mjs';
+import { migrate, parseOpenApi, topoOrder, splitBatches, canonical, diffRowSets, makeUrlRewriter, countHostLeft, readAll, parseFkMigrations, SINGLETON_ID_TABLES, withRetry, isTransient } from '../../../scripts/lib/migration-core.mjs';
 
 // ─── Hàm thuần ───────────────────────────────────────────────────────────────────────────────────
 describe('parseOpenApi', () => {
@@ -359,5 +359,30 @@ describe('migrate — luồng đầy đủ', () => {
     const r = await migrate(ctx);
     expect(r.thu_tu_nap.indexOf('employees')).toBeLessThan(r.thu_tu_nap.indexOf('projects'));
     expect(r.thu_tu_nap.indexOf('projects')).toBeLessThan(r.thu_tu_nap.indexOf('tasks'));
+  });
+
+  it('withRetry: lỗi mạng thoáng qua thì thử lại và thành công; lỗi khác thì ném ngay; quá số lần thì bỏ cuộc', async () => {
+    const sleep = async () => {};
+    let n = 0;
+    expect(await withRetry(async () => { if (++n < 3) throw new Error('terminated'); return 'xong'; }, { sleep })).toBe('xong');
+    expect(n).toBe(3);
+    let m = 0;
+    await expect(withRetry(async () => { m++; throw new Error('permission denied'); }, { sleep })).rejects.toThrow('permission denied');
+    expect(m).toBe(1);                                                    // lỗi không phải mạng → không thử lại
+    let k = 0;
+    await expect(withRetry(async () => { k++; throw new Error('fetch failed'); }, { sleep, tries: 4 })).rejects.toThrow('fetch failed');
+    expect(k).toBe(4);
+    expect(['terminated', 'fetch failed', 'ECONNRESET', 'Gateway 502', 'socket hang up'].every(isTransient)).toBe(true);
+    expect(isTransient('violates foreign key')).toBe(false);
+  });
+
+  it('đọc bảng gặp lỗi mạng giữa chừng: thử lại đúng trang đó, không sót không trùng', async () => {
+    const t = '2026-01-01T00:00:00+00:00';
+    prodDb.seed('employees', Array.from({ length: 120 }, (_, i) => ({ id: `n${String(i).padStart(4, '0')}`, name: `N${i}`, password: 'h', created_at: t })));
+    const base = prodDb.client(); let calls = 0;
+    const flaky = { from: (tb: string) => { const q: any = base.from(tb); const rg = q.range.bind(q); q.range = (a: number, b: number) => (++calls === 2 || calls === 3) ? { then: (res: any) => Promise.resolve({ data: null, error: { message: 'TypeError: fetch failed' } }).then(res) } : rg(a, b); return q; } };
+    const rows = await readAll(flaky, 'employees', ['id'], (m: string) => { throw new Error(m); }, 50, async () => {});
+    expect(rows).toHaveLength(122);
+    expect(new Set(rows.map((r: any) => r.id)).size).toBe(122);
   });
 });

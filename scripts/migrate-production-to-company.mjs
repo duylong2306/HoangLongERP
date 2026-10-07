@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { createClient } from '@supabase/supabase-js';
-import { migrate, parseOpenApi, parseFkMigrations, DEFAULT_SKIP_TABLES } from './lib/migration-core.mjs';
+import { migrate, parseOpenApi, parseFkMigrations, withRetry, DEFAULT_SKIP_TABLES } from './lib/migration-core.mjs';
 
 // Đọc tham số dạng `--khoa=giatri`, `--khoa giatri` hoặc cờ `--khoa`. Cờ không có giá trị = true.
 const FLAGS_BOOL = new Set(['ghi', 'tao-cong-ty', 'xac-nhan-hoanglong']);   // cờ không nhận giá trị đứng sau
@@ -88,11 +88,13 @@ async function walk(client, bucket, prefix = '') {
   }
   return out;
 }
+// Mọi thao tác Storage tự thử lại khi mạng chập chờn (đã từng bị "terminated" giữa chừng khi tải tệp lớn)
+const retry = (fn) => withRetry(fn, { onRetry: (i, e) => console.log(`  ↻ mạng chập chờn (${String(e.message).slice(0, 60)}) — thử lại lần ${i}...`) });
 const storage = {
-  listProd: (bucket) => walk(prodStorage, bucket),
-  listLolo: async (bucket, prefix) => { try { return await walk(loloStorage, bucket, prefix.replace(/\/$/, '')); } catch (e) { if (/not found|does not exist/i.test(e.message)) return []; throw e; } },
-  download: async (bucket, p) => { const { data, error } = await prodStorage.from(bucket).download(p); if (error) throw new Error(`Tải ${bucket}/${p}: ${error.message}`); return Buffer.from(await data.arrayBuffer()); },
-  upload: async (bucket, key, buf, ct) => { const { error } = await loloStorage.from(bucket).upload(key, buf, { contentType: ct, upsert: true }); if (error) throw new Error(`Tải lên ${bucket}/${key}: ${error.message}`); },
+  listProd: (bucket) => retry(() => walk(prodStorage, bucket)),
+  listLolo: (bucket, prefix) => retry(async () => { try { return await walk(loloStorage, bucket, prefix.replace(/\/$/, '')); } catch (e) { if (/not found|does not exist/i.test(e.message)) return []; throw e; } }),
+  download: (bucket, p) => retry(async () => { const { data, error } = await prodStorage.from(bucket).download(p); if (error) throw new Error(`Tải ${bucket}/${p}: ${error.message}`); return Buffer.from(await data.arrayBuffer()); }),
+  upload: (bucket, key, buf, ct) => retry(async () => { const { error } = await loloStorage.from(bucket).upload(key, buf, { contentType: ct, upsert: true }); if (error) throw new Error(`Tải lên ${bucket}/${key}: ${error.message}`); }),
 };
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -114,7 +116,7 @@ let report;
 try {
   report = await migrate({
     prod, lolo, prodSchema, loloSchema, extraFks, storage, target: { id: co.id, slug: co.slug }, urls,
-    opts: { ghi: !!args.ghi, snapshotDir, skipTables: [...DEFAULT_SKIP_TABLES, ...String(args['bo-bang'] || '').split(',').filter(Boolean)] },
+    opts: { ghi: !!args.ghi, snapshotDir, concurrency: Number(args['song-song']) || 4, skipTables: [...DEFAULT_SKIP_TABLES, ...String(args['bo-bang'] || '').split(',').filter(Boolean)] },
     log: (m) => console.log('  ·', m),
   });
 } catch (e) {

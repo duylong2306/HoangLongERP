@@ -322,19 +322,36 @@ export async function migrate(ctx) {
   return report;
 }
 
+// Lỗi mạng thoáng qua (kết nối bị ngắt, quá giờ, cổng 5xx...) → đáng thử lại; lỗi khác (quyền, dữ liệu sai...) → báo ngay.
+export const isTransient = (msg) => /terminated|fetch failed|econn|etimedout|socket|network|timeout|timed out|und_err|502|503|504|temporar/i.test(String(msg || ''));
+
+// Chạy fn, thử lại tối đa `tries` lần với thời gian chờ tăng dần khi gặp lỗi mạng thoáng qua. Lỗi khác ném ra ngay.
+export async function withRetry(fn, { tries = 5, base = 1500, sleep = (ms) => new Promise(r => setTimeout(r, ms)), onRetry = () => {} } = {}) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i >= tries || !isTransient(e?.message)) throw e;
+      onRetry(i, e);
+      await sleep(base * i);
+    }
+  }
+}
+
 // Đọc TOÀN BỘ 1 bảng theo trang. Bảng có dòng rất nặng (ảnh base64 nhúng trong dữ liệu) dễ vượt giới hạn thời gian của máy chủ khi đọc
 // nhiều dòng một lúc → tự GIẢM cỡ trang (÷4, tối thiểu 1 dòng) khi gặp lỗi quá giờ rồi thử lại đúng vị trí đó; không bao giờ bỏ sót dòng.
-export async function readAll(client, table, pk, onFatal, startSize = PAGE) {
+export async function readAll(client, table, pk, onFatal, startSize = PAGE, sleep) {
   const rows = [];
-  let size = startSize, from = 0;
+  let size = startSize, from = 0, netTries = 0;
   for (;;) {
     let q = client.from(table).select('*');
     for (const c of pk) q = q.order(c, { ascending: true });
     const { data: page, error } = await q.range(from, from + size - 1);
     if (error) {
-      if (/timeout|timed out|too large/i.test(error.message) && size > 1) { size = Math.max(1, Math.floor(size / 4)); continue; }
+      if (/statement timeout|too large/i.test(error.message) && size > 1) { size = Math.max(1, Math.floor(size / 4)); continue; }
+      if (isTransient(error.message) && ++netTries <= 5) { await (sleep || ((ms) => new Promise(r => setTimeout(r, ms))))(1500 * netTries); continue; }   // mạng chập chờn: thử lại đúng trang đó
       onFatal(error.message); return rows;
     }
+    netTries = 0;
     rows.push(...(page || []));
     if (!page || page.length < size) break;
     from += size;
