@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  decodeJwtClaims, sanitizeIds, pgIn, isUuid, authenticateCaller, pushToUsers, handleSendPush,
+  decodeJwtClaims, sanitizeIds, pgIn, isUuid, authenticateCaller, isServiceToken, pushToUsers, handleSendPush,
 } from '../../../supabase/functions/_shared/tenant-core';
 import { runAttendanceReminders, shiftWindow, vnDateParts } from '../../../supabase/functions/_shared/attendance-core';
 
@@ -10,6 +10,8 @@ import { runAttendanceReminders, shiftWindow, vnDateParts } from '../../../supab
 const A = '11111111-1111-4111-8111-111111111111';   // công ty A
 const B = '22222222-2222-4222-8222-222222222222';   // công ty B
 const SERVICE = 'service-key-bi-mat', ANON = 'anon-key-cong-khai';
+const SERVICE_KHAC = 'sb_secret_dinh-dang-moi';                                   // khóa cấp máy chủ HỢP LỆ nhưng khác chuỗi mà hàm Edge nhận
+const tokServiceJwt = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.${Buffer.from('{"role":"service_role"}').toString('base64url')}.chu-ky`;   // tự nhận service_role nhưng chữ ký GIẢ
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const jwt = (claims: object) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(claims)}.chu-ky`;
 const tokA = jwt({ role: 'authenticated', company_id: A, sub: 'emp_admin' });
@@ -19,6 +21,7 @@ const tokAnon = jwt({ role: 'anon' });
 type Row = Record<string, any>;
 // Máy chủ REST giả: GET/PATCH/DELETE/POST theo bộ lọc PostgREST (eq / in / lt / neq); mô phỏng RLS cho token người dùng
 function makeRest(db: Record<string, Row[]>, validTokens: string[]) {
+  db.companies ||= [{ id: 'c-bat-ky', slug: 'bat-ky' }];   // bảng companies luôn có dòng (đọc được chỉ với khóa cấp máy chủ)
   const calls: { method: string; table: string; query: string; body?: any }[] = [];
   const parseVal = (s: string) => { const m = s.match(/^in\.\((.*)\)$/); return m ? { op: 'in', v: m[1].split(',').map(x => x.replace(/^"|"$/g, '')) } : { op: s.slice(0, s.indexOf('.')), v: s.slice(s.indexOf('.') + 1) }; };
   const fetchFn = async (url: string, init: any = {}) => {
@@ -26,7 +29,7 @@ function makeRest(db: Record<string, Row[]>, validTokens: string[]) {
     const auth = String(init.headers?.Authorization || '').replace('Bearer ', '');
     calls.push({ method, table, query: u.search, body: init.body ? JSON.parse(init.body) : undefined });
     let rows = db[table] || (db[table] = []);
-    if (auth !== SERVICE) {                                       // người dùng: phải là token hợp lệ; RLS chỉ cho thấy công ty của token
+    if (auth !== SERVICE && auth !== SERVICE_KHAC) {                                       // người dùng: phải là token hợp lệ; RLS chỉ cho thấy công ty của token
       if (!validTokens.includes(auth)) return { ok: false, status: 401, json: async () => ({ message: 'invalid jwt' }), text: async () => 'invalid jwt' };
       const cid = decodeJwtClaims(auth)?.company_id; rows = rows.filter(r => r.company_id === cid);
     }
@@ -82,7 +85,10 @@ describe('authenticateCaller', () => {
     expect(await call(`Bearer ${tokA}`)).toEqual({ ok: true, caller: { kind: 'user', companyId: A, userId: 'emp_admin' } });
     expect(await call(`Bearer ${tokB}`)).toEqual({ ok: true, caller: { kind: 'user', companyId: B, userId: 'emp_admin' } });
   });
-  it('khóa service_role khớp chính xác → máy chủ', async () => { expect(await call(`Bearer ${SERVICE}`)).toEqual({ ok: true, caller: { kind: 'service' } }); });
+  it('khóa service_role khớp chính xác → máy chủ; khóa máy chủ dạng khác (sb_secret_) cũng được nhận qua xác nhận của cơ sở dữ liệu', async () => {
+    expect(await call(`Bearer ${SERVICE}`)).toEqual({ ok: true, caller: { kind: 'service' } });
+    expect(await call(`Bearer ${SERVICE_KHAC}`)).toEqual({ ok: true, caller: { kind: 'service' } });
+  });
   it('KHÓA ANON công khai / thiếu token / token rác / nhân viên không có thật / sub của công ty khác → 401', async () => {
     for (const a of [`Bearer ${ANON}`, `Bearer ${tokAnon}`, null, '', 'Bearer rac.rac.rac', `Bearer ${jwt({ role: 'authenticated', company_id: A, sub: 'nv_khong_co' })}`, `Bearer ${jwt({ role: 'authenticated', company_id: B, sub: 'nv_chi_o_A' })}`]) {
       const r = await call(a as any); expect(r.ok).toBe(false); expect((r as any).status).toBe(401);
@@ -94,6 +100,18 @@ describe('authenticateCaller', () => {
   it('công ty bị khóa (RLS không trả dòng nào) → 401', async () => {
     db.employees = db.employees.filter(e => e.company_id !== A);   // giả lập company_live chặn đọc
     expect((await call(`Bearer ${tokA}`)).ok).toBe(false);
+  });
+});
+
+describe('isServiceToken — nhận diện khóa cấp máy chủ', () => {
+  const rest = makeRest({}, []);
+  const chk = (token: string) => isServiceToken({ token, serviceKey: SERVICE, supabaseUrl: ENV.SUPABASE_URL, fetchFn: rest.fetchFn as any });
+  it('khớp chính xác → có; khóa dạng khác nhưng cơ sở dữ liệu xác nhận (đọc được companies) → có', async () => {
+    expect(await chk(SERVICE)).toBe(true);
+    expect(await chk(SERVICE_KHAC)).toBe(true);
+  });
+  it('khóa anon, token đăng nhập, chuỗi rác, token TỰ NHẬN service_role nhưng chữ ký giả, rỗng → không', async () => {
+    for (const t of [ANON, tokA, tokAnon, 'rac', '', tokServiceJwt]) expect(await chk(t)).toBe(false);
   });
 });
 

@@ -46,14 +46,31 @@ export interface AuthDeps {
   fetchFn: (url: string, init?: any) => Promise<{ ok: boolean; json: () => Promise<any> }>;
 }
 
+// Token này có phải khóa cấp MÁY CHỦ (service_role) không?
+//   • khớp CHÍNH XÁC khóa mà hàm Edge nhận (cách nhanh, đáng tin nhất); HOẶC
+//   • token tự nhận role=service_role (hoặc khóa dạng mới sb_secret_...) VÀ cơ sở dữ liệu xác nhận bằng cách cho đọc bảng `companies`
+//     — bảng này bật RLS không chính sách cho khóa anon/đăng nhập nên chỉ khóa cấp máy chủ đọc được. Cần cách thứ hai vì giá trị
+//     SUPABASE_SERVICE_ROLE_KEY mà Supabase đưa vào hàm Edge có thể KHÁC chuỗi khóa anh copy từ giao diện (định dạng khóa khác nhau).
+export async function isServiceToken(d: { token: string; serviceKey: string; supabaseUrl: string; fetchFn: AuthDeps['fetchFn'] }): Promise<boolean> {
+  if (!d.token) return false;
+  if (d.serviceKey && d.token === d.serviceKey) return true;
+  const claims = decodeJwtClaims(d.token);
+  if (!(claims?.role === 'service_role' || d.token.startsWith('sb_secret_'))) return false;
+  try {
+    const r = await d.fetchFn(`${d.supabaseUrl}/rest/v1/companies?select=id&limit=1`, { headers: { apikey: d.token, Authorization: `Bearer ${d.token}` } });
+    const rows = r.ok ? await r.json() : null;
+    return Array.isArray(rows) && rows.length > 0;
+  } catch { return false; }
+}
+
 // Xác định ai đang gọi:
-//   • khóa service_role (cron/máy chủ): khớp CHÍNH XÁC khóa — không tin phần "role" trong token;
+//   • khóa service_role (cron/máy chủ): xem isServiceToken ở trên;
 //   • nhân viên đăng nhập ERP: token role=authenticated + company_id + sub; rồi HỎI PostgREST bằng chính token đó xem nhân viên `sub`
 //     có thật trong công ty của token và công ty còn hoạt động không (PostgREST kiểm chữ ký + RLS) — khóa anon công khai không qua được.
 export async function authenticateCaller(d: AuthDeps): Promise<AuthResult> {
   const token = (d.authorization || '').replace(/^Bearer\s+/i, '').trim();
   if (!token) return { ok: false, status: 401, error: 'Thiếu thông tin đăng nhập.' };
-  if (d.serviceKey && token === d.serviceKey) return { ok: true, caller: { kind: 'service' } };
+  if (await isServiceToken({ token, serviceKey: d.serviceKey, supabaseUrl: d.supabaseUrl, fetchFn: d.fetchFn })) return { ok: true, caller: { kind: 'service' } };
 
   const claims = decodeJwtClaims(token);
   if (!claims || claims.role !== 'authenticated' || !isUuid(claims.company_id) || typeof claims.sub !== 'string' || !claims.sub) {

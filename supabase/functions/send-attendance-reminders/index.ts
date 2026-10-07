@@ -7,6 +7,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import webPush from "https://esm.sh/web-push@3.6.7";
 import { runAttendanceReminders } from "../_shared/attendance-core.ts";
+import { isServiceToken } from "../_shared/tenant-core.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,7 +27,7 @@ serve(async (req) => {
 
     // Chỉ khóa service_role mới được kích hoạt nhắc điểm danh (nếu không, ai có khóa anon công khai cũng gọi được)
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-    if (token !== SERVICE_KEY) return json(401, { error: "Chỉ máy chủ (service_role) được gọi hàm này." });
+    if (!(await isServiceToken({ token, serviceKey: SERVICE_KEY, supabaseUrl: SUPABASE_URL, fetchFn: fetch }))) return json(401, { error: "Chỉ máy chủ (service_role) được gọi hàm này." });
     if (!VAPID_PRIV || !VAPID_PUB) return json(500, { error: "Missing VAPID keys" });
 
     webPush.setVapidDetails("mailto:admin@hoanglonglamdong.vn", VAPID_PUB, VAPID_PRIV);
