@@ -21,7 +21,12 @@ begin
   end if;
 
   for t in select c.relname, c.relrowsecurity from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' order by 1 loop
-    if not t.relrowsecurity then sin_rls := sin_rls || t.relname; continue; end if;   -- bảng chưa bật RLS: không chặn được bằng chính sách (báo ở cuối)
+    if not t.relrowsecurity then
+      -- Bảng chưa bật RLS (trên production cũ có 10 bảng như vậy, gồm payments, purchase_orders, sales_orders...): chính sách không áp dụng được,
+      -- nên chặn bằng cách THU HỒI quyền ghi của anon/authenticated (đọc giữ nguyên). service_role không bị ảnh hưởng. Gỡ đóng băng sẽ cấp lại.
+      execute format('revoke insert, update, delete, truncate on public.%I from anon, authenticated', t.relname);
+      sin_rls := sin_rls || t.relname; continue;
+    end if;
     execute format('drop policy if exists freeze_ins on public.%I', t.relname);
     execute format('drop policy if exists freeze_upd on public.%I', t.relname);
     execute format('drop policy if exists freeze_del on public.%I', t.relname);
@@ -42,12 +47,16 @@ begin
     perform cron.unschedule(jobname) from cron.job where jobname in ('attendance-morning-reminder', 'attendance-afternoon-reminder');
   end if;
 
-  raise notice 'ĐÃ ĐÓNG BĂNG GHI: % bảng dữ liệu + Storage. Bảng chưa bật RLS (không chặn được): %', n, coalesce(nullif(array_to_string(sin_rls, ', '), ''), 'không có');
+  raise notice 'ĐÃ ĐÓNG BĂNG GHI: % bảng dữ liệu + Storage. Bảng chưa bật RLS (đã chặn bằng thu hồi quyền ghi): %', n, coalesce(nullif(array_to_string(sin_rls, ', '), ''), 'không có');
 end $$;
 
 -- KIỂM TRA: số bảng đã đóng băng (mỗi bảng 3 chính sách) — và danh sách bảng CHƯA được chặn nếu có
 select count(distinct tablename) filter (where schemaname = 'public') as so_bang_da_dong_bang,
        count(distinct tablename) filter (where schemaname = 'storage') as storage_da_dong_bang
   from pg_policies where policyname in ('freeze_ins', 'freeze_upd', 'freeze_del');
+-- Bảng vẫn GHI được = bảng KHÔNG có RLS mà anon/authenticated vẫn còn quyền ghi → phải ra 0 dòng
 select c.relname as bang_chua_chan_duoc_ghi from pg_class c
- where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not c.relrowsecurity order by 1;
+ where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not c.relrowsecurity
+   and (has_table_privilege('anon', c.oid, 'INSERT') or has_table_privilege('anon', c.oid, 'UPDATE') or has_table_privilege('anon', c.oid, 'DELETE')
+     or has_table_privilege('authenticated', c.oid, 'INSERT') or has_table_privilege('authenticated', c.oid, 'UPDATE') or has_table_privilege('authenticated', c.oid, 'DELETE'))
+ order by 1;

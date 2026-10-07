@@ -21,6 +21,11 @@ begin
     n := n + 1;
   end loop;
 
+  -- Cấp lại quyền ghi cho các bảng không bật RLS (đã bị thu hồi lúc đóng băng) — đúng mặc định của Supabase
+  for t in select c.relname from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not c.relrowsecurity loop
+    execute format('grant insert, update, delete, truncate on public.%I to anon, authenticated', t.relname);
+  end loop;
+
   if exists (select 1 from pg_namespace where nspname = 'cron') then
     perform cron.unschedule(jobname) from cron.job where jobname in ('attendance-morning-reminder', 'attendance-afternoon-reminder');
     perform cron.schedule('attendance-morning-reminder',   '0 0 * * 1-6',  'select trigger_attendance_reminders();');
