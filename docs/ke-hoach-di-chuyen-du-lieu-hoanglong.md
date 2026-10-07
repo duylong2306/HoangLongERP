@@ -120,3 +120,26 @@ Script: `scripts/rollback-company-to-production.mjs` (lõi: `scripts/lib/rollbac
 - **Chốt chặn:** đích có bảng `companies`/`platform_admins` (là LoLo chứ không phải production cũ) → dừng; LoLo có cột mà production chưa có (sẽ mất dữ liệu cột đó) → dừng; dòng vướng khóa ngoại → dừng và ghi rõ, không bỏ âm thầm; chỉ đọc đúng `company_id` của doanh nghiệp nguồn, không bao giờ đọc công ty khác.
 - **Trước khi ghi thật:** đóng băng ghi production (không ai nhập thêm) và báo nhân viên chuyển về địa chỉ cũ. Thông báo đẩy của production giữ nguyên (chỉ xóa đăng ký mồ côi của nhân viên đã bị xóa).
 - **Kết quả chạy thử ngày 8/10/2026 trên dữ liệu thật:** LoLo và production chỉ khác **1 dòng** (`business_profile.updated_at`, do ứng dụng tự lưu lại hồ sơ khi đăng nhập) và 2 tệp avatar cũ chỉ có ở LoLo.
+
+## 10. Chuyển hướng hệ thống cũ (nhánh `main`) sang hoanglong.lolo.io.vn
+
+Đã chuẩn bị sẵn ở nhánh **`redirect-to-lolo`** (tách từ `main`, commit `0c4b2ed`) — **chưa merge vào `main`**; `main` vẫn đang chạy như cũ cho tới đúng ngày chuyển.
+
+| Lớp | Việc làm | Tệp |
+|---|---|---|
+| 1. Máy chủ | Chuyển hướng TẠM THỜI (307) mọi đường dẫn sang `https://hoanglong.lolo.io.vn/<đường dẫn>`, giữ nguyên tham số (kể cả liên kết từ thông báo đẩy `?conversation=…`). Trừ 2 service worker để trình duyệt tải được bản mới | `vercel.json` |
+| 2. Ứng dụng đã cài / bộ nhớ đệm | `sw.js` và `web-push-sw.js` đổi thành **kill switch**: xóa bộ nhớ đệm, tự gỡ đăng ký, tải lại cửa sổ đang mở → lúc đó máy chủ chuyển hướng. Không có trình xử lý fetch/push | `public/sw.js`, `public/web-push-sw.js` |
+| 3. Dự phòng | Đoạn script đầu `index.html` tự chuyển hướng nếu trang đến từ bộ nhớ đệm (bỏ qua localhost và địa chỉ mới) | `index.html` |
+| 4. Chặn ghi | SQL **đóng băng ghi** production (chính sách RLS restrictive, thêm/sửa/xóa bị chặn cho khóa anon; đọc vẫn được) + tắt lịch nhắc điểm danh cũ. Hoàn tác bằng `production-unfreeze.sql` | `scripts/production-freeze.sql`, `scripts/production-unfreeze.sql` |
+
+**Thứ tự ngày chuyển** (gợi ý, buổi tối/ngoài giờ làm):
+1. Thông báo nhân viên ngừng nhập liệu.
+2. Chạy `scripts/production-freeze.sql` ở production (đóng băng ghi).
+3. Chạy lại di chuyển dữ liệu (`migrate-production-to-company.mjs --slug hoanglong --ghi --xac-nhan-hoanglong`) → "ĐẠT TẤT CẢ kiểm chứng".
+4. Kiểm tra nhanh `hoanglong.lolo.io.vn` (đăng nhập, dashboard, vài ảnh).
+5. **Bật chuyển hướng:** merge `redirect-to-lolo` vào `main` rồi push (Vercel tự deploy `main`). Kiểm tra: mở địa chỉ cũ phải nhảy sang địa chỉ mới; ứng dụng đã cài trên điện thoại tự chuyển sau lần mở kế tiếp.
+6. Báo nhân viên dùng địa chỉ mới, bật lại thông báo đẩy.
+
+**Quay lại hệ thống cũ (nếu có sự cố):** `git revert` commit merge ở `main` + push (tắt chuyển hướng) → `production-unfreeze.sql` → nếu đã nhập dữ liệu ở LoLo thì chạy `rollback-company-to-production.mjs` (mục 9) **trước khi** gỡ đóng băng.
+
+**Lưu ý:** tuyệt đối **không merge `redirect-to-lolo` vào `multi-tenant`** (sẽ chuyển hướng cả nền tảng mới). Service worker thay thế vẫn cần chạy một lần trên mỗi máy: máy nào không mở lại ứng dụng cũ thì không bị ảnh hưởng, và khi mở thì đã bị máy chủ chuyển hướng sẵn.
