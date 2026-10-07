@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Loader2, AlertCircle, CheckCircle2, KeyRound, Lock, Unlock, ShieldCheck, ShieldOff, Copy } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, CheckCircle2, KeyRound, Lock, Unlock, ShieldCheck, ShieldOff } from 'lucide-react';
+import CopyButton from '../CopyButton';
 import { platformCall, setPlatformToken } from './platformApi';
 import { formatDateTime } from './format';
 import ConfirmDialog from './ConfirmDialog';
@@ -104,7 +105,6 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
       reset(); onChanged(false); setMsg({ ok: true, text: 'Đã tắt xác thực hai lớp.' });
     } catch (err: any) { setMsg({ ok: false, text: err.message }); } finally { setBusy(false); }
   };
-  const copy = (t: string) => { try { navigator.clipboard?.writeText(t).catch(() => {}); } catch { /* bỏ qua */ } };
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4" id="totp_card">
@@ -139,7 +139,7 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
             <div className="min-w-0 flex-1 space-y-2">
               <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Khóa nhập tay</div>
               <div className="flex items-center gap-2"><code className="font-mono text-sm break-all bg-slate-50 border border-slate-200 rounded px-2 py-1" id="totp_secret_text">{setup.secret}</code>
-                <button type="button" onClick={() => copy(setup.secret)} aria-label="Sao chép khóa" className="text-slate-400 hover:text-slate-700"><Copy className="w-4 h-4" /></button></div>
+                <CopyButton text={setup.secret} label="khóa" /></div>
               <p className="text-xs text-slate-500">Khóa này chỉ hiện lúc thiết lập. Đừng chụp màn hình gửi cho ai.</p>
               <div><label className={label} htmlFor="totp_code">Mã 6 số trong ứng dụng</label>
                 <input id="totp_code" className={`${input} font-mono tracking-widest max-w-[200px]`} value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" maxLength={7} autoComplete="one-time-code" placeholder="123456" required /></div>
@@ -161,7 +161,7 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
             {recovery.map(c => <li key={c} className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-center">{c}</li>)}
           </ul>
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => copy(recovery.join('\n'))} className={btnSm}><Copy className="w-3.5 h-3.5" /> Sao chép tất cả</button>
+            <CopyButton variant="text" text={recovery.join('\n')} label="các mã khôi phục" className={btnSm}>Sao chép tất cả</CopyButton>
             <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={saved} onChange={e => setSaved(e.target.checked)} /> Tôi đã lưu các mã khôi phục</label>
           </div>
           <button type="button" disabled={!saved} onClick={reset} className={btn}>Hoàn tất</button>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Loader2, AlertCircle, CheckCircle2, Copy, ExternalLink, Search, Pencil, Lock, Unlock, X } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, CheckCircle2, ExternalLink, Search, Pencil, Lock, Unlock, X } from 'lucide-react';
+import CopyButton from '../CopyButton';
 import { getTenantUrl } from '../../lib/tenant';
 import { platformCall } from './platformApi';
 import ConfirmDialog from './ConfirmDialog';
@@ -140,7 +141,7 @@ export default function CompaniesTab() {
                         <span className="inline-flex items-center gap-1.5 font-mono text-xs">
                           <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{url.replace(/^https?:\/\//, '')}</a>
                           <a href={url} target="_blank" rel="noopener noreferrer" title="Mở trong tab mới" className="text-slate-400 hover:text-slate-700"><ExternalLink className="w-3.5 h-3.5" /></a>
-                          <button type="button" title="Sao chép địa chỉ" onClick={() => navigator.clipboard?.writeText(url).catch(() => {})} className="text-slate-400 hover:text-slate-700"><Copy className="w-3.5 h-3.5" /></button>
+                          <CopyButton text={url} label="địa chỉ" iconClass="w-3.5 h-3.5" />
                         </span>
                       ) : <span className="text-xs text-slate-400 italic">Chưa cấu hình tên miền</span>}
                     </td>

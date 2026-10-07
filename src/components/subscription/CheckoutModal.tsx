@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, Copy, Check, X, QrCode, Clock, ShieldCheck } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, X, QrCode, Clock, ShieldCheck } from 'lucide-react';
+import CopyButton from '../CopyButton';
 import { subscriptionCall, type SubscriptionOrder, type BankInfo } from '../../lib/subscriptionClient';
 import { buildVietQrPayload } from '../../lib/vietqr';
 
@@ -14,26 +15,13 @@ import { buildVietQrPayload } from '../../lib/vietqr';
 const vnd = (n: number) => `${new Intl.NumberFormat('vi-VN').format(Math.round(n))} đ`;
 const dateTime = (iso: string) => new Date(iso).toLocaleString('vi-VN');
 
-function CopyBtn({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  const onClick = () => {
-    try { navigator.clipboard?.writeText(text).catch(() => {}); } catch { /* bỏ qua */ }
-    setDone(true); setTimeout(() => setDone(false), 1500);
-  };
-  return (
-    <button type="button" onClick={onClick} title={`Sao chép ${label}`} aria-label={`Sao chép ${label}`} className="shrink-0 text-slate-400 hover:text-slate-700">
-      {done ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-    </button>
-  );
-}
-
 function Row({ label, value, mono, copy }: { label: string; value: string; mono?: boolean; copy?: string }) {
   return (
     <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
       <span className="text-sm text-slate-500 shrink-0">{label}</span>
       <span className="flex items-center gap-2 min-w-0 text-right">
         <b className={`text-slate-900 break-all ${mono ? 'font-mono' : ''}`}>{value}</b>
-        {copy !== undefined && <CopyBtn text={copy} label={label.toLowerCase()} />}
+        {copy !== undefined && <CopyButton text={copy} label={label.toLowerCase()} />}
       </span>
     </div>
   );
