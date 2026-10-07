@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle2, Check, X, BellRing } from 'lucide-react';
 import { platformCall } from './platformApi';
+import ConfirmDialog from './ConfirmDialog';
 import { formatVnd, formatDate, formatDateTime, PERIOD_LABEL, ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from './format';
 
 // TAB "ĐƠN ĐĂNG KÝ" — khách chọn gói + kỳ hạn (tháng/năm) → đơn "Chờ xác nhận" kèm số tiền + mã chuyển khoản.
@@ -21,7 +22,6 @@ export default function OrdersTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(null);
@@ -35,22 +35,31 @@ export default function OrdersTab() {
   }, [filter]);
   useEffect(() => { load(); }, [load]);
 
-  const confirmOrder = async (o: Order) => {
-    if (!window.confirm(`XÁC NHẬN đã nhận đủ ${formatVnd(o.amount)} từ "${o.companyName}"?\n\nMã chuyển khoản: ${o.code}\nGói ${o.planName} — ${PERIOD_LABEL[o.period]?.toLowerCase()} (${o.months} tháng)\n\nBấm OK sẽ KÍCH HOẠT / GIA HẠN doanh nghiệp ngay.`)) return;
-    setBusyId(o.id);
-    try {
-      const r = await platformCall<{ expiresAt: string }>('orders.confirm', { id: o.id });
-      setNotice(`Đã kích hoạt "${o.companyName}" — gói ${o.planName}, hạn mới đến ${formatDate(r.expiresAt)}.`);
-      load();
-    } catch (e: any) { setNotice(`⚠️ ${e.message}`); load(); } finally { setBusyId(null); }
-  };
+  // Xác nhận / hủy đơn: bấm nút chỉ MỞ HỘP XÁC NHẬN trong trang (ConfirmDialog, không dùng window.confirm/prompt vì trình duyệt
+  // nhúng có thể chặn hoặc tự đồng ý không hiện gì — nguy hiểm với thao tác kích hoạt gói có tiền). Chỉ khi bấm nút trong hộp mới gọi máy chủ.
+  const [action, setAction] = useState<{ kind: 'confirm' | 'cancel'; order: Order } | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelNote, setCancelNote] = useState('');
+  const openAction = (kind: 'confirm' | 'cancel', order: Order) => { setActionError(null); setCancelNote(''); setAction({ kind, order }); };
 
-  const cancelOrder = async (o: Order) => {
-    const note = window.prompt(`Hủy đơn ${o.code} của "${o.companyName}"?\nGhi chú lý do (có thể để trống):`, '');
-    if (note === null) return;   // bấm Hủy hộp thoại = không hủy đơn
-    setBusyId(o.id);
-    try { await platformCall('orders.cancel', { id: o.id, note }); setNotice(`Đã hủy đơn ${o.code}.`); load(); }
-    catch (e: any) { setNotice(`⚠️ ${e.message}`); load(); } finally { setBusyId(null); }
+  const runAction = async () => {
+    if (!action || actionBusy) return;
+    const { kind, order: o } = action;
+    setActionBusy(true); setActionError(null);
+    try {
+      if (kind === 'confirm') {
+        const r = await platformCall<{ expiresAt: string }>('orders.confirm', { id: o.id });
+        setNotice(`Đã kích hoạt "${o.companyName}" — gói ${o.planName}, hạn mới đến ${formatDate(r.expiresAt)}.`);
+      } else {
+        await platformCall('orders.cancel', { id: o.id, note: cancelNote.trim() });
+        setNotice(`Đã hủy đơn ${o.code}.`);
+      }
+      setAction(null); load();
+    } catch (e: any) {
+      // Lỗi (vd đơn vừa được người khác xử lý) hiện NGAY trong hộp để không bị bỏ sót; tải lại danh sách cho đúng thực tế.
+      setActionError(e.message); load();
+    } finally { setActionBusy(false); }
   };
 
   return (
@@ -102,8 +111,8 @@ export default function OrdersTab() {
                   <td className="py-2.5 px-3 text-right whitespace-nowrap">
                     {o.status === 'pending' && (
                       <>
-                        <button disabled={busyId === o.id} onClick={() => confirmOrder(o)} className={`${btn} bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-[#ffffff]`}>{busyId === o.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Xác nhận</button>{' '}
-                        <button disabled={busyId === o.id} onClick={() => cancelOrder(o)} className={`${btn} border border-slate-300 text-slate-700 hover:bg-slate-100`}><X className="w-3.5 h-3.5" /> Hủy</button>
+                        <button onClick={() => openAction('confirm', o)} className={`${btn} bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-[#ffffff]`}><Check className="w-3.5 h-3.5" /> Xác nhận</button>{' '}
+                        <button onClick={() => openAction('cancel', o)} className={`${btn} border border-slate-300 text-slate-700 hover:bg-slate-100`}><X className="w-3.5 h-3.5" /> Hủy</button>
                       </>
                     )}
                   </td>
@@ -113,6 +122,22 @@ export default function OrdersTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {action && action.kind === 'confirm' && (
+        <ConfirmDialog title="Xác nhận đã nhận đủ tiền?" confirmLabel="Đã nhận đủ — kích hoạt gói" busy={actionBusy} error={actionError} onConfirm={runAction} onClose={() => setAction(null)}>
+          <p>Doanh nghiệp <b>{action.order.companyName}</b> chuyển <b className="font-mono">{formatVnd(action.order.amount)}</b>.</p>
+          <p>Mã chuyển khoản: <b className="font-mono">{action.order.code}</b><br />Gói {action.order.planName} — {PERIOD_LABEL[action.order.period]?.toLowerCase()} ({action.order.months} tháng)</p>
+          {action.order.paidClaimedAt && <p className="text-amber-700">Khách đã báo chuyển khoản lúc {formatDateTime(action.order.paidClaimedAt)}.</p>}
+          <p className="font-semibold text-rose-700">Chỉ bấm khi tiền ĐÃ VỀ tài khoản. Bấm xác nhận sẽ KÍCH HOẠT / GIA HẠN doanh nghiệp ngay.</p>
+        </ConfirmDialog>
+      )}
+      {action && action.kind === 'cancel' && (
+        <ConfirmDialog title={`Hủy đơn ${action.order.code}?`} confirmLabel="Hủy đơn" danger busy={actionBusy} error={actionError} onConfirm={runAction} onClose={() => setAction(null)}>
+          <p>Đơn của <b>{action.order.companyName}</b> ({formatVnd(action.order.amount)}) sẽ bị hủy và không kích hoạt gói.</p>
+          <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide" htmlFor="od_ghi_chu_huy">Ghi chú lý do (không bắt buộc)</label>
+          <input id="od_ghi_chu_huy" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" value={cancelNote} maxLength={300} onChange={e => setCancelNote(e.target.value)} placeholder="vd: Khách không chuyển tiền" />
+        </ConfirmDialog>
       )}
     </div>
   );

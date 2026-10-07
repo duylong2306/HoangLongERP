@@ -242,6 +242,11 @@ describe('tab Đơn đăng ký', () => {
     expect(within(bang).getByText(/Theo năm/)).toBeTruthy();
 
     await u.click(within(bang).getByRole('button', { name: /Xác nhận/ }));
+    const hop = await screen.findByRole('alertdialog');                              // cảnh báo trong trang, chưa kích hoạt
+    expect(hop).toHaveTextContent('Công ty Hết Hạn'); expect(hop).toHaveTextContent('LOLOAAAA2222'); expect(hop).toHaveTextContent(/ĐÃ VỀ tài khoản/);
+    expect(db.table('subscription_orders')[0].status).toBe('pending');
+    expect(window.confirm).not.toHaveBeenCalled();
+    await u.click(within(hop).getByRole('button', { name: /Đã nhận đủ — kích hoạt gói/ }));
     await waitFor(() => expect(db.table('subscription_orders')[0].status).toBe('confirmed'));
     const c = db.table('companies').find(x => x.id === 'c3')!;
     expect(c).toMatchObject({ plan_id: 'co-ban', is_trial: false });
@@ -251,20 +256,38 @@ describe('tab Đơn đăng ký', () => {
     expect(await screen.findByText('Không có đơn nào đang chờ xác nhận.')).toBeTruthy();
   });
 
-  it('không xác nhận khi người dùng bấm Hủy ở hộp thoại', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('mở hộp xác nhận rồi bấm "Hủy bỏ" → KHÔNG kích hoạt gói', async () => {
     const u = await dangNhap();
     await u.click(screen.getByRole('button', { name: /Đơn đăng ký/ }));
     await u.click(await screen.findByRole('button', { name: /Xác nhận/ }));
+    await u.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Hủy bỏ' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(db.table('subscription_orders')[0].status).toBe('pending');
+    expect(db.table('companies').find(c => c.id === 'c3')!.plan_id).toBe('co-ban');   // công ty giữ nguyên (không được gia hạn)
+    expect(new Date(db.table('companies').find(c => c.id === 'c3')!.expires_at).getTime()).toBeLessThan(Date.now());
   });
 
-  it('hủy đơn kèm ghi chú', async () => {
-    vi.spyOn(window, 'prompt').mockReturnValue('Khách không chuyển tiền');
+  it('hủy đơn kèm ghi chú qua hộp trong trang (không dùng window.prompt)', async () => {
+    const prompt = vi.spyOn(window, 'prompt');
     const u = await dangNhap();
     await u.click(screen.getByRole('button', { name: /Đơn đăng ký/ }));
     await u.click(await screen.findByRole('button', { name: /^Hủy$/ }));
+    const hop = await screen.findByRole('alertdialog');
+    expect(db.table('subscription_orders')[0].status).toBe('pending');           // mới mở hộp, chưa hủy
+    await u.type(within(hop).getByLabelText(/Ghi chú lý do/), 'Khách không chuyển tiền');
+    await u.click(within(hop).getByRole('button', { name: 'Hủy đơn' }));
     await waitFor(() => expect(db.table('subscription_orders')[0]).toMatchObject({ status: 'cancelled', note: 'Khách không chuyển tiền' }));
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it('đơn đã được người khác xử lý: lỗi hiện ngay trong hộp, không im lặng', async () => {
+    const u = await dangNhap();
+    await u.click(screen.getByRole('button', { name: /Đơn đăng ký/ }));
+    await u.click(await screen.findByRole('button', { name: /Xác nhận/ }));
+    const hop = await screen.findByRole('alertdialog');
+    db.table('subscription_orders')[0].status = 'cancelled';                      // vừa bị hủy ở nơi khác
+    await u.click(within(hop).getByRole('button', { name: /Đã nhận đủ — kích hoạt gói/ }));
+    expect(await within(hop).findByRole('alert')).toHaveTextContent(/đã được xử lý/);
   });
 });
 
