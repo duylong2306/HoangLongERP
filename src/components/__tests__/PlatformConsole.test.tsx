@@ -142,13 +142,37 @@ describe('tab Doanh nghiệp', () => {
     expect(screen.queryByText('Hoàng Long')).toBeNull();
   });
 
-  it('khóa doanh nghiệp: hỏi xác nhận, ghi vào dữ liệu', async () => {
+  it('khóa doanh nghiệp: bấm Khóa chỉ hiện CẢNH BÁO trong trang (không khóa ngay); "Hủy bỏ" giữ nguyên; xác nhận mới khóa', async () => {
     const u = await dangNhap();
     const dong = screen.getByText('Công ty Dùng Thử').closest('tr') as HTMLElement;
     await u.click(within(dong).getByRole('button', { name: /Khóa/ }));
+    const hop = await screen.findByRole('alertdialog');
+    expect(hop).toHaveTextContent('Khóa doanh nghiệp "Công ty Dùng Thử"?');
+    expect(hop).toHaveTextContent(/bị chặn ngay/);
+    expect(hop).toHaveTextContent(/Dữ liệu của doanh nghiệp được giữ nguyên/);
+    expect(db.table('companies').find(c => c.id === 'c2')!.active).toBe(true);   // mới chỉ cảnh báo, chưa khóa
+    expect(window.confirm).not.toHaveBeenCalled();                                  // không dựa vào hộp thoại gốc của trình duyệt
+    // Hủy bỏ → không khóa
+    await u.click(within(hop).getByRole('button', { name: 'Hủy bỏ' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(db.table('companies').find(c => c.id === 'c2')!.active).toBe(true);
+    // Xác nhận → khóa
+    await u.click(within(dong).getByRole('button', { name: /Khóa/ }));
+    await u.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Khóa doanh nghiệp' }));
     await waitFor(() => expect(db.table('companies').find(c => c.id === 'c2')!.active).toBe(false));
-    expect(window.confirm).toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(await within(screen.getByText('Công ty Dùng Thử').closest('tr') as HTMLElement).findByText('Đã khóa')).toBeTruthy();   // huy hiệu trong đúng dòng (thông báo phía trên cũng có chữ này)
+  });
+
+  it('mở lại doanh nghiệp cũng hỏi xác nhận', async () => {
+    db.table('companies').find(c => c.id === 'c2')!.active = false;
+    const u = await dangNhap();
+    const dong = screen.getByText('Công ty Dùng Thử').closest('tr') as HTMLElement;
+    await u.click(within(dong).getByRole('button', { name: /Mở/ }));
+    const hop = await screen.findByRole('alertdialog');
+    expect(db.table('companies').find(c => c.id === 'c2')!.active).toBe(false);
+    await u.click(within(hop).getByRole('button', { name: 'Mở lại' }));
+    await waitFor(() => expect(db.table('companies').find(c => c.id === 'c2')!.active).toBe(true));
   });
 
   it('chỉnh gói và ngày hết hạn thủ công', async () => {
@@ -295,6 +319,7 @@ describe('tab Tài khoản & Nhật ký', () => {
     await u.click(screen.getByRole('button', { name: /Doanh nghiệp/ }));
     const khoa = await screen.findAllByRole('button', { name: /Khóa/ });
     await u.click(khoa[0]);
+    await u.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Khóa doanh nghiệp' }));
     await waitFor(() => expect(db.table('platform_audit_logs').some(l => l.action === 'companies.update')).toBe(true));
     await u.click(screen.getByRole('button', { name: /Nhật ký/ }));
     expect(await screen.findByText(/Khóa doanh nghiệp/)).toBeTruthy();

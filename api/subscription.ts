@@ -27,7 +27,7 @@ const MAX_PENDING_ORDERS = 3;   // mỗi công ty tối đa 3 đơn chờ xác n
 
 const fail = (res: VercelResponse, status: number, error: string) => { res.status(status).json({ error }); };
 
-interface TenantAuth { companyId: string; empId: string; isAdmin: boolean; locked: boolean }
+interface TenantAuth { companyId: string; empId: string; isAdmin: boolean; locked: boolean; companyActive: boolean }
 
 // Xác thực token ERP (thường hoặc khóa) → công ty + nhân viên + có phải admin doanh nghiệp không.
 async function authenticate(req: VercelRequest, db: SupabaseClient, jwtSecret: string): Promise<TenantAuth | null> {
@@ -44,7 +44,9 @@ async function authenticate(req: VercelRequest, db: SupabaseClient, jwtSecret: s
   const groups: string[] = Array.isArray(emp.role_group_ids) ? emp.role_group_ids : [];
   // Cùng quy ước admin với ERP: nhóm role_admin / role_superadmin, hoặc admin gốc emp_admin.
   const isAdmin = emp.id === 'emp_admin' || groups.includes('role_admin') || groups.includes('role_superadmin');
-  return { companyId, empId: emp.id, isAdmin, locked };
+  // Công ty có đang hoạt động không (quản trị nền tảng có thể KHÓA bất cứ lúc nào) — khác "hết hạn".
+  const { data: co } = await db.from('companies').select('active').eq('id', companyId).maybeSingle();
+  return { companyId, empId: emp.id, isAdmin, locked, companyActive: co?.active !== false };
 }
 
 const planToApi = (p: any) => ({
@@ -63,6 +65,15 @@ async function listPlans(db: SupabaseClient) {
   const { data } = await db.from('plans').select('*').eq('active', true).order('sort_order', { ascending: true }).order('name', { ascending: true });
   // Gói chưa đặt giá (cả tháng lẫn năm = 0) chưa thể mua → không hiện cho khách.
   return (data || []).filter((p: any) => Number(p.price_monthly) > 0 || Number(p.price_yearly) > 0).map(planToApi);
+}
+
+// Kiểm tra NHẸ (1 truy vấn) để ERP hỏi định kỳ: doanh nghiệp còn được dùng không? Trả về lý do nếu bị chặn:
+//   'inactive' = bị quản trị nền tảng khóa; 'expired' = hết hạn gói. ERP dùng kết quả này để chặn giao diện ngay.
+async function actionCheck(db: SupabaseClient, res: VercelResponse, a: TenantAuth) {
+  const { data: c } = await db.from('companies').select('active, expires_at, is_trial').eq('id', a.companyId).maybeSingle();
+  if (!c) return fail(res, 404, 'Không tìm thấy doanh nghiệp.');
+  const sub = getSubscriptionState(c);
+  res.status(200).json({ blocked: c.active === false || sub.locked, reason: c.active === false ? 'inactive' : sub.locked ? 'expired' : null });
 }
 
 async function actionStatus(db: SupabaseClient, res: VercelResponse, a: TenantAuth) {
@@ -203,7 +214,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await authenticate(req, db, jwtSecret);
   if (!auth) return fail(res, 401, 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.');
 
+  // Doanh nghiệp bị khóa: chỉ cho xem trạng thái / kiểm tra khóa, KHÔNG cho đặt mua, hủy, báo chuyển khoản.
+  if (!auth.companyActive && action !== 'status' && action !== 'check') {
+    return fail(res, 403, 'Doanh nghiệp đang bị khóa. Vui lòng liên hệ quản trị nền tảng.');
+  }
+
   switch (action) {
+    case 'check': return actionCheck(db, res, auth);
     case 'status': return actionStatus(db, res, auth);
     case 'order': return actionOrder(db, res, auth, body);
     case 'cancel': return actionCancel(db, res, auth, body);

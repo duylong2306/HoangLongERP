@@ -25,6 +25,9 @@ export interface SubscriptionStatus {
   orders: SubscriptionOrder[];
 }
 
+// Kết quả kiểm tra nhẹ định kỳ trong ERP: blocked = doanh nghiệp không được dùng nữa (reason: bị khóa / hết hạn).
+export interface SubscriptionCheck { blocked: boolean; reason: 'inactive' | 'expired' | null }
+
 export class SubscriptionApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }

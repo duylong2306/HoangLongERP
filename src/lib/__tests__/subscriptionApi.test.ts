@@ -219,6 +219,44 @@ describe('api/subscription — status / order / cancel', () => {
   });
 });
 
+describe('api/subscription — doanh nghiệp bị khóa / hết hạn khi đang dùng (action check)', () => {
+  const tokenAdmin = () => jwt.sign({ sub: 'emp_admin', role: 'authenticated', company_id: 'c1' }, SECRET);
+  beforeEach(() => {
+    db.seed('companies', [congTy({ expires_at: new Date(Date.now() + 5 * DAY).toISOString(), is_trial: true })]);
+    db.seed('employees', [nhanVien()]);
+  });
+
+  it('còn dùng được → blocked=false', async () => {
+    const r = await goi({ action: 'check' }, tokenAdmin());
+    expect(r.code).toBe(200); expect(r.body).toEqual({ blocked: false, reason: null });
+  });
+
+  it('bị quản trị nền tảng KHÓA (active=false) dù token còn hạn → blocked, lý do inactive', async () => {
+    db.table('companies')[0].active = false;
+    expect((await goi({ action: 'check' }, tokenAdmin())).body).toEqual({ blocked: true, reason: 'inactive' });
+  });
+
+  it('hết hạn gói → blocked, lý do expired', async () => {
+    db.table('companies')[0].expires_at = new Date(Date.now() - DAY).toISOString();
+    expect((await goi({ action: 'check' }, tokenAdmin())).body).toEqual({ blocked: true, reason: 'expired' });
+  });
+
+  it('công ty không giới hạn (expires_at null) và đang hoạt động → không bị chặn', async () => {
+    db.table('companies')[0].expires_at = null; db.table('companies')[0].is_trial = false;
+    expect((await goi({ action: 'check' }, tokenAdmin())).body.blocked).toBe(false);
+  });
+
+  it('công ty bị khóa: vẫn xem được status, nhưng KHÔNG đặt mua / hủy / báo chuyển khoản (403)', async () => {
+    db.table('companies')[0].active = false;
+    db.seed('subscription_orders', [{ id: 'o1', code: 'LOLOAAAA2222', company_id: 'c1', plan_id: 'co-ban', period: 'month', months: 1, amount: 1, status: 'pending', created_at: new Date().toISOString() }]);
+    expect((await goi({ action: 'status' }, tokenAdmin())).code).toBe(200);
+    expect((await goi({ action: 'order', planId: 'co-ban', period: 'month' }, tokenAdmin())).code).toBe(403);
+    expect((await goi({ action: 'cancel', id: 'o1' }, tokenAdmin())).code).toBe(403);
+    expect((await goi({ action: 'claim', id: 'o1' }, tokenAdmin())).code).toBe(403);
+    expect(db.table('subscription_orders')[0].status).toBe('pending');
+  });
+});
+
 describe('api/subscription — xác nhận chuyển khoản (claim) + Telegram', () => {
   const tokenAdmin = () => jwt.sign({ sub: 'emp_admin', role: 'authenticated', company_id: 'c1' }, SECRET);
   const tokenNV = () => jwt.sign({ sub: 'nv1', role: 'authenticated', company_id: 'c1' }, SECRET);

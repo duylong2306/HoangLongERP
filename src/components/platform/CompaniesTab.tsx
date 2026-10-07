@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Loader2, AlertCircle, CheckCircle2, Copy, ExternalLink, Search, Pencil, Lock, Unlock, X } from 'lucide-react';
 import { getTenantUrl } from '../../lib/tenant';
 import { platformCall } from './platformApi';
+import ConfirmDialog from './ConfirmDialog';
 import { formatDate, toDateInput, fromDateInputEndOfDay, STATUS_BADGE, STATUS_LABEL, type SubStatus } from './format';
 
 // TAB "DOANH NGHIỆP" — thay cho "Quản Lý Doanh Nghiệp" cũ nằm trong ERP: xem mọi doanh nghiệp, trạng thái gói/ngày hết hạn,
@@ -47,13 +48,19 @@ export default function CompaniesTab() {
     });
   }, [companies, search, statusFilter]);
 
-  const toggleActive = async (c: Company) => {
-    const msg = c.active
-      ? `Khóa doanh nghiệp "${c.name}"?\nMọi người của doanh nghiệp sẽ KHÔNG đăng nhập được cho tới khi mở lại. Dữ liệu được giữ nguyên.`
-      : `Mở lại doanh nghiệp "${c.name}"?`;
-    if (!window.confirm(msg)) return;
-    try { await platformCall('companies.update', { id: c.id, active: !c.active }); setNotice(`Đã ${c.active ? 'khóa' : 'mở lại'} "${c.name}".`); load(); }
-    catch (e: any) { setNotice(`⚠️ ${e.message}`); }
+  // Khóa/mở doanh nghiệp: bấm nút chỉ MỞ HỘP CẢNH BÁO (ConfirmDialog); chỉ khi bấm xác nhận mới gọi máy chủ.
+  const [lockTarget, setLockTarget] = useState<Company | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [lockError, setLockError] = useState<string | null>(null);
+  const toggleActive = (c: Company) => { setLockError(null); setLockTarget(c); };
+  const doToggle = async () => {
+    const c = lockTarget;
+    if (!c || lockBusy) return;
+    setLockBusy(true); setLockError(null);
+    try {
+      await platformCall('companies.update', { id: c.id, active: !c.active });
+      setNotice(`Đã ${c.active ? 'khóa' : 'mở lại'} "${c.name}".`); setLockTarget(null); load();
+    } catch (e: any) { setLockError(e.message); } finally { setLockBusy(false); }
   };
 
   return (
@@ -150,6 +157,19 @@ export default function CompaniesTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {lockTarget && (
+        lockTarget.active ? (
+          <ConfirmDialog title={`Khóa doanh nghiệp "${lockTarget.name}"?`} confirmLabel="Khóa doanh nghiệp" danger busy={lockBusy} error={lockError} onConfirm={doToggle} onClose={() => setLockTarget(null)}>
+            <p><b>Toàn bộ nhân viên</b> của doanh nghiệp này sẽ <b>bị chặn ngay</b> (người đang dùng bị đẩy ra trong khoảng 1 phút) và <b>không đăng nhập được</b> cho tới khi bạn mở lại.</p>
+            <p>Dữ liệu của doanh nghiệp được giữ nguyên, không bị xóa.</p>
+          </ConfirmDialog>
+        ) : (
+          <ConfirmDialog title={`Mở lại doanh nghiệp "${lockTarget.name}"?`} confirmLabel="Mở lại" busy={lockBusy} error={lockError} onConfirm={doToggle} onClose={() => setLockTarget(null)}>
+            <p>Nhân viên của doanh nghiệp này sẽ đăng nhập và sử dụng lại được (nếu gói còn hạn).</p>
+          </ConfirmDialog>
+        )
       )}
 
       {editing && <EditModal company={editing} plans={plans} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); setNotice(msg); load(); }} />}

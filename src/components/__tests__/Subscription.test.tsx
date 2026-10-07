@@ -252,6 +252,33 @@ describe('thanh hạn dùng trong ERP', () => {
     expect(thanh).toHaveTextContent('Có 1 đơn chờ xác nhận');
   });
 
+  it('công ty bị KHÓA lúc đang dùng → phủ kín màn hình thông báo, đăng xuất xóa phiên', async () => {
+    db.table('companies')[0].expires_at = new Date(Date.now() + 3 * DAY).toISOString();
+    render(<SubscriptionBanner />);
+    await waitFor(() => expect(document.getElementById('subscription_banner')).toBeTruthy());   // đang dùng bình thường
+    expect(document.getElementById('subscription_blocked')).toBeNull();
+    db.table('companies')[0].active = false;                       // quản trị nền tảng bấm Khóa
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));         // người dùng quay lại tab → kiểm tra ngay (không chờ 60 giây)
+    const hop = await screen.findByRole('alertdialog');
+    expect(hop).toHaveTextContent('Doanh nghiệp đã bị khóa');
+    expect(document.getElementById('subscription_banner')).toBeNull();
+    fireEvent.click(within(hop).getByRole('button', { name: /Đăng xuất/ }));
+    expect(sessionStorage.getItem('hl_erp_jwt')).toBeNull();
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('gói hết hạn lúc đang dùng → chặn, nút dẫn tới đăng nhập lại để gia hạn', async () => {
+    db.table('companies')[0].expires_at = new Date(Date.now() + 3 * DAY).toISOString();
+    render(<SubscriptionBanner />);
+    await waitFor(() => expect(document.getElementById('subscription_banner')).toBeTruthy());
+    db.table('companies')[0].expires_at = new Date(Date.now() - 1000).toISOString();
+    document.dispatchEvent(new Event('visibilitychange'));
+    const hop = await screen.findByRole('alertdialog');
+    expect(hop).toHaveTextContent('Gói dịch vụ đã hết hạn');
+    expect(within(hop).getByRole('button', { name: /Đăng nhập lại để gia hạn/ })).toBeTruthy();
+  });
+
   it('lỗi máy chủ / token sai → ẩn im lặng, không làm phiền người dùng ERP', async () => {
     sessionStorage.setItem('hl_erp_jwt', 'rac.rac.rac');
     render(<SubscriptionBanner />);
