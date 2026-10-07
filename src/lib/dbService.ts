@@ -2848,9 +2848,12 @@ export const dbService = {
     const path = `${safeTask}/${safeMission}_${ts}_${baseName}.${ext}`;
 
     const doUpload = async (): Promise<string> => {
+      // upsert:false — mỗi lần upload là 1 file MỚI (đường dẫn có dấu thời gian nên không trùng). Không dùng upsert:true vì
+      // Supabase Storage cần quyền SELECT cho upsert; production đã xóa policy select để chặn LIST công khai
+      // (20261001b_storage_production_block_public_list.sql) → upsert:true sẽ bị 403 (đã thử thực tế trên staging).
       const { error } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
       if (error) throw error;
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;
@@ -2910,9 +2913,12 @@ export const dbService = {
     const path = `products/${safeProduct}_${ts}.${safeExt}`;
 
     const doUpload = async (): Promise<string> => {
+      // upsert:false — mỗi lần upload là 1 file MỚI (đường dẫn có dấu thời gian nên không trùng). Không dùng upsert:true vì
+      // Supabase Storage cần quyền SELECT cho upsert; production đã xóa policy select để chặn LIST công khai
+      // (20261001b_storage_production_block_public_list.sql) → upsert:true sẽ bị 403 (đã thử thực tế trên staging).
       const { error } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: false });
       if (error) throw error;
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;
@@ -2970,9 +2976,12 @@ export const dbService = {
     const path = `quotes/${safeQuote}_${ts}.${safeExt}`;
 
     const doUpload = async (): Promise<string> => {
+      // upsert:false — mỗi lần upload là 1 file MỚI (đường dẫn có dấu thời gian nên không trùng). Không dùng upsert:true vì
+      // Supabase Storage cần quyền SELECT cho upsert; production đã xóa policy select để chặn LIST công khai
+      // (20261001b_storage_production_block_public_list.sql) → upsert:true sẽ bị 403 (đã thử thực tế trên staging).
       const { error } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: false });
       if (error) throw error;
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;
@@ -3076,9 +3085,12 @@ export const dbService = {
     const path = `${safeEmp}/${ts}.${safeExt}`;
 
     const doUpload = async (): Promise<string> => {
+      // upsert:false — mỗi lần upload là 1 file MỚI (đường dẫn có dấu thời gian nên không trùng). Không dùng upsert:true vì
+      // Supabase Storage cần quyền SELECT cho upsert; production đã xóa policy select để chặn LIST công khai
+      // (20261001b_storage_production_block_public_list.sql) → upsert:true sẽ bị 403 (đã thử thực tế trên staging).
       const { error } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: true });
+        .upload(path, file, { contentType: file.type || `image/${safeExt}`, upsert: false });
       if (error) throw error;
       const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
       return data.publicUrl;

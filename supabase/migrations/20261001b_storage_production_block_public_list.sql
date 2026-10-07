@@ -48,6 +48,18 @@
 -- đổi, vì production chưa có khái niệm company để phân biệt ai được sửa/xoá
 -- ảnh của ai; nhân viên nội bộ vốn đã được app tin cậy ở tầng ứng dụng.
 --
+-- ⚠️ ĐIỀU KIỆN BẮT BUỘC TRƯỚC KHI CHẠY (kiểm chứng thực tế trên staging 2026-10-07, bucket thử
+-- tạm chỉ có insert/update/delete, KHÔNG có select — đúng trạng thái production sau migration này):
+--   • upload với upsert:false      → OK (200)
+--   • upload với upsert:true       → LỖI 403 "new row violates row-level security policy"
+--     (Supabase Storage cần quyền SELECT cho upsert, kể cả file mới)
+--   • LIST công khai               → bị chặn (trả mảng rỗng)
+--   • GET qua URL công khai        → vẫn OK (200)
+--   • DELETE                       → 403 (app không xóa file ảnh nên không ảnh hưởng)
+-- ⇒ PHẢI deploy bản code đã đổi 4 chỗ upload (dbService.ts) từ upsert:true sang upsert:false
+--   TRƯỚC khi chạy migration này, nếu không tải avatar/ảnh sản phẩm/ảnh báo giá/ảnh báo cáo
+--   công tác lên sẽ lỗi. Người đang mở app bản cũ cần tải lại trang (F5) sau khi deploy.
+--
 -- Chạy 1 lần trong Supabase Dashboard > SQL Editor (project PRODUCTION).
 -- Idempotent — chạy lại không lỗi.
 -- ============================================================================
