@@ -51,13 +51,21 @@ export default function SubscriptionPanel({ onChanged, onStatus }: { onChanged?:
     } catch (e: any) { setError(e.message); } finally { setBusyPlan(null); }
   };
 
-  const cancel = async (o: SubscriptionOrder) => {
-    if (!window.confirm(`Hủy đơn ${o.code}?`)) return;
+  // Hủy đơn: hỏi xác nhận bằng hộp thoại NGAY TRONG TRANG (không dùng window.confirm — trình duyệt nhúng/ứng dụng bọc web
+  // thường chặn hộp thoại gốc và trả về "không" ngay, khiến nút Hủy đơn bấm không có phản ứng gì).
+  const [cancelTarget, setCancelTarget] = useState<SubscriptionOrder | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancel = (o: SubscriptionOrder) => { setCancelError(null); setCancelTarget(o); };
+  const doCancel = async () => {
+    if (!cancelTarget || cancelBusy) return;
+    setCancelBusy(true); setCancelError(null);
     try {
-      await subscriptionCall('cancel', { id: o.id });
-      if (checkoutId === o.id) setCheckoutId(null);
+      await subscriptionCall('cancel', { id: cancelTarget.id });
+      if (checkoutId === cancelTarget.id) setCheckoutId(null);
+      setCancelTarget(null);
       await load(); onChanged?.();
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { setCancelError(e.message); } finally { setCancelBusy(false); }
   };
 
   const pending = useMemo(() => (st?.orders || []).filter(o => o.status === 'pending'), [st]);
@@ -117,6 +125,20 @@ export default function SubscriptionPanel({ onChanged, onStatus }: { onChanged?:
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {cancelTarget && (
+        <div className="fixed inset-0 z-[120] bg-slate-900/50 flex items-center justify-center p-4" role="alertdialog" aria-modal="true" aria-labelledby="cancel_title" id="cancel_dialog">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3">
+            <h3 id="cancel_title" className="font-black text-slate-900">Hủy đơn {cancelTarget.code}?</h3>
+            <p className="text-sm text-slate-600">Đơn gói <b>{cancelTarget.planName}</b> ({vnd(cancelTarget.amount)}) sẽ bị hủy. Nếu bạn đã chuyển khoản, vui lòng <b>không hủy</b> mà chờ quản trị xác nhận.</p>
+            {cancelError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm" role="alert"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {cancelError}</div>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setCancelTarget(null)} disabled={cancelBusy} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold">Giữ đơn</button>
+              <button type="button" onClick={doCancel} disabled={cancelBusy} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-[#ffffff] text-sm font-bold">{cancelBusy && <Loader2 className="w-4 h-4 animate-spin" />} Xác nhận hủy đơn</button>
+            </div>
+          </div>
         </div>
       )}
 

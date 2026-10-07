@@ -126,9 +126,44 @@ describe('trang gia hạn (doanh nghiệp hết hạn, token khóa)', () => {
     db.seed('subscription_orders', [{ id: 'o1', code: 'LOLOAAAA2222', company_id: 'c1', plan_id: 'co-ban', period: 'month', months: 1, amount: 300000, status: 'pending', created_at: new Date().toISOString() }]);
     render(<RenewalPage />);
     const don = await waitFor(() => { const d = document.getElementById('pending_orders'); if (!d) throw new Error('chưa có'); return d; });
+    // Hộp thoại gốc bị chặn (như trình duyệt nhúng): nút Hủy đơn vẫn phải hoạt động qua hộp thoại trong trang
+    (window.confirm as any).mockReturnValue(false);
     fireEvent.click(within(don).getByRole('button', { name: /Hủy đơn/ }));
+    const hop = await screen.findByRole('alertdialog');
+    // "Giữ đơn" không hủy
+    fireEvent.click(within(hop).getByRole('button', { name: 'Giữ đơn' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(db.table('subscription_orders')[0].status).toBe('pending');
+    fireEvent.click(within(don).getByRole('button', { name: /Hủy đơn/ }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Xác nhận hủy đơn' }));
     await waitFor(() => expect(db.table('subscription_orders')[0].status).toBe('cancelled'));
     await waitFor(() => expect(document.getElementById('pending_orders')).toBeNull());
+  });
+
+  it('hủy đơn ngay trong trang thanh toán: hộp xác nhận hiện trên trang thanh toán, hủy xong đóng cả hai', async () => {
+    tokenKhoa();
+    render(<RenewalPage />);
+    const panel = await waitFor(() => { const p = document.getElementById('subscription_panel'); if (!p) throw new Error('chưa có'); return p; });
+    const the = within(panel).getByText('Cơ bản').closest('div.flex-col') as HTMLElement;
+    fireEvent.click(within(the).getByRole('button', { name: /Chọn gói này/ }));
+    const tt = await waitFor(() => { const d = document.getElementById('checkout_modal'); if (!d) throw new Error('chưa mở'); return d; });
+    fireEvent.click(within(tt).getByRole('button', { name: /Hủy đơn này/ }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Xác nhận hủy đơn' }));
+    await waitFor(() => expect(db.table('subscription_orders')[0].status).toBe('cancelled'));
+    await waitFor(() => expect(document.getElementById('checkout_modal')).toBeNull());
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('hủy đơn lỗi (đơn đã được xử lý) → báo lỗi ngay trong hộp thoại, không im lặng', async () => {
+    tokenKhoa();
+    db.seed('subscription_orders', [{ id: 'o1', code: 'LOLOAAAA2222', company_id: 'c1', plan_id: 'co-ban', period: 'month', months: 1, amount: 300000, status: 'pending', created_at: new Date().toISOString() }]);
+    render(<RenewalPage />);
+    const don = await waitFor(() => { const d = document.getElementById('pending_orders'); if (!d) throw new Error('chưa có'); return d; });
+    fireEvent.click(within(don).getByRole('button', { name: /Hủy đơn/ }));
+    const hop = await screen.findByRole('alertdialog');
+    db.table('subscription_orders')[0].status = 'confirmed';   // quản trị vừa xác nhận xong
+    fireEvent.click(within(hop).getByRole('button', { name: 'Xác nhận hủy đơn' }));
+    expect(await within(hop).findByRole('alert')).toHaveTextContent(/Không tìm thấy đơn đang chờ/);
   });
 
   it('nhân viên thường (không phải admin): thấy tình trạng hạn dùng nhưng KHÔNG đặt mua được và KHÔNG thấy tài khoản ngân hàng', async () => {
