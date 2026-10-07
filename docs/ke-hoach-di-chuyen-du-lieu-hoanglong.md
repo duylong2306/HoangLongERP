@@ -49,7 +49,20 @@ Tôi sẽ viết `scripts/migrate-production-to-company.mjs` (tiếng Việt, c�
 4. **Nạp vào LoLo** (chỉ với `--ghi`; mặc định là chạy thử không ghi): xóa dữ liệu cũ **chỉ của công ty đích** (kiểu `where company_id = <đích>`), nạp theo thứ tự phụ thuộc, nhiều lượt, ghi nhật ký từng bảng.
 5. **Kiểm chứng tự động** (báo cáo đạt/không đạt, xem §5).
 
-**Diễn tập trước, nạp thật sau:** bản diễn tập nạp vào một công ty thử `hltest` (cùng cơ chế, không đụng `hoanglong`); anh dùng thử ERP ở `hltest.lolo.io.vn` rồi xóa bằng script dọn dẹp công ty test. Chỉ khi diễn tập đạt hết mới làm bản thật vào `hoanglong`.
+**Diễn tập trước, nạp thật sau — ĐIỀU CHỈNH sau khi viết script:** ban đầu dự định diễn tập vào công ty thử `hltest`, nhưng một số bảng của LoLo có khóa chính chỉ là `id` (toàn cục, ví dụ `hrm_travel_expenses`) nên nạp cùng id vào công ty thứ hai sẽ đụng với bản sao cũ của `hoanglong`. Vì bản `hoanglong` hiện trên LoLo chỉ là **bản sao thử nghiệm cũ** (không ai dùng thật), ta **diễn tập thẳng vào `hoanglong` trên LoLo**: script xóa bản sao cũ rồi nạp lại từ production; anh dùng thử ở `hoanglong.lolo.io.vn`. Production không bị đụng. Khi chuyển chính thức chỉ việc chạy lại đúng lệnh đó sau khi đóng băng ghi (nạp lại dữ liệu mới nhất).
+
+### Những điểm tương thích multi-tenant script đã xử lý (phát hiện khi viết script)
+
+1. **Bảng cấu hình "mỗi doanh nghiệp 1 dòng"** (`business_profile`, `shift_config`, `hrm_task_permissions`, `project_permissions`, `document_templates`): ở production `id` là chuỗi cố định (`current`, `global`…) nhưng ứng dụng multi-tenant đọc bằng `id = company_id`. Script **đổi `id` thành `company_id` đích**; nếu không, ERP sẽ không tìm thấy hồ sơ doanh nghiệp, cấu hình ca làm, phân quyền dự án, mẫu tài liệu của Hoàng Long.
+2. **Thứ tự nạp theo khóa ngoại:** PostgREST không báo các khóa ngoại ghép của LoLo, nên script đọc thêm từ các tệp migration (25 khóa ngoại) + khóa ngoại production.
+3. **Đọc bảng nặng:** một số bảng (ví dụ `payments`) có dòng chứa ảnh base64 làm đọc theo trang lớn bị quá giờ → script tự giảm cỡ trang, không sót dòng.
+4. **Địa chỉ ảnh** được viết lại ở mọi bảng, kể cả trong JSON lồng nhau và chuỗi JSON.
+
+### Kết quả chạy thử (không ghi) bằng dữ liệu thật — 7/10/2026
+
+Xuất 10.037 dòng (10.072 trừ 35 đăng ký thông báo đẩy bỏ qua), 55 bảng, **4.717 tệp được dữ liệu nhắc tới, 0 tệp thiếu, 0 địa chỉ không viết lại được, 0 cảnh báo**; Storage 5.293 tệp ~1,39 GB sẵn sàng chép. Chưa ghi gì lên LoLo.
+
+Lệnh: `node scripts/migrate-production-to-company.mjs --slug hoanglong` (chạy thử) · thêm `--ghi --xac-nhan-hoanglong` để ghi thật (có hỏi xác nhận bằng cách gõ lại câu `XOA-VA-NAP hoanglong`).
 
 ## 4. Quy trình chuyển chính thức (cửa sổ khoảng 1–3 giờ, nên làm buổi tối/cuối tuần)
 

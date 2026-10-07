@@ -28,6 +28,7 @@ class Query {
   private sel = false;
   private ord: { col: string; asc: boolean }[] = [];   // nhiều lần order() = sắp theo cột thứ nhất, hòa thì cột kế tiếp
   private lim = Infinity;
+  private off = 0;   // range(): bỏ qua `off` dòng đầu
   private single: 'maybe' | 'one' | null = null;
   private countMode = false;
   private headOnly = false;
@@ -47,6 +48,8 @@ class Query {
   in(c: string, vs: any[]) { this.filters.push(r => vs.includes(r[c])); return this; }
   order(c: string, o?: { ascending?: boolean }) { this.ord.push({ col: c, asc: o?.ascending !== false }); return this; }
   limit(n: number) { this.lim = n; return this; }
+  range(a: number, b: number) { this.off = a; this.lim = b - a + 1; return this; }
+  is(c: string, v: any) { this.filters.push(r => (v === null ? r[c] === null || r[c] === undefined : r[c] === v)); return this; }
   maybeSingle() { this.single = 'maybe'; return this; }
   // (single() như maybeSingle nhưng không có dòng → lỗi)
   singleRow() { this.single = 'one'; return this; }
@@ -75,7 +78,7 @@ class Query {
           return 0;
         });
       }
-      data = data.slice(0, this.lim);
+      data = data.slice(this.off, this.off + this.lim);
       if (this.single) return { data: data[0] ?? null, error: this.single === 'one' && !data[0] ? { message: 'no rows' } : null };
       return { data, error: null };
     };

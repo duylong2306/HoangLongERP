@@ -51,3 +51,6 @@ README_FIXES.md
 # thật đã lưu riêng ở supabase/migrations/.
 supabase/dump_schema.sql
 supabase/dump_data.sql
+
+# Bản xuất dữ liệu production để di chuyển (chứa dữ liệu thật, mật khẩu băm, ảnh) — KHÔNG commit
+migration-snapshot/
