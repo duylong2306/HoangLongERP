@@ -8,8 +8,9 @@
 // service_role đọc/ghi) — server tự xác minh quyền qua JWT rồi mới dùng
 // service role thay mặt.
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, Loader2, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
+import { Building2, Plus, Loader2, AlertCircle, CheckCircle2, Copy, ExternalLink } from 'lucide-react';
 import { getCurrentAccessToken } from '../lib/supabase';
+import { getTenantUrl } from '../lib/tenant';
 
 interface CompanyRow {
   id: string;
@@ -69,7 +70,12 @@ export default function CompanyManagement() {
     setIsSubmitting(true);
     try {
       await callAdminCompaniesApi('POST', { slug, name, adminUsername, adminPassword });
-      setSuccessMsg(`Đã tạo công ty "${name}" (mã: ${slug}). Tài khoản quản trị: ${adminUsername}.`);
+      // Địa chỉ riêng của công ty vừa tạo (null nếu chưa cấu hình tên miền gốc → chỉ nhắc mã công ty như trước)
+      const url = getTenantUrl(slug);
+      setSuccessMsg(
+        `Đã tạo công ty "${name}" (mã: ${slug}). Tài khoản quản trị: ${adminUsername}.` +
+        (url ? ` Địa chỉ riêng: ${url}` : '')
+      );
       setSlug(''); setName(''); setAdminUsername(''); setAdminPassword('');
       setShowForm(false);
       loadCompanies();
@@ -101,7 +107,8 @@ export default function CompanyManagement() {
 
       <p className="text-[11px] text-slate-400 leading-relaxed">
         Mỗi công ty dùng chung 1 hệ thống, dữ liệu tách biệt hoàn toàn theo <code className="text-slate-300">company_id</code>.
-        Người dùng đăng nhập bằng đúng "Mã công ty" (slug) ở màn hình đăng nhập để vào đúng dữ liệu công ty mình.
+        Mỗi công ty có <b>địa chỉ riêng</b> dạng <code className="text-slate-300">ma-cong-ty.&lt;tên-miền&gt;</code> — gửi đúng địa chỉ này cho công ty để họ đăng nhập
+        vào đúng dữ liệu của mình. Mã công ty chỉ gồm chữ thường không dấu, số, dấu gạch ngang (2–40 ký tự) và không trùng tên dành cho hệ thống (www, api, admin...).
       </p>
 
       {successMsg && (
@@ -120,7 +127,7 @@ export default function CompanyManagement() {
                 type="text"
                 value={slug}
                 onChange={(e) => setSlug(e.target.value.toLowerCase())}
-                placeholder="vd: congtyxyz"
+                placeholder="vd: congtyxyz (sẽ thành congtyxyz.<tên-miền>)"
                 className="w-full bg-slate-900 border border-slate-800 rounded p-2 px-3 text-xs text-slate-200 outline-none"
                 required
               />
@@ -197,6 +204,7 @@ export default function CompanyManagement() {
                 <tr className="text-left text-[10px] text-slate-500 uppercase border-b border-slate-800">
                   <th className="py-2 pr-3">Mã công ty</th>
                   <th className="py-2 pr-3">Tên công ty</th>
+                  <th className="py-2 pr-3">Địa chỉ riêng</th>
                   <th className="py-2 pr-3">Trạng thái</th>
                   <th className="py-2 pr-3">Ngày tạo</th>
                 </tr>
@@ -219,6 +227,30 @@ export default function CompanyManagement() {
                     </td>
                     <td className="py-2 pr-3 text-slate-300">{c.name}</td>
                     <td className="py-2 pr-3">
+                      {(() => {
+                        const url = getTenantUrl(c.slug);
+                        if (!url) return <span className="text-slate-500 italic" title="Chưa đặt VITE_BASE_DOMAIN">Chưa cấu hình tên miền</span>;
+                        return (
+                          <span className="inline-flex items-center gap-1.5 font-mono text-[11px]">
+                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all" title="Mở địa chỉ riêng của công ty">
+                              {url.replace(/^https?:\/\//, '')}
+                            </a>
+                            <a href={url} target="_blank" rel="noopener noreferrer" title="Mở trong tab mới" className="text-slate-500 hover:text-slate-300">
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                            <button
+                              type="button"
+                              title="Sao chép địa chỉ để gửi cho công ty"
+                              onClick={() => navigator.clipboard?.writeText(url).catch(() => {})}
+                              className="text-slate-500 hover:text-slate-300 cursor-pointer"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="py-2 pr-3">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${c.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700/30 text-slate-400'}`}>
                         {c.active ? 'Đang hoạt động' : 'Ngừng hoạt động'}
                       </span>
@@ -227,7 +259,7 @@ export default function CompanyManagement() {
                   </tr>
                 ))}
                 {companies.length === 0 && (
-                  <tr><td colSpan={4} className="py-4 text-center text-slate-500">Chưa có công ty nào.</td></tr>
+                  <tr><td colSpan={5} className="py-4 text-center text-slate-500">Chưa có công ty nào.</td></tr>
                 )}
               </tbody>
             </table>

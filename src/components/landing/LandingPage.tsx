@@ -4,7 +4,7 @@ import {
   Eye, EyeOff, ArrowRight, Loader2, ExternalLink,
 } from 'lucide-react';
 import { slugify } from '../../lib/slug';
-import { getBaseDomainForDisplay } from '../../lib/tenant';
+import { getBaseDomainForDisplay, getTenantUrl } from '../../lib/tenant';
 
 // TRANG GIỚI THIỆU + ĐĂNG KÝ DOANH NGHIỆP (Giai đoạn 2) — hiện ở địa chỉ gốc (www.lolo.io.vn), kiểu KiotViet:
 // khách nhập thông tin → hệ thống tạo doanh nghiệp + tài khoản quản trị và cấp địa chỉ riêng <tên>.lolo.io.vn.
@@ -12,7 +12,7 @@ import { getBaseDomainForDisplay } from '../../lib/tenant';
 // (!important) cho giao diện ERP nền sáng → chữ trắng trên nền xanh sẽ thành chữ tối, khó đọc.
 // Được main.tsx chọn khi tên miền là "root" (xem src/lib/tenant.ts); KHÔNG nạp ứng dụng ERP/Supabase ở trang này.
 
-const TURNSTILE_SITE_KEY = (import.meta as any).env?.VITE_TURNSTILE_SITE_KEY as string | undefined;
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 const FEATURES = [
   { icon: FolderKanban, title: 'Quản lý dự án', text: 'Theo dõi dự án, công việc, tiến độ và báo cáo công trình trên bảng Kanban.' },
@@ -28,10 +28,10 @@ type SlugState = { status: 'idle' | 'checking' | 'ok' | 'bad'; message?: string 
 
 declare global { interface Window { turnstile?: any } }
 
-// Địa chỉ đầy đủ của 1 doanh nghiệp: giữ giao thức + cổng hiện tại (dev: http://slug.localhost:5174).
+// Địa chỉ đầy đủ của 1 doanh nghiệp (dùng chung với màn quản trị — src/lib/tenant.ts). Landing chỉ chạy ở địa chỉ gốc nên
+// luôn có tên miền gốc; dự phòng ghép tay nếu thiếu cấu hình.
 function tenantUrl(slug: string): string {
-  const { protocol, port } = window.location;
-  return `${protocol}//${slug}.${getBaseDomainForDisplay()}${port ? ':' + port : ''}`;
+  return getTenantUrl(slug) ?? `${window.location.protocol}//${slug}.${getBaseDomainForDisplay()}`;
 }
 
 export default function LandingPage() {

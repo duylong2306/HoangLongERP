@@ -20,6 +20,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { createCompanyWithAdmin } from './_company.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
+import { slugProblem, SLUG_MESSAGES } from './_signup.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
 
 // Công ty gốc (seed ở migration 20260928_multi_tenant_company_id.sql) — đóng
 // vai "chủ nền tảng" duy nhất được quản lý danh sách công ty.
@@ -110,8 +111,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cleanAdminUsername = (adminUsername || '').trim().toLowerCase();
     const cleanAdminPassword = (adminPassword || '').trim();
 
-    if (!/^[a-z0-9-]{2,40}$/.test(cleanSlug)) {
-      res.status(400).json({ error: 'Mã công ty (slug) chỉ gồm chữ thường, số và dấu gạch ngang, 2-40 ký tự.' });
+    // Mã công ty giờ là SUBDOMAIN (<mã>.<tên-miền>) nên áp đúng quy tắc của đăng ký công khai: định dạng nhãn DNS
+    // (không bắt đầu/kết thúc bằng gạch ngang) và không trùng tên dành cho hệ thống (www, api, admin...).
+    const slugErr = slugProblem(cleanSlug);
+    if (slugErr) {
+      res.status(400).json({ error: SLUG_MESSAGES[slugErr] });
       return;
     }
     if (!cleanName) {

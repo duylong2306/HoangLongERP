@@ -87,3 +87,23 @@ describe('matchBaseDomain — để hiện hướng dẫn đúng tên miền g�
     expect(client.matchBaseDomain('example.com', b)).toBeNull();
   });
 });
+
+describe('buildTenantUrl — địa chỉ riêng của doanh nghiệp', () => {
+  const b = client.parseBaseDomains('lolo.io.vn');
+  it('đang ở tên miền gốc/subdomain: giữ giao thức + cổng hiện tại', () => {
+    expect(client.buildTenantUrl('abc', b, 'www.lolo.io.vn', 'https:', '')).toBe('https://abc.lolo.io.vn');
+    expect(client.buildTenantUrl('abc', b, 'hoanglong.lolo.io.vn', 'https:', '')).toBe('https://abc.lolo.io.vn');
+    expect(client.buildTenantUrl('abc', client.parseBaseDomains('localhost'), 'www.localhost', 'http:', '5174')).toBe('http://abc.localhost:5174');
+  });
+  it('đang ở địa chỉ khác (vercel.app): dùng tên miền gốc đầu tiên, https, không cổng', () => {
+    expect(client.buildTenantUrl('abc', b, 'hoanglong-erp-staging.vercel.app', 'https:', '')).toBe('https://abc.lolo.io.vn');
+    expect(client.buildTenantUrl('abc', client.parseBaseDomains('lolo.io.vn,stg.lolo.io.vn'), 'x.vercel.app', 'https:', '')).toBe('https://abc.lolo.io.vn');
+  });
+  it('nhiều tên miền gốc: khớp bản dài nhất', () => {
+    expect(client.buildTenantUrl('abc', client.parseBaseDomains('lolo.io.vn,stg.lolo.io.vn'), 'x.stg.lolo.io.vn', 'https:', '')).toBe('https://abc.stg.lolo.io.vn');
+  });
+  it('chưa cấu hình tên miền gốc hoặc thiếu mã → null', () => {
+    expect(client.buildTenantUrl('abc', [], 'x.vercel.app', 'https:', '')).toBeNull();
+    expect(client.buildTenantUrl('', b, 'x.vercel.app', 'https:', '')).toBeNull();
+  });
+});

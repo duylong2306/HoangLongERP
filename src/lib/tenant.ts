@@ -71,11 +71,22 @@ export function matchBaseDomain(hostname: string, baseDomains: string[]): string
   return sorted.find(b => host === b || host.endsWith('.' + b)) ?? null;
 }
 
+// Dựng địa chỉ riêng của 1 doanh nghiệp: <slug>.<tên-miền-gốc>. Hàm thuần để test được.
+//  - Đang ở chính tên miền gốc (hoặc subdomain của nó): dùng đúng giao thức + cổng hiện tại (dev: http://x.localhost:5174);
+//  - Đang ở địa chỉ khác (vercel.app...): dùng tên miền gốc ĐẦU TIÊN đã cấu hình, mặc định https, không cổng.
+// Không có tên miền gốc nào được cấu hình → null (chưa dùng subdomain).
+export function buildTenantUrl(slug: string, baseDomains: string[], hostname: string, protocol: string, port: string): string | null {
+  if (baseDomains.length === 0 || !slug) return null;
+  const matched = matchBaseDomain(hostname, baseDomains);
+  if (matched) return `${protocol}//${slug}.${matched}${port ? ':' + port : ''}`;
+  return `https://${slug}.${baseDomains[0]}`;
+}
+
 // Dùng ở trình duyệt: đọc cấu hình + địa chỉ hiện tại.
 export function getHostInfo(): HostInfo {
   let hostname = '';
   try { hostname = window.location.hostname; } catch { /* môi trường không có window (test/SSR) */ }
-  const raw = (import.meta as any).env?.VITE_BASE_DOMAIN as string | undefined;
+  const raw = import.meta.env.VITE_BASE_DOMAIN;
   return resolveHost(hostname, parseBaseDomains(raw));
 }
 
@@ -83,6 +94,14 @@ export function getHostInfo(): HostInfo {
 export function getBaseDomainForDisplay(): string {
   let hostname = '';
   try { hostname = window.location.hostname; } catch { /* không có window */ }
-  const raw = (import.meta as any).env?.VITE_BASE_DOMAIN as string | undefined;
+  const raw = import.meta.env.VITE_BASE_DOMAIN;
   return matchBaseDomain(hostname, parseBaseDomains(raw)) ?? hostname;
+}
+
+// Dùng ở trình duyệt: địa chỉ riêng của doanh nghiệp `slug` (null nếu chưa cấu hình VITE_BASE_DOMAIN).
+export function getTenantUrl(slug: string): string | null {
+  let loc = { hostname: '', protocol: 'https:', port: '' };
+  try { loc = window.location; } catch { /* không có window */ }
+  const raw = import.meta.env.VITE_BASE_DOMAIN;
+  return buildTenantUrl(slug, parseBaseDomains(raw), loc.hostname, loc.protocol, loc.port);
 }
