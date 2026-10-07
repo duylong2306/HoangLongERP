@@ -16,7 +16,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
-import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_USERNAME } from './_platformAuth.js';
+import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST } from './_platformAuth.js';
 import { getClientIp, hashIp, slugProblem, SLUG_MESSAGES } from './_signup.js';
 import { createCompanyWithAdmin } from './_company.js';
 import {
@@ -24,7 +24,9 @@ import {
 } from './_subscription.js';
 
 // Băm "giả" để thời gian phản hồi khi sai TÊN đăng nhập ≈ khi sai MẬT KHẨU (không lộ tài khoản nào tồn tại).
-const DUMMY_HASH = '$2a$10$CwTycUXWue0Thq9StjUM0uJ8e3fNzG7bQvT9nWZB4oKX5PzB3q1uO';
+// ⚠️ Phải CÙNG cost với hash thật (12 — xem scripts/create-platform-admin.mjs và PLATFORM_BCRYPT_COST), nếu lệch thì
+// thời gian phản hồi vẫn lộ tên nào có thật (đã đo: cost 10 ≈ 69ms vs cost 12 ≈ 276ms).
+const DUMMY_HASH = '$2b$12$AkoYIfsxx4z9bO39IRYgfOYUNUQQV.3XleyxoTbkpzFhuCPXJSL7i';
 
 const fail = (res: VercelResponse, status: number, error: string, extra: Record<string, unknown> = {}) => {
   res.status(status).json({ error, ...extra });
@@ -43,16 +45,19 @@ async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelRe
 
   const ipHash = hashIp(getClientIp(req), jwtSecret);
   const since = new Date(Date.now() - LOGIN_WINDOW_MS).toISOString();
-  const [byIp, byUser] = await Promise.all([
+  const [byIp, byUser, byPair] = await Promise.all([
     db.from('platform_login_attempts').select('id', { count: 'exact', head: true }).eq('ip_hash', ipHash).eq('success', false).gte('created_at', since),
     db.from('platform_login_attempts').select('id', { count: 'exact', head: true }).eq('username', username).eq('success', false).gte('created_at', since),
+    db.from('platform_login_attempts').select('id', { count: 'exact', head: true }).eq('ip_hash', ipHash).eq('username', username).eq('success', false).gte('created_at', since),
   ]);
-  if (byIp.error || byUser.error) {
+  if (byIp.error || byUser.error || byPair.error) {
     // Chưa chạy migration 20261011 → từ chối (KHÔNG bỏ qua giới hạn đăng nhập)
-    console.error('[api/platform] Lỗi bảng platform_login_attempts:', (byIp.error || byUser.error)?.message);
+    console.error('[api/platform] Lỗi bảng platform_login_attempts:', (byIp.error || byUser.error || byPair.error)?.message);
     return fail(res, 500, 'Hệ thống chưa sẵn sàng.');
   }
-  if ((byIp.count || 0) >= MAX_FAILS_PER_IP || (byUser.count || 0) >= MAX_FAILS_PER_USERNAME) {
+  // Khóa theo CẶP (IP + tên đăng nhập) là chính: kẻ ngoài gõ sai tên quản trị từ IP của họ chỉ khóa được CHÍNH IP đó,
+  // không khóa được quản trị thật đăng nhập từ IP khác. Ngưỡng theo tên (cao hơn nhiều) chỉ để chặn dò mật khẩu phân tán.
+  if ((byIp.count || 0) >= MAX_FAILS_PER_IP || (byPair.count || 0) >= MAX_FAILS_PER_PAIR || (byUser.count || 0) >= MAX_FAILS_PER_USERNAME) {
     return fail(res, 429, 'Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.');
   }
 
@@ -260,7 +265,7 @@ async function actionPasswordChange(db: SupabaseClient, res: VercelResponse, bod
   }
   const { data: admin } = await db.from('platform_admins').select('password_hash').eq('id', adminId).maybeSingle();
   if (!admin || !(await bcrypt.compare(current, admin.password_hash))) return fail(res, 400, 'Mật khẩu hiện tại không đúng.');
-  const { error } = await db.from('platform_admins').update({ password_hash: await bcrypt.hash(next, 10) }).eq('id', adminId);
+  const { error } = await db.from('platform_admins').update({ password_hash: await bcrypt.hash(next, PLATFORM_BCRYPT_COST) }).eq('id', adminId);
   if (error) return fail(res, 500, error.message);
   res.status(200).json({ ok: true });
 }

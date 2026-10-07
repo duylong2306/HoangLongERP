@@ -12,7 +12,9 @@ import { createHash } from 'crypto';
 export const PLATFORM_TOKEN_TTL_SECONDS = 12 * 60 * 60;   // phiên quản trị tối đa 12 giờ
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;            // cửa sổ đếm lượt đăng nhập sai
 export const MAX_FAILS_PER_IP = 10;
-export const MAX_FAILS_PER_USERNAME = 5;
+export const MAX_FAILS_PER_PAIR = 5;        // sai quá 5 lần với CÙNG (IP + tên đăng nhập) → khóa cặp đó
+export const MAX_FAILS_PER_USERNAME = 50;   // tổng lượt sai theo tên từ mọi IP (chặn dò phân tán; đủ cao để khó dùng làm DoS)
+export const PLATFORM_BCRYPT_COST = 12;     // cost bcrypt của mật khẩu quản trị (phải khớp DUMMY_HASH trong api/platform.ts)
 
 export function platformSecret(jwtSecret: string): string {
   return createHash('sha256').update(`${jwtSecret}|platform-admin`).digest('hex');

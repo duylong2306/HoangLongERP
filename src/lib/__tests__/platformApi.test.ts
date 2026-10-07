@@ -108,8 +108,19 @@ describe('đăng nhập', () => {
     expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(401);
   });
 
-  it('sai 5 lần theo tên đăng nhập → 429, kể cả khi sau đó nhập ĐÚNG mật khẩu', async () => {
+  it('sai 5 lần từ cùng 1 IP với cùng tên → 429, kể cả khi sau đó nhập ĐÚNG mật khẩu', async () => {
     for (let i = 0; i < 5; i++) expect((await call({ action: 'login', username: 'chu', password: 'sai' })).code).toBe(401);
+    expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(429);
+  });
+
+  it('kẻ ngoài gõ sai tên quản trị từ IP khác KHÔNG khóa được quản trị thật đăng nhập từ IP của họ', async () => {
+    // 5 lượt sai trước đó đến từ IP lạ (ip_hash khác) nhắm vào đúng tên 'chu'
+    db.seed('platform_login_attempts', Array.from({ length: 5 }, () => ({ ip_hash: 'ip-la', username: 'chu', success: false, created_at: new Date().toISOString() })));
+    expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(200);
+  });
+
+  it('dò phân tán: ≥50 lượt sai vào 1 tên từ nhiều IP → khóa theo tên', async () => {
+    db.seed('platform_login_attempts', Array.from({ length: 50 }, (_, i) => ({ ip_hash: `ip-${i}`, username: 'chu', success: false, created_at: new Date().toISOString() })));
     expect((await call({ action: 'login', username: 'chu', password: 'MatKhauTot123' })).code).toBe(429);
   });
 
