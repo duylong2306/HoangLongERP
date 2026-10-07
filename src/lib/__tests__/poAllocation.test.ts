@@ -23,14 +23,14 @@ describe('getPoPayableRemaining', () => {
 });
 
 describe('planPoAllocations', () => {
-  it('trừ đúng từng đơn, trả hết → completed, congNo = 0', () => {
+  it('trừ đúng từng đơn, trả hết → congNo = 0, trạng thái đơn giữ nguyên', () => {
     const { applied, updatedOrders } = planPoAllocations(
       [{ purchaseOrderId: 'A', amount: 10720000 }, { purchaseOrderId: 'B', amount: 5360000 }],
       [po('A', 10720000, 0, { status: 'confirmed' }), po('B', 5360000, 0, { status: 'confirmed' })],
       16080000
     );
     expect(applied).toEqual([{ purchaseOrderId: 'A', amount: 10720000 }, { purchaseOrderId: 'B', amount: 5360000 }]);
-    expect(updatedOrders.map(o => [o.thanhToanThucTe, o.congNo, o.status])).toEqual([[10720000, 0, 'completed'], [5360000, 0, 'completed']]);
+    expect(updatedOrders.map(o => [o.thanhToanThucTe, o.congNo, o.status])).toEqual([[10720000, 0, 'confirmed'], [5360000, 0, 'confirmed']]);
   });
 
   it('trả 1 phần → còn nợ, giữ nguyên trạng thái đơn', () => {
@@ -56,9 +56,9 @@ describe('planPoAllocations', () => {
 });
 
 describe('planPoRevert', () => {
-  it('xóa phiếu chi → hoàn lại đúng số đã trừ, đơn còn nợ hạ completed → confirmed', () => {
+  it('xóa phiếu chi → hoàn lại đúng số đã trừ, KHÔNG đổi trạng thái đơn (completed vẫn completed)', () => {
     const [o] = planPoRevert([{ purchaseOrderId: 'A', amount: 40 }], [po('A', 100, 100)]);
-    expect(o).toMatchObject({ thanhToanThucTe: 60, congNo: 40, status: 'confirmed' });
+    expect(o).toMatchObject({ thanhToanThucTe: 60, congNo: 40, status: 'completed' });
   });
   it('trừ rồi hoàn lại → về đúng số ban đầu', () => {
     const orig = po('A', 100, 0, { status: 'confirmed' });
@@ -83,7 +83,7 @@ describe('planPoAllocations — tự phân bổ phần dư', () => {
     const { applied, autoApplied, updatedOrders } = planPoAllocations([], pool(), 50, { pool: pool(), openingDebt: 0, priorPaid: 0 });
     expect(applied).toEqual([{ purchaseOrderId: 'OLD', amount: 30 }, { purchaseOrderId: 'NEW', amount: 20 }]);
     expect(autoApplied).toEqual(applied);
-    expect(updatedOrders.find(o => o.id === 'OLD')).toMatchObject({ thanhToanThucTe: 30, congNo: 0, status: 'completed' });
+    expect(updatedOrders.find(o => o.id === 'OLD')).toMatchObject({ thanhToanThucTe: 30, congNo: 0, status: 'confirmed' });
     expect(updatedOrders.find(o => o.id === 'NEW')).toMatchObject({ thanhToanThucTe: 20, congNo: 80, status: 'confirmed' });
   });
 
@@ -121,5 +121,17 @@ describe('planPoAllocations — tự phân bổ phần dư', () => {
     const { applied, updatedOrders } = planPoAllocations([], pool(), 50, { pool: pool(), openingDebt: 0, priorPaid: 0 });
     const back = planPoRevert(applied, updatedOrders);
     expect(back.map(o => [o.id, o.thanhToanThucTe, o.congNo]).sort()).toEqual([['NEW', 0, 100], ['OLD', 0, 30]]);
+  });
+});
+
+// Lỗi phát hiện khi test trên staging: đơn đã nhận hàng (status 'completed') còn nợ → trừ công nợ rồi xóa
+// phiếu chi đã bị hạ nhầm xuống 'confirmed'. 'completed' của đơn mua = đã nhận hàng, không phải đã trả tiền.
+describe('trạng thái đơn không bị đổi bởi trừ/hoàn công nợ', () => {
+  it("đơn 'completed' còn nợ: trừ rồi hoàn lại vẫn 'completed'", () => {
+    const orig = po('A', 100, 0); // status mặc định 'completed'
+    const { applied, updatedOrders } = planPoAllocations([{ purchaseOrderId: 'A', amount: 100 }], [orig], 100);
+    expect(updatedOrders[0].status).toBe('completed');
+    const [back] = planPoRevert(applied, updatedOrders);
+    expect(back).toMatchObject({ status: 'completed', thanhToanThucTe: 0, congNo: 100 });
   });
 });
