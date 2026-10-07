@@ -1,5 +1,5 @@
 import { Conversation, ChatMessage, ChatAttachment } from '../types';
-import { getSupabase, getCurrentCompanyId } from './supabase';
+import { getSupabase, getCurrentCompanyId, getCurrentAccessToken } from './supabase';
 import { buildPushUrl } from './pushDeepLink';
 
 // =====================================================================
@@ -607,12 +607,17 @@ async function notifyChatPush(msg: ChatMessage, conv?: Conversation): Promise<vo
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
     if (!supabaseUrl || !supabaseAnonKey) return;
+    // Đa doanh nghiệp: gửi TOKEN ĐĂNG NHẬP (không phải khóa anon công khai) để hàm send-push biết người gửi thuộc công ty nào và
+    // CHỈ gửi cho thiết bị của đúng công ty đó. Chưa đăng nhập thì không gửi.
+    const accessToken = getCurrentAccessToken();
+    if (!accessToken) return;
 
     const res = await fetch(`${supabaseUrl}/functions/v1/send-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${supabaseAnonKey}`,
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         userIds: recipientIds,
