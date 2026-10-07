@@ -385,4 +385,25 @@ describe('migrate — luồng đầy đủ', () => {
     expect(rows).toHaveLength(122);
     expect(new Set(rows.map((r: any) => r.id)).size).toBe(122);
   });
+
+  it('bảng BỊ BỎ QUA khi chép (push_subscriptions → employees) vẫn được dọn khi xóa dữ liệu cũ, nếu không sẽ chặn xóa bảng cha', async () => {
+    const t = '2026-01-01T00:00:00+00:00';
+    loloDb.seed('push_subscriptions', [{ id: 'ps1', endpoint: 'cu', created_at: t, company_id: CID }, { id: 'ps2', endpoint: 'cua-cong-ty-khac', created_at: t, company_id: OTHER }]);
+    const { ctx } = mkCtx({ ghi: true });
+    const base = loloDb.client();
+    // Giả lập khóa ngoại thật: xóa employees của công ty đích khi push_subscriptions của công ty đó còn → lỗi 23503
+    ctx.lolo = { ...base, from: (tb: string) => { const q: any = base.from(tb); if (tb === 'employees') { const del = q.delete.bind(q); q.delete = () => { const d: any = del(); const eq = d.eq.bind(d);
+      d.eq = (c: string, v: string) => (loloDb.table('push_subscriptions').some(r => r.company_id === v) ? { then: (res: any) => Promise.resolve({ data: null, error: { code: '23503', message: 'fk push_subscriptions_user_id_fkey' } }).then(res) } : eq(c, v)); return d; }; } return q; } };
+    const r = await migrate(ctx);
+    expect(r.dat).toBe(true);
+    expect(loloDb.table('push_subscriptions').filter(x => x.company_id === CID)).toEqual([]);          // đã dọn, không nạp lại
+    expect(loloDb.table('push_subscriptions').filter(x => x.company_id === OTHER)).toHaveLength(1);    // công ty khác y nguyên
+  });
+
+  it('không xóa sạch được thì thông báo RÕ bảng nào còn vướng và vì sao', async () => {
+    const { ctx } = mkCtx({ ghi: true });
+    const base = loloDb.client();
+    ctx.lolo = { ...base, from: (tb: string) => { const q: any = base.from(tb); if (tb === 'employees') { const del = q.delete.bind(q); q.delete = () => { const d: any = del(); d.eq = () => ({ then: (res: any) => Promise.resolve({ data: null, error: { code: '23503', message: 'bang_la_con_tro_toi_employees' } }).then(res) }); return d; }; } return q; } };
+    await expect(migrate(ctx)).rejects.toThrow(/Bảng còn vướng: employees \(bang_la_con_tro_toi_employees\)/);
+  });
 });

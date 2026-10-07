@@ -253,18 +253,22 @@ export async function migrate(ctx) {
   }
 
   // 5b. Xóa dữ liệu CŨ của công ty đích (chỉ company_id = đích; con trước cha sau; nhiều lượt)
-  const del = [...order].reverse();
+  // QUAN TRỌNG: xóa CẢ các bảng bị bỏ qua khi chép (vd push_subscriptions → tham chiếu employees). Nếu chỉ xóa bảng được chép thì dòng cũ
+  // của bảng bỏ qua còn sót sẽ chặn việc xóa bảng cha. Các bảng bỏ qua không được nạp lại (đăng ký đẩy cũ vô dụng ở địa chỉ mới).
+  const skippedPresent = prodTables.filter(t => skipTables.has(t));
+  const del = [...skippedPresent, ...[...order].reverse()];
+  let lastErr = {};
   for (let pass = 1; ; pass++) {
-    let remaining = 0;
+    let remaining = 0; lastErr = {};
     for (const t of del) {
       const { error } = await lolo.from(t).delete().eq('company_id', target.id);
       if (error) {
         if (error.code !== '23503') fail(`Không xóa được dữ liệu cũ bảng ${t}: ${error.message}`);
-        remaining++;
+        remaining++; lastErr[t] = error.message;
       }
     }
     if (remaining === 0) break;
-    if (pass >= 10) fail('Không xóa sạch dữ liệu cũ của công ty đích sau 10 lượt (vướng khóa ngoại).');
+    if (pass >= 10) fail(`Không xóa sạch dữ liệu cũ của công ty đích sau 10 lượt (vướng khóa ngoại). Bảng còn vướng: ${Object.entries(lastErr).map(([t, m]) => `${t} (${m.slice(0, 120)})`).join('; ')}`);
   }
 
   // 5c. Nạp theo thứ tự cha → con; lô nào lỗi thì tách từng dòng; dòng vướng khóa ngoại thử lại ở lượt sau
