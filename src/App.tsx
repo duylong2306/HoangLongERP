@@ -113,6 +113,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
 import SubscriptionBanner from './components/subscription/SubscriptionBanner';
+import PushPermissionBanner from './components/PushPermissionBanner';
 import {
   parsePushData,
   readDeepLinkFromLocation,
@@ -3932,6 +3933,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         {/* THANH HẠN DÙNG (gói/dùng thử): ngày hết hạn + nút mua/gia hạn. Chỉ khi đã đăng nhập vào 1 doanh nghiệp (có company_id);
             doanh nghiệp không giới hạn thì thanh tự ẩn. Xem src/components/subscription/SubscriptionBanner.tsx */}
         {currentUser && getCurrentCompanyId() && <SubscriptionBanner />}
+
+        {/* THANH NHẮC BẬT THÔNG BÁO TRÌNH DUYỆT: chỉ hiện khi thiết bị này chưa cấp quyền (xem PushPermissionBanner.tsx) */}
+        {currentUser && <PushPermissionBanner userId={currentUser.id} />}
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
         <main

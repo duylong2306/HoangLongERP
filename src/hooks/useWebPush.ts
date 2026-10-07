@@ -23,7 +23,8 @@ function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
 
 // ─── Core subscribe/unsubscribe ─────────────────────────────────────────────
 
-async function subscribeToPush(userId: string): Promise<void> {
+// Xuất ra để thanh nhắc bật thông báo (PushPermissionBanner) gọi lại ngay sau khi người dùng bấm nút cấp quyền.
+export async function subscribeToPush(userId: string): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) return;
 
