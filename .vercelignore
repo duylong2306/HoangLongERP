@@ -1,0 +1,13 @@
+# Các tệp KHÔNG được tải lên Vercel khi chạy `vercel deploy` (npm run deploy:staging).
+# Lý do: lệnh này đóng gói đúng những tệp có trong thư mục (không theo .gitignore). Trước đây tệp .env (chứa khóa riêng VAPID, khóa Gemini
+# và cả khóa production) bị tải lên cùng mã nguồn. Cấu hình thật của ứng dụng nằm ở Vercel → Settings → Environment Variables.
+.env
+.env.*
+!.env.example
+!.env.staging.example
+
+# Bản xuất dữ liệu production phục vụ di chuyển (chứa dữ liệu thật, mật khẩu băm) — tuyệt đối không tải lên
+migration-snapshot/
+
+# Tệp tạm khi kiểm tra
+.diag-tmp.mjs
