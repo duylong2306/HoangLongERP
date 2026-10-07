@@ -18,7 +18,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { bearerToken } from './_platformAuth.js'; // ⚠️ bắt buộc đuôi .js (Node ESM — xem api/login.ts)
-import { getSubscriptionState, orderAmount, makeOrderCode, readBank, DEFAULT_BANK } from './_subscription.js';
+import { getSubscriptionState, orderAmount, makeOrderCode, readBank, readTrial, DEFAULT_BANK } from './_subscription.js';
 
 const MAX_PENDING_ORDERS = 3;   // mỗi công ty tối đa 3 đơn chờ xác nhận cùng lúc (chống tạo đơn rác)
 
@@ -145,7 +145,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body || {}) as any;
   const action = String(body.action || '');
 
-  if (action === 'plans') return void res.status(200).json({ plans: await listPlans(db) });
+  if (action === 'plans') {
+    // Kèm số ngày dùng thử để trang giới thiệu hiện đúng "Dùng thử N ngày" theo cấu hình ở trang quản trị.
+    const { data: trialRow } = await db.from('platform_settings').select('value').eq('key', 'trial').maybeSingle();
+    return void res.status(200).json({ plans: await listPlans(db), trialDays: readTrial(trialRow?.value).days });
+  }
 
   const auth = await authenticate(req, db, jwtSecret);
   if (!auth) return fail(res, 401, 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.');

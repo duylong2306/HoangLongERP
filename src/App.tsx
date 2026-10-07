@@ -112,6 +112,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
+import SubscriptionBanner from './components/subscription/SubscriptionBanner';
 import {
   parsePushData,
   readDeepLinkFromLocation,
@@ -3927,6 +3928,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
           </div>
         </header>
+
+        {/* THANH HẠN DÙNG (gói/dùng thử): ngày hết hạn + nút mua/gia hạn. Chỉ khi đã đăng nhập vào 1 doanh nghiệp (có company_id);
+            doanh nghiệp không giới hạn thì thanh tự ẩn. Xem src/components/subscription/SubscriptionBanner.tsx */}
+        {currentUser && getCurrentCompanyId() && <SubscriptionBanner />}
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
         <main

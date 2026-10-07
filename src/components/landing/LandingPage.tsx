@@ -23,6 +23,9 @@ const FEATURES = [
   { icon: Building2, title: 'Mỗi doanh nghiệp một địa chỉ riêng', text: 'Dữ liệu tách biệt hoàn toàn, truy cập qua địa chỉ riêng của doanh nghiệp bạn.' },
 ];
 
+interface PublicPlan { id: string; name: string; description: string; priceMonthly: number; priceYearly: number; maxEmployees: number | null }
+const vnd = (n: number) => `${new Intl.NumberFormat('vi-VN').format(Math.round(n))} đ`;
+
 interface FieldErrors { [k: string]: string | undefined }
 type SlugState = { status: 'idle' | 'checking' | 'ok' | 'bad'; message?: string };
 
@@ -52,7 +55,17 @@ export default function LandingPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [slugState, setSlugState] = useState<SlugState>({ status: 'idle' });
-  const [done, setDone] = useState<{ slug: string; name: string; username: string } | null>(null);
+  const [done, setDone] = useState<{ slug: string; name: string; username: string; trialEndsAt: string | null } | null>(null);
+  // Bảng giá + số ngày dùng thử: lấy từ api/subscription (cấu hình ở trang quản trị). Lỗi → ẩn bảng giá, dùng mặc định 7 ngày.
+  const [plans, setPlans] = useState<PublicPlan[]>([]);
+  const [trialDays, setTrialDays] = useState(7);
+
+  useEffect(() => {
+    fetch('/api/subscription', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'plans' }) })
+      .then(r => (r.ok ? r.json() : null))
+      .then(b => { if (b) { setPlans(b.plans || []); if (Number.isInteger(b.trialDays)) setTrialDays(b.trialDays); } })
+      .catch(() => { /* không có bảng giá thì thôi */ });
+  }, []);
 
   // ── "Vào doanh nghiệp của tôi" ──
   const [goSlug, setGoSlug] = useState('');
@@ -128,7 +141,7 @@ export default function LandingPage() {
       });
       const b = await r.json().catch(() => ({}));
       if (r.status === 201) {
-        setDone({ slug: b.company.slug, name: b.company.name, username: b.adminUsername || 'admin' });
+        setDone({ slug: b.company.slug, name: b.company.name, username: b.adminUsername || 'admin', trialEndsAt: b.trial?.endsAt ?? null });
         return;
       }
       if (b?.errors) setErrors(b.errors);
@@ -172,10 +185,10 @@ export default function LandingPage() {
           <h1 className="text-3xl sm:text-5xl font-black leading-tight">Quản trị doanh nghiệp<br className="hidden sm:block" /> trên một nền tảng</h1>
           <p className="mt-4 text-blue-100 text-base sm:text-lg max-w-2xl mx-auto">
             Dự án, nhân sự, kế toán, kho vật tư và thầu phụ trong cùng một hệ thống. Đăng ký trong vài phút,
-            nhận ngay địa chỉ riêng cho doanh nghiệp của bạn.
+            nhận ngay địa chỉ riêng cho doanh nghiệp của bạn và <b>dùng thử miễn phí {trialDays} ngày</b>.
           </p>
           <a href="#dang-ky" className="inline-flex items-center gap-2 mt-8 bg-white text-blue-700 font-bold px-6 py-3 rounded-lg shadow hover:bg-blue-50">
-            Đăng ký miễn phí <ArrowRight className="w-4 h-4" />
+            Dùng thử {trialDays} ngày <ArrowRight className="w-4 h-4" />
           </a>
         </div>
       </section>
@@ -194,6 +207,29 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Bảng giá — chỉ hiện khi quản trị đã mở bán ít nhất 1 gói */}
+      {plans.length > 0 && (
+        <section id="bang-gia" className="bg-white border-y border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 text-center">Bảng giá</h2>
+            <p className="text-center text-sm text-slate-600 mt-1">Dùng thử miễn phí {trialDays} ngày, sau đó chọn gói phù hợp. Thanh toán theo tháng hoặc theo năm.</p>
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {plans.map(p => (
+                <div key={p.id} className="border border-slate-200 rounded-xl p-5 flex flex-col">
+                  <h3 className="font-black text-slate-900 text-lg">{p.name}</h3>
+                  {p.description && <p className="text-sm text-slate-500 mt-1">{p.description}</p>}
+                  <div className="mt-4 space-y-1">
+                    {p.priceMonthly > 0 && <div><span className="text-2xl font-black text-slate-900 font-mono">{vnd(p.priceMonthly)}</span> <span className="text-sm text-slate-500">/ tháng</span></div>}
+                    {p.priceYearly > 0 && <div className="text-sm text-slate-600"><b className="font-mono">{vnd(p.priceYearly)}</b> / năm{p.priceMonthly > 0 && p.priceYearly < p.priceMonthly * 12 ? <span className="ml-1 text-emerald-700 font-bold">(tiết kiệm {vnd(p.priceMonthly * 12 - p.priceYearly)})</span> : null}</div>}
+                  </div>
+                  <div className="mt-3 text-sm text-slate-700 inline-flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> {p.maxEmployees === null ? 'Không giới hạn nhân viên' : `Tối đa ${p.maxEmployees} nhân viên`}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Đăng ký */}
       <section id="dang-ky" className="bg-white border-y border-slate-200">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-12">
@@ -208,6 +244,12 @@ export default function LandingPage() {
               <p className="text-sm text-slate-600">
                 Đăng nhập bằng tên đăng nhập <b className="font-mono">{done.username}</b> và mật khẩu bạn vừa đặt. Hãy lưu lại địa chỉ này.
               </p>
+              {done.trialEndsAt && (
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" id="register_trial_note">
+                  Bạn đang <b>dùng thử miễn phí</b> đến hết ngày <b>{new Date(done.trialEndsAt).toLocaleDateString('vi-VN')}</b>. Sau ngày này hãy chọn gói để tiếp tục sử dụng
+                  (dữ liệu của bạn được giữ nguyên).
+                </p>
+              )}
               <a href={tenantUrl(done.slug)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-[#ffffff] font-bold px-6 py-3 rounded-lg">
                 Vào hệ thống <ExternalLink className="w-4 h-4" />
               </a>
@@ -215,7 +257,7 @@ export default function LandingPage() {
           ) : (
             <>
               <h2 className="text-xl sm:text-2xl font-black text-slate-900 text-center">Đăng ký doanh nghiệp</h2>
-              <p className="text-center text-sm text-slate-600 mt-1">Miễn phí. Tài khoản quản trị được tạo ngay sau khi đăng ký.</p>
+              <p className="text-center text-sm text-slate-600 mt-1">Dùng thử miễn phí {trialDays} ngày, không cần thanh toán trước. Tài khoản quản trị được tạo ngay sau khi đăng ký.</p>
 
               <form onSubmit={handleSubmit} className="mt-8 space-y-4" id="register_form" noValidate>
                 <div>

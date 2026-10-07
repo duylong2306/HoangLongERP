@@ -62,6 +62,26 @@ export function getCurrentAccessToken(): string | null {
 }
 
 /**
+ * Các claim (payload) của JWT đang lưu — để app biết TRƯỚC khi nạp dữ liệu: token đã hết hạn chưa, có phải token KHÓA
+ * (locked_company_id: doanh nghiệp hết hạn gói → chỉ được vào trang gia hạn, xem api/login.ts) hay token thường.
+ * Không xác minh chữ ký (việc đó do máy chủ làm); null nếu không có/hỏng token.
+ */
+export function getStoredTokenClaims(): Record<string, any> | null {
+  const token = readStoredAccessToken();
+  return token ? decodeJwtPayload(token) : null;
+}
+
+/** Xóa JWT + phiên ERP đang lưu (hết hạn gói/hết hạn token/đăng xuất) — lần mở trang kế tiếp sẽ hiện màn đăng nhập. */
+export function clearStoredSession(): void {
+  try {
+    sessionStorage.removeItem(JWT_STORAGE_KEY);
+    localStorage.removeItem(JWT_STORAGE_KEY);
+    sessionStorage.removeItem('hl_erp_active_session');
+    localStorage.removeItem('hl_erp_active_session');
+  } catch { /* bỏ qua */ }
+}
+
+/**
  * Giai đoạn 6 (multi-tenant): gắn thêm company_id vào tên key localStorage
  * cho các key LƯU DỮ LIỆU NGHIỆP VỤ (khách hàng, dự án, hoá đơn, cấu hình
  * công ty...). Trước Phase 7 (routing theo subdomain), nhiều công ty vẫn có

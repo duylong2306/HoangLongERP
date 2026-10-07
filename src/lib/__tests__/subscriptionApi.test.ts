@@ -111,6 +111,9 @@ describe('api/subscription — plans (công khai)', () => {
     expect(r.code).toBe(200);
     expect(r.body.plans.map((p: any) => p.id)).toEqual(['co-ban', 'pro']);     // 'an' (tắt) và 'chua-gia' (giá 0) bị ẩn
     expect(r.body.plans[0]).toEqual({ id: 'co-ban', name: 'Cơ bản', description: 'Nhỏ', priceMonthly: 300000, priceYearly: 3000000, maxEmployees: 10 });
+    expect(r.body.trialDays).toBe(7);                                    // mặc định khi chưa cấu hình
+    db.seed('platform_settings', [{ key: 'trial', value: { days: 14, maxEmployees: null } }]);
+    expect((await goi({ action: 'plans' })).body.trialDays).toBe(14);   // theo cấu hình ở trang quản trị
   });
 });
 
