@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, Check, X, BellRing } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, AlertCircle, CheckCircle2, Check, X, BellRing, Search } from 'lucide-react';
 import { platformCall } from './platformApi';
 import ConfirmDialog from './ConfirmDialog';
 import { formatVnd, formatDate, formatDateTime, PERIOD_LABEL, ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from './format';
@@ -15,6 +15,20 @@ interface Order {
 }
 
 const btn = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors';
+const input = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
+
+// Chuẩn hóa để tìm KHÔNG phân biệt hoa/thường và KHÔNG cần gõ dấu tiếng Việt ("dai phat" tìm được "Đại Phát").
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+
+// Một đơn khớp khi MỌI từ khóa (cách nhau bởi khoảng trắng) đều xuất hiện ở đâu đó trong: mã chuyển khoản, tên/mã doanh nghiệp,
+// tên gói, kỳ hạn, trạng thái, ghi chú, hoặc số tiền (gõ "500000" hoặc "500.000" đều được).
+export function orderMatches(o: Pick<Order, 'code' | 'companyName' | 'companySlug' | 'planName' | 'period' | 'status' | 'note' | 'amount'>, query: string): boolean {
+  const terms = fold(query).split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const hay = fold([o.code, o.companyName, o.companySlug, o.planName, PERIOD_LABEL[o.period] || o.period, ORDER_STATUS_LABEL[o.status] || o.status, o.note || ''].join(' '));
+  const amountDigits = String(Math.round(o.amount));
+  return terms.every(t => hay.includes(t) || (/^[\d.,]+$/.test(t) && amountDigits.includes(t.replace(/[.,]/g, ''))));
+}
 
 export default function OrdersTab() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -22,18 +36,24 @@ export default function OrdersTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  // Đang tìm kiếm → tìm trong TẤT CẢ đơn (kể cả đã kích hoạt/đã hủy), không chỉ đơn đang chờ; xóa từ khóa thì quay về bộ lọc cũ.
+  const searching = search.trim().length > 0;
+  const loadAll = filter === 'all' || searching;
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(null);
     try {
-      const list = (await platformCall<{ orders: Order[] }>('orders.list', filter === 'pending' ? { status: 'pending' } : {})).orders;
+      const list = (await platformCall<{ orders: Order[] }>('orders.list', loadAll ? {} : { status: 'pending' })).orders;
       // Đơn khách đã báo chuyển khoản lên đầu (cần duyệt gấp), trong nhóm xếp theo thời điểm báo/đặt mới nhất trước.
       const key = (o: Order) => (o.status === 'pending' && o.paidClaimedAt ? 1 : 0);
       setOrders([...list].sort((a, b) => key(b) - key(a) || (b.paidClaimedAt || b.createdAt).localeCompare(a.paidClaimedAt || a.createdAt)));
     }
     catch (e: any) { setLoadError(e.message); } finally { setLoading(false); }
-  }, [filter]);
+  }, [loadAll]);
   useEffect(() => { load(); }, [load]);
+
+  const shown = useMemo(() => orders.filter(o => orderMatches(o, search)), [orders, search]);
 
   // Xác nhận / hủy đơn: bấm nút chỉ MỞ HỘP XÁC NHẬN trong trang (ConfirmDialog, không dùng window.confirm/prompt vì trình duyệt
   // nhúng có thể chặn hoặc tự đồng ý không hiện gì — nguy hiểm với thao tác kích hoạt gói có tiền). Chỉ khi bấm nút trong hộp mới gọi máy chủ.
@@ -69,9 +89,15 @@ export default function OrdersTab() {
           <h2 className="text-lg font-black text-slate-900">Đơn đăng ký gói</h2>
           <p className="text-xs text-slate-500">Đối chiếu tiền về theo <b>mã chuyển khoản</b> rồi bấm "Xác nhận" để kích hoạt/gia hạn.</p>
         </div>
+        <div className="relative flex-1 min-w-[220px] max-w-md order-last sm:order-none">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" aria-hidden />
+          <label htmlFor="od_tim_kiem" className="sr-only">Tìm đơn</label>
+          <input id="od_tim_kiem" type="search" className={`${input} pl-9 pr-8`} placeholder="Tìm mã đơn, doanh nghiệp, gói, số tiền..." value={search} onChange={e => setSearch(e.target.value)} autoComplete="off" />
+          {search && <button type="button" onClick={() => setSearch('')} aria-label="Xóa từ khóa tìm kiếm" className="absolute right-2 top-2 text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>}
+        </div>
         <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold" role="tablist">
           {(['pending', 'all'] as const).map(k => (
-            <button key={k} onClick={() => setFilter(k)} className={`px-3 py-1.5 ${filter === k ? 'bg-blue-600 text-[#ffffff]' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{k === 'pending' ? 'Chờ xác nhận' : 'Tất cả'}</button>
+            <button key={k} onClick={() => setFilter(k)} className={`px-3 py-1.5 ${filter === k && !searching ? 'bg-blue-600 text-[#ffffff]' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{k === 'pending' ? 'Chờ xác nhận' : 'Tất cả'}</button>
           ))}
         </div>
       </div>
@@ -85,6 +111,8 @@ export default function OrdersTab() {
       {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>}
       {loadError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2.5 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {loadError}</div>}
 
+      {searching && !loading && !loadError && <p className="text-xs text-slate-500" role="status" id="od_ket_qua_tim">Tìm thấy <b>{shown.length}</b> / {orders.length} đơn (tìm trong tất cả trạng thái).</p>}
+
       {!loading && !loadError && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm" id="orders_table">
@@ -95,7 +123,7 @@ export default function OrdersTab() {
               </tr>
             </thead>
             <tbody>
-              {orders.map(o => (
+              {shown.map(o => (
                 <tr key={o.id} className={`border-b border-slate-100 last:border-0 align-top ${o.status === 'pending' && o.paidClaimedAt ? 'bg-amber-50/60' : ''}`}>
                   <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{o.code}</td>
                   <td className="py-2.5 px-3"><div className="font-semibold text-slate-800">{o.companyName}</div><div className="font-mono text-xs text-slate-500">{o.companySlug}</div></td>
@@ -118,7 +146,7 @@ export default function OrdersTab() {
                   </td>
                 </tr>
               ))}
-              {orders.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">{filter === 'pending' ? 'Không có đơn nào đang chờ xác nhận.' : 'Chưa có đơn nào.'}</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">{searching ? `Không tìm thấy đơn nào khớp "${search.trim()}".` : filter === 'pending' ? 'Không có đơn nào đang chờ xác nhận.' : 'Chưa có đơn nào.'}</td></tr>}
             </tbody>
           </table>
         </div>

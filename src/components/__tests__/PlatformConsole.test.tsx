@@ -256,6 +256,57 @@ describe('tab Đơn đăng ký', () => {
     expect(await screen.findByText('Không có đơn nào đang chờ xác nhận.')).toBeTruthy();
   });
 
+  describe('tìm kiếm nhanh', () => {
+    const moTab = async () => {
+      db.seed('subscription_orders', [
+        { id: 'o2', code: 'LOLOBBBB3333', company_id: 'c2', plan_id: 'pro', period: 'month', months: 1, amount: 900000, status: 'confirmed', created_at: '2026-09-01T01:00:00Z', note: '' },
+        { id: 'o3', code: 'LOLOCCCC4444', company_id: 'c1', plan_id: 'co-ban', period: 'month', months: 1, amount: 500000, status: 'cancelled', created_at: '2026-08-01T01:00:00Z', note: 'Khách không chuyển tiền' },
+      ]);
+      const u = await dangNhap();
+      await u.click(screen.getByRole('button', { name: /Đơn đăng ký/ }));
+      await screen.findByText('LOLOAAAA2222');
+      return u;
+    };
+    const tim = (v: string) => fireEvent.change(screen.getByLabelText('Tìm đơn'), { target: { value: v } });
+    const maDon = () => within(document.getElementById('orders_table')!).queryAllByText(/^LOLO[A-Z0-9]{8}$/).map(e => e.textContent);
+
+    it('mặc định chỉ hiện đơn chờ; gõ từ khóa thì tìm trong TẤT CẢ đơn (kể cả đã kích hoạt / đã hủy)', async () => {
+      await moTab();
+      expect(maDon()).toEqual(['LOLOAAAA2222']);
+      tim('lolo');
+      await waitFor(() => expect(maDon().sort()).toEqual(['LOLOAAAA2222', 'LOLOBBBB3333', 'LOLOCCCC4444']));
+      expect(await screen.findByText(/Tìm thấy/)).toHaveTextContent('Tìm thấy 3 / 3 đơn');
+    });
+
+    it('tìm theo mã đơn (không phân biệt hoa/thường), tên doanh nghiệp KHÔNG cần gõ dấu, số tiền, tên gói, ghi chú', async () => {
+      await moTab();
+      tim('lolobbbb3333'); await waitFor(() => expect(maDon()).toEqual(['LOLOBBBB3333']));
+      tim('dung thu'); await waitFor(() => expect(maDon()).toEqual(['LOLOBBBB3333']));          // "Công ty Dùng Thử" gõ không dấu
+      tim('het han'); await waitFor(() => expect(maDon()).toEqual(['LOLOAAAA2222']));            // "Công ty Hết Hạn"
+      tim('3000000'); await waitFor(() => expect(maDon()).toEqual(['LOLOAAAA2222']));            // số tiền
+      tim('3.000.000'); await waitFor(() => expect(maDon()).toEqual(['LOLOAAAA2222']));          // số tiền có dấu chấm
+      tim('chuyen nghiep'); await waitFor(() => expect(maDon()).toEqual(['LOLOBBBB3333']));      // tên gói
+      tim('khong chuyen tien'); await waitFor(() => expect(maDon()).toEqual(['LOLOCCCC4444']));  // ghi chú
+      tim('da kich hoat'); await waitFor(() => expect(maDon()).toEqual(['LOLOBBBB3333']));       // trạng thái "Đã kích hoạt"
+    });
+
+    it('nhiều từ khóa phải khớp đồng thời; không khớp → báo rõ; xóa từ khóa → về danh sách đơn chờ', async () => {
+      await moTab();
+      tim('hoang long 500000'); await waitFor(() => expect(maDon()).toEqual(['LOLOCCCC4444']));
+      tim('hoang long 900000'); expect(await screen.findByText(/Không tìm thấy đơn nào khớp/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Xóa từ khóa tìm kiếm' }));
+      await waitFor(() => expect(maDon()).toEqual(['LOLOAAAA2222']));      // quay về bộ lọc "Chờ xác nhận"
+    });
+
+    it('kết quả tìm vẫn thao tác được: đơn đang chờ tìm ra vẫn mở được hộp xác nhận', async () => {
+      const u = await moTab();
+      tim('aaaa2222');
+      await waitFor(() => expect(maDon()).toEqual(['LOLOAAAA2222']));
+      await u.click(within(document.getElementById('orders_table')!).getByRole('button', { name: /Xác nhận/ }));
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent('LOLOAAAA2222');
+    });
+  });
+
   it('mở hộp xác nhận rồi bấm "Hủy bỏ" → KHÔNG kích hoạt gói', async () => {
     const u = await dangNhap();
     await u.click(screen.getByRole('button', { name: /Đơn đăng ký/ }));
