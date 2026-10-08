@@ -142,7 +142,9 @@ export const ROLE_HIERARCHY: ProjectRoleScope[] = [
 
 export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
   version: 2,
-  inheritBelow: true,
+  // TẮT kế thừa: nếu bật, quyền cấp cho director/pm bị lan xuống TẤT CẢ vai trò thấp hơn (kể cả nhân viên thường
+  // 'teamMember') → ô tick trong ma trận mất tác dụng giới hạn. Mỗi vai trò chỉ có đúng quyền được tick.
+  inheritBelow: false,
   actions: {
     // CẤP DỰ ÁN
     createProject:       ['director', 'pm'],
