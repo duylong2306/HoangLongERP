@@ -19,16 +19,26 @@ const calc = (log: any, leaves: any[]) => computeDailyWorkday(log, coefs, [], [0
 describe('Báo cáo nghỉ ca — tính công ngày không có giờ chấm', () => {
   it('chưa có báo cáo nào → vắng không phép KP (-2)', () => expect(calc(emptyLog(), []).workday).toBe(-2));
 
-  it('báo cáo nghỉ ca ĐÃ DUYỆT (ca sáng + ca chiều) → 0 công (mã P), không phạt', () => {
+  it('báo cáo nghỉ ca ĐÃ DUYỆT cho CẢ HAI ca (sáng + chiều) → 0 công (mã P), không phạt', () => {
     const r = calc(emptyLog(), [report(), report({ id: 'LR-2', shift: 'afternoon' })]);
     expect(r.workday).toBe(0); expect(r.label).toBe('0'); expect(r.details).toContain('(P)');
   });
-  it('chỉ 1 ca được báo cáo và duyệt, ngày không có giờ nào → vẫn 0 công', () => {
-    expect(calc(emptyLog(), [report({ shift: 'afternoon' })]).workday).toBe(0);
+  it('chỉ 1 ca có báo cáo đã duyệt, ca kia không báo cáo, cả ngày không có giờ → vẫn KP (ca còn lại vắng không giải trình)', () => {
+    expect(calc(emptyLog(), [report({ shift: 'morning' })]).workday).toBe(-2);
+    expect(calc(emptyLog(), [report({ shift: 'afternoon' })]).workday).toBe(-2);
+  });
+  it('duyệt ca sáng nhưng TỪ CHỐI ca chiều → KP (từ chối phải có tác dụng)', () => {
+    expect(calc(emptyLog(), [report({ shift: 'morning' }), report({ id: 'LR-2', shift: 'afternoon', status: 'rejected' })]).workday).toBe(-2);
+  });
+  it('duyệt ca sáng, ca chiều ĐANG CHỜ duyệt → vẫn KP cho tới khi duyệt đủ cả hai', () => {
+    expect(calc(emptyLog(), [report({ shift: 'morning' }), report({ id: 'LR-2', shift: 'afternoon', status: 'pending' })]).workday).toBe(-2);
+  });
+  it('đơn không ghi rõ ca (dữ liệu cũ) được coi là phủ cả ngày → 0 công', () => {
+    expect(calc(emptyLog(), [report({ shift: undefined })]).workday).toBe(0);
   });
   it('mã P đổi theo cấu hình công ty (VD P = 0.5)', () => {
     const c2 = coefs.map(c => c.id === 'P' ? { ...c, coefficient: 0.5 } : c);
-    expect(computeDailyWorkday(emptyLog(), c2, [], [0], [report()]).workday).toBe(0.5);
+    expect(computeDailyWorkday(emptyLog(), c2, [], [0], [report(), report({ id: 'LR-2', shift: 'afternoon' })]).workday).toBe(0.5);
   });
 
   it('báo cáo bị TỪ CHỐI → như chưa có báo cáo: KP', () => expect(calc(emptyLog(), [report({ status: 'rejected' })]).workday).toBe(-2));
@@ -53,7 +63,7 @@ describe('Báo cáo nghỉ ca — tính công ngày không có giờ chấm', ()
   });
   it('đơn nghỉ THẬT đã duyệt vẫn ưu tiên (VD nghỉ phép năm = +1)', () => {
     const pn = { id: 'LR-9', empId: 'NV018', empName: 'Lê Văn Công', type: 'Nghỉ phép năm', fromDate: WEEKDAY, toDate: WEEKDAY, status: 'approved' };
-    expect(calc(emptyLog(), [pn, report()]).workday).toBe(1);
+    expect(calc(emptyLog(), [pn, report(), report({ id: 'LR-2', shift: 'afternoon' })]).workday).toBe(1);
   });
   it('Chủ nhật / cuối tuần không có giờ → 0 (không phạt), báo cáo hay không đều vậy', () => {
     expect(computeDailyWorkday(emptyLog({ date: '2026-10-04' }), coefs, [], [0], []).workday).toBe(0);
