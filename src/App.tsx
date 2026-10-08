@@ -114,6 +114,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
 import SubscriptionBanner from './components/subscription/SubscriptionBanner';
 import PushPermissionBanner from './components/PushPermissionBanner';
+import { buildDocumentTitle, DEFAULT_DOCUMENT_TITLE } from './lib/documentTitle';
 import {
   parsePushData,
   readDeepLinkFromLocation,
@@ -865,6 +866,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Web Push notification registration
   useWebPush(currentUser?.id ?? null);
+
+  // Tiêu đề tab trình duyệt hiện TÊN DOANH NGHIỆP (để phân biệt khi mở nhiều doanh nghiệp). Chưa đăng nhập → tiêu đề mặc định của LoLo.
+  useEffect(() => {
+    document.title = currentUser ? buildDocumentTitle(businessInfo.companyName) : DEFAULT_DOCUMENT_TITLE;
+  }, [currentUser, businessInfo.companyName]);
 
   // ─── Super Admin check: query Supabase DB trực tiếp, KHÔNG dùng localStorage ──
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
