@@ -84,10 +84,29 @@ describe('Thanh Lưu ghim cố định (luôn nhìn thấy khi cuộn bảng dà
     expect(bar.className).toContain('fixed');
     for (const t of ['Hủy bỏ', 'Đặt làm mặc định', 'Khôi phục mặc định', 'Lưu thay đổi']) expect(screen.getByText(t)).toBeInTheDocument();
   });
-  it('có thay đổi thì viền nổi bật + hiện số thay đổi; để lại khoảng đệm ở vị trí cũ', () => {
+  it('có thay đổi thì viền/nền nổi bật + hiện số thay đổi; để lại khoảng đệm ở vị trí cũ', () => {
     const { container } = render(<SaveActionBar changed changeCount={3} onSave={() => {}} onCancel={() => {}} onSetDefault={() => {}} onRestoreDefault={() => {}} />);
     expect(screen.getByTestId('save-action-bar').className).toContain('border-amber-400');
     expect(screen.getByRole('status')).toHaveTextContent('Có 3 thay đổi CHƯA LƯU');
     expect(container.querySelector('[aria-hidden]')).not.toBeNull();     // khoảng đệm giữ chỗ
+  });
+});
+
+describe('Thanh Lưu dạng thanh ngang dưới đáy (kiểu VS Code)', () => {
+  it('trải ngang suốt bề rộng, dính đáy màn hình; nút Lưu nằm ngoài cùng bên phải; chưa sửa thì ghi "Chưa có thay đổi"', () => {
+    render(<SaveActionBar changed={false} onSave={() => {}} onCancel={() => {}} onSetDefault={() => {}} onRestoreDefault={() => {}} />);
+    const bar = screen.getByTestId('save-action-bar');
+    expect(bar.className).toContain('bottom-0'); expect(bar.className).toContain('left-0'); expect(bar.className).toContain('right-0');
+    expect(bar).toHaveTextContent('Chưa có thay đổi nào cần lưu');
+    const labels = [...bar.querySelectorAll('button')].map(b => b.textContent);
+    expect(labels[labels.length - 1]).toBe('Lưu thay đổi');
+  });
+  it('nằm trong vùng nội dung <main> thì căn đúng mép trái/bề rộng của vùng đó (không đè menu bên trái)', () => {
+    const rect = { left: 240, width: 800, top: 0, right: 1040, bottom: 600, height: 600, x: 240, y: 0, toJSON() {} } as DOMRect;
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(rect);
+    render(<main><SaveActionBar changed onSave={() => {}} onCancel={() => {}} onSetDefault={() => {}} onRestoreDefault={() => {}} /></main>);
+    const bar = screen.getByTestId('save-action-bar') as HTMLElement;
+    expect(bar.style.left).toBe('240px'); expect(bar.style.width).toBe('800px');
+    spy.mockRestore();
   });
 });
