@@ -33,8 +33,9 @@ vi.mock('../../lib/dbService', () => {
 });
 
 import HumanResourcesManagement from '../HumanResourcesManagement';
+import { computeDailyWorkday } from '../hr/hrCalculations';
 
-beforeEach(() => { cleanup(); leaveStore.length = 0; leaveStore.push(mkLeave('LR-001', 'morning'), mkLeave('LR-002', 'afternoon')); leaveSave.mockClear(); localStorage.clear(); });
+beforeEach(() => { cleanup(); attendanceSave.mockClear(); leaveStore.length = 0; leaveStore.push(mkLeave('LR-001', 'morning'), mkLeave('LR-002', 'afternoon')); leaveSave.mockClear(); localStorage.clear(); });
 
 const admin = { id: 'admin1', name: 'Admin', role: 'director', roleGroupIds: ['role_admin'] } as any;
 const open = async () => {
@@ -56,5 +57,18 @@ describe('Màn hình Nhân sự — duyệt cả ngày (luồng thật)', () => 
     await open();
     fireEvent.click(await screen.findByText('Từ chối cả ngày'));
     await waitFor(() => expect(leaveStore.map(l => l.status)).toEqual(['rejected', 'rejected']), { timeout: 4000 });
+  });
+
+  it('Duyệt cả ngày khi ngày CHƯA có bản ghi chấm công: KHÔNG tự điền giờ làm, công = 0 (mã P) — không phải +0,5/+1', async () => {
+    await open();
+    fireEvent.click(await screen.findByText('Duyệt cả ngày ✅'));
+    await waitFor(() => expect(leaveStore.map(l => l.status)).toEqual(['approved', 'approved']), { timeout: 4000 });
+    await waitFor(() => expect(attendanceSave.mock.calls.some(c => c[0]?.date === d)).toBe(true), { timeout: 4000 });
+    const saved = attendanceSave.mock.calls.map(c => c[0]).filter(r => r?.empId === 'NV018' && r?.date === d).pop();
+    const blank = (v: any) => !v || v === '--:--' || v === '';
+    expect([saved.timeInS, saved.timeOutS, saved.timeInC, saved.timeOutC].every(blank)).toBe(true);   // không có giờ làm bịa ra
+    const coefs = [{ id: 'MSHID', coefficient: 0.5 }, { id: 'ASHID', coefficient: 0.5 }, { id: 'KP', coefficient: -2 }, { id: 'P', coefficient: 0 }];
+    const leaves = leaveStore.map(l => ({ ...l, fromDate: l.fromDate, toDate: l.toDate }));
+    expect(computeDailyWorkday(saved, coefs, [], [0], leaves).workday).toBe(0);
   });
 });

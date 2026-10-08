@@ -3351,17 +3351,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       timeOutC = '17:00';
                     }
                   } else if (l.type === 'Báo cáo nghỉ ca') {
-                    if (l.shift === 'morning') {
-                      timeInS = '';
-                      timeOutS = '';
-                      timeInC = '13:00';
-                      timeOutC = '17:00';
-                    } else if (l.shift === 'afternoon') {
-                      timeInS = '07:30';
-                      timeOutS = '11:30';
-                      timeInC = '';
-                      timeOutC = '';
-                    }
+                    // Nghỉ ca = KHÔNG làm → tuyệt đối không tự điền giờ chuẩn (trước đây điền giờ cho ca không được báo cáo → cộng công ảo
+                    // +0,5 cho người nghỉ cả ngày). Để trống cả 4 ô: công do công thức quyết định (đủ 2 ca đã duyệt → 0 công mã P).
+                    timeInS = ''; timeOutS = ''; timeInC = ''; timeOutC = '';
                   } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
                     // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO, ca còn lại để trống.
                     if (l.shift === 'morning') {

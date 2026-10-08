@@ -321,8 +321,8 @@ export default function TaskManagement({
                 if (targetLeave.shift === 'morning') { timeInC = ''; timeOutC = ''; }
                 else { timeInS = ''; timeOutS = ''; }
               } else if (targetLeave.type === 'Báo cáo nghỉ ca') {
-                if (targetLeave.shift === 'morning') { timeInS = ''; timeOutS = ''; }
-                else { timeInC = ''; timeOutC = ''; }
+                // Nghỉ ca = KHÔNG làm → không tự điền giờ chuẩn cho ca còn lại (trước đây làm công ảo +0,5 cho người nghỉ cả ngày)
+                timeInS = ''; timeOutS = ''; timeInC = ''; timeOutC = '';
               } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
                 if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; timeInC = ''; timeOutC = ''; }
                 else { timeInS = ''; timeOutS = ''; timeInC = '13:00'; timeOutC = '17:00'; }
