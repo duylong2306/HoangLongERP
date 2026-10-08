@@ -28,3 +28,19 @@ describe('Ma trận quyền dự án — không kế thừa xuống vai trò th�
     expect(can('createProject', nhanVien, duAn, undefined, m)).toBe(true);
   });
 });
+
+// "Thành viên nhóm" (teamMember): ở công việc cụ thể phải THỰC SỰ có tên trong nhiệm vụ, không phải mọi nhân viên.
+describe('Vai trò "Thành viên" theo công việc cụ thể', () => {
+  const m = { ...DEFAULT_PROJECT_PERMISSIONS, actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, uploadAttachment: ['teamMember'] } } as any;
+  const task = (memberIds: string[]) => ({ id: 't1', assignerId: 'A', assigneeId: 'B', missions: [{ id: 'm1', name: 'x', memberIds, status: 'todo' }] }) as any;
+  it('có tên trong nhiệm vụ → được quyền của "Thành viên"', () => {
+    expect(can('uploadAttachment', nhanVien, duAn, task(['NV022']), m)).toBe(true);
+  });
+  it('KHÔNG có tên trong công việc → không được (trước đây mọi nhân viên đều được)', () => {
+    expect(can('uploadAttachment', nhanVien, duAn, task(['NV_khac']), m)).toBe(false);
+    expect(can('uploadAttachment', nhanVien, duAn, { ...task([]), missions: undefined } as any, m)).toBe(false);
+  });
+  it('cấp dự án/bảng (không có công việc) → giữ cách cũ: mọi nhân viên là "Thành viên"', () => {
+    expect(can('uploadAttachment', nhanVien, duAn, undefined, m)).toBe(true);
+  });
+});

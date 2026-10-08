@@ -203,7 +203,7 @@ const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; c
   assignee: { label: 'Phụ Trách CV', desc: 'task.assigneeId — phụ trách thực hiện công việc', color: 'text-amber-400 bg-amber-500/10' },
   missionAssignee: { label: 'Phụ Trách NV', desc: 'mission.mainAssigneeId — phụ trách nhiệm vụ con', color: 'text-teal-400 bg-teal-500/10' },
   accountant: { label: 'Kế Toán', desc: 'Role Group role_accounting — nhân viên kế toán', color: 'text-indigo-400 bg-indigo-500/10' },
-  teamMember: { label: 'Thành Viên', desc: 'mission.memberIds — thành viên nhóm / fallback', color: 'text-slate-400 bg-slate-500/10' },
+  teamMember: { label: 'Thành Viên', desc: 'Ở công việc cụ thể: người có tên trong nhiệm vụ (mission.memberIds). Ở cấp dự án/bảng Kanban: mọi nhân viên', color: 'text-slate-400 bg-slate-500/10' },
 };
 
 const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string }[] = [

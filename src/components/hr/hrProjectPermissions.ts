@@ -19,7 +19,7 @@ import { dbService } from '../../lib/dbService';
 //   assignee        → "Phụ Trách Công Việc" (task.assigneeId)
 //   missionAssignee → "Phụ Trách Nhiệm Vụ"  (task.missions[].mainAssigneeId)
 //   accountant      → "Kế Toán"             (Role Group: role_accounting)
-//   teamMember      → "Thành Viên Nhóm"     (mission.memberIds / fallback)
+//   teamMember      → "Thành Viên Nhóm"     (có task: phải có tên trong mission.memberIds; cấp dự án/bảng: mọi nhân viên)
 export type ProjectRoleScope =
   | 'director'         // Giám Đốc (role_admin) - luôn full
   | 'pm'               // Trưởng Dự Án (project.pmId)
@@ -273,8 +273,17 @@ export const getProjectRoleScopes = (
     if (task.missions?.some(m => m.mainAssigneeId === currentUser.id)) scopes.push('missionAssignee');
   }
 
-  // Nếu không rơi vào vai trò đặc thù nào → coi là thành viên nhóm
-  if (scopes.length === 0) scopes.push('teamMember');
+  // "Thành viên" (teamMember) — nếu chưa có vai trò đặc thù nào:
+  //  • Đang xét MỘT CÔNG VIỆC cụ thể (có task): chỉ là thành viên khi THỰC SỰ có tên trong danh sách thành viên của một nhiệm vụ
+  //    (mission.memberIds). TRƯỚC ĐÂY mọi nhân viên đều bị tính là thành viên của mọi công việc, kể cả người không liên quan
+  //    → ô tick "Thành viên" thành "tất cả nhân viên". Người không có tên thì KHÔNG có vai trò theo vị trí nào ở công việc đó
+  //    (vẫn có thể được quyền riêng theo Nhóm vai trò HRM).
+  //  • Ở cấp dự án / bảng Kanban (không có task): chưa có danh sách thành viên dự án để đối chiếu → giữ cách cũ (mọi nhân viên),
+  //    vì các thao tác ở đây (tạo công việc, bình luận...) vốn dành cho toàn bộ nhân viên.
+  if (scopes.length === 0) {
+    if (!task) scopes.push('teamMember');
+    else if (task.missions?.some(m => m.memberIds?.includes(currentUser.id))) scopes.push('teamMember');
+  }
 
   return Array.from(new Set(scopes));
 };
