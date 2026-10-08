@@ -867,6 +867,29 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Web Push notification registration
   useWebPush(currentUser?.id ?? null);
 
+  // NẠP MA TRẬN QUYỀN NGAY KHI CÓ NGƯỜI ĐĂNG NHẬP (Quyền Dự Án + Quyền Công việc).
+  // Lỗi cũ: 2 ma trận này nằm trong bộ nhớ đệm, khởi đầu là giá trị MẶC ĐỊNH (không có quyền theo nhóm vai trò) và chỉ được nạp từ cơ sở dữ liệu khi
+  // (a) mở màn hình Phân quyền, hoặc (b) có sự kiện realtime/polling 5 phút → nhân viên không phải admin (VD Kế toán) vừa đăng nhập mở bảng Kanban
+  // thấy mọi nút bị khóa ("Không có quyền THÊM dự án") dù quyền đã được cấp cho nhóm của họ. Nạp xong thì bắn sự kiện để các màn hình đang mở tính lại quyền.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let active = true;
+    (async () => {
+      try {
+        await Promise.all([
+          import('./components/hr/hrProjectPermissions').then(m => m.syncProjectPermissionsFromDb()),
+          import('./components/hr/hrTaskPermissions').then(m => m.syncTaskPermissionsFromCloud()),
+        ]);
+      } catch (e) {
+        console.warn('Nạp ma trận quyền thất bại:', e);
+      }
+      if (!active) return;
+      window.dispatchEvent(new CustomEvent('hl-project-permissions-updated'));
+      window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+    })();
+    return () => { active = false; };
+  }, [currentUser?.id]);
+
   // Tiêu đề tab trình duyệt hiện TÊN DOANH NGHIỆP (để phân biệt khi mở nhiều doanh nghiệp). Chưa đăng nhập → tiêu đề mặc định của LoLo.
   useEffect(() => {
     document.title = currentUser ? buildDocumentTitle(businessInfo.companyName) : DEFAULT_DOCUMENT_TITLE;
