@@ -97,10 +97,10 @@ export type ProjectAction =
   | 'uploadAttachment'       // Tải lên tệp
   | 'deleteAttachment';      // Xóa tệp
 
-// ─── Visibility Mode: tầm nhìn theo sự liên quan ─────────────────────────
-// all      → thấy mọi cột/thẻ/công việc của dự án
-// related  → chỉ thấy thẻ/công việc có mặt mình
-// readonly → thấy nhưng không thao tác
+// ─── Visibility Mode (ĐÃ BỎ KHỎI GIAO DIỆN VÀ KHỎI can() — 2026-10) ──────────────────────
+// Cột "Tầm nhìn" bị gỡ vì dư thừa: 'all'/'related' không lọc dữ liệu ở đâu; 'readonly' trùng với việc bỏ tick các ô của vai trò
+// và còn khóa nhầm mọi quyền của người có nhiều vai trò. Ai THẤY công việc nào do tab "Quyền Công việc" quyết định.
+// Giữ KIỂU và trường `visibility` (tùy chọn) chỉ để đọc được dữ liệu cũ đã lưu trên Supabase mà không lỗi — không còn tác dụng.
 export type VisibilityMode = 'all' | 'related' | 'readonly';
 
 // ─── Quy tắc theo trạng thái (tùy biến nâng cao) ─────────────────────────
@@ -118,7 +118,8 @@ export interface ProjectPermissionMatrix {
   /** Mỗi action = danh sách ProjectRoleScope được phép */
   actions: Record<ProjectAction, ProjectRoleScope[]>;
   /** Tầm nhìn theo từng vai trò */
-  visibility: Partial<Record<ProjectRoleScope, VisibilityMode>>;
+  /** @deprecated Không còn tác dụng — chỉ giữ để đọc dữ liệu cũ. */
+  visibility?: Partial<Record<ProjectRoleScope, VisibilityMode>>;
   /** Kế thừa quyền cấp dưới (pm cấp → tự động cấp cho assignee, involved...) */
   inheritBelow: boolean;
   /** Quy tắc theo trạng thái */
@@ -221,15 +222,6 @@ export const DEFAULT_PROJECT_PERMISSIONS: ProjectPermissionMatrix = {
     // TỆP ĐÍNH KÈM
     uploadAttachment: ['director', 'pm', 'assigner', 'assignee', 'missionAssignee', 'teamMember'],
     deleteAttachment: ['director', 'pm', 'assigner'],
-  },
-  visibility: {
-    director: 'all',
-    pm: 'all',
-    assigner: 'all',
-    assignee: 'related',
-    missionAssignee: 'related',
-    teamMember: 'related',
-    accountant: 'readonly',
   },
   statusRules: [],
 };
@@ -424,8 +416,9 @@ export const can = (
   // ── Nguồn 1: Context roles (vị trí trong dự án/công việc) ──
   const scopes = getProjectRoleScopes(currentUser, project, task);
 
-  // Kiểm tra visibility readonly → không được thao tác (trừ role group)
-  let blockedByVisibility = false;
+  // Quyền theo vị trí: một vai trò của người dùng nằm trong danh sách được tick cho hành động này → được phép.
+  // (Không còn cơ chế "Tầm nhìn: Chỉ xem" khóa mọi quyền — muốn chặn vai trò nào thì bỏ tick ô của vai trò đó.)
+  let blockedByVisibility = false; // true = KHÔNG có quyền theo vị trí → xét tiếp quyền theo nhóm HRM
   const allowedRoles = effectiveActions[action] || [];
   if (allowedRoles.length > 0) {
     const checkRoles = effectiveInherit ? expandInheritance(allowedRoles) : allowedRoles;
@@ -435,12 +428,6 @@ export const can = (
     }
   } else {
     blockedByVisibility = true;
-  }
-
-  // Nếu context role bị block bởi visibility readonly → không cho
-  for (const scope of scopes) {
-    const vis = matrix.visibility[scope];
-    if (vis === 'readonly') blockedByVisibility = true;
   }
 
   // Nếu có quyền từ context role → cho phép
@@ -458,29 +445,3 @@ export const can = (
   return false;
 };
 
-/** Lấy tầm nhìn của user đối với dự án */
-export const getVisibility = (
-  currentUser: Employee | undefined,
-  project: Project | undefined,
-  task?: Task
-): VisibilityMode => {
-  if (!currentUser) return 'readonly';
-  if (IS_ADMIN(currentUser.id) || isUserInRoleGroup(currentUser.id, 'role_superadmin')) return 'all';
-
-  const scopes = getProjectRoleScopes(currentUser, project, task);
-  const matrix = loadProjectPermissions();
-
-  // Ưu tiên role cao nhất (all > related > readonly)
-  const rank: Record<VisibilityMode, number> = { all: 3, related: 2, readonly: 1 };
-  let best: VisibilityMode = 'related';
-  for (const scope of scopes) {
-    const vis = matrix.visibility[scope];
-    if (vis && rank[vis] > rank[best]) best = vis;
-  }
-  return best;
-};
-
-/** Tiện ích: user có thấy mọi thứ (all) không */
-export const canSeeAll = (currentUser: Employee | undefined, project: Project | undefined, task?: Task): boolean => {
-  return getVisibility(currentUser, project, task) === 'all';
-};

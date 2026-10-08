@@ -128,19 +128,13 @@ describe('Nhãn "Chưa áp dụng" ở Quyền Dự Án', () => {
   });
 });
 
-// Cột "Tầm nhìn" chỉ còn 2 mức có tác dụng thật; giá trị 'related' đã lưu từ trước hiển thị như "Thao tác theo quyền" và KHÔNG tự đổi dữ liệu.
-describe('Chế độ thao tác của từng vai trò', () => {
-  it('chỉ có 2 lựa chọn; vai trò đang lưu "related" hiển thị là "Thao tác theo quyền", "readonly" hiển thị "Chỉ xem"', () => {
+// Cột "Tầm nhìn" đã bị gỡ (dư thừa): không còn ô chọn nào, và việc mở màn hình không tạo thay đổi chưa lưu.
+describe('Không còn cột Tầm nhìn', () => {
+  it('không có ô chọn chế độ vai trò nào và không còn chữ "Tầm nhìn"/"Chỉ xem"', () => {
     const { container } = renderModal();
-    const selects = [...container.querySelectorAll('select')] as HTMLSelectElement[];
-    expect(selects.length).toBeGreaterThan(0);
-    for (const sel of selects) expect([...sel.options].map(o => o.value)).toEqual(['all', 'readonly']);
-    const mac = DEFAULT_PROJECT_PERMISSIONS.visibility as any;               // mặc định: assignee='related', accountant='readonly'
-    expect(Object.values(mac)).toContain('related'); expect(Object.values(mac)).toContain('readonly');
-    expect(selects.map(s => s.value).sort()).toEqual(Object.values(mac).map(v => v === 'readonly' ? 'readonly' : 'all').sort());
-  });
-  it('mở màn hình mà không bấm gì: không phát sinh thay đổi chưa lưu', () => {
-    renderModal();
+    expect(container.querySelectorAll('select').length).toBe(0);
+    expect(screen.queryByText(/Tầm nhìn/)).toBeNull();
+    expect(screen.queryByText(/Chỉ xem/)).toBeNull();
     expect(screen.queryByText(/CHƯA LƯU/)).toBeNull();
   });
 });

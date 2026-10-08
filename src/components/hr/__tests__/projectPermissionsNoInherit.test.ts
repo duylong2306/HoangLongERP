@@ -61,3 +61,12 @@ describe('Quyền theo đúng dự án / công việc đang thao tác', () => {
     expect(can('editProjectInfo', nhanVien, duAn, undefined, m)).toBe(false);
   });
 });
+
+// Đã gỡ "Tầm nhìn": giá trị 'readonly' còn sót trong dữ liệu cũ KHÔNG được khóa quyền nữa (trước đây khóa mọi quyền theo vị trí của vai trò đó,
+// kể cả người có nhiều vai trò).
+describe('Dữ liệu cũ còn trường visibility không còn ảnh hưởng quyền', () => {
+  const m = { ...DEFAULT_PROJECT_PERMISSIONS, visibility: { pm: 'readonly', teamMember: 'readonly' }, actions: { ...DEFAULT_PROJECT_PERMISSIONS.actions, deleteProject: ['pm'] } } as any;
+  it('Trưởng DA có tick vẫn được dù visibility cũ ghi readonly', () => {
+    expect(can('deleteProject', nhanVien, duAnCuaPm, undefined, m)).toBe(true);
+  });
+});
