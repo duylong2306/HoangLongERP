@@ -14,7 +14,7 @@ vi.mock('../supabase', async (orig) => {
         upsert: (payload: any) => {
           upserts.push(JSON.parse(JSON.stringify(payload)));
           // Mô phỏng PostgREST: lần lưu nào còn chứa cột không tồn tại thì báo lỗi nêu tên cột đầu tiên thiếu
-          const missingCol = ['accountant_base_salary', 'leave_advance_days'].find(c => missingColumns.has(c) && c in payload);
+          const missingCol = ['allowed_late_morning', 'leave_advance_days'].find(c => missingColumns.has(c) && c in payload);
           const err = missingCol ? { message: `Could not find the '${missingCol}' column of 'shift_config' in the schema cache` } : null;
           return Promise.resolve({ error: err });
         },
@@ -46,11 +46,11 @@ describe('shiftConfig.save — quy định xin nghỉ báo trước', () => {
     expect('leave_advance_days' in last).toBe(false);
     expect(last.morning_in).toBe('07:45');
   });
-  it('cột lương cũ chưa bao giờ có trên bảng → bỏ riêng cột đó, vẫn lưu được số ngày báo trước', async () => {
-    missingColumns.add('accountant_base_salary');
-    await dbService.shiftConfig.save({ morningIn: '07:30', accountantBaseSalary: 5, leaveAdvanceDays: 0.5, leaveAdvanceBlock: true });
+  it('một cột bất kỳ chưa có trên bảng → bỏ riêng cột đó, vẫn lưu được số ngày báo trước', async () => {
+    missingColumns.add('allowed_late_morning');
+    await dbService.shiftConfig.save({ morningIn: '07:30', allowedLateMorning: 10, leaveAdvanceDays: 0.5, leaveAdvanceBlock: true });
     const last = upserts[upserts.length - 1];
-    expect('accountant_base_salary' in last).toBe(false);
+    expect('allowed_late_morning' in last).toBe(false);
     expect(last.leave_advance_days).toBe(0.5);
     expect(last.leave_advance_block).toBe(true);
   });

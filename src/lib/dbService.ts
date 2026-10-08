@@ -1226,11 +1226,6 @@ export const dbService = {
           weekendDays: data.weekend_days,
           autoAttendanceDays: data.auto_attendance_days,
           autoAttendanceStartDate: data.auto_attendance_start_date,
-          directorBaseSalary: data.director_base_salary,
-          pmBaseSalary: data.pm_base_salary,
-          accountantBaseSalary: data.accountant_base_salary,
-          staffBaseSalary: data.staff_base_salary,
-          constructionSites: data.construction_sites,
           companyProfile: data.company_profile
         } : null;
       } catch (e) {
@@ -1271,11 +1266,6 @@ export const dbService = {
           weekend_days: config.weekendDays,
           auto_attendance_days: config.autoAttendanceDays,
           auto_attendance_start_date: config.autoAttendanceStartDate,
-          director_base_salary: config.directorBaseSalary,
-          pm_base_salary: config.pmBaseSalary,
-          accountant_base_salary: config.accountantBaseSalary,
-          staff_base_salary: config.staffBaseSalary,
-          construction_sites: config.constructionSites,
           company_profile: config.companyProfile
         };
         // 2 cột mới của quy định xin nghỉ báo trước

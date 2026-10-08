@@ -172,9 +172,4 @@ export const DEFAULT_SYSTEM_CONFIG = {
   otPunchOutOpenBeforeMinutes: 15,
   otPunchOutCloseAfterMinutes: 15,
   antiFakeCam: true,
-  directorBaseSalary: 0,
-  pmBaseSalary: 0,
-  accountantBaseSalary: 0,
-  staffBaseSalary: 0,
-  constructionSites: [],
 };

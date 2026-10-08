@@ -62,6 +62,10 @@ interface DashboardProps {
   travelExpensesSummary?: any[];
 }
 
+// Công trình mặc định khi không định vị được GPS (trước đây lấy từ trường cấu hình constructionSites — không có ô nhập/cột lưu, luôn rỗng;
+// đọc config.constructionSites[0] còn bị lỗi khi trường này undefined)
+const DEFAULT_PUNCH_SITE = 'Công trình Blue Sky';
+
 export default function DashboardOverview({
   projects,
   tasks,
@@ -916,7 +920,7 @@ export default function DashboardOverview({
     }
   }, [digitalTime, todayVal, attendanceList]); */
 
-  const [selectedSite, setSelectedSite] = useState(config?.constructionSites?.[0] || 'Công trình Blue Sky');
+  const [selectedSite, setSelectedSite] = useState(DEFAULT_PUNCH_SITE);
   const [activePunchSlot, setActivePunchSlot] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [liveGpsCoords, setLiveGpsCoords] = useState<string>('');
@@ -1254,7 +1258,7 @@ export default function DashboardOverview({
       if (!navigator.geolocation) {
         setGpsErrorMsg('Trình duyệt không hỗ trợ định vị GPS.');
         setGpsLoading(false);
-        const defaultSite = config.constructionSites[0] || 'Công trình Blue Sky';
+        const defaultSite = DEFAULT_PUNCH_SITE;
         setSelectedSite(defaultSite);
         const sInfo = getSiteGpsInfo(defaultSite);
         setLiveGpsCoords(sInfo.coords);
@@ -1334,7 +1338,7 @@ export default function DashboardOverview({
           console.error('GPS Geolocation Error:', error);
           setGpsErrorMsg(errTxt);
           
-          const defaultSite = config.constructionSites[0] || 'Công trình Blue Sky';
+          const defaultSite = DEFAULT_PUNCH_SITE;
           setSelectedSite(defaultSite);
           const sInfo = getSiteGpsInfo(defaultSite);
           setLiveGpsCoords(sInfo.coords);
@@ -2051,16 +2055,6 @@ export default function DashboardOverview({
   const countLateArrive = monthLateEarly.lates + monthLateEarly.earlies;
 
   // Real salary multiplier
-  const userBaseSalary = isAdmin
-    ? (config.directorBaseSalary ?? 45000000)
-    : currentUser?.role === 'pm'
-      ? (config.pmBaseSalary ?? 22000000)
-      : isAccountant
-        ? (config.accountantBaseSalary ?? 18000000)
-        : (config.staffBaseSalary ?? 14000000);
-  const standardDailyRate = (userBaseSalary ?? 0) / 26;
-  const calcEstimatedSalary = Math.round(((standardDailyRate ?? 0) * countAccumulatedDays) + (countOvertimeHours * ((userBaseSalary ?? 0) / 26 / 8) * (config.otMultiplier ?? 1.5)));
-
   // Get current today slots
   // QUAN TRỌNG: tìm theo empId (không dùng empName) để đồng bộ với logic chấm công
   // (handleConfirmPunch) và currentLogs ở trên. Tìm theo tên dễ trượt nếu tên lệch
@@ -4102,9 +4096,6 @@ export default function DashboardOverview({
                     {Number(advanceAmountVal).toLocaleString('vi-VN')} đ
                   </div>
                 )}
-                <span className="block text-[10px] text-slate-500 mt-1 italic">
-                  * Số tiền ứng tối đa đề xuất: &lt;= 50% mức lương cơ bản ({(userBaseSalary ?? 0).toLocaleString('vi-VN')} đ)
-                </span>
               </div>
 
               <div>

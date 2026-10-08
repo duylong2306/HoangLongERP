@@ -25,11 +25,6 @@
   otPunchOutOpenBeforeMinutes?: number;
   otPunchOutCloseAfterMinutes?: number;
   antiFakeCam?: boolean; // Thêm vào SystemConfig
-  directorBaseSalary?: number; // Thêm vào SystemConfig
-  pmBaseSalary?: number; // Thêm vào SystemConfig
-  accountantBaseSalary?: number; // Thêm vào SystemConfig
-  staffBaseSalary?: number; // Thêm vào SystemConfig
-  constructionSites: string[];
   companyProfile?: CompanyProfile; // Hồ sơ Thông tin doanh nghiệp (header Đơn Mua Hàng)
 }
 
