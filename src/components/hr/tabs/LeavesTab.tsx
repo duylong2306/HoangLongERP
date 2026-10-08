@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../../../lib/leaveRequests';
 
 interface LeaveItem {
   id: string;
@@ -14,6 +15,7 @@ interface LeaveItem {
   approverName?: string;
   approverPosition?: string;
   submittedAt?: string;
+  shift?: string;   // 'morning' | 'afternoon' — chỉ có ở đơn báo cáo chấm công theo ca
 }
 
 interface LeavesTabProps {
@@ -91,6 +93,10 @@ export default function LeavesTab({
     });
   }, [leaves, filterFromDate, filterToDate, filterType, filterStatus, filterName]);
 
+  // "Báo cáo nghỉ ca" sáng + chiều cùng ngày (cùng nhân viên) đang chờ duyệt → gộp thành 1 dòng "Cả ngày" (ẩn dòng ca chiều);
+  // Duyệt/Từ chối/Xóa ở dòng này áp dụng cho cả hai đơn. `pairOf`: mã đơn ca sáng → mã đơn ca chiều.
+  const { visible: visibleLeaves, pairOf } = useMemo(() => groupPendingAbsencePairs(filteredLeaves), [filteredLeaves]);
+
   const resetFilters = () => {
     setFilterFromDate(getDefaultFromDate());
     setFilterToDate(getDefaultToDate());
@@ -101,9 +107,9 @@ export default function LeavesTab({
   };
 
   const paginatedLeaves = (() => {
-    const startIndex = (leavePage - 1) * (globalPageSize === 'all' ? filteredLeaves.length : (globalPageSize as number));
-    const endIndex = globalPageSize === 'all' ? filteredLeaves.length : startIndex + (globalPageSize as number);
-    return filteredLeaves.slice(startIndex, endIndex);
+    const startIndex = (leavePage - 1) * (globalPageSize === 'all' ? visibleLeaves.length : (globalPageSize as number));
+    const endIndex = globalPageSize === 'all' ? visibleLeaves.length : startIndex + (globalPageSize as number);
+    return visibleLeaves.slice(startIndex, endIndex);
   })();
 
   const handleLeaveSelectAll = (checked: boolean) => {
@@ -123,15 +129,20 @@ export default function LeavesTab({
 
   const handleBulkDeleteLeaves = () => {
     if (leaveSelectedRows.size === 0) return;
-    if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${leaveSelectedRows.size} đơn nghỉ phép đã chọn không?\nHành động này không thể hoàn tác.`)) return;
-    leaveSelectedRows.forEach(id => onDeleteLeave(id));
+    // Dòng "Cả ngày" đại diện cho 2 đơn → xóa kèm đơn ca chiều của cặp
+    const idsToDelete = new Set<string>(leaveSelectedRows);
+    leaveSelectedRows.forEach(id => { const sib = pairOf.get(id); if (sib) idsToDelete.add(sib); });
+    if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${idsToDelete.size} đơn nghỉ phép đã chọn không?\nHành động này không thể hoàn tác.`)) return;
+    idsToDelete.forEach(id => onDeleteLeave(id));
     setLeaveSelectedRows(new Set());
     setLeaveSelectAll(false);
   };
 
   const handleDeleteSelectedLeave = (l: LeaveItem) => {
-    if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa đơn nghỉ phép "${l.id}" của ${l.empName} không?\nHành động này không thể hoàn tác.`)) return;
+    const sibling = findPairedAbsenceReport(l, leaves);   // đơn đi cùng (ca sáng/chiều) nếu là cặp "Cả ngày" đang chờ duyệt
+    if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa đơn nghỉ phép "${l.id}"${sibling ? ` và đơn đi cùng "${sibling.id}" (báo cáo cả ngày)` : ''} của ${l.empName} không?\nHành động này không thể hoàn tác.`)) return;
     onDeleteLeave(l.id);
+    if (sibling) onDeleteLeave(sibling.id);
     setSelectedLeaveId(null);
   };
 
@@ -211,7 +222,7 @@ export default function LeavesTab({
           {/* Left side: basic table layout */}
           <div className={`${selectedLeaveId ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
             <div className="flex justify-between items-center bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <div className="text-xs font-bold text-slate-300">📬 Danh sách đơn xin nghỉ phép ({filteredLeaves.length})</div>
+              <div className="text-xs font-bold text-slate-300">📬 Danh sách đơn xin nghỉ phép ({visibleLeaves.length})</div>
               {selectedLeaveId && (
                 <button
                   onClick={() => setSelectedLeaveId(null)}
@@ -222,7 +233,7 @@ export default function LeavesTab({
               )}
             </div>
 
-            {filteredLeaves.length === 0 ? (
+            {visibleLeaves.length === 0 ? (
               <div className="p-6 text-center bg-slate-900 border border-slate-800 rounded-xl">
                 <p className="text-xs text-slate-500 font-bold">Không có đơn nào khớp bộ lọc hiện tại.</p>
               </div>
@@ -262,12 +273,20 @@ export default function LeavesTab({
                           className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
                         />
                       </td>
-                      <td className="py-2.5 font-mono font-bold text-pink-400">{l.id}</td>
+                      <td className="py-2.5 font-mono font-bold text-pink-400">
+                        {l.id}
+                        {pairOf.has(l.id) && <span className="block text-[9px] text-pink-300">+ {pairOf.get(l.id)}</span>}
+                      </td>
                       <td className="py-2.5 font-bold text-white hover:text-amber-400 transition-colors leading-none">
                         {l.empName}
                         <span className="block text-[8.5px] text-slate-400 font-mono mt-0.5">{l.empId}</span>
                       </td>
-                      <td className="py-2.5 text-slate-300 font-medium">{l.type}</td>
+                      <td className="py-2.5 text-slate-300 font-medium">
+                        {l.type}
+                        {pairOf.has(l.id)
+                          ? <span className="block text-[9px] font-bold text-sky-400">Cả ngày (sáng + chiều)</span>
+                          : (l.type === 'Báo cáo nghỉ ca' && l.shift ? <span className="block text-[9px] text-slate-500">{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
+                      </td>
                       <td className="py-2.5 text-slate-350 text-center font-mono">
                         {l.fromDate} ➔ {l.toDate}
                       </td>
@@ -290,7 +309,7 @@ export default function LeavesTab({
 
               {/* Leave Pagination helper */}
               {(() => {
-                const totalFiltered = filteredLeaves.length;
+                const totalFiltered = visibleLeaves.length;
                 if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
                 const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
                 return (
@@ -333,7 +352,7 @@ export default function LeavesTab({
 
               {/* Global Row Selector inside Leaves footer */}
               <div className="flex justify-between items-center mt-3 pt-2 text-[10px] text-slate-500 border-t border-slate-850/50">
-                <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, filteredLeaves.length)} / ${filteredLeaves.length} đơn phép`} mỗi trang.</div>
+                <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, visibleLeaves.length)} / ${visibleLeaves.length} đơn phép`} mỗi trang.</div>
                 <div className="flex items-center gap-1.5 font-bold text-white">
                   <span>Hiển thị:</span>
                   <select
@@ -423,24 +442,35 @@ export default function LeavesTab({
                     )}
                   </div>
 
-                  {l.status === 'pending' && (
-                    <div className="flex gap-2 pt-2 border-t border-slate-800">
+                  {l.status === 'pending' && (() => {
+                    const sibling = findPairedAbsenceReport(l, leaves);
+                    return (
+                    <div className="space-y-2 pt-2 border-t border-slate-800">
+                      {sibling && (
+                        <p className="text-[10px] text-sky-300 bg-slate-950 border border-slate-800 rounded p-2">
+                          Đây là báo cáo <strong>CẢ NGÀY</strong>: đi cùng đơn <span className="font-mono">{sibling.id}</span> ({sibling.shift === 'morning' ? 'ca sáng' : 'ca chiều'}).
+                          Duyệt hoặc Từ chối sẽ áp dụng cho cả hai đơn.
+                        </p>
+                      )}
+                      <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => handleApproveLeave(l.id, 'rejected')}
                         className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-[10.5px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
                       >
-                        Từ chối đơn xin
+                        {sibling ? 'Từ chối cả ngày' : 'Từ chối đơn xin'}
                       </button>
                       <button
                         type="button"
                         onClick={() => handleApproveLeave(l.id, 'approved')}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10.5px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
                       >
-                        Duyệt phép ✅
+                        {sibling ? 'Duyệt cả ngày ✅' : 'Duyệt phép ✅'}
                       </button>
+                      </div>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             );

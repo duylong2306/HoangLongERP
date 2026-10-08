@@ -6,6 +6,7 @@ import {
   Briefcase, Award, CheckCircle2, X
 } from 'lucide-react';
 import TaskDetailModal from './TaskDetailModal';
+import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../lib/leaveRequests';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
@@ -374,6 +375,7 @@ export default function TaskManagement({
 
     // Cập nhật state leaves (đồng bộ)
     const updated = leaves.map(l => l.id === id ? { ...l, status } : l);
+    pairedArmedRef.current = pairedLeaveQueueRef.current.length > 0;   // cho phép xử lý đơn đi cùng (cặp "Cả ngày") ở render kế tiếp
     setLeaves(updated);
     // Lưu đơn đã duyệt/từ chối lên Supabase
     const changed = updated.find(l => l.id === id);
@@ -399,6 +401,26 @@ export default function TaskManagement({
     }
   };
 
+  // DUYỆT / TỪ CHỐI CẢ CẶP "Báo cáo nghỉ ca" (ca sáng + ca chiều cùng ngày): bấm 1 lần xử lý cả hai đơn.
+  // handleApproveLeave dựa vào state `leaves` của lần render hiện tại → không gọi 2 lần liền (lần 2 dùng state cũ, ghi đè lần 1).
+  // Xử lý đơn thứ nhất ngay, đơn thứ hai chờ ở hàng đợi và chỉ chạy khi `leaves` đã cập nhật (effect bên dưới, ở render mới).
+  // handleApproveLeave ở đây chạy BẤT ĐỒNG BỘ (chờ ghi chấm công lên Supabase) nên hàng đợi chỉ được "kích hoạt" (pairedArmedRef) khi đơn
+  // thứ nhất đã tới bước cập nhật state `leaves` — tránh trường hợp `leaves` đổi vì lý do khác (realtime) làm đơn thứ hai chạy sớm.
+  const pairedLeaveQueueRef = React.useRef<{ id: string; status: 'approved' | 'rejected' }[]>([]);
+  const pairedArmedRef = React.useRef(false);
+  const handleApproveLeaveWithPair = (id: string, status: 'approved' | 'rejected') => {
+    const sibling = findPairedAbsenceReport(leaves.find(l => l.id === id), leaves);
+    pairedLeaveQueueRef.current = sibling ? [{ id: sibling.id, status }] : [];
+    pairedArmedRef.current = false;
+    handleApproveLeave(id, status);
+  };
+  useEffect(() => {
+    if (!pairedArmedRef.current) return;
+    pairedArmedRef.current = false;
+    const next = pairedLeaveQueueRef.current.shift();
+    if (next) handleApproveLeave(next.id, next.status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaves]);
   const handleApprovePayment = (id: string, status: 'approved' | 'rejected') => {
     // RÀ SOÁT 2026-09: nút Duyệt/Từ chối chỉ hiện cho phiếu chi nằm trong
     // myPendingPayments (đã lọc đúng thẩm quyền, không còn tự duyệt) — gate lại ở
@@ -771,6 +793,10 @@ export default function TaskManagement({
      l.approverName === currentUser?.name ||
      l.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
   ), [leaves, currentUser]);
+
+  // Danh sách hiển thị: cặp chờ duyệt gộp thành 1 thẻ "Cả ngày" (ẩn thẻ ca chiều)
+  const { visible: visiblePendingLeaves, pairOf: pendingLeavePairOf } = React.useMemo(
+    () => groupPendingAbsencePairs(myPendingLeaves), [myPendingLeaves]);
 
   // Đề xuất TÀI CHÍNH chờ duyệt mà user hiện tại có quyền xét duyệt:
   // (a) được CHỈ ĐỊNH làm người duyệt (approver theo ID/tên, kể cả chuỗi duyệt approvals), HOẶC
@@ -1520,7 +1546,7 @@ export default function TaskManagement({
                   </button>
                 )}
                 <span className="bg-pink-50 border border-pink-200 text-pink-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                  {myPendingLeaves.length} chờ duyệt
+                  {visiblePendingLeaves.length} chờ duyệt
                 </span>
               </div>
             </div>
@@ -1531,15 +1557,17 @@ export default function TaskManagement({
                   Không có đơn nghỉ phép nào chờ bạn duyệt.
                 </div>
               ) : (
-                myPendingLeaves.map(l => (
+                visiblePendingLeaves.map(l => (
                   <div 
                     key={l.id} 
                     className="bg-slate-950/80 border border-slate-850 p-3.5 rounded-lg hover:border-slate-700 hover:bg-slate-950 transition-all duration-150 space-y-3 shadow-sm"
                   >
                     <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
-                      <span className="text-[10px] font-mono font-extrabold text-pink-700 tracking-wider bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded">{l.id}</span>
+                      <span className="text-[10px] font-mono font-extrabold text-pink-700 tracking-wider bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded">
+                        {l.id}{pendingLeavePairOf.has(l.id) ? ` + ${pendingLeavePairOf.get(l.id)}` : ''}
+                      </span>
                       <span className="text-[9.5px] font-bold text-slate-300">
-                        {l.type}
+                        {l.type}{pendingLeavePairOf.has(l.id) ? ' · Cả ngày (sáng + chiều)' : (l.type === 'Báo cáo nghỉ ca' && (l as any).shift ? ` · ${(l as any).shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}` : '')}
                       </span>
                     </div>
 
@@ -1559,14 +1587,14 @@ export default function TaskManagement({
                     <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
                       <button
                         type="button"
-                        onClick={() => handleApproveLeave(l.id, 'rejected')}
+                        onClick={() => handleApproveLeaveWithPair(l.id, 'rejected')}
                         className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 hover:text-rose-800 px-3.5 py-1 rounded text-[10.5px] font-extrabold transition cursor-pointer"
                       >
                         Từ chối
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleApproveLeave(l.id, 'approved')}
+                        onClick={() => handleApproveLeaveWithPair(l.id, 'approved')}
                         className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer"
                       >
                         Duyệt

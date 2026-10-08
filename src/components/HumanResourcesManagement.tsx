@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
 import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
 import { useSettings } from '../context/SettingsContext';
@@ -3201,7 +3202,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const submittedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
     const req: LeaveRequest = {
-      id: `LR-${Date.now().toString().slice(-3)}`,
+      id: generateLeaveId(leaves.map(x => x.id)),   // mã không trùng đơn có sẵn (mã cũ 3 số cuối đồng hồ có thể trùng và ghi đè đơn khác)
       empId: newLeave.empId,
       empName: emp.name,
       type: newLeave.type,
@@ -3501,6 +3502,22 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       addToast({ title: 'ℹ️ Thông báo', message: "Từ chối", type: 'info' });
     }
   };
+
+  // DUYỆT / TỪ CHỐI CẢ CẶP "Báo cáo nghỉ ca" (ca sáng + ca chiều của cùng 1 ngày): bấm 1 lần xử lý cả hai đơn.
+  // Vì handleApproveLeave tính từ state `leaves`/`attendance` của lần render hiện tại, KHÔNG gọi 2 lần liền (lần 2 sẽ dùng state cũ và
+  // ghi đè kết quả lần 1). Cách làm: xử lý đơn thứ nhất ngay, đưa đơn thứ hai vào hàng đợi; khi state `leaves` đã cập nhật (render mới,
+  // handleApproveLeave có state mới) thì effect bên dưới mới xử lý đơn thứ hai.
+  const pairedLeaveQueueRef = React.useRef<{ id: string; status: 'approved' | 'rejected' }[]>([]);
+  const handleApproveLeaveWithPair = (id: string, status: 'approved' | 'rejected') => {
+    const sibling = findPairedAbsenceReport(leaves.find(l => l.id === id), leaves);
+    pairedLeaveQueueRef.current = sibling ? [{ id: sibling.id, status }] : [];
+    handleApproveLeave(id, status);
+  };
+  useEffect(() => {
+    const next = pairedLeaveQueueRef.current.shift();
+    if (next) handleApproveLeave(next.id, next.status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaves]);
 
   // Xóa hẳn 1 đơn nghỉ phép (dùng cho nút Xóa ở thẻ Chi tiết / xóa hàng loạt
   // trong LeavesTab). Không hoàn tác — component con đã hỏi xác nhận trước khi gọi.
@@ -4358,7 +4375,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 leaves={leaves}
                 selectedLeaveId={selectedLeaveId}
                 setSelectedLeaveId={setSelectedLeaveId}
-                handleApproveLeave={handleApproveLeave}
+                handleApproveLeave={handleApproveLeaveWithPair}
                 onDeleteLeave={handleDeleteLeave}
                 globalPageSize={globalPageSize}
                 setGlobalPageSize={setGlobalPageSize}
