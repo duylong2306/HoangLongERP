@@ -49,7 +49,7 @@ export default function EffectivePermissionPreview({ employees }: Props) {
         <h4 className="font-extrabold text-sm text-white flex items-center gap-2"><Eye className="w-4 h-4 text-emerald-500" /> Xem quyền của một nhân viên</h4>
         <p className="text-[10.5px] text-slate-400 mt-1">
           Chọn nhân viên để xem người này THỰC SỰ làm được gì ở từng tình huống (theo cấu hình đã lưu, tính bằng đúng quy tắc của ứng dụng).
-          Chưa gồm các thao tác trong chi tiết công việc (nhận việc, hoàn thành, duyệt, tạm ứng...) — những thao tác đó do tab "Quyền Công việc" quyết định.
+          Chưa gồm các thao tác trong chi tiết công việc (nhận việc, hoàn thành, duyệt, tạm ứng...) — những thao tác đó theo ma trận quyền công việc (hiện là cấu hình mặc định của hệ thống, chưa có màn hình chỉnh).
         </p>
       </div>
 

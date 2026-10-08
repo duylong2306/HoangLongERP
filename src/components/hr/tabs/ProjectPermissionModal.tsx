@@ -56,7 +56,7 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
     <span
       className="ml-1.5 text-[8.5px] font-bold uppercase tracking-wide text-slate-500 border border-slate-600 rounded px-1 py-px align-middle"
       title={tab === 'vitri'
-        ? 'Hiện chưa có chức năng nào kiểm tra quyền này theo vị trí. Thao tác công việc/nhiệm vụ do tab "Quyền Công việc" quyết định.'
+        ? 'Hiện chưa có chức năng nào kiểm tra quyền này theo vị trí. Thao tác trong chi tiết công việc/nhiệm vụ do ma trận quyền công việc quyết định (hiện dùng cấu hình mặc định của hệ thống, chưa có màn hình chỉnh).'
         : 'Hiện chưa có chức năng nào kiểm tra quyền này theo nhóm — tick hay bỏ tick đều chưa đổi gì.'}
     >Chưa áp dụng</span>
   );
