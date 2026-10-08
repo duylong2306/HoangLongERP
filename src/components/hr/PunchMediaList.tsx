@@ -31,7 +31,7 @@ const PunchMediaList: React.FC<Props> = ({
   log,
   onZoomImage,
   variant = 'full',
-  fallbackLocation = 'Công trình',
+  fallbackLocation = 'Chưa rõ địa điểm',
 }) => {
   const slots = getSlotViews(log);
   const legacy = getLegacyMedia(log);

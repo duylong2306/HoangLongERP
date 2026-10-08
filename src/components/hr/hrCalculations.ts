@@ -3,6 +3,7 @@
 // Các hàm thuần (pure) — không phụ thuộc React hook hay component state.
 import { dbService } from '../../lib/dbService';
 import { isAttendanceReportType } from '../../lib/attendanceMeta';
+import { isShiftLeave, shiftLabel, leaveSymbolOf } from '../../lib/leaveShift';
 
 /** Helper trả về ngày local (UTC+7) theo định dạng YYYY-MM-DD. */
 export function getLocalYYYYMMDD(d: Date): string {
@@ -204,9 +205,17 @@ export function computeDailyWorkday(
   const approvedLeave = activeLeaves.find((l: any) => {
     if (l.status !== 'approved') return false;
     if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return false;
+    if (isShiftLeave(l)) return false;   // đơn nghỉ 1 CA xử lý riêng ở nhánh "nghỉ theo ca" bên dưới (không phải nghỉ cả ngày)
     const sameEmp = (l.empId && log.empId && l.empId === log.empId) || (l.empName && log.empName && l.empName === log.empName);
     if (!sameEmp) return false;
     return log.date >= l.fromDate && log.date <= l.toDate;
+  });
+
+  // Đơn nghỉ 1 CA (nghỉ phép năm / nghỉ không lương có xin phép) đã duyệt trùng ngày này
+  const shiftLeaves = approvedLeave ? [] : activeLeaves.filter((l: any) => {
+    if (l.status !== 'approved' || !isShiftLeave(l)) return false;
+    const sameEmp = (l.empId && log.empId && l.empId === log.empId) || (l.empName && log.empName && l.empName === log.empName);
+    return !!sameEmp && log.date >= l.fromDate && log.date <= (l.toDate || l.fromDate);
   });
 
   if (approvedLeave) {
@@ -287,6 +296,29 @@ export function computeDailyWorkday(
   } else if (isWeekend) {
     multiplier = getCoefVal('TC', 2.0);
     multiplierType = 'Cuối tuần';
+  }
+
+  // NGHỈ THEO CA: ca nghỉ tính theo hệ số của loại nghỉ × tỉ lệ của ca (VD nghỉ phép năm hệ số 1 → ca sáng = +0,5); ca còn lại tính theo giờ chấm
+  // thực tế (đủ vào + ra = công ca; không chấm = 0, không phạt như nghỉ cả ngày). Hai ca cùng nghỉ (2 đơn) → cộng cả hai.
+  if (shiftLeaves.length > 0) {
+    const dayBase = morningBaseVal + afternoonBaseVal || 1;
+    const parts: string[] = [];
+    let total = 0;
+    for (const sh of ['morning', 'afternoon'] as const) {
+      const base = sh === 'morning' ? morningBaseVal : afternoonBaseVal;
+      const lv = shiftLeaves.find((l: any) => l.shift === sh);
+      if (lv) {
+        const matched = activeCoefs.find((c: any) => c.type === lv.type || c.id === lv.type);
+        const sym = matched ? matched.id : leaveSymbolOf(lv.type);
+        total += getCoefVal(sym, 0) * (base / dayBase);
+        parts.push(`${lv.type} ${shiftLabel(sh)} (${sym})`);
+      } else if ((sh === 'morning' ? morningWorked : afternoonWorked)) {
+        total += base * (applyMultiplier ? multiplier : 1);
+        parts.push(`làm ${shiftLabel(sh)}`);
+      }
+    }
+    total = Math.round(total * 100) / 100;
+    return { workday: total, label: `${total > 0 ? '+' : ''}${total}`, details: parts.join(' + ') };
   }
 
   if (morningWorked || afternoonWorked) {
@@ -478,6 +510,7 @@ export function getMissingAttendanceReport(params: {
   (leaves || []).forEach((l: any) => {
     if (l.status !== 'approved') return;
     if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) return;
+    if (isShiftLeave(l)) return;   // nghỉ 1 ca chỉ phủ 1 ca — ngày đó vẫn phải có chấm công cho ca còn lại
     eachDateInRange(l.fromDate, l.toDate).forEach((d) => {
       if (l.empId) leaveCov.add(`${l.empId}|${d}`);
       if (l.empName) leaveCov.add(`${l.empName}|${d}`);

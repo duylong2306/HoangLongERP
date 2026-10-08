@@ -122,7 +122,7 @@ export async function syncAttendanceOutbox(
  */
 export function burnTimestampToPhoto(
   photo: string,
-  opts: { time: string; site?: string; gps?: string; empName?: string }
+  opts: { time: string; gps?: string; empName?: string }
 ): Promise<string> {
   return new Promise((resolve) => {
     if (!photo || !photo.startsWith('data:image')) {
@@ -142,7 +142,7 @@ export function burnTimestampToPhoto(
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-        const lines = [opts.time, opts.site, opts.gps, opts.empName].filter(
+        const lines = [opts.time, opts.gps, opts.empName].filter(
           Boolean
         ) as string[];
         if (lines.length > 0) {

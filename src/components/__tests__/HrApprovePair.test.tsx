@@ -21,13 +21,14 @@ const mkLeave = (id: string, shift: string) => ({ id, empId: 'NV018', empName: '
 const leaveStore: any[] = [];
 const leaveSave = vi.fn().mockImplementation((l: any) => { const i = leaveStore.findIndex(x => x.id === l.id); if (i >= 0) leaveStore[i] = l; else leaveStore.push(l); return Promise.resolve(); });
 const attendanceSave = vi.fn().mockResolvedValue(undefined);
+const employeesSave = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../lib/dbService', () => {
   const makeTable = (extra: Record<string, any> = {}) => ({ list: vi.fn().mockResolvedValue([]), save: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined), deleteMultiple: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue(null), ...extra });
   const target: any = {
     hrmLeaves: { ...makeTable(), list: vi.fn().mockImplementation(() => Promise.resolve(JSON.parse(JSON.stringify(leaveStore)))), save: (...a: any[]) => leaveSave(...a) },
     attendance: { ...makeTable(), save: (...a: any[]) => attendanceSave(...a), listForRange: vi.fn().mockResolvedValue([]), getCachedRange: vi.fn().mockReturnValue(null) },
-    employees: { ...makeTable(), list: vi.fn().mockResolvedValue([{ id: 'NV018', name: 'Lê Văn Công', status: 'working', phepNam: 12 }]) },
+    employees: { ...makeTable(), list: vi.fn().mockResolvedValue([{ id: 'NV018', name: 'Lê Văn Công', status: 'working', phepNam: 12 }]), save: (...a: any[]) => employeesSave(...a) },
   };
   return { dbService: new Proxy(target, { get(t: any, p: string) { if (p in t) return t[p]; t[p] = makeTable(); return t[p]; } }), camelToSnake: (s: string) => s, snakeToCamel: (s: string) => s };
 });
@@ -35,7 +36,7 @@ vi.mock('../../lib/dbService', () => {
 import HumanResourcesManagement from '../HumanResourcesManagement';
 import { computeDailyWorkday } from '../hr/hrCalculations';
 
-beforeEach(() => { cleanup(); attendanceSave.mockClear(); leaveStore.length = 0; leaveStore.push(mkLeave('LR-001', 'morning'), mkLeave('LR-002', 'afternoon')); leaveSave.mockClear(); localStorage.clear(); });
+beforeEach(() => { cleanup(); attendanceSave.mockClear(); employeesSave.mockClear(); leaveStore.length = 0; leaveStore.push(mkLeave('LR-001', 'morning'), mkLeave('LR-002', 'afternoon')); leaveSave.mockClear(); localStorage.clear(); });
 
 const admin = { id: 'admin1', name: 'Admin', role: 'director', roleGroupIds: ['role_admin'] } as any;
 const open = async () => {
@@ -104,5 +105,41 @@ describe('Màn hình Nhân sự — duyệt báo cáo lỗi chấm công điền
     await openOne({ ...mkLeave('LR-9', 'afternoon'), type: 'Báo cáo lỗi chấm ra ca' }, undefined);
     const r = await lastSaved();
     expect([r.timeInC, r.timeOutC]).toEqual(['13:00', '17:00']);
+  });
+});
+
+describe('Màn hình Nhân sự — duyệt đơn nghỉ phép năm 1 CA', () => {
+  const shiftLeave = (o: any = {}) => ({ id: 'LR-S1', empId: 'NV018', empName: 'Lê Văn Công', type: 'Nghỉ phép năm', shift: 'morning', fromDate: d, toDate: d, daysCount: 0.5, status: 'pending', reason: 'Việc gia đình', approverName: 'Admin', approverId: 'admin1', ...o });
+  const openOneLeave = async (leave: any) => {
+    leaveStore.length = 0; leaveStore.push(leave);
+    const { container } = render(<HumanResourcesManagement currentUser={admin} defaultSubTab="leaves" hideSidebar systemConfig={{} as any} />);
+    await waitFor(() => expect(container.querySelector('tbody tr')).not.toBeNull(), { timeout: 4000 });
+    await new Promise(r => setTimeout(r, 800));
+    return container;
+  };
+
+  it('danh sách hiện nhãn "Nghỉ 1 ca sáng" cho đơn nghỉ phép 1 ca', async () => {
+    const c = await openOneLeave(shiftLeave());
+    expect(c.querySelector('tbody')!.textContent).toContain('Nghỉ 1 ca sáng');
+    expect(c.querySelector('tbody')!.textContent).toContain('0.5 ngày');
+  });
+  it('duyệt: trừ ĐÚNG 0,5 ngày phép năm, và KHÔNG ghi ký hiệu nghỉ đè cả ngày (bản ghi chấm công để trống giờ)', async () => {
+    const c = await openOneLeave(shiftLeave());
+    fireEvent.click(c.querySelector('tbody tr')!);
+    fireEvent.click(await screen.findByText('Duyệt phép ✅'));
+    await waitFor(() => expect(leaveStore[0].status).toBe('approved'), { timeout: 4000 });
+    await waitFor(() => expect(employeesSave).toHaveBeenCalled(), { timeout: 4000 });
+    expect(employeesSave.mock.calls[0][0].phepNam).toBe(11.5);                       // 12 − 0,5
+    await waitFor(() => expect(attendanceSave.mock.calls.some(c => c[0]?.empId === 'NV018' && c[0]?.date === d)).toBe(true), { timeout: 4000 });
+    const rec = attendanceSave.mock.calls.map(c => c[0]).filter(r => r?.empId === 'NV018' && r?.date === d).pop();
+    expect([rec.timeInS, rec.timeOutS, rec.timeInC, rec.timeOutC].every((v: any) => !v)).toBe(true);   // không có 'PN' đè lên giờ
+    expect(rec.status).not.toBe('excused');
+  });
+  it('nghỉ không lương 1 ca: duyệt không trừ phép năm', async () => {
+    const c = await openOneLeave(shiftLeave({ type: 'Nghỉ không lương có xin phép', shift: 'afternoon' }));
+    fireEvent.click(c.querySelector('tbody tr')!);
+    fireEvent.click(await screen.findByText('Duyệt phép ✅'));
+    await waitFor(() => expect(leaveStore[0].status).toBe('approved'), { timeout: 4000 });
+    expect(employeesSave).not.toHaveBeenCalled();
   });
 });

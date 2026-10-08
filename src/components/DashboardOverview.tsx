@@ -46,6 +46,7 @@ import {
 import { Employee } from '../types';
 import { generateLeaveId } from '../lib/leaveRequests';
 import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
+import { supportsShiftLeave, leaveDaysCount, shiftLabel, shiftLeaveBadge, shiftLeaveFullLabel, approvedShiftLeavesOnDay, type LeaveShift } from '../lib/leaveShift';
 
 interface DashboardProps {
   projects: Project[];
@@ -62,9 +63,6 @@ interface DashboardProps {
   travelExpensesSummary?: any[];
 }
 
-// Công trình mặc định khi không định vị được GPS (trước đây lấy từ trường cấu hình constructionSites — không có ô nhập/cột lưu, luôn rỗng;
-// đọc config.constructionSites[0] còn bị lỗi khi trường này undefined)
-const DEFAULT_PUNCH_SITE = 'Công trình Blue Sky';
 
 export default function DashboardOverview({
   projects,
@@ -920,7 +918,6 @@ export default function DashboardOverview({
     }
   }, [digitalTime, todayVal, attendanceList]); */
 
-  const [selectedSite, setSelectedSite] = useState(DEFAULT_PUNCH_SITE);
   const [activePunchSlot, setActivePunchSlot] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [liveGpsCoords, setLiveGpsCoords] = useState<string>('');
@@ -1008,23 +1005,24 @@ export default function DashboardOverview({
   const [leaveFrom, setLeaveFrom] = useState('2026-06-08');
   const [leaveTo, setLeaveTo] = useState('2026-06-09');
   const [leaveDays, setLeaveDays] = useState(2);
+  // Thời gian nghỉ của "Nghỉ phép năm" / "Nghỉ không lương có xin phép": cả ngày (mặc định) hoặc chỉ 1 ca. Nghỉ 1 ca = đúng 1 ngày, 0,5 ngày.
+  const [leaveShiftChoice, setLeaveShiftChoice] = useState<'full' | LeaveShift>('full');
 
-  // Auto-sync leaveDays when leaveFrom or leaveTo changes
+  // Loại phép không hỗ trợ nghỉ theo ca (hiếu hỉ, cưới...) → quay về nghỉ cả ngày
+  useEffect(() => {
+    if (!supportsShiftLeave(leaveRequestType)) setLeaveShiftChoice('full');
+  }, [leaveRequestType]);
+
+  // Tự đồng bộ số ngày (và ngày kết thúc khi nghỉ 1 ca) mỗi khi ngày hoặc cách nghỉ đổi
   useEffect(() => {
     try {
-      const start = new Date(leaveFrom);
-      const end = new Date(leaveTo);
-      const diff = end.getTime() - start.getTime();
-      if (diff >= 0) {
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24)) + 1;
-        setLeaveDays(days);
-      } else {
-        setLeaveDays(0);
-      }
+      const shift = leaveShiftChoice === 'full' ? undefined : leaveShiftChoice;
+      if (shift && leaveTo !== leaveFrom) { setLeaveTo(leaveFrom); return; }   // nghỉ 1 ca chỉ trong 1 ngày
+      setLeaveDays(leaveDaysCount(leaveFrom, leaveTo, shift));
     } catch (e) {
       setLeaveDays(0);
     }
-  }, [leaveFrom, leaveTo]);
+  }, [leaveFrom, leaveTo, leaveShiftChoice]);
 
   const [leaveReasonText, setLeaveReasonText] = useState('');
   const [leaveApprover, setLeaveApprover] = useState('Trương Hữu Long');
@@ -1117,8 +1115,20 @@ export default function DashboardOverview({
   // Đánh giá thời gian báo trước của đơn đang lập (số ngày báo trước lấy từ Cấu Hình Ca; chỉ áp dụng cho đơn nghỉ phép thật) — xem lib/leaveNotice.ts
   const getLeaveNotice = () => {
     if (!leaveFrom || !isRealLeaveType(leaveRequestType)) return null;
-    const n = evaluateLeaveNotice({ fromDate: leaveFrom, now: new Date(), morningIn: config.morningIn, requiredDays: config.leaveAdvanceDays });
+    // Mốc bắt đầu nghỉ = giờ vào ca đầu tiên bị nghỉ (nghỉ riêng ca chiều → giờ vào ca chiều)
+    const startIn = leaveShiftChoice === 'afternoon' ? config.afternoonIn : config.morningIn;
+    const n = evaluateLeaveNotice({ fromDate: leaveFrom, now: new Date(), morningIn: startIn, requiredDays: config.leaveAdvanceDays });
     return n.late ? n : null;
+  };
+  // Phép năm còn dùng được = số còn lại TRỪ số ngày của các đơn phép năm CỦA MÌNH đang chờ duyệt (phép chỉ bị trừ lúc duyệt, nên nếu không
+  // tính đơn đang chờ thì có thể nộp nhiều đơn vượt quá số phép còn lại).
+  const getAnnualLeaveAvailability = () => {
+    const profile = getCurrentEmployeeProfile();
+    const remaining = profile?.phepNam !== undefined ? Number(profile.phepNam) : 12;
+    const reserved = (dashLeaves || [])
+      .filter((l: any) => l.status === 'pending' && l.type === 'Nghỉ phép năm' && (l.empId ? l.empId === empId : l.empName === currentUser.name))
+      .reduce((sum: number, l: any) => sum + Number(l.daysCount || 0), 0);
+    return { remaining, reserved, available: Math.max(0, remaining - reserved) };
   };
   const getLeaveDateWarningText = () => {
     try {
@@ -1233,21 +1243,8 @@ export default function DashboardOverview({
     startCameraStream();
   };
 
-  const getSiteGpsInfo = (siteName: string) => {
-    switch (siteName) {
-      case 'Công trình Blue Sky':
-        return { coords: '10.771142, 106.698031', location: '100 Lê Lợi, Bến Nghé, Quận 1, Tp. HCM' };
-      case 'Xưởng mộc Hoàng Long':
-        return { coords: '10.849409, 106.753705', location: '45 Đường số 9, Linh Tây, Thủ Đức, Tp. HCM' };
-      case 'Bộ phận văn phòng chính':
-        return { coords: '10.762622, 106.660172', location: '230 Ba Tháng Hai, Phường 12, Quận 10, Tp. HCM' };
-      case 'Biệt thự SS400 Cát Lái':
-        return { coords: '10.776101, 106.781812', location: 'Khu SS400 Nguyễn Thị Định, Cát Lái, Quận 2, Tp. HCM' };
-      default:
-        return { coords: '10.770000, 106.690000', location: 'Khu vực Công trình Ngoại vi' };
-    }
-  };
-
+  // Định vị GPS khi mở hộp chấm công: lấy tọa độ thật + địa chỉ thật (tra cứu ngược bản đồ). Không còn "địa điểm dự kiến"/danh sách công trình
+  // cố định (dữ liệu cũ của bản demo); nếu không định vị được thì để TRỐNG và báo lỗi — tuyệt đối không bịa tọa độ/địa chỉ.
   useEffect(() => {
     if (showPunchModal) {
       setGpsLoading(true);
@@ -1258,11 +1255,6 @@ export default function DashboardOverview({
       if (!navigator.geolocation) {
         setGpsErrorMsg('Trình duyệt không hỗ trợ định vị GPS.');
         setGpsLoading(false);
-        const defaultSite = DEFAULT_PUNCH_SITE;
-        setSelectedSite(defaultSite);
-        const sInfo = getSiteGpsInfo(defaultSite);
-        setLiveGpsCoords(sInfo.coords);
-        setLiveGpsAddr(sInfo.location);
         return;
       }
 
@@ -1270,59 +1262,16 @@ export default function DashboardOverview({
         async (position) => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
-          const coordsText = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-          setLiveGpsCoords(coordsText);
-
-          const sites = [
-            { name: 'Công trình Blue Sky', lat: 10.771142, lng: 106.698031, location: '100 Lê Lợi, Bến Nghé, Quận 1, Tp. HCM' },
-            { name: 'Xưởng mộc Hoàng Long', lat: 10.849409, lng: 106.753705, location: '45 Đường số 9, Linh Tây, Thủ Đức, Tp. HCM' },
-            { name: 'Bộ phận văn phòng chính', lat: 10.762622, lng: 106.660172, location: '230 Ba Tháng Hai, Phường 12, Quận 10, Tp. HCM' },
-            { name: 'Biệt thự SS400 Cát Lái', lat: 10.776101, lng: 106.781812, location: 'Khu SS400 Nguyễn Thị Định, Cát Lái, Quận 2, Tp. HCM' }
-          ];
-
-          const calculateDist = (la1: number, lo1: number, la2: number, lo2: number) => {
-            const R = 6371000;
-            const dLa = (la2 - la1) * Math.PI / 180;
-            const dLo = (lo2 - lo1) * Math.PI / 180;
-            const a = Math.sin(dLa/2) * Math.sin(dLa/2) +
-                      Math.cos(la1 * Math.PI / 180) * Math.cos(la2 * Math.PI / 180) *
-                      Math.sin(dLo/2) * Math.sin(dLo/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
-          };
-
-          let nearestSite = sites[0];
-          let minDist = calculateDist(lat, lng, sites[0].lat, sites[0].lng);
-
-          for (let i = 1; i < sites.length; i++) {
-            const dist = calculateDist(lat, lng, sites[i].lat, sites[i].lng);
-            if (dist < minDist) {
-              minDist = dist;
-              nearestSite = sites[i];
-            }
-          }
-
-          if (minDist <= 1500) {
-            setSelectedSite(nearestSite.name);
-          } else {
-            setSelectedSite('Công trình Ngoại vi');
-          }
+          setLiveGpsCoords(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
 
           try {
             const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=vi`);
             if (res.ok) {
               const resData = await res.json();
-              if (resData && resData.display_name) {
-                setLiveGpsAddr(resData.display_name);
-              } else {
-                setLiveGpsAddr(nearestSite.location);
-              }
-            } else {
-              setLiveGpsAddr(nearestSite.location);
+              if (resData && resData.display_name) setLiveGpsAddr(resData.display_name);
             }
           } catch (osmErr) {
-            console.error('Nominatim call failed:', osmErr);
-            setLiveGpsAddr(nearestSite.location);
+            console.error('Nominatim call failed:', osmErr);   // không lấy được địa chỉ → để trống, tọa độ vẫn có
           }
           setGpsLoading(false);
         },
@@ -1337,12 +1286,6 @@ export default function DashboardOverview({
           }
           console.error('GPS Geolocation Error:', error);
           setGpsErrorMsg(errTxt);
-          
-          const defaultSite = DEFAULT_PUNCH_SITE;
-          setSelectedSite(defaultSite);
-          const sInfo = getSiteGpsInfo(defaultSite);
-          setLiveGpsCoords(sInfo.coords);
-          setLiveGpsAddr(sInfo.location);
           setGpsLoading(false);
         },
         { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
@@ -1419,7 +1362,6 @@ export default function DashboardOverview({
     // có id khác → trùng lặp (2 bản ghi cùng empId + ngày). empId là khóa nghiệp vụ duy nhất.
     let todayLog = updated.find(a => a.empId === empId && a.date === todayVal);
 
-    const siteInfo = getSiteGpsInfo(selectedSite);
     const selfPhoto = captureSelfieFromStream();
 
     // ─── GUARD 1: Bản ghi đã bị khóa (đã chốt công) thì không cho chấm nữa ───
@@ -1499,7 +1441,7 @@ export default function DashboardOverview({
         timeOutC: '--:--',
         timeInOT: '--:--',
         timeOutOT: '--:--',
-        method: `GPS (${selectedSite})`,
+        method: 'GPS',
         status: 'valid',
         otHours: 0,
         notes: 'Chấm công qua FaceID & định vị mạng trạm',
@@ -1517,16 +1459,15 @@ export default function DashboardOverview({
 
     // Set slot value
     todayLog[activePunchSlot] = punchedTime;
-    todayLog.method = `GPS/FaceID (${selectedSite})`;
+    todayLog.method = 'GPS/FaceID';
 
-    // Đốt giờ chấm + công trình + GPS + tên NV vào ảnh selfie để tạo dấu vết audit
+    // Đốt giờ chấm + GPS + tên NV vào ảnh selfie để tạo dấu vết audit
     // (chống sửa giờ trong localStorage: ảnh vẫn giữ giờ gốc). Dùng giờ máy chủ nếu có.
     const stampTime = serverTs ? serverTs.time : punchedTime;
     const burnedPhoto = selfPhoto
       ? await burnTimestampToPhoto(selfPhoto, {
           time: stampTime,
-          site: selectedSite,
-          gps: liveGpsCoords || siteInfo.coords,
+          gps: liveGpsCoords,
           empName: currentUser.name,
         })
       : '';
@@ -1539,8 +1480,8 @@ export default function DashboardOverview({
       ? ((await dbService.uploadAttendancePhoto(burnedPhoto)) ?? burnedPhoto)
       : '';
 
-    const punchLocation = liveGpsAddr || selectedSite;
-    const punchCoords = liveGpsCoords || siteInfo.coords;
+    const punchLocation = liveGpsAddr;
+    const punchCoords = liveGpsCoords;
 
     // ─── Ghi ảnh + tọa độ RIÊNG cho lượt chấm này (không ghi đè lượt trước) ───
     // Mỗi ngày có tới 6 lượt: Vào/Ra sáng, Vào/Ra chiều, Vào/Ra tăng ca. Trước đây
@@ -1577,10 +1518,10 @@ export default function DashboardOverview({
       if (checkInMin > (limitMin + allowedLateMorning)) {
         todayLog.status = 'late';
         // Ghi phút muộn THỰC TẾ (không trừ dung sai) → khớp với badge "Muộn X'" trong chấm công ngày.
-        todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút sáng. Địa điểm: ${selectedSite}`;
+        todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút sáng.`;
       } else {
         todayLog.status = 'valid';
-        todayLog.notes = `Chấm công vào sáng chuẩn mực tại ${selectedSite}`;
+        todayLog.notes = 'Chấm công vào sáng chuẩn mực';
       }
     } else if (activePunchSlot === 'timeInC') {
       const hh = now.getHours();
@@ -1591,10 +1532,10 @@ export default function DashboardOverview({
       if (checkInMin > (limitMin + allowedLateAfternoon)) {
         todayLog.status = 'late';
         // Ghi phút muộn THỰC TẾ (không trừ dung sai) → khớp với badge "Muộn X'" trong chấm công ngày.
-        todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút chiều. Địa điểm: ${selectedSite}`;
+        todayLog.notes = `Đi muộn ${checkInMin - limitMin} phút chiều.`;
       } else {
         todayLog.status = 'valid';
-        todayLog.notes = `Chấm công vào chiều chuẩn mực tại ${selectedSite}`;
+        todayLog.notes = 'Chấm công vào chiều chuẩn mực';
       }
     }
 
@@ -1692,7 +1633,7 @@ export default function DashboardOverview({
       setPendingSync(outboxPendingCount());
       addToast({
         title: '✅ Điểm danh thành công',
-        message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime} tại ${selectedSite}.`,
+        message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime}.`,
         type: 'success',
       });
       // 📣 Nhóm chat "Điểm danh": người chấm ĐẦU TIÊN trong ca kích hoạt Hệ
@@ -1731,22 +1672,29 @@ export default function DashboardOverview({
       return;
     }
 
+    const leaveShift: LeaveShift | undefined = supportsShiftLeave(leaveRequestType) && leaveShiftChoice !== 'full' ? leaveShiftChoice : undefined;
+    if (leaveShift && leaveTo !== leaveFrom) {
+      alert('⚠️ Nghỉ 1 ca chỉ được chọn trong 1 ngày.');
+      return;
+    }
+
     // Constraint: end date must be after or equal to start date
     if (new Date(leaveTo) < new Date(leaveFrom)) {
       alert("⚠️ Đến ngày không thể trước Từ ngày!");
       return;
     }
 
-    // Constraint: Check if leaveRequestType is annual leave but user runs out or doesn't have enough remaining annual leave days
+    // Hết phép năm → chặn tạo đơn "Nghỉ phép năm" (đã trừ số ngày của các đơn phép năm đang chờ duyệt); đơn vượt số phép còn lại cũng bị chặn.
     if (leaveRequestType === 'Nghỉ phép năm') {
-      const profile = getCurrentEmployeeProfile();
-      const remainingDays = profile?.phepNam !== undefined ? profile.phepNam : 12;
-      if (remainingDays <= 0) {
-        alert("⚠️ Không thể nộp đơn! Bạn đã dùng hết số lượng phép năm được cấp (số ngày phép còn lại: 0).");
+      const { remaining, reserved, available } = getAnnualLeaveAvailability();
+      if (available <= 0) {
+        alert(reserved > 0
+          ? `⚠️ Không thể nộp đơn nghỉ phép năm! Số phép năm còn lại (${formatDays(remaining)} ngày) đã được các đơn đang chờ duyệt của bạn dùng hết (${formatDays(reserved)} ngày).`
+          : '⚠️ Không thể nộp đơn nghỉ phép năm! Bạn đã dùng hết số phép năm được cấp (còn lại: 0 ngày). Hãy chọn loại nghỉ khác.');
         return;
       }
-      if (Number(leaveDays) > remainingDays) {
-        alert(`⚠️ Không thể nộp đơn! Số ngày xin nghỉ phép năm (${leaveDays} ngày) vượt quá số ngày phép năm còn lại của bạn (${remainingDays} ngày).`);
+      if (Number(leaveDays) > available) {
+        alert(`⚠️ Không thể nộp đơn! Số ngày xin nghỉ phép năm (${formatDays(Number(leaveDays))} ngày) vượt quá số phép năm còn dùng được (${formatDays(available)} ngày${reserved > 0 ? `, đã trừ ${formatDays(reserved)} ngày của đơn đang chờ duyệt` : ''}).`);
         return;
       }
     }
@@ -1784,7 +1732,8 @@ export default function DashboardOverview({
       type: leaveRequestType,
       fromDate: leaveFrom,
       toDate: leaveTo,
-      daysCount: Number(leaveDays),
+      daysCount: leaveShift ? 0.5 : Number(leaveDays),   // nghỉ 1 ca = 0,5 ngày (nghỉ phép năm: trừ 0,5 khi duyệt)
+      ...(leaveShift ? { shift: leaveShift } : {}),
       reason: lateNotice ? tagLateNoticeReason(leaveReasonText, lateNotice) : leaveReasonText,
       status: 'pending',
       createdAt: todayVal,
@@ -1811,12 +1760,13 @@ export default function DashboardOverview({
         senderRole: currentUser.role,
         recipientId: approverEmp.id,
         recipientName: approverEmp.name || newRequest.approverName,
-        content: `🔔 ${currentUser.name} đã gửi ĐƠN NGHỈ PHÉP "${newRequest.type}" từ ${newRequest.fromDate} đến ${newRequest.toDate} (${newRequest.daysCount} ngày). Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        content: `🔔 ${currentUser.name} đã gửi ĐƠN NGHỈ PHÉP "${newRequest.type}"${leaveShift ? ` (${shiftLabel(leaveShift)})` : ''} từ ${newRequest.fromDate} đến ${newRequest.toDate} (${newRequest.daysCount} ngày). Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
         relatedEntity: { type: 'leave', id: newRequest.id },
       });
     }
 
     setLeaveReasonText('');
+    setLeaveShiftChoice('full');
     setLeaveModalOpen(false);
     alert(`📬 Đơn xin nghỉ phép đã được nộp sang HỆ THỐNG NHÂN SỰ thành công!\nNgười duyệt: ${(leaveApprover || 'Trương Hữu Long')}${leaveApproverPosition ? ` (${leaveApproverPosition})` : ''}\nTrạng thái: Đang chờ duyệt.${lateNotice ? '\n⚠️ Đơn được đánh dấu "XIN MUỘN" (chưa đủ thời gian báo trước) để người duyệt cân nhắc.' : ''}`);
   };
@@ -2956,7 +2906,16 @@ export default function DashboardOverview({
                           <span className="absolute top-0 right-0 text-[7.5px] font-semibold text-rose-200 bg-rose-950 px-0.5 rounded-bl border-b border-l border-rose-800/60 leading-none h-[11px] flex items-center uppercase z-10">
                             {log.leaveSymbol || log.timeInS}
                           </span>
-                        ) : null}
+                        ) : (() => {
+                          // Nghỉ phép THEO CA đã duyệt: gắn nhãn ngắn (PN·S = nghỉ phép năm ca sáng, P·C = nghỉ không lương ca chiều) để nhận ra ngay
+                          const sl = approvedShiftLeavesOnDay(dashLeaves, { empId, empName: currentUser.name }, dateStr);
+                          if (sl.length === 0) return null;
+                          return (
+                            <span className="absolute top-0 right-0 text-[7.5px] font-semibold text-rose-200 bg-rose-950 px-0.5 rounded-bl border-b border-l border-rose-800/60 leading-none h-[11px] flex items-center uppercase z-10" title={sl.map(shiftLeaveFullLabel).join(' + ')}>
+                              {sl.map(shiftLeaveBadge).join('+')}
+                            </span>
+                          );
+                        })()}
                         
                         <div className="flex items-center justify-center gap-1.5 leading-none mt-0.5">
                           {isToday && (
@@ -3222,6 +3181,14 @@ export default function DashboardOverview({
                   <span className="text-[10px] text-slate-400 font-mono">Định mức: {config.morningIn} - {config.morningOut}</span>
                 </div>
                 {(() => {
+                  const sl = approvedShiftLeavesOnDay(dashLeaves, { empId, empName: currentUser.name }, selectedDayDetail.date).find(l => l.shift === 'morning');
+                  return sl ? (
+                    <div className="bg-sky-50 border border-sky-200 text-sky-700 rounded-lg px-2.5 py-1.5 text-[10.5px] font-bold">
+                      🏖 {shiftLeaveFullLabel(sl)} — đã được duyệt nghỉ
+                    </div>
+                  ) : null;
+                })()}
+                {(() => {
                   const log = selectedDayDetail.log;
                   const timeInS = normalizeTime(log.timeInS);
                   const timeOutS = normalizeTime(log.timeOutS);
@@ -3394,6 +3361,14 @@ export default function DashboardOverview({
                   <span className="font-extrabold text-[11px] text-sky-400 tracking-wide">🌇 CA 2 (CHIỀU)</span>
                   <span className="text-[10px] text-slate-400 font-mono">Định mức: {config.afternoonIn} - {config.afternoonOut}</span>
                 </div>
+                {(() => {
+                  const sl = approvedShiftLeavesOnDay(dashLeaves, { empId, empName: currentUser.name }, selectedDayDetail.date).find(l => l.shift === 'afternoon');
+                  return sl ? (
+                    <div className="bg-sky-50 border border-sky-200 text-sky-700 rounded-lg px-2.5 py-1.5 text-[10.5px] font-bold">
+                      🏖 {shiftLeaveFullLabel(sl)} — đã được duyệt nghỉ
+                    </div>
+                  ) : null;
+                })()}
                 
                 {(() => {
                   const log = selectedDayDetail.log;
@@ -3677,7 +3652,6 @@ export default function DashboardOverview({
                           log={userTodayLog}
                           onZoomImage={setZoomedImage}
                           variant="compact"
-                          fallbackLocation={selectedSite}
                         />
                       </td>
                     </tr>
@@ -3801,10 +3775,6 @@ export default function DashboardOverview({
               {/* GPS STATE INFO */}
               <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 text-left space-y-1.5 text-[11px]">
                 <div className="flex justify-between items-start gap-2">
-                  <span className="text-slate-500 font-bold shrink-0">ĐỊA ĐIỂM DỰ KIẾN:</span>
-                  <span className="text-slate-300 font-black font-mono uppercase text-sky-400 text-right">{selectedSite}</span>
-                </div>
-                <div className="flex justify-between items-start gap-2">
                   <span className="text-slate-500 font-bold shrink-0">TỌA ĐỘ GPS THỰC TẾ:</span>
                   {gpsLoading ? (
                     <span className="text-sky-450 font-mono font-black flex items-center gap-1 animate-pulse">
@@ -3920,6 +3890,32 @@ export default function DashboardOverview({
                 </span>
               </div>
 
+              {/* Hết phép năm → chặn tạo đơn Nghỉ phép năm (đã trừ các đơn phép năm đang chờ duyệt) */}
+              {leaveRequestType === 'Nghỉ phép năm' && getAnnualLeaveAvailability().available <= 0 && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
+                  ⚠️ Bạn đã hết phép năm{getAnnualLeaveAvailability().reserved > 0 ? ' (số còn lại đã được các đơn đang chờ duyệt dùng hết)' : ''} nên không thể tạo đơn Nghỉ phép năm. Hãy chọn loại nghỉ khác.
+                </div>
+              )}
+
+              {/* Nghỉ cả ngày hay chỉ 1 ca — chỉ cho Nghỉ phép năm và Nghỉ không lương có xin phép */}
+              {supportsShiftLeave(leaveRequestType) && (
+                <div>
+                  <label className="text-[10px] text-slate-500 font-bold block mb-1">THỜI GIAN NGHỈ</label>
+                  <select
+                    value={leaveShiftChoice}
+                    onChange={(e) => setLeaveShiftChoice(e.target.value as 'full' | LeaveShift)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500"
+                  >
+                    <option value="full" className="bg-slate-900">Nghỉ cả ngày</option>
+                    <option value="morning" className="bg-slate-900">Chỉ nghỉ ca sáng (0,5 ngày)</option>
+                    <option value="afternoon" className="bg-slate-900">Chỉ nghỉ ca chiều (0,5 ngày)</option>
+                  </select>
+                  {leaveShiftChoice !== 'full' && leaveRequestType === 'Nghỉ phép năm' && (
+                    <p className="text-[10px] text-slate-500 mt-1">Nghỉ 1 ca chỉ trong 1 ngày và trừ 0,5 ngày phép năm khi được duyệt.</p>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] text-slate-500 font-bold block mb-1">TỪ NGÀY</label>
@@ -3931,7 +3927,7 @@ export default function DashboardOverview({
                       setLeaveFrom(val);
                       try {
                         const d = new Date(val);
-                        d.setDate(d.getDate() + 1);
+                        if (leaveShiftChoice === 'full') d.setDate(d.getDate() + 1);   // nghỉ 1 ca: ngày kết thúc = ngày bắt đầu
                         setLeaveTo(d.toISOString().split('T')[0]);
                       } catch (err) {}
                     }}
@@ -3944,7 +3940,9 @@ export default function DashboardOverview({
                     type="date"
                     value={leaveTo}
                     onChange={(e) => setLeaveTo(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 font-mono"
+                    disabled={leaveShiftChoice !== 'full'}
+                    title={leaveShiftChoice !== 'full' ? 'Nghỉ 1 ca chỉ trong 1 ngày' : undefined}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -4024,7 +4022,8 @@ export default function DashboardOverview({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-sky-500 hover:bg-sky-400 text-white text-xs py-2 rounded-xl font-black text-center cursor-pointer"
+                  disabled={leaveRequestType === 'Nghỉ phép năm' && getAnnualLeaveAvailability().available <= 0}
+                  className="flex-1 bg-sky-500 hover:bg-sky-400 text-white text-xs py-2 rounded-xl font-black text-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   NỘP ĐƠN NGHỈ PHÉP
                 </button>

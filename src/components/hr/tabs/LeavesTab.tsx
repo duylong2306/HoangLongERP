@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../../../lib/leaveRequests';
 import { parseLateNotice } from '../../../lib/leaveNotice';
+import { isShiftLeave, shiftLabel } from '../../../lib/leaveShift';
 
 interface LeaveItem {
   id: string;
@@ -286,7 +287,10 @@ export default function LeavesTab({
                         {l.type}
                         {pairOf.has(l.id)
                           ? <span className="block text-[9px] font-bold text-sky-400">Cả ngày (sáng + chiều)</span>
-                          : (l.type === 'Báo cáo nghỉ ca' && l.shift ? <span className="block text-[9px] text-slate-500">{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
+                          : isShiftLeave(l)
+                            // Nghỉ phép THẬT chỉ 1 ca: nhãn nổi bật để nhận ra ngay lịch nghỉ nửa ngày
+                            ? <span className="block text-[9px] font-black text-sky-400">🏖 Nghỉ 1 {shiftLabel(l.shift)}</span>
+                            : (l.type === 'Báo cáo nghỉ ca' && l.shift ? <span className="block text-[9px] text-slate-500">{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
                         {parseLateNotice(l.reason).late && <span className="block text-[9px] font-black text-amber-700" title={parseLateNotice(l.reason).detail}>⚠ Xin muộn</span>}
                       </td>
                       <td className="py-2.5 text-slate-350 text-center font-mono">
@@ -419,7 +423,7 @@ export default function LeavesTab({
                     <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs">
                       <div>Mã nhân viên: <strong className="text-slate-200 block mt-0.5 font-mono">{l.empId}</strong></div>
                       <div>Họ và tên: <strong className="text-slate-200 block mt-0.5 font-sans">{l.empName}</strong></div>
-                      <div className="col-span-2">Loại phép đăng ký: <strong className="text-amber-400 block mt-0.5 font-medium">{l.type}</strong></div>
+                      <div className="col-span-2">Loại phép đăng ký: <strong className="text-amber-400 block mt-0.5 font-medium">{l.type}{isShiftLeave(l) ? ` — chỉ nghỉ ${shiftLabel(l.shift)} (0,5 ngày)` : ''}</strong></div>
                       <div>Thời gian nghỉ: <strong className="text-slate-200 block mt-0.5 font-mono">{l.fromDate}</strong></div>
                       <div>Đến ngày: <strong className="text-slate-200 block mt-0.5 font-mono">{l.toDate}</strong></div>
                       <div>Tổng cộng số ngày: <strong className="text-white block mt-0.5 font-mono">{l.daysCount} ngày</strong></div>

@@ -9,6 +9,7 @@ import TaskDetailModal from './TaskDetailModal';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
 import { parseLateNotice } from '../lib/leaveNotice';
+import { isShiftLeave, shiftLabel } from '../lib/leaveShift';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
@@ -312,6 +313,10 @@ export default function TaskManagement({
               }
               attendance[idx] = { ...currentAt, timeInS, timeOutS, timeInC, timeOutC, status: 'valid', statusMsg: 'Hợp lệ', leaveSymbol: undefined, notes: targetLeave.reason };
               toSave.push(attendance[idx]);
+            } else if (isShiftLeave(targetLeave)) {
+              // Nghỉ 1 CA: không ghi ký hiệu nghỉ đè cả 4 ô giờ (sẽ xóa giờ chấm của ca còn lại); công do công thức tính từ đơn nghỉ + giờ chấm
+              attendance[idx] = { ...attendance[idx], notes: `Nghỉ phép được duyệt: ${targetLeave.type} (${symbol}) — ${shiftLabel(targetLeave.shift)}` };
+              toSave.push(attendance[idx]);
             } else {
               attendance[idx] = { ...attendance[idx], timeInS: symbol, timeOutS: symbol, timeInC: symbol, timeOutC: symbol, status: 'excused', leaveSymbol: symbol, notes: `Nghỉ phép được duyệt: ${targetLeave.type} (${symbol})` };
               toSave.push(attendance[idx]);
@@ -331,6 +336,10 @@ export default function TaskManagement({
                 if (targetLeave.shift === 'morning') { timeInS = shiftTimes.morningIn; timeOutS = shiftTimes.morningOut; timeInC = ''; timeOutC = ''; }
                 else { timeInS = ''; timeOutS = ''; timeInC = shiftTimes.afternoonIn; timeOutC = shiftTimes.afternoonOut; }
               }
+            }
+            if (isShiftLeave(targetLeave)) {
+              // Nghỉ 1 CA: bản ghi để TRỐNG giờ, không đặt ký hiệu nghỉ cho cả ngày
+              timeInS = ''; timeOutS = ''; timeInC = ''; timeOutC = ''; st = 'valid';
             }
             const newLog = { id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`, empId: targetLeave.empId, empName: targetLeave.empName, date: dStr, timeInS, timeOutS, timeInC, timeOutC, timeInOT: '', timeOutOT: '', method, status: st, statusMsg: st === 'valid' ? 'Hợp lệ' : undefined, otHours: 0, leaveSymbol: st === 'excused' ? symbol : undefined, notes: targetLeave.reason || `Nghỉ phép được duyệt: ${targetLeave.type} (${symbol})` };
             attendance.unshift(newLog);
@@ -1571,7 +1580,7 @@ export default function TaskManagement({
                         {l.id}{pendingLeavePairOf.has(l.id) ? ` + ${pendingLeavePairOf.get(l.id)}` : ''}
                       </span>
                       <span className="text-[9.5px] font-bold text-slate-300">
-                        {l.type}{pendingLeavePairOf.has(l.id) ? ' · Cả ngày (sáng + chiều)' : (l.type === 'Báo cáo nghỉ ca' && (l as any).shift ? ` · ${(l as any).shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}` : '')}
+                        {l.type}{pendingLeavePairOf.has(l.id) ? ' · Cả ngày (sáng + chiều)' : (isShiftLeave(l as any) ? ` · chỉ nghỉ ${shiftLabel((l as any).shift)} (0,5 ngày)` : (l.type === 'Báo cáo nghỉ ca' && (l as any).shift ? ` · ${(l as any).shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}` : ''))}
                       </span>
                     </div>
 

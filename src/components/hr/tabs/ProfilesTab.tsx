@@ -105,7 +105,6 @@ interface ProfilesTabProps {
   setProfilePage: (v: number | ((prev: number) => number)) => void;
   globalPageSize: number | 'all';
   setGlobalPageSize: (v: number | 'all') => void;
-  handleSimulateCheckIn: (empId: string, empName: string) => void;
   addToast: (t: ToastInput) => void;
   handleExportProfilesExcel: () => void;
   handleImportProfilesExcel: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -130,7 +129,6 @@ export default function ProfilesTab({
   setProfilePage,
   globalPageSize,
   setGlobalPageSize,
-  handleSimulateCheckIn,
   addToast,
   handleExportProfilesExcel,
   handleImportProfilesExcel,

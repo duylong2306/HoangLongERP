@@ -1,6 +1,7 @@
 ﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
-import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason } from '../lib/leaveNotice';
+import { isShiftLeave, shiftLabel, supportsShiftLeave, type LeaveShift } from '../lib/leaveShift';
+import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
 import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
@@ -79,8 +80,6 @@ import RolesTab from './hr/tabs/RolesTab';
  *   - Tính lương tự động (`handleCalculatePayroll`): chỉ tính lương cho nhân viên
  *     `working`, dựa trên `empAttendance` (workedDays, otSunday, otHoliday, otHours)
  *     từ log chấm công có `status === 'valid'`.
- *   - Chấm công thủ công (`handleSimulateCheckIn`): từ chối nếu nhân viên không
- *     phải `working`.
  * ========================================================================== */
 
 // Dynamic import — chỉ tải các thư viện nặng này khi thực sự cần (in/xuất PDF,
@@ -1867,7 +1866,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [newLeave, setNewLeave] = useState({
     empId: '', type: 'Nghỉ phép năm', fromDate: '', toDate: '',
-    daysCount: 1, reason: '', approverName: '', approverId: '', approverPosition: ''
+    daysCount: 1, reason: '', approverName: '', approverId: '', approverPosition: '',
+    // Nghỉ 1 ca ('morning' | 'afternoon') cho Nghỉ phép năm / Nghỉ không lương có xin phép; '' = nghỉ cả ngày
+    shift: '' as '' | LeaveShift
   });
 
   // Tạm ứng lương (salary advance) state
@@ -3095,68 +3096,18 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     addToast({ title: '✅ Thành công', message: `🎉 Đã thêm hồ sơ nhân sự mã ${id} cho anh/chị ${newEmp.name} thành công.`, type: 'success' });
   };
 
-  const handleSimulateCheckIn = (empId: string, name: string) => {
-    // Chỉ cho phép chấm công với nhân viên ĐANG LÀM
-    const emp = employees.find(e => e.id === empId);
-    if (emp && emp.status !== 'working') {
-      addToast({ title: '⛔ Từ chối', message: `⚠️ Nhân viên ${name} (${empId}) không ở trạng thái Đang làm, không thể ghi nhận chấm công.`, type: 'warning' });
-      return;
-    }
-    const todayStr = getLocalYYYYMMDD(new Date());
-    // Check if check-in already exists
-    const duplicate = attendance.find(a => a.empId === empId && a.date === todayStr);
-    if (duplicate) {
-      addToast({ title: 'ℹ️ Thông báo', message: `⚠️ Nhân viên ${name} đã được ghi nhận chấm công ngày hôm nay (${todayStr})!`, type: 'info' });
-      return;
-    }
-    const newLog: AttendanceLog = {
-      // id XÁC ĐỊNH từ empId + ngày → mọi lần chấm của cùng 1 NV trong ngày trúng CÙNG dòng.
-      // (dbService.attendance.save cũng chuẩn hóa về đúng id này, nên nhất quán.)
-      id: `AT-${empId}-${todayStr.replace(/-/g, '')}`,
-      empId,
-      empName: name,
-      date: todayStr,
-      timeInS: '07:28',
-      timeOutS: '11:30',
-      timeInC: '13:00',
-      timeOutC: '17:05',
-      timeInOT: '',
-      timeOutOT: '',
-      method: 'GPS Biệt Thự Trạm',
-      status: 'valid',
-      otHours: 0,
-      notes: 'Hệ thống vệ tinh xác nhận chấm công thực tế thành công'
-    };
-    setAttendance([newLog, ...attendance]);
-    // Đồng bộ lên Supabase
-    dbService.attendance.save(newLog).catch(err => console.warn('Lưu chấm công lên Supabase thất bại:', err));
-    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: [newLog, ...attendance] } }));
-    addToast({ title: '✅ Thành công', message: `⚡ Chấm công thành công cho [${empId}] ${name} vào lúc 07:28 sáng ngày hôm nay!`, type: 'success' });
-  };
-
   // ===================== BLOCK NGHỈ PHÉP (leaves) =====================
   const handleCreateLeaveRequest = (e: React.FormEvent) => {
     e.preventDefault();
     const emp = employees.find(ep => ep.id === newLeave.empId);
     if (!emp) return;
 
-    // Constraint: must apply at least 2 days in advance of today
-    try {
-      const todayVal = getLocalYYYYMMDD(new Date());
-      const todayMidnight = new Date(todayVal);
-      todayMidnight.setHours(0,0,0,0);
-      const fromMidnight = new Date(newLeave.fromDate);
-      fromMidnight.setHours(0,0,0,0);
-      
-      const timeDiff = fromMidnight.getTime() - todayMidnight.getTime();
-      const diffDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
-      
-      if (diffDays < 2) {
-        addToast({ title: '⚠️ Lỗi', message: '⚠️ không thể nộp đơn nghỉ phép! Bạn không được phép nộp đơn xin nghỉ ngay trong ngày làm đơn hoặc ngày hôm sau (phép nghỉ bắt buộc phải đăng ký trước ít nhất 2 ngày).', type: 'warning' });
-        return;
-      }
-    } catch (err) {
-      console.error(err);
+    // Quy định báo trước: trước đây chặn cứng "phải xin trước 2 ngày" ngay cả khi Nhân sự lập đơn hộ. Nay lấy số ngày từ Cấu Hình Ca và Nhân sự
+    // lập đơn hộ KHÔNG bị chặn — chỉ đánh dấu "Xin muộn" cho người duyệt cân nhắc (xem lateNotice bên dưới).
+    const reqShift: LeaveShift | undefined = supportsShiftLeave(newLeave.type) && newLeave.shift ? newLeave.shift : undefined;
+    if (reqShift && newLeave.toDate !== newLeave.fromDate) {
+      addToast({ title: '⚠️ Lỗi', message: '⚠️ Nghỉ 1 ca chỉ được chọn trong 1 ngày.', type: 'warning' });
+      return;
     }
 
     if (new Date(newLeave.toDate) < new Date(newLeave.fromDate)) {
@@ -3164,16 +3115,20 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       return;
     }
 
-    // Constraint: Check if leaveRequestType is annual leave but user runs out or doesn't have enough remaining annual leave days
+    // Hết phép năm → chặn tạo đơn "Nghỉ phép năm" (đã trừ số ngày của các đơn phép năm đang chờ duyệt của nhân viên này)
     if (newLeave.type === 'Nghỉ phép năm') {
-      const remainingDays = emp.phepNam !== undefined ? emp.phepNam : 12;
-      const reqDays = Number(newLeave.daysCount);
-      if (remainingDays <= 0) {
-        addToast({ title: '⚠️ Thông báo', message: `⚠️ Không thể nộp đơn! Nhân viên ${emp.name} đã dùng hết số lượng phép năm được cấp (số ngày phép còn lại: 0).`, type: 'warning' });
+      const remainingDays = emp.phepNam !== undefined ? Number(emp.phepNam) : 12;
+      const reserved = leaves
+        .filter(l => l.status === 'pending' && l.type === 'Nghỉ phép năm' && l.empId === emp.id)
+        .reduce((sum, l) => sum + Number(l.daysCount || 0), 0);
+      const available = Math.max(0, remainingDays - reserved);
+      const reqDays = reqShift ? 0.5 : Number(newLeave.daysCount);
+      if (available <= 0) {
+        addToast({ title: '⚠️ Thông báo', message: `⚠️ Không thể nộp đơn nghỉ phép năm! Nhân viên ${emp.name} đã hết phép năm (còn ${formatDays(remainingDays)} ngày${reserved > 0 ? `, đã có ${formatDays(reserved)} ngày ở các đơn đang chờ duyệt` : ''}).`, type: 'warning' });
         return;
       }
-      if (reqDays > remainingDays) {
-        addToast({ title: '⚠️ Thông báo', message: `⚠️ Không thể nộp đơn! Số ngày xin nghỉ phép năm (${reqDays} ngày) vượt quá số ngày phép năm còn lại của nhân viên (${remainingDays} ngày).`, type: 'warning' });
+      if (reqDays > available) {
+        addToast({ title: '⚠️ Thông báo', message: `⚠️ Không thể nộp đơn! Số ngày xin nghỉ phép năm (${formatDays(reqDays)} ngày) vượt quá số phép năm còn dùng được của ${emp.name} (${formatDays(available)} ngày).`, type: 'warning' });
         return;
       }
     }
@@ -3205,7 +3160,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
     // Quy định xin nghỉ phép báo trước (Cấu Hình Ca): nhân sự lập đơn hộ thì KHÔNG chặn, chỉ đánh dấu "Xin muộn" cho người duyệt cân nhắc
     const lateNotice = isRealLeaveType(newLeave.type)
-      ? evaluateLeaveNotice({ fromDate: newLeave.fromDate, now: new Date(), morningIn: resolveShiftTimes(systemConfig).morningIn, requiredDays: (systemConfig as any)?.leaveAdvanceDays })
+      ? evaluateLeaveNotice({ fromDate: newLeave.fromDate, now: new Date(), morningIn: reqShift === 'afternoon' ? resolveShiftTimes(systemConfig).afternoonIn : resolveShiftTimes(systemConfig).morningIn, requiredDays: (systemConfig as any)?.leaveAdvanceDays })
       : null;
 
     const req: LeaveRequest = {
@@ -3215,7 +3170,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       type: newLeave.type,
       fromDate: newLeave.fromDate,
       toDate: newLeave.toDate,
-      daysCount: Number(newLeave.daysCount),
+      daysCount: reqShift ? 0.5 : Number(newLeave.daysCount),   // nghỉ 1 ca = 0,5 ngày
+      ...(reqShift ? { shift: reqShift } : {}),
       reason: lateNotice?.late ? tagLateNoticeReason(newLeave.reason, lateNotice) : newLeave.reason,
       status: 'pending',
       createdAt: getLocalYYYYMMDD(new Date()),
@@ -3329,6 +3285,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     leaveSymbol: undefined,
                     notes: l.reason
                   };
+                } else if (isShiftLeave(l)) {
+                  // Nghỉ 1 CA: KHÔNG ghi ký hiệu nghỉ đè cả 4 ô giờ (sẽ xóa giờ chấm của ca còn lại). Công do công thức tính từ đơn nghỉ + giờ chấm.
+                  updatedAttendance[idx] = {
+                    ...updatedAttendance[idx],
+                    notes: `Nghỉ phép được duyệt: ${l.type} (${symbol}) — ${shiftLabel(l.shift)}`
+                  };
                 } else {
                   updatedAttendance[idx] = {
                     ...updatedAttendance[idx],
@@ -3397,21 +3359,23 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   };
                   updatedAttendance.unshift(simulatedLog);
                 } else {
+                  // Nghỉ 1 CA: bản ghi để TRỐNG giờ (ca nghỉ không có giờ chấm; ca còn lại chờ nhân viên chấm) — không đặt ký hiệu nghỉ cho cả ngày
+                  const shiftOnly = isShiftLeave(l);
                   const simulatedLog: AttendanceLog = {
                     id: `AT-${l.empId}-${dStr.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
-                    timeInS: symbol,
-                    timeOutS: symbol,
-                    timeInC: symbol,
-                    timeOutC: symbol,
+                    timeInS: shiftOnly ? '' : symbol,
+                    timeOutS: shiftOnly ? '' : symbol,
+                    timeInC: shiftOnly ? '' : symbol,
+                    timeOutC: shiftOnly ? '' : symbol,
                     timeInOT: '',
                     timeOutOT: '',
                     method: 'Hành chính phép',
-                    status: 'excused',
+                    status: shiftOnly ? 'valid' : 'excused',
                     otHours: 0,
-                    notes: `Nghỉ phép được duyệt: ${l.type} (${symbol})`
+                    notes: `Nghỉ phép được duyệt: ${l.type} (${symbol})${shiftOnly ? ` — ${shiftLabel(l.shift)}` : ''}`
                   };
                   updatedAttendance.unshift(simulatedLog);
                 }
@@ -4320,7 +4284,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 setProfilePage={setProfilePage}
                 globalPageSize={globalPageSize}
                 setGlobalPageSize={setGlobalPageSize}
-                handleSimulateCheckIn={handleSimulateCheckIn}
                 addToast={addToast}
                 handleExportProfilesExcel={handleExportProfilesExcel}
                 handleImportProfilesExcel={handleImportProfilesExcel}
@@ -5503,7 +5466,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <label className="block text-slate-400 font-bold mb-1">Loại nghỉ phép:</label>
                 <select
                   value={newLeave.type}
-                  onChange={(e) => setNewLeave({ ...newLeave, type: e.target.value })}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    // Loại không hỗ trợ nghỉ 1 ca (hiếu hỉ, cưới...) → quay về nghỉ cả ngày (số ngày tính lại theo ngày bắt đầu/kết thúc)
+                    if (!supportsShiftLeave(t) && newLeave.shift) {
+                      const d1 = new Date(newLeave.fromDate), d2 = new Date(newLeave.toDate);
+                      const days = !isNaN(d1.getTime()) && !isNaN(d2.getTime()) ? Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1) : 1;
+                      setNewLeave({ ...newLeave, type: t, shift: '', daysCount: days });
+                    } else {
+                      setNewLeave({ ...newLeave, type: t });
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
                 >
                   {leaveCoefficients.filter(c => !c.isAuto).map(c => (
@@ -5511,6 +5484,31 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   ))}
                 </select>
               </div>
+
+              {/* Nghỉ cả ngày hay chỉ 1 ca — chỉ cho Nghỉ phép năm và Nghỉ không lương có xin phép */}
+              {supportsShiftLeave(newLeave.type) && (
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Thời gian nghỉ:</label>
+                  <select
+                    value={newLeave.shift}
+                    onChange={(e) => {
+                      const v = e.target.value as '' | LeaveShift;
+                      if (v) {
+                        setNewLeave({ ...newLeave, shift: v, toDate: newLeave.fromDate, daysCount: 0.5 });   // nghỉ 1 ca: 1 ngày, 0,5 ngày
+                      } else {
+                        const d1 = new Date(newLeave.fromDate), d2 = new Date(newLeave.toDate);
+                        const days = !isNaN(d1.getTime()) && !isNaN(d2.getTime()) ? Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1) : 1;
+                        setNewLeave({ ...newLeave, shift: '', daysCount: days });
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
+                  >
+                    <option value="">Nghỉ cả ngày</option>
+                    <option value="morning">Chỉ nghỉ ca sáng (0,5 ngày)</option>
+                    <option value="afternoon">Chỉ nghỉ ca chiều (0,5 ngày)</option>
+                  </select>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -5528,12 +5526,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                           updatedToDate = getLocalYYYYMMDD(d);
                         }
                       } catch (err) {}
-                      setNewLeave({
-                        ...newLeave,
-                        fromDate: val,
-                        toDate: updatedToDate,
-                        daysCount: 2
-                      });
+                      setNewLeave(newLeave.shift
+                        ? { ...newLeave, fromDate: val, toDate: val, daysCount: 0.5 }   // nghỉ 1 ca: cùng 1 ngày
+                        : { ...newLeave, fromDate: val, toDate: updatedToDate, daysCount: 2 });
                     }}
                     className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white"
                   />
@@ -5543,6 +5538,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   <input
                     type="date"
                     value={newLeave.toDate}
+                    disabled={!!newLeave.shift}
+                    title={newLeave.shift ? 'Nghỉ 1 ca chỉ trong 1 ngày' : undefined}
                     onChange={(e) => {
                       const val = e.target.value;
                       let days = 1;
@@ -5570,6 +5567,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <input
                   type="number"
                   value={newLeave.daysCount}
+                  readOnly={!!newLeave.shift}
+                  step="0.5"
                   onChange={(e) => setNewLeave({ ...newLeave, daysCount: Number(e.target.value) })}
                   className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white"
                 />
