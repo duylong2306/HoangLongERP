@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
+import { DEFAULT_ROLE_GROUPS, buildInitialProjectPermissionMatrix } from './_defaultRoleGroups.js';
 
 export interface NewCompanyInput {
   slug: string;            // đã chuẩn hóa chữ thường
@@ -85,6 +86,23 @@ export async function createCompanyWithAdmin(supabase: SupabaseClient, input: Ne
     // 1 công ty "mồ côi" không ai đăng nhập được.
     await supabase.from('companies').delete().eq('id', companyId);
     return { ok: false, status: 500, error: `Tạo tài khoản quản trị thất bại: ${empErr.message}` };
+  }
+
+  // Cấp sẵn bộ NHÓM VAI TRÒ mẫu (có "Loại nhóm") + Quyền Dự Án theo nhóm — để chủ công ty không phải dựng từ đầu và
+  // không bị lỗi "nhóm không có Loại nhóm nên không được tính là Giám đốc/Kế toán". Làm theo kiểu "cố gắng hết sức":
+  // nếu bước này lỗi vẫn KHÔNG hủy việc tạo công ty (emp_admin vẫn full quyền nhờ quy ước ở trên), chỉ ghi log để xử lý sau.
+  try {
+    const { error: grpErr } = await supabase.from('hrm_role_groups').insert(DEFAULT_ROLE_GROUPS.map(g => ({
+      ...g, company_id: companyId,
+      member_ids: g.id === 'role_admin' ? ['emp_admin'] : [], // tài khoản quản trị đầu tiên thuộc nhóm Ban Giám Đốc
+    })));
+    if (grpErr) console.warn('Seed nhóm vai trò mặc định thất bại:', grpErr.message);
+    const { error: ppErr } = await supabase.from('project_permissions').insert({
+      id: companyId, company_id: companyId, matrix: buildInitialProjectPermissionMatrix(),
+    });
+    if (ppErr) console.warn('Seed Quyền Dự Án mặc định thất bại:', ppErr.message);
+  } catch (e: any) {
+    console.warn('Seed phân quyền mặc định lỗi:', e?.message || e);
   }
 
   return { ok: true, company: { id: companyId, slug, name, active: true } };

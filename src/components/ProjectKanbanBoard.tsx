@@ -313,7 +313,10 @@ export default function ProjectKanbanBoard({
 
   // Thẻ Dự Án
   const canView = canProjectAction('viewProjectFinance', currentUser, boardProject, undefined, matrix);
-  const canCreate = canProjectAction('createCard', currentUser, boardProject, undefined, matrix);
+  // Nút "Tạo Dự án" trên Kanban = quyền "Tạo dự án mới" (createProject) trong Quyền Dự Án.
+  // TRƯỚC ĐÂY dùng 'createCard' ("Tạo thẻ dự án") nên ô tick "Tạo dự án mới" không điều khiển nút này
+  // (VD Kế toán được tick Tạo dự án vẫn không bấm được; còn nhân viên có tick "Thành viên nhóm → Tạo thẻ" lại tạo được).
+  const canCreate = canProjectAction('createProject', currentUser, boardProject, undefined, matrix);
   const canEdit = canProjectAction('editCard', currentUser, boardProject, undefined, matrix);
   const canDelete = canProjectAction('deleteCard', currentUser, boardProject, undefined, matrix);
   const canMoveCard = canProjectAction('moveCard', currentUser, boardProject, undefined, matrix);

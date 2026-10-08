@@ -79,7 +79,8 @@ describe('api/register-company', () => {
     expect(emp).toMatchObject({ id: 'emp_admin', username: 'admin', name: 'Nguyễn Văn A', email: 'a@abc.vn', phone: '0912345678', role_group_ids: ['role_admin'], company_id: db.companyRows[0].id });
     expect(emp.password).toMatch(/^\$2/);            // bcrypt, không lưu mật khẩu thô
     expect(emp.password).not.toContain('matkhau123');
-    expect(db.log).toEqual(['insert:signup_attempts', 'insert:companies', 'insert:employees']);
+    // Thứ tự: ghi nhận lượt đăng ký → công ty → tài khoản quản trị → (mới) nhóm vai trò mẫu + Quyền Dự Án khởi tạo
+    expect(db.log).toEqual(['insert:signup_attempts', 'insert:companies', 'insert:employees', 'insert:hrm_role_groups', 'insert:project_permissions']);
     expect(db.attemptRows[0].ip_hash).toMatch(/^[0-9a-f]{64}$/);   // chỉ lưu băm IP
     expect(JSON.stringify(r.body)).not.toContain('matkhau123');
   });
