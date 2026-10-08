@@ -24,3 +24,13 @@ const TASK_LEVEL_FOR_GROUP: ProjectAction[] = [
   'createMission', 'editMission', 'deleteMission', // = "manageSubTask" trong Quyền Công việc
 ];
 export const ENFORCED_BY_ROLE_GROUP: ReadonlySet<ProjectAction> = new Set<ProjectAction>([...ENFORCED_BY_POSITION, ...TASK_LEVEL_FOR_GROUP]);
+
+/**
+ * Trong ENFORCED_BY_POSITION: những hành động được kiểm tra KÈM CÔNG VIỆC cụ thể (Kanban truyền task cho sửa/xóa công việc,
+ * ConnectedToolsModal truyền activeTask) — chỉ ở đó các vai trò Người giao việc / Phụ trách CV / Phụ trách NV / Thành viên nhiệm vụ mới xuất hiện.
+ * Các hành động còn lại được kiểm tra ở cấp dự án/bảng (không có công việc). Dùng cho màn "Xem quyền của một nhân viên".
+ */
+export const CHECKED_WITH_TASK: ReadonlySet<ProjectAction> = new Set<ProjectAction>([
+  'editTask', 'deleteTask',
+  'openToolApproval', 'openToolCost', 'openToolMaterial', 'openToolQuotation', 'openToolContract', 'openToolAcceptance', 'openToolLiquidation', 'manageDocs',
+]);

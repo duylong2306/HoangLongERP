@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Users, Plus, Lock, Trash2, Shield, Settings, X, Unlock, ChevronDown, FileText, Building, Factory, Truck, AlertCircle, CheckCircle } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
 import ProjectPermissionModal from './ProjectPermissionModal';
+import EffectivePermissionPreview from './EffectivePermissionPreview';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
@@ -1300,6 +1301,8 @@ export default function RolesTab(props: RolesTabProps) {
             }}
             hasDefaultContext={!!loadDefaultSnapshot('project')}
           />
+          {/* Xem quyền hiệu lực của một nhân viên (đọc cấu hình ĐÃ LƯU, không sửa gì) */}
+          <EffectivePermissionPreview employees={(employees || []) as any} />
         </div>
       )}
 

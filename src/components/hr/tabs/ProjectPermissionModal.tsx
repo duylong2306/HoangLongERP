@@ -63,7 +63,7 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 };
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
-const actionGroups: {
+export const actionGroups: {
   group: string;
   icon: React.ReactNode;
   actions: { action: ProjectAction; label: string }[];
