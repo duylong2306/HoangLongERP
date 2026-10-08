@@ -30,8 +30,8 @@ interface SaveActionBarProps {
   onSave: () => void;
   /** Hàm huỷ, reset draft về config gốc */
   onCancel: () => void;
-  /** Lưu draft hiện tại thành mặc định */
-  onSetDefault: () => void;
+  /** Lưu draft hiện tại thành mặc định (không truyền → ẩn nút "Đặt làm mặc định") */
+  onSetDefault?: () => void;
   /** Khôi phục draft từ mặc định đã lưu */
   onRestoreDefault: () => void;
   /** Đã có mặc định để khôi phục chưa (disable nút nếu chưa) */
@@ -111,9 +111,11 @@ export default function SaveActionBar({
 
       {/* Phải: nút phụ (mặc định) | Hủy bỏ | Lưu (nút chính ở ngoài cùng bên phải) */}
       <div className="flex flex-wrap items-center gap-2 ml-auto">
-        <button type="button" onClick={onSetDefault} className={`${btn} bg-white hover:bg-slate-100 text-sky-700 border-slate-300`}>
-          Đặt làm mặc định
-        </button>
+        {onSetDefault && (
+          <button type="button" onClick={onSetDefault} className={`${btn} bg-white hover:bg-slate-100 text-sky-700 border-slate-300`}>
+            Đặt làm mặc định
+          </button>
+        )}
         <button type="button" onClick={onRestoreDefault} disabled={!hasDefault} className={`${btn} bg-white hover:bg-slate-100 text-amber-700 border-slate-300`}>
           Khôi phục mặc định
         </button>

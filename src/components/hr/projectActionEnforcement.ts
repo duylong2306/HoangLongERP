@@ -20,6 +20,7 @@ export const ENFORCED_BY_POSITION: ReadonlySet<ProjectAction> = new Set<ProjectA
  * cho thao tác trong chi tiết công việc. Riêng nhận việc/hoàn thành (receiveTask/completeTask) CỐ Ý không đọc theo nhóm.
  */
 const TASK_LEVEL_FOR_GROUP: ProjectAction[] = [
+  'viewTask', // canViewTask đọc 'viewTask' của nhóm để cho xem công việc
   'approveResult', 'rejectResult', 'assignMembers', 'assignSubWorker', 'recordViolation', 'issuePenalty', 'proposeAdvance',
   'createMission', 'editMission', 'deleteMission', // = "manageSubTask" trong Quyền Công việc
 ];

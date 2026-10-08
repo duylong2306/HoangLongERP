@@ -66,3 +66,15 @@ export function countJsonChanges(a: any, b: any): number {
   }
   return JSON.stringify(a) === JSON.stringify(b) ? 0 : 1;
 }
+
+// ─── Quyền Công việc (ma trận hrTaskPermissions): mỗi ô (hành động × vai trò) đổi tích/bỏ tích tính 1 thay đổi ───
+type TaskMatrix = { actions?: Record<string, string[]> } | undefined | null;
+export function countTaskMatrixChanges(draft: TaskMatrix, saved: TaskMatrix): number {
+  const d = draft?.actions || {}, s = saved?.actions || {};
+  let n = 0;
+  for (const a of new Set([...Object.keys(d), ...Object.keys(s)])) n += countSetChanges(d[a], s[a]);
+  return n;
+}
+export function isTaskCellChanged(draft: TaskMatrix, saved: TaskMatrix, action: string, role: string): boolean {
+  return !!draft?.actions?.[action]?.includes(role) !== !!saved?.actions?.[action]?.includes(role);
+}

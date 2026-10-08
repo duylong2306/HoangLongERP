@@ -49,3 +49,27 @@ describe('canDoTaskAction — receiveTask / completeTask chỉ cho người đư
     expect(canDoTaskAction(long, task, undefined, 'deleteTask', M)).toBe(true);
   });
 });
+
+// Vai trò "Kế Toán"/"Giám Đốc" của công việc phải nhận diện cả nhóm TỰ TẠO có "Loại nhóm" (id role_custom_...), không chỉ id cố định cũ.
+// Trước đây Kế toán thật luôn bị tính là "không liên quan" nên cột "Kế Toán" của ma trận Quyền Công việc không có tác dụng.
+import { getTaskRoleScope } from '../hrTaskPermissions';
+describe('getTaskRoleScope — nhận diện theo "Loại nhóm"', () => {
+  const kind = (k: string) => ({ [`__role_kind__${k}`]: { view: true, create: false, edit: false, delete: false } });
+  beforeEach(() => {
+    setRoleGroupsCache([
+      { id: 'role_custom_kt', name: 'Kế toán', memberIds: ['KT'], permissions: kind('accounting') },
+      { id: 'role_custom_gd', name: 'Giám Đốc', memberIds: ['GD'], permissions: kind('admin') },
+      { id: 'role_custom_xuong', name: 'Xưởng', memberIds: ['TH'], permissions: kind('technical') },
+    ] as any);
+  });
+  const nv = (id: string) => ({ id, name: id, roleGroupIds: [] }) as any;
+  const task = { id: 't', assignerId: 'A', assigneeId: 'B', missions: [] } as any;
+  it('nhóm tự tạo loại Kế toán → accountant; loại Quản trị viên → director; nhân viên xưởng → none', () => {
+    expect(getTaskRoleScope(nv('KT'), task, undefined)).toBe('accountant');
+    expect(getTaskRoleScope(nv('GD'), task, undefined)).toBe('director');
+    expect(getTaskRoleScope(nv('TH'), task, undefined)).toBe('none');
+  });
+  it('Kế toán đồng thời là Người giao việc → vẫn là Người giao việc (thứ tự ưu tiên không đổi)', () => {
+    expect(getTaskRoleScope(nv('KT'), { ...task, assignerId: 'KT' }, undefined)).toBe('assigner');
+  });
+});

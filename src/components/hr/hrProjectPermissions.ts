@@ -99,7 +99,7 @@ export type ProjectAction =
 
 // ─── Visibility Mode (ĐÃ BỎ KHỎI GIAO DIỆN VÀ KHỎI can() — 2026-10) ──────────────────────
 // Cột "Tầm nhìn" bị gỡ vì dư thừa: 'all'/'related' không lọc dữ liệu ở đâu; 'readonly' trùng với việc bỏ tick các ô của vai trò
-// và còn khóa nhầm mọi quyền của người có nhiều vai trò. Ai THẤY công việc nào do ma trận quyền công việc (hrTaskPermissions.ts) quyết định.
+// và còn khóa nhầm mọi quyền của người có nhiều vai trò. Ai THẤY công việc nào do tab "Quyền Công việc" (hrTaskPermissions.ts) quyết định.
 // Giữ KIỂU và trường `visibility` (tùy chọn) chỉ để đọc được dữ liệu cũ đã lưu trên Supabase mà không lỗi — không còn tác dụng.
 export type VisibilityMode = 'all' | 'related' | 'readonly';
 

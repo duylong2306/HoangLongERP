@@ -88,3 +88,14 @@ describe('ghi / đọc nhật ký — không bao giờ làm hỏng việc lưu',
     expect(r.ok).toBe(true); expect(r.rows[0]).toMatchObject({ id: '1', actorName: 'Long', area: 'approval', createdAt: '2026-10-09T01:00:00Z' });
   });
 });
+
+import { diffTaskMatrix } from '../permissionAudit';
+describe('diff — Quyền Công việc', () => {
+  it('thêm/bỏ tick được ghi với nhãn thao tác và vai trò', () => {
+    const d = diffTaskMatrix({ actions: { editTask: ['director', 'pm'], deleteTask: ['director', 'assigner'] } }, { actions: { editTask: ['director', 'pm', 'assigner'], deleteTask: ['director'] } }, a => ({ editTask: 'Sửa công việc', deleteTask: 'Xóa công việc' } as any)[a] || a)!;
+    expect(d.changes).toContainEqual({ label: 'Sửa công việc — Người giao việc', from: 'Không', to: 'Có' });
+    expect(d.changes).toContainEqual({ label: 'Xóa công việc — Người giao việc', from: 'Có', to: 'Không' });
+    expect(d.summary).toBe('Quyền Công việc: +1 quyền, −1 quyền');
+    expect(diffTaskMatrix({ actions: { a: ['pm'] } }, { actions: { a: ['pm'] } })).toBeNull();
+  });
+});

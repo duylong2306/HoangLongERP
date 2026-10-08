@@ -2,15 +2,17 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Users, Plus, Lock, Trash2, Shield, Settings, X, Unlock, ChevronDown, FileText, Building, Factory, Truck, AlertCircle, CheckCircle } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
 import ProjectPermissionModal, { actionLabelOf } from './ProjectPermissionModal';
-import { diffProjectPosition, diffRoleGroups, diffApproval, recordPermissionAudit } from '../../../lib/permissionAudit';
+import { diffProjectPosition, diffRoleGroups, diffApproval, diffTaskMatrix, recordPermissionAudit } from '../../../lib/permissionAudit';
 import EffectivePermissionPreview from './EffectivePermissionPreview';
 import PermissionAuditLog from './PermissionAuditLog';
+import TaskPermissionEditor, { TASK_ACTION_LABELS } from './TaskPermissionEditor';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { countListChangesById, countProjectMatrixChanges, countJsonChanges } from '../../../lib/permissionDraftDiff';
+import { countListChangesById, countProjectMatrixChanges, countJsonChanges, countTaskMatrixChanges } from '../../../lib/permissionDraftDiff';
 import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache, encodeApprovalApprovers, getRoleGroupKind, withRoleGroupKind, ROLE_GROUP_KIND_LABELS, RoleGroupKind } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
+import { loadTaskPermissionMatrix, syncTaskPermissionsFromCloud, saveTaskPermissionMatrix, DEFAULT_TASK_PERMISSIONS, TaskPermissionMatrix } from '../hrTaskPermissions';
 import { dbService } from '../../../lib/dbService';
 import SearchableMultiSelect from '../../SearchableMultiSelect';
 
@@ -78,7 +80,7 @@ export default function RolesTab(props: RolesTabProps) {
   } = props;
 
   // ─── Top-level tab: Phân Quyền Nhóm Vai Trò | Quyền Dự Án | Quyền Phê Duyệt ──────
-  const [roleMainTab, setRoleMainTab] = React.useState<'group' | 'task' | 'approval' | 'audit'>('group');
+  const [roleMainTab, setRoleMainTab] = React.useState<'group' | 'task' | 'taskperm' | 'approval' | 'audit'>('group');
 
   // ─── Internal sub-tab within "Phân Quyền Nhóm Vai Trò" ──────────────
   const [roleGroupTab, setRoleGroupTab] = React.useState<'permissions' | 'members'>('permissions');
@@ -121,9 +123,23 @@ export default function RolesTab(props: RolesTabProps) {
   const groupCount = React.useMemo(() => countListChangesById(draftRoles as any, roles as any), [draftRoles, roles]);
   const projectCount = React.useMemo(() => countProjectMatrixChanges(draftMatrix as any, savedMatrix as any) + rgUnsaved, [draftMatrix, savedMatrix, rgUnsaved]);
   const approvalCount = React.useMemo(() => countJsonChanges(draftApprovalConfig, savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
+  // Quyền Công việc (ma trận hrTaskPermissions): bản nháp + bản đã lưu. Trước đây KHÔNG có màn hình chỉnh — cả 2 công ty dùng mặc định trong code.
+  const [draftTask, setDraftTask] = React.useState<TaskPermissionMatrix>(() => JSON.parse(JSON.stringify(loadTaskPermissionMatrix())));
+  const [savedTask, setSavedTask] = React.useState<TaskPermissionMatrix>(() => JSON.parse(JSON.stringify(loadTaskPermissionMatrix())));
+  const taskCount = React.useMemo(() => countTaskMatrixChanges(draftTask, savedTask), [draftTask, savedTask]);
+  const taskChangedRef = React.useRef(false);
+  taskChangedRef.current = taskCount > 0;
+  React.useEffect(() => {
+    // Nạp từ cloud khi mở; sự kiện cập nhật chỉ tải lại khi KHÔNG có thay đổi chưa lưu (cùng cách với Quyền Dự Án / Phê Duyệt)
+    const nap = () => { const m = JSON.parse(JSON.stringify(loadTaskPermissionMatrix())); setDraftTask(m); setSavedTask(JSON.parse(JSON.stringify(m))); };
+    syncTaskPermissionsFromCloud().then(nap);
+    const onUpdated = () => { if (!taskChangedRef.current) nap(); };
+    window.addEventListener('hl-task-permissions-updated', onUpdated);
+    return () => window.removeEventListener('hl-task-permissions-updated', onUpdated);
+  }, []);
   // Đổi tab chính: nháp "Vai trò nhóm HRM" nằm trong màn hình con nên rời tab Quyền Dự Án là MẤT nháp đó → hỏi lại nếu còn thay đổi chưa lưu.
   // (Nháp "Theo vị trí"/nhóm vai trò/phê duyệt nằm ở component này nên giữ nguyên khi đổi tab.) Trả về true nếu được phép đổi.
-  const requestMainTab = (next: 'group' | 'task' | 'approval' | 'audit'): boolean => {
+  const requestMainTab = (next: 'group' | 'task' | 'taskperm' | 'approval' | 'audit'): boolean => {
     if (roleMainTab === 'task' && next !== 'task') {
       if (rgUnsaved > 0 && !window.confirm(`Bạn còn ${rgUnsaved} thay đổi CHƯA LƯU ở "Vai trò nhóm HRM". Rời tab này sẽ MẤT các thay đổi đó.\n\nVẫn rời đi?`)) return false;
       setRgUnsaved(0);
@@ -308,6 +324,14 @@ export default function RolesTab(props: RolesTabProps) {
     }
   }, [draftMatrix, savedMatrix, auditActor, addToast]);
 
+  const handleSaveTask = React.useCallback(() => {
+    // saveTaskPermissionMatrix: cập nhật bộ nhớ + lưu lên Supabase (không chờ) + phát sự kiện để các màn hình đang mở tính lại
+    saveTaskPermissionMatrix(draftTask);
+    void recordPermissionAudit('task_permission', diffTaskMatrix(savedTask, draftTask, a => (TASK_ACTION_LABELS as any)[a] || a), auditActor);
+    setSavedTask(JSON.parse(JSON.stringify(draftTask)));
+    addToast({ title: '✅ Thành công', message: 'Quyền công việc đã được lưu.', type: 'success' });
+  }, [draftTask, savedTask, auditActor, addToast]);
+
   const handleSaveApproval = React.useCallback(async () => {
     let supabaseFailed = false;
     try {
@@ -490,6 +514,13 @@ export default function RolesTab(props: RolesTabProps) {
         </button>
         <button
           type="button"
+          onClick={() => requestMainTab('taskperm')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'taskperm' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+        >
+          <Shield className="w-3.5 h-3.5" /> Quyền Công việc{unsavedBadge(taskCount)}
+        </button>
+        <button
+          type="button"
           onClick={() => {
             if (!requestMainTab('approval')) return;
             // Auto-select first role (or admin role) when entering approval tab
@@ -510,6 +541,26 @@ export default function RolesTab(props: RolesTabProps) {
           <Shield className="w-3.5 h-3.5" /> Nhật ký
         </button>
       </div>
+
+      {/* TAB QUYỀN CÔNG VIỆC: ma trận thao tác trong chi tiết công việc + thanh Lưu ghim đáy riêng */}
+      {roleMainTab === 'taskperm' && (
+        <>
+          <TaskPermissionEditor value={draftTask} onChange={setDraftTask} savedValue={savedTask} />
+          <SaveActionBar
+            changed={taskCount > 0}
+            changeCount={taskCount}
+            onSave={handleSaveTask}
+            onCancel={() => setDraftTask(JSON.parse(JSON.stringify(savedTask)))}
+            onRestoreDefault={() => {
+              // "Khôi phục mặc định" ở tab này = quay về cấu hình mặc định của HỆ THỐNG (vẫn chỉ là bản nháp, bấm Lưu mới có hiệu lực)
+              if (taskCount > 0 && !window.confirm('Đưa ma trận về mặc định của hệ thống? Các thay đổi chưa lưu sẽ bị thay thế.')) return;
+              setDraftTask(JSON.parse(JSON.stringify(DEFAULT_TASK_PERMISSIONS)));
+            }}
+            hasDefault
+            accent="sky"
+          />
+        </>
+      )}
 
       {/* TAB NHẬT KÝ THAY ĐỔI PHÂN QUYỀN (chỉ xem, không có thanh Lưu) */}
       {roleMainTab === 'audit' && <PermissionAuditLog />}

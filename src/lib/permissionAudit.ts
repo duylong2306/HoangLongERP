@@ -5,12 +5,13 @@
 // lỗi (VD chưa chạy migration 20261019) chỉ trả false/ghi log.
 import { getSupabase, getCurrentCompanyId } from './supabase';
 
-export type AuditArea = 'role_group' | 'project_position' | 'project_group' | 'approval';
+export type AuditArea = 'role_group' | 'project_position' | 'project_group' | 'approval' | 'task_permission';
 export const AUDIT_AREA_LABELS: Record<AuditArea, string> = {
   role_group: 'Nhóm vai trò (quyền phân hệ, thành viên)',
   project_position: 'Quyền Dự Án — theo vị trí',
   project_group: 'Quyền Dự Án — theo nhóm HRM',
   approval: 'Quyền Phê Duyệt',
+  task_permission: 'Quyền Công việc',
 };
 
 export interface AuditChange { label: string; from: string; to: string }
@@ -45,6 +46,20 @@ export function diffProjectPosition(before: any, after: any, actionLabel: LabelF
   if (!changes.length) return null;
   const them = changes.filter(c => c.to === CO).length, bot = changes.filter(c => c.to === KHONG).length;
   return { target: 'Theo vị trí trong dự án', summary: `Theo vị trí: +${them} quyền, −${bot} quyền`, changes };
+}
+
+/** Quyền Công việc: mỗi (hành động × vai trò) được thêm/bỏ tick là 1 thay đổi. */
+export function diffTaskMatrix(before: any, after: any, actionLabel: LabelFn = id): AuditDiff | null {
+  const b = before?.actions || {}, a = after?.actions || {};
+  const changes: AuditChange[] = [];
+  for (const act of new Set([...Object.keys(b), ...Object.keys(a)])) {
+    const B = new Set<string>(b[act] || []), A = new Set<string>(a[act] || []);
+    for (const r of A) if (!B.has(r)) changes.push({ label: `${actionLabel(act)} — ${SCOPE_LABELS[r] || r}`, from: KHONG, to: CO });
+    for (const r of B) if (!A.has(r)) changes.push({ label: `${actionLabel(act)} — ${SCOPE_LABELS[r] || r}`, from: CO, to: KHONG });
+  }
+  if (!changes.length) return null;
+  const them = changes.filter(c => c.to === CO).length, bot = changes.filter(c => c.to === KHONG).length;
+  return { target: 'Quyền Công việc', summary: `Quyền Công việc: +${them} quyền, −${bot} quyền`, changes };
 }
 
 /** Quyền Dự Án — theo nhóm HRM: mỗi (nhóm × hành động). Trả về 1 diff gộp (target = tên các nhóm bị ảnh hưởng). */

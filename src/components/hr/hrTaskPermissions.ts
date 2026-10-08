@@ -8,7 +8,7 @@
 // ma trận Role × Action có thể tùy biến qua UI trong tab "Phân Quyền Và Vai Trò"
 
 import { Employee, Project, Task } from '../../types';
-import { isUserInRoleGroup, isRoleAdmin } from '../../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting } from '../../context';
 import { dbService } from '../../lib/dbService';
 import { loadProjectPermissions } from './hrProjectPermissions';
 
@@ -122,8 +122,9 @@ export const getTaskRoleScope = (
 ): RoleScope => {
   if (!currentUser) return 'none';
 
-  // 1. Director (Role Group: role_admin)
-  if (isUserInRoleGroup(currentUser.id, ROLE_GROUP_ADMIN)) return 'director';
+  // 1. Director — nhóm có id 'role_admin' HOẶC nhóm được gán "Loại nhóm" = Quản trị viên (isRoleAdmin). Trước đây chỉ so id cố định
+  //    nên nhóm tự tạo (id role_custom_...) như "Giám Đốc" không bao giờ được tính là 'director' ở đây.
+  if (isRoleAdmin(currentUser.id)) return 'director';
 
   // 2. Trưởng Dự Án (PM)
   if (project?.pmId === currentUser.id) return 'pm';
@@ -138,8 +139,9 @@ export const getTaskRoleScope = (
   const hasMainMission = task.missions?.some(m => m.mainAssigneeId === currentUser.id);
   if (hasMainMission) return 'missionAssignee';
 
-  // 6. Kế Toán (Role Group: role_accounting)
-  if (isUserInRoleGroup(currentUser.id, ROLE_GROUP_ACCOUNTING)) return 'accountant';
+  // 6. Kế Toán — nhóm có id 'role_accounting' HOẶC nhóm được gán "Loại nhóm" = Kế toán (isRoleAccounting). Trước đây chỉ so id cố định
+  //    nên Kế toán thật (nhóm tự tạo) luôn bị tính là 'none' và cột "Kế Toán" của ma trận không có tác dụng.
+  if (isRoleAccounting(currentUser.id)) return 'accountant';
 
   return 'none';
 };
