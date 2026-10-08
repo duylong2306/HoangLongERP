@@ -49,6 +49,8 @@ export interface HrmConfig {
   allowedLateMinutes: number;
   allowedLateMorning?: number;    // Dung sai đi muộn ca Sáng (phút)
   allowedLateAfternoon?: number;  // Dung sai đi muộn ca Chiều (phút)
+  leaveAdvanceDays?: number;      // Số ngày phải xin nghỉ phép TRƯỚC (thập phân, 0 = không yêu cầu) — xem lib/leaveNotice.ts
+  leaveAdvanceBlock?: boolean;    // true = chặn nộp đơn khi xin muộn; false = vẫn nộp nhưng đánh dấu "Xin muộn"
   weekendDays: number[];
 }
 
@@ -103,6 +105,8 @@ const DEFAULT_HRM_CONFIG: HrmConfig = {
   allowedLateMinutes: 15,
   allowedLateMorning: 15,
   allowedLateAfternoon: 15,
+  leaveAdvanceDays: 1,
+  leaveAdvanceBlock: false,
   weekendDays: [0],
 };
 
@@ -314,6 +318,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             allowedLateMinutes: cloud.allowedLateMinutes ?? 15,
             allowedLateMorning: cloud.allowedLateMorning ?? 15,
             allowedLateAfternoon: cloud.allowedLateAfternoon ?? 15,
+            leaveAdvanceDays: cloud.leaveAdvanceDays ?? 1,
+            leaveAdvanceBlock: cloud.leaveAdvanceBlock ?? false,
           }));
         }
         // Nạp cache cho hrCalculations (readHrmConfigFromStorage)

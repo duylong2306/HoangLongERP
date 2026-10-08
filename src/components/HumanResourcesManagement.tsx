@@ -1,5 +1,6 @@
 ﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
+import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason } from '../lib/leaveNotice';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
 import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
@@ -3202,6 +3203,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     const pad = (n: number) => String(n).padStart(2, '0');
     const submittedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
+    // Quy định xin nghỉ phép báo trước (Cấu Hình Ca): nhân sự lập đơn hộ thì KHÔNG chặn, chỉ đánh dấu "Xin muộn" cho người duyệt cân nhắc
+    const lateNotice = isRealLeaveType(newLeave.type)
+      ? evaluateLeaveNotice({ fromDate: newLeave.fromDate, now: new Date(), morningIn: resolveShiftTimes(systemConfig).morningIn, requiredDays: (systemConfig as any)?.leaveAdvanceDays })
+      : null;
+
     const req: LeaveRequest = {
       id: generateLeaveId(leaves.map(x => x.id)),   // mã không trùng đơn có sẵn (mã cũ 3 số cuối đồng hồ có thể trùng và ghi đè đơn khác)
       empId: newLeave.empId,
@@ -3210,7 +3216,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       fromDate: newLeave.fromDate,
       toDate: newLeave.toDate,
       daysCount: Number(newLeave.daysCount),
-      reason: newLeave.reason,
+      reason: lateNotice?.late ? tagLateNoticeReason(newLeave.reason, lateNotice) : newLeave.reason,
       status: 'pending',
       createdAt: getLocalYYYYMMDD(new Date()),
       submittedAt: submittedAtStr,

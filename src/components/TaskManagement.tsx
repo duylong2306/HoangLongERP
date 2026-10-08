@@ -8,6 +8,7 @@ import {
 import TaskDetailModal from './TaskDetailModal';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
+import { parseLateNotice } from '../lib/leaveNotice';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
@@ -1582,8 +1583,13 @@ export default function TaskManagement({
                       <p className="text-[10.5px] text-slate-400 font-mono">
                         Từ ngày: <strong className="text-slate-300">{l.fromDate}</strong> đến <strong className="text-slate-300">{l.toDate}</strong> ({l.daysCount} ngày phép)
                       </p>
+                      {parseLateNotice(l.reason).late && (
+                        <div className="text-[10.5px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                          ⚠ XIN MUỘN — {parseLateNotice(l.reason).detail}. Cân nhắc khi duyệt.
+                        </div>
+                      )}
                       <div className="text-[10.5px] text-slate-350 italic bg-slate-900/60 p-2.5 rounded border border-slate-850 font-sans mt-2">
-                        "Lý do: {l.reason}"
+                        "Lý do: {parseLateNotice(l.reason).reason}"
                       </div>
                     </div>
 

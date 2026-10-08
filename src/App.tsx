@@ -4959,6 +4959,54 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                       </div>
                     </div>
 
+                    {/* ───────── QUY ĐỊNH XIN NGHỈ PHÉP PHẢI BÁO TRƯỚC ───────── */}
+                    <div className="pt-2 border-t border-slate-850">
+                      <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1.5 font-mono">
+                        📝 Quy định xin nghỉ phép báo trước:
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Số ngày phải xin phép trước</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={hrmConfig.leaveAdvanceDays ?? 1}
+                            onChange={(e) => {
+                              // Nhập được số thập phân (0.5 ngày = 12 giờ); 0 = không yêu cầu báo trước; ô trống/sai → 0
+                              const n = parseFloat(e.target.value.replace(',', '.'));
+                              const updated = { ...hrmConfig, leaveAdvanceDays: Number.isFinite(n) && n >= 0 ? n : 0 };
+                              setHrmConfig(updated);
+                              dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                              window.dispatchEvent(new Event('storage'));
+                              window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                            }}
+                            className="w-full bg-slate-900 border border-emerald-800 rounded p-1.5 text-xs text-white outline-none focus:border-emerald-700 font-mono"
+                          />
+                          <p className="text-[9px] text-slate-500 mt-1">Tính từ lúc nộp đơn đến giờ vào ca sáng của ngày bắt đầu nghỉ (VD 1 ngày: nghỉ 10/10 phải nộp trước giờ vào ca ngày 09/10). Nhập được số thập phân (0,5 = 12 giờ), 0 = không yêu cầu. Chỉ áp dụng cho đơn nghỉ phép, không áp dụng cho báo cáo chấm công.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Khi nộp đơn không đủ thời gian báo trước</label>
+                          <label className="flex items-start gap-2 bg-slate-900 border border-emerald-800 rounded p-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!hrmConfig.leaveAdvanceBlock}
+                              onChange={(e) => {
+                                const updated = { ...hrmConfig, leaveAdvanceBlock: e.target.checked };
+                                setHrmConfig(updated);
+                                dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));
+                                window.dispatchEvent(new Event('storage'));
+                                window.dispatchEvent(new CustomEvent('hl_system_settings_updated'));
+                              }}
+                              className="mt-0.5 cursor-pointer"
+                            />
+                            <span className="text-[10.5px] text-slate-300 leading-snug">Chặn, không cho nộp đơn</span>
+                          </label>
+                          <p className="text-[9px] text-slate-500 mt-1">Tắt (mặc định): vẫn cho nộp nhưng đơn được đánh dấu "Xin muộn" để người duyệt cân nhắc. Bật: nhân viên không nộp được đơn xin muộn.</p>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* ───────── NGÀY NGHỈ CUỐI TUẦN ───────── */}
                     <div className="pt-2 border-t border-slate-850">
                       <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1.5 font-mono">
@@ -5025,6 +5073,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                             allowedLateCount: 3,
                             allowedLateMorning: 15,
                             allowedLateAfternoon: 15,
+                            leaveAdvanceDays: 1,
+                            leaveAdvanceBlock: false,
                           };
                           setHrmConfig(updated);
                           dbService.shiftConfig.save(updated).catch(err => console.error('Supabase shiftConfig save error:', err));

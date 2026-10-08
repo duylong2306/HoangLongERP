@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { Employee } from '../types';
 import { generateLeaveId } from '../lib/leaveRequests';
+import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
 
 interface DashboardProps {
   projects: Project[];
@@ -1109,20 +1110,20 @@ export default function DashboardOverview({
   }, [selectedDayDetail]);
 
   // Calculate leave warning message in real-time (must register 2 days in advance)
+  // Đánh giá thời gian báo trước của đơn đang lập (số ngày báo trước lấy từ Cấu Hình Ca; chỉ áp dụng cho đơn nghỉ phép thật) — xem lib/leaveNotice.ts
+  const getLeaveNotice = () => {
+    if (!leaveFrom || !isRealLeaveType(leaveRequestType)) return null;
+    const n = evaluateLeaveNotice({ fromDate: leaveFrom, now: new Date(), morningIn: config.morningIn, requiredDays: config.leaveAdvanceDays });
+    return n.late ? n : null;
+  };
   const getLeaveDateWarningText = () => {
     try {
-      if (!leaveFrom || !todayVal) return null;
-      const todayMidnight = new Date(todayVal);
-      todayMidnight.setHours(0,0,0,0);
-      const fromMidnight = new Date(leaveFrom);
-      fromMidnight.setHours(0,0,0,0);
-      
-      const timeDiff = fromMidnight.getTime() - todayMidnight.getTime();
-      const diffDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
-      
-      if (diffDays < 2) {
-        return `⚠️ Bản đăng ký lỗi hạn! Phải xin nghỉ phép trước ít nhất 2 ngày kể từ ngày chấm hôm nay (Hôm nay: ${todayVal}).`;
-      }
+      const n = getLeaveNotice();
+      if (!n) return null;
+      const adv = n.advanceDays < 0 ? 'đã quá hạn' : `báo trước ${formatDays(n.advanceDays)} ngày`;
+      return config.leaveAdvanceBlock
+        ? `⚠️ Không đủ thời gian báo trước! Phải xin nghỉ phép trước ít nhất ${formatDays(n.requiredDays)} ngày (đơn này ${adv}). Công ty không cho nộp đơn xin muộn.`
+        : `⚠️ Đơn xin muộn: ${adv}, quy định ${formatDays(n.requiredDays)} ngày. Vẫn nộp được nhưng đơn sẽ được đánh dấu "Xin muộn" để người duyệt cân nhắc.`;
     } catch (err) {}
     return null;
   };
@@ -1718,22 +1719,12 @@ export default function DashboardOverview({
       return;
     }
 
-    // Constraint: must apply at least 2 days in advance of todayVal
-    try {
-      const todayMidnight = new Date(todayVal);
-      todayMidnight.setHours(0,0,0,0);
-      const fromMidnight = new Date(leaveFrom);
-      fromMidnight.setHours(0,0,0,0);
-      
-      const timeDiff = fromMidnight.getTime() - todayMidnight.getTime();
-      const diffDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
-      
-      if (diffDays < 2) {
-        alert("⚠️ Không thể nộp đơn nghỉ phép! Bạn không được phép nộp đơn xin nghỉ ngay trong ngày làm đơn hoặc ngày hôm sau (phép nghỉ bắt buộc phải đăng ký trước ít nhất 2 ngày).");
-        return;
-      }
-    } catch (err) {
-      console.error(err);
+    // Quy định báo trước: số ngày lấy từ Cấu Hình Ca (trước đây viết cứng 2 ngày). Xin muộn → chặn (nếu công ty bật) hoặc cho nộp
+    // nhưng đánh dấu "Xin muộn" trong lý do để người duyệt cân nhắc.
+    const lateNotice = getLeaveNotice();
+    if (lateNotice && config.leaveAdvanceBlock) {
+      alert(`⚠️ Không thể nộp đơn nghỉ phép! Phải xin nghỉ phép trước ít nhất ${formatDays(lateNotice.requiredDays)} ngày (tính đến giờ vào ca ngày bắt đầu nghỉ).`);
+      return;
     }
 
     // Constraint: end date must be after or equal to start date
@@ -1790,7 +1781,7 @@ export default function DashboardOverview({
       fromDate: leaveFrom,
       toDate: leaveTo,
       daysCount: Number(leaveDays),
-      reason: leaveReasonText,
+      reason: lateNotice ? tagLateNoticeReason(leaveReasonText, lateNotice) : leaveReasonText,
       status: 'pending',
       createdAt: todayVal,
       submittedAt: submittedAtStr,
@@ -1823,7 +1814,7 @@ export default function DashboardOverview({
 
     setLeaveReasonText('');
     setLeaveModalOpen(false);
-    alert(`📬 Đơn xin nghỉ phép đã được nộp sang HỆ THỐNG NHÂN SỰ thành công!\nNgười duyệt: ${(leaveApprover || 'Trương Hữu Long')}${leaveApproverPosition ? ` (${leaveApproverPosition})` : ''}\nTrạng thái: Đang chờ duyệt.`);
+    alert(`📬 Đơn xin nghỉ phép đã được nộp sang HỆ THỐNG NHÂN SỰ thành công!\nNgười duyệt: ${(leaveApprover || 'Trương Hữu Long')}${leaveApproverPosition ? ` (${leaveApproverPosition})` : ''}\nTrạng thái: Đang chờ duyệt.${lateNotice ? '\n⚠️ Đơn được đánh dấu "XIN MUỘN" (chưa đủ thời gian báo trước) để người duyệt cân nhắc.' : ''}`);
   };
 
   // Submit attendance correction report

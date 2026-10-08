@@ -158,6 +158,8 @@ export const DEFAULT_SYSTEM_CONFIG = {
   allowedLateCount: 3,
   allowedLateMorning: 15,
   allowedLateAfternoon: 15,
+  leaveAdvanceDays: 1,
+  leaveAdvanceBlock: false,
   otMultiplier: 1.5,
   gpsRadiusAllowed: 50,
   weekendDays: [0, 6], // CN và T7

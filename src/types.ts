@@ -11,6 +11,8 @@
   allowedLateCount: number;
   allowedLateMorning?: number;    // Dung sai đi muộn ca Sáng (phút)
   allowedLateAfternoon?: number;  // Dung sai đi muộn ca Chiều (phút)
+  leaveAdvanceDays?: number;      // Số ngày phải xin nghỉ phép TRƯỚC (thập phân; 0 = không yêu cầu; mặc định 1)
+  leaveAdvanceBlock?: boolean;    // true = chặn nộp đơn khi xin muộn; false (mặc định) = vẫn nộp nhưng đánh dấu "Xin muộn"
   otMultiplier: number;
   gpsRadiusAllowed: number;
   weekendDays: number[];

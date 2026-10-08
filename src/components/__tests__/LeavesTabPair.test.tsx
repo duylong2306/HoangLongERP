@@ -85,3 +85,21 @@ describe('Mẫu duyệt cả cặp: không ghi đè nhau', () => {
     expect(screen.getByTestId('s').textContent).toBe('approved,approved');
   });
 });
+
+describe('Tab Nghỉ phép — nhãn "Xin muộn"', () => {
+  it('đơn có dấu [XIN MUỘN…] hiện nhãn ở danh sách và cảnh báo + lý do gốc ở chi tiết', () => {
+    const l = { id: 'LR-050', empId: 'NV001', empName: 'Nhân viên A', type: 'Nghỉ phép năm', fromDate: d, toDate: d, daysCount: 1, status: 'pending' as const,
+      reason: '[XIN MUỘN: báo trước 0,3 ngày, quy định 1 ngày] Việc gia đình' };
+    const { container } = renderTab([l]);
+    expect(container.querySelector('tbody')!.textContent).toContain('⚠ Xin muộn');
+    fireEvent.click(container.querySelector('tbody tr')!);
+    expect(container.textContent).toContain('XIN MUỘN — báo trước 0,3 ngày, quy định 1 ngày');
+    expect(container.textContent).toContain('"Việc gia đình"');
+    expect(container.textContent).not.toContain('[XIN MUỘN');   // dấu thô không lộ ra giao diện
+  });
+  it('đơn thường không có nhãn', () => {
+    const l = { id: 'LR-051', empId: 'NV001', empName: 'Nhân viên A', type: 'Nghỉ phép năm', fromDate: d, toDate: d, daysCount: 1, status: 'pending' as const, reason: 'Việc gia đình' };
+    const { container } = renderTab([l]);
+    expect(container.textContent).not.toContain('Xin muộn');
+  });
+});

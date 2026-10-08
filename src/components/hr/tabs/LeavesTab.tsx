@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../../../lib/leaveRequests';
+import { parseLateNotice } from '../../../lib/leaveNotice';
 
 interface LeaveItem {
   id: string;
@@ -286,6 +287,7 @@ export default function LeavesTab({
                         {pairOf.has(l.id)
                           ? <span className="block text-[9px] font-bold text-sky-400">Cả ngày (sáng + chiều)</span>
                           : (l.type === 'Báo cáo nghỉ ca' && l.shift ? <span className="block text-[9px] text-slate-500">{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
+                        {parseLateNotice(l.reason).late && <span className="block text-[9px] font-black text-amber-700" title={parseLateNotice(l.reason).detail}>⚠ Xin muộn</span>}
                       </td>
                       <td className="py-2.5 text-slate-350 text-center font-mono">
                         {l.fromDate} ➔ {l.toDate}
@@ -436,7 +438,16 @@ export default function LeavesTab({
 
                   <div className="bg-slate-950 p-3 rounded-lg border border-slate-850 space-y-1.5">
                     <h5 className="font-extrabold text-[10px] text-amber-500 uppercase tracking-wider">Lý Do Nghỉ Phép</h5>
-                    <p className="text-xs text-slate-300 italic">"{l.reason}"</p>
+                    {(() => {
+                      // Đơn xin nghỉ nộp thiếu thời gian báo trước (theo Cấu Hình Ca) được đánh dấu trong lý do → hiện cảnh báo + lý do gốc
+                      const ln = parseLateNotice(l.reason);
+                      return (
+                        <>
+                          {ln.late && <p className="text-[10.5px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">⚠ XIN MUỘN — {ln.detail}. Người duyệt cân nhắc khi quyết định.</p>}
+                          <p className="text-xs text-slate-300 italic">"{ln.reason}"</p>
+                        </>
+                      );
+                    })()}
                     {l.submittedAt && (
                       <p className="text-[9.5px] text-slate-500 font-mono pt-1">📅 Ngày tạo đơn: {l.submittedAt}</p>
                     )}

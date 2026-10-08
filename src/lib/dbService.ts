@@ -1221,6 +1221,8 @@ export const dbService = {
           allowedLateCount: data.allowed_late_count ?? 3,
           allowedLateMorning: data.allowed_late_morning ?? 15,
           allowedLateAfternoon: data.allowed_late_afternoon ?? 15,
+          leaveAdvanceDays: data.leave_advance_days != null ? Number(data.leave_advance_days) : 1,
+          leaveAdvanceBlock: data.leave_advance_block ?? false,
           weekendDays: data.weekend_days,
           autoAttendanceDays: data.auto_attendance_days,
           autoAttendanceStartDate: data.auto_attendance_start_date,
@@ -1243,7 +1245,7 @@ export const dbService = {
         return;
       }
       try {
-        const { error } = await supabase.from('shift_config').upsert({
+        const payload: any = {
           id: getCurrentCompanyId() || 'current',
           ...(getCurrentCompanyId() ? { company_id: getCurrentCompanyId() } : {}),
           morning_in: config.morningIn,
@@ -1275,7 +1277,16 @@ export const dbService = {
           staff_base_salary: config.staffBaseSalary,
           construction_sites: config.constructionSites,
           company_profile: config.companyProfile
-        });
+        };
+        // 2 cột mới của quy định xin nghỉ báo trước
+        payload.leave_advance_days = config.leaveAdvanceDays ?? 1;
+        payload.leave_advance_block = config.leaveAdvanceBlock ?? false;
+        let { error } = await supabase.from('shift_config').upsert(payload);
+        // Chưa chạy migration 20261018 (cột chưa có) → thử lại KHÔNG kèm 2 cột mới để các cấu hình khác vẫn lưu được
+        if (error && /leave_advance/.test(error.message || '')) {
+          delete payload.leave_advance_days; delete payload.leave_advance_block;
+          ({ error } = await supabase.from('shift_config').upsert(payload));
+        }
         if (error) console.warn('Supabase shift_config save error:', error.message);
       } catch (e) {
         console.warn('Supabase shift_config save exception:', e);
