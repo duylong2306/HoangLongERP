@@ -72,3 +72,37 @@ describe('Màn hình Nhân sự — duyệt cả ngày (luồng thật)', () => 
     expect(computeDailyWorkday(saved, coefs, [], [0], leaves).workday).toBe(0);
   });
 });
+
+describe('Màn hình Nhân sự — duyệt báo cáo lỗi chấm công điền giờ theo CẤU HÌNH CA', () => {
+  const cfg = { morningIn: '08:00', morningOut: '12:00', afternoonIn: '13:30', afternoonOut: '17:30' } as any;
+  const openOne = async (leave: any, systemConfig: any) => {
+    leaveStore.length = 0; leaveStore.push(leave);
+    const { container } = render(<HumanResourcesManagement currentUser={admin} defaultSubTab="leaves" hideSidebar systemConfig={systemConfig} />);
+    await waitFor(() => expect(container.querySelector('tbody tr')).not.toBeNull(), { timeout: 4000 });
+    await new Promise(r => setTimeout(r, 800));   // qua giai đoạn không ghi sau khi tải danh sách
+    fireEvent.click(container.querySelector('tbody tr')!);
+    fireEvent.click(await screen.findByText('Duyệt phép ✅'));
+  };
+  const lastSaved = async () => {
+    await waitFor(() => expect(attendanceSave.mock.calls.some(c => c[0]?.empId === 'NV018' && c[0]?.date === d)).toBe(true), { timeout: 4000 });
+    return attendanceSave.mock.calls.map(c => c[0]).filter(r => r?.empId === 'NV018' && r?.date === d).pop();
+  };
+
+  it('Lỗi chấm ra ca (ca chiều, chưa có bản ghi) → giờ vào/ra chiều lấy theo cấu hình ca (13:30–17:30), ca sáng để trống', async () => {
+    await openOne({ ...mkLeave('LR-9', 'afternoon'), type: 'Báo cáo lỗi chấm ra ca' }, cfg);
+    const r = await lastSaved();
+    expect([r.timeInC, r.timeOutC]).toEqual(['13:30', '17:30']);
+    expect([r.timeInS, r.timeOutS]).toEqual(['', '']);
+  });
+  it('Lỗi hệ thống chấm công (ca sáng) → giờ sáng theo cấu hình (08:00–12:00)', async () => {
+    await openOne({ ...mkLeave('LR-9', 'morning'), type: 'Báo cáo lỗi hệ thống chấm công' }, cfg);
+    const r = await lastSaved();
+    expect([r.timeInS, r.timeOutS]).toEqual(['08:00', '12:00']);
+    expect([r.timeInC, r.timeOutC]).toEqual(['', '']);
+  });
+  it('Chưa có cấu hình ca → dùng giờ mặc định (không lỗi)', async () => {
+    await openOne({ ...mkLeave('LR-9', 'afternoon'), type: 'Báo cáo lỗi chấm ra ca' }, undefined);
+    const r = await lastSaved();
+    expect([r.timeInC, r.timeOutC]).toEqual(['13:00', '17:00']);
+  });
+});

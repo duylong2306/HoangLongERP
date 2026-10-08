@@ -1,4 +1,5 @@
 ﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
+import { resolveShiftTimes } from '../lib/standardShiftTimes';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
 import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
@@ -3223,6 +3224,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   };
 
   const handleApproveLeave = (id: string, status: 'approved' | 'rejected') => {
+    // Giờ chuẩn của ca khi tự điền lúc duyệt báo cáo chấm công: lấy từ CẤU HÌNH CA của doanh nghiệp (không viết cứng)
+    const shiftTimes = resolveShiftTimes(systemConfig);
     const targetLeave = leaves.find(l => l.id === id);
     if (targetLeave && status === 'approved' && targetLeave.type === 'Nghỉ phép năm' && targetLeave.status !== 'approved') {
       // Tìm nhân viên bị trừ phép để lưu Supabase
@@ -3286,9 +3289,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
                   if (l.type === 'Báo cáo lỗi chấm ra ca') {
                     if (l.shift === 'morning') {
-                      timeOutS = '11:30';
+                      timeOutS = shiftTimes.morningOut;
                     } else if (l.shift === 'afternoon') {
-                      timeOutC = '17:00';
+                      timeOutC = shiftTimes.afternoonOut;
                     }
                   } else if (l.type === 'Báo cáo nghỉ ca') {
                     // Trạng thái ngày đó sẽ là HỢP LỆ, không cần ghi thêm giờ nếu không có sẵn
@@ -3296,17 +3299,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     // Lỗi hệ thống không thể chấm công: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO
                     // (chỉ ca đó; ca còn lại giữ nguyên giờ hiện tại để không làm sai lệch).
                     if (l.shift === 'morning') {
-                      timeInS = '07:30';
-                      timeOutS = '11:30';
+                      timeInS = shiftTimes.morningIn;
+                      timeOutS = shiftTimes.morningOut;
                     } else if (l.shift === 'afternoon') {
-                      timeInC = '13:00';
-                      timeOutC = '17:00';
+                      timeInC = shiftTimes.afternoonIn;
+                      timeOutC = shiftTimes.afternoonOut;
                     }
                   } else {
-                    timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : '07:30';
-                    timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : '11:30';
-                    timeInC = currentAt.timeInC && currentAt.timeInC !== '--:--' && currentAt.timeInC !== '' ? currentAt.timeInC : '13:00';
-                    timeOutC = currentAt.timeOutC && currentAt.timeOutC !== '--:--' && currentAt.timeOutC !== '' ? currentAt.timeOutC : '17:00';
+                    timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : shiftTimes.morningIn;
+                    timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : shiftTimes.morningOut;
+                    timeInC = currentAt.timeInC && currentAt.timeInC !== '--:--' && currentAt.timeInC !== '' ? currentAt.timeInC : shiftTimes.afternoonIn;
+                    timeOutC = currentAt.timeOutC && currentAt.timeOutC !== '--:--' && currentAt.timeOutC !== '' ? currentAt.timeOutC : shiftTimes.afternoonOut;
                   }
 
                   updatedAttendance[idx] = {
@@ -3333,22 +3336,22 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 }
               } else {
                 if (l.isAttendanceCorrection || l.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(l.type)) {
-                  let timeInS = '07:30';
-                  let timeOutS = '11:30';
-                  let timeInC = '13:00';
-                  let timeOutC = '17:00';
+                  let timeInS = shiftTimes.morningIn;
+                  let timeOutS = shiftTimes.morningOut;
+                  let timeInC = shiftTimes.afternoonIn;
+                  let timeOutC = shiftTimes.afternoonOut;
 
                   if (l.type === 'Báo cáo lỗi chấm ra ca') {
                     if (l.shift === 'morning') {
-                      timeInS = '07:30';
-                      timeOutS = '11:30';
+                      timeInS = shiftTimes.morningIn;
+                      timeOutS = shiftTimes.morningOut;
                       timeInC = '';
                       timeOutC = '';
                     } else if (l.shift === 'afternoon') {
                       timeInS = '';
                       timeOutS = '';
-                      timeInC = '13:00';
-                      timeOutC = '17:00';
+                      timeInC = shiftTimes.afternoonIn;
+                      timeOutC = shiftTimes.afternoonOut;
                     }
                   } else if (l.type === 'Báo cáo nghỉ ca') {
                     // Nghỉ ca = KHÔNG làm → tuyệt đối không tự điền giờ chuẩn (trước đây điền giờ cho ca không được báo cáo → cộng công ảo
@@ -3357,15 +3360,15 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
                     // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO, ca còn lại để trống.
                     if (l.shift === 'morning') {
-                      timeInS = '07:30';
-                      timeOutS = '11:30';
+                      timeInS = shiftTimes.morningIn;
+                      timeOutS = shiftTimes.morningOut;
                       timeInC = '';
                       timeOutC = '';
                     } else if (l.shift === 'afternoon') {
                       timeInS = '';
                       timeOutS = '';
-                      timeInC = '13:00';
-                      timeOutC = '17:00';
+                      timeInC = shiftTimes.afternoonIn;
+                      timeOutC = shiftTimes.afternoonOut;
                     }
                   }
 

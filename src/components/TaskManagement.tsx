@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import TaskDetailModal from './TaskDetailModal';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../lib/leaveRequests';
+import { resolveShiftTimes } from '../lib/standardShiftTimes';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
@@ -279,6 +280,8 @@ export default function TaskManagement({
 
       // B. Cập nhật attendance trên Supabase
       try {
+        // Giờ chuẩn của ca khi tự điền lúc duyệt báo cáo chấm công: đọc từ CẤU HÌNH CA của doanh nghiệp (lỗi/chưa có → giờ mặc định)
+        const shiftTimes = resolveShiftTimes(await dbService.shiftConfig.get().catch(() => null));
         const symbol = getLeaveSymbol(targetLeave.type);
         const leaveDates = getDaysDiffList(targetLeave.fromDate, targetLeave.toDate);
         // Chỉ tải KHOẢNG NGÀY NGHỈ (thay vì toàn bộ lịch sử) để tìm/sửa bản ghi tương ứng.
@@ -294,17 +297,17 @@ export default function TaskManagement({
               const currentAt = attendance[idx];
               let timeInS = currentAt.timeInS, timeOutS = currentAt.timeOutS, timeInC = currentAt.timeInC, timeOutC = currentAt.timeOutC;
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
-                if (targetLeave.shift === 'morning') timeOutS = '11:30';
-                else if (targetLeave.shift === 'afternoon') timeOutC = '17:00';
+                if (targetLeave.shift === 'morning') timeOutS = shiftTimes.morningOut;
+                else if (targetLeave.shift === 'afternoon') timeOutC = shiftTimes.afternoonOut;
               } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
                 // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO (giữ ca còn lại nguyên).
-                if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; }
-                else if (targetLeave.shift === 'afternoon') { timeInC = '13:00'; timeOutC = '17:00'; }
+                if (targetLeave.shift === 'morning') { timeInS = shiftTimes.morningIn; timeOutS = shiftTimes.morningOut; }
+                else if (targetLeave.shift === 'afternoon') { timeInC = shiftTimes.afternoonIn; timeOutC = shiftTimes.afternoonOut; }
               } else if (targetLeave.type !== 'Báo cáo nghỉ ca') {
-                timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : '07:30';
-                timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : '11:30';
-                timeInC = currentAt.timeInC && currentAt.timeInC !== '--:--' && currentAt.timeInC !== '' ? currentAt.timeInC : '13:00';
-                timeOutC = currentAt.timeOutC && currentAt.timeOutC !== '--:--' && currentAt.timeOutC !== '' ? currentAt.timeOutC : '17:00';
+                timeInS = currentAt.timeInS && currentAt.timeInS !== '--:--' && currentAt.timeInS !== '' ? currentAt.timeInS : shiftTimes.morningIn;
+                timeOutS = currentAt.timeOutS && currentAt.timeOutS !== '--:--' && currentAt.timeOutS !== '' ? currentAt.timeOutS : shiftTimes.morningOut;
+                timeInC = currentAt.timeInC && currentAt.timeInC !== '--:--' && currentAt.timeInC !== '' ? currentAt.timeInC : shiftTimes.afternoonIn;
+                timeOutC = currentAt.timeOutC && currentAt.timeOutC !== '--:--' && currentAt.timeOutC !== '' ? currentAt.timeOutC : shiftTimes.afternoonOut;
               }
               attendance[idx] = { ...currentAt, timeInS, timeOutS, timeInC, timeOutC, status: 'valid', statusMsg: 'Hợp lệ', leaveSymbol: undefined, notes: targetLeave.reason };
               toSave.push(attendance[idx]);
@@ -316,7 +319,7 @@ export default function TaskManagement({
             let timeInS = symbol, timeOutS = symbol, timeInC = symbol, timeOutC = symbol, method = 'Hành chính phép', st = 'excused';
             if (targetLeave.isAttendanceCorrection || targetLeave.type === 'Yêu cầu xét duyệt công' || isAttendanceReportType(targetLeave.type)) {
               method = 'Duyệt công'; st = 'valid';
-              timeInS = '07:30'; timeOutS = '11:30'; timeInC = '13:00'; timeOutC = '17:00';
+              timeInS = shiftTimes.morningIn; timeOutS = shiftTimes.morningOut; timeInC = shiftTimes.afternoonIn; timeOutC = shiftTimes.afternoonOut;
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
                 if (targetLeave.shift === 'morning') { timeInC = ''; timeOutC = ''; }
                 else { timeInS = ''; timeOutS = ''; }
@@ -324,8 +327,8 @@ export default function TaskManagement({
                 // Nghỉ ca = KHÔNG làm → không tự điền giờ chuẩn cho ca còn lại (trước đây làm công ảo +0,5 cho người nghỉ cả ngày)
                 timeInS = ''; timeOutS = ''; timeInC = ''; timeOutC = '';
               } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
-                if (targetLeave.shift === 'morning') { timeInS = '07:30'; timeOutS = '11:30'; timeInC = ''; timeOutC = ''; }
-                else { timeInS = ''; timeOutS = ''; timeInC = '13:00'; timeOutC = '17:00'; }
+                if (targetLeave.shift === 'morning') { timeInS = shiftTimes.morningIn; timeOutS = shiftTimes.morningOut; timeInC = ''; timeOutC = ''; }
+                else { timeInS = ''; timeOutS = ''; timeInC = shiftTimes.afternoonIn; timeOutC = shiftTimes.afternoonOut; }
               }
             }
             const newLog = { id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`, empId: targetLeave.empId, empName: targetLeave.empName, date: dStr, timeInS, timeOutS, timeInC, timeOutC, timeInOT: '', timeOutOT: '', method, status: st, statusMsg: st === 'valid' ? 'Hợp lệ' : undefined, otHours: 0, leaveSymbol: st === 'excused' ? symbol : undefined, notes: targetLeave.reason || `Nghỉ phép được duyệt: ${targetLeave.type} (${symbol})` };
