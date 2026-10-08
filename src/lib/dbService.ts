@@ -1282,9 +1282,13 @@ export const dbService = {
         payload.leave_advance_days = config.leaveAdvanceDays ?? 1;
         payload.leave_advance_block = config.leaveAdvanceBlock ?? false;
         let { error } = await supabase.from('shift_config').upsert(payload);
-        // Chưa chạy migration 20261018 (cột chưa có) → thử lại KHÔNG kèm 2 cột mới để các cấu hình khác vẫn lưu được
-        if (error && /leave_advance/.test(error.message || '')) {
-          delete payload.leave_advance_days; delete payload.leave_advance_block;
+        // Cột nào CHƯA CÓ trên cơ sở dữ liệu (VD chưa chạy migration; hoặc 5 cột lương/công trình mà ứng dụng luôn ghi nhưng bảng chưa bao giờ có)
+        // thì PostgREST từ chối cả lần lưu → mọi cấu hình ca khác cũng không lưu được. Bỏ riêng cột thiếu rồi thử lại (tối đa 10 lần).
+        for (let attempt = 0; error && attempt < 10; attempt++) {
+          const missing = /Could not find the '([A-Za-z0-9_]+)' column/.exec(error.message || '')?.[1];
+          if (!missing || !(missing in payload)) break;
+          console.warn(`shift_config: cột "${missing}" chưa có trên cơ sở dữ liệu — bỏ qua cột này khi lưu`);
+          delete payload[missing];
           ({ error } = await supabase.from('shift_config').upsert(payload));
         }
         if (error) console.warn('Supabase shift_config save error:', error.message);
