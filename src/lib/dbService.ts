@@ -1,3 +1,4 @@
+import { compressImageFile } from './imageCompress';
 import { getSupabase, getCurrentCompanyId } from './supabase';
 import { ensureProjectChatGroup } from './chatStore';
 import { parsePunchMeta, mergePunchMeta, hasAnyPunchMeta } from './attendanceMeta';
@@ -2914,6 +2915,8 @@ export const dbService = {
       });
     }
 
+    // Nén nếu là ảnh (JPEG/PNG/WebP lớn); PDF/Word/video... giữ nguyên — xem lib/imageCompress.ts
+    file = await compressImageFile(file);
     const BUCKET = 'mission-report-images';
     // Trước đây ép về 1 trong 5 đuôi ảnh (mất đuôi thật nếu là file khác ảnh) — nay
     // giữ ĐÚNG đuôi gốc để hỗ trợ "Đính kèm báo cáo" bằng mọi định dạng file (PDF,
@@ -2989,6 +2992,7 @@ export const dbService = {
       });
     }
 
+    file = await compressImageFile(file);   // nén ảnh trước khi tải lên (xem lib/imageCompress.ts)
     const BUCKET = 'product-catalog-images';
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
@@ -3051,6 +3055,7 @@ export const dbService = {
       });
     }
 
+    file = await compressImageFile(file);   // nén ảnh trước khi tải lên (xem lib/imageCompress.ts)
     const BUCKET = 'quote-images';
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
@@ -3161,6 +3166,7 @@ export const dbService = {
       });
     }
 
+    file = await compressImageFile(file, { maxEdge: 512, quality: 0.85 });   // ảnh đại diện chỉ cần nhỏ
     const BUCKET = 'avatars';
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
     const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
