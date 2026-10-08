@@ -110,3 +110,20 @@ describe('Thanh Lưu dạng thanh ngang dưới đáy (kiểu VS Code)', () => {
     spy.mockRestore();
   });
 });
+
+// Nhãn "Chưa áp dụng": hành động nào ứng dụng chưa kiểm tra ở đâu thì phải được báo rõ ở CẢ 2 tab (tick cũng không đổi gì).
+describe('Nhãn "Chưa áp dụng" ở Quyền Dự Án', () => {
+  it('tab Theo vị trí: có nhãn ở hành động chưa dùng (VD Xuất dữ liệu dự án), không có ở hành động đang dùng (VD Tạo dự án mới)', () => {
+    renderModal();
+    const dong = (ten: string) => screen.getByText(ten).closest('tr')!;
+    expect(dong('Xuất dữ liệu dự án').textContent).toContain('Chưa áp dụng');
+    expect(dong('Tạo dự án mới').textContent).not.toContain('Chưa áp dụng');
+  });
+  it('tab Vai trò nhóm HRM: Duyệt kết quả CÓ tác dụng (đọc theo nhóm ở chi tiết công việc), Xuất dữ liệu dự án thì chưa', () => {
+    renderModal();
+    fireEvent.click(screen.getByText(/Vai trò nhóm HRM/));
+    const dong = (ten: string) => screen.getByText(ten).closest('tr')!;
+    expect(dong('Xuất dữ liệu dự án').textContent).toContain('Chưa áp dụng');
+    expect(dong('Tạo dự án mới').textContent).not.toContain('Chưa áp dụng');
+  });
+});

@@ -20,6 +20,7 @@ import {
 } from '../hrProjectPermissions';
 import { loadHrmRoleGroups, useNotification } from '../../../context';
 import SaveActionBar from '../../ui/SaveActionBar';
+import { ENFORCED_BY_POSITION, ENFORCED_BY_ROLE_GROUP } from '../projectActionEnforcement';
 import { countRoleGroupMatrixChanges, countProjectMatrixChanges, isRoleGroupCellChanged, isProjectCellChanged } from '../../../lib/permissionDraftDiff';
 
 interface ProjectPermissionModalProps {
@@ -47,6 +48,20 @@ interface ProjectPermissionModalProps {
   /** Báo cho cha số thay đổi chưa lưu của ma trận "Vai trò nhóm HRM" (state nháp này nằm trong modal, cha không biết) */
   onUnsavedCountChange?: (count: number) => void;
 }
+
+// Nhãn nhỏ cạnh hành động mà ứng dụng CHƯA kiểm tra ở đâu cả (tick hay bỏ tick đều không đổi gì) — xem projectActionEnforcement.ts
+const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = ({ tab, action }) => {
+  const coTacDung = (tab === 'vitri' ? ENFORCED_BY_POSITION : ENFORCED_BY_ROLE_GROUP).has(action);
+  if (coTacDung) return null;
+  return (
+    <span
+      className="ml-1.5 text-[8.5px] font-bold uppercase tracking-wide text-slate-500 border border-slate-600 rounded px-1 py-px align-middle"
+      title={tab === 'vitri'
+        ? 'Hiện chưa có chức năng nào kiểm tra quyền này theo vị trí. Thao tác công việc/nhiệm vụ do tab "Quyền Công việc" quyết định.'
+        : 'Hiện chưa có chức năng nào kiểm tra quyền này theo nhóm — tick hay bỏ tick đều chưa đổi gì.'}
+    >Chưa áp dụng</span>
+  );
+};
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
 const actionGroups: {
@@ -446,7 +461,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                     {rgExpandedGroups.has(group.group) && group.actions.map(({ action, label }) => (
                       <tr key={action} className="hover:bg-slate-900/40 transition-colors">
                         <td className="p-3 pl-8 font-medium text-slate-300 text-[11px] sticky left-0 bg-slate-950 z-10 border-r border-slate-800">
-                          {label}
+                          {label}<ChuaApDung tab="nhom" action={action} />
                         </td>
                         {hrmRoleGroups.map(rg => {
                           const isChecked = rgMatrix.roleGroupActions[rg.id]?.includes(action) || false;
@@ -499,9 +514,8 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Tầm nhìn của từng vai trò dự án</span>
           {/* Chú thích tầm nhìn */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[9px] text-slate-400">
-            <span><b className="text-emerald-400">Tất cả:</b> Xem & thao tác (theo quyền) với mọi dự án</span>
-            <span><b className="text-sky-400">Liên quan:</b> Chỉ xem & thao tác dự án mình liên quan</span>
-            <span><b className="text-slate-300">Chỉ xem:</b> Xem toàn bộ dự án, không được thao tác</span>
+            <span><b className="text-emerald-400">Tất cả</b> và <b className="text-sky-400">Liên quan:</b> hiện CHƯA dùng để lọc dữ liệu hiển thị (hai mức này đang hoạt động như nhau)</span>
+            <span><b className="text-slate-300">Chỉ xem:</b> CÓ tác dụng — vai trò đó không được thao tác theo ma trận bên dưới (quyền cấp riêng theo nhóm HRM vẫn áp dụng)</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
             {scopeKeys.map(key => (
@@ -551,7 +565,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                 </tr>
                 {(activeGroup === null || activeGroup === group.group) && group.actions.map(({ action, label }) => (
                   <tr key={action} className="hover:bg-slate-900/40 transition-colors">
-                    <td className="p-3 font-medium text-slate-300 text-[11px]">{label}</td>
+                    <td className="p-3 font-medium text-slate-300 text-[11px]">{label}<ChuaApDung tab="vitri" action={action} /></td>
                     {scopeKeys.map(roleScopeKey => (
                       <td key={roleScopeKey} className={'p-2 text-center' + (savedValue && isProjectCellChanged(matrix as any, savedValue as any, action, roleScopeKey) ? CHANGED_CELL : '')} title={savedValue && isProjectCellChanged(matrix as any, savedValue as any, action, roleScopeKey) ? 'Đã đổi — chưa lưu' : undefined}>
                         <input
