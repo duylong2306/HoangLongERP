@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Users, Plus, Lock, Trash2, Shield, Settings, X, Unlock, ChevronDown, FileText, Building, Factory, Truck, AlertCircle, CheckCircle } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
-import ProjectPermissionModal from './ProjectPermissionModal';
+import ProjectPermissionModal, { actionLabelOf } from './ProjectPermissionModal';
+import { diffProjectPosition, diffRoleGroups, diffApproval, recordPermissionAudit } from '../../../lib/permissionAudit';
 import EffectivePermissionPreview from './EffectivePermissionPreview';
+import PermissionAuditLog from './PermissionAuditLog';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
@@ -76,7 +78,7 @@ export default function RolesTab(props: RolesTabProps) {
   } = props;
 
   // ─── Top-level tab: Phân Quyền Nhóm Vai Trò | Quyền Dự Án | Quyền Phê Duyệt ──────
-  const [roleMainTab, setRoleMainTab] = React.useState<'group' | 'task' | 'approval'>('group');
+  const [roleMainTab, setRoleMainTab] = React.useState<'group' | 'task' | 'approval' | 'audit'>('group');
 
   // ─── Internal sub-tab within "Phân Quyền Nhóm Vai Trò" ──────────────
   const [roleGroupTab, setRoleGroupTab] = React.useState<'permissions' | 'members'>('permissions');
@@ -121,7 +123,7 @@ export default function RolesTab(props: RolesTabProps) {
   const approvalCount = React.useMemo(() => countJsonChanges(draftApprovalConfig, savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
   // Đổi tab chính: nháp "Vai trò nhóm HRM" nằm trong màn hình con nên rời tab Quyền Dự Án là MẤT nháp đó → hỏi lại nếu còn thay đổi chưa lưu.
   // (Nháp "Theo vị trí"/nhóm vai trò/phê duyệt nằm ở component này nên giữ nguyên khi đổi tab.) Trả về true nếu được phép đổi.
-  const requestMainTab = (next: 'group' | 'task' | 'approval'): boolean => {
+  const requestMainTab = (next: 'group' | 'task' | 'approval' | 'audit'): boolean => {
     if (roleMainTab === 'task' && next !== 'task') {
       if (rgUnsaved > 0 && !window.confirm(`Bạn còn ${rgUnsaved} thay đổi CHƯA LƯU ở "Vai trò nhóm HRM". Rời tab này sẽ MẤT các thay đổi đó.\n\nVẫn rời đi?`)) return false;
       setRgUnsaved(0);
@@ -181,6 +183,8 @@ export default function RolesTab(props: RolesTabProps) {
 
   // Save handlers
   const { addToast } = useNotification();
+  // Người đang thao tác — ghi vào nhật ký thay đổi phân quyền
+  const auditActor = React.useMemo(() => ({ id: currentUser?.id, name: currentUser?.name }), [currentUser?.id, currentUser?.name]);
 
   const handleSaveGroup = React.useCallback(async () => {
     const updated = [...draftRoles];
@@ -282,23 +286,27 @@ export default function RolesTab(props: RolesTabProps) {
 
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
+    // Nhật ký thay đổi phân quyền (so bản đã lưu `roles` với bản vừa lưu) — không bao giờ làm hỏng việc lưu
+    const tenNV = (eid: string) => (allEmployees || []).find(e => e.id === eid)?.name || eid;
+    diffRoleGroups(roles as any[], updated as any[], m => m, tenNV).forEach(d => { void recordPermissionAudit('role_group', d, auditActor); });
     if (supabaseFailed) {
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     } else {
       addToast({ title: '✅ Thành công', message: 'Phân quyền nhóm vai trò đã được lưu.', type: 'success' });
     }
-  }, [draftRoles, setRoles, syncHrmPermissionsToApp, addToast]);
+  }, [draftRoles, roles, allEmployees, auditActor, setRoles, syncHrmPermissionsToApp, addToast]);
 
   const handleSaveProject = React.useCallback(async () => {
     try {
       await saveProjectPermissions(draftMatrix);
+      void recordPermissionAudit('project_position', diffProjectPosition(savedMatrix, draftMatrix, actionLabelOf), auditActor);
       setSavedMatrix(JSON.parse(JSON.stringify(draftMatrix)));
       addToast({ title: '✅ Thành công', message: 'Quyền dự án đã được lưu.', type: 'success' });
     } catch (e) {
       console.error('Supabase projectPermissions save error:', e);
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     }
-  }, [draftMatrix, addToast]);
+  }, [draftMatrix, savedMatrix, auditActor, addToast]);
 
   const handleSaveApproval = React.useCallback(async () => {
     let supabaseFailed = false;
@@ -314,12 +322,15 @@ export default function RolesTab(props: RolesTabProps) {
     if (supabaseFailed) {
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     } else {
+      // Nhật ký: người duyệt được lưu dạng chuỗi JSON của mảng tên → hiển thị gọn "A, B"
+      const tenNguoiDuyet = (raw: any) => { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.join(', ') : String(v ?? ''); } catch { return String(raw ?? ''); } };
+      void recordPermissionAudit('approval', diffApproval(savedApprovalConfig as any[], draftApprovalConfig as any[], tenNguoiDuyet), auditActor);
       setSavedApprovalConfig(JSON.parse(JSON.stringify(draftApprovalConfig)));
       // Nạp ngay vào in-memory cache để các form (nghỉ phép, báo cáo chấm công) hiển thị đúng người duyệt
       setApprovalConfigCache(draftApprovalConfig);
       addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
     }
-  }, [draftApprovalConfig, addToast]);
+  }, [draftApprovalConfig, savedApprovalConfig, auditActor, addToast]);
 
   // Default snapshot helpers (per-tab)
   const getCurrentTabDefault = React.useCallback((): any => {
@@ -491,7 +502,17 @@ export default function RolesTab(props: RolesTabProps) {
         >
           <Shield className="w-3.5 h-3.5" /> Quyền Phê Duyệt{unsavedBadge(approvalCount)}
         </button>
+        <button
+          type="button"
+          onClick={() => requestMainTab('audit')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'audit' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+        >
+          <Shield className="w-3.5 h-3.5" /> Nhật ký
+        </button>
       </div>
+
+      {/* TAB NHẬT KÝ THAY ĐỔI PHÂN QUYỀN (chỉ xem, không có thanh Lưu) */}
+      {roleMainTab === 'audit' && <PermissionAuditLog />}
 
       {/* TOP PANEL: Master - List of Roles (chỉ hiển thị ở tab Phân Quyền Nhóm Vai Trò để tránh nhầm lẫn) */}
       {roleMainTab === 'group' && (
@@ -1286,6 +1307,7 @@ export default function RolesTab(props: RolesTabProps) {
             hasChanges={projectChanged}
             savedValue={savedMatrix}
             onUnsavedCountChange={setRgUnsaved}
+            auditActor={auditActor}
             // Trước đây các nút Hủy/Đặt mặc định/Khôi phục mặc định của thanh Lưu cục bộ (ngay dưới
             // bảng "Theo vị trí") là no-op — không có tác dụng gì. Nối vào state draftMatrix/savedMatrix
             // thật ở đây để chúng hoạt động đúng, đồng thời KHÔNG hiển thị thêm thanh Lưu ở cuối trang
@@ -1471,7 +1493,7 @@ export default function RolesTab(props: RolesTabProps) {
           tab "task", tạo ra 2 thanh trùng lặp cho "Theo vị trí" (1 cái là no-op) và hiển thị SAI
           trạng thái "chưa lưu"/nút Lưu cho "Vai trò nhóm HRM" (chỉ theo dõi draftMatrix, không
           theo dõi rgMatrix nội bộ của ProjectPermissionModal) — dễ khiến tưởng đã lưu nhưng chưa. */}
-      {roleMainTab !== 'task' && (
+      {(roleMainTab === 'group' || roleMainTab === 'approval') && (
         <SaveActionBar
           changed={roleMainTab === 'group' ? groupChanged : approvalChanged}
           changeCount={roleMainTab === 'group' ? groupCount : approvalCount}

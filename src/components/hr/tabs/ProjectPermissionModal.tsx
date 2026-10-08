@@ -20,6 +20,7 @@ import {
 import { loadHrmRoleGroups, useNotification } from '../../../context';
 import SaveActionBar from '../../ui/SaveActionBar';
 import { ENFORCED_BY_POSITION, ENFORCED_BY_ROLE_GROUP } from '../projectActionEnforcement';
+import { diffProjectGroup, recordPermissionAudit } from '../../../lib/permissionAudit';
 import { countRoleGroupMatrixChanges, countProjectMatrixChanges, isRoleGroupCellChanged, isProjectCellChanged } from '../../../lib/permissionDraftDiff';
 
 interface ProjectPermissionModalProps {
@@ -46,6 +47,8 @@ interface ProjectPermissionModalProps {
   savedValue?: ProjectPermissionMatrix;
   /** Báo cho cha số thay đổi chưa lưu của ma trận "Vai trò nhóm HRM" (state nháp này nằm trong modal, cha không biết) */
   onUnsavedCountChange?: (count: number) => void;
+  /** Người đang thao tác — để ghi vào nhật ký thay đổi phân quyền */
+  auditActor?: { id?: string; name?: string };
 }
 
 // Nhãn nhỏ cạnh hành động mà ứng dụng CHƯA kiểm tra ở đâu cả (tick hay bỏ tick đều không đổi gì) — xem projectActionEnforcement.ts
@@ -190,6 +193,12 @@ export const actionGroups: {
   },
 ];
 
+/** Tên hiển thị của một hành động (dùng cho nhật ký thay đổi phân quyền) */
+export const actionLabelOf = (action: string): string => {
+  for (const g of actionGroups) { const f = g.actions.find(a => a.action === action); if (f) return f.label; }
+  return action;
+};
+
 // Vai trò (cột của ma trận) — dựa trên vị trí dữ liệu thực tế trong UI
 // Nhận diện nhóm "Admin" trong bảng "Vai trò nhóm HRM" — trước đây chỉ so 'role_admin' nên nhóm
 // Siêu Admin thật (id role_superadmin, xem RolesTab.tsx) không được khóa full quyền ở ma trận này.
@@ -205,7 +214,7 @@ const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; c
   teamMember: { label: 'Thành Viên', desc: 'Ở công việc cụ thể: người có tên trong nhiệm vụ (mission.memberIds). Ở cấp dự án/bảng Kanban: mọi nhân viên', color: 'text-slate-400 bg-slate-500/10' },
 };
 
-export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange, hasChanges: externalChanged, onCancelContext, onSetDefaultContext, onRestoreDefaultContext, hasDefaultContext, savedValue, onUnsavedCountChange }: ProjectPermissionModalProps) {
+export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange, hasChanges: externalChanged, onCancelContext, onSetDefaultContext, onRestoreDefaultContext, hasDefaultContext, savedValue, onUnsavedCountChange, auditActor }: ProjectPermissionModalProps) {
   const [internalMatrix, setInternalMatrix] = React.useState<ProjectPermissionMatrix>(DEFAULT_PROJECT_PERMISSIONS);
   const [activeGroup, setActiveGroup] = React.useState<string | null>(null);
   const [rgTab, setRgTab] = React.useState<'context' | 'roleGroup'>('context');
@@ -238,6 +247,9 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
 
   const handleSaveRoleGroup = async () => {
     await saveRoleGroupProjectMatrix(rgMatrix);
+    // Nhật ký: ai đổi quyền nhóm HRM nào (không bao giờ làm hỏng việc lưu — xem permissionAudit.ts)
+    const tenNhom = (gid: string) => hrmRoleGroups.find(g => g.id === gid)?.name || gid;
+    void recordPermissionAudit('project_group', diffProjectGroup(savedRgMatrix, rgMatrix, tenNhom, actionLabelOf), auditActor);
     setSavedRgMatrix(JSON.parse(JSON.stringify(rgMatrix)));
     addToast({ title: '✅ Thành công', message: 'Quyền nhóm HRM đã được lưu.', type: 'success' });
   };
