@@ -44,3 +44,20 @@ describe('Vai trò "Thành viên" theo công việc cụ thể', () => {
     expect(can('uploadAttachment', nhanVien, duAn, undefined, m)).toBe(true);
   });
 });
+
+// Kanban kiểm tra quyền theo ĐÚNG dự án/công việc (canOn) → vai trò theo vị trí mới có tác dụng.
+describe('Quyền theo đúng dự án / công việc đang thao tác', () => {
+  const m = DEFAULT_PROJECT_PERMISSIONS as any; // mặc định: editTask = giám đốc, trưởng DA, người giao việc
+  const congViec = { id: 't1', assignerId: 'NV022', assigneeId: 'B', missions: [] } as any;
+  it('Người giao việc của CHÍNH công việc đó được sửa; không truyền công việc thì không (trước đây Kanban không truyền)', () => {
+    expect(can('editTask', nhanVien, duAn, congViec, m)).toBe(true);
+    expect(can('editTask', nhanVien, duAn, undefined, m)).toBe(false);
+  });
+  it('công việc của người khác → không được', () => {
+    expect(can('editTask', nhanVien, duAn, { ...congViec, assignerId: 'NV_khac' }, m)).toBe(false);
+  });
+  it('Trưởng DA chỉ có quyền ở dự án MÌNH quản lý, không phải dự án khác', () => {
+    expect(can('editProjectInfo', nhanVien, duAnCuaPm, undefined, m)).toBe(true);
+    expect(can('editProjectInfo', nhanVien, duAn, undefined, m)).toBe(false);
+  });
+});

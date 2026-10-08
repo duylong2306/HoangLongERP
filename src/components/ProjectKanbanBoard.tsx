@@ -299,8 +299,15 @@ export default function ProjectKanbanBoard({
   // Dùng ma trận Quyền Dự Án (hrProjectPermissions) thay thế quyền module sector cũ.
   // Mọi thao tác (Cột / Thẻ / Công việc / Nhiệm vụ / Hồ sơ / Thầu phụ) đều qua can().
   // boardProject = dự án đại diện của phân hệ (dùng tính quyền cấp bảng)
-  const boardProject = projects.find(p => p.type === sector || (p as any).sector === sector);
+  // Ưu tiên dự án mà CHÍNH người dùng làm Trưởng DA — nếu không, vai trò "Trưởng DA" ở thao tác cấp bảng (tạo cột/dự án...) chỉ có
+  // người quản lý đúng dự án đầu tiên của phân hệ, còn Trưởng DA các dự án khác bị từ chối dù cùng vai trò.
+  const boardProject = projects.find(p => (p.type === sector || (p as any).sector === sector) && p.pmId === currentUser?.id)
+    || projects.find(p => p.type === sector || (p as any).sector === sector);
   const matrix = loadProjectPermissions();
+  // Kiểm tra quyền theo ĐÚNG dự án/công việc đang thao tác (không dùng dự án đại diện của bảng):
+  // nhờ đó vai trò theo vị trí (Trưởng DA của dự án đó, Người giao/Phụ trách công việc đó...) mới có tác dụng.
+  const canOn = (action: Parameters<typeof canProjectAction>[0], project?: Project, task?: Task) =>
+    canProjectAction(action, currentUser, project ?? boardProject, task, matrix);
 
   // ===========================================================================
   // BIẾN QUYỀN (Permission flags) - Derived từ can() / Quyền Dự Án
@@ -319,25 +326,19 @@ export default function ProjectKanbanBoard({
   const canCreate = canProjectAction('createProject', currentUser, boardProject, undefined, matrix);
   const canEdit = canProjectAction('editCard', currentUser, boardProject, undefined, matrix);
   const canDelete = canProjectAction('deleteCard', currentUser, boardProject, undefined, matrix);
-  const canMoveCard = canProjectAction('moveCard', currentUser, boardProject, undefined, matrix);
   const canAssignCardMember = canProjectAction('assignCardMember', currentUser, boardProject, undefined, matrix);
   // RÀ SOÁT 2026-09: nút "Xóa dự án" (xóa vĩnh viễn CẢ dự án — công việc, chat, công nợ,
   // báo giá, hợp đồng, phiếu thu/chi liên quan — xem dbService.projects.deleteCascade())
   // trước đây chỉ kiểm tra prop onDeleteProject có tồn tại hay không (luôn true), không hề
   // kiểm tra quyền 'deleteProject' trong ma trận Quyền Dự Án — ai mở được thẻ dự án cũng
   // xóa được toàn bộ. ProjectManagement.tsx đã gate đúng action này (can('deleteProject')).
-  const canDeleteProject = canProjectAction('deleteProject', currentUser, boardProject, undefined, matrix);
 
   // Công việc (Task)
-  const canCreateTask = canProjectAction('createTask', currentUser, boardProject, undefined, matrix);
-  const canEditTask = canProjectAction('editTask', currentUser, boardProject, undefined, matrix);
-  const canDeleteTask = canProjectAction('deleteTask', currentUser, boardProject, undefined, matrix);
+  // (createTask/editTask/deleteTask/deleteProject/editProjectInfo/settlePayment/moveCard: kiểm tra TẠI CHỖ bằng canOn(...) theo đúng dự án/công việc)
 
   // RÀ SOÁT 2026-09: 3 action này đã có sẵn trong ma trận Quyền Dự Án (hrProjectPermissions.ts)
   // nhưng chưa từng được canProjectAction() gọi ở component này — lập phiếu thu/sửa thông tin
   // dự án/thêm khách hàng nhanh trước đây KHÔNG kiểm tra quyền gì cả.
-  const canSettlePayment = canProjectAction('settlePayment', currentUser, boardProject, undefined, matrix);
-  const canEditProjectInfo = canProjectAction('editProjectInfo', currentUser, boardProject, undefined, matrix);
   const canQuickAddCustomer = canProjectAction('quickAddCustomer', currentUser, boardProject, undefined, matrix);
 
   // 1. Column configuration initialized in LocalStorage or defaults
@@ -840,7 +841,7 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   const handleCreateReceipt = (isFinal: boolean) => {
     if (!selectedProject) return;
-    if (!canSettlePayment) {
+    if (!canOn('settlePayment', selectedProject)) {
       addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền lập phiếu tạm ứng/quyết toán cho dự án này.', type: 'warning' });
       return;
     }
@@ -923,7 +924,7 @@ export default function ProjectKanbanBoard({
   // ===========================================================================
   const handleSaveProjectDetails = async () => {
     if (!selectedProject) return;
-    if (!canEditProjectInfo) {
+    if (!canOn('editProjectInfo', selectedProject)) {
       addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa thông tin dự án này.', type: 'warning' });
       return;
     }
@@ -1638,7 +1639,7 @@ export default function ProjectKanbanBoard({
   // Drag & Drop handlers (Kéo thả thẻ dự án giữa các cột)
   // ===========================================================================
   const handleDragStart = (e: React.DragEvent, id: string) => {
-    if (!canMoveCard) {
+    if (!canOn('moveCard', projects.find(p => p.id === id))) {
       e.preventDefault();
       addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền DI CHUYỂN thẻ dự án (không thể kéo thả).', type: 'error' });
       return;
@@ -1940,7 +1941,7 @@ export default function ProjectKanbanBoard({
   // handleSaveEditSubTask() → Lưu subtask đã chỉnh sửa (gọi localUpdateTask)
   const handleSaveEditSubTask = () => {
     if (!editingSubTask) return;
-    if (!canEditTask) {
+    if (!canOn('editTask', selectedProject, editingSubTask)) {
       addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA công việc con.', type: 'error' });
       return;
     }
@@ -3364,7 +3365,7 @@ export default function ProjectKanbanBoard({
                   Tải Dự Án
                 </button>
 
-                {onDeleteProject && canDeleteProject && (
+                {onDeleteProject && canOn('deleteProject', selectedProject) && (
                   <>
                     <button
                       onClick={() => setIsConfirmingDelete(true)}
@@ -3402,7 +3403,7 @@ export default function ProjectKanbanBoard({
                             <div className="flex gap-2 mt-3">
                               <button
                                 onClick={() => {
-                                  if (!canDeleteProject) {
+                                  if (!canOn('deleteProject', selectedProject)) {
                                     addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền xóa dự án này.', type: 'warning' });
                                     setIsConfirmingDelete(false);
                                     return;
@@ -3764,7 +3765,7 @@ export default function ProjectKanbanBoard({
                     {/* Button action toggles */}
                     <div className="col-span-2 pt-2 border-t border-slate-900 flex justify-end gap-3.5">
                       {!isEditingDetails ? (
-                        canEditProjectInfo && (
+                        canOn('editProjectInfo', selectedProject) && (
                           <button
                             type="button"
                             onClick={() => setIsEditingDetails(true)}
@@ -3927,13 +3928,13 @@ export default function ProjectKanbanBoard({
                       <button
                         type="button"
                         onClick={() => {
-                          if (!canCreateTask) {
+                          if (!canOn('createTask', selectedProject)) {
                             addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền TẠO công việc con.', type: 'error' });
                             return;
                           }
                           setShowSubtaskForm(!showSubtaskForm);
                         }}
-                        className={canCreateTask ? "bg-emerald-600 hover:bg-emerald-500 text-white font-black px-3 py-1 rounded-lg text-[10px] flex items-center gap-1 cursor-pointer transition-colors" : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed font-black px-3 py-1 rounded-lg text-[10px] flex items-center gap-1"}
+                        className={canOn('createTask', selectedProject) ? "bg-emerald-600 hover:bg-emerald-500 text-white font-black px-3 py-1 rounded-lg text-[10px] flex items-center gap-1 cursor-pointer transition-colors" : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed font-black px-3 py-1 rounded-lg text-[10px] flex items-center gap-1"}
                       >
                         <Plus className="w-3.5 h-3.5" />
                         Tạo Việc Con
@@ -4358,13 +4359,13 @@ export default function ProjectKanbanBoard({
                             <button
                               type="button"
                               onClick={() => {
-                                if (!canCreateTask) {
+                                if (!canOn('createTask', selectedProject)) {
                                   addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền TẠO công việc con.', type: 'error' });
                                   return;
                                 }
                                 handleAddSubTask();
                               }}
-                              className={canCreateTask ? "bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-[10.5px] font-black cursor-pointer shadow-md" : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed px-4 py-1.5 rounded-lg text-[10.5px] font-black"}
+                              className={canOn('createTask', selectedProject) ? "bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-[10.5px] font-black cursor-pointer shadow-md" : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed px-4 py-1.5 rounded-lg text-[10.5px] font-black"}
                             >
                               Lưu
                             </button>
@@ -5012,7 +5013,7 @@ export default function ProjectKanbanBoard({
                                           type="button"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            if (!canEditTask) {
+                                            if (!canOn('editTask', selectedProject, task)) {
                                               addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA công việc con.', type: 'error' });
                                               return;
                                             }
@@ -5024,7 +5025,7 @@ export default function ProjectKanbanBoard({
                                           Sửa công việc
                                         </button>
 
-                                        {onDeleteTask && canDeleteTask && (
+                                        {onDeleteTask && canOn('deleteTask', selectedProject, task) && (
                                           <button
                                             type="button"
                                             onClick={(e) => {
