@@ -206,9 +206,12 @@ const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; c
   teamMember: { label: 'Thành Viên', desc: 'Ở công việc cụ thể: người có tên trong nhiệm vụ (mission.memberIds). Ở cấp dự án/bảng Kanban: mọi nhân viên', color: 'text-slate-400 bg-slate-500/10' },
 };
 
+// RÀ SOÁT 2026-10: trước đây có 3 mức Tất cả / Liên quan / Chỉ xem nhưng "Tất cả" và "Liên quan" KHÔNG dùng để lọc dữ liệu ở đâu cả
+// (xem getVisibility/canSeeAll không có nơi gọi) — chỉ "Chỉ xem" có tác dụng thật (khóa thao tác theo vị trí). Rút gọn còn 2 mức đúng
+// thực tế. Giá trị 'related' đã lưu từ trước vẫn giữ nguyên trong dữ liệu và được hiển thị như "Thao tác theo quyền" (hành vi y hệt 'all').
+// Việc ai THẤY công việc nào do tab "Quyền Công việc" (hành động Xem) quyết định, không phải cột này.
 const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string }[] = [
-  { value: 'all', label: 'Tất cả' },
-  { value: 'related', label: 'Liên quan' },
+  { value: 'all', label: 'Thao tác theo quyền' },
   { value: 'readonly', label: 'Chỉ xem' },
 ];
 
@@ -511,18 +514,19 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
 
         {/* Cột Tầm nhìn */}
         <div className="mt-3">
-          <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Tầm nhìn của từng vai trò dự án</span>
+          <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Chế độ thao tác của từng vai trò dự án</span>
           {/* Chú thích tầm nhìn */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-[9px] text-slate-400">
-            <span><b className="text-emerald-400">Tất cả</b> và <b className="text-sky-400">Liên quan:</b> hiện CHƯA dùng để lọc dữ liệu hiển thị (hai mức này đang hoạt động như nhau)</span>
-            <span><b className="text-slate-300">Chỉ xem:</b> CÓ tác dụng — vai trò đó không được thao tác theo ma trận bên dưới (quyền cấp riêng theo nhóm HRM vẫn áp dụng)</span>
+            <span><b className="text-emerald-400">Thao tác theo quyền:</b> vai trò được làm đúng những hành động đã tick trong bảng bên dưới</span>
+            <span><b className="text-slate-300">Chỉ xem:</b> khóa MỌI thao tác theo vị trí của vai trò đó, dù ô nào đã tick (quyền cấp riêng theo nhóm HRM vẫn áp dụng)</span>
+            <span>Ai được THẤY công việc nào do tab "Quyền Công việc" quyết định, không phải cột này.</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
             {scopeKeys.map(key => (
               <div key={key} className="flex items-center justify-between gap-1 bg-slate-900 rounded-lg px-2 py-1 border border-slate-850">
                 <span className={`text-[9px] font-bold ${roleScopeLabels[key].color} px-1.5 py-0.5 rounded`}>{roleScopeLabels[key].label}</span>
                 <select
-                  value={matrix.visibility[key] || 'related'}
+                  value={matrix.visibility[key] === 'readonly' ? 'readonly' : 'all'}
                   onChange={(e) => handleVisibilityChange(key, e.target.value as VisibilityMode)}
                   className="bg-slate-800 text-[9px] text-slate-200 rounded border border-slate-700 px-1 py-0.5 outline-none cursor-pointer"
                 >
