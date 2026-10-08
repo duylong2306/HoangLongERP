@@ -20,6 +20,7 @@ import {
 } from '../hrProjectPermissions';
 import { loadHrmRoleGroups, useNotification } from '../../../context';
 import SaveActionBar from '../../ui/SaveActionBar';
+import { countRoleGroupMatrixChanges, countProjectMatrixChanges, isRoleGroupCellChanged, isProjectCellChanged } from '../../../lib/permissionDraftDiff';
 
 interface ProjectPermissionModalProps {
   isOpen: boolean;
@@ -41,6 +42,10 @@ interface ProjectPermissionModalProps {
   onSetDefaultContext?: () => void;
   onRestoreDefaultContext?: () => void;
   hasDefaultContext?: boolean;
+  /** Ma trận "Theo vị trí" ĐÃ LƯU — để đếm số thay đổi chưa lưu và tô nổi các ô đã đổi (cha truyền khi quản lý bản nháp) */
+  savedValue?: ProjectPermissionMatrix;
+  /** Báo cho cha số thay đổi chưa lưu của ma trận "Vai trò nhóm HRM" (state nháp này nằm trong modal, cha không biết) */
+  onUnsavedCountChange?: (count: number) => void;
 }
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
@@ -192,7 +197,7 @@ const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string }[] = [
   { value: 'readonly', label: 'Chỉ xem' },
 ];
 
-export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange, hasChanges: externalChanged, onCancelContext, onSetDefaultContext, onRestoreDefaultContext, hasDefaultContext }: ProjectPermissionModalProps) {
+export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleName, onSave, mode = 'modal', value, onChange, hasChanges: externalChanged, onCancelContext, onSetDefaultContext, onRestoreDefaultContext, hasDefaultContext, savedValue, onUnsavedCountChange }: ProjectPermissionModalProps) {
   const [internalMatrix, setInternalMatrix] = React.useState<ProjectPermissionMatrix>(DEFAULT_PROJECT_PERMISSIONS);
   const [activeGroup, setActiveGroup] = React.useState<string | null>(null);
   const [rgTab, setRgTab] = React.useState<'context' | 'roleGroup'>('context');
@@ -204,6 +209,9 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   const { addToast } = useNotification();
 
   const rgChanged = React.useMemo(() => JSON.stringify(rgMatrix) !== JSON.stringify(savedRgMatrix), [rgMatrix, savedRgMatrix]);
+  // Số thay đổi CHƯA LƯU của từng tab con (hiện cho người dùng + tô nổi ô đã đổi). Vai trò nhóm HRM: so nháp với bản đã lưu; Theo vị trí: so với savedValue của cha.
+  const rgCount = React.useMemo(() => countRoleGroupMatrixChanges(rgMatrix, savedRgMatrix), [rgMatrix, savedRgMatrix]);
+  React.useEffect(() => { onUnsavedCountChange?.(rgCount); }, [rgCount, onUnsavedCountChange]);
 
   const RG_DEFAULT_KEY = 'hl_hrm_role_group_project_perms_default_v1';
   const hasRgDefault = React.useMemo(() => {
@@ -257,6 +265,13 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
 
   // Controlled vs uncontrolled: ưu tiên value prop nếu được truyền
   const matrix = value !== undefined ? value : internalMatrix;
+  const contextCount = savedValue ? countProjectMatrixChanges(matrix as any, savedValue as any) : undefined;
+  // Nhãn đỏ nhỏ cạnh tên tab con: còn bao nhiêu thay đổi CHƯA LƯU trong tab đó (để chuyển tab không làm người dùng quên)
+  const unsavedBadge = (n?: number) => (n && n > 0)
+    ? <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black" title={`${n} thay đổi chưa lưu`}>{n}</span>
+    : null;
+  // Ô đã đổi so với bản đã lưu được tô nổi để nhìn ra ngay
+  const CHANGED_CELL = ' bg-amber-100 ring-2 ring-inset ring-amber-400 rounded';
 
   // Save context matrix (Quyền Dự Án theo vị trí)
   const handleSaveContext = React.useCallback(() => {
@@ -436,7 +451,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                         {hrmRoleGroups.map(rg => {
                           const isChecked = rgMatrix.roleGroupActions[rg.id]?.includes(action) || false;
                           return (
-                            <td key={rg.id} className="p-2 text-center">
+                            <td key={rg.id} className={'p-2 text-center' + (isRoleGroupCellChanged(rgMatrix, savedRgMatrix, rg.id, action) ? CHANGED_CELL : '')} title={isRoleGroupCellChanged(rgMatrix, savedRgMatrix, rg.id, action) ? 'Đã đổi — chưa lưu' : undefined}>
                               <input
                                 type="checkbox"
                                 checked={isChecked}
@@ -538,7 +553,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                   <tr key={action} className="hover:bg-slate-900/40 transition-colors">
                     <td className="p-3 font-medium text-slate-300 text-[11px]">{label}</td>
                     {scopeKeys.map(roleScopeKey => (
-                      <td key={roleScopeKey} className="p-2 text-center">
+                      <td key={roleScopeKey} className={'p-2 text-center' + (savedValue && isProjectCellChanged(matrix as any, savedValue as any, action, roleScopeKey) ? CHANGED_CELL : '')} title={savedValue && isProjectCellChanged(matrix as any, savedValue as any, action, roleScopeKey) ? 'Đã đổi — chưa lưu' : undefined}>
                         <input
                           type="checkbox"
                           checked={matrix.actions[action]?.includes(roleScopeKey as ProjectRoleScope) || false}
@@ -586,14 +601,14 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             onClick={() => setRgTab('context')}
             className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
           >
-            <Shield className="w-3 h-3" /> Theo vị trí trong dự án
+            <Shield className="w-3 h-3" /> Theo vị trí trong dự án{unsavedBadge(contextCount)}
           </button>
           <button
             type="button"
             onClick={() => setRgTab('roleGroup')}
             className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
           >
-            <UserCog className="w-3 h-3" /> Vai trò nhóm HRM
+            <UserCog className="w-3 h-3" /> Vai trò nhóm HRM{unsavedBadge(rgCount)}
           </button>
         </div>
 
@@ -604,6 +619,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           <div className="mt-4">
             <SaveActionBar
               changed={!!externalChanged}
+              changeCount={contextCount}
               onSave={handleSaveContext}
               onCancel={onCancelContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
               onSetDefault={onSetDefaultContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
@@ -619,6 +635,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           <div className="mt-4">
             <SaveActionBar
               changed={rgChanged}
+              changeCount={rgCount}
               onSave={handleSaveRoleGroup}
               onCancel={handleCancelRoleGroup}
               onSetDefault={handleSetDefaultRoleGroup}
@@ -650,14 +667,14 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
               onClick={() => setRgTab('context')}
               className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
             >
-              <Shield className="w-3 h-3" /> Theo vị trí
+              <Shield className="w-3 h-3" /> Theo vị trí{unsavedBadge(contextCount)}
             </button>
             <button
               type="button"
               onClick={() => setRgTab('roleGroup')}
               className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
             >
-              <UserCog className="w-3 h-3" /> Nhóm HRM
+              <UserCog className="w-3 h-3" /> Nhóm HRM{unsavedBadge(rgCount)}
             </button>
           </div>
           <button
@@ -675,6 +692,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             <div className="mt-4">
               <SaveActionBar
                 changed={!!externalChanged}
+              changeCount={contextCount}
                 onSave={handleSaveContext}
                 onCancel={onCancelContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
                 onSetDefault={onSetDefaultContext || (() => {/* Không có cha quản lý draft (chế độ modal độc lập) */})}
@@ -689,6 +707,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             <div className="mt-4">
               <SaveActionBar
                 changed={rgChanged}
+              changeCount={rgCount}
                 onSave={handleSaveRoleGroup}
                 onCancel={handleCancelRoleGroup}
                 onSetDefault={handleSetDefaultRoleGroup}

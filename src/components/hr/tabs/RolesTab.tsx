@@ -5,6 +5,7 @@ import ProjectPermissionModal from './ProjectPermissionModal';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
+import { countListChangesById, countProjectMatrixChanges, countJsonChanges } from '../../../lib/permissionDraftDiff';
 import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache, encodeApprovalApprovers, getRoleGroupKind, withRoleGroupKind, ROLE_GROUP_KIND_LABELS, RoleGroupKind } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { dbService } from '../../../lib/dbService';
@@ -111,6 +112,25 @@ export default function RolesTab(props: RolesTabProps) {
   const groupChanged = React.useMemo(() => JSON.stringify(draftRoles) !== JSON.stringify(roles), [draftRoles, roles]);
   const projectChanged = React.useMemo(() => JSON.stringify(draftMatrix) !== JSON.stringify(savedMatrix), [draftMatrix, savedMatrix]);
   const approvalChanged = React.useMemo(() => JSON.stringify(draftApprovalConfig) !== JSON.stringify(savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
+  // Số thay đổi CHƯA LƯU của từng tab chính (hiện nhãn đỏ trên tên tab + trong thanh Lưu) — để người dùng biết còn bao nhiêu ô phải bấm Lưu mới có hiệu lực.
+  // Tab Quyền Dự Án gồm 2 phần: "Theo vị trí" (draftMatrix, do component này giữ) và "Vai trò nhóm HRM" (nháp nằm trong ProjectPermissionModal → báo lên qua rgUnsaved).
+  const [rgUnsaved, setRgUnsaved] = React.useState(0);
+  const groupCount = React.useMemo(() => countListChangesById(draftRoles as any, roles as any), [draftRoles, roles]);
+  const projectCount = React.useMemo(() => countProjectMatrixChanges(draftMatrix as any, savedMatrix as any) + rgUnsaved, [draftMatrix, savedMatrix, rgUnsaved]);
+  const approvalCount = React.useMemo(() => countJsonChanges(draftApprovalConfig, savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
+  // Đổi tab chính: nháp "Vai trò nhóm HRM" nằm trong màn hình con nên rời tab Quyền Dự Án là MẤT nháp đó → hỏi lại nếu còn thay đổi chưa lưu.
+  // (Nháp "Theo vị trí"/nhóm vai trò/phê duyệt nằm ở component này nên giữ nguyên khi đổi tab.) Trả về true nếu được phép đổi.
+  const requestMainTab = (next: 'group' | 'task' | 'approval'): boolean => {
+    if (roleMainTab === 'task' && next !== 'task') {
+      if (rgUnsaved > 0 && !window.confirm(`Bạn còn ${rgUnsaved} thay đổi CHƯA LƯU ở "Vai trò nhóm HRM". Rời tab này sẽ MẤT các thay đổi đó.\n\nVẫn rời đi?`)) return false;
+      setRgUnsaved(0);
+    }
+    setRoleMainTab(next);
+    return true;
+  };
+  const unsavedBadge = (n: number) => n > 0
+    ? <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black" title={`${n} thay đổi chưa lưu`}>{n}</span>
+    : null;
 
   // Ref theo dõi cờ "chưa lưu" để đọc được giá trị MỚI NHẤT bên trong listener
   // sự kiện (đăng ký 1 lần lúc mount, dep []) mà không phải re-subscribe mỗi
@@ -444,22 +464,22 @@ export default function RolesTab(props: RolesTabProps) {
       <div className="flex gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 w-fit">
         <button
           type="button"
-          onClick={() => setRoleMainTab('group')}
+          onClick={() => requestMainTab('group')}
           className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'group' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
-          <Shield className="w-3.5 h-3.5" /> Phân Quyền Nhóm Vai Trò
+          <Shield className="w-3.5 h-3.5" /> Phân Quyền Nhóm Vai Trò{unsavedBadge(groupCount)}
         </button>
         <button
           type="button"
-          onClick={() => setRoleMainTab('task')}
+          onClick={() => requestMainTab('task')}
           className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'task' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
-          <Shield className="w-3.5 h-3.5" /> Quyền Dự Án
+          <Shield className="w-3.5 h-3.5" /> Quyền Dự Án{unsavedBadge(projectCount)}
         </button>
         <button
           type="button"
           onClick={() => {
-            setRoleMainTab('approval');
+            if (!requestMainTab('approval')) return;
             // Auto-select first role (or admin role) when entering approval tab
             if (!selectedRoleId && roles.length > 0) {
               const adminRole = roles.find(r => ADMIN_ROLE_IDS.includes(r.id));
@@ -468,7 +488,7 @@ export default function RolesTab(props: RolesTabProps) {
           }}
           className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'approval' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
-          <Shield className="w-3.5 h-3.5" /> Quyền Phê Duyệt
+          <Shield className="w-3.5 h-3.5" /> Quyền Phê Duyệt{unsavedBadge(approvalCount)}
         </button>
       </div>
 
@@ -1263,6 +1283,8 @@ export default function RolesTab(props: RolesTabProps) {
             value={draftMatrix}
             onChange={setDraftMatrix}
             hasChanges={projectChanged}
+            savedValue={savedMatrix}
+            onUnsavedCountChange={setRgUnsaved}
             // Trước đây các nút Hủy/Đặt mặc định/Khôi phục mặc định của thanh Lưu cục bộ (ngay dưới
             // bảng "Theo vị trí") là no-op — không có tác dụng gì. Nối vào state draftMatrix/savedMatrix
             // thật ở đây để chúng hoạt động đúng, đồng thời KHÔNG hiển thị thêm thanh Lưu ở cuối trang
@@ -1449,6 +1471,7 @@ export default function RolesTab(props: RolesTabProps) {
       {roleMainTab !== 'task' && (
         <SaveActionBar
           changed={roleMainTab === 'group' ? groupChanged : approvalChanged}
+          changeCount={roleMainTab === 'group' ? groupCount : approvalCount}
           onSave={roleMainTab === 'group' ? handleSaveGroup : handleSaveApproval}
           onCancel={() => {
             if (roleMainTab === 'group') setDraftRoles([...roles]);
