@@ -14,7 +14,7 @@ import { loadProjectPermissions } from './hrProjectPermissions';
 
 // ─── Role Scope: vai trò của user đối với MỘT task cụ thể ────────────
 // Dựa trên vị trí dữ liệu THỰC TẾ trong UI
-// Tên hiển thị UI (Xem TaskPermissionModal.tsx > roleScopeLabels):
+// Tên hiển thị UI (Xem tabs/TaskPermissionEditor.tsx > COT):
 //   director        → "Giám Đốc"
 //   pm              → "Trưởng Dự Án"
 //   assigner        → "Người Giao Việc"
