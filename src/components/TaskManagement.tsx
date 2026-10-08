@@ -356,7 +356,8 @@ export default function TaskManagement({
               attendance[idx] = { ...attendance[idx], status: 'invalid', statusMsg: 'Không hợp lệ', notes: `Bị từ chối duyệt: ${targetLeave.reason || ''}` };
               toSave.push(attendance[idx]);
             } else {
-              const newLog = { id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`, empId: targetLeave.empId, empName: targetLeave.empName, date: dStr, timeInS: targetLeave.shift === 'morning' ? 'OFF' : '', timeOutS: '', timeInC: targetLeave.shift === 'afternoon' ? 'OFF' : '', timeOutC: '', timeInOT: '', timeOutOT: '', method: 'Duyệt công', status: 'invalid', statusMsg: 'Không hợp lệ', otHours: 0, notes: `Bị từ chối duyệt: ${targetLeave.reason || ''}` };
+              // Từ chối = coi như chưa có báo cáo: để trống giờ (không ghi 'OFF' vì OFF bị tính 0 công, tha phạt dù đơn bị từ chối)
+              const newLog = { id: `AT-${Date.now().toString().slice(-3)}-${Math.random().toString().slice(-2)}`, empId: targetLeave.empId, empName: targetLeave.empName, date: dStr, timeInS: '', timeOutS: '', timeInC: '', timeOutC: '', timeInOT: '', timeOutOT: '', method: 'Duyệt công', status: 'invalid', statusMsg: 'Không hợp lệ', otHours: 0, notes: `Bị từ chối duyệt: ${targetLeave.reason || ''}` };
               attendance.unshift(newLog);
               toSave.push(newLog);
             }

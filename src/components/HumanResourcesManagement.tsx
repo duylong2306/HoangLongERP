@@ -3445,9 +3445,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     empId: l.empId,
                     empName: l.empName,
                     date: dStr,
-                    timeInS: l.shift === 'morning' ? 'OFF' : '',
+                    // Từ chối = coi như CHƯA CÓ báo cáo: để trống giờ (KHÔNG ghi ký hiệu 'OFF' — OFF bị tính 0 công, tức vô tình
+                    // "tha" phạt dù đơn bị từ chối). Ngày không có giờ nào sẽ bị tính vắng không phép (KP) theo quy tắc chung.
+                    timeInS: '',
                     timeOutS: '',
-                    timeInC: l.shift === 'afternoon' ? 'OFF' : '',
+                    timeInC: '',
                     timeOutC: '',
                     timeInOT: '',
                     timeOutOT: '',
@@ -6575,6 +6577,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <option value="missing">Thiếu dữ liệu</option>
                 <option value="invalid">Không hợp lệ</option>
               </select>
+              {/* Trạng thái chỉ là chú thích: công được tính từ giờ chấm + đơn nghỉ/báo cáo đã duyệt (xem computeDailyWorkday) */}
+              <p className="text-[10px] text-slate-500 mt-1">Chỉ để chú thích, không làm thay đổi công. Muốn đổi công, hãy tạo hoặc duyệt đơn nghỉ / báo cáo.</p>
             </div>
 
             {/* Morning shift */}

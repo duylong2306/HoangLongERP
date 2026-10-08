@@ -307,6 +307,18 @@ export function computeDailyWorkday(
     if (hasAnyPunch) return { workday: 0, label: '0', details: 'Đang làm việc (chờ chốt ca)' };
 
     if (!isHoliday && !isWeekend) {
+      // "Báo cáo nghỉ ca" ĐÃ DUYỆT mà cả ngày không có giờ chấm nào = nhân viên nghỉ có lý do và người duyệt đã chấp nhận
+      // → tính theo mã P (nghỉ có xin phép, không lương): mặc định 0 công, KHÔNG phạt KP.
+      // (Đơn bị TỪ CHỐI hoặc đang chờ duyệt không vào đây → rơi xuống phạt KP như chưa có báo cáo.)
+      // Chỉ xét khi KHÔNG có giờ nào: ngày có chấm 1 ca thì vẫn tính công ca đó ở nhánh phía trên.
+      const hasApprovedAbsenceReport = activeLeaves.some((l: any) =>
+        l.status === 'approved' && l.type === 'Báo cáo nghỉ ca' &&
+        ((l.empId && log.empId && l.empId === log.empId) || (l.empName && log.empName && l.empName === log.empName)) &&
+        log.date >= l.fromDate && log.date <= l.toDate);
+      if (hasApprovedAbsenceReport) {
+        const pVal = getCoefVal('P', 0);
+        return { workday: pVal, label: `${pVal > 0 ? '+' : ''}${pVal}`, details: 'Nghỉ có xin phép (báo cáo nghỉ ca đã duyệt) (P)' };
+      }
       // Hệ số vắng không phép = công cơ sở (MSHID + ASHID) nhân với hệ số KP
       // (mã 'KP' trong tab Hệ Số Chấm Công). Mặc định: 1.0 × (-1.0) = -1.0.
       const baseDay = getCoefVal('MSHID', 0.5) + getCoefVal('ASHID', 0.5);
