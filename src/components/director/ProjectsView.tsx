@@ -149,9 +149,9 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                       <td className="px-3 py-2.5 text-slate-700">{empName(p.pmId)}</td>
                       <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={p.progress || 0} tone={f?.flags.includes('late') ? 'amber' : 'emerald'} /><b className="text-[10.5px] w-9 text-right">{p.progress || 0}%</b></div></td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{dmy(toDay(p.endDate))}{f?.flags.includes('late') && <span className="block"><Badge tone="rose">Trễ tiến độ</Badge></span>}</td>
-                      <td className="px-3 py-2.5 text-right font-mono">{fmtFull(f?.contractValue || 0)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-600">{fmtFull(f?.collected || 0)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-rose-600">{fmtFull(f?.spent || 0)}{f && (f.flags.includes('overBudget') || f.flags.includes('loss')) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
+                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(f?.contractValue || 0)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(f?.collected || 0)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(f?.spent || 0)}{f && (f.flags.includes('overBudget') || f.flags.includes('loss')) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
                       <td className="px-3 py-2.5 text-right">{ts?.open || 0}{(ts?.overdue || 0) > 0 && <span className="text-rose-600 font-bold"> / {ts?.overdue}</span>}</td>
                       <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[p.status] || 'slate'}>{STATUS_LABEL[p.status] || p.status}</Badge></td>
                     </tr>

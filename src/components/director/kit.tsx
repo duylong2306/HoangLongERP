@@ -77,7 +77,8 @@ export const PairBars: React.FC<{ data: { label: string; a: number; b: number }[
               <title>{`${d.label}: ${titleA} ${money ? fmtFull(d.a) : d.a} · ${titleB} ${money ? fmtFull(d.b) : d.b}`}</title>
               <rect x={x - bw - 1} y={H - padB - ha} width={bw} height={ha} rx={2} className={colorA} />
               <rect x={x + 1} y={H - padB - hb} width={bw} height={hb} rx={2} className={colorB} />
-              <text x={x} y={H - 4} textAnchor="middle" className="fill-slate-400" fontSize="9">{d.label}</text>
+              {/* Nhiều cột (30 ngày) thì chỉ ghi nhãn cách quãng để không chồng chữ */}
+              {(i % Math.max(1, Math.ceil(data.length / 12)) === 0 || i === data.length - 1) && <text x={x} y={H - 4} textAnchor="middle" className="fill-slate-400" fontSize="9">{d.label}</text>}
             </g>
           );
         })}

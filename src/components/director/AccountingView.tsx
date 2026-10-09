@@ -172,10 +172,10 @@ export default function AccountingView({ projects, receipts, payments, customers
                   <td className="px-3 py-2.5 text-slate-600">{projName(p.projectId) || 'Chi chung'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{CATEGORY_LABELS[p.category as string] || 'Khác'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{METHOD[p.paymentMethod] || p.paymentMethod}</td>
-                  <td className="px-3 py-2.5 text-right font-mono font-bold text-rose-600">{fmtFull(p.amount)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold text-rose-600">{fmtFull(p.amount)}</td>
                   <td className="px-3 py-2.5"><Badge tone={PAY_STATUS[p.status]?.tone || 'slate'}>{PAY_STATUS[p.status]?.label || p.status}</Badge></td>
                 </tr>))}</tbody>
-              <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={6}>TỔNG ({payList.length} phiếu, không tính phiếu từ chối)</td><td className="px-3 py-2.5 text-right font-mono text-rose-600">{fmtFull(payListSum)}</td><td /></tr></tfoot>
+              <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={6}>TỔNG ({payList.length} phiếu, không tính phiếu từ chối)</td><td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(payListSum)}</td><td /></tr></tfoot>
             </table></div>
           )}
           {payPager.bar}
@@ -198,9 +198,9 @@ export default function AccountingView({ projects, receipts, payments, customers
                   <td className="px-3 py-2.5 text-slate-600">{projName(r.projectId) || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{r.paymentMethod === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{r.collector || '—'}</td>
-                  <td className="px-3 py-2.5 text-right font-mono font-bold text-emerald-600">{fmtFull(r.amount)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold text-emerald-600">{fmtFull(r.amount)}</td>
                 </tr>))}</tbody>
-              <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={6}>TỔNG ({recList.length} phiếu)</td><td className="px-3 py-2.5 text-right font-mono text-emerald-600">{fmtFull(recList.reduce((s, r) => s + (r.amount || 0), 0))}</td></tr></tfoot>
+              <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={6}>TỔNG ({recList.length} phiếu)</td><td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(recList.reduce((s, r) => s + (r.amount || 0), 0))}</td></tr></tfoot>
             </table></div>
           )}
           {recPager.bar}
@@ -224,7 +224,7 @@ export default function AccountingView({ projects, receipts, payments, customers
                   <td className="px-3 py-2.5 text-slate-600">{a.projectName || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600 max-w-[220px] truncate" title={a.reason}>{a.reason || a.taskName || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{a.creatorName || a.creator || '—'} → {a.approverName || a.approver || '—'}</td>
-                  <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-800">{fmtFull(a.approvedAmount ?? a.amount)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold text-slate-800">{fmtFull(a.approvedAmount ?? a.amount)}</td>
                   <td className="px-3 py-2.5"><Badge tone={PROP_STATUS[a.status]?.tone || 'slate'}>{PROP_STATUS[a.status]?.label || a.status}</Badge></td>
                 </tr>))}</tbody>
             </table></div>

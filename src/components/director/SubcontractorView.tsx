@@ -104,11 +104,11 @@ export default function SubcontractorView({ projects, payments, onNavigateTab }:
                   <td className="px-3 py-2.5 font-bold text-slate-800">{r.sub.name}<div className="text-[10px] font-normal text-slate-400">{r.sub.representative || '—'} · {r.sub.phone || '—'}</div></td>
                   <td className="px-3 py-2.5 text-slate-600">{r.sub.field || '—'}</td>
                   <td className="px-3 py-2.5 text-right">{r.approvedContracts}/{r.contracts}</td>
-                  <td className="px-3 py-2.5 text-right font-mono">{fmtFull(r.contractValue)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(r.contractValue)}</td>
                   <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={pct} tone={pct > 100 ? 'rose' : pct >= 80 ? 'amber' : 'sky'} /><b className="text-[10.5px] w-9 text-right">{pct}%</b></div></td>
-                  <td className="px-3 py-2.5 text-right font-mono text-rose-600">{fmtFull(r.paid)}{r.pendingPaid > 0 && <span className="block text-[10px] text-amber-600">+ {fmtShort(r.pendingPaid)} chờ duyệt</span>}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-amber-600">{fmtFull(r.remaining)}</td>
-                  <td className={`px-3 py-2.5 text-right font-mono ${r.debt > 0 ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>{fmtFull(r.debt)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(r.paid)}{r.pendingPaid > 0 && <span className="block text-[10px] text-amber-600">+ {fmtShort(r.pendingPaid)} chờ duyệt</span>}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-600">{fmtFull(r.remaining)}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono whitespace-nowrap ${r.debt > 0 ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>{fmtFull(r.debt)}</td>
                   <td className="px-3 py-2.5 text-right">{r.projectIds.length}</td>
                   <td className="px-3 py-2.5 text-right">{r.pendingProposals > 0 ? <Badge tone="amber">{r.pendingProposals}</Badge> : <span className="text-slate-300">0</span>}</td>
                 </tr>);
@@ -135,10 +135,10 @@ export default function SubcontractorView({ projects, payments, onNavigateTab }:
                 <td className="px-3 py-2.5 font-bold text-slate-800">{subName(c.subcontractorId, c.subcontractorName)}</td>
                 <td className="px-3 py-2.5 text-slate-600">{projName(c.projectId, c.projectName) || '—'}</td>
                 <td className="px-3 py-2.5 text-slate-600 max-w-[220px] truncate" title={c.workName || c.scopeWork}>{c.workName || c.scopeWork || '—'}</td>
-                <td className="px-3 py-2.5 text-right font-mono font-bold">{fmtFull(contractAmount(c))}</td>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold">{fmtFull(contractAmount(c))}</td>
                 <td className="px-3 py-2.5">{c.isApproved === true ? <Badge tone="emerald">Đã duyệt</Badge> : <Badge tone="amber">Chờ duyệt</Badge>}</td>
               </tr>))}</tbody>
-            <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={5}>TỔNG ({conList.length} hợp đồng)</td><td className="px-3 py-2.5 text-right font-mono">{fmtFull(conList.reduce((s, c) => s + contractAmount(c), 0))}</td><td /></tr></tfoot>
+            <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={5}>TỔNG ({conList.length} hợp đồng)</td><td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(conList.reduce((s, c) => s + contractAmount(c), 0))}</td><td /></tr></tfoot>
           </table></div>
         )}
         {conPager.bar}

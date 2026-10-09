@@ -142,10 +142,10 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
                   <tr key={it.id} className="border-b border-slate-100 hover:bg-slate-50/60">
                     <td className="px-3 py-2.5 font-bold text-slate-800">{it.name}<div className="text-[10px] font-mono font-normal text-slate-400">{it.code}</div></td>
                     <td className="px-3 py-2.5 text-slate-600">{it.unit}</td>
-                    <td className={`px-3 py-2.5 text-right font-mono font-bold ${st === 'ok' ? 'text-slate-800' : st === 'low' ? 'text-amber-600' : 'text-rose-600'}`}>{(it.qty || 0).toLocaleString('vi-VN')}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-slate-500">{(it.minAlert || 0).toLocaleString('vi-VN')}</td>
-                    <td className="px-3 py-2.5 text-right font-mono">{fmtFull(it.unitPrice || 0)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono">{fmtFull((it.qty || 0) * (it.unitPrice || 0))}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold ${st === 'ok' ? 'text-slate-800' : st === 'low' ? 'text-amber-600' : 'text-rose-600'}`}>{(it.qty || 0).toLocaleString('vi-VN')}</td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-500">{(it.minAlert || 0).toLocaleString('vi-VN')}</td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(it.unitPrice || 0)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull((it.qty || 0) * (it.unitPrice || 0))}</td>
                     <td className="px-3 py-2.5 text-slate-600">{it.location || '—'}</td>
                     <td className="px-3 py-2.5">{st === 'out' ? <Badge tone="rose">Hết hàng</Badge> : st === 'low' ? <Badge tone="amber">Sắp hết</Badge> : <Badge tone="emerald">Bình thường</Badge>}</td>
                   </tr>);
@@ -172,15 +172,15 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
                   <td className="px-3 py-2.5 font-mono text-slate-500">{o.id}{o.proposalCode && <div className="text-[10px]">từ {o.proposalCode}</div>}</td>
                   <td className="px-3 py-2.5 font-bold text-slate-800">{o.fromWarehouse ? 'Xuất từ kho' : (o.supplierName || '—')}</td>
                   <td className="px-3 py-2.5 text-slate-600">{projName(o.projectId, o.projectName) || '—'}</td>
-                  <td className="px-3 py-2.5 text-right font-mono">{fmtFull(o.tongTien || 0)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-emerald-600">{fmtFull(o.thanhToanThucTe || 0)}</td>
-                  <td className={`px-3 py-2.5 text-right font-mono font-bold ${(o.congNo || 0) > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{fmtFull(o.congNo || 0)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(o.tongTien || 0)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(o.thanhToanThucTe || 0)}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold ${(o.congNo || 0) > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{fmtFull(o.congNo || 0)}</td>
                   <td className="px-3 py-2.5"><Badge tone={ORDER_STATUS[o.status]?.tone || 'slate'}>{ORDER_STATUS[o.status]?.label || o.status}</Badge></td>
                 </tr>))}</tbody>
               <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={4}>TỔNG ({orderList.length} đơn)</td>
-                <td className="px-3 py-2.5 text-right font-mono">{fmtFull(orderList.reduce((s, o) => s + (o.tongTien || 0), 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-emerald-600">{fmtFull(orderList.reduce((s, o) => s + (o.thanhToanThucTe || 0), 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-amber-600">{fmtFull(orderList.reduce((s, o) => s + (o.congNo || 0), 0))}</td><td /></tr></tfoot>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(orderList.reduce((s, o) => s + (o.tongTien || 0), 0))}</td>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(orderList.reduce((s, o) => s + (o.thanhToanThucTe || 0), 0))}</td>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-600">{fmtFull(orderList.reduce((s, o) => s + (o.congNo || 0), 0))}</td><td /></tr></tfoot>
             </table></div>
           )}
           {orderPager.bar}
@@ -202,8 +202,8 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
                   <td className="px-3 py-2.5 font-mono font-bold text-slate-700">{p.code}</td>
                   <td className="px-3 py-2.5 text-slate-600">{projName(p.projectId, p.projectName) || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{p.taskName || '—'}</td>
-                  <td className="px-3 py-2.5 text-right font-mono">{(p.items || []).length}</td>
-                  <td className="px-3 py-2.5 text-right font-mono">{fmtFull((p.items || []).reduce((s: number, it: any) => s + (it.totalPrice || (it.price || 0) * (it.qty || 0)), 0))}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{(p.items || []).length}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull((p.items || []).reduce((s: number, it: any) => s + (it.totalPrice || (it.price || 0) * (it.qty || 0)), 0))}</td>
                   <td className="px-3 py-2.5 text-slate-600">{p.createdByName || '—'}</td>
                   <td className="px-3 py-2.5"><Badge tone={PROP_TONE[p.status] || 'slate'}>{PROPOSAL_STATUS_LABELS[p.status] || (p.status === 'cancelled' ? 'Đã hủy' : p.status)}</Badge></td>
                 </tr>))}</tbody>

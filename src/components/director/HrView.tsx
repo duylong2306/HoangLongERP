@@ -143,7 +143,7 @@ export default function HrView({ employees, onNavigateTab }: Props) {
                     <td className="px-3 py-2.5 text-slate-600">{e.position || '—'}</td>
                     <td className="px-3 py-2.5 font-mono text-slate-600">{e.phone || '—'}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-slate-600">{dmy(toDay(e.startDate))}</td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold">{worked.get(e.id) || 0}</td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold">{worked.get(e.id) || 0}</td>
                     <td className="px-3 py-2.5">{(!e.status || e.status === 'working') ? stateBadge(e.id) : <span className="text-slate-400">—</span>}</td>
                   </tr>
                 ))}
@@ -172,7 +172,7 @@ export default function HrView({ employees, onNavigateTab }: Props) {
                     <td className="px-3 py-2.5 text-slate-600">{l.type}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{dmy(toDay(l.fromDate))}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{dmy(toDay(l.toDate || l.fromDate))}</td>
-                    <td className="px-3 py-2.5 text-right font-mono">{l.daysCount ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{l.daysCount ?? '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600 max-w-[260px] truncate" title={l.reason}>{l.reason || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{l.approverName || '—'}</td>
                     <td className="px-3 py-2.5"><Badge tone={LEAVE_STATUS[l.status]?.tone || 'slate'}>{LEAVE_STATUS[l.status]?.label || l.status}</Badge></td>
