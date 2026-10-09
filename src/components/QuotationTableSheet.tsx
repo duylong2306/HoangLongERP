@@ -8,7 +8,7 @@ import LiquidationDocument from './LiquidationDocument';
 import LegalDocument from './LegalDocument';
 import FinalQuoteDocument from './FinalQuoteDocument';
 import { dbService, invalidateCache } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, useAuth, canApproveProjectDoc } from '../context';
 
 // Helper function to read Vietnamese numbers aloud in text format
 export function docSoTiengViet(number: number): string {
@@ -115,6 +115,9 @@ interface QuotationTableSheetProps {
 
 export default function QuotationTableSheet({ quoteData, initialTab, onApproved }: QuotationTableSheetProps) {
   const { addToast } = useNotification();
+  const { currentUser } = useAuth();
+  // Người duyệt Báo Giá theo Quyền Phê Duyệt (chưa cấu hình ai → không hạn chế; Giám đốc luôn được)
+  const coQuyenDuyetBG = canApproveProjectDoc(currentUser?.id, 'quotation');
   // Báo giá Xây dựng lập qua luồng Bóc Tách (không đi qua luồng "tính theo loại
   // nhà" nên không có selectedHouseType) trước đây bị rơi nhầm vào giao diện
   // Nội Thất mặc định (chỉ phân biệt house-type vs mechanical vs còn lại) — phát
@@ -194,9 +197,14 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
   }, []);
 
   const handleApproveQuote = async () => {
+    if (!coQuyenDuyetBG) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Báo Giá (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     try {
       const approvedAt = new Date().toLocaleString('vi-VN');
-      const approvedBy = 'Trương Hữu Long (Giám Đốc)';
+      // Ghi đúng người bấm duyệt (trước đây viết cứng tên một người, sai khi có nhiều người duyệt)
+      const approvedBy = currentUser?.name ? `${currentUser.name}` : 'Giám Đốc';
 
       // 1. Ghi trạng thái duyệt xuống DB (archived_quotes)
       if ((quoteData as any).id) {
@@ -467,6 +475,8 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                   ) : (
                     <button
                       onClick={handleApproveQuote}
+                      disabled={!coQuyenDuyetBG}
+                      title={!coQuyenDuyetBG ? 'Bạn không phải người duyệt Báo Giá (Quyền Phê Duyệt)' : undefined}
                       className="px-3.5 py-1.5 bg-amber-500 text-white hover:bg-amber-600 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse"
                     >
                       <FileCheck className="w-3.5 h-3.5" />
@@ -714,6 +724,8 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                   ) : (
                     <button
                       onClick={handleApproveQuote}
+                      disabled={!coQuyenDuyetBG}
+                      title={!coQuyenDuyetBG ? 'Bạn không phải người duyệt Báo Giá (Quyền Phê Duyệt)' : undefined}
                       className="px-3.5 py-1.5 bg-amber-500 text-white hover:bg-amber-600 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse"
                     >
                       <FileCheck className="w-3.5 h-3.5" />

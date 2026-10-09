@@ -4,7 +4,7 @@ import {
   Shield, DollarSign, Zap, FileText, Briefcase, CheckCircle2, Award, X, Trash2, Calculator, Sliders, AlertCircle, AlertTriangle
 } from 'lucide-react';
 import { Project, Employee, Task, Customer, ProjectDoc, SubcontractorAdvanceProposal, ApprovalStep } from '../types';
-import { useNotification } from '../context';
+import { useNotification, canApproveProjectDoc } from '../context';
 import { dbService } from '../lib/dbService';
 import { createMaterialProposalsFromItems } from '../lib/materialProposals';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
@@ -2181,6 +2181,11 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                           const canSignThisDoc = activeConnectedTool === 'contract' ? ctContract
                             : activeConnectedTool === 'acceptance' ? ctAcceptance
                             : ctLiquidation;
+                          // Người duyệt từng loại hồ sơ (Hợp đồng / Nghiệm thu / Thanh lý) theo Quyền Phê Duyệt — chưa cấu hình ai thì không hạn chế, Giám đốc luôn được
+                          if (!canApproveProjectDoc(currentUser?.id, activeConnectedTool as 'contract' | 'acceptance' | 'liquidation')) {
+                            addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt hồ sơ này (xem Phân Quyền → Quyền Phê Duyệt).', type: 'error' });
+                            return;
+                          }
                           if (!canSignThisDoc || !ctManageDocs) {
                             addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền ký/lưu hồ sơ này.', type: 'error' });
                             return;

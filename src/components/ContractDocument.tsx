@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Printer, CheckCircle2, FileCheck, XCircle, FileDown } from 'lucide-react';
 import { docSoTiengViet } from './QuotationTableSheet';
 import { dbService, invalidateCache } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, useAuth, canApproveProjectDoc } from '../context';
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 
@@ -289,6 +289,9 @@ interface ContractDocumentProps {
 
 export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   const { addToast } = useNotification();
+  const { currentUser } = useAuth();
+  // Người duyệt Hợp Đồng theo Quyền Phê Duyệt (chưa cấu hình ai → không hạn chế; Giám đốc luôn được)
+  const coQuyenDuyetHD = canApproveProjectDoc(currentUser?.id, 'contract');
   const items = quoteData.items || [];
   // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ.
   const discountPercent = 0;
@@ -408,6 +411,10 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   };
 
   const handleApproveContract = async () => {
+    if (!coQuyenDuyetHD) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Hợp Đồng (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     try {
       setSaving(true);
       await dbService.updateQuoteDocHtml(quoteData.id, { contractApproved: true });
@@ -727,7 +734,8 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
         ) : (
           <button
             onClick={handleApproveContract}
-            disabled={saving}
+            disabled={saving || !coQuyenDuyetHD}
+            title={!coQuyenDuyetHD ? 'Bạn không phải người duyệt Hợp Đồng (Quyền Phê Duyệt)' : undefined}
             className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse active:scale-95"
           >
             <FileCheck className="w-3.5 h-3.5" />

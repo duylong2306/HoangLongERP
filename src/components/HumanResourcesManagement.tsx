@@ -4,7 +4,7 @@ import { isShiftLeave, shiftLabel, supportsShiftLeave, type LeaveShift } from '.
 import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
-import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission } from '../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { useSettings } from '../context/SettingsContext';
 import {
   Users, Clock, DollarSign, Calendar, Award,
@@ -1846,10 +1846,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // Người được cấu hình xét duyệt Công Tác Phí (Quyền Phê Duyệt → Công Tác Phí)
   // có quyền thấy nút Duyệt/Từ chối trong TripsTab. Fallback: vai trò Kế toán.
   const canApproveTravelExpense = React.useMemo(() => {
-    if (!currentUser?.id) return false;
-    // Bất kỳ ai trong danh sách người duyệt CTP đã cấu hình đều được duyệt (không chỉ 1 người).
-    if (getConfiguredApprovers('travel_expense').some(a => a.id === currentUser.id)) return true;
-    return isRoleAccounting(currentUser.id);
+    // Quy tắc DÙNG CHUNG ở 3 nơi (xem canApproveTravelExpense trong SettingsContext): Giám đốc / đúng người được cấu hình / (chưa cấu hình ai) Kế toán
+    return canApproveTravelExpenseCfg(currentUser?.id);
   }, [currentUser]);
 
   // Form states
@@ -3187,7 +3185,17 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     addToast({ title: 'ℹ️ Thông báo', message: `đã nộp Đơn nghỉ lý do: "${newLeave.reason}" trình lên cấp duyệt quản lý trực tiếp.`, type: 'info' });
   };
 
+  // Ai được duyệt/từ chối một đơn (nghỉ phép / tạm ứng lương nhanh): Giám đốc, người ghi trên đơn, hoặc người trong danh sách duyệt cấu hình (Quyền Phê Duyệt).
+  // Trước đây mọi người vào được tab Nghỉ phép đều thấy nút Duyệt/Từ chối.
+  const canApproveLeaveRecord = (l: any): boolean =>
+    !!currentUser?.id && (isRoleAdmin(currentUser.id) || isLeaveApproverFor(currentUser.id, currentUser.name, l));
+
   const handleApproveLeave = (id: string, status: 'approved' | 'rejected') => {
+    const donDuyet = leaves.find(l => l.id === id);
+    if (donDuyet && !canApproveLeaveRecord(donDuyet)) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người xét duyệt đơn này (xem Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     // Giờ chuẩn của ca khi tự điền lúc duyệt báo cáo chấm công: lấy từ CẤU HÌNH CA của doanh nghiệp (không viết cứng)
     const shiftTimes = resolveShiftTimes(systemConfig);
     const targetLeave = leaves.find(l => l.id === id);
@@ -4342,6 +4350,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 selectedLeaveId={selectedLeaveId}
                 setSelectedLeaveId={setSelectedLeaveId}
                 handleApproveLeave={handleApproveLeaveWithPair}
+                canApproveLeave={canApproveLeaveRecord}
                 onDeleteLeave={handleDeleteLeave}
                 globalPageSize={globalPageSize}
                 setGlobalPageSize={setGlobalPageSize}

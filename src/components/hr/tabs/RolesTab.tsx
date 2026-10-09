@@ -1431,7 +1431,7 @@ export default function RolesTab(props: RolesTabProps) {
               <Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Phê Duyệt
             </h4>
             <p className="text-[10.5px] text-slate-400 mt-1">
-              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người duyệt/điều phối cho: hồ sơ dự án (Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, điều phối và xét duyệt vật tư), hồ sơ nhân sự (Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí, Phiếu Lương) và tài chính (Đề Xuất Chi Phí, Tạm Ứng Thầu Phụ). Người được chỉ định hiển thị tự động trong biểu mẫu tương ứng.
+              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người duyệt/điều phối cho: hồ sơ dự án (Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, điều phối và xét duyệt vật tư), hồ sơ nhân sự (Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí, Phiếu Lương) và tài chính (Đề Xuất Chi Phí, Tạm Ứng Thầu Phụ). Người được chỉ định hiển thị tự động trong biểu mẫu tương ứng. Giám đốc (nhóm quản trị) luôn duyệt được mọi loại, không phụ thuộc danh sách. Loại đã bật mà chưa chọn người sẽ hiện cảnh báo.
             </p>
           </div>
 
@@ -1454,7 +1454,9 @@ export default function RolesTab(props: RolesTabProps) {
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
                             className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
                           />
-                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />
+                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />{enabled && getCurrentApproverIds(t.type).length === 0 && (
+                            <span data-testid="approval-empty-warning" className="ml-2 text-[10px] font-bold text-amber-600" title="Đã bật nhưng chưa chọn ai: chỉ Giám đốc duyệt được (một số hồ sơ không hạn chế người duyệt khi để trống).">⚠ Chưa chọn người duyệt</span>
+                          )}
                         </div>
                         {enabled && (
                           <div className="flex items-center gap-2">
@@ -1491,7 +1493,9 @@ export default function RolesTab(props: RolesTabProps) {
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
                             className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
                           />
-                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />
+                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />{enabled && getCurrentApproverIds(t.type).length === 0 && (
+                            <span data-testid="approval-empty-warning" className="ml-2 text-[10px] font-bold text-amber-600" title="Đã bật nhưng chưa chọn ai: chỉ Giám đốc duyệt được (một số hồ sơ không hạn chế người duyệt khi để trống).">⚠ Chưa chọn người duyệt</span>
+                          )}
                         </div>
                         {enabled && (
                           <div className="flex flex-wrap items-center gap-3">
@@ -1544,7 +1548,9 @@ export default function RolesTab(props: RolesTabProps) {
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
                             className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
                           />
-                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />
+                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />{enabled && getCurrentApproverIds(t.type).length === 0 && (
+                            <span data-testid="approval-empty-warning" className="ml-2 text-[10px] font-bold text-amber-600" title="Đã bật nhưng chưa chọn ai: chỉ Giám đốc duyệt được (một số hồ sơ không hạn chế người duyệt khi để trống).">⚠ Chưa chọn người duyệt</span>
+                          )}
                         </div>
                         {enabled && (
                           <div className="flex flex-col sm:flex-row gap-3 pl-7">

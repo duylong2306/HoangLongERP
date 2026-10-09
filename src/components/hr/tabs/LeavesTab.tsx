@@ -25,6 +25,8 @@ interface LeavesTabProps {
   selectedLeaveId: string | null;
   setSelectedLeaveId: (v: string | null) => void;
   handleApproveLeave: (id: string, decision: 'approved' | 'rejected') => void;
+  /** Người đang đăng nhập có được duyệt/từ chối đơn này không (theo Quyền Phê Duyệt). Không truyền → như cũ (hiện cho mọi người). */
+  canApproveLeave?: (leave: any) => boolean;
   onDeleteLeave: (id: string) => void;
   globalPageSize: number | 'all';
   setGlobalPageSize: (v: number | 'all') => void;
@@ -57,6 +59,7 @@ export default function LeavesTab({
   selectedLeaveId,
   setSelectedLeaveId,
   handleApproveLeave,
+  canApproveLeave,
   onDeleteLeave,
   globalPageSize,
   setGlobalPageSize,
@@ -457,7 +460,12 @@ export default function LeavesTab({
                     )}
                   </div>
 
-                  {l.status === 'pending' && (() => {
+                  {l.status === 'pending' && canApproveLeave && !canApproveLeave(l) && (
+                    <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-800" data-testid="leave-not-approver">
+                      ⏳ Chờ {l.approverName || 'người xét duyệt'} xét duyệt — tài khoản của bạn không phải người xét duyệt đơn này.
+                    </p>
+                  )}
+                  {l.status === 'pending' && (!canApproveLeave || canApproveLeave(l)) && (() => {
                     const sibling = findPairedAbsenceReport(l, leaves);
                     return (
                     <div className="space-y-2 pt-2 border-t border-slate-800">

@@ -12,6 +12,8 @@ vi.mock('../../context', () => ({
   getConfiguredSettler: () => null, getConfiguredSettlers: () => [],
   getAccentClasses: () => '', getConfiguredApprover: () => null, getConfiguredApprovers: () => [],
   hasModulePermission: () => true,
+  // Admin (isRoleAdmin: true) → duyệt được; các hàm kiểm tra người duyệt mới (Quyền Phê Duyệt)
+  canApproveTravelExpense: () => true, isLeaveApproverFor: () => true, canApproveProjectDoc: () => true,
 }));
 
 vi.mock('../../context/SettingsContext', () => ({ useSettings: () => ({ settings: {}, businessInfo: { companyName: 'Cty thử' }, hrmConfig: {} }) }));

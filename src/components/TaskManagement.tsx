@@ -14,7 +14,7 @@ import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
-import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 import { canDoTaskAction, loadTaskPermissionMatrix, isTaskReadOnlyFor } from './hr/hrTaskPermissions';
 
@@ -800,11 +800,10 @@ export default function TaskManagement({
   // 2. Công việc phải duyệt chưa hoàn thành (mặc định đã là trạng thái 'reviewing' nên tương đương toReviewTasksCount)
   // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt (lọc theo ID lẫn tên,
   // tương tự logic công việc phải duyệt ở trên — vì một số đơn fallback chỉ lưu tên người duyệt)
+  // isLeaveApproverFor: khớp người duyệt ghi trên đơn HOẶC là một trong những người được cấu hình duyệt (Quyền Phê Duyệt) — đơn chỉ lưu 1 người duyệt nhưng
+  // cấu hình cho phép nhiều người, nên các người còn lại cũng phải thấy và duyệt được.
   const myPendingLeaves = React.useMemo(() => leaves.filter(l =>
-    l.status === 'pending' &&
-    (l.approverId === currentUser?.id ||
-     l.approverName === currentUser?.name ||
-     l.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+    l.status === 'pending' && isLeaveApproverFor(currentUser?.id, currentUser?.name, l as any)
   ), [leaves, currentUser]);
 
   // Danh sách hiển thị: cặp chờ duyệt gộp thành 1 thẻ "Cả ngày" (ẩn thẻ ca chiều)
@@ -848,10 +847,8 @@ export default function TaskManagement({
   // Phí). ⚠️ Bỏ fallback "thuộc nhóm Kế toán → duyệt tất cả" (isRoleAccounting) — cùng lý do rà
   // soát ở trên, chỉ người được add riêng cho "Công Tác Phí" (hoặc admin) mới được duyệt.
   const canApproveTravelExpense = React.useMemo(() => {
-    if (!currentUser?.id) return false;
-    if (isRoleAdmin(currentUser.id)) return true;
-    // Bất kỳ ai trong danh sách người duyệt CTP đã cấu hình đều được duyệt (không chỉ 1 người).
-    return getConfiguredApprovers('travel_expense').some(a => a.id === currentUser.id);
+    // Quy tắc DÙNG CHUNG ở 3 nơi (xem canApproveTravelExpense trong SettingsContext)
+    return canApproveTravelExpenseCfg(currentUser?.id);
   }, [currentUser]);
   const myPendingTravelExpenses = React.useMemo(() => travelExpenses.filter((t: any) =>
     t.status === 'pending' && canApproveTravelExpense

@@ -39,7 +39,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from './context';
 import { Toast } from './context/NotificationContext';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
 
@@ -3331,10 +3331,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     // Đơn nghỉ phép chờ duyệt mà user hiện tại là NGƯỜI ĐƯỢC CHỈ ĐỊNH xét duyệt
     // (đồng bộ với TaskManagement myPendingLeaves: lọc theo ID lẫn tên, kể cả chuỗi duyệt approvals)
     const myPendingLeaves = leaves.filter(l =>
-      l.status === 'pending' &&
-      (l.approverId === currentUser.id ||
-       l.approverName === currentUser.name ||
-       l.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+      l.status === 'pending' && isLeaveApproverFor(currentUser.id, currentUser.name, l as any) // gồm cả những người khác trong danh sách duyệt cấu hình
     );
     // Đề xuất tài chính chờ duyệt (đồng bộ TaskManagement myPendingPayments/myPendingAdvances):
     // chỉ định làm người duyệt, hoặc thuộc nhóm Kế toán / Giám đốc → xem toàn bộ.
@@ -3357,8 +3354,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     );
     // Công tác phí chờ duyệt (đồng bộ TaskManagement myPendingTravelExpenses):
     // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.
-    const canApproveTravelExpense = isRoleAccounting(currentUser.id) ||
-      (getConfiguredApprover('travel_expense')?.id === currentUser.id);
+    const canApproveTravelExpense = canApproveTravelExpenseCfg(currentUser.id); // quy tắc dùng chung (SettingsContext)
     const myPendingTravelExpenses = ctpSummary.filter((t: any) => t.status === 'pending' && canApproveTravelExpense);
     const toReviewUncompletedCount = toReviewTasksCount
       + myPendingLeaves.length

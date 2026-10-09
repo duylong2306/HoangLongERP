@@ -61,15 +61,15 @@ export const TASK_ACTION_HELP: Record<string, string> = {
 
 /** Quyền Phê Duyệt — khóa = loại hồ sơ */
 export const APPROVAL_DOC_HELP: Record<string, string> = {
-  quotation: 'Bật rồi chọn người duyệt Báo Giá của dự án. Bất kỳ ai trong danh sách đều duyệt được.',
-  contract: 'Bật rồi chọn người duyệt Hợp Đồng của dự án. Bất kỳ ai trong danh sách đều duyệt được.',
-  acceptance: 'Bật rồi chọn người duyệt Biên bản Nghiệm Thu. Bất kỳ ai trong danh sách đều duyệt được.',
-  liquidation: 'Bật rồi chọn người duyệt hồ sơ Thanh Lý. Bất kỳ ai trong danh sách đều duyệt được.',
+  quotation: 'Chọn người duyệt Báo Giá. Đã chọn thì chỉ những người này (và Giám đốc) bấm được nút "Duyệt Báo Giá"; chưa chọn ai thì không hạn chế.',
+  contract: 'Chọn người duyệt Hợp Đồng. Đã chọn thì chỉ những người này (và Giám đốc) bấm được "Duyệt Hợp Đồng" (Kho hồ sơ, hợp đồng thầu phụ, công cụ liên thông); chưa chọn ai thì không hạn chế.',
+  acceptance: 'Chọn người duyệt Biên bản Nghiệm Thu. Đã chọn thì chỉ những người này (và Giám đốc) ký/lưu được hồ sơ nghiệm thu từ công cụ liên thông; chưa chọn ai thì không hạn chế.',
+  liquidation: 'Chọn người duyệt hồ sơ Thanh Lý. Đã chọn thì chỉ những người này (và Giám đốc) ký/lưu được hồ sơ thanh lý từ công cụ liên thông; chưa chọn ai thì không hạn chế.',
   material_coordinator: 'Người nhận và điều phối các đề xuất vật tư (bước điều phối trước khi xét duyệt).',
   material_approver: 'Người xét duyệt các đề xuất cung ứng vật tư sau khi điều phối.',
-  leave: 'Người xét duyệt Đơn Xin Nghỉ Phép — tên hiện cố định ở ô "Người xét duyệt" khi lập đơn và không cho sửa.',
-  salary_advance: 'Người duyệt Đề xuất Tạm Ứng Lương Nhanh — tên hiện cố định ở ô "Người duyệt" của đề xuất.',
-  travel_expense: 'Người xét duyệt Công Tác Phí của nhân sự.',
+  leave: 'Người xét duyệt Đơn Xin Nghỉ Phép — hiện cố định ở ô "Người xét duyệt" khi lập đơn. Chọn nhiều người thì mọi người trong danh sách đều thấy và duyệt được đơn.',
+  salary_advance: 'Người duyệt Tạm Ứng Lương Nhanh — hiện cố định ở ô "Người duyệt" của đề xuất. Chọn nhiều người thì mọi người trong danh sách đều duyệt được.',
+  travel_expense: 'Người xét duyệt Công Tác Phí của nhân sự. Chưa chọn ai thì nhóm Kế toán duyệt thay; Giám đốc luôn duyệt được.',
   payroll: 'Người phát lương và kế toán xử lý Phiếu Lương.',
   finance_expense_proposal: 'Người xét duyệt và người quyết toán của Đề Xuất Chi Phí ở "Trung tâm Lập chi & Đề xuất" (Tài Chính - Kế Toán).',
   finance_advance_proposal: 'Người xét duyệt và người quyết toán của Đề Xuất Tạm Ứng Thầu Phụ ở "Trung tâm Lập chi & Đề xuất" (Tài Chính - Kế Toán).',

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { dbService } from '../lib/dbService';
 import { Employee, ArchivedQuote, Supplier } from '../types';
 import { FileText, Search, Printer, Trash2, Eye, Calendar, User, Briefcase, ChevronRight, ShieldCheck, Info, CheckCircle2, FileCheck, Save, XCircle, FileDown } from 'lucide-react';
-import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleAccounting } from '../context';
+import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleAccounting, canApproveProjectDoc } from '../context';
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 import { docSoTiengViet } from './QuotationTableSheet';
@@ -705,6 +705,8 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                   <button
                     onClick={async () => {
                       if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt hợp đồng này.', type: 'warning' }); return; }
+                      // Người duyệt Hợp Đồng theo Quyền Phê Duyệt (chưa cấu hình ai → không hạn chế; Giám đốc luôn được)
+                      if (!canApproveProjectDoc(currentUser?.id, 'contract')) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Hợp Đồng (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' }); return; }
                       const updated = {
                         ...tempQuote,
                         isApproved: true,

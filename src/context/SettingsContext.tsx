@@ -683,6 +683,61 @@ export function isConfiguredApproverForPayment(empId: string | undefined, paymen
   return getConfiguredApprovers(docType).some(a => a.id === empId);
 }
 
+// ─── Kiểm tra quyền duyệt theo cấu hình Quyền Phê Duyệt (dùng chung, rà soát vòng 5 — 09/10/2026) ─────────────────
+
+/**
+ * Hồ sơ dự án (Báo Giá / Hợp Đồng / Nghiệm Thu / Thanh Lý): ai bấm được nút "Phê duyệt".
+ * - Giám đốc (nhóm quản trị) luôn được.
+ * - Loại này CHƯA bật hoặc CHƯA chọn ai → không hạn chế (giữ nguyên hành vi cũ, tránh khóa cả doanh nghiệp vì chưa cấu hình).
+ * - Đã chọn người duyệt → chỉ những người đó (+ Giám đốc).
+ */
+export function canApproveProjectDoc(empId: string | undefined, docType: ApprovalPermission['documentType']): boolean {
+  if (!empId) return false;
+  if (isRoleAdmin(empId)) return true;
+  const list = getConfiguredApprovers(docType);
+  if (list.length === 0) return true;
+  return list.some(a => a.id === empId);
+}
+
+/** Đơn nghỉ phép / báo cáo chấm công → loại 'leave'; "Tạm ứng lương nhanh" lưu chung bảng đơn → loại 'salary_advance'. */
+export function leaveApprovalDocType(leave: { type?: string }): ApprovalPermission['documentType'] {
+  return leave.type === 'Tạm ứng lương nhanh' ? 'salary_advance' : 'leave';
+}
+
+/**
+ * Người này là người xét duyệt của đơn (nghỉ phép / tạm ứng lương nhanh) không?
+ * Đơn chỉ lưu MỘT người duyệt (người đầu tiên lúc lập đơn), nên ngoài việc khớp trực tiếp ID/tên trên đơn, còn tính cả những người KHÁC trong
+ * danh sách duyệt được cấu hình — với điều kiện đơn được giao cho một người trong danh sách (hoặc chưa giao ai). Đơn được giao riêng cho người
+ * ngoài danh sách (VD chọn tay ở màn Tổng quan) thì chỉ người đó duyệt.
+ */
+export function isLeaveApproverFor(
+  empId: string | undefined,
+  empName: string | undefined,
+  leave: { type?: string; approverId?: string; approverName?: string; approvals?: { approverId?: string }[] }
+): boolean {
+  if (!empId) return false;
+  if (leave.approverId === empId || (empName && leave.approverName === empName)) return true;
+  if (leave.approvals?.some(ap => ap.approverId === empId || (empName && ap.approverId === empName))) return true;
+  const list = getConfiguredApprovers(leaveApprovalDocType(leave));
+  if (!list.some(a => a.id === empId)) return false;
+  const chuaGiao = !leave.approverId && !leave.approverName;
+  const giaoChoNguoiTrongDs = list.some(a => (leave.approverId && a.id === leave.approverId) || (leave.approverName && a.name.toLowerCase() === leave.approverName.toLowerCase()));
+  return chuaGiao || giaoChoNguoiTrongDs;
+}
+
+/**
+ * Công Tác Phí: ai duyệt được — MỘT quy tắc dùng chung cho Hệ thống Nhân sự, Quản lý công việc và màn "Việc của tôi"
+ * (trước đây 3 nơi 3 quy tắc). Giám đốc luôn được; đã cấu hình người duyệt → đúng những người đó;
+ * chưa cấu hình ai → dự phòng cho nhóm Kế toán để hồ sơ không bị kẹt.
+ */
+export function canApproveTravelExpense(empId: string | undefined): boolean {
+  if (!empId) return false;
+  if (isRoleAdmin(empId)) return true;
+  const list = getConfiguredApprovers('travel_expense');
+  if (list.length > 0) return list.some(a => a.id === empId);
+  return isRoleAccounting(empId);
+}
+
 /**
  * Lấy người điều phối vật tư được chỉ định trong Quyền Phê Duyệt (loại 'material_coordinator')
  */
