@@ -4297,7 +4297,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                   </h3>
                 </div>
                 <p className="text-[11px] text-slate-400 mb-4 leading-relaxed">
-                  Thiết lập các quyền thao tác (Xem, Thêm, Sửa, Xóa) chi tiết cho từng vai trò và phòng ban được đồng bộ trực tiếp từ phân hệ Quản trị Nhân sự (HRM). Thay đổi quyền hạn tại đây sẽ áp dụng ngay lập tức cho toàn bộ người dùng trong hệ thống.
+                  Quản lý nhóm vai trò và quyền: quyền theo phân hệ (Xem, Thêm, Sửa, Xóa), quyền trong dự án, quyền thao tác trong công việc/nhiệm vụ và quyền phê duyệt. Thay đổi chỉ có hiệu lực sau khi bấm Lưu thay đổi; người đang đăng nhập nhận quyền mới trong khoảng 1 phút. Mọi lần lưu đều được ghi vào tab Nhật ký.
                 </p>
                 <HumanResourcesManagement
                   currentUser={currentUser}

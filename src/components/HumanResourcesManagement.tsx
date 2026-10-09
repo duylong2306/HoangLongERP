@@ -4131,7 +4131,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   {activeSubTab === 'payroll' && 'Thu nhập sạch sau khi bù trừ thuế TNCN, đóng bảo hiểm và ứng chi công tác phí.'}
                   {activeSubTab === 'performance' && 'Ghi nhận lỗi vi phạm tác phong, kỹ luật và tự động đánh giá xếp loại theo tổng lỗi mắc phải.'}
                   {activeSubTab === 'trips' && 'Tổng hợp công tác phí.'}
-                  {activeSubTab === 'roles' && 'Thiết lập nhóm vai trò người dùng, tùy biến chi tiết quyền Xem, Thêm, Sửa, Xóa cho từng phân hệ ERP.'}
+                  {activeSubTab === 'roles' && 'Tạo nhóm vai trò, gán thành viên và cấp quyền theo phân hệ; cấu hình quyền trong dự án, công việc, nhiệm vụ và phê duyệt.'}
                   {activeSubTab === 'hr_data' && (
                     activeHrDataSubTab === 'insurance'
                       ? 'Kết hợp số liệu đăng ký BHXH, mức đóng mặc định 10.5% và thông tin người phụ thuộc thuế TNCN.'

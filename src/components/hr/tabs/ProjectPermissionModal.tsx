@@ -20,6 +20,8 @@ import {
 import { loadHrmRoleGroups, useNotification, hasModulePermission } from '../../../context';
 import SaveActionBar from '../../ui/SaveActionBar';
 import { ENFORCED_BY_POSITION, ENFORCED_BY_ROLE_GROUP } from '../projectActionEnforcement';
+import HelpTip from '../../ui/HelpTip';
+import { PROJECT_ACTION_HELP } from '../../../lib/permissionHelp';
 import { diffProjectGroup, recordPermissionAudit } from '../../../lib/permissionAudit';
 import { MISSION_GROUP_KEYS, collapseMissionKeys, countRoleGroupMatrixChanges, countProjectMatrixChanges, isRoleGroupCellChanged, isProjectCellChanged } from '../../../lib/permissionDraftDiff';
 
@@ -370,7 +372,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           </span>
         </div>
         <p className="text-[10px] text-slate-400 mt-1.5">
-          Quyền này ngoài quyền theo vị trí (PM, Assigner...). Nếu nhóm vai trò được cấp quyền ở đây → thành viên nhóm đó tự động có quyền trong mọi dự án.
+          Quyền cấp THÊM theo nhóm vai trò, cộng vào quyền theo vị trí (Trưởng dự án, Người giao việc...). Nhóm được tích ô nào thì mọi thành viên của nhóm có quyền đó ở MỌI dự án. Nhóm quản trị luôn có toàn quyền nên bị khóa. Các thao tác bên trong công việc/nhiệm vụ (duyệt, vi phạm, nhiệm vụ con...) được cấp theo nhóm ở đây sẽ cộng vào quyền theo vị trí ở tab Quyền Công việc.
         </p>
       </div>
 
@@ -448,7 +450,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                     {rgExpandedGroups.has(group.group) && group.actions.map(({ action, label }) => (
                       <tr key={action} className="hover:bg-slate-900/40 transition-colors">
                         <td className="p-3 pl-8 font-medium text-slate-300 text-[11px] sticky left-0 bg-slate-950 z-10 border-r border-slate-800">
-                          {label}<ChuaApDung tab="nhom" action={action} />
+                          {label}<ChuaApDung tab="nhom" action={action} /><HelpTip text={PROJECT_ACTION_HELP[action] || label} label={label} />
                         </td>
                         {hrmRoleGroups.map(rg => {
                           const isChecked = isAdminRoleGroup(rg.id) ? true : (collapseMissionKeys(rgMatrix.roleGroupActions[rg.id]).includes(action)); // nhóm quản trị luôn có mọi quyền → hiển thị tích (khóa) thay vì ô trống gây hiểu nhầm
@@ -485,7 +487,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           <div className="flex items-center gap-2">
             <Eye className="w-4 h-4 text-emerald-400" />
             <span className="text-[10px] text-emerald-300 font-bold">
-              Ma trận Quyền Dự Án — 8 vai trò dự án × các hành động. Nhấp ô để bật/tắt quyền.
+              Ma trận Quyền Dự Án theo VỊ TRÍ — 7 vai trò (Giám Đốc, Trưởng Dự Án, Người Giao Việc, Phụ Trách CV, Phụ Trách NV, Kế Toán, Thành Viên) × các hành động cấp dự án/Kanban. Nhấp ô để bật/tắt, rồi bấm Lưu thay đổi.
             </span>
           </div>
           <button
@@ -539,7 +541,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                 </tr>
                 {(activeGroup === null || activeGroup === group.group) && group.actions.map(({ action, label }) => (
                   <tr key={action} className="hover:bg-slate-900/40 transition-colors">
-                    <td className="p-3 font-medium text-slate-300 text-[11px]">{label}<ChuaApDung tab="vitri" action={action} /></td>
+                    <td className="p-3 font-medium text-slate-300 text-[11px]">{label}<ChuaApDung tab="vitri" action={action} /><HelpTip text={PROJECT_ACTION_HELP[action] || label} label={label} /></td>
                     {scopeKeys.map(roleScopeKey => (
                       <td key={roleScopeKey} className={'p-2 text-center' + (savedValue && isProjectCellChanged(matrix as any, savedValue as any, action, roleScopeKey) ? CHANGED_CELL : '')} title={savedValue && isProjectCellChanged(matrix as any, savedValue as any, action, roleScopeKey) ? 'Đã đổi — chưa lưu' : undefined}>
                         <input
@@ -645,7 +647,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             <Shield className="w-6 h-6 text-amber-500" />
             <div>
               <h3 className="font-extrabold text-white text-sm uppercase tracking-wider">CẤU HÌNH QUYỀN DỰ ÁN</h3>
-              <p className="text-[10px] text-slate-400">Ma trận quyền theo 8 vai trò dự án</p>
+              <p className="text-[10px] text-slate-400">Ma trận quyền theo 7 vai trò dự án</p>
             </div>
           </div>
           {/* Tab selector trong modal */}

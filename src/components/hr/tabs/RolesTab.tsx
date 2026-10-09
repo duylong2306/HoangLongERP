@@ -4,7 +4,8 @@ import { Role, EmployeeProfile } from '../hrTypes';
 import ProjectPermissionModal, { actionLabelOf } from './ProjectPermissionModal';
 import { employeesToCleanAfterGroupDelete } from '../../../lib/roleGroupCleanup';
 import { diffProjectPosition, diffRoleGroups, diffApproval, diffTaskMatrix, recordPermissionAudit } from '../../../lib/permissionAudit';
-import EffectivePermissionPreview from './EffectivePermissionPreview';
+import HelpTip from '../../ui/HelpTip';
+import { moduleHelp, APPROVAL_DOC_HELP } from '../../../lib/permissionHelp';
 import PermissionAuditLog from './PermissionAuditLog';
 import TaskPermissionEditor, { TASK_ACTION_LABELS } from './TaskPermissionEditor';
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
@@ -884,7 +885,7 @@ export default function RolesTab(props: RolesTabProps) {
               <div className="space-y-4 animate-fadeIn">
                 <div className="flex justify-between items-center text-[10.5px]">
                   <span className="text-slate-400 italic">
-                    * Tích chọn để cấp quyền thao tác trực tiếp trên từng phân hệ ERP. Thay đổi chỉ có hiệu lực sau khi bấm "Lưu thay đổi" ở thanh dưới.
+                    * Tích chọn để cấp quyền Xem / Thêm / Sửa / Xóa cho nhóm đang chọn trên từng phân hệ. Nhóm Quản trị luôn có toàn quyền (ô bị khóa). Chỉ có hiệu lực sau khi bấm "Lưu thay đổi" ở thanh dưới; người đang đăng nhập nhận quyền mới trong khoảng 1 phút.
                   </span>
 
                   <div className="flex gap-2">
@@ -996,7 +997,7 @@ export default function RolesTab(props: RolesTabProps) {
                           return (
                             <tr key={m.code} className="hover:bg-slate-900/40 transition-colors">
                               <td className={`p-3 ${isSub ? 'pl-10' : ''}`}>
-                                <div className={`font-bold ${isSub ? 'text-slate-300 font-medium' : 'text-white'} text-[12px]`}>{m.name}</div>
+                                <div className={`font-bold ${isSub ? 'text-slate-300 font-medium' : 'text-white'} text-[12px]`}>{m.name}<HelpTip text={moduleHelp(m.desc, !isSub)} label={m.name.replace('↳','').trim()} /></div>
                                 <div className="text-[10px] text-slate-450 mt-0.5 leading-tight">{m.desc}</div>
                               </td>
                               <td className="p-3 text-center">
@@ -1390,7 +1391,7 @@ export default function RolesTab(props: RolesTabProps) {
               <Shield className="w-4 h-4 text-emerald-500" /> Cấu hình Quyền Dự Án
             </h4>
             <p className="text-[10.5px] text-slate-400 mt-1">
-              Ma trận cấu hình quyền cho 12 vai trò trong dự án (PM, Assigner, Assignee, Thầu phụ...). Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Mỗi ô = vai trò đó có được thực hiện hành động đó không. Nhấp trực tiếp vào ô để bật/tắt.
+              Quyền ở cấp dự án và bảng Kanban, gồm 2 phần: <b>Theo vị trí trong dự án</b> (7 vai trò: Giám Đốc, Trưởng Dự Án, Người Giao Việc, Phụ Trách CV, Phụ Trách NV, Kế Toán, Thành Viên — áp dụng cho toàn doanh nghiệp) và <b>Vai trò nhóm HRM</b> (quyền cấp thêm cho từng nhóm vai trò, hiệu lực ở mọi dự án). Mỗi ô = vai trò/nhóm đó có được làm thao tác đó không. Tích ô rồi bấm Lưu thay đổi.
             </p>
           </div>
           <ProjectPermissionModal
@@ -1419,8 +1420,6 @@ export default function RolesTab(props: RolesTabProps) {
             }}
             hasDefaultContext={!!loadDefaultSnapshot('project')}
           />
-          {/* Xem quyền hiệu lực của một nhân viên (đọc cấu hình ĐÃ LƯU, không sửa gì) */}
-          <EffectivePermissionPreview employees={(employees || []) as any} />
         </div>
       )}
 
@@ -1432,7 +1431,7 @@ export default function RolesTab(props: RolesTabProps) {
               <Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Phê Duyệt
             </h4>
             <p className="text-[10.5px] text-slate-400 mt-1">
-              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người có quyền duyệt các hồ sơ Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý và người xét duyệt cho Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí. Thông tin này sẽ hiển thị tự động trong biểu mẫu tương ứng.
+              Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người duyệt/điều phối cho: hồ sơ dự án (Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, điều phối và xét duyệt vật tư), hồ sơ nhân sự (Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí, Phiếu Lương) và tài chính (Đề Xuất Chi Phí, Tạm Ứng Thầu Phụ). Người được chỉ định hiển thị tự động trong biểu mẫu tương ứng.
             </p>
           </div>
 
@@ -1455,7 +1454,7 @@ export default function RolesTab(props: RolesTabProps) {
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
                             className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
                           />
-                          <span className="font-bold text-xs text-white">{t.label}</span>
+                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />
                         </div>
                         {enabled && (
                           <div className="flex items-center gap-2">
@@ -1492,7 +1491,7 @@ export default function RolesTab(props: RolesTabProps) {
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
                             className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
                           />
-                          <span className="font-bold text-xs text-white">{t.label}</span>
+                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />
                         </div>
                         {enabled && (
                           <div className="flex flex-wrap items-center gap-3">
@@ -1545,7 +1544,7 @@ export default function RolesTab(props: RolesTabProps) {
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
                             className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
                           />
-                          <span className="font-bold text-xs text-white">{t.label}</span>
+                          <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />
                         </div>
                         {enabled && (
                           <div className="flex flex-col sm:flex-row gap-3 pl-7">

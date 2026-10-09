@@ -6,6 +6,8 @@ import React from 'react';
 import { Eye, CheckCircle2, Shield, Users, AlertTriangle, DollarSign, FileText, Info, ListTodo } from 'lucide-react';
 import { TaskPermissionMatrix, TaskAction, RoleScope } from '../hrTaskPermissions';
 import { countTaskMatrixChanges, isTaskCellChanged } from '../../../lib/permissionDraftDiff';
+import HelpTip from '../../ui/HelpTip';
+import { TASK_ACTION_HELP } from '../../../lib/permissionHelp';
 
 /** Nhãn tiếng Việt của từng thao tác */
 export const TASK_ACTION_LABELS: Record<TaskAction, string> = {
@@ -83,8 +85,9 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
       <div className="bg-slate-950 p-4 rounded-xl border border-slate-850">
         <h4 className="font-extrabold text-sm text-white flex items-center gap-2"><Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Công việc</h4>
         <p className="text-[10.5px] text-slate-400 mt-1">
-          Quyết định ai được làm thao tác nào BÊN TRONG một công việc (nhận việc, hoàn thành, duyệt kết quả, giao thợ phụ, tạm ứng, ghi vi phạm, sửa/xóa...).
-          Tích ô rồi bấm <b>Lưu thay đổi</b> ở thanh dưới mới có hiệu lực. Cấu hình này áp dụng cho TOÀN doanh nghiệp.
+          Quyết định ai được làm thao tác nào BÊN TRONG một công việc và các nhiệm vụ con của nó: nhận việc, hoàn thành, duyệt/từ chối, thêm người tham gia, ghi vi phạm,
+          đề xuất tạm ứng thầu phụ, đổi người phụ trách chính, và thao tác trên từng nhiệm vụ (tạo/nhập, sửa/xóa, phân công, thực hiện).
+          Tích ô rồi bấm <b>Lưu thay đổi</b> ở thanh dưới mới có hiệu lực (người đang đăng nhập nhận quyền mới trong khoảng 1 phút). Áp dụng cho TOÀN doanh nghiệp.
         </p>
       </div>
 
@@ -93,7 +96,8 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
         <ul className="space-y-0.5 list-disc pl-3.5">
           <li>Mỗi người chỉ được tính MỘT vai trò ở mỗi công việc, theo thứ tự ưu tiên: Giám đốc → Trưởng DA → Người giao việc → Phụ trách CV → Phụ trách NV → Kế toán. (Người vừa là Người giao việc vừa là Phụ trách CV được tính là Người giao việc.)</li>
           <li><b>Nhận việc / Hoàn thành</b> chỉ dành cho người được giao (Phụ trách CV, Phụ trách NV) — kể cả Giám đốc cũng không nhận hộ việc của người khác; các ô khác ở 2 dòng này bị khóa.</li>
-          <li>Quyền riêng cấp cho từng NHÓM ở tab <b>Quyền Dự Án → Vai trò nhóm HRM</b> được cộng thêm vào đây (trừ Nhận việc / Hoàn thành).</li>
+          <li>Quyền cấp cho từng NHÓM ở tab <b>Quyền Dự Án → Vai trò nhóm HRM</b> được cộng thêm vào đây (trừ Nhận việc / Hoàn thành).</li>
+          <li>Nhóm <b>Nhiệm vụ</b> tính theo TỪNG nhiệm vụ: người phụ trách chính của một nhiệm vụ (cột <b>Phụ Trách NV</b>) chỉ làm được trên nhiệm vụ của chính mình, không lan sang nhiệm vụ của người khác.</li>
         </ul>
       </div>
 
@@ -118,7 +122,7 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
                 {g.actions.map(action => (
                   <tr key={action} className="hover:bg-slate-900/40">
                     <td className="p-3 pl-6 font-medium text-slate-300 text-[11px]">
-                      {TASK_ACTION_LABELS[action]}
+                      {TASK_ACTION_LABELS[action]}<HelpTip text={TASK_ACTION_HELP[action] || TASK_ACTION_LABELS[action]} label={TASK_ACTION_LABELS[action]} />
                       {TASK_ACTIONS_NOT_APPLIED.has(action) && (
                         <span className="ml-1.5 text-[8.5px] font-bold uppercase tracking-wide text-slate-500 border border-slate-600 rounded px-1 py-px align-middle" title="Hiện chưa có nút nào trong chi tiết công việc dùng quyền này — tick hay bỏ tick đều chưa đổi gì.">Chưa áp dụng</span>
                       )}
