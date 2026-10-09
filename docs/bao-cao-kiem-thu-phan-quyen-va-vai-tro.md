@@ -188,3 +188,33 @@ Thử trên doanh nghiệp TEST với 5 tài khoản thật (Giám đốc, Kế 
 4. Chế độ chỉ-xem của cửa sổ công việc dùng chung `isTaskReadOnlyFor` (Kanban và Công việc): Giám đốc thuộc nhóm quản trị không còn bị khóa nếu trường role không phải "director"; vai trò được ma trận cho duyệt/từ chối/sửa/quản lý nhiệm vụ không còn bị khóa. Kế toán và phụ trách chính nhiệm vụ (không phải người được giao) vẫn chỉ-xem — cố ý, để không nhận hộ việc người khác.
 5. Nhãn "Chưa áp dụng" cho 4 ô cấp thẻ (đã gỡ khỏi bảng "có tác dụng" và xóa biến thừa ở Kanban) và 5 ô Quyền Công việc chưa nối vào nút nào.
 *Giữ nguyên có chủ đích:* Giám đốc vẫn xác nhận hoàn thành được nhiệm vụ của người khác (quyền quản lý nhiệm vụ) — khác với nhận/hoàn thành CÔNG VIỆC chỉ cho người được giao; nếu muốn thống nhất cần quyết định riêng.
+
+---
+
+# VÒNG 4 — Kiểm thử các công cụ kết nối trong công việc (Phê duyệt, Chi phí, Báo giá, Hợp đồng, Nghiệm thu, Thanh lý)
+
+Thực hiện trên doanh nghiệp TEST: bật các tính năng trên công việc thử (task_test_1/2), thao tác bằng nhiều tài khoản nhân viên.
+
+## 14. Cách các công cụ đang được kiểm soát quyền
+| Công cụ | Cờ quyền (Quyền Dự Án) | Chặn ở đâu |
+|---|---|---|
+| Phê duyệt | `openToolApproval` | khi **gửi/lưu** (ConnectedToolsModal ~dòng 693) |
+| Chi phí | `openToolCost` | khi **lưu** phiếu chi phí (~1334) |
+| Hợp đồng / Nghiệm thu / Thanh lý | `openToolContract` / `openToolAcceptance` / `openToolLiquidation` | khi **ký/lưu** hồ sơ (~2181) |
+| Vật tư | `openToolMaterial` | khi **lưu** (~2365) |
+| Báo giá | `openToolQuotation` | **không dùng ở đâu** — cờ được tính (dòng 346) nhưng không có chỗ nào đọc |
+| Các nút hồ sơ ở thanh bên (Hợp đồng…) | — | chỉ điều hướng sang Kho hồ sơ, nên quyền do phân hệ Kho hồ sơ quyết định, không phải cờ `openTool*` |
+
+## 15. Kết quả
+1. **Nút công cụ luôn hiện với mọi người** có quyền xem công việc; cờ `openTool*` chỉ chặn ở bước lưu/gửi. Người không có quyền vẫn mở được cửa sổ, nhập xong mới bị từ chối → trải nghiệm kém (nhập mất công rồi báo lỗi).
+2. **Ô "Mở công cụ Báo giá" trong Quyền Dự Án không có tác dụng** — tích hay bỏ tích đều không ảnh hưởng. Nên gắn nhãn "Chưa áp dụng" (như 4 ô cấp thẻ ở vòng 3) hoặc nối vào nút thật.
+3. Các công cụ còn lại (Phê duyệt, Chi phí, Hợp đồng, Nghiệm thu, Thanh lý, Vật tư) **có chặn ở bước lưu**, đúng theo ma trận.
+4. Nút hồ sơ chỉ là lối tắt sang Kho hồ sơ nên quyền bị quyết định bởi phân hệ đó, dễ gây hiểu lầm rằng "đã bỏ tích mà vẫn mở được".
+
+## 16. Đề xuất
+1. Ẩn hoặc làm mờ nút công cụ khi cờ `openTool*` tương ứng = không (chặn ngay khi mở, không đợi đến lúc lưu) — giữ nguyên chặn ở bước lưu làm lớp thứ hai.
+2. Xử lý ô Báo giá: nhãn "Chưa áp dụng" hoặc nối vào nút.
+3. Ghi rõ trong màn Quyền Dự Án rằng nút hồ sơ phụ thuộc quyền phân hệ Kho hồ sơ.
+
+## 17. Dọn dữ liệu thử (còn lại trong TEST)
+Cờ tính năng trên task_test_1/2 cần trả về `null`, trạng thái CV1/CV2 trả về `todo`; nhiệm vụ mission_test_1/2/3 là dữ liệu thử còn lại.
