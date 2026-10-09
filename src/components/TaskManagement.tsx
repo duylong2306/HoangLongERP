@@ -16,7 +16,7 @@ import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
-import { canDoTaskAction, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
+import { canDoTaskAction, loadTaskPermissionMatrix, isTaskReadOnlyFor } from './hr/hrTaskPermissions';
 
 interface TaskManagementProps {
   tasks: Task[];
@@ -2168,10 +2168,8 @@ export default function TaskManagement({
       {/* MODAL CHI TIẾT CÔNG VIỆC CHUYÊN SÂU HOÀN CHỈNH */}
       {selectedTaskId && (() => {
         const openedTaskObj = tasks.find(t => t.id === selectedTaskId);
-        const isReadOnlyTask = openedTaskObj 
-          ? (currentUser?.role !== 'director' && 
-             openedTaskObj.assigneeId !== currentUser?.id && 
-             openedTaskObj.assignerId !== currentUser?.id)
+        const isReadOnlyTask = openedTaskObj
+          ? isTaskReadOnlyFor(currentUser as any, openedTaskObj, projects.find(p => p.id === openedTaskObj.projectId), loadTaskPermissionMatrix())
           : false;
           
         return (

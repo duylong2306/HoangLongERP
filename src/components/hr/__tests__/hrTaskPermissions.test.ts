@@ -73,3 +73,56 @@ describe('getTaskRoleScope — nhận diện theo "Loại nhóm"', () => {
     expect(getTaskRoleScope(nv('KT'), { ...task, assignerId: 'KT' }, undefined)).toBe('assigner');
   });
 });
+
+// ─── Quyền theo TỪNG NHIỆM VỤ & chế độ chỉ-xem (vòng 3) ───
+import { canManageMission, isTaskReadOnlyFor } from '../hrTaskPermissions';
+describe('canManageMission — quyền cấp nhiệm vụ không lẫn sang nhiệm vụ của người khác', () => {
+  const nv = (id: string) => ({ id, name: id, roleGroupIds: [] }) as any;
+  const task = { id: 't', assignerId: 'GIAO', assigneeId: 'CV', missions: [] } as any;
+  const M = DEFAULT_TASK_PERMISSIONS;
+  beforeEach(() => { setRoleGroupsCache([] as any); });
+  it('phụ trách chính của CHÍNH nhiệm vụ đó → được', () => {
+    expect(canManageMission(nv('TA'), task, undefined, { mainAssigneeId: 'TA' }, M)).toBe(true);
+  });
+  it('phụ trách chính của nhiệm vụ KHÁC trong cùng công việc → KHÔNG được (đúng lỗi đã báo)', () => {
+    const t = { ...task, missions: [{ id: 'm2', mainAssigneeId: 'TA' }, { id: 'm3', mainAssigneeId: 'TB' }] };
+    expect(canManageMission(nv('TA'), t, undefined, t.missions[1], M)).toBe(false);
+    expect(canManageMission(nv('TA'), t, undefined, t.missions[0], M)).toBe(true);
+  });
+  it('người giao việc / phụ trách công việc / trưởng DA (có quyền "Quản lý nhiệm vụ con") quản lý được mọi nhiệm vụ', () => {
+    expect(canManageMission(nv('GIAO'), task, undefined, { mainAssigneeId: 'TB' }, M)).toBe(true);
+    expect(canManageMission(nv('CV'), task, undefined, { mainAssigneeId: 'TB' }, M)).toBe(true);
+    expect(canManageMission(nv('PM'), task, { pmId: 'PM' } as any, { mainAssigneeId: 'TB' }, M)).toBe(true);
+  });
+  it('người không liên quan → không', () => {
+    expect(canManageMission(nv('LA'), task, undefined, { mainAssigneeId: 'TB' }, M)).toBe(false);
+  });
+});
+
+describe('isTaskReadOnlyFor — chỉ-xem theo ma trận chứ không chỉ theo danh tính cứng', () => {
+  const kind = (k: string) => ({ [`__role_kind__${k}`]: { view: true, create: false, edit: false, delete: false } });
+  const nv = (id: string, role = 'engineer') => ({ id, name: id, role, roleGroupIds: [] }) as any;
+  const task = { id: 't', assignerId: 'GIAO', assigneeId: 'CV', missions: [{ id: 'm', mainAssigneeId: 'TA' }] } as any;
+  beforeEach(() => {
+    setRoleGroupsCache([
+      { id: 'g_gd', name: 'Giám đốc', memberIds: ['GD'], permissions: kind('admin') },
+      { id: 'g_kt', name: 'Kế toán', memberIds: ['KT'], permissions: kind('accounting') },
+    ] as any);
+  });
+  it('Giám đốc thuộc nhóm quản trị dù trường role KHÔNG phải "director" → không bị chỉ-xem (trước đây bị khóa)', () => {
+    expect(isTaskReadOnlyFor(nv('GD', 'engineer'), task, undefined)).toBe(false);
+  });
+  it('người giao việc / phụ trách / Trưởng DA → không chỉ-xem', () => {
+    expect(isTaskReadOnlyFor(nv('GIAO'), task, undefined)).toBe(false);
+    expect(isTaskReadOnlyFor(nv('CV'), task, undefined)).toBe(false);
+    expect(isTaskReadOnlyFor(nv('PM'), task, { pmId: 'PM' } as any)).toBe(false);
+  });
+  it('Kế toán và người chỉ là phụ trách chính một nhiệm vụ → vẫn chỉ-xem ở cửa sổ công việc (không nhận hộ việc người khác)', () => {
+    expect(isTaskReadOnlyFor(nv('KT'), task, undefined)).toBe(true);
+    expect(isTaskReadOnlyFor(nv('TA'), task, undefined)).toBe(true);
+  });
+  it('ma trận cho phép duyệt cho vai trò Kế toán → hết chỉ-xem (cột Kế Toán bắt đầu có tác dụng)', () => {
+    const m: any = { actions: { ...DEFAULT_TASK_PERMISSIONS.actions, approveResult: ['director', 'pm', 'assigner', 'accountant'] } };
+    expect(isTaskReadOnlyFor(nv('KT'), task, undefined, m)).toBe(false);
+  });
+});

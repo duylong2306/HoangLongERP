@@ -151,7 +151,7 @@ Thử trên doanh nghiệp TEST với 5 tài khoản thật (Giám đốc, Kế 
 | Nút / thao tác | GĐ | KT | Trưởng DA | Thợ A | Đánh giá |
 |---|---|---|---|---|---|
 | Tạo Dự án | ✅ | ✅ (theo nhóm) | ✅ (theo nhóm) | ⛔ | Đúng |
-| Thêm cột / Sửa cột / Xóa cột / Tự động hóa cột | ✅ | ⛔ | ✅ (Trưởng DA) | ⛔ | Đúng khi bấm; **nút luôn hiện cho mọi người** (chỉ chặn lúc bấm) |
+| Thêm cột / Sửa cột / Xóa cột / Tự động hóa cột | ✅ | ⛔ | ✅ (Trưởng DA) | ⛔ | Đúng khi bấm; nút hiện nhưng đã được làm mờ (xám, con trỏ cấm) khi không có quyền — kiểm tra lại mã nguồn xác nhận |
 | Kéo thẻ | ✅ | ⛔ | ✅ | ✅ (mặc định cho "Thành viên") | Đúng ma trận; nhưng nên xem lại có muốn thợ tự kéo thẻ |
 | Sửa thông tin / Xóa dự án | ✅ / ✅ | ✅ / ẩn | ✅ / ✅ | ẩn / ẩn | Đúng (nút ẩn khi không có quyền) |
 | Lập phiếu tạm ứng / quyết toán | ✅ | ✅ | ✅ | ẩn | Đúng (đã ẩn ở vòng trước) |
@@ -179,4 +179,12 @@ Thử trên doanh nghiệp TEST với 5 tài khoản thật (Giám đốc, Kế 
 3. Chặn Import theo quyền quản lý nhiệm vụ (và ẩn nút cho người chỉ-xem).
 4. Thống nhất sửa/xóa công việc về **một** ma trận; thay `isReadOnlyTask` bằng kiểm tra theo ma trận (để cột Kế toán có tác dụng) hoặc ghi rõ giới hạn.
 5. Gắn nhãn "Chưa áp dụng" cho 4 ô cấp thẻ nêu ở mục 9 và 4 ô công việc ở mục 10; làm test canh lệch đếm chỗ DÙNG thay vì chỗ khai báo.
-6. Ẩn hoặc làm mờ nút điều khiển cột khi không có quyền.
+6. (Không cần làm: nút điều khiển cột đã được làm mờ khi không có quyền — đính chính sau khi đọc lại mã nguồn.)
+
+## 13. ĐÃ SỬA (commit sau báo cáo vòng 3)
+1. Quyền cấp nhiệm vụ tính **theo từng nhiệm vụ** (`canManageMission`): phụ trách chính của CHÍNH nhiệm vụ đó hoặc người có quyền "Quản lý nhiệm vụ con" — không còn lẫn quyền cấp công việc nên Thợ A không còn sửa/xóa/hoàn thành nhiệm vụ của Thợ B.
+2. Khối "Khởi tạo nhiệm vụ" chỉ hiện với quyền "Quản lý nhiệm vụ con" (không còn do quyền "Thêm/xóa người tham gia").
+3. **Import** Excel nhiệm vụ: hàm kiểm tra quyền; nút ẩn với người không có quyền (Export vẫn xem được).
+4. Chế độ chỉ-xem của cửa sổ công việc dùng chung `isTaskReadOnlyFor` (Kanban và Công việc): Giám đốc thuộc nhóm quản trị không còn bị khóa nếu trường role không phải "director"; vai trò được ma trận cho duyệt/từ chối/sửa/quản lý nhiệm vụ không còn bị khóa. Kế toán và phụ trách chính nhiệm vụ (không phải người được giao) vẫn chỉ-xem — cố ý, để không nhận hộ việc người khác.
+5. Nhãn "Chưa áp dụng" cho 4 ô cấp thẻ (đã gỡ khỏi bảng "có tác dụng" và xóa biến thừa ở Kanban) và 5 ô Quyền Công việc chưa nối vào nút nào.
+*Giữ nguyên có chủ đích:* Giám đốc vẫn xác nhận hoàn thành được nhiệm vụ của người khác (quyền quản lý nhiệm vụ) — khác với nhận/hoàn thành CÔNG VIỆC chỉ cho người được giao; nếu muốn thống nhất cần quyết định riêng.

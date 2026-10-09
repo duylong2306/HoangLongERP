@@ -46,6 +46,12 @@ const COT: { key: RoleScope; label: string; desc: string }[] = [
   { key: 'accountant', label: 'Kế Toán', desc: 'Nhân viên thuộc nhóm có Loại nhóm "Kế toán"' },
 ];
 
+/**
+ * Thao tác hiện CHƯA nối vào nút nào trong cửa sổ chi tiết công việc (khai báo quyền nhưng không dùng) — tick hay bỏ tick đều chưa đổi gì.
+ * Xóa công việc ở Kanban dùng ma trận Quyền Dự Án; quyết toán/hồ sơ dùng Quyền Dự Án; "Gán thợ phụ" nay gộp vào "Quản lý nhiệm vụ con".
+ */
+export const TASK_ACTIONS_NOT_APPLIED: ReadonlySet<TaskAction> = new Set<TaskAction>(['issuePenalty', 'settlePayment', 'manageDocs', 'deleteTask', 'assignSubWorkers']);
+
 /** Nhận việc / Hoàn thành chỉ dành cho người được giao: ứng dụng chỉ đọc 2 vai trò này, các ô khác không có tác dụng. */
 const CHI_NGUOI_DUOC_GIAO: TaskAction[] = ['receiveTask', 'completeTask'];
 const CELL_DA_DOI = ' bg-amber-100 ring-2 ring-inset ring-amber-400 rounded';
@@ -104,7 +110,12 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
                 </tr>
                 {g.actions.map(action => (
                   <tr key={action} className="hover:bg-slate-900/40">
-                    <td className="p-3 pl-6 font-medium text-slate-300 text-[11px]">{TASK_ACTION_LABELS[action]}</td>
+                    <td className="p-3 pl-6 font-medium text-slate-300 text-[11px]">
+                      {TASK_ACTION_LABELS[action]}
+                      {TASK_ACTIONS_NOT_APPLIED.has(action) && (
+                        <span className="ml-1.5 text-[8.5px] font-bold uppercase tracking-wide text-slate-500 border border-slate-600 rounded px-1 py-px align-middle" title="Hiện chưa có nút nào trong chi tiết công việc dùng quyền này — tick hay bỏ tick đều chưa đổi gì.">Chưa áp dụng</span>
+                      )}
+                    </td>
                     {COT.map(c => {
                       const nguoiDuocGiao = c.key === 'assignee' || c.key === 'missionAssignee';
                       const khoa = c.key === 'director' ? true : (CHI_NGUOI_DUOC_GIAO.includes(action) && !nguoiDuocGiao);

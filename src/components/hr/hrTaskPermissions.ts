@@ -251,3 +251,40 @@ export const canDoTaskAction = (
 
   return false;
 };
+
+
+// ─── Quyền theo TỪNG NHIỆM VỤ & chế độ chỉ-xem của cửa sổ chi tiết công việc ───────────────────────────────────────
+// Lỗi (vòng 3 kiểm thử 2026-10-09): quyền cấp nhiệm vụ được tính bằng `canReceive || canAssignMembers || canManageSubTask || là-phụ-trách-chính`,
+// trong đó 2 điều kiện đầu là quyền cấp CÔNG VIỆC nên người phụ trách chính của MỘT nhiệm vụ sửa/xóa/hoàn thành được nhiệm vụ của NGƯỜI KHÁC
+// trong cùng công việc. Nay: quản lý nhiệm vụ = quyền "Quản lý nhiệm vụ con" (manageSubTask) HOẶC là phụ trách chính của CHÍNH nhiệm vụ đó.
+export const canManageMission = (
+  currentUser: Employee | undefined,
+  task: Task,
+  project: Project | undefined,
+  mission: { mainAssigneeId?: string } | undefined,
+  matrix: TaskPermissionMatrix = DEFAULT_TASK_PERMISSIONS
+): boolean => {
+  if (!currentUser || !mission) return false;
+  if (mission.mainAssigneeId && mission.mainAssigneeId === currentUser.id) return true;
+  return canDoTaskAction(currentUser, task, project, 'manageSubTask', matrix);
+};
+
+/**
+ * Cửa sổ chi tiết công việc ở chế độ CHỈ XEM? Trước đây khóa theo danh tính cứng (trường role = director, người phụ trách, người giao việc,
+ * Trưởng DA) nên MỌI vai trò khác — kể cả Giám đốc thuộc nhóm quản trị nhưng trường role không phải "director", hoặc người được ma trận/nhóm cấp
+ * quyền duyệt/quản lý — luôn chỉ xem. Nay: không chỉ-xem nếu thuộc danh tính cũ HOẶC được ma trận cho duyệt / từ chối / sửa công việc / quản lý nhiệm vụ.
+ * (Cố ý KHÔNG tính nhận việc/hoàn thành/thêm người: người phụ trách chính nhiệm vụ không được nhận hộ công việc của người khác.)
+ */
+export const isTaskReadOnlyFor = (
+  currentUser: Employee | undefined,
+  task: Task | undefined,
+  project: Project | undefined,
+  matrix: TaskPermissionMatrix = DEFAULT_TASK_PERMISSIONS
+): boolean => {
+  if (!task || !currentUser) return false;
+  if (currentUser.role === 'director' || isRoleAdmin(currentUser.id)) return false;
+  if (task.assigneeId === currentUser.id || task.assignerId === currentUser.id) return false;
+  if (project?.pmId === currentUser.id) return false;
+  return !(['approveResult', 'rejectResult', 'editTask', 'manageSubTask'] as TaskAction[])
+    .some(a => canDoTaskAction(currentUser, task, project, a, matrix));
+};

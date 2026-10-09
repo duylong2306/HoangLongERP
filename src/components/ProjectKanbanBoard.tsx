@@ -24,7 +24,7 @@ import {
 // ../lib/kanbanLogic          → getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, KanbanColumn, AVAILABLE_CARD_COLORS
 import TaskDetailModal from './TaskDetailModal';
 import { can as canProjectAction, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
-import { canViewTask, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
+import { canViewTask, loadTaskPermissionMatrix, isTaskReadOnlyFor } from './hr/hrTaskPermissions';
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
@@ -318,15 +318,12 @@ export default function ProjectKanbanBoard({
   const canDeleteColumn = canProjectAction('deleteColumn', currentUser, boardProject, undefined, matrix);
   const canConfigureColumnAutomation = canProjectAction('configureColumnAutomation', currentUser, boardProject, undefined, matrix);
 
-  // Thẻ Dự Án
-  const canView = canProjectAction('viewProjectFinance', currentUser, boardProject, undefined, matrix);
+  // Thẻ Dự Án — 'Sửa thẻ' / 'Xóa thẻ' / 'Gán thành viên thẻ' / 'Xem tài chính dự án' trong Quyền Dự Án hiện KHÔNG nối vào nút nào ở Kanban
+  // (trước đây có khai báo biến nhưng không dùng); xem projectActionEnforcement.ts — giao diện gắn nhãn "Chưa áp dụng".
   // Nút "Tạo Dự án" trên Kanban = quyền "Tạo dự án mới" (createProject) trong Quyền Dự Án.
   // TRƯỚC ĐÂY dùng 'createCard' ("Tạo thẻ dự án") nên ô tick "Tạo dự án mới" không điều khiển nút này
   // (VD Kế toán được tick Tạo dự án vẫn không bấm được; còn nhân viên có tick "Thành viên nhóm → Tạo thẻ" lại tạo được).
   const canCreate = canProjectAction('createProject', currentUser, boardProject, undefined, matrix);
-  const canEdit = canProjectAction('editCard', currentUser, boardProject, undefined, matrix);
-  const canDelete = canProjectAction('deleteCard', currentUser, boardProject, undefined, matrix);
-  const canAssignCardMember = canProjectAction('assignCardMember', currentUser, boardProject, undefined, matrix);
   // RÀ SOÁT 2026-09: nút "Xóa dự án" (xóa vĩnh viễn CẢ dự án — công việc, chat, công nợ,
   // báo giá, hợp đồng, phiếu thu/chi liên quan — xem dbService.projects.deleteCascade())
   // trước đây chỉ kiểm tra prop onDeleteProject có tồn tại hay không (luôn true), không hề
@@ -6416,14 +6413,9 @@ export default function ProjectKanbanBoard({
           phone: '',
           email: ''
         };
+        // Chế độ chỉ-xem theo ma trận Quyền Công việc (+ danh tính cũ) — xem isTaskReadOnlyFor (hrTaskPermissions.ts)
         const isReadOnlyTask = openedTaskObj
-          ? (activeUserObj.role !== 'director' &&
-             openedTaskObj.assigneeId !== activeUserObj.id &&
-             openedTaskObj.assignerId !== activeUserObj.id &&
-             (() => {
-               const proj = projects.find(p => p.id === openedTaskObj?.projectId);
-               return !proj || proj.pmId !== activeUserObj.id;
-             })())
+          ? isTaskReadOnlyFor(activeUserObj as any, openedTaskObj, projects.find(p => p.id === openedTaskObj.projectId), loadTaskPermissionMatrix())
           : false;
 
         return (
