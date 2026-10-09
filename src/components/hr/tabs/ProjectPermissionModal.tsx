@@ -21,7 +21,7 @@ import { loadHrmRoleGroups, useNotification, hasModulePermission } from '../../.
 import SaveActionBar from '../../ui/SaveActionBar';
 import { ENFORCED_BY_POSITION, ENFORCED_BY_ROLE_GROUP } from '../projectActionEnforcement';
 import { diffProjectGroup, recordPermissionAudit } from '../../../lib/permissionAudit';
-import { countRoleGroupMatrixChanges, countProjectMatrixChanges, isRoleGroupCellChanged, isProjectCellChanged } from '../../../lib/permissionDraftDiff';
+import { MISSION_GROUP_KEYS, collapseMissionKeys, countRoleGroupMatrixChanges, countProjectMatrixChanges, isRoleGroupCellChanged, isProjectCellChanged } from '../../../lib/permissionDraftDiff';
 
 interface ProjectPermissionModalProps {
   isOpen: boolean;
@@ -164,9 +164,8 @@ export const actionGroups: {
     group: '🧩 NHIỆM VỤ CON',
     icon: <ListTodo className="w-4 h-4" />,
     actions: [
-      { action: 'createMission', label: 'Tạo nhiệm vụ con' },
-      { action: 'editMission', label: 'Sửa nhiệm vụ con' },
-      { action: 'deleteMission', label: 'Xóa nhiệm vụ con' },
+      // 1 ô đại diện cho 3 khóa lưu createMission/editMission/deleteMission (trước đây 3 ô nhưng tick ô nào cũng cho cùng kết quả) — xem MISSION_GROUP_KEYS
+      { action: 'createMission', label: 'Quản lý nhiệm vụ con (tạo / sửa / xóa)' },
       // Tệp đính kèm = tệp BÁO CÁO của nhiệm vụ nên xếp vào nhóm Nhiệm vụ (trước đây là nhóm riêng)
       { action: 'uploadAttachment', label: 'Tải lên tệp báo cáo' },
       { action: 'deleteAttachment', label: 'Xóa tệp báo cáo' },
@@ -219,9 +218,12 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   const handleToggleRoleGroupAction = (groupId: string, action: ProjectAction) => {
     setRgMatrix(prev => {
       const current = prev.roleGroupActions[groupId] || [];
-      const next = current.includes(action)
-        ? current.filter(a => a !== action)
-        : [...current, action];
+      // Ô "Quản lý nhiệm vụ con" = 3 khóa: đang có bất kỳ khóa nào thì bỏ cả 3, chưa có thì thêm cả 3
+      const keys = action === 'createMission' ? MISSION_GROUP_KEYS : [action as string];
+      const dangCo = collapseMissionKeys(current).includes(action);
+      const next = dangCo
+        ? current.filter(a => !keys.includes(a))
+        : [...current.filter(a => !keys.includes(a)), ...keys] as ProjectAction[];
       return { ...prev, roleGroupActions: { ...prev.roleGroupActions, [groupId]: next } };
     });
   };
@@ -389,7 +391,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                         onClick={() => {
                           if (isAdminRoleGroup(rg.id)) return;
                           // Toggle all actions for this role group
-                          const allActionKeys = allActions.map(a => a.action);
+                          const allActionKeys = allActions.flatMap(a => a.action === 'createMission' ? MISSION_GROUP_KEYS as ProjectAction[] : [a.action]);
                           const currentActions = rgMatrix.roleGroupActions[rg.id] || [];
                           const allChecked = allActionKeys.every(a => currentActions.includes(a));
                           setRgMatrix(prev => ({
@@ -408,7 +410,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                         title={isAdminRoleGroup(rg.id) ? 'Admin luôn full quyền' : 'Chọn/bỏ chọn tất cả'}
                       >
                         {(() => {
-                          const allActionKeys = allActions.map(a => a.action);
+                          const allActionKeys = allActions.flatMap(a => a.action === 'createMission' ? MISSION_GROUP_KEYS as ProjectAction[] : [a.action]);
                           const currentActions = rgMatrix.roleGroupActions[rg.id] || [];
                           return allActionKeys.every(a => currentActions.includes(a)) ? 'Bỏ hết' : 'Chọn hết';
                         })()}
@@ -449,7 +451,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                           {label}<ChuaApDung tab="nhom" action={action} />
                         </td>
                         {hrmRoleGroups.map(rg => {
-                          const isChecked = isAdminRoleGroup(rg.id) ? true : (rgMatrix.roleGroupActions[rg.id]?.includes(action) || false); // nhóm quản trị luôn có mọi quyền → hiển thị tích (khóa) thay vì ô trống gây hiểu nhầm
+                          const isChecked = isAdminRoleGroup(rg.id) ? true : (collapseMissionKeys(rgMatrix.roleGroupActions[rg.id]).includes(action)); // nhóm quản trị luôn có mọi quyền → hiển thị tích (khóa) thay vì ô trống gây hiểu nhầm
                           return (
                             <td key={rg.id} className={'p-2 text-center' + (isRoleGroupCellChanged(rgMatrix, savedRgMatrix, rg.id, action) ? CHANGED_CELL : '')} title={isRoleGroupCellChanged(rgMatrix, savedRgMatrix, rg.id, action) ? 'Đã đổi — chưa lưu' : undefined}>
                               <input

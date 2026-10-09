@@ -99,3 +99,10 @@ describe('diff — Quyền Công việc', () => {
     expect(diffTaskMatrix({ actions: { a: ['pm'] } }, { actions: { a: ['pm'] } })).toBeNull();
   });
 });
+
+describe('diff — nhật ký gộp 3 khóa nhiệm vụ con thành 1 dòng', () => {
+  it('thêm cả 3 khóa → 1 dòng thay đổi', () => {
+    const d = diffProjectGroup({ roleGroupActions: { g: [] } }, { roleGroupActions: { g: ['createMission', 'editMission', 'deleteMission'] } }, () => 'Nhóm', (x) => x);
+    expect(d?.changes).toHaveLength(1);
+  });
+});

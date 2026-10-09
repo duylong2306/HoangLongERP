@@ -41,3 +41,25 @@ describe('Đếm thay đổi chưa lưu của màn hình phân quyền', () => {
     expect(countJsonChanges({ a: 1, b: { c: [1, 2] } }, { a: 2, b: { c: [1, 3] } })).toBe(3);   // a đổi + c: bớt 2 thêm 3 = 2... tổng 3
   });
 });
+
+// Ô "Quản lý nhiệm vụ con" (tab Vai trò nhóm HRM) gộp 3 khóa createMission/editMission/deleteMission
+import { collapseMissionKeys, MISSION_GROUP_KEYS } from '../permissionDraftDiff';
+describe('Ô "Quản lý nhiệm vụ con" = 3 khóa nhiệm vụ gộp thành 1', () => {
+  it('gộp: có bất kỳ khóa nào → coi như có ô; không có khóa nào → không', () => {
+    expect(collapseMissionKeys(['editMission', 'viewTask']).sort()).toEqual(['createMission', 'viewTask']);
+    expect(collapseMissionKeys(['viewTask'])).toEqual(['viewTask']);
+    expect(collapseMissionKeys(undefined)).toEqual([]);
+  });
+  it('tích 1 lần (thêm cả 3 khóa) = đúng 1 thay đổi chưa lưu, không phải 3', () => {
+    const saved = { roleGroupActions: { g: ['viewTask'] } };
+    const draft = { roleGroupActions: { g: ['viewTask', ...MISSION_GROUP_KEYS] } };
+    expect(countRoleGroupMatrixChanges(draft, saved)).toBe(1);
+    expect(isRoleGroupCellChanged(draft, saved, 'g', 'createMission')).toBe(true);
+  });
+  it('dữ liệu cũ chỉ có 1 trong 3 khóa → hiển thị như đã tích; chuyển sang đủ 3 khóa → không báo thay đổi', () => {
+    const saved = { roleGroupActions: { g: ['editMission'] } };
+    const draft = { roleGroupActions: { g: [...MISSION_GROUP_KEYS] } };
+    expect(countRoleGroupMatrixChanges(draft, saved)).toBe(0);
+    expect(isRoleGroupCellChanged(draft, saved, 'g', 'createMission')).toBe(false);
+  });
+});

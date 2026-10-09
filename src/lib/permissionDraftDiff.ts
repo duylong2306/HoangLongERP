@@ -11,20 +11,29 @@ export function countSetChanges(a: readonly string[] | undefined, b: readonly st
   return n;
 }
 
+// Ô "Quản lý nhiệm vụ con" của tab Vai trò nhóm HRM đại diện cho 3 khóa lưu: createMission / editMission / deleteMission (nhóm có bất kỳ khóa nào đều được làm cả
+// 4 thao tác nhiệm vụ). Giao diện chỉ còn 1 ô nên khi đếm/so sánh/ghi nhật ký gộp 3 khóa thành 1 để "1 lần tích = 1 thay đổi" và không báo thay đổi giả.
+export const MISSION_GROUP_KEYS = ['createMission', 'editMission', 'deleteMission'];
+export function collapseMissionKeys(list: string[] | undefined | null): string[] {
+  const l = list || [];
+  if (!l.some(a => MISSION_GROUP_KEYS.includes(a))) return l;
+  return [...l.filter(a => !MISSION_GROUP_KEYS.includes(a)), 'createMission'];
+}
+
 type RoleGroupActions = { roleGroupActions?: Record<string, string[]> } | undefined | null;
 
 /** Ma trận "Vai trò nhóm HRM": mỗi ô (nhóm × hành động) đổi tích/bỏ tích tính 1 thay đổi. */
 export function countRoleGroupMatrixChanges(draft: RoleGroupActions, saved: RoleGroupActions): number {
   const d = draft?.roleGroupActions || {}, s = saved?.roleGroupActions || {};
   let n = 0;
-  for (const gid of new Set([...Object.keys(d), ...Object.keys(s)])) n += countSetChanges(d[gid], s[gid]);
+  for (const gid of new Set([...Object.keys(d), ...Object.keys(s)])) n += countSetChanges(collapseMissionKeys(d[gid]), collapseMissionKeys(s[gid]));
   return n;
 }
 
 /** Ô (nhóm × hành động) này có khác bản đã lưu không — để tô nổi ô. */
 export function isRoleGroupCellChanged(draft: RoleGroupActions, saved: RoleGroupActions, gid: string, action: string): boolean {
-  const inDraft = !!draft?.roleGroupActions?.[gid]?.includes(action);
-  const inSaved = !!saved?.roleGroupActions?.[gid]?.includes(action);
+  const inDraft = collapseMissionKeys(draft?.roleGroupActions?.[gid]).includes(action);
+  const inSaved = collapseMissionKeys(saved?.roleGroupActions?.[gid]).includes(action);
   return inDraft !== inSaved;
 }
 

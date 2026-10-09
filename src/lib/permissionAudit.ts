@@ -4,6 +4,7 @@
 // Phần "tính đổi gì" (diff*) là hàm thuần, có test. Phần ghi/đọc DB (record/load) KHÔNG BAO GIỜ làm hỏng việc lưu phân quyền:
 // lỗi (VD chưa chạy migration 20261019) chỉ trả false/ghi log.
 import { getSupabase, getCurrentCompanyId } from './supabase';
+import { collapseMissionKeys } from './permissionDraftDiff';
 
 export type AuditArea = 'role_group' | 'project_position' | 'project_group' | 'approval' | 'task_permission';
 export const AUDIT_AREA_LABELS: Record<AuditArea, string> = {
@@ -67,7 +68,7 @@ export function diffProjectGroup(before: any, after: any, groupName: LabelFn = i
   const b = before?.roleGroupActions || {}, a = after?.roleGroupActions || {};
   const changes: AuditChange[] = []; const nhom = new Set<string>();
   for (const g of new Set([...Object.keys(b), ...Object.keys(a)])) {
-    const B = new Set<string>(b[g] || []), A = new Set<string>(a[g] || []);
+    const B = new Set<string>(collapseMissionKeys(b[g])), A = new Set<string>(collapseMissionKeys(a[g])); // 3 khóa nhiệm vụ con gộp thành 1 ô
     for (const x of A) if (!B.has(x)) { changes.push({ label: `${groupName(g)} — ${actionLabel(x)}`, from: KHONG, to: CO }); nhom.add(groupName(g)); }
     for (const x of B) if (!A.has(x)) { changes.push({ label: `${groupName(g)} — ${actionLabel(x)}`, from: CO, to: KHONG }); nhom.add(groupName(g)); }
   }
