@@ -22,8 +22,8 @@ export const ENFORCED_BY_POSITION: ReadonlySet<ProjectAction> = new Set<ProjectA
  */
 const TASK_LEVEL_FOR_GROUP: ProjectAction[] = [
   'viewTask', // canViewTask đọc 'viewTask' của nhóm để cho xem công việc
-  'approveResult', 'rejectResult', 'assignMembers', 'assignSubWorker', 'recordViolation', 'issuePenalty', 'proposeAdvance',
-  'createMission', 'editMission', 'deleteMission', // = "manageSubTask" trong Quyền Công việc
+  'approveResult', 'rejectResult', 'assignMembers', 'recordViolation', 'proposeAdvance',
+  'createMission', 'editMission', 'deleteMission', // = nhóm ô "Nhiệm vụ" trong Quyền Công việc (bất kỳ ô nào trong 3 ô này đều cấp quyền cho cả 4 thao tác nhiệm vụ). issuePenalty/assignSubWorker đã bỏ: hàm kiểm tra tính ra nhưng không có nút nào dùng
 ];
 export const ENFORCED_BY_ROLE_GROUP: ReadonlySet<ProjectAction> = new Set<ProjectAction>([...ENFORCED_BY_POSITION, ...TASK_LEVEL_FOR_GROUP]);
 

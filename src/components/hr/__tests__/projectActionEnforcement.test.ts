@@ -28,7 +28,7 @@ describe('Quyền Dự Án — bảng ô có tác dụng khớp mã nguồn', ()
   });
   it('hành động nhóm đọc trong hrTaskPermissions (canDoTaskAction) đều có trong bảng', () => {
     const src = doc('hr/hrTaskPermissions.ts');
-    for (const a of ['assignMembers', 'recordViolation', 'issuePenalty', 'proposeAdvance', 'approveResult', 'rejectResult', 'createMission', 'editMission', 'deleteMission', 'assignSubWorker']) {
+    for (const a of ['assignMembers', 'recordViolation', 'proposeAdvance', 'approveResult', 'rejectResult', 'createMission', 'editMission', 'deleteMission']) {
       expect(src.includes(a), a).toBe(true);
       expect(ENFORCED_BY_ROLE_GROUP.has(a as any), a).toBe(true);
     }

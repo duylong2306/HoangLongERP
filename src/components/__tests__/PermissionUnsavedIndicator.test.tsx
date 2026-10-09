@@ -121,12 +121,14 @@ describe('Nhãn "Chưa áp dụng" ở Quyền Dự Án', () => {
     expect(screen.queryByText('Duyệt kết quả')).toBeNull();
     expect(screen.getByTestId('ghi-chu-quyen-cong-viec').textContent).toContain('Quyền Công việc');
   });
-  it('tab Vai trò nhóm HRM: Duyệt kết quả CÓ tác dụng (đọc theo nhóm ở chi tiết công việc), Ghi nhận công tác phí thì chưa', () => {
+  it('tab Vai trò nhóm HRM: chỉ còn ô có tác dụng (Duyệt kết quả…), các ô thừa (Nhận việc, Ghi nhận công tác phí, Lập phiếu phạt…) đã gỡ nên không còn nhãn', () => {
     renderModal();
     fireEvent.click(screen.getByText(/Vai trò nhóm HRM/));
     const dong = (ten: string) => screen.getByText(ten).closest('tr')!;
-    expect(dong('Ghi nhận công tác phí').textContent).toContain('Chưa áp dụng');
+    for (const ten of ['Nhận việc', 'Hoàn thành', 'Giao việc', 'Ghi nhận công tác phí', 'Lập phiếu phạt', 'Gán thợ phụ', 'Gán phụ trách chính', 'Gán thành viên nhiệm vụ', 'Xác nhận hoàn thành']) expect(screen.queryByText(ten)).toBeNull();
+    expect(dong('Duyệt kết quả').textContent).not.toContain('Chưa áp dụng');
     expect(dong('Tạo dự án mới').textContent).not.toContain('Chưa áp dụng');
+    expect(screen.queryAllByText('Chưa áp dụng')).toHaveLength(0);
   });
 });
 

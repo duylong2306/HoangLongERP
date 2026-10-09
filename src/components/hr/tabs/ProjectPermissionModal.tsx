@@ -72,6 +72,9 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 // createCard/editCard/deleteCard/assignCardMember (một thẻ chính là một dự án, đã do quyền Tạo/Sửa/Xóa dự án quyết định, không có nút riêng).
 // SẮP NHÓM THEO CHỨC NĂNG THẬT (xem docs/de-xuat-nhom-phan-quyen-du-an-cong-viec-nhiem-vu.md): 6 nhóm đầu là thao tác cấp DỰ ÁN / KANBAN (tab "Theo vị trí" chỉ hiện các
 // hành động này); các nhóm sau là thao tác BÊN TRONG công việc / nhiệm vụ — chỉ hiện ở tab "Vai trò nhóm HRM" (ở tab "Theo vị trí" do tab Quyền Công việc quyết định).
+// ĐÃ GỠ thêm khỏi giao diện (dữ liệu đã lưu giữ nguyên): assignTask, receiveTask, completeTask (nhận/hoàn thành chỉ dành cho người được giao thật, không cấp theo nhóm),
+// assignMissionMainAssignee/assignMissionMember/completeMission/recordTravelAllowance (đã có ô Phân công/Thực hiện nhiệm vụ ở Quyền Công việc),
+// issuePenalty/assignSubWorker (không có nút nào dùng).
 // Chỉ đổi cách nhóm/tên nhóm hiển thị, KHÔNG đổi khóa hành động nên dữ liệu đã lưu không ảnh hưởng.
 export const actionGroups: {
   group: string;
@@ -144,9 +147,6 @@ export const actionGroups: {
     icon: <CheckSquare className="w-4 h-4" />,
     actions: [
       { action: 'viewTask', label: 'Xem danh sách công việc' },
-      { action: 'assignTask', label: 'Giao việc' },
-      { action: 'receiveTask', label: 'Nhận việc' },
-      { action: 'completeTask', label: 'Hoàn thành' },
       { action: 'approveResult', label: 'Duyệt kết quả' },
       { action: 'rejectResult', label: 'Từ chối duyệt' },
     ],
@@ -157,7 +157,6 @@ export const actionGroups: {
     actions: [
       { action: 'assignMembers', label: 'Phân công người tham gia' },
       { action: 'recordViolation', label: 'Ghi nhận vi phạm' },
-      { action: 'issuePenalty', label: 'Lập phiếu phạt' },
       { action: 'proposeAdvance', label: 'Đề xuất tạm ứng' },
     ],
   },
@@ -168,11 +167,6 @@ export const actionGroups: {
       { action: 'createMission', label: 'Tạo nhiệm vụ con' },
       { action: 'editMission', label: 'Sửa nhiệm vụ con' },
       { action: 'deleteMission', label: 'Xóa nhiệm vụ con' },
-      { action: 'assignMissionMainAssignee', label: 'Gán phụ trách chính' },
-      { action: 'assignMissionMember', label: 'Gán thành viên nhiệm vụ' },
-      { action: 'assignSubWorker', label: 'Gán thợ phụ' },
-      { action: 'completeMission', label: 'Xác nhận hoàn thành' },
-      { action: 'recordTravelAllowance', label: 'Ghi nhận công tác phí' },
       // Tệp đính kèm = tệp BÁO CÁO của nhiệm vụ nên xếp vào nhóm Nhiệm vụ (trước đây là nhóm riêng)
       { action: 'uploadAttachment', label: 'Tải lên tệp báo cáo' },
       { action: 'deleteAttachment', label: 'Xóa tệp báo cáo' },
