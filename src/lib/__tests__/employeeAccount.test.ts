@@ -38,3 +38,12 @@ describe('ensureAdminAndPasswords — không tự tạo tài khoản ma', () => 
     expect(r.some(e => e.id === 'emp_admin' && e.username === 'admin')).toBe(true);
   });
 });
+
+// Bước 1 (ẩn password khỏi trình duyệt): chuẩn hóa nhân viên KHÔNG được bơm mật khẩu mặc định cho admin, vì nếu hồ sơ admin bị lưu lại sẽ ghi đè mật khẩu thật.
+describe('ensureAdminAndPasswords — không bơm mật khẩu cho admin', () => {
+  it('admin lấy từ DB (không có cột password) vẫn không có password trong bộ nhớ', () => {
+    const [admin] = ensureAdminAndPasswords([{ id: 'emp_admin', name: 'Quản trị', username: 'admin', hasSystemAccount: true } as any]);
+    expect(admin.id).toBe('emp_admin');
+    expect((admin as any).password).toBeUndefined();
+  });
+});

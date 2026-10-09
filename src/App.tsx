@@ -240,7 +240,8 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
         username: 'admin',
         roleGroupIds: ['role_superadmin', 'role_admin', 'role_accounting', 'role_office', 'role_technical', 'role_factory_mwood', 'role_factory_mmetal'],
         hasSystemAccount: true,
-        password: emp.password || ADMIN_EMPLOYEE.password
+        // KHÔNG tự điền mật khẩu mặc định nữa: từ nay trình duyệt không nhận cột password từ DB (migration 20261020), nếu điền mặc định ở đây rồi
+        // có lúc lưu lại cả hồ sơ admin thì sẽ GHI ĐÈ mật khẩu thật bằng mật khẩu mặc định.
       };
     }
     // Enrich roleGroupIds for non-admin users

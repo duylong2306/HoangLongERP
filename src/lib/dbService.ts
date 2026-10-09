@@ -282,7 +282,10 @@ function enqueueUpload<T>(task: () => Promise<T>): Promise<T> {
 // dùng select() gọn hơn mặc định '*' (vd loại cột nặng như payments.images) —
 // LƯU Ý cache key chỉ theo `tableName`, nên KHÔNG gọi hàm này với 2 selectClause
 // khác nhau cho CÙNG 1 bảng ở 2 nơi (sẽ đụng cache, trả nhầm shape dữ liệu).
-async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh = false, selectClause = '*'): Promise<T[]> {
+//
+// `rpcName` (tuỳ chọn): đọc qua hàm RPC trả về mảng JSON thay vì select — dùng cho bảng có cột KHÔNG được gửi về trình duyệt (employees.password, xem
+// migration 20261020a). RPC chưa tồn tại (chưa chạy migration) hoặc lỗi → tự quay về select như cũ, nên bản code mới chạy được với DB cũ.
+async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh = false, selectClause = '*', rpcName?: string): Promise<T[]> {
   // Trả cache nếu có (trừ khi forceFresh — dùng cho purchase_orders sau khi lưu
   // đơn giá / gán dự án, để realtime refetch KHÔNG trả dữ liệu cũ ghi đè state)
   if (!forceFresh && _queryCache.has(tableName)) {
@@ -308,6 +311,16 @@ async function querySupabase<T>(tableName: string, fallbackData: T[], forceFresh
       // AN TOÀN ở giai đoạn này vì RLS thật (Giai đoạn 3) chưa bật, và hiện chỉ
       // có 1 doanh nghiệp nên không có gì để lẫn.
       const companyId = getCurrentCompanyId();
+      if (rpcName) {
+        const r = await supabase.rpc(rpcName);
+        if (!r.error && Array.isArray(r.data)) {
+          const rowsRpc = r.data.length > 0 ? r.data.map(rowToCamel) as T[] : [];
+          console.log(`[DB] ✅ Loaded ${tableName} (rpc ${rpcName}):`, rowsRpc.length, 'rows');
+          _queryCache.set(tableName, rowsRpc);
+          return rowsRpc;
+        }
+        console.warn(`[DB] rpc ${rpcName} không dùng được (${r.error?.message || 'dữ liệu rỗng/sai dạng'}) — quay về select ${tableName}`);
+      }
       const query = supabase.from(tableName).select(selectClause);
       const { data, error } = await (companyId ? query.eq('company_id', companyId) : query);
       if (error) {
@@ -355,7 +368,9 @@ async function saveSupabase(tableName: string, item: any, onConflict?: string): 
     // Đưa request ghi vào queue giới hạn concurrency — tránh bắn N POST song
     // song làm vượt connection pool của PostgREST (nguồn gốc ERR_CONNECTION_CLOSED).
     await enqueueWrite(async () => {
-      const { data, error } = await supabase.from(tableName).upsert(snakeItem, onConflict ? { onConflict } : undefined).select();
+      // Bảng employees: chỉ đòi trả lại cột id (không '*') — sau migration 20261020b trình duyệt không còn quyền đọc cột password nên RETURNING * sẽ bị từ chối.
+      const upsertQuery = supabase.from(tableName).upsert(snakeItem, onConflict ? { onConflict } : undefined);
+      const { data, error } = await (tableName === 'employees' ? upsertQuery.select('id') : upsertQuery.select());
       if (error) {
         console.error(`[DB] ❌ Supabase save error for ${tableName}:`, error.message, error.details, error.hint);
         throw new Error(`Lưu ${tableName} thất bại: ${error.message}`);
@@ -789,7 +804,8 @@ export const dbService = {
   // 1. EMPLOYEES
   employees: {
     async list(): Promise<Employee[]> {
-      return querySupabase<Employee>('employees', INITIAL_EMPLOYEES);
+      // Qua RPC list_employees_safe: KHÔNG trả cột password (hash) về trình duyệt — xem migration 20261020a.
+      return querySupabase<Employee>('employees', INITIAL_EMPLOYEES, false, '*', 'list_employees_safe');
     },
     // Cho phép lưu bản ghi đầy đủ hoặc cập nhật một phần (upsert chỉ ghi đè các cột được truyền).
     async save(employee: Partial<Employee> & { id: string }): Promise<void> {
