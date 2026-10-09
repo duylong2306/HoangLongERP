@@ -768,8 +768,12 @@ export default function DashboardOverview({
   useEffect(() => {
     const handleSyncEmployees = (e: Event) => {
       const customEvent = e as CustomEvent;
-      if (customEvent.detail) {
-        setHrmEmployees(customEvent.detail);
+      // detail có thể là mảng (sự kiện từ HRM) hoặc { employees: [...] } (App.fireEmployeesEvent,
+      // bắn mỗi 60s). Luôn chuẩn hóa về mảng, nếu không state thành object → crash ".find is not a function".
+      const d = customEvent.detail;
+      const list = Array.isArray(d) ? d : d?.employees;
+      if (Array.isArray(list)) {
+        setHrmEmployees(list);
       }
     };
     window.addEventListener('hl_employees_changed_from_hrm', handleSyncEmployees);
