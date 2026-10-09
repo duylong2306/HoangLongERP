@@ -45,9 +45,10 @@ describe('Tab Quyền Công việc — bảng chỉnh sửa', () => {
       for (const cot of ['Giám Đốc', 'Trưởng Dự Án', 'Người Giao Việc', 'Kế Toán']) expect(o(ten, cot).disabled).toBe(true);
     }
   });
-  it('mọi thao tác trong ma trận đều có dòng (trừ ô Xóa công việc đã gỡ khỏi giao diện vì trùng Quyền Dự Án)', () => {
+  it('mọi thao tác trong ma trận đều có dòng (trừ 5 ô đã gỡ khỏi giao diện vì không điều khiển nút nào)', () => {
     render(<Harness />);
-    const dong = Object.keys(DEFAULT_TASK_PERMISSIONS.actions).filter(a => a !== 'deleteTask').length;
+    // Chỉ đếm các ô còn hiện trong bảng (đã gỡ ô không điều khiển nút nào)
+    const dong = Object.keys(DEFAULT_TASK_PERMISSIONS.actions).filter(a => !['deleteTask', 'issuePenalty', 'settlePayment', 'manageDocs', 'assignSubWorkers'].includes(a)).length;
     const sl = document.querySelectorAll('tbody tr:not(.bg-slate-950\\/60)').length;
     expect(sl).toBe(dong);
   });
@@ -68,7 +69,9 @@ describe('Nhãn "Chưa áp dụng" ở Quyền Công việc', () => {
   it('chỉ các thao tác chưa nối vào nút nào có nhãn', () => {
     render(<Harness />);
     const dong = (ten: string) => screen.getByText(ten).closest('tr')!.textContent || '';
-    for (const ten of ['Lập phiếu phạt', 'Quyết toán thanh toán', 'Quản lý hồ sơ liên thông', 'Gán thợ phụ cho nhiệm vụ']) expect(dong(ten)).toContain('Chưa áp dụng');
+    // Các ô không điều khiển nút nào đã gỡ khỏi bảng (dữ liệu đã lưu giữ nguyên)
+    for (const ten of ['Lập phiếu phạt', 'Quyết toán thanh toán', 'Quản lý hồ sơ liên thông', 'Gán thợ phụ cho nhiệm vụ', 'Xóa công việc']) expect(screen.queryByText(ten)).toBeNull();
+    expect(screen.queryAllByText('Chưa áp dụng')).toHaveLength(0);
     expect(screen.queryByText('Xóa công việc')).toBeNull(); // đã gỡ khỏi bảng
     for (const ten of ['Duyệt kết quả', 'Nhận việc', 'Quản lý nhiệm vụ con (tạo/sửa/xóa)', 'Ghi nhận vi phạm']) expect(dong(ten)).not.toContain('Chưa áp dụng');
   });
