@@ -75,7 +75,9 @@ describe('getTaskRoleScope — nhận diện theo "Loại nhóm"', () => {
 });
 
 // ─── Quyền theo TỪNG NHIỆM VỤ & chế độ chỉ-xem (vòng 3) ───
-import { canManageMission, isTaskReadOnlyFor } from '../hrTaskPermissions';
+import { canManageMission, isTaskReadOnlyFor, canDoMissionAction, syncTaskPermissionsFromCloud, loadTaskPermissionMatrix } from '../hrTaskPermissions';
+import { dbService } from '../../../lib/dbService';
+import { vi } from 'vitest';
 describe('canManageMission — quyền cấp nhiệm vụ không lẫn sang nhiệm vụ của người khác', () => {
   const nv = (id: string) => ({ id, name: id, roleGroupIds: [] }) as any;
   const task = { id: 't', assignerId: 'GIAO', assigneeId: 'CV', missions: [] } as any;
@@ -124,5 +126,56 @@ describe('isTaskReadOnlyFor — chỉ-xem theo ma trận chứ không chỉ theo
   it('ma trận cho phép duyệt cho vai trò Kế toán → hết chỉ-xem (cột Kế Toán bắt đầu có tác dụng)', () => {
     const m: any = { actions: { ...DEFAULT_TASK_PERMISSIONS.actions, approveResult: ['director', 'pm', 'assigner', 'accountant'] } };
     expect(isTaskReadOnlyFor(nv('KT'), task, undefined, m)).toBe(false);
+  });
+});
+
+
+// ─── Tách "Quản lý nhiệm vụ con" thành 3 nhóm nhiệm vụ (sửa/xóa, phân công, thực hiện) ───
+describe('canDoMissionAction — 3 nhóm thao tác nhiệm vụ, theo TỪNG nhiệm vụ', () => {
+  const nv = (id: string) => ({ id, name: id, roleGroupIds: [] }) as any;
+  const task = { id: 't', assignerId: 'GIAO', assigneeId: 'CV', missions: [{ id: 'm1', mainAssigneeId: 'TA' }, { id: 'm2', mainAssigneeId: 'TB' }] } as any;
+  const M = DEFAULT_TASK_PERMISSIONS;
+  beforeEach(() => { setRoleGroupsCache([] as any); });
+  it('mặc định giữ đúng hành vi cũ: phụ trách chính làm được cả 3 nhóm trên nhiệm vụ của mình', () => {
+    for (const a of ['editMissionInfo', 'assignMission', 'executeMission'] as const)
+      expect(canDoMissionAction(nv('TA'), task, undefined, task.missions[0], a, M)).toBe(true);
+  });
+  it('phụ trách chính nhiệm vụ này KHÔNG làm được trên nhiệm vụ của người khác', () => {
+    for (const a of ['editMissionInfo', 'assignMission', 'executeMission'] as const)
+      expect(canDoMissionAction(nv('TA'), task, undefined, task.missions[1], a, M)).toBe(false);
+  });
+  it('Người giao việc / Phụ trách CV làm được trên mọi nhiệm vụ; người không liên quan thì không', () => {
+    expect(canDoMissionAction(nv('GIAO'), task, undefined, task.missions[1], 'assignMission', M)).toBe(true);
+    expect(canDoMissionAction(nv('CV'), task, undefined, task.missions[1], 'executeMission', M)).toBe(true);
+    expect(canDoMissionAction(nv('LA'), task, undefined, task.missions[1], 'editMissionInfo', M)).toBe(false);
+  });
+  it('bỏ tích cột "Phụ Trách NV" ở 1 ô → phụ trách chính mất đúng quyền đó, vẫn giữ các ô khác', () => {
+    const m2 = JSON.parse(JSON.stringify(M));
+    m2.actions.editMissionInfo = m2.actions.editMissionInfo.filter((r: string) => r !== 'missionAssignee');
+    expect(canDoMissionAction(nv('TA'), task, undefined, task.missions[0], 'editMissionInfo', m2)).toBe(false);
+    expect(canDoMissionAction(nv('TA'), task, undefined, task.missions[0], 'executeMission', m2)).toBe(true);
+  });
+});
+
+describe('syncTaskPermissionsFromCloud — dữ liệu đã lưu chưa có 3 ô mới thì kế thừa manageSubTask (không đổi quyền ai)', () => {
+  it('manageSubTask đã tùy chỉnh (bỏ Phụ trách CV) → 3 ô mới cũng bỏ, và có thêm phụ trách chính của chính nhiệm vụ', async () => {
+    const goc = JSON.parse(JSON.stringify(DEFAULT_TASK_PERMISSIONS.actions));
+    delete goc.editMissionInfo; delete goc.assignMission; delete goc.executeMission;
+    goc.manageSubTask = ['director', 'pm'];
+    const spy = vi.spyOn(dbService.hrmTaskPermissions, 'get').mockResolvedValue({ actions: goc } as any);
+    await syncTaskPermissionsFromCloud();
+    const a = loadTaskPermissionMatrix().actions;
+    for (const k of ['editMissionInfo', 'assignMission', 'executeMission'] as const) {
+      expect(a[k].sort()).toEqual(['director', 'missionAssignee', 'pm']);
+    }
+    spy.mockRestore();
+  });
+  it('dữ liệu đã có sẵn 3 ô mới thì giữ nguyên, không ghi đè', async () => {
+    const goc = JSON.parse(JSON.stringify(DEFAULT_TASK_PERMISSIONS.actions));
+    goc.executeMission = ['director'];
+    const spy = vi.spyOn(dbService.hrmTaskPermissions, 'get').mockResolvedValue({ actions: goc } as any);
+    await syncTaskPermissionsFromCloud();
+    expect(loadTaskPermissionMatrix().actions.executeMission).toEqual(['director']);
+    spy.mockRestore();
   });
 });

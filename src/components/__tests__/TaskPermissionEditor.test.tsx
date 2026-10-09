@@ -73,6 +73,6 @@ describe('Nhãn "Chưa áp dụng" ở Quyền Công việc', () => {
     for (const ten of ['Lập phiếu phạt', 'Quyết toán thanh toán', 'Quản lý hồ sơ liên thông', 'Gán thợ phụ cho nhiệm vụ', 'Xóa công việc']) expect(screen.queryByText(ten)).toBeNull();
     expect(screen.queryAllByText('Chưa áp dụng')).toHaveLength(0);
     expect(screen.queryByText('Xóa công việc')).toBeNull(); // đã gỡ khỏi bảng
-    for (const ten of ['Duyệt kết quả', 'Nhận việc', 'Quản lý nhiệm vụ con (tạo/sửa/xóa)', 'Ghi nhận vi phạm']) expect(dong(ten)).not.toContain('Chưa áp dụng');
+    for (const ten of ['Duyệt kết quả', 'Nhận việc', 'Tạo / nhập Excel nhiệm vụ', 'Ghi nhận vi phạm']) expect(dong(ten)).not.toContain('Chưa áp dụng');
   });
 });

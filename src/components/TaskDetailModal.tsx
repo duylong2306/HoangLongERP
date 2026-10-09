@@ -10,7 +10,7 @@ import {
 import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import SearchableSelect from './SearchableSelect';
-import { canDoTaskAction, loadTaskPermissionMatrix, getTaskRoleScope, canManageMission } from './hr/hrTaskPermissions';
+import { canDoTaskAction, loadTaskPermissionMatrix, getTaskRoleScope, canManageMission, canDoMissionAction } from './hr/hrTaskPermissions';
 import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
 import * as XLSX from 'xlsx';
 
@@ -2407,7 +2407,10 @@ export default function TaskDetailModal({
                         : formatDateTime(new Date(parseInt(mission.id.replace('mission_', '')) || Date.now()).toISOString());
                       const isMissionAssigneeInline = mission.memberIds?.includes(currentUser.id) || false;
                       const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
-                      const hasMissionPermission = canManageMission(currentUser, selectedTask, project, mission, taskMatrix); // theo TỪNG nhiệm vụ (không còn lẫn quyền cấp công việc)
+                      // Quyền theo TỪNG nhiệm vụ, tách 3 nhóm (xem tab Quyền Công việc → nhóm NHIỆM VỤ): phân công / sửa-xóa / thực hiện
+                      const canAssignMission = canDoMissionAction(currentUser, selectedTask, project, mission, 'assignMission', taskMatrix);
+                      const canEditMission = canDoMissionAction(currentUser, selectedTask, project, mission, 'editMissionInfo', taskMatrix);
+                      const canExecuteMission = canDoMissionAction(currentUser, selectedTask, project, mission, 'executeMission', taskMatrix);
 
                       return (
                         <div 
@@ -2578,7 +2581,7 @@ export default function TaskDetailModal({
                                       className="group/avatar relative shrink-0"
                                       onClick={async (e) => {
                                         e.stopPropagation();
-                                        if (!hasMissionPermission || selectedTask.status === 'completed' || isCompleted) return;
+                                        if (!canAssignMission || selectedTask.status === 'completed' || isCompleted) return;
                                         const updatedMissions = (selectedTask.missions || []).map(m => {
                                           if (m.id === mission.id) {
                                             // Bỏ Phụ trách chính đồng thời gỡ họ khỏi Nhân sự tham gia thực hiện
@@ -2602,14 +2605,14 @@ export default function TaskDetailModal({
                                     >
                                       <div
                                         className={`w-6.5 h-6.5 rounded-full bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-550 flex items-center justify-center font-black text-slate-950 text-[8px] shadow-sm border border-slate-905 select-none relative ${
-                                          hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted
+                                          canAssignMission && selectedTask.status !== 'completed' && !isCompleted
                                             ? 'hover:scale-105 transition cursor-pointer'
                                             : 'cursor-default'
                                         }`}
-                                        title={hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted ? `Bấm để gỡ ${emp.name}` : emp.name}
+                                        title={canAssignMission && selectedTask.status !== 'completed' && !isCompleted ? `Bấm để gỡ ${emp.name}` : emp.name}
                                       >
                                         {initials}
-                                        {(hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted) && (
+                                        {(canAssignMission && selectedTask.status !== 'completed' && !isCompleted) && (
                                           <div className="absolute inset-0 bg-red-650/90 rounded-full flex items-center justify-center text-white font-extrabold text-[8px] opacity-0 hover:opacity-100 transition-opacity">
                                             ✕
                                           </div>
@@ -2628,7 +2631,7 @@ export default function TaskDetailModal({
                                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                   <span className="text-[9px] text-slate-550 italic select-none">Chưa gán</span>
                                   {/* Plus button to add member inline */}
-                                  {hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted && (
+                                  {canAssignMission && selectedTask.status !== 'completed' && !isCompleted && (
                                     <div className="relative shrink-0">
                                       <button className="w-5.5 h-5.5 rounded-full bg-slate-900 border border-slate-800 hover:border-emerald-500 flex items-center justify-center text-slate-450 hover:text-emerald-400 transition cursor-pointer shadow">
                                         <Plus className="w-2.5 h-2.5" />
@@ -2699,7 +2702,7 @@ export default function TaskDetailModal({
                                       className="group/mem relative shrink-0"
                                       onClick={async (e) => {
                                         e.stopPropagation();
-                                        if (!hasMissionPermission || selectedTask.status === 'completed' || isCompleted) return;
+                                        if (!canAssignMission || selectedTask.status === 'completed' || isCompleted) return;
                                         // Phụ trách chính là trường bắt buộc và luôn là Nhân sự tham gia —
                                         // không cho gỡ khỏi danh sách nhân sự (chỉ gỡ qua ô Phụ trách chính).
                                         if (memId === mission.mainAssigneeId) {
@@ -2725,14 +2728,14 @@ export default function TaskDetailModal({
                                     >
                                       <div
                                         className={`w-6 h-6 rounded-full bg-slate-850 border border-slate-900 flex items-center justify-center font-bold text-slate-300 text-[8px] select-none relative ${
-                                          hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted
+                                          canAssignMission && selectedTask.status !== 'completed' && !isCompleted
                                             ? 'hover:scale-105 hover:border-red-500 transition cursor-pointer'
                                             : 'cursor-default'
                                         }`}
-                                        title={hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted ? `Bấm để gỡ ${emp.name}` : emp.name}
+                                        title={canAssignMission && selectedTask.status !== 'completed' && !isCompleted ? `Bấm để gỡ ${emp.name}` : emp.name}
                                       >
                                         {initials}
-                                        {(hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted) && (
+                                        {(canAssignMission && selectedTask.status !== 'completed' && !isCompleted) && (
                                           <div className="absolute inset-0 bg-red-650/95 rounded-full flex items-center justify-center text-white font-extrabold text-[8px] opacity-0 hover:opacity-100 transition-opacity">
                                             ✕
                                           </div>
@@ -2747,7 +2750,7 @@ export default function TaskDetailModal({
                               </div>
                               
                               {/* Option to add helper inline */}
-                              {hasMissionPermission && selectedTask.status !== 'completed' && !isCompleted && (
+                              {canAssignMission && selectedTask.status !== 'completed' && !isCompleted && (
                                 <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
                                   <button className="w-5.5 h-5.5 rounded-full bg-slate-900 border border-slate-800 hover:border-emerald-500 flex items-center justify-center text-slate-450 hover:text-emerald-400 transition cursor-pointer shadow">
                                     <Plus className="w-2.5 h-2.5" />
@@ -2792,7 +2795,7 @@ export default function TaskDetailModal({
 
                             {/* Status and Arrow */}
                             <div className="flex items-center gap-2">
-                              {!isCompleted && hasMissionPermission && selectedTask.status !== 'completed' && (
+                              {!isCompleted && canEditMission && selectedTask.status !== 'completed' && (
                                 <>
                                   {/* ✏️ Nút Sửa — đặt cạnh nút Xóa */}
                                   <button
@@ -4028,13 +4031,16 @@ export default function TaskDetailModal({
         const isMissionCompleted = mission.status === 'completed';
         const isMissionAssignee = mission.memberIds?.includes(currentUser.id) || false;
         const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
-        const hasMissionPermission = canManageMission(currentUser, selectedTask, project, mission, taskMatrix); // theo TỪNG nhiệm vụ (không còn lẫn quyền cấp công việc)
+        // Quyền theo TỪNG nhiệm vụ, tách 3 nhóm (xem tab Quyền Công việc → nhóm NHIỆM VỤ): phân công / sửa-xóa / thực hiện
+        const canAssignMission = canDoMissionAction(currentUser, selectedTask, project, mission, 'assignMission', taskMatrix);
+        const canEditMission = canDoMissionAction(currentUser, selectedTask, project, mission, 'editMissionInfo', taskMatrix);
+        const canExecuteMission = canDoMissionAction(currentUser, selectedTask, project, mission, 'executeMission', taskMatrix);
         // File đính kèm báo cáo nhiệm vụ: ngoài quyền cấp nhiệm vụ còn phải được ô "Tải lên tệp"/"Xóa tệp" của Quyền Dự Án cho phép.
         // Xóa tệp: người phụ trách chính của CHÍNH nhiệm vụ này luôn được xóa tệp báo cáo của mình (ma trận mặc định chỉ cho Giám đốc/Trưởng dự án/Người giao việc xóa
         // → nếu không có ngoại lệ này, thợ sẽ mất quyền xóa file báo cáo của chính mình đang có).
         const projectMatrix = loadProjectPermissions();
-        const canUploadReportFile = hasMissionPermission && canProjectAction('uploadAttachment', currentUser, project, selectedTask, projectMatrix);
-        const canDeleteReportFile = hasMissionPermission && (isMissionMainAssignee || canProjectAction('deleteAttachment', currentUser, project, selectedTask, projectMatrix));
+        const canUploadReportFile = canExecuteMission && canProjectAction('uploadAttachment', currentUser, project, selectedTask, projectMatrix);
+        const canDeleteReportFile = canExecuteMission && (isMissionMainAssignee || canProjectAction('deleteAttachment', currentUser, project, selectedTask, projectMatrix));
 
         return (
           <div 
@@ -4078,7 +4084,7 @@ export default function TaskDetailModal({
                 <div className="space-y-1.5 bg-slate-900/30 p-3 rounded-xl border border-slate-850/50">
                   <div className="flex justify-between items-center">
                     <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider">👑 Phụ trách chính nhiệm vụ <span className="text-rose-400">*</span>:</span>
-                    {!mission.mainAssigneeId && hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                    {!mission.mainAssigneeId && canAssignMission && !isMissionCompleted && selectedTask.status !== 'completed' && (
                       <div className="relative shrink-0">
                         <button className="flex items-center gap-1 text-[8.5px] font-bold text-amber-700 hover:text-amber-800 transition bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
                           <Plus className="w-2 h-2" /> Gán
@@ -4150,7 +4156,7 @@ export default function TaskDetailModal({
                   <div className="flex justify-between items-center">
                     <span className="block text-slate-450 font-bold text-[9px] uppercase tracking-wider">👷 Nhân sự tham gia thực hiện:</span>
                     {/* Add member button in popup detail */}
-                    {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && employees.filter(emp => !(mission.memberIds || []).includes(emp.id)).length > 0 && (
+                    {canAssignMission && !isMissionCompleted && selectedTask.status !== 'completed' && employees.filter(emp => !(mission.memberIds || []).includes(emp.id)).length > 0 && (
                       <div className="relative shrink-0">
                         <button className="flex items-center gap-1 text-[8.5px] font-bold text-emerald-700 hover:text-emerald-800 transition bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200">
                           <Plus className="w-2 h-2" /> Thêm thợ
@@ -4206,7 +4212,7 @@ export default function TaskDetailModal({
                             {initials}
                           </div>
                           <span className="text-[10px] text-slate-300 font-bold">{emp.name}</span>
-                          {hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed' && (
+                          {canAssignMission && !isMissionCompleted && selectedTask.status !== 'completed' && (
                             <button
                               type="button"
                               onClick={() => {
@@ -4253,7 +4259,7 @@ export default function TaskDetailModal({
                     <div className="space-y-1.5 pt-1">
                       {mission.checklistTexts.map((chk, idx) => {
                         const isChecked = mission.completedChecklistTexts?.includes(chk) || false;
-                        const canToggle = hasMissionPermission && !isMissionCompleted && selectedTask.status !== 'completed';
+                        const canToggle = canExecuteMission && !isMissionCompleted && selectedTask.status !== 'completed';
                         return (
                           <div
                             key={idx}
@@ -4313,7 +4319,7 @@ export default function TaskDetailModal({
                               </div>
 
                               {/* CTP bị khóa khi nhiệm vụ đã Hoàn thành — không xóa/đổi được (theo yêu cầu) */}
-                              {hasMissionPermission && !isMissionCompleted && (
+                              {canExecuteMission && !isMissionCompleted && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -4356,7 +4362,7 @@ export default function TaskDetailModal({
                   </div>
 
                   {/* Form Ghi nhận CTP mới — KHÓA khi nhiệm vụ đã Hoàn thành (theo yêu cầu) */}
-                  {hasMissionPermission && !isMissionCompleted && (
+                  {canExecuteMission && !isMissionCompleted && (
                     <div className="mt-3.5 pt-3.5 border-t border-slate-150 space-y-3 bg-white p-1 rounded-xl">
                       <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-slate-600">
                         <Plus className="w-3.5 h-3.5 text-emerald-500" /> Đăng ký công tác phí chuyến đi:
@@ -4541,7 +4547,7 @@ export default function TaskDetailModal({
                       </div>
                     ) : (
                       <textarea
-                        disabled={!hasMissionPermission}
+                        disabled={!canExecuteMission}
                         rows={5}
                         value={missionReportText}
                         onChange={(e) => setMissionReportText(e.target.value)}
@@ -4705,7 +4711,7 @@ export default function TaskDetailModal({
                   <button
                     type="button"
                     disabled={
-                      !hasMissionPermission ||
+                      !canExecuteMission ||
                       !missionReportText.trim() ||
                       missionReportText.trim().length < 10 ||
                       missionReportImages.length === 0 ||
@@ -4901,7 +4907,7 @@ export default function TaskDetailModal({
                       resetMissionReportState();
                     }}
                     className={`px-5 py-2.5 rounded-xl font-bold text-[10.5px] uppercase tracking-wider flex items-center gap-1.5 transition ${
-                      hasMissionPermission &&
+                      canExecuteMission &&
                       missionReportText.trim() &&
                       missionReportText.trim().length >= 10 &&
                       mission.mainAssigneeId
@@ -4915,7 +4921,7 @@ export default function TaskDetailModal({
                 )}
 
                 {/* Delete action for original assignee or assigner */}
-                {!isMissionCompleted && hasMissionPermission && (
+                {!isMissionCompleted && canEditMission && (
                   <button
                     type="button"
                     onClick={async () => {

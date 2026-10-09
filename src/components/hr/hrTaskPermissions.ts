@@ -47,7 +47,10 @@ export type TaskAction =
   | 'manageDocs'       // Quản lý hồ sơ liên thông
   | 'editTask'         // Sửa thông tin task
   | 'deleteTask'       // Xóa task
-  | 'manageSubTask';   // Quản lý công việc con
+  | 'manageSubTask'   // Tạo / nhập Excel nhiệm vụ (khối "Khởi tạo nhiệm vụ" + nút Import)
+  | 'editMissionInfo' // Sửa / xóa nhiệm vụ (tên, hạn, xóa) — theo TỪNG nhiệm vụ
+  | 'assignMission'   // Phân công nhiệm vụ: gán/gỡ phụ trách chính, thêm/gỡ thành viên — theo TỪNG nhiệm vụ
+  | 'executeMission'; // Thực hiện nhiệm vụ: checklist, báo cáo + tệp, công tác phí, xác nhận hoàn thành — theo TỪNG nhiệm vụ
 
 // ─── Ma trận quyền mặc định ──────────────────────────────────────────
 // Mỗi action = danh sách RoleScope được phép
@@ -72,8 +75,15 @@ export const DEFAULT_TASK_PERMISSIONS: TaskPermissionMatrix = {
     editTask:         ['director', 'pm', 'assigner'],
     deleteTask:       ['director', 'pm', 'assigner'],
     manageSubTask:    ['director', 'pm', 'assigner', 'assignee'],
+    // 3 ô nhiệm vụ tách từ "Quản lý nhiệm vụ con" cũ: mặc định = người được quản lý nhiệm vụ + phụ trách chính của CHÍNH nhiệm vụ đó (đúng hành vi trước đây)
+    editMissionInfo:  ['director', 'pm', 'assigner', 'assignee', 'missionAssignee'],
+    assignMission:    ['director', 'pm', 'assigner', 'assignee', 'missionAssignee'],
+    executeMission:   ['director', 'pm', 'assigner', 'assignee', 'missionAssignee'],
   },
 };
+
+/** 3 ô nhiệm vụ tách ra từ manageSubTask (xem syncTaskPermissionsFromCloud) */
+export const MISSION_SPLIT_ACTIONS: TaskAction[] = ['editMissionInfo', 'assignMission', 'executeMission'];
 
 // ─── In-memory cache (nguồn: Supabase khi mount) ─────────────────────
 let _taskPermissionCache: TaskPermissionMatrix = DEFAULT_TASK_PERMISSIONS;
@@ -90,9 +100,16 @@ export const syncTaskPermissionsFromCloud = async (): Promise<void> => {
   try {
     const cloud = await dbService.hrmTaskPermissions.get();
     if (cloud && cloud.actions) {
-      _taskPermissionCache = {
-        actions: { ...DEFAULT_TASK_PERMISSIONS.actions, ...cloud.actions },
-      };
+      const merged: Record<string, RoleScope[]> = { ...DEFAULT_TASK_PERMISSIONS.actions, ...cloud.actions };
+      // 3 ô nhiệm vụ mới (editMissionInfo/assignMission/executeMission) tách từ "Quản lý nhiệm vụ con": dữ liệu đã lưu trước đây chưa có →
+      // kế thừa danh sách đã lưu của manageSubTask (+ phụ trách chính của chính nhiệm vụ như trước), KHÔNG dùng mặc định, để không ai thêm/mất quyền.
+      for (const k of MISSION_SPLIT_ACTIONS) {
+        if (!(k in cloud.actions)) {
+          const goc: RoleScope[] = cloud.actions.manageSubTask || DEFAULT_TASK_PERMISSIONS.actions.manageSubTask;
+          merged[k] = Array.from(new Set<RoleScope>([...goc, 'missionAssignee']));
+        }
+      }
+      _taskPermissionCache = { actions: merged as Record<TaskAction, RoleScope[]> };
       window.dispatchEvent(new CustomEvent('hl-task-permissions-updated'));
     }
   } catch (e) {
@@ -238,7 +255,7 @@ export const canDoTaskAction = (
         const mappedAction = action === 'assignSubWorkers' ? 'assignSubWorker' : action;
         if (groupActions.includes(mappedAction)) return true;
         // manageSubTask → kiểm tra nhiều quyền mission
-        if (action === 'manageSubTask') {
+        if (action === 'manageSubTask' || MISSION_SPLIT_ACTIONS.includes(action)) {
           if (groupActions.includes('createMission') ||
               groupActions.includes('editMission') ||
               groupActions.includes('deleteMission')) return true;
@@ -267,6 +284,29 @@ export const canManageMission = (
   if (!currentUser || !mission) return false;
   if (mission.mainAssigneeId && mission.mainAssigneeId === currentUser.id) return true;
   return canDoTaskAction(currentUser, task, project, 'manageSubTask', matrix);
+};
+
+/**
+ * Quyền thao tác trên MỘT nhiệm vụ cụ thể, theo 3 nhóm (xem MISSION_SPLIT_ACTIONS):
+ *  - editMissionInfo (sửa/xóa), assignMission (phân công), executeMission (checklist, báo cáo + tệp, công tác phí, hoàn thành).
+ * Người phụ trách chính của CHÍNH nhiệm vụ này được làm nếu cột "Phụ Trách NV" của ma trận tích ô đó (mặc định có — đúng hành vi cũ).
+ * Người khác theo quyền cấp công việc (Giám đốc/Trưởng DA/Người giao/Phụ trách CV/Kế toán/nhóm) — nhưng KHÔNG được tính vai "Phụ trách NV" nhờ
+ * nhiệm vụ KHÁC trong cùng công việc (nếu không, phụ trách chính nhiệm vụ A sẽ sửa được nhiệm vụ B): khi đó tính quyền như thể họ không là phụ trách nhiệm vụ nào.
+ */
+export const canDoMissionAction = (
+  currentUser: Employee | undefined,
+  task: Task,
+  project: Project | undefined,
+  mission: { mainAssigneeId?: string } | undefined,
+  action: 'editMissionInfo' | 'assignMission' | 'executeMission',
+  matrix: TaskPermissionMatrix = DEFAULT_TASK_PERMISSIONS
+): boolean => {
+  if (!currentUser || !mission) return false;
+  if (mission.mainAssigneeId && mission.mainAssigneeId === currentUser.id) {
+    if ((matrix.actions[action] || []).includes('missionAssignee')) return true;
+  }
+  // Bỏ các nhiệm vụ khỏi bản sao công việc để vai "Phụ trách NV" của nhiệm vụ khác không bị tính vào quyền của nhiệm vụ này
+  return canDoTaskAction(currentUser, { ...task, missions: [] }, project, action, matrix);
 };
 
 /**

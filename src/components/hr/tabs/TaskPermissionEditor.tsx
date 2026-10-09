@@ -3,7 +3,7 @@
 // không đổi được. Màn này cho chỉnh theo cơ chế bản nháp (tích ô → phải bấm Lưu), có số thay đổi chưa lưu và nhật ký.
 // Quyết định ai làm được thao tác nào TRONG công việc: nhận việc, hoàn thành, duyệt, giao thợ phụ, tạm ứng, ghi vi phạm, sửa/xóa công việc...
 import React from 'react';
-import { Eye, CheckCircle2, Shield, Users, AlertTriangle, DollarSign, FileText, Info } from 'lucide-react';
+import { Eye, CheckCircle2, Shield, Users, AlertTriangle, DollarSign, FileText, Info, ListTodo } from 'lucide-react';
 import { TaskPermissionMatrix, TaskAction, RoleScope } from '../hrTaskPermissions';
 import { countTaskMatrixChanges, isTaskCellChanged } from '../../../lib/permissionDraftDiff';
 
@@ -23,7 +23,10 @@ export const TASK_ACTION_LABELS: Record<TaskAction, string> = {
   manageDocs: 'Quản lý hồ sơ liên thông',
   editTask: 'Đổi người phụ trách chính',
   deleteTask: 'Xóa công việc',
-  manageSubTask: 'Quản lý nhiệm vụ con (tạo/sửa/xóa)',
+  manageSubTask: 'Tạo / nhập Excel nhiệm vụ',
+  editMissionInfo: 'Sửa / xóa nhiệm vụ',
+  assignMission: 'Phân công nhiệm vụ (phụ trách chính, thành viên)',
+  executeMission: 'Thực hiện nhiệm vụ (checklist, báo cáo + tệp, công tác phí, hoàn thành)',
 };
 
 const GROUPS: { group: string; icon: React.ReactNode; actions: TaskAction[] }[] = [
@@ -36,7 +39,8 @@ const GROUPS: { group: string; icon: React.ReactNode; actions: TaskAction[] }[] 
   // Đã gỡ khỏi giao diện (dữ liệu đã lưu giữ nguyên) các ô không điều khiển nút nào: Xóa công việc, Lập phiếu phạt, Quyết toán thanh toán, Quản lý hồ sơ liên thông, Gán thợ phụ.
   // (Quyết toán/hồ sơ do Quyền Dự Án quyết định; lập phiếu phạt và thợ phụ chưa có chức năng.) Chi tiết bên dưới về riêng ô Xóa công việc:
   // Đã gỡ ô 'Xóa công việc' (deleteTask) khỏi giao diện: nút xóa công việc ở Kanban chỉ do ô 'Xóa công việc' của Quyền Dự Án quyết định, ô này trùng và không điều khiển nút nào (dữ liệu đã lưu giữ nguyên).
-  { group: 'QUẢN LÝ CÔNG VIỆC', icon: <FileText className="w-3.5 h-3.5" />, actions: ['editTask', 'manageSubTask'] },
+  { group: 'QUẢN LÝ CÔNG VIỆC', icon: <FileText className="w-3.5 h-3.5" />, actions: ['editTask'] },
+  { group: 'NHIỆM VỤ', icon: <ListTodo className="w-3.5 h-3.5" />, actions: ['manageSubTask', 'editMissionInfo', 'assignMission', 'executeMission'] },
 ];
 
 // Các vai trò chỉnh được (bỏ "Không liên quan": cấp quyền cho người chẳng liên quan gì tới công việc dễ lộ dữ liệu)
