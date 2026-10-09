@@ -11,6 +11,7 @@ import QuotationTableSheet from './QuotationTableSheet';
 import ConnectedToolsModal from './ConnectedToolsModal';
 import SearchableSelect from './SearchableSelect';
 import { canDoTaskAction, loadTaskPermissionMatrix, getTaskRoleScope, canManageMission } from './hr/hrTaskPermissions';
+import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
 import * as XLSX from 'xlsx';
 
 interface TravelAllowanceNorm {
@@ -4028,6 +4029,12 @@ export default function TaskDetailModal({
         const isMissionAssignee = mission.memberIds?.includes(currentUser.id) || false;
         const isMissionMainAssignee = mission.mainAssigneeId === currentUser.id;
         const hasMissionPermission = canManageMission(currentUser, selectedTask, project, mission, taskMatrix); // theo TỪNG nhiệm vụ (không còn lẫn quyền cấp công việc)
+        // File đính kèm báo cáo nhiệm vụ: ngoài quyền cấp nhiệm vụ còn phải được ô "Tải lên tệp"/"Xóa tệp" của Quyền Dự Án cho phép.
+        // Xóa tệp: người phụ trách chính của CHÍNH nhiệm vụ này luôn được xóa tệp báo cáo của mình (ma trận mặc định chỉ cho Giám đốc/Trưởng dự án/Người giao việc xóa
+        // → nếu không có ngoại lệ này, thợ sẽ mất quyền xóa file báo cáo của chính mình đang có).
+        const projectMatrix = loadProjectPermissions();
+        const canUploadReportFile = hasMissionPermission && canProjectAction('uploadAttachment', currentUser, project, selectedTask, projectMatrix);
+        const canDeleteReportFile = hasMissionPermission && (isMissionMainAssignee || canProjectAction('deleteAttachment', currentUser, project, selectedTask, projectMatrix));
 
         return (
           <div 
@@ -4605,7 +4612,7 @@ export default function TaskDetailModal({
                               >
                                 <Download className="w-3 h-3" />
                               </a>
-                              {hasMissionPermission && (
+                              {canDeleteReportFile && (
                                 <button
                                   type="button"
                                   onClick={() => removeMissionReportImage(i)}
@@ -4621,7 +4628,7 @@ export default function TaskDetailModal({
                       )}
 
                       {/* Nút chụp / tải file báo cáo */}
-                      {hasMissionPermission && (
+                      {canUploadReportFile && (
                         <div className="flex gap-2 pt-1">
                           <button
                             type="button"

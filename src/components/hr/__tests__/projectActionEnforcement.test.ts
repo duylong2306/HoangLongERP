@@ -7,9 +7,9 @@ import { DEFAULT_PROJECT_PERMISSIONS } from '../hrProjectPermissions';
 // Canh lệch: bảng "ô nào có tác dụng" phải khớp đúng các chỗ gọi can() trong mã nguồn.
 const goc = path.resolve(__dirname, '../..');
 const doc = (f: string) => fs.readFileSync(path.join(goc, f), 'utf8');
-// Mọi lời gọi can('x', ...) / canProjectAction('x', ...) / canOn('x', ...) (hàm kiểm tra theo đúng dự án/công việc ở Kanban) trong 3 màn dùng ma trận Quyền Dự Án
+// Mọi lời gọi can('x', ...) / canProjectAction('x', ...) / canOn('x', ...) (hàm kiểm tra theo đúng dự án/công việc ở Kanban) trong 4 màn dùng ma trận Quyền Dự Án
 const goiTrucTiep = new Set<string>();
-for (const f of ['ProjectKanbanBoard.tsx', 'ProjectManagement.tsx', 'ConnectedToolsModal.tsx']) {
+for (const f of ['ProjectKanbanBoard.tsx', 'ProjectManagement.tsx', 'ConnectedToolsModal.tsx', 'TaskDetailModal.tsx']) {
   for (const m of doc(f).matchAll(/(?:canProjectAction|canOn|\bcan)\(\s*'(\w+)'/g)) goiTrucTiep.add(m[1]);
 }
 

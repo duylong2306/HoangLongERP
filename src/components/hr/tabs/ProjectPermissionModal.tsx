@@ -66,6 +66,7 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 };
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
+// Cũng đã gỡ nhóm BÌNH LUẬN & CHAT (addComment/deleteComment/taskChat): ứng dụng không có ô nhập/xóa bình luận hay khung chat riêng cho công việc (bình luận chỉ do hệ thống tự ghi).
 // ĐÃ GỠ KHỎI GIAO DIỆN (dữ liệu cũ vẫn giữ nguyên trong cấu hình đã lưu, không xóa): arrangeColumn (kéo cột đã do quyền "Sửa cột" lo) và
 // createCard/editCard/deleteCard/assignCardMember (một thẻ chính là một dự án, đã do quyền Tạo/Sửa/Xóa dự án quyết định, không có nút riêng).
 export const actionGroups: {
@@ -169,15 +170,6 @@ export const actionGroups: {
       { action: 'openToolAcceptance', label: 'Công cụ Nghiệm thu' },
       { action: 'openToolLiquidation', label: 'Công cụ Thanh lý' },
       { action: 'manageDocs', label: 'Quản lý hồ sơ liên thông' },
-    ],
-  },
-  {
-    group: '🗣️ BÌNH LUẬN & CHAT',
-    icon: <MessageSquare className="w-4 h-4" />,
-    actions: [
-      { action: 'addComment', label: 'Thêm bình luận' },
-      { action: 'deleteComment', label: 'Xóa bình luận' },
-      { action: 'taskChat', label: 'Chat nội bộ công việc' },
     ],
   },
   {
