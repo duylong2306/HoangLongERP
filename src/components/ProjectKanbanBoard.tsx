@@ -2320,6 +2320,7 @@ export default function ProjectKanbanBoard({
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto text-[11px]">
+          {canCreate && (
           <button
             type="button"
             onClick={() => {
@@ -2339,7 +2340,9 @@ export default function ProjectKanbanBoard({
             <Plus className="w-3.5 h-3.5" />
             Tạo Dự án
           </button>
+          )}
 
+          {canConfigureColumnAutomation && (
           <button
             type="button"
             onClick={() => {
@@ -2360,7 +2363,9 @@ export default function ProjectKanbanBoard({
             <Zap className="w-3.5 h-3.5 text-yellow-300 animate-pulse" />
             Tự động hóa
           </button>
+          )}
 
+          {canCreateColumn && (
           <button
             type="button"
             onClick={() => {
@@ -2379,7 +2384,9 @@ export default function ProjectKanbanBoard({
             <Plus className="w-3.5 h-3.5" />
             Thêm Cột
           </button>
+          )}
 
+          {canEditColumn && (
           <button
             type="button"
             onClick={() => {
@@ -2406,7 +2413,9 @@ export default function ProjectKanbanBoard({
             <RotateCcw className="w-3.5 h-3.5" />
             Khôi phục Mặc định
           </button>
+          )}
 
+          {/* Các nút Tạo Dự án / Tự động hóa / Thêm Cột / Khôi phục Mặc định chỉ hiện khi có quyền tương ứng (trước đây hiện mờ, bấm mới báo "Không có quyền") */}
           {/* Zoom Controls */}
           <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 select-none text-[11px]">
             <span className="text-slate-400 font-bold text-[10px] uppercase mr-1">Thu phóng:</span>
@@ -3945,6 +3954,7 @@ export default function ProjectKanbanBoard({
                         </span>
                       </div>
 
+                      {canOn('createTask', selectedProject) && (
                       <button
                         type="button"
                         onClick={() => {
@@ -3959,6 +3969,7 @@ export default function ProjectKanbanBoard({
                         <Plus className="w-3.5 h-3.5" />
                         Tạo Việc Con
                       </button>
+                      )}
                     </div>
                     {/* Form to add subtask — hiển thị dạng hộp thoại (modal) nằm trên cùng */}
                     {showSubtaskForm && (
@@ -5036,6 +5047,7 @@ export default function ProjectKanbanBoard({
                                         className="absolute right-0 top-full mt-1.5 z-[90] bg-slate-900 border border-slate-800/95 rounded-xl p-1.5 w-40 shadow-2xl space-y-1 text-left"
                                         onClick={(e) => e.stopPropagation()}
                                       >
+                                        {canOn('editTask', selectedProject, task) && (
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -5051,6 +5063,7 @@ export default function ProjectKanbanBoard({
                                           <Edit2 className="w-3.5 h-3.5 text-sky-400" />
                                           Sửa công việc
                                         </button>
+                                        )}
 
                                         {onDeleteTask && canOn('deleteTask', selectedProject, task) && (
                                           <button

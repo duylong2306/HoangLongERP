@@ -7,7 +7,7 @@
 // Ma trận được lưu lên Firestore + Supabase (dbService.projectPermissions).
 
 import { Employee, Project, Task } from '../../types';
-import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting } from '../../context';
+import { isUserInRoleGroup, isRoleAdmin, isRoleAccounting, loadHrmRoleGroups } from '../../context';
 import { dbService } from '../../lib/dbService';
 
 // ─── Role Scope: vai trò của user đối với MỘT dự án / công việc cụ thể ───
@@ -273,7 +273,13 @@ export const getProjectRoleScopes = (
   //  • Ở cấp dự án / bảng Kanban (không có task): chưa có danh sách thành viên dự án để đối chiếu → giữ cách cũ (mọi nhân viên),
   //    vì các thao tác ở đây (tạo công việc, bình luận...) vốn dành cho toàn bộ nhân viên.
   if (scopes.length === 0) {
-    if (!task) scopes.push('teamMember');
+    // Cấp dự án/Kanban: chỉ tính "Thành viên" cho nhân viên ĐÃ thuộc ít nhất một nhóm vai trò. Nhân viên chưa vào nhóm nào (VD tài khoản mới tạo nhanh, hoặc nhóm bị xóa)
+    // không còn tự có quyền tạo công việc / kéo thẻ ở mọi dự án họ nhìn thấy (rà soát vòng 5, 09/10/2026).
+    if (!task) {
+      let thuocNhom = false;
+      try { thuocNhom = loadHrmRoleGroups().some(g => isUserInRoleGroup(currentUser.id, g.id)); } catch { thuocNhom = false; }
+      if (thuocNhom) scopes.push('teamMember');
+    }
     else if (task.missions?.some(m => m.memberIds?.includes(currentUser.id))) scopes.push('teamMember');
   }
 

@@ -3,7 +3,12 @@ import { describe, it, expect, vi } from 'vitest';
 // Hồi quy "kế thừa quyền": trước đây inheritBelow=true khiến quyền cấp cho director/pm lan xuống MỌI vai trò thấp hơn,
 // kể cả nhân viên thường (teamMember) → nhân viên thường tạo/xóa được dự án. Nay mặc định TẮT: mỗi vai trò chỉ có đúng quyền được tick.
 vi.mock('../../../lib/dbService', () => ({ dbService: { projectPermissions: { get: vi.fn(async () => null), save: vi.fn() } } }));
-vi.mock('../../../context', () => ({ isUserInRoleGroup: () => false, isRoleAdmin: () => false, isRoleAccounting: () => false }));
+// Nhân viên NV022 thuộc nhóm 'g1'; NV_chuaNhom không thuộc nhóm nào
+vi.mock('../../../context', () => ({
+  isUserInRoleGroup: (id: string, gid: string) => id === 'NV022' && gid === 'g1',
+  isRoleAdmin: () => false, isRoleAccounting: () => false,
+  loadHrmRoleGroups: () => [{ id: 'g1' }],
+}));
 import { can, DEFAULT_PROJECT_PERMISSIONS } from '../hrProjectPermissions';
 
 const nhanVien = { id: 'NV022', name: 'Nhân viên', role: 'worker', roleGroupIds: ['role_factory_mwood'] } as any;
@@ -40,8 +45,15 @@ describe('Vai trò "Thành viên" theo công việc cụ thể', () => {
     expect(can('uploadAttachment', nhanVien, duAn, task(['NV_khac']), m)).toBe(false);
     expect(can('uploadAttachment', nhanVien, duAn, { ...task([]), missions: undefined } as any, m)).toBe(false);
   });
-  it('cấp dự án/bảng (không có công việc) → giữ cách cũ: mọi nhân viên là "Thành viên"', () => {
+  it('cấp dự án/bảng (không có công việc) → nhân viên ĐÃ thuộc một nhóm vai trò là "Thành viên"', () => {
     expect(can('uploadAttachment', nhanVien, duAn, undefined, m)).toBe(true);
+  });
+  it('cấp dự án/bảng: nhân viên CHƯA thuộc nhóm nào KHÔNG còn là "Thành viên" (không tự tạo công việc/kéo thẻ)', () => {
+    const chuaNhom = { id: 'NV_chuaNhom', name: 'Chưa nhóm', role: 'engineer', roleGroupIds: [] } as any;
+    expect(can('uploadAttachment', chuaNhom, duAn, undefined, m)).toBe(false);
+    expect(can('createTask', chuaNhom, duAn, undefined, DEFAULT_PROJECT_PERMISSIONS as any)).toBe(false);
+    expect(can('moveCard', chuaNhom, duAn, undefined, DEFAULT_PROJECT_PERMISSIONS as any)).toBe(false);
+    expect(can('createTask', nhanVien, duAn, undefined, DEFAULT_PROJECT_PERMISSIONS as any)).toBe(true);
   });
 });
 
