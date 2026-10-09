@@ -219,6 +219,33 @@ export interface AttendanceToday {
   onLeaveNames: string[];
   pendingLeaves: number;
 }
+export type TodayState = 'present' | 'leave' | 'missing';
+/** Trạng thái hôm nay của TỪNG nhân sự cần chấm công: đã chấm công / nghỉ có phép / chưa chấm công (cùng quy tắc với summarizeAttendance). */
+export function employeeTodayStates(employees: Employee[], logs: any[], leaves: any[], today: string): Map<string, TodayState> {
+  const out = new Map<string, TodayState>();
+  const presentIds = new Set((logs || [])
+    .filter(l => toDay(l.date) === today && l.status !== 'missing' && l.status !== 'unexcused' && l.status !== 'leave').map(l => l.empId));
+  const leaveIds = new Set<string>();
+  for (const l of leaves || []) {
+    if (l.status !== 'approved') continue;
+    const from = toDay(l.fromDate), to = toDay(l.toDate || l.fromDate);
+    if (from && from <= today && today <= (to || from)) leaveIds.add(l.empId);
+  }
+  for (const e of employees) out.set(e.id, presentIds.has(e.id) ? 'present' : leaveIds.has(e.id) ? 'leave' : 'missing');
+  return out;
+}
+/** Số NGÀY công đã chấm của từng nhân sự trong khoảng bản ghi truyền vào (mỗi ngày tính 1, bỏ ngày vắng/không phép/nghỉ). */
+export function workedDaysByEmployee(logs: any[]): Map<string, number> {
+  const days = new Map<string, Set<string>>();
+  for (const l of logs || []) {
+    if (l.status === 'missing' || l.status === 'unexcused' || l.status === 'leave') continue;
+    const d = toDay(l.date); if (!d || !l.empId) continue;
+    if (!days.has(l.empId)) days.set(l.empId, new Set());
+    days.get(l.empId)!.add(d);
+  }
+  return new Map([...days.entries()].map(([k, v]) => [k, v.size] as const));
+}
+
 export function summarizeAttendance(employees: Employee[], logs: any[], leaves: any[], today: string): AttendanceToday {
   const staff = employees.filter(e => (!e.status || e.status === 'working'));
   const staffIds = new Set(staff.map(e => e.id));
