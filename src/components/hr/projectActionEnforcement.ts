@@ -8,11 +8,11 @@ import type { ProjectAction } from './hrProjectPermissions';
 
 /** Tab "Theo vị trí": hành động được can() kiểm tra trực tiếp ở ProjectKanbanBoard / ProjectManagement / ConnectedToolsModal. */
 export const ENFORCED_BY_POSITION: ReadonlySet<ProjectAction> = new Set<ProjectAction>([
-  'createProject', 'editProjectInfo', 'viewProjectFinance', 'updateProjectStatus', 'manageProjectDocs', 'deleteProject', 'quickAddCustomer',
+  'createProject', 'editProjectInfo', 'viewProjectFinance', 'deleteProject', 'quickAddCustomer',
   'createColumn', 'editColumn', 'deleteColumn', 'configureColumnAutomation',
   'moveCard',
   'createTask', 'editTask', 'deleteTask', 'settlePayment',
-  'openToolApproval', 'openToolCost', 'openToolMaterial', 'openToolQuotation', 'openToolContract', 'openToolAcceptance', 'openToolLiquidation', 'manageDocs',
+  'openToolApproval', 'openToolCost', 'openToolMaterial', 'openToolContract', 'openToolAcceptance', 'openToolLiquidation', 'manageDocs',
   'uploadAttachment', 'deleteAttachment', // file đính kèm báo cáo nhiệm vụ (TaskDetailModal)
 ]);
 
@@ -34,6 +34,6 @@ export const ENFORCED_BY_ROLE_GROUP: ReadonlySet<ProjectAction> = new Set<Projec
  */
 export const CHECKED_WITH_TASK: ReadonlySet<ProjectAction> = new Set<ProjectAction>([
   'editTask', 'deleteTask',
-  'openToolApproval', 'openToolCost', 'openToolMaterial', 'openToolQuotation', 'openToolContract', 'openToolAcceptance', 'openToolLiquidation', 'manageDocs',
+  'openToolApproval', 'openToolCost', 'openToolMaterial', 'openToolContract', 'openToolAcceptance', 'openToolLiquidation', 'manageDocs',
   'uploadAttachment', 'deleteAttachment',
 ]);

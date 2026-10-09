@@ -12,6 +12,9 @@ const goiTrucTiep = new Set<string>();
 for (const f of ['ProjectKanbanBoard.tsx', 'ProjectManagement.tsx', 'ConnectedToolsModal.tsx', 'TaskDetailModal.tsx']) {
   for (const m of doc(f).matchAll(/(?:canProjectAction|canOn|\bcan)\(\s*'(\w+)'/g)) goiTrucTiep.add(m[1]);
 }
+// Các ô đã gỡ khỏi giao diện vì không còn nút nào dùng: updateProjectStatus/manageProjectDocs chỉ còn ở màn Quản lý dự án cũ (không có trên menu),
+// openToolQuotation chỉ được tính ở ConnectedToolsModal mà không nơi nào đọc kết quả.
+for (const a of ['updateProjectStatus', 'manageProjectDocs', 'openToolQuotation']) goiTrucTiep.delete(a);
 
 describe('Quyền Dự Án — bảng ô có tác dụng khớp mã nguồn', () => {
   it('mọi hành động được can() gọi trực tiếp đều nằm trong ENFORCED_BY_POSITION (và ngược lại)', () => {

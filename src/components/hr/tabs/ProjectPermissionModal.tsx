@@ -74,7 +74,7 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 // createCard/editCard/deleteCard/assignCardMember (một thẻ chính là một dự án, đã do quyền Tạo/Sửa/Xóa dự án quyết định, không có nút riêng).
 // SẮP NHÓM THEO CHỨC NĂNG THẬT (xem docs/de-xuat-nhom-phan-quyen-du-an-cong-viec-nhiem-vu.md): 6 nhóm đầu là thao tác cấp DỰ ÁN / KANBAN (tab "Theo vị trí" chỉ hiện các
 // hành động này); các nhóm sau là thao tác BÊN TRONG công việc / nhiệm vụ — chỉ hiện ở tab "Vai trò nhóm HRM" (ở tab "Theo vị trí" do tab Quyền Công việc quyết định).
-// ĐÃ GỠ thêm khỏi giao diện (dữ liệu đã lưu giữ nguyên): assignTask, receiveTask, completeTask (nhận/hoàn thành chỉ dành cho người được giao thật, không cấp theo nhóm),
+// ĐÃ GỠ thêm khỏi giao diện (dữ liệu đã lưu giữ nguyên): updateProjectStatus, manageProjectDocs (chỉ màn Quản lý dự án cũ, không còn trên menu), openToolQuotation (không nút nào đọc); assignTask, receiveTask, completeTask (nhận/hoàn thành chỉ dành cho người được giao thật, không cấp theo nhóm),
 // assignMissionMainAssignee/assignMissionMember/completeMission/recordTravelAllowance (đã có ô Phân công/Thực hiện nhiệm vụ ở Quyền Công việc),
 // issuePenalty/assignSubWorker (không có nút nào dùng).
 // Chỉ đổi cách nhóm/tên nhóm hiển thị, KHÔNG đổi khóa hành động nên dữ liệu đã lưu không ảnh hưởng.
@@ -89,7 +89,6 @@ export const actionGroups: {
     actions: [
       { action: 'createProject', label: 'Tạo dự án mới' },
       { action: 'editProjectInfo', label: 'Sửa thông tin dự án (gồm đổi Trưởng dự án, đồng bộ nhóm chat)' },
-      { action: 'updateProjectStatus', label: 'Cập nhật trạng thái / % tiến độ' },
       { action: 'deleteProject', label: 'Xóa dự án' },
       { action: 'quickAddCustomer', label: 'Thêm nhanh khách hàng' },
     ],
@@ -114,13 +113,6 @@ export const actionGroups: {
     ],
   },
   {
-    group: '📁 HỒ SƠ DỰ ÁN',
-    icon: <FileText className="w-4 h-4" />,
-    actions: [
-      { action: 'manageProjectDocs', label: 'Quản lý hồ sơ (BG/HĐ/NT/TL)' },
-    ],
-  },
-  {
     group: '✅ CÔNG VIỆC TRÊN KANBAN',
     icon: <CheckSquare className="w-4 h-4" />,
     actions: [
@@ -136,7 +128,6 @@ export const actionGroups: {
       { action: 'openToolApproval', label: 'Công cụ Phê duyệt' },
       { action: 'openToolCost', label: 'Công cụ Chi phí' },
       { action: 'openToolMaterial', label: 'Công cụ Vật tư' },
-      { action: 'openToolQuotation', label: 'Công cụ Báo giá' },
       { action: 'openToolContract', label: 'Công cụ Hợp đồng' },
       { action: 'openToolAcceptance', label: 'Công cụ Nghiệm thu' },
       { action: 'openToolLiquidation', label: 'Công cụ Thanh lý' },

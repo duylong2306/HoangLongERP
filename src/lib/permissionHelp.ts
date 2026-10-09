@@ -7,7 +7,6 @@ export const PROJECT_ACTION_HELP: Record<string, string> = {
   // Dự án
   createProject: 'Bấm được nút "Tạo Dự án" trên bảng Kanban (và dấu + trong từng cột) để tạo dự án mới.',
   editProjectInfo: 'Bấm được "Chỉnh sửa thông tin" trong chi tiết dự án (địa điểm, ngày khởi công, thời hạn, giá trị hợp đồng tạm tính, màu thẻ). Cũng quyết định ai đổi được Trưởng dự án và bấm được "Đồng bộ nhân sự vào nhóm chat dự án".',
-  updateProjectStatus: 'Chỉ dùng ở màn Quản lý dự án cũ (không còn trên menu chính). Hiện KHÔNG có nút nào ở Kanban đọc ô này — tick hay bỏ tick chưa đổi gì.',
   deleteProject: 'Xóa vĩnh viễn cả dự án (kèm công việc, nhóm chat, công nợ, báo giá, hợp đồng, phiếu thu/chi liên quan). Chỉ cấp cho người thật sự cần.',
   quickAddCustomer: 'Thêm nhanh một khách hàng mới ngay trong form tạo dự án.',
   // Bảng Kanban
@@ -19,7 +18,6 @@ export const PROJECT_ACTION_HELP: Record<string, string> = {
   // Tài chính / hồ sơ dự án
   viewProjectFinance: 'Xem khối tài chính trong chi tiết dự án: giá trị hợp đồng, số đã thu, còn lại chưa thu và tổng giá trị hợp đồng thầu phụ. Không có quyền này thì các số tiền bị ẩn.',
   settlePayment: 'Thấy và bấm "Lập Phiếu Tạm Ứng" / "Lập Phiếu Quyết Toán" để lập phiếu thu cho dự án.',
-  manageProjectDocs: 'Chỉ dùng ở màn Quản lý dự án cũ (không còn trên menu chính). Hiện KHÔNG có nút nào ở Kanban đọc ô này — tick hay bỏ tick chưa đổi gì.',
   // Công việc trên Kanban
   createTask: 'Bấm "Tạo Việc Con" trong chi tiết dự án để tạo công việc mới và lưu.',
   editTask: 'Sửa công việc từ menu ⋮ trên thẻ công việc ở Kanban (tên, hạn, người giao, phụ trách, các tùy chọn tự động).',
@@ -28,7 +26,6 @@ export const PROJECT_ACTION_HELP: Record<string, string> = {
   openToolApproval: 'Dùng nút "Yêu cầu phê duyệt" của công việc (trong cửa sổ công việc và menu LT trên thẻ) để gửi yêu cầu duyệt. Không có quyền thì nút bị khóa.',
   openToolCost: 'Dùng nút "Đề xuất chi phí" của công việc để gửi đề xuất chi phí thi công. Không có quyền thì nút bị khóa.',
   openToolMaterial: 'Dùng nút "Đề xuất vật tư" của công việc để gửi đề xuất cung ứng vật tư. Không có quyền thì nút bị khóa.',
-  openToolQuotation: 'Hiện KHÔNG có nút nào đọc ô này (báo giá đi qua Kho hồ sơ) — tick hay bỏ tick chưa đổi gì.',
   openToolContract: 'Cho phép ký/lưu hồ sơ Hợp đồng từ công cụ liên thông (cần kèm ô "Quản lý hồ sơ liên thông").',
   openToolAcceptance: 'Cho phép ký/lưu Biên bản nghiệm thu từ công cụ liên thông (cần kèm ô "Quản lý hồ sơ liên thông").',
   openToolLiquidation: 'Cho phép ký/lưu hồ sơ Thanh lý từ công cụ liên thông (cần kèm ô "Quản lý hồ sơ liên thông").',
