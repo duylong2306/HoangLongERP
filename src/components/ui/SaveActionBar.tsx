@@ -84,7 +84,13 @@ export default function SaveActionBar({
   useLayoutEffect(() => {
     const sp = spacerRef.current;
     const scoped = !!sp?.closest('[data-save-bar-host]');
-    const host = (scoped ? sp?.parentElement : sp?.closest('main')) as HTMLElement | null;
+    let host = (scoped ? sp?.parentElement : sp?.closest('main')) as HTMLElement | null;
+    // Thanh đôi khi được bọc trong 1 div nhỏ chỉ chứa mỗi thanh (VD tab Quyền Dự Án): lúc đó phần tử cha quá thấp, không đại diện cho "thẻ" của tab
+    // → leo lên các phần tử cha tới khi gặp khung đủ cao (hoặc tới khung HRM) để căn đúng theo cả bảng.
+    if (scoped) {
+      const root = sp!.closest('[data-save-bar-host]') as HTMLElement;
+      while (host && host !== root && host.parentElement && host.getBoundingClientRect().height < 300) host = host.parentElement;
+    }
     if (!host) { setBox(null); return; }
     const update = () => {
       const r = host.getBoundingClientRect();
