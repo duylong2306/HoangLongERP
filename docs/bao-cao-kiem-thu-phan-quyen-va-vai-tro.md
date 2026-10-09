@@ -132,8 +132,10 @@ Tài khoản được tạo bằng nút "Tạo tài khoản nhanh" và đăng nh
 *Ảnh hưởng thật:* **Ngọc Thịnh: 5 nhân viên (4 nhân viên xưởng + 1 tổ trưởng) hiện không thuộc nhóm nào** — hai nhóm "Nhân viên xưởng" và "Tổ trưởng" đã bị xóa nhưng hồ sơ họ vẫn giữ mã nhóm cũ (lỗi mã nhóm mồ côi đã nêu ở mục 3.1, đã sửa cho các lần xóa sau nhưng chưa dọn dữ liệu cũ). **Hoàng Long: 1 nhân viên** (Nhữ Văn Phường). Các nhân viên này, nếu đăng nhập, đang có thể mở trang Phân quyền và đổi quyền.
 *Cách sửa đề xuất (khẩn):* (1) bỏ cơ chế rơi về quyền cũ khi chưa có nhóm (chỉ giữ các tab lõi), (2) kiểm tra quyền Sửa/Xóa trong trang Phân quyền và Tài khoản khi lưu/xóa, (3) gán nhóm cho 5+1 nhân viên đang không có nhóm, (4) về lâu dài kiểm tra ở tầng máy chủ (xem 3.8).
 
-### 8.2 Quyền đổi ở admin không áp dụng cho người đang đăng nhập cho tới khi họ tải lại trang
-Đã tái hiện (cấp "Sửa công việc" cho Phụ trách CV: vẫn bị chặn sau >10 giây, được phép sau khi tải lại). Do realtime của các bảng phân quyền đã bị tắt có chủ ý (migration `20260826d`, App.tsx:2006). Hệ quả: **thu hồi quyền cũng chỉ có hiệu lực khi người đó tải lại** — người đã bị rút quyền vẫn thao tác được tới khi tải lại. Cân nhắc: tải lại ma trận định kỳ (vài phút) hoặc khi chuyển màn hình; hoặc bật lại realtime cho riêng bảng phân quyền (ít thay đổi nên chi phí thấp).
+### 8.2 Quyền đổi ở admin áp dụng chậm cho người đang đăng nhập (ĐÃ SỬA)
+*Phát hiện:* cấp "Sửa công việc" cho Phụ trách CV, sau ~15 giây tab nhân viên vẫn bị chặn. **Đính chính:** trong báo cáo ban đầu tôi ghi "chỉ sau khi tải lại trang" — chưa chính xác. Các bảng phân quyền không dùng realtime mà được poll mỗi 5 phút (thiết kế để tiết kiệm chi phí realtime, migration `20260826d`), nên độ trễ thật là tối đa 5 phút; thu hồi quyền cũng trễ chừng đó.
+*Đã sửa (commit `2cca50d`):* poll riêng mỗi 60 giây cho ma trận Quyền Dự Án/Công việc, nhóm vai trò, hồ sơ nhân viên; làm tươi ngay khi tab hiện lại; nhóm của người đang đăng nhập được đồng bộ.
+*Đã kiểm chứng trên bản deploy:* cấp quyền → hiệu lực ở tab nhân viên sau ~22 giây (không tải lại); thu hồi → bị chặn lại sau ~48 giây.
 
 ### 8.3 Nhỏ
 - "Tạo tài khoản nhanh" đặt email cố định đuôi `@hoanglonglamdong.vn` cho mọi doanh nghiệp và đặt lại `role_group_ids` về rỗng; mật khẩu mặc định `123`.
