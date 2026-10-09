@@ -1235,9 +1235,8 @@ export default function MessagesView({
                       onClick={() => handleSelectContact(emp)}
                       className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-900 cursor-pointer transition-all"
                     >
-                      <div className={`w-11 h-11 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 ${getAvatarBgColor(emp.name)}`}>
-                        {getAvatarFallback(emp.name)}
-                      </div>
+                      {/* Avatar đúng như avatar tài khoản (ảnh / emoji / chữ cái) */}
+                      <UserAvatar employee={emp} size="lg" className="shrink-0" />
                       <div className="flex-1 min-w-0">
                         <span className="text-[13px] text-white font-medium truncate block">{emp.name}</span>
                         <span className="text-[10px] text-slate-500">{emp.role === 'director' ? '💎 Giám Đốc' : emp.department}</span>
@@ -1291,10 +1290,15 @@ export default function MessagesView({
                   const otherEmp = !isGroup ? getConvOtherMember(selectedConv) : null;
                   return (
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 shadow-md text-white"
-                        style={{ backgroundColor: selectedConv.color || '#6366F1' }}>
-                        {isGroup ? (selectedConv.avatar || getAvatarFallback(selectedConv.name)) : (otherEmp ? getAvatarFallback(otherEmp.name) : '??')}
-                      </div>
+                      {isGroup ? (
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 shadow-md text-white"
+                          style={{ backgroundColor: selectedConv.color || '#6366F1' }}>
+                          {selectedConv.avatar || getAvatarFallback(selectedConv.name)}
+                        </div>
+                      ) : (
+                        // Chat cá nhân: dùng avatar tài khoản của người đối diện
+                        <UserAvatar employee={otherEmp || null} size="md" className="shrink-0 shadow-md" />
+                      )}
                       <div className="min-w-0">
                         <h2 className="font-semibold text-[15px] text-white truncate">
                           {isGroup ? selectedConv.name : (otherEmp?.name || 'Người dùng')}
@@ -1309,9 +1313,7 @@ export default function MessagesView({
                   const emp = employees.find(e => e.id === pendingChatEmpId);
                   return (
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 text-white ${emp ? getAvatarBgColor(emp.name) : 'bg-indigo-500'}`}>
-                        {emp ? getAvatarFallback(emp.name) : '??'}
-                      </div>
+                      <UserAvatar employee={emp || null} size="md" className="shrink-0" />
                       <div className="min-w-0">
                         <h2 className="font-semibold text-[15px] text-white truncate">{emp?.name || 'Người dùng'}</h2>
                         <p className="text-[11px] text-indigo-400">💬 Nhắn tin mới</p>
@@ -1578,9 +1580,7 @@ export default function MessagesView({
                                   }}
                                   className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700 transition-colors cursor-pointer text-left"
                                 >
-                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 ${getAvatarBgColor(emp.name)}`}>
-                                    {getAvatarFallback(emp.name)}
-                                  </div>
+                                  <UserAvatar employee={emp} size="sm" className="shrink-0" />
                                   <div className="min-w-0">
                                     <span className="text-[13px] text-white font-medium block truncate">{emp.name}</span>
                                     <span className="text-[10px] text-slate-400">{emp.department || emp.role || ''}</span>
@@ -1630,9 +1630,7 @@ export default function MessagesView({
                       const avatarFallback = emp ? getAvatarFallback(emp.name) : '??';
                       return (
                         <div key={id} className="flex items-center gap-2">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[8px] ${avatarColor} shrink-0`}>
-                            {avatarFallback}
-                          </div>
+                          <UserAvatar employee={emp || null} name={displayName} size="sm" className="shrink-0" />
                           <div className="min-w-0">
                             <span className="text-[12px] text-white font-medium truncate block">
                               {displayName} {emp?.id === currentUser.id && <span className="text-[9px] text-indigo-400">(Bạn)</span>}
