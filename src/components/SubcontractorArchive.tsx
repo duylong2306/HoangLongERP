@@ -394,6 +394,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     // từng được dùng để gate Duyệt/Hủy phê duyệt Hợp đồng — ai xem được hồ sơ cũng
     // duyệt/hủy duyệt được, dù không có quyền "Sửa" ở phân hệ Báo Giá.
     if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền hủy phê duyệt hợp đồng này.', type: 'warning' }); return; }
+    if (!canApproveProjectDoc(currentUser?.id, 'contract')) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Hợp Đồng nên không hủy được phê duyệt (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' }); return; }
     if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Hợp Đồng Thầu Phụ?\nSau khi sửa xong cần Duyệt Hợp Đồng lại từ đầu.\nLưu ý: hợp đồng này sẽ tạm thời không còn tính vào Công Nợ Trả cho tới khi được duyệt lại.')) return;
     try {
       // Khi duyệt, "status" được set cứng thành 'Hoàn thành' (xem nút Duyệt Hợp

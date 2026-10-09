@@ -2,7 +2,7 @@
 import { Printer, CheckCircle2, FileCheck, XCircle, FileDown } from 'lucide-react';
 import { docSoTiengViet } from './QuotationTableSheet';
 import { dbService } from '../lib/dbService';
-import { useNotification } from '../context';
+import { useNotification, useAuth, canApproveProjectDoc } from '../context';
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 
@@ -125,6 +125,9 @@ interface LiquidationDocumentProps {
 
 export default function LiquidationDocument({ quoteData }: LiquidationDocumentProps) {
   const { addToast } = useNotification();
+  const { currentUser } = useAuth();
+  // Người duyệt / hủy duyệt Thanh Lý theo Quyền Phê Duyệt (chưa cấu hình ai → không hạn chế; Giám đốc luôn được)
+  const coQuyenDuyetTL = canApproveProjectDoc(currentUser?.id, 'liquidation');
   const items = quoteData.items || [];
   // Chiết khấu thầu (%) và Thuế VAT (%) đã được loại bỏ khỏi hồ sơ.
   const discountPercent = 0;
@@ -158,6 +161,10 @@ export default function LiquidationDocument({ quoteData }: LiquidationDocumentPr
   });
 
   const handleApproveLiquidation = async () => {
+    if (!coQuyenDuyetTL) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Thanh Lý (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     try {
       setSaving(true);
       await dbService.updateQuoteDocHtml(quoteData.id, { liquidationApproved: true });
@@ -174,6 +181,10 @@ export default function LiquidationDocument({ quoteData }: LiquidationDocumentPr
 
   // Hủy phê duyệt để mở khóa chỉnh sửa lại — xem cùng pattern ở ContractDocument.tsx.
   const handleUnapproveLiquidation = async () => {
+    if (!coQuyenDuyetTL) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Thanh Lý (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Biên Bản Thanh Lý?\nSau khi sửa xong cần Duyệt Thanh Lý lại từ đầu.')) return;
     try {
       setSaving(true);
@@ -372,7 +383,7 @@ export default function LiquidationDocument({ quoteData }: LiquidationDocumentPr
             </span>
             <button
               onClick={handleUnapproveLiquidation}
-              disabled={saving}
+              disabled={saving || !coQuyenDuyetTL}
               title="Hủy phê duyệt để mở khóa chỉnh sửa"
               className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
             >
@@ -383,7 +394,7 @@ export default function LiquidationDocument({ quoteData }: LiquidationDocumentPr
         ) : (
           <button
             onClick={handleApproveLiquidation}
-            disabled={saving}
+            disabled={saving || !coQuyenDuyetTL}
             className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse active:scale-95"
           >
             <FileCheck className="w-3.5 h-3.5" />

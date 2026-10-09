@@ -440,6 +440,10 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
   // Công Nợ Thu tự trừ lại giá trị hợp đồng này NGAY (không cần code trừ riêng)
   // vì FinanceManagement.tsx tính contractValue động theo contractApproved===true.
   const handleUnapproveContract = async () => {
+    if (!coQuyenDuyetHD) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Hợp Đồng nên không hủy được phê duyệt (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Hợp Đồng?\nSau khi sửa xong cần Duyệt Hợp Đồng lại từ đầu.\nLưu ý: giá trị hợp đồng này sẽ tạm thời không còn tính vào Công Nợ Thu cho tới khi được duyệt lại.')) return;
     try {
       setSaving(true);
@@ -723,7 +727,7 @@ export default function ContractDocument({ quoteData }: ContractDocumentProps) {
             </span>
             <button
               onClick={handleUnapproveContract}
-              disabled={saving}
+              disabled={saving || !coQuyenDuyetHD}
               title="Hủy phê duyệt để mở khóa chỉnh sửa"
               className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
             >

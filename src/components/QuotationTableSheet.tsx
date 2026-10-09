@@ -343,6 +343,10 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
   // Công Nợ Thu ở đây vì Công Nợ Thu hiện được tính động theo Hợp Đồng đã duyệt
   // (contractApproved), không còn phụ thuộc trạng thái duyệt của Báo Giá.
   const handleUnapproveQuote = async () => {
+    if (!coQuyenDuyetBG) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không phải người duyệt Báo Giá nên không hủy được phê duyệt (xem Phân Quyền → Quyền Phê Duyệt).', type: 'warning' });
+      return;
+    }
     if (!window.confirm('Hủy phê duyệt để chỉnh sửa lại Báo Giá?\nSau khi sửa xong cần Duyệt Báo Giá lại từ đầu.')) return;
     try {
       setUnapproving(true);
@@ -464,7 +468,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                       </span>
                       <button
                         onClick={handleUnapproveQuote}
-                        disabled={unapproving}
+                        disabled={unapproving || !coQuyenDuyetBG}
                         title="Hủy phê duyệt để mở khóa chỉnh sửa"
                         className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
                       >
@@ -713,7 +717,7 @@ export default function QuotationTableSheet({ quoteData, initialTab, onApproved 
                       </span>
                       <button
                         onClick={handleUnapproveQuote}
-                        disabled={unapproving}
+                        disabled={unapproving || !coQuyenDuyetBG}
                         title="Hủy phê duyệt để mở khóa chỉnh sửa"
                         className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 border border-rose-200 transition-colors rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
                       >
