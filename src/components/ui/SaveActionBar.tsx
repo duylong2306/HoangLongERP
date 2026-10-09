@@ -75,27 +75,38 @@ export default function SaveActionBar({
   // Màu viết thẳng (không phụ thuộc lớp tối/sáng của trang) vì thanh được vẽ ngoài cây giao diện chính
   const btn = 'px-3 py-1.5 text-[11px] font-bold rounded-md cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed border';
 
-  // Căn thanh theo khung chứa có đánh dấu data-save-bar-host (VD thẻ "Phân quyền chức năng & Vai trò người dùng" của HRM) để thanh nằm gọn trong thẻ;
-  // không có thì căn theo vùng nội dung (<main>) để không che menu bên trái; không có <main> (VD đang ở trong hộp thoại) thì trải hết bề rộng màn hình.
+  // Vị trí thanh:
+  //  - Nằm trong khung HRM (có tổ tiên data-save-bar-host, VD màn Phân quyền): thanh thuộc RIÊNG từng tab nên căn theo khung chứa của tab đó (phần tử cha nơi
+  //    thanh được đặt) — ghim ở đáy màn hình khi còn đang xem bảng, và khi cuộn tới cuối bảng thì "đậu" ngay cuối bảng, nằm gọn trong thẻ (không trôi ra ngoài).
+  //  - Ngoài ra: căn theo vùng nội dung (<main>) để không che menu bên trái; không có <main> (VD đang ở trong hộp thoại) thì trải hết bề rộng màn hình.
   const spacerRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState<{ left: number; width: number } | null>(null);
+  const [box, setBox] = useState<{ left: number; width: number; bottom: number; hidden: boolean } | null>(null);
   useLayoutEffect(() => {
-    const host = (spacerRef.current?.closest('[data-save-bar-host]') ?? spacerRef.current?.closest('main')) as HTMLElement | null;
+    const sp = spacerRef.current;
+    const scoped = !!sp?.closest('[data-save-bar-host]');
+    const host = (scoped ? sp?.parentElement : sp?.closest('main')) as HTMLElement | null;
     if (!host) { setBox(null); return; }
-    const update = () => { const r = host.getBoundingClientRect(); setBox({ left: r.left, width: r.width }); };
+    const update = () => {
+      const r = host.getBoundingClientRect();
+      if (!scoped) { setBox({ left: r.left, width: r.width, bottom: 0, hidden: false }); return; }
+      // Đáy thanh = đáy màn hình, nhưng không thấp hơn đáy khung (đậu cuối bảng); khung nằm hẳn ngoài màn hình thì ẩn thanh.
+      setBox({ left: r.left, width: r.width, bottom: Math.max(0, window.innerHeight - r.bottom), hidden: r.top >= window.innerHeight || r.bottom <= 0 });
+    };
     update();
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
     ro?.observe(host);
     window.addEventListener('resize', update);
-    return () => { ro?.disconnect(); window.removeEventListener('resize', update); };
+    // capture = true để bắt cả cuộn trong vùng cuộn con (không chỉ cuộn cả trang)
+    if (scoped) window.addEventListener('scroll', update, true);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); };
   }, []);
 
   const bar = (
     <div
-      className={`fixed bottom-0 z-[200] flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 border-t-2 shadow-[0_-4px_14px_rgba(0,0,0,0.10)] ${
+      className={`fixed ${box ? '' : 'bottom-0'} z-[200] flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 border-t-2 shadow-[0_-4px_14px_rgba(0,0,0,0.10)] ${
         changed ? 'border-amber-400 bg-amber-50' : 'border-slate-300 bg-slate-50'
       } ${box ? '' : 'left-0 right-0'}`}
-      style={box ? { left: box.left, width: box.width } : undefined}
+      style={box ? { left: box.left, width: box.width, bottom: box.bottom, display: box.hidden ? 'none' : undefined } : undefined}
       data-testid="save-action-bar"
     >
       {/* Trái: trạng thái */}
