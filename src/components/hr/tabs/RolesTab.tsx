@@ -11,7 +11,7 @@ import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
 import { countListChangesById, countProjectMatrixChanges, countJsonChanges, countTaskMatrixChanges } from '../../../lib/permissionDraftDiff';
-import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache, encodeApprovalApprovers, getRoleGroupKind, withRoleGroupKind, ROLE_GROUP_KIND_LABELS, RoleGroupKind } from '../../../context';
+import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, hasModulePermission, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache, encodeApprovalApprovers, getRoleGroupKind, withRoleGroupKind, ROLE_GROUP_KIND_LABELS, RoleGroupKind } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { loadTaskPermissionMatrix, syncTaskPermissionsFromCloud, saveTaskPermissionMatrix, DEFAULT_TASK_PERMISSIONS, TaskPermissionMatrix } from '../hrTaskPermissions';
 import { dbService } from '../../../lib/dbService';
@@ -200,10 +200,20 @@ export default function RolesTab(props: RolesTabProps) {
 
   // Save handlers
   const { addToast } = useNotification();
+  // QUYỀN TRUY CẬP TRANG PHÂN QUYỀN: trước đây không kiểm tra gì — chỉ cần thấy menu là mở và SỬA được (xem legacyRoleTabs.ts).
+  // Xem trang cần quyền Xem phân hệ "Phân Quyền Và Vai Trò" (settings_roles); lưu/xóa/tạo cần quyền Sửa. Quản trị viên / Siêu Admin luôn có.
+  const coQuyenXem = hasModulePermission(currentUser?.id, 'settings_roles', 'view');
+  const coQuyenSua = hasModulePermission(currentUser?.id, 'settings_roles', 'edit');
+  const chanNeuKhongCoQuyenSua = (): boolean => {
+    if (coQuyenSua) return false;
+    addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Phân Quyền Và Vai Trò.', type: 'warning' });
+    return true;
+  };
   // Người đang thao tác — ghi vào nhật ký thay đổi phân quyền
   const auditActor = React.useMemo(() => ({ id: currentUser?.id, name: currentUser?.name }), [currentUser?.id, currentUser?.name]);
 
   const handleSaveGroup = React.useCallback(async () => {
+    if (chanNeuKhongCoQuyenSua()) return;
     const updated = [...draftRoles];
     setRoleGroupsCache(updated); // sync in-memory cache
     setRoles(updated);
@@ -311,9 +321,10 @@ export default function RolesTab(props: RolesTabProps) {
     } else {
       addToast({ title: '✅ Thành công', message: 'Phân quyền nhóm vai trò đã được lưu.', type: 'success' });
     }
-  }, [draftRoles, roles, allEmployees, auditActor, setRoles, syncHrmPermissionsToApp, addToast]);
+  }, [draftRoles, roles, allEmployees, auditActor, setRoles, syncHrmPermissionsToApp, addToast, coQuyenSua]);
 
   const handleSaveProject = React.useCallback(async () => {
+    if (chanNeuKhongCoQuyenSua()) return;
     try {
       await saveProjectPermissions(draftMatrix);
       void recordPermissionAudit('project_position', diffProjectPosition(savedMatrix, draftMatrix, actionLabelOf), auditActor);
@@ -323,17 +334,19 @@ export default function RolesTab(props: RolesTabProps) {
       console.error('Supabase projectPermissions save error:', e);
       addToast({ title: '⚠️ Lưu cục bộ thành công', message: 'Không thể đồng bộ lên Supabase. Dữ liệu đã lưu localStorage.', type: 'warning' });
     }
-  }, [draftMatrix, savedMatrix, auditActor, addToast]);
+  }, [draftMatrix, savedMatrix, auditActor, addToast, coQuyenSua]);
 
   const handleSaveTask = React.useCallback(() => {
+    if (chanNeuKhongCoQuyenSua()) return;
     // saveTaskPermissionMatrix: cập nhật bộ nhớ + lưu lên Supabase (không chờ) + phát sự kiện để các màn hình đang mở tính lại
     saveTaskPermissionMatrix(draftTask);
     void recordPermissionAudit('task_permission', diffTaskMatrix(savedTask, draftTask, a => (TASK_ACTION_LABELS as any)[a] || a), auditActor);
     setSavedTask(JSON.parse(JSON.stringify(draftTask)));
     addToast({ title: '✅ Thành công', message: 'Quyền công việc đã được lưu.', type: 'success' });
-  }, [draftTask, savedTask, auditActor, addToast]);
+  }, [draftTask, savedTask, auditActor, addToast, coQuyenSua]);
 
   const handleSaveApproval = React.useCallback(async () => {
+    if (chanNeuKhongCoQuyenSua()) return;
     let supabaseFailed = false;
     try {
       await saveApprovalConfig(draftApprovalConfig).catch((e) => {
@@ -355,7 +368,7 @@ export default function RolesTab(props: RolesTabProps) {
       setApprovalConfigCache(draftApprovalConfig);
       addToast({ title: '✅ Thành công', message: 'Quyền phê duyệt đã được lưu.', type: 'success' });
     }
-  }, [draftApprovalConfig, savedApprovalConfig, auditActor, addToast]);
+  }, [draftApprovalConfig, savedApprovalConfig, auditActor, addToast, coQuyenSua]);
 
   // Default snapshot helpers (per-tab)
   const getCurrentTabDefault = React.useCallback((): any => {
@@ -494,8 +507,21 @@ export default function RolesTab(props: RolesTabProps) {
     setDraftApprovalConfig(existing);
   }, [draftApprovalConfig, employees]);
 
+  if (!coQuyenXem) {
+    return (
+      <div role="alert" className="bg-slate-900 border border-rose-500/30 rounded-2xl p-6 text-sm text-rose-300 text-left">
+        ⛔ Bạn không có quyền truy cập phân hệ <b>Phân Quyền Và Vai Trò</b>. Liên hệ quản trị viên để được cấp quyền.
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 animate-fadeIn text-slate-200">
+      {!coQuyenSua && (
+        <div role="note" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-left">
+          Bạn chỉ có quyền XEM phân hệ này — mọi thay đổi (tick, lưu, thêm, xóa) đều bị từ chối.
+        </div>
+      )}
 
       {/* TOP TAB SELECTOR: Phân Quyền Nhóm Vai Trò | Quyền Dự Án | Quyền Phê Duyệt */}
       <div className="flex gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 w-fit">
@@ -635,6 +661,7 @@ export default function RolesTab(props: RolesTabProps) {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (chanNeuKhongCoQuyenSua()) return;
                         if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa nhóm vai trò "${r.name}" không?`)) {
                           const updated = draftRoles.filter(item => item.id !== r.id);
                           setDraftRoles(updated);

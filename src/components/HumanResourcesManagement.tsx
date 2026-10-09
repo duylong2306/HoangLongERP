@@ -5083,6 +5083,10 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   addToast({ title: '⚠️ Thiếu thông tin', message: 'vui lòng nhập tên nhóm vai trò.', type: 'warning' });
                   return;
                 }
+                if (!hasModulePermission(currentUser?.id, 'settings_roles', 'edit')) {
+                  addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Phân Quyền Và Vai Trò.', type: 'warning' });
+                  return;
+                }
 
                 const newId = 'role_custom_' + Date.now();
                 const defaultPerms: any = {};

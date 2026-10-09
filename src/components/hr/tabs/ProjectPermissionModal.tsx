@@ -17,7 +17,7 @@ import {
   loadProjectPermissions,
   saveProjectPermissions,
 } from '../hrProjectPermissions';
-import { loadHrmRoleGroups, useNotification } from '../../../context';
+import { loadHrmRoleGroups, useNotification, hasModulePermission } from '../../../context';
 import SaveActionBar from '../../ui/SaveActionBar';
 import { ENFORCED_BY_POSITION, ENFORCED_BY_ROLE_GROUP } from '../projectActionEnforcement';
 import { diffProjectGroup, recordPermissionAudit } from '../../../lib/permissionAudit';
@@ -246,6 +246,11 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   };
 
   const handleSaveRoleGroup = async () => {
+    // Chặn người không có quyền Sửa phân hệ Phân Quyền (thanh Lưu vẽ qua portal nên không bị khóa theo giao diện)
+    if (auditActor?.id && !hasModulePermission(auditActor.id, 'settings_roles', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Phân Quyền Và Vai Trò.', type: 'warning' });
+      return;
+    }
     await saveRoleGroupProjectMatrix(rgMatrix);
     // Nhật ký: ai đổi quyền nhóm HRM nào (không bao giờ làm hỏng việc lưu — xem permissionAudit.ts)
     const tenNhom = (gid: string) => hrmRoleGroups.find(g => g.id === gid)?.name || gid;

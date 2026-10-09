@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
 import { hasLoginAccount } from './lib/employeeAccount';
+import { filterLegacyFallbackTabs } from './lib/legacyRoleTabs';
 import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
 import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations, sendApprovalDirectMessage, findEmployeeByName, ensureAttendanceChatGroup } from './lib/chatStore';
@@ -3230,7 +3231,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     let allowedSet = new Set(allowedFromGroups);
     if (!allowedFromGroups || allowedFromGroups.length === 0) {
       const role = currentUser.role;
-      const legacy = role ? rolePermissions[role] : undefined;
+      const legacy = role ? filterLegacyFallbackTabs(rolePermissions[role]) : undefined;
       if (legacy && legacy.length > 0) {
         legacy.forEach(t => allowedSet.add(t));
       }
