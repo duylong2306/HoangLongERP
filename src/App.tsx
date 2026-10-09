@@ -1125,7 +1125,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Trạng thái cây thư mục Sidebar dạng mô phỏng
   const [isDirectorGroupExpanded, setIsDirectorGroupExpanded] = useState(true);
-  const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary'>('projects');
+  const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary'>('summary'); // mặc định mở Bảng điều hành Giám đốc (Tổng Hợp)
   const [isProjectGroupExpanded, setIsProjectGroupExpanded] = useState(true);
   const [isHrGroupExpanded, setIsHrGroupExpanded] = useState(true);
   const [isFinanceGroupExpanded, setIsFinanceGroupExpanded] = useState(true);
@@ -3521,7 +3521,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                           <button
                             onClick={() => {
                               const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor', summary: 'director-summary' };
-                              setActiveTab(subTabMap[directorSubDept] || 'director-projects');
+                              setActiveTab(subTabMap[directorSubDept] || 'director-summary');
                               if (mobileMenuOpen) setMobileMenuOpen(false);
                             }}
                             className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab.startsWith('director-') ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
