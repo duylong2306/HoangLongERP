@@ -66,6 +66,8 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 };
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
+// ĐÃ GỠ KHỎI GIAO DIỆN (dữ liệu cũ vẫn giữ nguyên trong cấu hình đã lưu, không xóa): arrangeColumn (kéo cột đã do quyền "Sửa cột" lo) và
+// createCard/editCard/deleteCard/assignCardMember (một thẻ chính là một dự án, đã do quyền Tạo/Sửa/Xóa dự án quyết định, không có nút riêng).
 export const actionGroups: {
   group: string;
   icon: React.ReactNode;
@@ -92,7 +94,6 @@ export const actionGroups: {
       { action: 'createColumn', label: 'Tạo cột mới' },
       { action: 'editColumn', label: 'Sửa cột' },
       { action: 'deleteColumn', label: 'Xóa cột' },
-      { action: 'arrangeColumn', label: 'Sắp xếp thứ tự cột' },
       { action: 'configureColumnAutomation', label: 'Cấu hình tự động hóa cột' },
     ],
   },
@@ -100,11 +101,7 @@ export const actionGroups: {
     group: '🃏 THẺ DỰ ÁN',
     icon: <LayoutGrid className="w-4 h-4" />,
     actions: [
-      { action: 'createCard', label: 'Tạo thẻ dự án' },
-      { action: 'editCard', label: 'Sửa thẻ dự án' },
-      { action: 'deleteCard', label: 'Xóa thẻ dự án' },
       { action: 'moveCard', label: 'Kéo thẻ qua cột' },
-      { action: 'assignCardMember', label: 'Gán thành viên thẻ' },
     ],
   },
   {
