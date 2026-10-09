@@ -101,3 +101,40 @@ Xếp theo mức độ ưu tiên. "Đã kiểm chứng" = tôi tái hiện đư�
 
 ## 6. Dữ liệu thử còn lại trong doanh nghiệp TEST
 6 nhân viên `TEST_*`, khách hàng `cust_test_1`, dự án `proj_test_1`, công việc `task_test_1/2`, một dòng ma trận Quyền Công việc (đang bằng mặc định), nhóm ảo "Siêu Admin" đã được lưu, 12 dòng nhật ký. Doanh nghiệp Hoàng Long và Ngọc Thịnh không bị đụng trong lượt kiểm thử này.
+
+---
+
+# VÒNG 2 — Kiểm thử bằng 5 tài khoản nhân viên thật (doanh nghiệp TEST)
+
+Tài khoản được tạo bằng nút "Tạo tài khoản nhanh" và đăng nhập bởi chủ dự án (tôi không nhập mật khẩu): TEST Giám đốc (nhóm Ban Giám Đốc), TEST Kế toán (nhóm Kế toán), TEST Trưởng dự án (nhóm Văn phòng, là Trưởng DA của dự án test), TEST Thợ A (nhóm Kỹ thuật, phụ trách công việc CV1), TEST Nhân viên chưa vào nhóm. Admin test dùng để đổi quyền.
+
+## 7. Kết quả theo từng chức năng (đối chiếu với ma trận)
+| Thử | Giám đốc | Kế toán | Trưởng DA | Thợ A | Chưa nhóm | Đúng ma trận? |
+|---|---|---|---|---|---|---|
+| Tạo dự án (Kanban) | ✅ | ✅ (theo nhóm) | ✅ (theo nhóm) | ⛔ | ⛔ | ✅ |
+| Thêm cột | ✅ | ⛔ | ✅ (Trưởng DA) | ⛔ | ⛔ | ✅ |
+| Kéo thẻ | ✅ | ⛔ | ✅ | ✅ (mặc định cho "Thành viên") | — | ✅ |
+| Sửa thông tin dự án | ✅ | ✅ | ✅ | không có nút | — | ✅ |
+| Xóa dự án | có nút | không có nút | có nút | không có nút | — | ✅ |
+| Sửa công việc | ✅ | ⛔ | ✅ | ⛔ (là Phụ trách CV) | — | ✅ |
+| Xóa công việc | có nút | không có nút | có nút | không có nút | — | ✅ |
+| Lập phiếu quyết toán | — | — | — | ⛔ | ⛔ | ✅ |
+| Thấy công việc nào | cả 2 | cả 2 (vai trò Kế toán) | cả 2 | chỉ CV1 của mình | không thấy gì | ✅ — xác nhận sửa lỗi nhận diện Kế toán |
+| Nhận việc (Thợ A, CV1) | — | — | — | ✅ ghi nhật ký đúng người | không có nút | ✅ |
+| Mở trang qua sự kiện chuyển tab (finance, settings-roles) | — | — | — | ⛔ về Tổng quan | — | ✅ |
+| Menu hiển thị | Đầy đủ | Dự án, Nhân sự, Kế toán, Kho, Thầu phụ, Thư viện | Dự án, Kho, Thầu phụ, Thư viện | Dự án, Kho (xem) | **Có Nhân sự + Cài đặt hệ thống** ⚠️ | ✅ trừ cột "Chưa nhóm" |
+| Đổi quyền ở admin → hiệu lực ở tab nhân viên | — | — | — | **chỉ sau khi tải lại trang** | — | ⚠️ xem 8.2 |
+
+## 8. Lỗi mới phát hiện
+### 8.1 NGHIÊM TRỌNG — nhân viên không thuộc nhóm nào được vào "Phân quyền" và "Tài khoản" và SỬA được quyền
+*Đã tái hiện:* tài khoản "chưa vào nhóm" thấy menu **Hệ thống Nhân sự, Dữ liệu nhân sự, Tài Khoản Hệ Thống, Phân Quyền Và Vai Trò, Cài Đặt Hệ Thống**; mở được trang Phân quyền (có nút Thêm nhóm, Lưu), thấy danh sách 7 tài khoản kèm nút Xóa, và **đã sửa thật** ma trận Quyền Công việc rồi Lưu thành công (nhật ký ghi đúng người sửa là nhân viên đó). Tôi đã hoàn tác.
+*Nguyên nhân:* `isAccessible` (App.tsx) khi nhân viên không có quyền từ nhóm thì rơi về bảng quyền cũ theo trường `role`; "Tạo tài khoản nhanh" luôn đặt `role = engineer`, mà quyền cũ của `engineer` gồm `hr-office`, `employees`, `system-office`, `settings` (kéo theo toàn bộ trang cài đặt). Trang Phân quyền không kiểm tra lại quyền "Sửa" khi lưu.
+*Ảnh hưởng thật:* **Ngọc Thịnh: 5 nhân viên (4 nhân viên xưởng + 1 tổ trưởng) hiện không thuộc nhóm nào** — hai nhóm "Nhân viên xưởng" và "Tổ trưởng" đã bị xóa nhưng hồ sơ họ vẫn giữ mã nhóm cũ (lỗi mã nhóm mồ côi đã nêu ở mục 3.1, đã sửa cho các lần xóa sau nhưng chưa dọn dữ liệu cũ). **Hoàng Long: 1 nhân viên** (Nhữ Văn Phường). Các nhân viên này, nếu đăng nhập, đang có thể mở trang Phân quyền và đổi quyền.
+*Cách sửa đề xuất (khẩn):* (1) bỏ cơ chế rơi về quyền cũ khi chưa có nhóm (chỉ giữ các tab lõi), (2) kiểm tra quyền Sửa/Xóa trong trang Phân quyền và Tài khoản khi lưu/xóa, (3) gán nhóm cho 5+1 nhân viên đang không có nhóm, (4) về lâu dài kiểm tra ở tầng máy chủ (xem 3.8).
+
+### 8.2 Quyền đổi ở admin không áp dụng cho người đang đăng nhập cho tới khi họ tải lại trang
+Đã tái hiện (cấp "Sửa công việc" cho Phụ trách CV: vẫn bị chặn sau >10 giây, được phép sau khi tải lại). Do realtime của các bảng phân quyền đã bị tắt có chủ ý (migration `20260826d`, App.tsx:2006). Hệ quả: **thu hồi quyền cũng chỉ có hiệu lực khi người đó tải lại** — người đã bị rút quyền vẫn thao tác được tới khi tải lại. Cân nhắc: tải lại ma trận định kỳ (vài phút) hoặc khi chuyển màn hình; hoặc bật lại realtime cho riêng bảng phân quyền (ít thay đổi nên chi phí thấp).
+
+### 8.3 Nhỏ
+- "Tạo tài khoản nhanh" đặt email cố định đuôi `@hoanglonglamdong.vn` cho mọi doanh nghiệp và đặt lại `role_group_ids` về rỗng; mật khẩu mặc định `123`.
+- Thợ A thấy nút "Tạo Việc Con", "Lập Phiếu Tạm Ứng/Quyết Toán" dù không có quyền (bấm mới bị chặn) — chỉ là giao diện hiện nút thừa.
