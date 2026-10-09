@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
+import { recordPermissionAudit, diffRoleGroups } from '../lib/permissionAudit';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
@@ -5103,6 +5104,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 const nextRoles = [...roles, createdRole];
                 setRoles(nextRoles);
                 dbService.hrmRoleGroups.save({ id: createdRole.id, name: createdRole.name, description: createdRole.description || '', permissions: createdRole.permissions || {}, memberIds: createdRole.memberIds || [] }).catch(() => {});
+                // Nhật ký thay đổi phân quyền: ghi việc thêm nhóm (không bao giờ làm hỏng việc tạo nhóm)
+                void recordPermissionAudit('role_group', diffRoleGroups([], [createdRole as any])[0], { id: currentUser?.id, name: currentUser?.name });
                 setSelectedRoleId(newId);
                 setShowAddRoleModal(false);
               }}

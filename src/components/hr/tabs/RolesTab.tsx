@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Users, Plus, Lock, Trash2, Shield, Settings, X, Unlock, ChevronDown, FileText, Building, Factory, Truck, AlertCircle, CheckCircle } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
 import ProjectPermissionModal, { actionLabelOf } from './ProjectPermissionModal';
+import { employeesToCleanAfterGroupDelete } from '../../../lib/roleGroupCleanup';
 import { diffProjectPosition, diffRoleGroups, diffApproval, diffTaskMatrix, recordPermissionAudit } from '../../../lib/permissionAudit';
 import EffectivePermissionPreview from './EffectivePermissionPreview';
 import PermissionAuditLog from './PermissionAuditLog';
@@ -642,6 +643,18 @@ export default function RolesTab(props: RolesTabProps) {
                           dbService.hrmRoleGroups.delete(r.id).catch(err => {
                             console.error('Supabase hrmRoleGroups delete error:', err);
                           });
+                          // Nhật ký: ghi lại việc xóa nhóm (trước đây xóa nhóm không để lại dấu vết)
+                          void recordPermissionAudit('role_group', diffRoleGroups([r as any], [], m => m, id => (allEmployees || []).find(e => e.id === id)?.name || id)[0], auditActor);
+                          // Dọn mã nhóm đã xóa khỏi hồ sơ các thành viên (trước đây để lại mã "ma" trong employees.role_group_ids)
+                          (async () => {
+                            try {
+                              const dsNV = await dbService.employees.list();
+                              await Promise.all(employeesToCleanAfterGroupDelete(dsNV as any[], r.id).map(({ empId, roleGroupIds }) =>
+                                dbService.employees.save({ id: empId, roleGroupIds })));
+                            } catch (e) {
+                              console.error('Lỗi dọn role_group_ids sau khi xóa nhóm:', e);
+                            }
+                          })();
                           syncHrmPermissionsToApp(updated);
                           if (selectedRoleId === r.id) {
                             // Chuyển về nhóm admin thật (nếu có) thay vì id 'role_admin' cố định
