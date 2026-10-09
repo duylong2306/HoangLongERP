@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
+import { hasLoginAccount } from './lib/employeeAccount';
 import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
 import { deleteConversation, getUserConversations, getConversations, loadConversationsFromCloud, subscribeConversations, sendApprovalDirectMessage, findEmployeeByName, ensureAttendanceChatGroup } from './lib/chatStore';
@@ -39,7 +40,6 @@ import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission } from './context';
 import { Toast } from './context/NotificationContext';
-import { hashPasswordSync } from './lib/passwordUtils';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
 
 // COMPONENTS
@@ -255,11 +255,11 @@ const ensureAdminAndPasswords = (emps: Employee[]): Employee[] => {
         }
       } catch { /* ignore */ }
     }
+    // KHÔNG tự điền username / mật khẩu mặc định "123" cho nhân viên chưa có tài khoản nữa: trước đây làm danh sách "Tài Khoản Hệ Thống" hiện mọi nhân viên
+    // và khiến tài khoản vừa bị xóa tự hiện lại sau khi tải lại trang. Có tài khoản hay không xem hasLoginAccount() (lib/employeeAccount.ts).
     return {
       ...emp,
       roleGroupIds: roleGroupIds && roleGroupIds.length > 0 ? roleGroupIds : undefined,
-      username: emp.username || generateUsername(emp.name),
-      password: emp.password || hashPasswordSync('123')
     };
   });
   if (!mapped.some(e => e.username === 'admin' || e.id === 'emp_admin')) {
@@ -4297,7 +4297,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                   <div className="flex items-center gap-2">
                     <Users className={`w-4 h-4 ${accentTextClass}`} />
                     <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                      👤 Danh Sách Tài Khoản Hệ Thống ({employees.filter(e => e.username && e.password).length})
+                      👤 Danh Sách Tài Khoản Hệ Thống ({employees.filter(hasLoginAccount).length})
                     </h3>
                   </div>
                 </div>
@@ -4315,7 +4315,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                       </tr>
                     </thead>
                     <tbody>
-                      {employees.filter(e => e.username && e.password).map((emp) => (
+                      {employees.filter(hasLoginAccount).map((emp) => (
                         <tr key={emp.id} className="border-b border-slate-800/60 hover:bg-slate-850/30 transition-colors">
                           <td className="py-2.5 px-3">
                             <div className="font-bold text-slate-100 flex items-center gap-1.5">
@@ -4402,7 +4402,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                                       });
                                       return;
                                     }
-                                    if (employees.filter(e => e.username && e.password).length <= 1) {
+                                    if (employees.filter(hasLoginAccount).length <= 1) {
                                       addToast({
                                         title: 'Không thể thực hiện',
                                         message: 'Hệ thống cần ít nhất một tài khoản hoạt động.',

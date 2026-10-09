@@ -59,11 +59,10 @@ export function ensureAdminAndPasswords(emps: Employee[]): Employee[] {
         }
       } catch { /* ignore */ }
     }
+    // Không tự điền username / mật khẩu "123" cho nhân viên chưa có tài khoản (xem lib/employeeAccount.ts).
     return {
       ...emp,
       roleGroupIds,
-      username: emp.username || generateUsername(emp.name),
-      password: emp.password || '123'
     };
   });
   if (!mapped.some(e => e.username === 'admin' || e.id === 'emp_admin')) {
