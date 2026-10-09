@@ -237,8 +237,10 @@ export default function ProfilesTab({
         username,
         password: hashPasswordSync('123'),
         role: 'engineer',
-        roleGroupIds: roleGroupId ? [roleGroupId] : ([] as string[]),
-        email: `${username}@hoanglonglamdong.vn`,
+        // GIỮ nhóm vai trò hiện có của nhân viên (trước đây luôn đặt lại về rỗng khi không chỉ định nhóm → mất nhóm trong hồ sơ)
+        roleGroupIds: roleGroupId ? [roleGroupId] : ((emp as any).roleGroupIds || ([] as string[])),
+        // KHÔNG còn gán email cố định đuôi @hoanglonglamdong.vn (sai với mọi doanh nghiệp khác) — giữ email sẵn có của nhân viên.
+        email: emp.email || '',
         hasSystemAccount: true,
       };
 

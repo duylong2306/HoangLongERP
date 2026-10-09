@@ -10,7 +10,7 @@ import TaskPermissionEditor, { TASK_ACTION_LABELS } from './TaskPermissionEditor
 import { ProjectPermissionMatrix } from '../hrProjectPermissions';
 import { Employee, HrmRoleGroup, HrmApprovalConfig } from '../../../types';
 import SaveActionBar from '../../ui/SaveActionBar';
-import { countListChangesById, countProjectMatrixChanges, countJsonChanges, countTaskMatrixChanges } from '../../../lib/permissionDraftDiff';
+import { countRoleGroupChanges, countProjectMatrixChanges, countJsonChanges, countTaskMatrixChanges } from '../../../lib/permissionDraftDiff';
 import { loadApprovalConfig, syncApprovalConfigFromDb, saveApprovalConfig, saveDefaultSnapshot, loadDefaultSnapshot, useNotification, hasModulePermission, ApprovalPermission, setRoleGroupsCache, setApprovalConfigCache, encodeApprovalApprovers, getRoleGroupKind, withRoleGroupKind, ROLE_GROUP_KIND_LABELS, RoleGroupKind } from '../../../context';
 import { loadProjectPermissions, syncProjectPermissionsFromDb, saveProjectPermissions } from '../hrProjectPermissions';
 import { loadTaskPermissionMatrix, syncTaskPermissionsFromCloud, saveTaskPermissionMatrix, DEFAULT_TASK_PERMISSIONS, TaskPermissionMatrix } from '../hrTaskPermissions';
@@ -121,7 +121,7 @@ export default function RolesTab(props: RolesTabProps) {
   // Số thay đổi CHƯA LƯU của từng tab chính (hiện nhãn đỏ trên tên tab + trong thanh Lưu) — để người dùng biết còn bao nhiêu ô phải bấm Lưu mới có hiệu lực.
   // Tab Quyền Dự Án gồm 2 phần: "Theo vị trí" (draftMatrix, do component này giữ) và "Vai trò nhóm HRM" (nháp nằm trong ProjectPermissionModal → báo lên qua rgUnsaved).
   const [rgUnsaved, setRgUnsaved] = React.useState(0);
-  const groupCount = React.useMemo(() => countListChangesById(draftRoles as any, roles as any), [draftRoles, roles]);
+  const groupCount = React.useMemo(() => countRoleGroupChanges(draftRoles as any, roles as any), [draftRoles, roles]);
   const projectCount = React.useMemo(() => countProjectMatrixChanges(draftMatrix as any, savedMatrix as any) + rgUnsaved, [draftMatrix, savedMatrix, rgUnsaved]);
   const approvalCount = React.useMemo(() => countJsonChanges(draftApprovalConfig, savedApprovalConfig), [draftApprovalConfig, savedApprovalConfig]);
   // Quyền Công việc (ma trận hrTaskPermissions): bản nháp + bản đã lưu. Trước đây KHÔNG có màn hình chỉnh — cả 2 công ty dùng mặc định trong code.
@@ -204,6 +204,11 @@ export default function RolesTab(props: RolesTabProps) {
   // Xem trang cần quyền Xem phân hệ "Phân Quyền Và Vai Trò" (settings_roles); lưu/xóa/tạo cần quyền Sửa. Quản trị viên / Siêu Admin luôn có.
   const coQuyenXem = hasModulePermission(currentUser?.id, 'settings_roles', 'view');
   const coQuyenSua = hasModulePermission(currentUser?.id, 'settings_roles', 'edit');
+  // Số thành viên THẬT của nhóm: bỏ các mã không còn nhân viên nào (VD nhóm ảo "Siêu Admin" luôn chứa 3 mã cố định emp_admin/NV_ADMIN/admin dù chỉ có 1 người thật).
+  const soThanhVienThat = (r: { memberIds?: string[] }) => {
+    const ids = r.memberIds || [];
+    return (employees || []).length === 0 ? ids.length : ids.filter(id => (employees as any[]).some(e => e.id === id)).length;
+  };
   const chanNeuKhongCoQuyenSua = (): boolean => {
     if (coQuyenSua) return false;
     addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Phân Quyền Và Vai Trò.', type: 'warning' });
@@ -638,7 +643,7 @@ export default function RolesTab(props: RolesTabProps) {
                     {r.name}
                   </h5>
                   <span className="bg-slate-800 text-slate-300 font-mono text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shrink-0">
-                    {r.memberIds.length} nhân sự
+                    {soThanhVienThat(r)} nhân sự
                   </span>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1.5 line-clamp-2 leading-relaxed">
@@ -879,7 +884,7 @@ export default function RolesTab(props: RolesTabProps) {
               <div className="space-y-4 animate-fadeIn">
                 <div className="flex justify-between items-center text-[10.5px]">
                   <span className="text-slate-400 italic">
-                    * Tích chọn để cấp quyền thao tác trực tiếp trên từng phân hệ ERP. Thay đổi tự động lưu lại.
+                    * Tích chọn để cấp quyền thao tác trực tiếp trên từng phân hệ ERP. Thay đổi chỉ có hiệu lực sau khi bấm "Lưu thay đổi" ở thanh dưới.
                   </span>
 
                   <div className="flex gap-2">

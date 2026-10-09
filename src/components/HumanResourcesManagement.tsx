@@ -19,6 +19,7 @@ import {
 import { SalaryScale, Employee } from '../types';
 import { dbService } from '../lib/dbService';
 import { recordPermissionAudit, diffRoleGroups } from '../lib/permissionAudit';
+import { defaultPermissionsForNewGroup } from '../lib/roleGroupDefaults';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
@@ -5089,13 +5090,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 }
 
                 const newId = 'role_custom_' + Date.now();
-                const defaultPerms: any = {};
-                // Gán quyền Xem mặc định cho TOÀN BỘ phân hệ thật (ERP_MODULE_CODES, dùng chung với
-                // ma trận ở RolesTab.tsx) — trước đây dùng một danh sách mã module khác/cũ, lệch với
-                // ma trận thật nên nhóm mới tạo gần như không có quyền Xem ở đa số phân hệ.
-                ERP_MODULE_CODES.forEach(m => {
-                  defaultPerms[m] = { view: true, create: false, edit: false, delete: false };
-                });
+                // Quyền mặc định của nhóm mới: chỉ Xem các phân hệ nghiệp vụ thường; phân hệ nhạy cảm (nhân sự/lương, tài chính, cài đặt, tài khoản,
+                // phân quyền, phòng giám đốc) để TẮT — xem lib/roleGroupDefaults.ts. Dùng chung ERP_MODULE_CODES với ma trận ở RolesTab.tsx.
+                const defaultPerms: any = defaultPermissionsForNewGroup(ERP_MODULE_CODES);
 
                 const createdRole: Role = {
                   id: newId,
@@ -5139,7 +5136,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               </div>
 
               <p className="text-[10px] text-slate-450 italic leading-relaxed">
-                * Sau khi khởi tạo thành công, nhóm sẽ mặc định có quyền "XEM" ở tất cả phân hệ. Bạn có thể thay đổi chi tiết quyền thao tác ngay trên bảng phân quyền tác nghiệp.
+                * Sau khi khởi tạo thành công, nhóm sẽ mặc định chỉ có quyền "XEM" ở các phân hệ nghiệp vụ thông thường (KHÔNG gồm Nhân sự, Tài chính, Cài đặt, Tài khoản, Phân quyền). Bạn có thể thay đổi chi tiết quyền thao tác ngay trên bảng phân quyền tác nghiệp.
               </p>
 
               <div className="flex gap-3 pt-2">

@@ -78,3 +78,25 @@ export function countTaskMatrixChanges(draft: TaskMatrix, saved: TaskMatrix): nu
 export function isTaskCellChanged(draft: TaskMatrix, saved: TaskMatrix, action: string, role: string): boolean {
   return !!draft?.actions?.[action]?.includes(role) !== !!saved?.actions?.[action]?.includes(role);
 }
+
+/**
+ * Nhóm vai trò: đếm theo TỪNG THAY ĐỔI cụ thể (trước đây đếm theo nhóm nên thêm 5 người vào 4 nhóm chỉ báo "4 thay đổi"):
+ * nhóm thêm/xóa = 1; đổi tên/mô tả = 1 mỗi cái; mỗi ô quyền phân hệ (xem/thêm/sửa/xóa) đổi = 1; mỗi thành viên vào/ra = 1.
+ */
+export function countRoleGroupChanges(draft: any[] | undefined, saved: any[] | undefined): number {
+  const d = new Map((draft || []).map(x => [x?.id, x])), s = new Map((saved || []).map(x => [x?.id, x]));
+  let n = 0;
+  for (const [id, g] of d) {
+    const old = s.get(id);
+    if (!old) { n++; continue; }
+    if ((g.name || '') !== (old.name || '')) n++;
+    if ((g.description || '') !== (old.description || '')) n++;
+    const pa = g.permissions || {}, pb = old.permissions || {};
+    for (const m of new Set([...Object.keys(pa), ...Object.keys(pb)])) {
+      for (const q of ['view', 'create', 'edit', 'delete'] as const) if (!!pa[m]?.[q] !== !!pb[m]?.[q]) n++;
+    }
+    n += countSetChanges(g.memberIds, old.memberIds);
+  }
+  for (const id of s.keys()) if (!d.has(id)) n++;
+  return n;
+}

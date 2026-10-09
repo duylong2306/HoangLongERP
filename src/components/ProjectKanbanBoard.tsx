@@ -3631,7 +3631,8 @@ export default function ProjectKanbanBoard({
                               </div>
                             </div>
 
-                            {/* Easy quick action receipt billing buttons */}
+                            {/* Easy quick action receipt billing buttons — chỉ hiện khi có quyền "Quyết toán thanh toán" (trước đây hiện cho mọi người, bấm mới bị chặn) */}
+                            {canOn('settlePayment', selectedProject) && (
                             <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-slate-100">
                               <button
                                 type="button"
@@ -3652,6 +3653,7 @@ export default function ProjectKanbanBoard({
                                 Lập Phiếu Quyết Toán
                               </button>
                             </div>
+                            )}
                           </div>
                         );
                       })()}

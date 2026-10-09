@@ -468,7 +468,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                           {label}<ChuaApDung tab="nhom" action={action} />
                         </td>
                         {hrmRoleGroups.map(rg => {
-                          const isChecked = rgMatrix.roleGroupActions[rg.id]?.includes(action) || false;
+                          const isChecked = isAdminRoleGroup(rg.id) ? true : (rgMatrix.roleGroupActions[rg.id]?.includes(action) || false); // nhóm quản trị luôn có mọi quyền → hiển thị tích (khóa) thay vì ô trống gây hiểu nhầm
                           return (
                             <td key={rg.id} className={'p-2 text-center' + (isRoleGroupCellChanged(rgMatrix, savedRgMatrix, rg.id, action) ? CHANGED_CELL : '')} title={isRoleGroupCellChanged(rgMatrix, savedRgMatrix, rg.id, action) ? 'Đã đổi — chưa lưu' : undefined}>
                               <input
@@ -476,6 +476,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
                                 checked={isChecked}
                                 onChange={() => handleToggleRoleGroupAction(rg.id, action)}
                                 disabled={isAdminRoleGroup(rg.id)}
+                                title={isAdminRoleGroup(rg.id) ? 'Quản trị viên / Siêu Admin luôn có toàn quyền — không chỉnh được' : undefined}
                                 className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer mx-auto transition-transform hover:scale-110 disabled:opacity-60 disabled:cursor-not-allowed"
                               />
                             </td>

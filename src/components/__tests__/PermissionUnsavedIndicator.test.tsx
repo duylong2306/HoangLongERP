@@ -138,3 +138,23 @@ describe('Không còn cột Tầm nhìn', () => {
     expect(screen.queryByText(/CHƯA LƯU/)).toBeNull();
   });
 });
+
+// Cột nhóm quản trị trong "Vai trò nhóm HRM": phải hiển thị TÍCH (khóa) vì nhóm quản trị luôn có toàn quyền — trước đây hiện ô trống gây hiểu nhầm.
+describe('Cột nhóm quản trị trong Vai trò nhóm HRM', () => {
+  it('nhóm Siêu Admin (role_superadmin): mọi ô được tích và bị khóa', async () => {
+    vi.resetModules();
+    vi.doMock('../../context', () => ({
+      loadHrmRoleGroups: () => [{ id: 'role_superadmin', name: 'Siêu Admin', memberIds: [] }, { id: 'role_xuong', name: 'Nhân viên xưởng', memberIds: [] }],
+      useNotification: () => ({ addToast: vi.fn() }), isUserInRoleGroup: () => false, isRoleAdmin: () => false, isRoleAccounting: () => false, hasModulePermission: () => true,
+    }));
+    const Modal = (await import('../hr/tabs/ProjectPermissionModal')).default;
+    const { DEFAULT_PROJECT_PERMISSIONS: D } = await import('../hr/hrProjectPermissions');
+    const { container } = render(<Modal isOpen mode="inline" onClose={() => {}} onSave={() => {}} value={D} savedValue={D} onChange={() => {}} hasChanges={false} />);
+    fireEvent.click(screen.getByText(/Vai trò nhóm HRM/));
+    const hang = container.querySelector('tbody input[type=checkbox]') as HTMLInputElement | null;
+    const khoa = [...container.querySelectorAll('tbody input[type=checkbox]:disabled')] as HTMLInputElement[];
+    expect(hang).not.toBeNull();
+    expect(khoa.length).toBeGreaterThan(0);
+    expect(khoa.every(c => c.checked)).toBe(true);
+  });
+});

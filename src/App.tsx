@@ -2094,6 +2094,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
     const lowChurnInterval = setInterval(pollLowChurnTables, POLLED_LOW_CHURN_MS);
 
+    // LÀM TƯƠI QUYỀN NHANH HƠN: các bảng phân quyền (ma trận Quyền Dự Án/Công việc, nhóm vai trò, hồ sơ nhân viên) chỉ được poll 5 phút/lần
+    // (để tiết kiệm Realtime) nên admin đổi hay THU HỒI quyền mà người đang đăng nhập vẫn thao tác được tới 5 phút. Quyền là dữ liệu cần
+    // hiệu lực sớm: poll riêng mỗi 60 giây (4 truy vấn nhỏ/phút/người, rẻ hơn nhiều so với Realtime) và làm tươi ngay khi tab hiện lại.
+    const POLLED_PERMISSIONS_MS = 60 * 1000;
+    const refreshPermissions = () => {
+      fireProjectPermissionsEvent();
+      fireTaskPermissionsEvent();
+      fireHrmRoleGroupsEvent();
+      fireEmployeesEvent();
+    };
+    const permissionsInterval = setInterval(refreshPermissions, POLLED_PERMISSIONS_MS);
+
     // ─── Tab quay lại foreground: kênh WebSocket có thể đã "chết êm" trong lúc
     // tab bị ẩn/máy ngủ (không bắn CHANNEL_ERROR/CLOSED, chỉ lặng lẽ ngừng nhận
     // sự kiện) — biểu hiện đúng như báo cáo: 1 tab để lâu hiển thị Kanban thiếu
@@ -2110,6 +2122,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       }
       fetchTasks();
       fetchProjects();
+      refreshPermissions();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -2118,6 +2131,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       intentionalClose = true;
       flushPendingJobs();
       clearInterval(lowChurnInterval);
+      clearInterval(permissionsInterval);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('hl-supabase-client-ready', onClientReady);
@@ -2346,7 +2360,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         // Chuẩn hoá lại tài khoản admin (mật khẩu cố định "admin") trước khi setState —
         // dữ liệu tới từ event Realtime là bản thô từ Supabase, nếu set thẳng sẽ ghi đè
         // mật khẩu admin bằng giá trị thật trong DB (xem ghi chú tại Tier 2 poll ở trên).
-        setEmployees(ensureAdminAndPasswords(deduped));
+        const moi = ensureAdminAndPasswords(deduped);
+        setEmployees(moi);
+        // Đồng bộ NHÓM VAI TRÒ của chính người đang đăng nhập: quyền theo nhóm (can()) đọc currentUser.roleGroupIds — trước đây chỉ nạp lúc đăng nhập
+        // nên admin chuyển nhóm/gỡ nhóm cho họ mà họ vẫn giữ quyền cũ tới khi đăng nhập lại.
+        setCurrentUser(prev => {
+          if (!prev) return prev;
+          const toi = moi.find(e => e.id === prev.id);
+          if (!toi) return prev;
+          const a = JSON.stringify(prev.roleGroupIds || []), b = JSON.stringify(toi.roleGroupIds || []);
+          return a === b ? prev : { ...prev, roleGroupIds: toi.roleGroupIds };
+        });
       }
     };
     window.addEventListener('hl-task-permissions-updated', handleTaskPermUpdated);
