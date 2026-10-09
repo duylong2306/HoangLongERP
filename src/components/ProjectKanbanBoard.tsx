@@ -318,7 +318,7 @@ export default function ProjectKanbanBoard({
   const canDeleteColumn = canProjectAction('deleteColumn', currentUser, boardProject, undefined, matrix);
   const canConfigureColumnAutomation = canProjectAction('configureColumnAutomation', currentUser, boardProject, undefined, matrix);
 
-  // Thẻ Dự Án — 'Sửa thẻ' / 'Xóa thẻ' / 'Gán thành viên thẻ' / 'Xem tài chính dự án' trong Quyền Dự Án hiện KHÔNG nối vào nút nào ở Kanban
+  // Thẻ Dự Án — 'Sửa thẻ' / 'Xóa thẻ' / 'Gán thành viên thẻ' / 'Xem tài chính dự án' đã nối vào khối tài chính chi tiết dự án (xem bên dưới); các ô khác KHÔNG nối vào nút nào ở Kanban
   // (trước đây có khai báo biến nhưng không dùng); xem projectActionEnforcement.ts — giao diện gắn nhãn "Chưa áp dụng".
   // Nút "Tạo Dự án" trên Kanban = quyền "Tạo dự án mới" (createProject) trong Quyền Dự Án.
   // TRƯỚC ĐÂY dùng 'createCard' ("Tạo thẻ dự án") nên ô tick "Tạo dự án mới" không điều khiển nút này
@@ -3545,6 +3545,9 @@ export default function ProjectKanbanBoard({
                       </div>
                     </div>
 
+                    {/* TÀI CHÍNH DỰ ÁN (giá trị hợp đồng, đã thu/còn lại, hợp đồng thầu phụ): chỉ hiện khi có quyền "Xem tài chính dự án" (viewProjectFinance) —
+                        mặc định Giám đốc / Trưởng dự án / Kế toán. Trước đây mọi người mở được thẻ dự án đều thấy số tiền. */}
+                    {canOn('viewProjectFinance', selectedProject) && (<>
                     {/* Vốn trị hợp đồng VNĐ */}
                     <div className="col-span-2">
                       <span className="text-slate-400 block font-bold text-[10.5px] uppercase tracking-wider mb-2">
@@ -3712,6 +3715,8 @@ export default function ProjectKanbanBoard({
                         );
                       })()}
                     </div>
+
+                    </>)}
 
                     {/* Tùy chọn màu sắc thẻ Dự án */}
                     <div className="col-span-2 bg-slate-900/40 border border-slate-850/60 p-4 rounded-xl space-y-3">

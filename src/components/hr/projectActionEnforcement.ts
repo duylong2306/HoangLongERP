@@ -8,7 +8,7 @@ import type { ProjectAction } from './hrProjectPermissions';
 
 /** Tab "Theo vị trí": hành động được can() kiểm tra trực tiếp ở ProjectKanbanBoard / ProjectManagement / ConnectedToolsModal. */
 export const ENFORCED_BY_POSITION: ReadonlySet<ProjectAction> = new Set<ProjectAction>([
-  'createProject', 'editProjectInfo', 'updateProjectStatus', 'manageProjectDocs', 'deleteProject', 'quickAddCustomer',
+  'createProject', 'editProjectInfo', 'viewProjectFinance', 'updateProjectStatus', 'manageProjectDocs', 'deleteProject', 'quickAddCustomer',
   'createColumn', 'editColumn', 'deleteColumn', 'configureColumnAutomation',
   'moveCard',
   'createTask', 'editTask', 'deleteTask', 'settlePayment',

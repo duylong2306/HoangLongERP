@@ -66,6 +66,7 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 };
 
 // Nhóm hành động theo cây menu (để hiển thị phân cấp)
+// Cũng đã gỡ exportProject (không có chức năng xuất dữ liệu dự án) và viewFinanceLedger (màn Sổ cái chỉ nằm trong ProjectManagement cũ, không còn trên menu).
 // Cũng đã gỡ nhóm BÌNH LUẬN & CHAT (addComment/deleteComment/taskChat): ứng dụng không có ô nhập/xóa bình luận hay khung chat riêng cho công việc (bình luận chỉ do hệ thống tự ghi).
 // ĐÃ GỠ KHỎI GIAO DIỆN (dữ liệu cũ vẫn giữ nguyên trong cấu hình đã lưu, không xóa): arrangeColumn (kéo cột đã do quyền "Sửa cột" lo) và
 // createCard/editCard/deleteCard/assignCardMember (một thẻ chính là một dự án, đã do quyền Tạo/Sửa/Xóa dự án quyết định, không có nút riêng).
@@ -84,7 +85,6 @@ export const actionGroups: {
       { action: 'viewProjectFinance', label: 'Xem tài chính dự án' },
       { action: 'manageProjectDocs', label: 'Quản lý hồ sơ (BG/HĐ/NT/TL)' },
       { action: 'deleteProject', label: 'Xóa dự án' },
-      { action: 'exportProject', label: 'Xuất dữ liệu dự án' },
       { action: 'quickAddCustomer', label: 'Thêm nhanh khách hàng' },
     ],
   },
@@ -147,7 +147,6 @@ export const actionGroups: {
     actions: [
       { action: 'proposeAdvance', label: 'Đề xuất tạm ứng' },
       { action: 'settlePayment', label: 'Quyết toán thanh toán' },
-      { action: 'viewFinanceLedger', label: 'Xem sổ cái thu chi' },
     ],
   },
   {
