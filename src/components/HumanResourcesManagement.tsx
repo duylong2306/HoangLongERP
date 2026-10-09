@@ -4029,7 +4029,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         )}
 
         {/* RIGHT COLUMN: MAIN PANEL VIEWPORT (9 cols) */}
-        <div className={`${(menuDisplayMode === 'tabs' || hideSidebar || activeSubTab === 'hr_data') ? 'lg:col-span-12' : 'lg:col-span-9'} p-6 bg-slate-950 flex flex-col justify-between`} id="hrm_workspace_panel">
+        <div className={`${(menuDisplayMode === 'tabs' || hideSidebar || activeSubTab === 'hr_data') ? 'lg:col-span-12' : 'lg:col-span-9'} p-6 bg-slate-950 flex flex-col justify-between`} id="hrm_workspace_panel" data-save-bar-host>
           <div>
             
             {/* Top Navigation & Mode Switcher (Fully active when menuDisplayMode is 'tabs') */}

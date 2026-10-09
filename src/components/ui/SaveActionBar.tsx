@@ -75,11 +75,12 @@ export default function SaveActionBar({
   // Màu viết thẳng (không phụ thuộc lớp tối/sáng của trang) vì thanh được vẽ ngoài cây giao diện chính
   const btn = 'px-3 py-1.5 text-[11px] font-bold rounded-md cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed border';
 
-  // Căn thanh theo vùng nội dung (<main>) để không che menu bên trái; không có <main> (VD đang ở trong hộp thoại) thì trải hết bề rộng màn hình.
+  // Căn thanh theo khung chứa có đánh dấu data-save-bar-host (VD thẻ "Phân quyền chức năng & Vai trò người dùng" của HRM) để thanh nằm gọn trong thẻ;
+  // không có thì căn theo vùng nội dung (<main>) để không che menu bên trái; không có <main> (VD đang ở trong hộp thoại) thì trải hết bề rộng màn hình.
   const spacerRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ left: number; width: number } | null>(null);
   useLayoutEffect(() => {
-    const host = spacerRef.current?.closest('main') as HTMLElement | null;
+    const host = (spacerRef.current?.closest('[data-save-bar-host]') ?? spacerRef.current?.closest('main')) as HTMLElement | null;
     if (!host) { setBox(null); return; }
     const update = () => { const r = host.getBoundingClientRect(); setBox({ left: r.left, width: r.width }); };
     update();
