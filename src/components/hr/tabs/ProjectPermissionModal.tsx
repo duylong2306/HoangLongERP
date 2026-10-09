@@ -504,6 +504,12 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
 
       </div>
 
+      {/* Ghi chú: thao tác bên trong công việc do tab Quyền Công việc quản lý */}
+      <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-800" data-testid="ghi-chu-quyen-cong-viec">
+        ℹ️ Bảng này chỉ gồm thao tác ở cấp <strong>dự án và bảng Kanban</strong> (tạo/sửa/xóa dự án, cột, công việc, xem tài chính, công cụ hồ sơ liên thông, tệp...).
+        Các thao tác <strong>bên trong một công việc</strong> (nhận việc, hoàn thành, duyệt/từ chối, nhiệm vụ con, ghi nhận vi phạm, đề xuất tạm ứng...) được cấu hình ở tab <strong>Quyền Công việc</strong>.
+      </div>
+
       {/* Ma trận */}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
@@ -518,7 +524,12 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-850">
-            {actionGroups.map(group => (
+            {/* Tab "Theo vị trí" chỉ liệt kê các hành động THỰC SỰ được kiểm tra theo vị trí (ENFORCED_BY_POSITION). Các thao tác bên trong chi tiết công việc/nhiệm vụ
+                (nhận/hoàn thành, duyệt, nhiệm vụ con, vi phạm, tạm ứng...) do tab "Quyền Công việc" quyết định nên KHÔNG hiện ở đây (dữ liệu đã lưu giữ nguyên, không đổi quyền ai). */}
+            {actionGroups
+              .map(g => ({ ...g, actions: g.actions.filter(a => ENFORCED_BY_POSITION.has(a.action)) }))
+              .filter(g => g.actions.length > 0)
+              .map(group => (
               <React.Fragment key={group.group}>
                 <tr className="bg-slate-950/60">
                   <td colSpan={scopeKeys.length + 1} className="p-2 px-3">

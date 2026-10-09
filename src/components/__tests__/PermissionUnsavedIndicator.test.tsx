@@ -113,11 +113,13 @@ describe('Thanh Lưu dạng thanh ngang dưới đáy (kiểu VS Code)', () => {
 
 // Nhãn "Chưa áp dụng": hành động nào ứng dụng chưa kiểm tra ở đâu thì phải được báo rõ ở CẢ 2 tab (tick cũng không đổi gì).
 describe('Nhãn "Chưa áp dụng" ở Quyền Dự Án', () => {
-  it('tab Theo vị trí: có nhãn ở hành động chưa dùng (VD Ghi nhận công tác phí), không có ở hành động đang dùng (VD Tạo dự án mới)', () => {
+  it('tab Theo vị trí: chỉ liệt kê hành động đang dùng (không nhãn), thao tác trong công việc bị ẩn và có ghi chú trỏ sang Quyền Công việc', () => {
     renderModal();
     const dong = (ten: string) => screen.getByText(ten).closest('tr')!;
-    expect(dong('Ghi nhận công tác phí').textContent).toContain('Chưa áp dụng');
     expect(dong('Tạo dự án mới').textContent).not.toContain('Chưa áp dụng');
+    expect(screen.queryByText('Ghi nhận công tác phí')).toBeNull();
+    expect(screen.queryByText('Duyệt kết quả')).toBeNull();
+    expect(screen.getByTestId('ghi-chu-quyen-cong-viec').textContent).toContain('Quyền Công việc');
   });
   it('tab Vai trò nhóm HRM: Duyệt kết quả CÓ tác dụng (đọc theo nhóm ở chi tiết công việc), Ghi nhận công tác phí thì chưa', () => {
     renderModal();
