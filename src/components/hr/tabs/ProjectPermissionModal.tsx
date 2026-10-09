@@ -70,54 +70,95 @@ const ChuaApDung: React.FC<{ tab: 'vitri' | 'nhom'; action: ProjectAction }> = (
 // Cũng đã gỡ nhóm BÌNH LUẬN & CHAT (addComment/deleteComment/taskChat): ứng dụng không có ô nhập/xóa bình luận hay khung chat riêng cho công việc (bình luận chỉ do hệ thống tự ghi).
 // ĐÃ GỠ KHỎI GIAO DIỆN (dữ liệu cũ vẫn giữ nguyên trong cấu hình đã lưu, không xóa): arrangeColumn (kéo cột đã do quyền "Sửa cột" lo) và
 // createCard/editCard/deleteCard/assignCardMember (một thẻ chính là một dự án, đã do quyền Tạo/Sửa/Xóa dự án quyết định, không có nút riêng).
+// SẮP NHÓM THEO CHỨC NĂNG THẬT (xem docs/de-xuat-nhom-phan-quyen-du-an-cong-viec-nhiem-vu.md): 6 nhóm đầu là thao tác cấp DỰ ÁN / KANBAN (tab "Theo vị trí" chỉ hiện các
+// hành động này); các nhóm sau là thao tác BÊN TRONG công việc / nhiệm vụ — chỉ hiện ở tab "Vai trò nhóm HRM" (ở tab "Theo vị trí" do tab Quyền Công việc quyết định).
+// Chỉ đổi cách nhóm/tên nhóm hiển thị, KHÔNG đổi khóa hành động nên dữ liệu đã lưu không ảnh hưởng.
 export const actionGroups: {
   group: string;
   icon: React.ReactNode;
   actions: { action: ProjectAction; label: string }[];
 }[] = [
   {
-    group: '🏗️ CẤP DỰ ÁN',
+    group: '🏗️ DỰ ÁN',
     icon: <FolderOpen className="w-4 h-4" />,
     actions: [
       { action: 'createProject', label: 'Tạo dự án mới' },
-      { action: 'editProjectInfo', label: 'Sửa thông tin dự án' },
+      { action: 'editProjectInfo', label: 'Sửa thông tin dự án (gồm đổi Trưởng dự án, đồng bộ nhóm chat)' },
       { action: 'updateProjectStatus', label: 'Cập nhật trạng thái / % tiến độ' },
-      { action: 'viewProjectFinance', label: 'Xem tài chính dự án' },
-      { action: 'manageProjectDocs', label: 'Quản lý hồ sơ (BG/HĐ/NT/TL)' },
       { action: 'deleteProject', label: 'Xóa dự án' },
       { action: 'quickAddCustomer', label: 'Thêm nhanh khách hàng' },
     ],
   },
   {
-    group: '📋 CỘT KANBAN',
+    group: '📋 BẢNG KANBAN',
     icon: <Columns className="w-4 h-4" />,
     actions: [
       { action: 'createColumn', label: 'Tạo cột mới' },
       { action: 'editColumn', label: 'Sửa cột' },
       { action: 'deleteColumn', label: 'Xóa cột' },
       { action: 'configureColumnAutomation', label: 'Cấu hình tự động hóa cột' },
-    ],
-  },
-  {
-    group: '🃏 THẺ DỰ ÁN',
-    icon: <LayoutGrid className="w-4 h-4" />,
-    actions: [
       { action: 'moveCard', label: 'Kéo thẻ qua cột' },
     ],
   },
   {
-    group: '✅ CÔNG VIỆC',
+    group: '💰 TÀI CHÍNH DỰ ÁN',
+    icon: <DollarSign className="w-4 h-4" />,
+    actions: [
+      { action: 'viewProjectFinance', label: 'Xem tài chính dự án' },
+      { action: 'settlePayment', label: 'Lập phiếu tạm ứng / quyết toán thu' },
+    ],
+  },
+  {
+    group: '📁 HỒ SƠ DỰ ÁN',
+    icon: <FileText className="w-4 h-4" />,
+    actions: [
+      { action: 'manageProjectDocs', label: 'Quản lý hồ sơ (BG/HĐ/NT/TL)' },
+    ],
+  },
+  {
+    group: '✅ CÔNG VIỆC TRÊN KANBAN',
     icon: <CheckSquare className="w-4 h-4" />,
     actions: [
-      { action: 'viewTask', label: 'Xem danh sách công việc' },
       { action: 'createTask', label: 'Tạo công việc' },
       { action: 'editTask', label: 'Sửa công việc' },
       { action: 'deleteTask', label: 'Xóa công việc' },
+    ],
+  },
+  {
+    group: '🔗 CÔNG CỤ LIÊN THÔNG',
+    icon: <LayoutGrid className="w-4 h-4" />,
+    actions: [
+      { action: 'openToolApproval', label: 'Công cụ Phê duyệt' },
+      { action: 'openToolCost', label: 'Công cụ Chi phí' },
+      { action: 'openToolMaterial', label: 'Công cụ Vật tư' },
+      { action: 'openToolQuotation', label: 'Công cụ Báo giá' },
+      { action: 'openToolContract', label: 'Công cụ Hợp đồng' },
+      { action: 'openToolAcceptance', label: 'Công cụ Nghiệm thu' },
+      { action: 'openToolLiquidation', label: 'Công cụ Thanh lý' },
+      { action: 'manageDocs', label: 'Quản lý hồ sơ liên thông' },
+    ],
+  },
+  // ── Từ đây: thao tác bên trong công việc / nhiệm vụ (tab "Vai trò nhóm HRM"; tab "Theo vị trí" do Quyền Công việc quyết định) ──
+  {
+    group: '✅ VÒNG ĐỜI CÔNG VIỆC',
+    icon: <CheckSquare className="w-4 h-4" />,
+    actions: [
+      { action: 'viewTask', label: 'Xem danh sách công việc' },
       { action: 'assignTask', label: 'Giao việc' },
       { action: 'receiveTask', label: 'Nhận việc' },
       { action: 'completeTask', label: 'Hoàn thành' },
       { action: 'approveResult', label: 'Duyệt kết quả' },
       { action: 'rejectResult', label: 'Từ chối duyệt' },
+    ],
+  },
+  {
+    group: '👥 NHÂN SỰ & KỶ LUẬT CÔNG VIỆC',
+    icon: <Users className="w-4 h-4" />,
+    actions: [
+      { action: 'assignMembers', label: 'Phân công người tham gia' },
+      { action: 'recordViolation', label: 'Ghi nhận vi phạm' },
+      { action: 'issuePenalty', label: 'Lập phiếu phạt' },
+      { action: 'proposeAdvance', label: 'Đề xuất tạm ứng' },
     ],
   },
   {
@@ -132,51 +173,9 @@ export const actionGroups: {
       { action: 'assignSubWorker', label: 'Gán thợ phụ' },
       { action: 'completeMission', label: 'Xác nhận hoàn thành' },
       { action: 'recordTravelAllowance', label: 'Ghi nhận công tác phí' },
-    ],
-  },
-  {
-    group: '👥 PHÂN CÔNG & THAM GIA',
-    icon: <Users className="w-4 h-4" />,
-    actions: [
-      { action: 'assignMembers', label: 'Phân công người tham gia' },
-    ],
-  },
-  {
-    group: '💰 TÀI CHÍNH',
-    icon: <DollarSign className="w-4 h-4" />,
-    actions: [
-      { action: 'proposeAdvance', label: 'Đề xuất tạm ứng' },
-      { action: 'settlePayment', label: 'Quyết toán thanh toán' },
-    ],
-  },
-  {
-    group: '🚨 KỶ LUẬT',
-    icon: <AlertTriangle className="w-4 h-4" />,
-    actions: [
-      { action: 'recordViolation', label: 'Ghi nhận vi phạm' },
-      { action: 'issuePenalty', label: 'Lập phiếu phạt' },
-    ],
-  },
-  {
-    group: '🔗 HỒ SƠ LIÊN THÔNG',
-    icon: <FileText className="w-4 h-4" />,
-    actions: [
-      { action: 'openToolApproval', label: 'Công cụ Phê duyệt' },
-      { action: 'openToolCost', label: 'Công cụ Chi phí' },
-      { action: 'openToolMaterial', label: 'Công cụ Vật tư' },
-      { action: 'openToolQuotation', label: 'Công cụ Báo giá' },
-      { action: 'openToolContract', label: 'Công cụ Hợp đồng' },
-      { action: 'openToolAcceptance', label: 'Công cụ Nghiệm thu' },
-      { action: 'openToolLiquidation', label: 'Công cụ Thanh lý' },
-      { action: 'manageDocs', label: 'Quản lý hồ sơ liên thông' },
-    ],
-  },
-  {
-    group: '📎 TỆP ĐÍNH KÈM',
-    icon: <Paperclip className="w-4 h-4" />,
-    actions: [
-      { action: 'uploadAttachment', label: 'Tải lên tệp' },
-      { action: 'deleteAttachment', label: 'Xóa tệp' },
+      // Tệp đính kèm = tệp BÁO CÁO của nhiệm vụ nên xếp vào nhóm Nhiệm vụ (trước đây là nhóm riêng)
+      { action: 'uploadAttachment', label: 'Tải lên tệp báo cáo' },
+      { action: 'deleteAttachment', label: 'Xóa tệp báo cáo' },
     ],
   },
 ];
