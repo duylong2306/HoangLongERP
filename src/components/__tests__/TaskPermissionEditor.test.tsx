@@ -45,9 +45,9 @@ describe('Tab Quyền Công việc — bảng chỉnh sửa', () => {
       for (const cot of ['Giám Đốc', 'Trưởng Dự Án', 'Người Giao Việc', 'Kế Toán']) expect(o(ten, cot).disabled).toBe(true);
     }
   });
-  it('mọi thao tác trong ma trận đều có dòng (15 hành động, không thiếu hành động nào)', () => {
+  it('mọi thao tác trong ma trận đều có dòng (trừ ô Xóa công việc đã gỡ khỏi giao diện vì trùng Quyền Dự Án)', () => {
     render(<Harness />);
-    const dong = Object.keys(DEFAULT_TASK_PERMISSIONS.actions).length;
+    const dong = Object.keys(DEFAULT_TASK_PERMISSIONS.actions).filter(a => a !== 'deleteTask').length;
     const sl = document.querySelectorAll('tbody tr:not(.bg-slate-950\\/60)').length;
     expect(sl).toBe(dong);
   });
@@ -68,7 +68,8 @@ describe('Nhãn "Chưa áp dụng" ở Quyền Công việc', () => {
   it('chỉ các thao tác chưa nối vào nút nào có nhãn', () => {
     render(<Harness />);
     const dong = (ten: string) => screen.getByText(ten).closest('tr')!.textContent || '';
-    for (const ten of ['Lập phiếu phạt', 'Quyết toán thanh toán', 'Quản lý hồ sơ liên thông', 'Xóa công việc', 'Gán thợ phụ cho nhiệm vụ']) expect(dong(ten)).toContain('Chưa áp dụng');
+    for (const ten of ['Lập phiếu phạt', 'Quyết toán thanh toán', 'Quản lý hồ sơ liên thông', 'Gán thợ phụ cho nhiệm vụ']) expect(dong(ten)).toContain('Chưa áp dụng');
+    expect(screen.queryByText('Xóa công việc')).toBeNull(); // đã gỡ khỏi bảng
     for (const ten of ['Duyệt kết quả', 'Nhận việc', 'Quản lý nhiệm vụ con (tạo/sửa/xóa)', 'Ghi nhận vi phạm']) expect(dong(ten)).not.toContain('Chưa áp dụng');
   });
 });

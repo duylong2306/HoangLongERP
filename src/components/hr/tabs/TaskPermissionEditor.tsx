@@ -33,7 +33,8 @@ const GROUPS: { group: string; icon: React.ReactNode; actions: TaskAction[] }[] 
   { group: 'PHÂN CÔNG', icon: <Users className="w-3.5 h-3.5" />, actions: ['assignMembers', 'assignSubWorkers'] },
   { group: 'KỶ LUẬT & HIỆU SUẤT', icon: <AlertTriangle className="w-3.5 h-3.5" />, actions: ['recordViolation', 'issuePenalty'] },
   { group: 'TÀI CHÍNH', icon: <DollarSign className="w-3.5 h-3.5" />, actions: ['proposeAdvance', 'settlePayment'] },
-  { group: 'HỒ SƠ & QUẢN LÝ', icon: <FileText className="w-3.5 h-3.5" />, actions: ['manageDocs', 'editTask', 'deleteTask', 'manageSubTask'] },
+  // Đã gỡ ô 'Xóa công việc' (deleteTask) khỏi giao diện: nút xóa công việc ở Kanban chỉ do ô 'Xóa công việc' của Quyền Dự Án quyết định, ô này trùng và không điều khiển nút nào (dữ liệu đã lưu giữ nguyên).
+  { group: 'HỒ SƠ & QUẢN LÝ', icon: <FileText className="w-3.5 h-3.5" />, actions: ['manageDocs', 'editTask', 'manageSubTask'] },
 ];
 
 // Các vai trò chỉnh được (bỏ "Không liên quan": cấp quyền cho người chẳng liên quan gì tới công việc dễ lộ dữ liệu)
@@ -50,7 +51,7 @@ const COT: { key: RoleScope; label: string; desc: string }[] = [
  * Thao tác hiện CHƯA nối vào nút nào trong cửa sổ chi tiết công việc (khai báo quyền nhưng không dùng) — tick hay bỏ tick đều chưa đổi gì.
  * Xóa công việc ở Kanban dùng ma trận Quyền Dự Án; quyết toán/hồ sơ dùng Quyền Dự Án; "Gán thợ phụ" nay gộp vào "Quản lý nhiệm vụ con".
  */
-export const TASK_ACTIONS_NOT_APPLIED: ReadonlySet<TaskAction> = new Set<TaskAction>(['issuePenalty', 'settlePayment', 'manageDocs', 'deleteTask', 'assignSubWorkers']);
+export const TASK_ACTIONS_NOT_APPLIED: ReadonlySet<TaskAction> = new Set<TaskAction>(['issuePenalty', 'settlePayment', 'manageDocs', 'assignSubWorkers']);
 
 /** Nhận việc / Hoàn thành chỉ dành cho người được giao: ứng dụng chỉ đọc 2 vai trò này, các ô khác không có tác dụng. */
 const CHI_NGUOI_DUOC_GIAO: TaskAction[] = ['receiveTask', 'completeTask'];
