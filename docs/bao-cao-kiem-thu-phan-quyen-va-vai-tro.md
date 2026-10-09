@@ -140,3 +140,43 @@ Tài khoản được tạo bằng nút "Tạo tài khoản nhanh" và đăng nh
 ### 8.3 Nhỏ
 - "Tạo tài khoản nhanh" đặt email cố định đuôi `@hoanglonglamdong.vn` cho mọi doanh nghiệp và đặt lại `role_group_ids` về rỗng; mật khẩu mặc định `123`.
 - Thợ A thấy nút "Tạo Việc Con", "Lập Phiếu Tạm Ứng/Quyết Toán" dù không có quyền (bấm mới bị chặn) — chỉ là giao diện hiện nút thừa.
+
+---
+
+# VÒNG 3 — Đánh giá nút chức năng Dự án / Công việc / Nhiệm vụ so với Quyền Dự Án và Quyền Công việc
+
+Thử trên doanh nghiệp TEST với 5 tài khoản thật (Giám đốc, Kế toán, Trưởng DA, Thợ A, Nhân viên chưa nhóm); dựng thêm 3 nhiệm vụ test (NV1 trong CV1; NV2, NV3 trong CV2) để thử cấp nhiệm vụ. Phương pháp: mở từng màn, liệt kê nút hiển thị, bấm thử để xem có bị chặn không, đối chiếu mã nguồn.
+
+## 9. Cấp DỰ ÁN (Kanban) — hợp lý, có 3 điểm lệch nhỏ
+| Nút / thao tác | GĐ | KT | Trưởng DA | Thợ A | Đánh giá |
+|---|---|---|---|---|---|
+| Tạo Dự án | ✅ | ✅ (theo nhóm) | ✅ (theo nhóm) | ⛔ | Đúng |
+| Thêm cột / Sửa cột / Xóa cột / Tự động hóa cột | ✅ | ⛔ | ✅ (Trưởng DA) | ⛔ | Đúng khi bấm; **nút luôn hiện cho mọi người** (chỉ chặn lúc bấm) |
+| Kéo thẻ | ✅ | ⛔ | ✅ | ✅ (mặc định cho "Thành viên") | Đúng ma trận; nhưng nên xem lại có muốn thợ tự kéo thẻ |
+| Sửa thông tin / Xóa dự án | ✅ / ✅ | ✅ / ẩn | ✅ / ✅ | ẩn / ẩn | Đúng (nút ẩn khi không có quyền) |
+| Lập phiếu tạm ứng / quyết toán | ✅ | ✅ | ✅ | ẩn | Đúng (đã ẩn ở vòng trước) |
+
+**Lệch 1:** 4 ô quyền **Sửa thẻ dự án, Xóa thẻ dự án, Gán thành viên thẻ, Xem tài chính dự án** vẫn được tính "có tác dụng" nhưng thực tế chỉ khai báo biến rồi không dùng ở đâu trong giao diện Kanban (`canEdit`, `canDelete`, `canAssignCardMember`, `canView` có 1 lần khai báo, 0 lần dùng). Nhãn "Chưa áp dụng" đang **thiếu** ở 4 ô này, và test canh lệch chỉ đếm chỗ khai báo nên không bắt được. **Lệch 2:** "Sắp xếp cột" không có nơi dùng (đã gắn nhãn). **Lệch 3:** nút điều khiển cột hiện cho mọi người dù không có quyền.
+
+## 10. Cấp CÔNG VIỆC — chạy đúng nhưng có 2 hệ quyền song song
+- **Thấy công việc nào:** đúng. Thợ A chỉ thấy CV1 (việc mình phụ trách), thấy CV2 khi là phụ trách chính nhiệm vụ trong CV2; Trưởng DA và Kế toán thấy cả hai; nhân viên chưa nhóm không thấy gì.
+- **Nhận việc:** chỉ Thợ A (phụ trách CV1) có nút; Giám đốc/Trưởng DA/Kế toán không có nút. Đúng thiết kế (admin không nhận hộ việc).
+- **Sửa/Xóa công việc ở Kanban (menu ⋮)** dùng ma trận **Quyền Dự Án**; còn **bên trong cửa sổ chi tiết công việc** lại dùng ma trận **Quyền Công việc**. Hai ma trận có mặc định khác nhau (VD xóa công việc: Quyền Dự Án chỉ Giám đốc + Trưởng DA; Quyền Công việc thêm cả Người giao việc) → cùng một việc nhưng kết quả phụ thuộc vào cửa vào.
+- **Cửa sổ chi tiết bị khóa chỉ-xem theo danh tính cứng** (`isReadOnlyTask` ở ProjectKanbanBoard): chỉ Giám đốc (theo trường `role`), người phụ trách, người giao việc hoặc Trưởng DA mới thao tác được; **mọi vai trò khác (kể cả Kế toán dù ma trận cho phép quyết toán/hồ sơ) luôn chỉ xem**. Nghĩa là các ô của cột "Kế Toán" trong Quyền Công việc không có tác dụng.
+- **Ô Quyền Công việc không có tác dụng trong cửa sổ chi tiết:** Lập phiếu phạt (`issuePenalty`), Quyết toán (`settlePayment`), Quản lý hồ sơ (`manageDocs`), Xóa công việc (`deleteTask`) — được tính sẵn nhưng không nối vào nút nào.
+
+## 11. Cấp NHIỆM VỤ — chưa hợp lý, có lỗi phân quyền cần sửa
+*Đã kiểm chứng:*
+1. **Người phụ trách chính của MỘT nhiệm vụ sửa/xóa/hoàn thành được nhiệm vụ của NGƯỜI KHÁC trong cùng công việc.** Thợ A (phụ trách chính NV2, không phải phụ trách CV2) thấy nút *Sửa tên/hạn*, *Xóa nhiệm vụ này*, *Thêm thợ*, *XÁC NHẬN HOÀN THÀNH* trên **NV3 của Thợ B**. Nguyên nhân: quyền cấp nhiệm vụ tính bằng `canReceive || canAssignMembers || canManageSubTask || là-phụ-trách-chính-của-nhiệm-vụ-đó` — hai điều kiện đầu là quyền cấp CÔNG VIỆC nên có là áp cho MỌI nhiệm vụ trong công việc.
+2. **Phụ trách chính nhiệm vụ lại có khối "Khởi tạo nhiệm vụ" (tạo nhiệm vụ mới), "Thêm đầu mục", "Gửi vi phạm"** dù ma trận "Quản lý nhiệm vụ con" (`manageSubTask`) không cấp cho vai trò này: khối tạo nhiệm vụ hiển thị khi có `assignMembers` **hoặc** `assignSubWorkers` **hoặc** `manageSubTask`, mà mặc định `assignMembers` (thêm/xóa người tham gia) có cả "Phụ trách nhiệm vụ" → quyền thêm người bị hiểu thành quyền tạo/xóa nhiệm vụ.
+3. **Nút Import (nhập Excel nhiệm vụ) và Export hiện cho mọi người, kể cả người chỉ-xem (Kế toán); hàm Import không kiểm tra quyền.** (xác nhận qua mã nguồn và qua việc nút hiện ở tài khoản chỉ-xem; chưa tải thử một tệp thật.)
+4. Người chỉ-xem (Kế toán) thấy nút "XÁC NHẬN HOÀN THÀNH" ở bảng nhiệm vụ nhưng bị khóa (đúng, chỉ là hiển thị thừa).
+5. Giám đốc có "XÁC NHẬN HOÀN THÀNH" nhiệm vụ của người khác, trong khi "Nhận việc/Hoàn thành công việc" cố ý chỉ cho người được giao — hai quy tắc trái nhau.
+
+## 12. Đề xuất sửa (theo ưu tiên)
+1. Quyền cấp nhiệm vụ phải xét **theo từng nhiệm vụ**: người phụ trách chính/thành viên của nhiệm vụ đó + (Giám đốc, Trưởng DA, Người giao việc, Phụ trách CV) — không để phụ trách một nhiệm vụ làm được trên nhiệm vụ khác.
+2. Tách rõ `assignMembers` (thêm/bớt người) khỏi `manageSubTask` (tạo/sửa/xóa nhiệm vụ): khối "Khởi tạo nhiệm vụ", sửa, xóa chỉ theo `manageSubTask`.
+3. Chặn Import theo quyền quản lý nhiệm vụ (và ẩn nút cho người chỉ-xem).
+4. Thống nhất sửa/xóa công việc về **một** ma trận; thay `isReadOnlyTask` bằng kiểm tra theo ma trận (để cột Kế toán có tác dụng) hoặc ghi rõ giới hạn.
+5. Gắn nhãn "Chưa áp dụng" cho 4 ô cấp thẻ nêu ở mục 9 và 4 ô công việc ở mục 10; làm test canh lệch đếm chỗ DÙNG thay vì chỗ khai báo.
+6. Ẩn hoặc làm mờ nút điều khiển cột khi không có quyền.
