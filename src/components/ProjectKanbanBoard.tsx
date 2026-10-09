@@ -232,6 +232,11 @@ export default function ProjectKanbanBoard({
   const [isSyncingChatMembers, setIsSyncingChatMembers] = useState(false);
   const handleSyncProjectMembersToChat = async () => {
     if (!selectedProject?.id || isSyncingChatMembers) return;
+    // Đồng bộ nhân sự vào nhóm chat thay đổi thành viên nhóm chat dự án → cần quyền "Sửa thông tin dự án" (trước đây không kiểm soát).
+    if (!canOn('editProjectInfo', selectedProject)) {
+      addToast({ title: '⛔ Không có quyền', message: 'Bạn không có quyền đồng bộ nhân sự vào nhóm chat (cần quyền "Sửa thông tin dự án").', type: 'error' });
+      return;
+    }
     setIsSyncingChatMembers(true);
     try {
       const memberIds = new Set<string>();
@@ -3827,10 +3832,16 @@ export default function ProjectKanbanBoard({
                                   {/* Transparent select over avatar for easy click trigger */}
                                   <select
                                     value={selectedProject.pmId || ''}
+                                    // Đổi Trưởng dự án = quyền "Sửa thông tin dự án" (editProjectInfo); trước đây ai mở được chi tiết dự án cũng đổi được.
+                                    disabled={!canOn('editProjectInfo', selectedProject)}
                                     onChange={(e) => {
+                                      if (!canOn('editProjectInfo', selectedProject)) {
+                                        addToast({ title: '⛔ Không có quyền', message: 'Bạn không có quyền đổi Trưởng dự án (cần quyền "Sửa thông tin dự án").', type: 'error' });
+                                        return;
+                                      }
                                       updateProjectWithRule(selectedProject.id, { pmId: e.target.value });
                                     }}
-                                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
+                                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10 disabled:cursor-not-allowed"
                                     title="Nhấp vào avatar để thay đổi Trưởng Dự Án chuyên trách"
                                   >
                                     <option value="" disabled className="bg-slate-950 text-slate-400">-- Thay đổi Trưởng Dự Án --</option>
@@ -3847,7 +3858,12 @@ export default function ProjectKanbanBoard({
                                   <div className="relative">
                                     <select
                                       value={selectedProject.pmId || ''}
+                                      disabled={!canOn('editProjectInfo', selectedProject)}
                                       onChange={(e) => {
+                                        if (!canOn('editProjectInfo', selectedProject)) {
+                                          addToast({ title: '⛔ Không có quyền', message: 'Bạn không có quyền đổi Trưởng dự án (cần quyền "Sửa thông tin dự án").', type: 'error' });
+                                          return;
+                                        }
                                         updateProjectWithRule(selectedProject.id, { pmId: e.target.value });
                                       }}
                                       className="bg-transparent text-slate-200 font-bold text-xs border-none outline-none focus:ring-0 p-0 hover:text-emerald-400 transition-colors cursor-pointer w-full"
@@ -3873,10 +3889,10 @@ export default function ProjectKanbanBoard({
                         <button
                           type="button"
                           onClick={handleSyncProjectMembersToChat}
-                          disabled={isSyncingChatMembers}
+                          disabled={isSyncingChatMembers || !canOn('editProjectInfo', selectedProject)}
                           title="Thêm toàn bộ nhân sự trong công việc và nhiệm vụ của dự án vào nhóm chat (mỗi người 1 lần)"
                           className={`bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative transition-colors text-left ${
-                            isSyncingChatMembers
+                            (isSyncingChatMembers || !canOn('editProjectInfo', selectedProject))
                               ? 'opacity-60 cursor-not-allowed'
                               : 'hover:border-sky-500/40 hover:bg-slate-900 cursor-pointer group'
                           }`}
