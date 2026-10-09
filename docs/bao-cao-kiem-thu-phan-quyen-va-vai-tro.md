@@ -218,3 +218,53 @@ Thực hiện trên doanh nghiệp TEST: bật các tính năng trên công vi�
 
 ## 17. Dọn dữ liệu thử (còn lại trong TEST)
 Cờ tính năng trên task_test_1/2 cần trả về `null`, trạng thái CV1/CV2 trả về `todo`; nhiệm vụ mission_test_1/2/3 là dữ liệu thử còn lại.
+
+---
+
+# VÒNG 5 — Kiểm thử lại sau đợt chỉnh Quyền Dự Án / Quyền Công việc (09/10/2026)
+
+Thực hiện trên doanh nghiệp TEST, bản deploy `dad6d2f`, dự án `TEST Dự án phân quyền`, 6 tab đăng nhập sẵn: **Long Nguyen (quản trị), TEST Giám đốc, TEST Kế toán, TEST Trưởng dự án, TEST Thợ A (phụ trách CV), TEST Nhân viên chưa vào nhóm**. Công việc: CV1 (giao: Trưởng dự án, phụ trách: Thợ A; NV1: Thợ A), CV2 (giao: Giám đốc, phụ trách: Thợ B; NV2: Thợ A, NV3: Thợ B). Bật tạm trạng thái "Đang làm" + các công cụ để nút hiện đủ, kiểm xong đã trả về ban đầu. Chỉ quan sát nút/ô khóa và bấm các nút bị chặn (không tạo/xóa dữ liệu).
+
+## 14. Kết quả theo vai trò — cấp DỰ ÁN
+| Chức năng | Quản trị | Giám đốc | Trưởng DA | Kế toán | Thợ A | Chưa vào nhóm |
+|---|---|---|---|---|---|---|
+| Sửa thông tin dự án | ✓ | ✓ | ✓ | ✓ (*) | ẩn | ẩn |
+| Đổi Trưởng dự án | mở | mở | mở | mở (*) | **khóa** | **khóa** |
+| Đồng bộ nhân sự vào nhóm chat | mở | mở | mở | mở (*) | **khóa** | **khóa** |
+| Khối tài chính (giá trị HĐ, đã thu, thầu phụ) | thấy | thấy | thấy | thấy | **ẩn** | **ẩn** |
+| Nút "Lập Phiếu Tạm Ứng/Quyết Toán" | ✓ | ✓ | ✓ | ✓ | **ẩn** | **ẩn** |
+| Xóa dự án | ✓ | ✓ | ✓ | ẩn | ẩn | ẩn |
+| Xóa công việc con (menu ⋮) | ✓ | ✓ | ✓ | ẩn | ẩn | — |
+(*) Kế toán được quyền này vì nhóm Kế toán mặc định có "Sửa thông tin dự án".
+
+## 15. Kết quả — cấp CÔNG VIỆC
+- **Công cụ liên thông** (cửa sổ công việc và menu LT trên thẻ Kanban): khóa mờ kèm "(Không có quyền)" đúng theo ma trận — Thợ A: Phê duyệt mở / Chi phí khóa / Vật tư mở trên CV1; trên CV2 (chỉ là phụ trách một nhiệm vụ) Phê duyệt khóa, Chi phí khóa, Vật tư mở. Kế toán: Chi phí mở, Phê duyệt + Vật tư khóa.
+- **Khối "Ghi nhận vi phạm"**: Quản trị / Giám đốc / Trưởng DA / Thợ A có; **Kế toán không**. Người chưa vào nhóm **không thấy công việc nào** của dự án.
+- **Khối tạo nhiệm vụ + Import**: chỉ Quản trị / Giám đốc / Trưởng DA / (Phụ trách CV = Thợ A trên CV1). Kế toán và Thợ A trên CV2 (không phải phụ trách CV) **không có**.
+
+## 16. Kết quả — cấp NHIỆM VỤ (điểm mấu chốt của đợt sửa)
+| Người | Nhiệm vụ | Nút Sửa / Xóa / Gỡ người | Mở popup: gán, thêm thợ, file báo cáo, công tác phí |
+|---|---|---|---|
+| Thợ A | NV2 (của mình, trong CV2) | có | có |
+| Thợ A | NV3 (của Thợ B, cùng CV2) | **không** | **không** (ô báo cáo khóa, không có File báo cáo / CTP / Thêm thợ) |
+| Kế toán | NV2, NV3 | không | không |
+| Trưởng DA / Giám đốc | cả hai | có | có |
+Đây là lỗi nghiêm trọng của vòng 3 ("phụ trách chính nhiệm vụ này sửa được nhiệm vụ của người khác") — **đã hết**.
+
+## 17. So với báo cáo lần trước
+| Vấn đề lần trước | Nay |
+|---|---|
+| Nhân viên chưa vào nhóm vào được Phân quyền/Tài khoản/Nhân sự | **Đã hết**: không thấy menu nào của Hệ thống, Kho; không thấy công việc |
+| Quyền nhiệm vụ lẫn sang nhiệm vụ của người khác | **Đã hết** (xem mục 16) |
+| Thợ A thấy nút thừa "Lập Phiếu Tạm Ứng/Quyết Toán" | **Đã ẩn** |
+| Công cụ liên thông chỉ chặn lúc lưu | **Khóa ngay từ nút** |
+| Ai cũng đổi được Trưởng dự án, đồng bộ nhóm chat | **Đã khóa theo "Sửa thông tin dự án"** |
+| Số tiền hợp đồng ai mở thẻ cũng thấy | **Chỉ vai trò có "Xem tài chính dự án"** |
+| Bảng phân quyền đầy ô "Chưa áp dụng", ô trùng giữa hai tab | **0 nhãn** ở cả 3 tab; ô thừa đã gỡ, nhóm theo chức năng thật |
+| Quyền thay đổi áp dụng chậm | Giữ ~1 phút (đã sửa từ trước) |
+
+## 18. Vấn đề còn lại phát hiện trong vòng này
+1. **(Trung bình) Người chưa vào nhóm vẫn mở được form "Tạo thẻ việc con"** và **được phép lưu**: ở cấp dự án/Kanban mọi nhân viên được tính là vai "Thành viên" (`getProjectRoleScopes` khi không có công việc cụ thể), và ma trận mặc định cho "Thành viên" tạo công việc (`createTask`) / kéo thẻ (`moveCard`). Hệ quả: nhân viên chưa thuộc nhóm nào cũng tạo/kéo được thẻ ở bất kỳ dự án nào họ nhìn thấy. Đề xuất: ở cấp dự án chỉ tính "Thành viên" cho người thực sự tham gia dự án hoặc thuộc nhóm có quyền xem phân hệ dự án.
+2. **(Thấp) Nút hiện nhưng bị chặn khi bấm**: Tạo Dự án, Thêm Cột, Tự động hóa, Khôi phục Mặc định (người không có quyền thấy nút, bấm ra thông báo "Không có quyền"); "Sửa công việc" ở menu ⋮ của công việc cũng vậy. Hành vi an toàn nhưng gây khó hiểu — nên ẩn/làm mờ như nút công cụ liên thông.
+3. **(Cần quyết định) Kế toán đổi được Trưởng dự án và đồng bộ nhóm chat**, vì nhóm Kế toán mặc định có "Sửa thông tin dự án". Nếu không muốn, bỏ ô này khỏi nhóm Kế toán trong Quyền Dự Án → Vai trò nhóm HRM.
+4. Chưa kiểm: Thợ B (không có tab đăng nhập), nút duyệt/từ chối khi công việc ở trạng thái "Chờ duyệt", nút "Nhận Việc", thao tác ghi dữ liệu thật (chỉ quan sát giao diện).
