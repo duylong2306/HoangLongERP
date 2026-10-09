@@ -87,7 +87,8 @@ const PairBars: React.FC<{ data: { label: string; a: number; b: number }[]; colo
   const W = 560, H = 140, padB = 18, bw = Math.floor((W / data.length) * 0.32);
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[420px]" role="img" aria-label={`${titleA} và ${titleB} theo ngày`}>
+      <p className="text-[10px] text-slate-400 mb-0.5">Cột cao nhất: {money ? fmtShort(max) : max}</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[420px] max-h-44" role="img" aria-label={`${titleA} và ${titleB} theo ngày`}>
         {data.map((d, i) => {
           const x = (i + 0.5) * (W / data.length);
           const ha = Math.round(((H - padB - 6) * d.a) / max), hb = Math.round(((H - padB - 6) * d.b) / max);
@@ -186,8 +187,11 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
     [rows, buckets, att, pendingPays.length, pendingPayAmount, now]);
 
   // Danh sách việc theo tab đang chọn (tối đa 8 dòng cho gọn, có nút xem tất cả)
-  const taskList: (Task & { daysLate?: number })[] = taskTab === 'overdue' ? buckets.overdue : taskTab === 'todo' ? buckets.todo
-    : [...buckets.dueToday, ...buckets.doing.filter(t => !buckets.dueToday.some(x => x.id === t.id))];
+  // Việc đang làm nhưng đã quá hạn vẫn nằm ở tab "Hôm nay" (đang được làm) NHƯNG gắn nhãn "Trễ n ngày" để Giám đốc không bỏ sót
+  const lateById = new Map(buckets.overdue.map(t => [t.id, t.daysLate] as const));
+  const taskList: (Task & { daysLate?: number })[] = (taskTab === 'overdue' ? buckets.overdue : taskTab === 'todo' ? buckets.todo
+    : [...buckets.dueToday, ...buckets.doing.filter(t => !buckets.dueToday.some(x => x.id === t.id))]
+  ).map(t => (typeof (t as any).daysLate === 'number' || !lateById.has(t.id)) ? t : { ...t, daysLate: lateById.get(t.id) });
   const visibleRows = showAllProjects ? rows : rows.slice(0, 8);
 
   const exportReport = () => {
