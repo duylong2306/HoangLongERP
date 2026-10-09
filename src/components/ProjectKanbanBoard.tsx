@@ -4516,7 +4516,9 @@ export default function ProjectKanbanBoard({
                                               {(() => {
                                                 const isCompleted = task.status === 'completed';
                                                 const isApprovalLocked = task.isApprovalRequired === true && task.status === 'reviewing';
-                                                const isApprovalEnabled = task.isApprovalEnabled !== false && !isApprovalLocked && !isCompleted;
+                                                // Công cụ liên thông: chỉ mở được khi có quyền "Công cụ Phê duyệt" (Quyền Dự Án) — trước đây nút luôn bấm được, đến lúc gửi mới bị từ chối
+                                                const coQuyenPheDuyet = canOn('openToolApproval', projects.find(p => p.id === task.projectId), task);
+                                                const isApprovalEnabled = task.isApprovalEnabled !== false && !isApprovalLocked && !isCompleted && coQuyenPheDuyet;
                                                 
                                                 let btnLabel = "Yêu cầu phê duyệt";
                                                 let btnColor = "text-sky-400 hover:bg-sky-500/10";
@@ -4538,6 +4540,7 @@ export default function ProjectKanbanBoard({
                                                   <button
                                                     type="button"
                                                     disabled={isCompleted || !isApprovalEnabled || isApprovalLocked}
+                                                    title={!coQuyenPheDuyet ? 'Bạn không có quyền dùng Công cụ Phê duyệt (Quyền Dự Án → Công cụ liên thông)' : undefined}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
                                                       setActivePopover(null);
@@ -4561,11 +4564,13 @@ export default function ProjectKanbanBoard({
 
                                               {/* Button: Đề xuất chi phí */}
                                               {(() => {
-                                                const isCostEnabled = task.isCostEnabled !== false && task.status !== 'completed';
+                                                const coQuyenChiPhi = canOn('openToolCost', projects.find(p => p.id === task.projectId), task);
+                                                const isCostEnabled = task.isCostEnabled !== false && task.status !== 'completed' && coQuyenChiPhi;
                                                 return (
                                                   <button
                                                     type="button"
                                                     disabled={!isCostEnabled}
+                                                    title={!coQuyenChiPhi ? 'Bạn không có quyền dùng Công cụ Chi phí (Quyền Dự Án → Công cụ liên thông)' : undefined}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
                                                       setActivePopover(null);
@@ -4590,11 +4595,13 @@ export default function ProjectKanbanBoard({
 
                                               {/* Button: Đề xuất vật tư */}
                                               {(() => {
-                                                const isMaterialEnabled = task.isMaterialEnabled !== false && task.status !== 'completed';
+                                                const coQuyenVatTu = canOn('openToolMaterial', projects.find(p => p.id === task.projectId), task);
+                                                const isMaterialEnabled = task.isMaterialEnabled !== false && task.status !== 'completed' && coQuyenVatTu;
                                                 return (
                                                   <button
                                                     type="button"
                                                     disabled={!isMaterialEnabled}
+                                                    title={!coQuyenVatTu ? 'Bạn không có quyền dùng Công cụ Vật tư (Quyền Dự Án → Công cụ liên thông)' : undefined}
                                                     onClick={(e) => {
                                                       e.stopPropagation();
                                                       setActivePopover(null);

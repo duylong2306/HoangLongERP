@@ -239,6 +239,11 @@ export default function TaskDetailModal({
   const canEditTask = canDoTaskAction(currentUser, selectedTask, project, 'editTask', taskMatrix);
   const canDeleteTask = canDoTaskAction(currentUser, selectedTask, project, 'deleteTask', taskMatrix);
   const canManageSubTask = canDoTaskAction(currentUser, selectedTask, project, 'manageSubTask', taskMatrix);
+  // Công cụ liên thông (Phê duyệt / Chi phí / Vật tư): nút chỉ bấm được khi có ô "Công cụ …" tương ứng trong Quyền Dự Án (trước đây luôn bấm được, đến lúc gửi mới bị từ chối)
+  const toolMatrix = loadProjectPermissions();
+  const coQuyenPheDuyet = canProjectAction('openToolApproval', currentUser, project, selectedTask, toolMatrix);
+  const coQuyenChiPhi = canProjectAction('openToolCost', currentUser, project, selectedTask, toolMatrix);
+  const coQuyenVatTu = canProjectAction('openToolMaterial', currentUser, project, selectedTask, toolMatrix);
 
   // States
   const [activeConnectedTool, setActiveConnectedTool] = useState<'approval' | 'cost' | 'material' | 'quotation' | 'contract' | 'acceptance' | 'liquidation' | null>(null);
@@ -3383,7 +3388,7 @@ export default function TaskDetailModal({
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {selectedTask.isApprovalEnabled !== false ? (
+                          {selectedTask.isApprovalEnabled !== false && coQuyenPheDuyet ? (
                             <button
                               type="button"
                               onClick={() => {
@@ -3411,14 +3416,14 @@ export default function TaskDetailModal({
                               type="button"
                               disabled={true}
                               className="w-full border border-slate-900/50 bg-slate-950/40 text-slate-600 p-2.5 rounded-xl flex items-center gap-2 font-bold text-left opacity-40 cursor-not-allowed"
-                              title="Quy trình phê duyệt chưa được bật cho việc con này"
+                              title={selectedTask.isApprovalEnabled === false ? "Quy trình phê duyệt chưa được bật cho việc con này" : 'Bạn không có quyền dùng công cụ này (Quyền Dự Án → Công cụ liên thông)'}
                             >
                               <Shield className="w-4 h-4 text-slate-600" />
-                              Yêu cầu phê duyệt (Chưa bật)
+                              Yêu cầu phê duyệt {selectedTask.isApprovalEnabled === false ? '(Chưa bật)' : '(Không có quyền)'}
                             </button>
                           )}
 
-                          {selectedTask.isCostEnabled !== false ? (
+                          {selectedTask.isCostEnabled !== false && coQuyenChiPhi ? (
                             <button
                               type="button"
                               onClick={() => {
@@ -3437,14 +3442,14 @@ export default function TaskDetailModal({
                               type="button"
                               disabled={true}
                               className="w-full border border-slate-900/50 bg-slate-950/40 text-slate-600 p-2.5 rounded-xl flex items-center gap-2 font-bold text-left opacity-40 cursor-not-allowed"
-                              title="Đề xuất chi phí chưa được bật cho việc con này"
+                              title={selectedTask.isCostEnabled === false ? "Đề xuất chi phí chưa được bật cho việc con này" : 'Bạn không có quyền dùng công cụ này (Quyền Dự Án → Công cụ liên thông)'}
                             >
                               <DollarSign className="w-4 h-4 text-slate-600" />
-                              Đề xuất chi phí (Chưa bật)
+                              Đề xuất chi phí {selectedTask.isCostEnabled === false ? '(Chưa bật)' : '(Không có quyền)'}
                             </button>
                           )}
 
-                          {selectedTask.isMaterialEnabled !== false ? (
+                          {selectedTask.isMaterialEnabled !== false && coQuyenVatTu ? (
                             <button
                               type="button"
                               onClick={() => {
@@ -3462,10 +3467,10 @@ export default function TaskDetailModal({
                               type="button"
                               disabled={true}
                               className="w-full border border-slate-900/50 bg-slate-950/40 text-slate-600 p-2.5 rounded-xl flex items-center gap-2 font-bold text-left opacity-40 cursor-not-allowed"
-                              title="Đề xuất vật tư chưa được bật cho việc con này"
+                              title={selectedTask.isMaterialEnabled === false ? "Đề xuất vật tư chưa được bật cho việc con này" : 'Bạn không có quyền dùng công cụ này (Quyền Dự Án → Công cụ liên thông)'}
                             >
                               <Zap className="w-4 h-4 text-slate-600" />
-                              Đề xuất vật tư (Chưa bật)
+                              Đề xuất vật tư {selectedTask.isMaterialEnabled === false ? '(Chưa bật)' : '(Không có quyền)'}
                             </button>
                           )}
                         </div>
