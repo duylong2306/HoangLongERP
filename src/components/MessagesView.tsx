@@ -17,6 +17,8 @@ import {
   Pin, Plus, X, Trash, Camera, Paperclip, File, Download, Check, Loader2,
 } from 'lucide-react';
 import UserAvatar from './UserAvatar';
+import PresenceDot from './PresenceDot';
+import { usePresence } from '../lib/presence';
 
 interface MessagesViewProps {
   currentUser: Employee;
@@ -111,6 +113,7 @@ export default function MessagesView({
   // ─── Multi-select mode ──────────────────────────────────────────────────
   const [convSelectMode, setConvSelectMode] = useState(false);
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set());
+  const { isOnline, getLastSeen, formatLastSeen } = usePresence();   // trạng thái online/offline của đồng nghiệp
 
   // ─── Cloud: load hội thoại + subscribe realtime khi mount ────────────────
   useEffect(() => {
@@ -523,6 +526,24 @@ export default function MessagesView({
     } else {
       setSelectedConvIds(new Set(filteredConversations.map(c => c.id)));
     }
+  };
+
+  // Đánh dấu ĐÃ ĐỌC hàng loạt cho các hội thoại đã chọn (chỉ xử lý cái đang có tin chưa đọc).
+  // Dùng đúng hàm đã dùng khi mở 1 hội thoại: markConversationRead chỉ reset unread_counts[userId] của RIÊNG mình.
+  const handleBulkMarkRead = async () => {
+    const unreadIds = [...selectedConvIds].filter(id => (conversations.find(c => c.id === id)?.unreadCount || 0) > 0);
+    if (unreadIds.length === 0) {
+      addToast({ title: 'ℹ️ Không có gì để đánh dấu', message: 'Các cuộc trò chuyện đã chọn đều đã đọc.', type: 'info' });
+      return;
+    }
+    for (const id of unreadIds) {
+      await markConversationRead(id, currentUser.id);
+      await markMessagesReadByUser(id, currentUser.id);
+    }
+    setSelectedConvIds(new Set());
+    setConvSelectMode(false);
+    setConversations(getConversations());
+    addToast({ title: '✅ Đã đánh dấu đã đọc', message: `${unreadIds.length} cuộc trò chuyện`, type: 'success' });
   };
 
   // Xóa hàng loạt hội thoại đã chọn
@@ -1136,7 +1157,7 @@ export default function MessagesView({
                       ) : (
                         <>
                           <UserAvatar employee={otherEmp || null} size="lg" className="shadow-md" />
-                          <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-[2px] border-slate-950"></span>
+                          <PresenceDot online={isOnline(otherEmp?.id)} />
                         </>
                       )}
                     </div>
@@ -1202,6 +1223,14 @@ export default function MessagesView({
                 </span>
               </div>
               {selectedConvIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                <button
+                  onClick={handleBulkMarkRead}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  Đã đọc
+                </button>
                 <button
                   onClick={handleBulkDeleteConversations}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer"
@@ -1209,6 +1238,7 @@ export default function MessagesView({
                   <Trash className="w-3.5 h-3.5" />
                   Xóa ({selectedConvIds.size})
                 </button>
+                </div>
               )}
             </div>
           )}
@@ -1236,7 +1266,10 @@ export default function MessagesView({
                       className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-900 cursor-pointer transition-all"
                     >
                       {/* Avatar đúng như avatar tài khoản (ảnh / emoji / chữ cái) */}
-                      <UserAvatar employee={emp} size="lg" className="shrink-0" />
+                      <div className="relative shrink-0">
+                        <UserAvatar employee={emp} size="lg" />
+                        <PresenceDot online={isOnline(emp.id)} />
+                      </div>
                       <div className="flex-1 min-w-0">
                         <span className="text-[13px] text-white font-medium truncate block">{emp.name}</span>
                         <span className="text-[10px] text-slate-500">{emp.role === 'director' ? '💎 Giám Đốc' : emp.department}</span>
@@ -1297,14 +1330,24 @@ export default function MessagesView({
                         </div>
                       ) : (
                         // Chat cá nhân: dùng avatar tài khoản của người đối diện
-                        <UserAvatar employee={otherEmp || null} size="md" className="shrink-0 shadow-md" />
+                        <div className="relative shrink-0">
+                          <UserAvatar employee={otherEmp || null} size="md" className="shadow-md" />
+                          <PresenceDot online={isOnline(otherEmp?.id)} size="sm" />
+                        </div>
                       )}
                       <div className="min-w-0">
                         <h2 className="font-semibold text-[15px] text-white truncate">
                           {isGroup ? selectedConv.name : (otherEmp?.name || 'Người dùng')}
                         </h2>
                         <p className="text-[11px] text-slate-400 truncate">
-                          {isGroup ? `${getConvMemberCount(selectedConv)} thành viên` : (otherEmp?.role === 'director' ? '💎 Giám Đốc' : `💼 ${otherEmp?.department || ''}`)}
+                          {isGroup
+                            ? `${getConvMemberCount(selectedConv)} thành viên`
+                            : (<>
+                                <span data-testid="presence-label" className={isOnline(otherEmp?.id) ? 'text-emerald-400 font-semibold' : ''}>
+                                  {isOnline(otherEmp?.id) ? 'Đang hoạt động' : formatLastSeen(getLastSeen(otherEmp?.id))}
+                                </span>
+                                {' • '}{otherEmp?.role === 'director' ? '💎 Giám Đốc' : `💼 ${otherEmp?.department || ''}`}
+                              </>)}
                         </p>
                       </div>
                     </div>

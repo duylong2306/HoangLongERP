@@ -64,6 +64,7 @@ import DirectorDashboard from './components/DirectorDashboard';
 import Login from './components/Login';
 import UserProfileModal from './components/UserProfileModal';
 import ForcePasswordModal from './components/ForcePasswordModal';
+import { startPresence, stopPresence } from './lib/presence';
 import { getPasswordNotice, setPasswordNotice, type PasswordNotice } from './lib/passwordChange';
 import MessagesView from './components/MessagesView';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
@@ -938,6 +939,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   // Yêu cầu đổi mật khẩu của phiên (đặt ở Login.tsx sau khi máy chủ báo); đọc lại ở handleLoginSuccess
   const [pwNotice, setPwNotice] = useState<PasswordNotice | null>(() => getPasswordNotice());
+  // Trạng thái online/offline: đã đăng nhập → "điểm danh" vào kênh presence của công ty; đăng xuất/đóng app → tự gỡ (xem lib/presence.ts)
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    startPresence(currentUser.id);
+    return () => stopPresence();
+  }, [currentUser?.id]);
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
 
   useEffect(() => {
