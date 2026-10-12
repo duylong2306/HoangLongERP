@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
-import { hasLoginAccount } from './lib/employeeAccount';
+import { hasLoginAccount, sessionRevokeReason, SESSION_REVOKE_MESSAGES } from './lib/employeeAccount';
 import { filterLegacyFallbackTabs } from './lib/legacyRoleTabs';
 import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
@@ -687,12 +687,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         if (activeSessionStr) {
           try {
             const parsedSession = JSON.parse(activeSessionStr);
+            // Người đã bị xóa/thu hồi/nghỉ việc thì KHÔNG khôi phục phiên (so với danh sách nhân viên THẬT từ máy chủ, trước khi chèn admin dự phòng)
+            if (forceLogoutIfRevoked(cloudEmps, parsedSession)) {
+              /* đã đăng xuất bắt buộc */
+            } else {
             const foundUser = finalEmps.find(e => e.id === parsedSession.id || e.username === parsedSession.username);
             if (foundUser) {
               setCurrentUser(foundUser);
               sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(foundUser)));
             } else {
               setCurrentUser(parsedSession);
+            }
             }
           } catch { setCurrentUser(null); }
         } else {
@@ -865,6 +870,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
     return null;
   });
+  // Bản tham chiếu luôn cập nhật của người đang đăng nhập — để các bộ lắng nghe sự kiện (đăng ký 1 lần) kiểm tra đúng người hiện tại.
+  const currentUserRef = useRef<Employee | null>(currentUser);
+  currentUserRef.current = currentUser;
+  // Chỉ đăng xuất bắt buộc MỘT lần (tránh lặp khi nhiều nguồn dữ liệu cùng báo tài khoản đã bị thu hồi).
+  const forcedLogoutRef = useRef(false);
 
   // Web Push notification registration
   useWebPush(currentUser?.id ?? null);
@@ -2347,6 +2357,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
         const incoming = customEvent.detail.employees || customEvent.detail;
+        // Đang đăng nhập mà tài khoản vừa bị xóa/thu hồi → đăng xuất ngay (danh sách này là bản đầy đủ từ máy chủ)
+        if (Array.isArray(incoming) && forceLogoutIfRevoked(incoming)) return;
         // Deduplicate by name: keep entry with username/hasSystemAccount if duplicate exists
         const deduped = incoming.filter((emp: Employee, idx: number, arr: Employee[]) => {
           const firstIdx = arr.findIndex(e => e.name.toLowerCase() === emp.name.toLowerCase());
@@ -2459,6 +2471,25 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     // là state cũ chưa được dọn, KHÔNG phải rò rỉ qua API/DB, RLS vẫn chặn
     // đúng). Tải lại toàn bộ trang là cách chắc chắn nhất xoá sạch mọi state.
     setTimeout(() => window.location.reload(), 400);
+  };
+
+  /**
+   * Đăng xuất BẮT BUỘC khi tài khoản của người đang đăng nhập đã bị xóa / thu hồi / nghỉ việc (rà soát bảo mật 11/10/2026: trước đây họ vẫn dùng
+   * bình thường cho tới khi tự đăng xuất hoặc token hết hạn tối đa 7 ngày). `serverEmployees` PHẢI là danh sách nhân viên THẬT lấy từ máy chủ
+   * (không phải bản đã chèn tài khoản admin dự phòng); danh sách rỗng thì không làm gì. Trả về true nếu đã đăng xuất.
+   */
+  const forceLogoutIfRevoked = (serverEmployees: Employee[] | null | undefined, sessionOverride?: { id?: string; username?: string } | null): boolean => {
+    if (forcedLogoutRef.current) return true;
+    const reason = sessionRevokeReason(sessionOverride || currentUserRef.current, serverEmployees as any);
+    if (!reason) return false;
+    forcedLogoutRef.current = true;
+    addToast({ title: '⛔ Phiên làm việc đã bị thu hồi', message: SESSION_REVOKE_MESSAGES[reason], type: 'error', duration: 6000 });
+    setCurrentUser(null);
+    sessionStorage.removeItem('hl_erp_active_session');
+    localStorage.removeItem('hl_erp_active_session');
+    setAuthToken(null, false); // gỡ JWT khỏi trình duyệt ngay để không còn gọi được dữ liệu công ty
+    setTimeout(() => window.location.reload(), 2500); // tải lại sạch state dữ liệu của công ty (giống đăng xuất thường)
+    return true;
   };
 
   // Bộ xử lý cập nhật thông tin hồ sơ cá nhân

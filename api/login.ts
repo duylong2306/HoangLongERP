@@ -130,13 +130,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 3. So khớp mật khẩu NGAY TẠI SERVER (bcrypt, có fallback so sánh chuỗi
   //    thường cho dữ liệu cũ chưa hash — giữ đúng hành vi verifyPasswordSync
   //    đã dùng ở Login.tsx trước đây, chỉ chuyển vị trí chạy sang server).
-  const storedPassword: string = employeeRow.password || '123';
+  // Hồ sơ KHÔNG có mật khẩu (rỗng/NULL) thì KHÔNG cho đăng nhập. Trước đây rơi về '123' nên ai biết tên đăng nhập của hồ sơ rỗng
+  // đều vào được bằng "123" (rà soát bảo mật 11/10/2026). Hiện chưa có tài khoản nào rỗng nên không ảnh hưởng ai đang dùng.
+  const storedPassword: string = employeeRow.password || '';
+  if (!storedPassword) {
+    res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng!' });
+    return;
+  }
   const passwordOk = storedPassword.startsWith('$2')
     ? await bcrypt.compare(password, storedPassword)
     : password === storedPassword;
 
   if (!passwordOk) {
     res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng!' });
+    return;
+  }
+
+  // 3b. Tài khoản đã bị THU HỒI (has_system_account = false) hoặc nhân viên đã NGHỈ VIỆC thì không được đăng nhập, dù hồ sơ còn tên đăng nhập.
+  // Kiểm tra SAU khi mật khẩu đúng để người lạ không dò được tài khoản nào đã bị khóa. (Nghỉ dài hạn 'leave' vẫn được đăng nhập.)
+  if (employeeRow.has_system_account === false || employeeRow.status === 'retired') {
+    res.status(403).json({ error: 'Tài khoản này đã bị thu hồi hoặc nhân viên đã nghỉ việc. Vui lòng liên hệ quản trị viên.' });
     return;
   }
 
