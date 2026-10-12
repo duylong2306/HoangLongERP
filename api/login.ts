@@ -22,6 +22,7 @@ import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { getSubscriptionState, tokenTtlSeconds } from './_subscription.js'; // ⚠️ bắt buộc đuôi .js (Node ESM)
+import { loadSecurity, lockMinutesLeft, recordFailure, recordSuccess, DEFAULT_PASSWORD } from './_security.js'; // bảo mật theo nhân viên (khóa tạm, cờ đổi mật khẩu, token_version)
 import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant.js'; // ⚠️ BẮT BUỘC đuôi .js: package.json "type":"module" → Node ESM không tự thêm đuôi (thiếu → ERR_MODULE_NOT_FOUND, đã gây sập đăng nhập staging)
 
 // Chuyển 1 object snake_case (row thô từ Postgres) sang camelCase — bản rút
@@ -127,6 +128,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // 2b. Khóa đăng nhập tạm (nhập sai nhiều lần) — kiểm tra TRƯỚC khi so mật khẩu để không cho dò mật khẩu trong lúc đang khóa.
+  // Nếu bảng employee_security chưa có (chưa chạy SQL) thì bỏ qua tính năng này.
+  const security = await loadSecurity(supabase, company.id, employeeRow.id);
+  const minutesLeft = lockMinutesLeft(security.row);
+  if (minutesLeft > 0) {
+    res.status(429).json({ error: `Tài khoản tạm khóa do nhập sai mật khẩu nhiều lần. Vui lòng thử lại sau ${minutesLeft} phút.` });
+    return;
+  }
+
   // 3. So khớp mật khẩu NGAY TẠI SERVER (bcrypt, có fallback so sánh chuỗi
   //    thường cho dữ liệu cũ chưa hash — giữ đúng hành vi verifyPasswordSync
   //    đã dùng ở Login.tsx trước đây, chỉ chuyển vị trí chạy sang server).
@@ -142,6 +152,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : password === storedPassword;
 
   if (!passwordOk) {
+    // Ghi nhận lần sai; chạm ngưỡng thì khóa tạm và báo luôn cho người dùng biết.
+    const lockedFor = await recordFailure(supabase, company.id, employeeRow.id, security);
+    if (lockedFor > 0) {
+      res.status(429).json({ error: `Nhập sai mật khẩu quá nhiều lần. Tài khoản tạm khóa ${lockedFor} phút.` });
+      return;
+    }
     res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng!' });
     return;
   }
@@ -159,6 +175,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   //   • ĐÃ HẾT HẠN: token KHÓA — role 'anon' và KHÔNG có claim company_id, chỉ có locked_company_id. Các chính sách bảo
   //     mật dữ liệu (RLS) và hàm load_all_core_data đều dựa vào claim company_id nên token này đọc/ghi được 0 dòng dữ
   //     liệu ERP; nó chỉ đủ để gọi api/subscription.ts (xem gói, đặt mua/gia hạn). Dữ liệu doanh nghiệp được giữ nguyên.
+  // Đăng nhập thành công: xóa bộ đếm sai + ghi thời điểm đăng nhập (chỉ khi mọi kiểm tra ở trên đã qua).
+  await recordSuccess(supabase, company.id, employeeRow.id, security);
+  const tokenVersion = security.row?.token_version || 0;
+
   const sub = getSubscriptionState(company as any);
   const token = sub.locked
     ? jwt.sign(
@@ -167,7 +187,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         { expiresIn: 24 * 60 * 60 }
       )
     : jwt.sign(
-        { sub: employeeRow.id, role: 'authenticated', company_id: company.id },
+        // tv = token_version: đổi mật khẩu/thu hồi tăng số này → RLS (employee_session_is_live) chặn mọi token cũ ngay lập tức.
+        { sub: employeeRow.id, role: 'authenticated', company_id: company.id, tv: tokenVersion },
         jwtSecret,
         { expiresIn: tokenTtlSeconds(sub.expiresAt) }
       );
@@ -179,6 +200,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.status(200).json({
     token,
     employee,
+    // Cờ cho giao diện: bắt buộc đổi mật khẩu (admin đặt) / nhắc đổi khi đang dùng mật khẩu mặc định '123'.
+    mustChangePassword: security.row?.must_change_password === true,
+    defaultPassword: password === DEFAULT_PASSWORD,
     company: { id: company.id, name: company.name, slug: company.slug },
     subscription: { status: sub.status, expiresAt: sub.expiresAt, daysLeft: sub.daysLeft, isTrial: sub.isTrial, locked: sub.locked },
   });

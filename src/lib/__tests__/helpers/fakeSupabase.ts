@@ -11,6 +11,7 @@ export class FakeDb {
   unique: Record<string, string[]> = {};                 // bảng → các cột unique
   autoId = new Set<string>();                            // bảng tự cấp id uuid khi thiếu
   missingColumns: Record<string, string[]> = {};         // bảng → cột "chưa tồn tại": select có nhắc tới cột này → lỗi 42703
+  missingTables = new Set<string>();                     // bảng "chưa tạo" (chưa chạy SQL): mọi thao tác → lỗi 42P01
   fail: Record<string, string> = {};                     // "bảng.thaoTac" → thông báo lỗi
   rpcs: Record<string, () => any> = {};
   log: string[] = [];                                    // "thaoTac:bảng" theo thứ tự gọi
@@ -58,6 +59,7 @@ class Query {
   private async run(): Promise<any> {
     const db = this.db, key = `${this.t}.${this.op}`;
     db.log.push(`${this.op}:${this.t}`);
+    if (db.missingTables.has(this.t)) return { data: null, error: { message: `relation "public.${this.t}" does not exist`, code: '42P01' }, count: null };
     const thieuCot = (db.missingColumns[this.t] || []).find(c => new RegExp(`(^|[ ,])${c}([ ,]|$)`).test(this.cols));
     if (this.op === 'select' && thieuCot) return { data: null, error: { message: `column ${this.t}.${thieuCot} does not exist`, code: '42703' }, count: null };
     if (db.fail[key]) return { data: null, error: { message: db.fail[key], code: 'XX000' }, count: null };

@@ -1,6 +1,6 @@
 ﻿import React, { useState, useRef } from 'react';
 import { Employee } from '../types';
-import { hashPasswordSync } from '../lib/passwordUtils';
+import { checkNewPassword, requestPasswordChange } from '../lib/passwordChange';
 import { dbService } from '../lib/dbService';
 import {
   X,
@@ -60,6 +60,7 @@ export default function UserProfileModal({
   const [showCustomUrlInput, setShowCustomUrlInput] = useState(false);
 
   // Change password
+  const [oldPassword, setOldPassword] = useState('');   // mật khẩu hiện tại — máy chủ kiểm tra trước khi cho đổi
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -110,16 +111,10 @@ export default function UserProfileModal({
   };
 
   const handleChangePassword = async () => {
-    if (!newPassword.trim()) {
-      addToast({ title: '⚠️ Lỗi', message: 'Vui lòng nhập mật khẩu mới!', type: 'warning' });
-      return;
-    }
-    if (newPassword.trim().length < 3) {
-      addToast({ title: '⚠️ Lỗi', message: 'Mật khẩu phải có ít nhất 3 ký tự!', type: 'warning' });
-      return;
-    }
-    if (newPassword.trim() !== confirmPassword.trim()) {
-      addToast({ title: '⚠️ Lỗi', message: 'Mật khẩu xác nhận không khớp!', type: 'warning' });
+    // Kiểm tra nhanh ở giao diện; máy chủ (api/change-password) kiểm tra lại và xác nhận mật khẩu hiện tại bằng bcrypt.
+    const bad = checkNewPassword(oldPassword, newPassword.trim(), confirmPassword.trim());
+    if (bad) {
+      addToast({ title: '⚠️ Lỗi', message: bad, type: 'warning' });
       return;
     }
 
@@ -127,19 +122,16 @@ export default function UserProfileModal({
     setPasswordSuccess(false);
 
     try {
-      const updatedUser: Employee = {
-        ...currentUser,
-        password: hashPasswordSync(newPassword.trim())
-      };
-      await onUpdateProfile(updatedUser);
+      await requestPasswordChange(oldPassword, newPassword.trim());
       setPasswordSuccess(true);
       addToast({ title: '✅ Thành công', message: 'Đổi mật khẩu thành công!', type: 'success' });
+      setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => setPasswordSuccess(false), 2000);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi đổi mật khẩu!', type: 'error' });
+      addToast({ title: '❌ Lỗi', message: error?.message || 'Có lỗi xảy ra khi đổi mật khẩu!', type: 'error' });
     } finally {
       setChangingPassword(false);
     }
@@ -406,6 +398,24 @@ export default function UserProfileModal({
                   🔒 Đổi mật khẩu truy cập hệ thống
                 </label>
 
+                {/* Mật khẩu hiện tại */}
+                <div className="space-y-1">
+                  <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                    Mật khẩu hiện tại
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      value={oldPassword}
+                      onChange={(e) => setOldPassword(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 pl-9 pr-3 text-xs text-white outline-none focus:border-slate-700 font-mono font-bold transition-all"
+                      placeholder="Nhập mật khẩu hiện tại"
+                      autoComplete="current-password"
+                    />
+                    <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                  </div>
+                </div>
+
                 {/* Mật khẩu mới */}
                 <div className="space-y-1">
                   <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">
@@ -417,7 +427,7 @@ export default function UserProfileModal({
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 pl-9 pr-10 text-xs text-white outline-none focus:border-slate-700 font-mono font-bold transition-all"
-                      placeholder="Nhập mật khẩu mới"
+                      placeholder="Từ 6 ký tự"
                     />
                     <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                     <button
@@ -462,7 +472,7 @@ export default function UserProfileModal({
                 <button
                   type="button"
                   onClick={handleChangePassword}
-                  disabled={changingPassword || !newPassword.trim() || !confirmPassword.trim()}
+                  disabled={changingPassword || !oldPassword || !newPassword.trim() || !confirmPassword.trim()}
                   className={`w-full py-2 rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${passwordSuccess ? 'bg-emerald-600 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'}`}
                 >
                   {passwordSuccess ? (

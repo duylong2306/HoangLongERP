@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { setAuthToken } from '../lib/supabase';
+import { setPasswordNotice } from '../lib/passwordChange';
 import { getHostInfo, getBaseDomainForDisplay } from '../lib/tenant';
 
 interface LoginProps {
@@ -141,6 +142,8 @@ export default function Login({
       // (AuthContext.tsx/App.tsx handleLoginSuccess) — 2 loại dữ liệu của
       // cùng 1 phiên phải cùng "sống"/"chết" theo đúng lựa chọn của người dùng.
       setAuthToken(token, autoLogin);
+      // Máy chủ báo tài khoản bị yêu cầu đổi mật khẩu ('force' — không bỏ qua được) hoặc đang dùng mật khẩu mặc định ('default' — nhắc, cho để sau).
+      setPasswordNotice((body as any).mustChangePassword ? 'force' : (body as any).defaultPassword ? 'default' : null);
 
       setSuccessMsg(`Đăng nhập thành công! Chào mừng ${employee.name}.`);
 

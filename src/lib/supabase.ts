@@ -71,6 +71,11 @@ export function getStoredTokenClaims(): Record<string, any> | null {
   return token ? decodeJwtPayload(token) : null;
 }
 
+/** JWT đang được ghi nhớ lâu dài (tự đăng nhập) hay chỉ trong phiên trình duyệt — để giữ nguyên lựa chọn khi cấp lại token (đổi mật khẩu). */
+export function isAuthTokenPersisted(): boolean {
+  try { return !!localStorage.getItem(JWT_STORAGE_KEY); } catch { return false; }
+}
+
 /** Xóa JWT + phiên ERP đang lưu (hết hạn gói/hết hạn token/đăng xuất) — lần mở trang kế tiếp sẽ hiện màn đăng nhập. */
 export function clearStoredSession(): void {
   try {

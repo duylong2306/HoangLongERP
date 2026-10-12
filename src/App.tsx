@@ -63,6 +63,8 @@ import SubcontractorManagement from './components/SubcontractorManagement';
 import DirectorDashboard from './components/DirectorDashboard';
 import Login from './components/Login';
 import UserProfileModal from './components/UserProfileModal';
+import ForcePasswordModal from './components/ForcePasswordModal';
+import { getPasswordNotice, setPasswordNotice, type PasswordNotice } from './lib/passwordChange';
 import MessagesView from './components/MessagesView';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
@@ -942,6 +944,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   }, [activeTab]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  // Yêu cầu đổi mật khẩu của phiên (đặt ở Login.tsx sau khi máy chủ báo); đọc lại ở handleLoginSuccess
+  const [pwNotice, setPwNotice] = useState<PasswordNotice | null>(() => getPasswordNotice());
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
 
   useEffect(() => {
@@ -2414,6 +2418,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Bộ xử lý Đăng nhập thành công & Ghi nhớ / Tự động đăng nhập
   const handleLoginSuccess = (loggedInUser: Employee, remember: boolean, autoLogin: boolean) => {
+    setPwNotice(getPasswordNotice());
     setCurrentUser(loggedInUser);
     
     if (remember) {
@@ -2451,6 +2456,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Bộ xử lý Đăng xuất
   const handleLogout = () => {
     setCurrentUser(null);
+    setPasswordNotice(null); setPwNotice(null);   // hết phiên → bỏ yêu cầu đổi mật khẩu của phiên cũ
     sessionStorage.removeItem('hl_erp_active_session');
     localStorage.removeItem('hl_erp_active_session');
     // Gỡ JWT (chứa company_id) khỏi client — quay về dùng anon key trần, đúng
@@ -5454,6 +5460,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
         </main>
       </div>
+
+      {/* Yêu cầu đổi mật khẩu sau đăng nhập: 'force' (admin bắt buộc) hoặc 'default' (đang dùng mật khẩu mặc định 123) */}
+      {pwNotice && <ForcePasswordModal notice={pwNotice} onDone={() => setPwNotice(null)} />}
 
       <UserProfileModal
         isOpen={showProfileModal}
