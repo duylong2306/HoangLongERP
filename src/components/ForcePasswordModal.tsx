@@ -4,12 +4,14 @@ import { useNotification } from '../context';
 import { checkNewPassword, requestPasswordChange, setPasswordNotice, type PasswordNotice } from '../lib/passwordChange';
 
 // Hộp thoại đổi mật khẩu hiện ngay sau đăng nhập khi:
-//  • notice = 'force'   — quản trị viên bắt buộc đổi: KHÔNG có nút bỏ qua, phải đổi mới dùng tiếp.
-//  • notice = 'default' — đang dùng mật khẩu mặc định "123": nhắc đổi, cho phép "Để sau".
+//  • notice = 'force'   — quản trị viên yêu cầu đổi (cờ must_change_password).
+//  • notice = 'default' — đang dùng mật khẩu mặc định "123": nhắc đổi.
+// Cả hai đều có nút "Để sau" (chủ dự án yêu cầu): bỏ qua trong phiên này, lần đăng nhập sau máy chủ báo lại nên hộp thoại hiện lại
+// cho tới khi đổi xong (cờ chỉ được xóa khi đổi mật khẩu thành công qua api/change-password).
 // Giao diện theo cùng tông tối (slate) với UserProfileModal.
 interface Props {
   notice: PasswordNotice;
-  onDone: () => void;   // đã đổi xong hoặc người dùng chọn "Để sau" (chỉ với 'default')
+  onDone: () => void;   // đã đổi xong hoặc người dùng chọn "Để sau"
 }
 
 export default function ForcePasswordModal({ notice, onDone }: Props) {
@@ -49,7 +51,7 @@ export default function ForcePasswordModal({ notice, onDone }: Props) {
             <h2 className="text-sm font-black text-white">{notice === 'force' ? 'Bạn cần đổi mật khẩu' : 'Nên đổi mật khẩu mặc định'}</h2>
             <p className="text-[11px] text-slate-400 mt-0.5">
               {notice === 'force'
-                ? 'Quản trị viên yêu cầu bạn đặt mật khẩu mới trước khi tiếp tục sử dụng.'
+                ? 'Quản trị viên yêu cầu bạn đặt mật khẩu mới. Nếu chọn "Để sau", hộp thoại này sẽ hiện lại ở lần đăng nhập kế tiếp.'
                 : 'Bạn đang dùng mật khẩu mặc định (123) nên rất dễ bị đoán. Hãy đặt mật khẩu riêng của bạn.'}
             </p>
           </div>
@@ -71,9 +73,7 @@ export default function ForcePasswordModal({ notice, onDone }: Props) {
         {error && <div role="alert" className="text-[11px] font-bold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">{error}</div>}
 
         <div className="flex gap-2 pt-1">
-          {notice === 'default' && (
-            <button type="button" onClick={later} disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 disabled:opacity-40">Để sau</button>
-          )}
+          <button type="button" onClick={later} disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 disabled:opacity-40">Để sau</button>
           <button type="submit" disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-black uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-white flex items-center justify-center gap-2 disabled:opacity-40">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}Đổi mật khẩu
           </button>
