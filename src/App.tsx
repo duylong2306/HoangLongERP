@@ -659,18 +659,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         }
 
         // ── BƯỚC 2: Fetch employees từ cloud (bắt buộc cho auth) ──
-        let cloudEmps: Employee[];
-        try {
-          let data: Record<string, any[]> | null = null;
-          try {
-            data = await dbService.loadAllCore();
-          } catch { /* RPC chưa có */ }
-          cloudEmps = data
-            ? toCamel(data.employees || [])
-            : await dbService.employees.list();
-        } catch {
-          cloudEmps = await dbService.employees.list();
-        }
+        // Chỉ cần danh sách nhân viên để đăng nhập/kiểm tra phiên → gọi RPC list_employees_safe (~0,2s). Trước đây gọi
+        // loadAllCore() (tải CẢ 6MB dữ liệu, ~6s với Hoàng Long) rồi bước 3 lại tải thêm lần nữa → mở app chậm gấp đôi.
+        // Toàn bộ dữ liệu còn lại vẫn do BƯỚC 3 tải nền như cũ.
+        const cloudEmps: Employee[] = await dbService.employees.list();
         const finalEmps = ensureAdminAndPasswords(cloudEmps);
         setEmployees(finalEmps);
 
