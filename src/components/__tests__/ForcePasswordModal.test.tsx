@@ -7,7 +7,8 @@ const requestPasswordChange = vi.fn();
 vi.mock('../../lib/passwordChange', async (orig) => ({ ...(await orig<any>()), requestPasswordChange: (...a: any[]) => requestPasswordChange(...a) }));
 import ForcePasswordModal from '../ForcePasswordModal';
 
-beforeEach(() => requestPasswordChange.mockReset());
+// (dùng khối {} để beforeEach không trả về hàm mock — vitest sẽ gọi giá trị trả về như hàm dọn dẹp)
+beforeEach(() => { requestPasswordChange.mockReset(); });
 const dien = (o: string, n: string, c: string) => {
   fireEvent.change(screen.getByLabelText('Mật khẩu hiện tại'), { target: { value: o } });
   fireEvent.change(screen.getByLabelText('Mật khẩu mới (từ 6 ký tự)'), { target: { value: n } });
