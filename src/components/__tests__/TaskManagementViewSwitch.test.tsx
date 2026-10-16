@@ -27,29 +27,28 @@ const mount = (onUpdateTask = vi.fn()) => render(<TaskManagement tasks={tasks} p
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 describe('Việc của tôi — công tắc kiểu xem', () => {
-  it('mặc định là Cột (Kanban); chuyển sang Tổng quan thì hiện Tổng quan và ẩn các tab cũ', () => {
+  it('mặc định là Tổng quan; chuyển sang Cột (Kanban) thì hiện các tab cũ và ẩn Tổng quan', () => {
     mount();
-    expect(screen.queryByTestId('mywork-overview')).toBeNull();
-    expect(screen.getByText('Công việc được giao')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' }));
     expect(screen.getByTestId('mywork-overview')).toBeTruthy();
     expect(screen.queryByText('Công việc được giao')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cột (Kanban)' }));
+    expect(screen.queryByTestId('mywork-overview')).toBeNull();
+    expect(screen.getByText('Công việc được giao')).toBeTruthy();
   });
-  it('nhớ lựa chọn: lưu localStorage và lần mở sau vào thẳng kiểu đã chọn; đổi lại Kanban cũng được nhớ', () => {
+  it('nhớ lựa chọn: người đã chọn Kanban lần sau vẫn vào Kanban; đổi lại Tổng quan cũng được nhớ', () => {
     const { unmount } = mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' }));
-    expect(localStorage.getItem('hl_my_tasks_view_u1')).toBe('overview');
-    unmount();
-    mount();
-    expect(screen.getByTestId('mywork-overview')).toBeTruthy();   // phiên sau: vẫn Tổng quan
     fireEvent.click(screen.getByRole('button', { name: 'Cột (Kanban)' }));
     expect(localStorage.getItem('hl_my_tasks_view_u1')).toBe('kanban');
-    expect(screen.queryByTestId('mywork-overview')).toBeNull();
+    unmount();
+    mount();
+    expect(screen.queryByTestId('mywork-overview')).toBeNull();   // phiên sau: vẫn Kanban
+    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' }));
+    expect(localStorage.getItem('hl_my_tasks_view_u1')).toBe('overview');
+    expect(screen.getByTestId('mywork-overview')).toBeTruthy();
   });
   it('Tổng quan: "Nhận việc" chuyển công việc sang Đang làm đúng như kiểu Cột (nhật ký + 20%)', () => {
     const onUpdateTask = vi.fn();
     mount(onUpdateTask);
-    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' }));
     fireEvent.click(within(screen.getByTestId('mywork-waiting')).getByTestId('mywork-receive'));
     expect(onUpdateTask).toHaveBeenCalledTimes(1);
     const [id, upd] = onUpdateTask.mock.calls[0];
@@ -59,7 +58,6 @@ describe('Việc của tôi — công tắc kiểu xem', () => {
   });
   it('Tổng quan: bấm một việc mở chi tiết công việc đó', async () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' }));
     fireEvent.click(within(screen.getByTestId('mywork-all')).getByText('Việc đến hạn'));
     await waitFor(() => expect(screen.getByTestId('task-detail').textContent).toBe('T1'));
   });

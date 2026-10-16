@@ -6,7 +6,7 @@ import { toDay, todayYmd, addDays, diffDays } from './executiveDashboard';
 
 // ─── Kiểu xem đã chọn (lưu localStorage theo người dùng + doanh nghiệp) ───
 export type MyTasksView = 'kanban' | 'overview';
-export const MY_TASKS_VIEW_DEFAULT: MyTasksView = 'kanban';   // mặc định giữ thói quen cũ (Kanban)
+export const MY_TASKS_VIEW_DEFAULT: MyTasksView = 'overview';   // mặc định Tổng quan để người dùng kiểm thử giao diện mới (ai đã chọn Kanban thì vẫn giữ Kanban)
 export const viewStorageKey = (userId?: string) => `hl_my_tasks_view_${userId || 'anon'}`;
 export function readMyTasksView(key: string, storage: Pick<Storage, 'getItem'> | null = typeof localStorage !== 'undefined' ? localStorage : null): MyTasksView {
   try { const v = storage?.getItem(key); return v === 'overview' || v === 'kanban' ? v : MY_TASKS_VIEW_DEFAULT; } catch { return MY_TASKS_VIEW_DEFAULT; }
