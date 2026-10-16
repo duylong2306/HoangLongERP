@@ -7,6 +7,7 @@ import { useNotification, isUserInRoleGroup, isRoleAdmin, isRoleAccounting, canA
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 import { docSoTiengViet } from './QuotationTableSheet';
+import { replaceContractValueInHtml } from '../lib/subcontractorContractValue';
 
 // Bản in Hợp Đồng Thầu Phụ — trước đây là các ô <input> cố định bind trực tiếp
 // vào tempQuote.<field>, nay chuyển sang 1 vùng văn bản tự do (contentEditable)
@@ -252,6 +253,9 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
   }, []);
 
   // ── TỰ ĐỘNG MỞ PRINT PREVIEW KHI ĐƯỢC REDIRECT TỪ MENU THẦU PHỤ ──
+  const autoOpenedIdRef = React.useRef<string | null>(null);
+  // Đóng hộp xem → cho phép tự mở lại như cũ ở lần yêu cầu sau
+  useEffect(() => { if (!showPrintPreview) autoOpenedIdRef.current = null; }, [showPrintPreview]);
   useEffect(() => {
     if (archivedList.length === 0) return;
 
@@ -260,7 +264,10 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     if (!targetId) return;
 
     const found = archivedList.find(q => q.id === targetId);
-    if (found) {
+    // Chỉ tự mở MỘT lần cho mỗi hợp đồng: danh sách được tải lại sau mỗi lần lưu/hủy duyệt (và định kỳ), nếu mở lại ở đây sẽ
+    // ghi đè tempQuote đang sửa dở (VD giá trị hợp đồng vừa nhập) bằng bản đã lưu.
+    if (found && autoOpenedIdRef.current !== targetId) {
+      autoOpenedIdRef.current = targetId;
       setSelectedQuote(found);
       setTempQuote({ ...found });
       setShowPrintPreview(true);
@@ -408,11 +415,51 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
       await dbService.archivedQuotes.save({ ...updated, sector: 'subcontractor' });
       setSelectedQuote(updated);
       setArchivedList(prev => prev.map(q => q.id === updated.id ? updated : q));
-      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Hợp đồng đã được mở khóa để chỉnh sửa.', type: 'info' });
+      addToast({ title: '🔓 Đã hủy phê duyệt', message: 'Đã mở khóa: sửa ô "Giá trị hợp đồng khoán" rồi bấm "Lưu giá trị", hoặc bấm "Chỉnh sửa bản in" để sửa nội dung hợp đồng.', type: 'info' });
       window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
     } catch (err) {
       console.error('Lỗi khi hủy phê duyệt hợp đồng thầu phụ:', err);
       addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi hủy phê duyệt.', type: 'error' });
+    }
+  };
+
+  // Lưu RIÊNG giá trị hợp đồng khoán (không cần bấm "Chỉnh sửa bản in"). Hợp đồng đã duyệt thì khóa — phải "Hủy phê duyệt" trước.
+  // Đồng thời đổi số tiền (dạng số + dạng chữ) trong bản in đã lưu để văn bản khớp với giá trị mới; Công Nợ Trả đọc trực tiếp contractValue.
+  const [savingValue, setSavingValue] = useState(false);
+  const handleSaveContractValue = async () => {
+    if (!tempQuote || !selectedQuote) return;
+    if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa hợp đồng này.', type: 'warning' }); return; }
+    if (tempQuote.isApproved) { addToast({ title: '🔒 Hợp đồng đã duyệt', message: 'Hãy "Hủy phê duyệt" trước khi sửa giá trị.', type: 'warning' }); return; }
+    const newValue = Number(tempQuote.contractValue);
+    const oldValue = Number(selectedQuote.contractValue || 0);
+    if (!Number.isFinite(newValue) || newValue < 0) { addToast({ title: '⚠️ Giá trị không hợp lệ', message: 'Giá trị hợp đồng phải là số không âm.', type: 'warning' }); return; }
+    if (newValue === oldValue) return;
+    setSavingValue(true);
+    try {
+      // Văn bản cần đổi số: bản đang soạn (nếu đang sửa) hoặc bản đã lưu. Chưa từng lưu bản in → văn bản tự sinh từ giá trị nên tự khớp.
+      const baseHtml = isEditing ? docHtml : (tempQuote.contractHtml || '');
+      const { html, replaced } = baseHtml ? replaceContractValueInHtml(baseHtml, oldValue, newValue, docSoTiengViet) : { html: '', replaced: 0 };
+      const updated = {
+        ...tempQuote,
+        contractValue: newValue,
+        ...(baseHtml ? { contractHtml: html } : {}),
+      } as ArchivedQuote;
+      await dbService.archivedQuotes.save({ ...updated, sector: 'subcontractor' });
+      setTempQuote(updated);
+      setSelectedQuote(updated);
+      setArchivedList(prev => prev.map(q => q.id === updated.id ? updated : q));
+      setDocHtml(baseHtml ? html : generateSubcontractorContractHtml(updated, selectedSupplier));
+      window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
+      if (baseHtml && replaced === 0) {
+        addToast({ title: '💾 Đã lưu giá trị', message: 'Đã lưu giá trị mới (Công Nợ Trả đã cập nhật) nhưng KHÔNG tìm thấy số cũ trong văn bản hợp đồng — hãy bấm "Chỉnh sửa bản in" để sửa số tiền trong nội dung.', type: 'warning' });
+      } else {
+        addToast({ title: '💾 Đã lưu giá trị', message: baseHtml ? `Đã cập nhật giá trị và ${replaced} chỗ số tiền trong văn bản hợp đồng.` : 'Đã cập nhật giá trị hợp đồng.', type: 'success' });
+      }
+    } catch (err) {
+      console.error('Lỗi khi lưu giá trị hợp đồng thầu phụ:', err);
+      addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi lưu giá trị hợp đồng.', type: 'error' });
+    } finally {
+      setSavingValue(false);
     }
   };
 
@@ -421,11 +468,16 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa hợp đồng này.', type: 'warning' }); return; }
     setSavingDoc(true);
     try {
-      const updated = { ...tempQuote, contractHtml: docHtml };
+      // Nếu giá trị hợp đồng đã đổi (chưa bấm "Lưu giá trị") thì đồng bộ luôn số tiền trong văn bản đang soạn trước khi lưu
+      const oldValue = Number(selectedQuote?.contractValue || 0);
+      const newValue = Number(tempQuote.contractValue || 0);
+      const htmlToSave = oldValue !== newValue ? replaceContractValueInHtml(docHtml, oldValue, newValue, docSoTiengViet).html : docHtml;
+      const updated = { ...tempQuote, contractHtml: htmlToSave };
       await dbService.archivedQuotes.save({ ...updated, sector: 'subcontractor' });
       setTempQuote(updated);
       setSelectedQuote(updated);
       setArchivedList(prev => prev.map(q => q.id === updated.id ? updated : q));
+      setDocHtml(htmlToSave);
       setIsEditing(false);
       addToast({ title: '💾 Đã lưu', message: 'Đã lưu bản in hợp đồng thầu phụ thành công!', type: 'success' });
       window.dispatchEvent(new CustomEvent('hl-archived-subcontractor-quotes-updated'));
@@ -789,12 +841,35 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                   <span className="text-xs font-bold text-slate-600">Giá trị hợp đồng khoán:</span>
                   <input
                     type="number"
-                    disabled={tempQuote.isApproved || !isEditing}
+                    disabled={tempQuote.isApproved}
                     value={tempQuote.contractValue || 0}
                     onChange={(e) => setTempQuote({ ...tempQuote, contractValue: Number(e.target.value) })}
                     className="bg-white border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-bold text-emerald-600 disabled:opacity-60 disabled:bg-slate-100 w-40"
                   />
-                  <span className="text-[10px] text-slate-400 italic">Đồng bộ trực tiếp với Công Nợ Trả</span>
+                  {!tempQuote.isApproved && Number(tempQuote.contractValue || 0) !== Number(selectedQuote?.contractValue || 0) ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleSaveContractValue}
+                        disabled={savingValue}
+                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        {savingValue ? 'Đang lưu...' : 'Lưu giá trị'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectedQuote && setTempQuote({ ...tempQuote, contractValue: selectedQuote.contractValue })}
+                        disabled={savingValue}
+                        className="px-2 py-1 text-[10px] text-slate-500 hover:text-slate-700 cursor-pointer"
+                      >
+                        Hoàn tác
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 italic">
+                      {tempQuote.isApproved ? '🔒 Đã duyệt — hủy phê duyệt để sửa giá trị' : 'Đồng bộ trực tiếp với Công Nợ Trả'}
+                    </span>
+                  )}
                 </div>
 
                 {/* Header Title */}
