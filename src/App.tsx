@@ -39,7 +39,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators } from './context';
 import { Toast } from './context/NotificationContext';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
 
@@ -66,6 +66,7 @@ import UserProfileModal from './components/UserProfileModal';
 import ForcePasswordModal from './components/ForcePasswordModal';
 import { startPresence, stopPresence } from './lib/presence';
 import { getPasswordNotice, setPasswordNotice, type PasswordNotice } from './lib/passwordChange';
+import { materialInboxFor } from './lib/materialApproval';
 import MessagesView from './components/MessagesView';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
@@ -1216,6 +1217,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Đơn nghỉ phép (dùng để cộng vào badge "Việc của tôi" – nhánh Công việc phải duyệt)
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [subcontractorAdvances, setSubcontractorAdvances] = useState<SubcontractorAdvanceProposal[]>([]);
+  // Đề xuất vật tư (dùng cho badge "Việc của tôi": chờ duyệt + việc điều phối)
+  const [materialProposalsForBadge, setMaterialProposalsForBadge] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -1526,6 +1529,17 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     };
     window.addEventListener('hl-payments-updated', handlePaymentsUpdated);
     return () => window.removeEventListener('hl-payments-updated', handlePaymentsUpdated);
+  }, []);
+
+  // Sync đề xuất vật tư (badge "Việc của tôi") khi mount và khi có thay đổi (sự kiện Realtime hl-material-proposals-updated)
+  useEffect(() => {
+    const load = async () => {
+      try { setMaterialProposalsForBadge((await dbService.materialProposals.list()) || []); }
+      catch (err) { console.error('Lỗi đồng bộ đề xuất vật tư:', err); }
+    };
+    load();
+    window.addEventListener('hl-material-proposals-updated', load);
+    return () => window.removeEventListener('hl-material-proposals-updated', load);
   }, []);
 
   // Sync đơn nghỉ phép (dùng cho badge "Việc của tôi") khi mount và khi có thay đổi
@@ -3392,11 +3406,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.
     const canApproveTravelExpense = canApproveTravelExpenseCfg(currentUser.id); // quy tắc dùng chung (SettingsContext)
     const myPendingTravelExpenses = ctpSummary.filter((t: any) => t.status === 'pending' && canApproveTravelExpense);
+    // Đề xuất vật tư (đồng bộ TaskManagement): chờ duyệt (người xét duyệt vật tư/Giám đốc) + việc điều phối (người điều phối được chỉ định)
+    const materialInbox = materialInboxFor(materialProposalsForBadge, currentUser, {
+      isAdmin: isRoleAdmin(currentUser.id),
+      approverIds: getMaterialApprovers().map(a => a.id),
+      coordinatorIds: getMaterialCoordinators().map(c => c.id),
+    });
     const toReviewUncompletedCount = toReviewTasksCount
       + myPendingLeaves.length
       + myPendingPayments.length
       + myPendingAdvances.length
-      + myPendingTravelExpenses.length;
+      + myPendingTravelExpenses.length
+      + materialInbox.count;
 
     return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
   })();

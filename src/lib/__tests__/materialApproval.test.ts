@@ -28,11 +28,47 @@ describe('TaskManagement — nối đề xuất vật tư', () => {
   it('tải đề xuất vật tư, nghe sự kiện cập nhật, đếm vào "cần xử lý" và có nút mở Điều Phối Vật Tư', () => {
     expect(src).toMatch(/dbService\.materialProposals\.list\(\)/);
     expect(src).toMatch(/hl-material-proposals-updated/);
-    expect(src).toMatch(/myPendingMaterial\.length\s*\n\s*\} cần xử lý/);
+    expect(src).toMatch(/materialInbox\.count\s*\n\s*\} cần xử lý/);
     expect(src).toMatch(/onOpenMaterialProposal\?\.\(m\.id\)/);
   });
   it('App truyền onOpenMaterialProposal cho TaskManagement', () => {
     const i = app.indexOf('<TaskManagement\n');   // thẻ mở (không phải chú thích có chữ <TaskManagement)
     expect(app.slice(i, i + 2500)).toContain('onOpenMaterialProposal={openMaterialProposal}');
+  });
+});
+
+import { pendingMaterialForCoordinator, materialInboxFor } from '../materialApproval';
+describe('việc điều phối vật tư', () => {
+  const list = [
+    { id: 'a', status: 'find_supplier' }, { id: 'b', status: 'waiting_order' }, { id: 'c', status: 'waiting_approval' },
+    { id: 'd', status: 'ordered' }, { id: 'e', status: 'received' }, { id: 'f', status: 'cancelled' },
+  ];
+  it('người điều phối được chỉ định thấy đề xuất đang Tìm nhà cung cấp và Chờ đặt hàng', () => {
+    expect(pendingMaterialForCoordinator(list, 'u1', ['u1']).map(p => p.id)).toEqual(['a', 'b']);
+  });
+  it('người không được chỉ định điều phối (kể cả admin) không thấy; không có uid thì rỗng', () => {
+    expect(pendingMaterialForCoordinator(list, 'u9', ['u1'])).toEqual([]);
+    expect(pendingMaterialForCoordinator(list, undefined, ['u1'])).toEqual([]);
+    expect(pendingMaterialForCoordinator(list, 'u1', [])).toEqual([]);
+  });
+  it('gộp: vừa người duyệt vừa người điều phối → đếm cả hai nhóm; huy hiệu = tổng', () => {
+    const r = materialInboxFor(list, { id: 'u1', username: 'x' }, { isAdmin: false, approverIds: ['u1'], coordinatorIds: ['u1'] });
+    expect(r.toApprove.map(p => p.id)).toEqual(['c']);
+    expect(r.toCoordinate.map(p => p.id)).toEqual(['a', 'b']);
+    expect(r.count).toBe(3);
+  });
+  it('chỉ là người điều phối → không thấy việc chờ duyệt; không có vai trò nào → 0', () => {
+    expect(materialInboxFor(list, { id: 'u2' }, { isAdmin: false, approverIds: [], coordinatorIds: ['u2'] }).count).toBe(2);
+    expect(materialInboxFor(list, { id: 'u3' }, { isAdmin: false, approverIds: [], coordinatorIds: [] }).count).toBe(0);
+    expect(materialInboxFor(list, null, { isAdmin: true, approverIds: [], coordinatorIds: [] }).count).toBe(0);
+  });
+  it('App (huy hiệu) và TaskManagement dùng chung materialInboxFor và cộng vào số cần xử lý', () => {
+    const app = fs.readFileSync('src/App.tsx', 'utf8');
+    const tm = fs.readFileSync('src/components/TaskManagement.tsx', 'utf8');
+    expect(app).toMatch(/materialInboxFor\(materialProposalsForBadge/);
+    expect(app).toMatch(/\+ materialInbox\.count;/);
+    expect(app).toMatch(/hl-material-proposals-updated/);
+    expect(tm).toMatch(/materialInboxFor\(materialProposals/);
+    expect(tm).toMatch(/my-material-coordination/);
   });
 });

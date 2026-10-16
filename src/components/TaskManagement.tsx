@@ -14,9 +14,9 @@ import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
-import { useNotification, isUserInRoleGroup, getConfiguredApprovers, getMaterialApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
-import { isMaterialApprover, pendingMaterialForApprover, materialProposalTotal } from '../lib/materialApproval';
+import { materialInboxFor, materialProposalTotal, COORDINATOR_STATUS_LABEL } from '../lib/materialApproval';
 import { canDoTaskAction, loadTaskPermissionMatrix, isTaskReadOnlyFor } from './hr/hrTaskPermissions';
 
 interface TaskManagementProps {
@@ -875,13 +875,16 @@ export default function TaskManagement({
      (a.creatorName && currentUser?.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase()) ||
      (a.creator && currentUser?.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))
   ), [subcontractorAdvances, currentUser, isFinanceApprover]);
-  // ĐỀ XUẤT VẬT TƯ chờ duyệt (trạng thái CHỜ DUYỆT) mà user là Người xét duyệt vật tư / Giám đốc
-  const myPendingMaterial = React.useMemo(() => pendingMaterialForApprover(
-    materialProposals,
-    isMaterialApprover(currentUser?.id, currentUser?.username, isFinanceAdmin, getMaterialApprovers().map(a => a.id)),
-  ), [materialProposals, currentUser, isFinanceAdmin]);
+  // ĐỀ XUẤT VẬT TƯ: (1) chờ DUYỆT — Người xét duyệt vật tư / Giám đốc; (2) việc ĐIỀU PHỐI (Tìm nhà cung cấp / Chờ đặt hàng) — Người điều phối vật tư
+  const materialInbox = React.useMemo(() => materialInboxFor(materialProposals, currentUser, {
+    isAdmin: isFinanceAdmin,
+    approverIds: getMaterialApprovers().map(a => a.id),
+    coordinatorIds: getMaterialCoordinators().map(c => c.id),
+  }), [materialProposals, currentUser, isFinanceAdmin]);
+  const myPendingMaterial = materialInbox.toApprove;
+  const myMaterialCoordination = materialInbox.toCoordinate;
   const toReviewUncompletedCount = toReviewTasksCount
-    + myPendingMaterial.length
+    + materialInbox.count
     + myPendingLeaves.length
     + myPendingPayments.length
     + myPendingAdvances.length
@@ -1672,7 +1675,7 @@ export default function TaskManagement({
                     +
                     myPendingVouchers.length
                     +
-                    myPendingMaterial.length
+                    materialInbox.count
                   } cần xử lý
                 </span>
               </div>
@@ -1692,7 +1695,7 @@ export default function TaskManagement({
 
                 if (allPending.length === 0) {
                   // Còn đề xuất vật tư / chờ lập phiếu ở phần dưới → không hiện câu "không có đề xuất" gây hiểu nhầm
-                  if (myPendingMaterial.length + myPendingVouchers.length > 0) return null;
+                  if (materialInbox.count + myPendingVouchers.length > 0) return null;
                   return (
                     <div className="text-center py-16 text-slate-500 italic text-xs">
                       Không có đề xuất tài chính nào chờ duyệt.
@@ -1896,6 +1899,42 @@ export default function TaskManagement({
                         >
                           <Eye className="w-3.5 h-3.5" />
                           Xem & duyệt
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* PHẦN VIỆC ĐIỀU PHỐI VẬT TƯ — người điều phối được chỉ định: đề xuất đang Tìm nhà cung cấp / Chờ đặt hàng (việc cần LÀM, không phải chờ duyệt) */}
+              {myMaterialCoordination.length > 0 && (
+                <div className="space-y-2 pt-3 mt-3 border-t border-dashed border-slate-800" data-testid="my-material-coordination">
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                    <h4 className="font-extrabold text-[11px] text-violet-400 uppercase tracking-wider">Việc điều phối vật tư</h4>
+                    <span className="bg-violet-50 border border-violet-200 text-violet-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">{myMaterialCoordination.length}</span>
+                  </div>
+                  {myMaterialCoordination.map((m: any) => (
+                    <div key={m.id} data-testid="my-material-coordination-item" className="bg-slate-950/80 border border-violet-500/30 p-3.5 rounded-lg hover:border-violet-400 transition-all duration-150 space-y-3 shadow-sm">
+                      <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
+                        <span className="text-[10px] font-mono font-extrabold text-violet-700 tracking-wider bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">{m.code || m.id}</span>
+                        <span className="text-[10.5px] font-bold text-violet-300">{COORDINATOR_STATUS_LABEL[m.status] || m.status}</span>
+                      </div>
+                      <div className="space-y-1.5 text-[10.5px] text-slate-400">
+                        <div className="text-slate-200">Dự án: <strong className="text-slate-100 text-xs font-bold leading-none">{m.projectName || m.project_name || 'Không gắn dự án'}</strong></div>
+                        {(m.taskName || m.task_name) && <div className="font-mono text-[10px]">Công việc: <strong className="text-slate-300">{m.taskName || m.task_name}</strong></div>}
+                        <p>Người đề xuất: <strong className="text-slate-300">{m.createdByName || m.created_by_name || '—'}</strong> · {(m.items || []).length} dòng vật tư{m.supplierName ? ` · NCC: ${m.supplierName}` : ''}</p>
+                        <p className="text-violet-400 font-bold text-[9px] uppercase">{m.status === 'find_supplier' ? 'Cần tìm nhà cung cấp và nhập báo giá' : 'Đã duyệt — cần tạo đơn đặt hàng'}</p>
+                      </div>
+                      <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onOpenMaterialProposal?.(m.id)}
+                          className="bg-violet-600 hover:bg-violet-500 text-white px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer flex items-center gap-1"
+                          title="Mở Điều Phối Vật Tư để xử lý đề xuất này"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          Mở & xử lý
                         </button>
                       </div>
                     </div>
