@@ -83,13 +83,14 @@ describe('Phòng Dự Án — Tổng chi phí / Còn phải chi / bảng Chi ph�
     ];
     return render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={payments} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={vi.fn()} />);
   };
-  it('bảng công trình: không còn cột Đã chi; có Tổng chi phí và Còn phải chi, tính theo 6 nhóm, kèm chi tiết khi rê chuột', async () => {
+  it('bảng công trình: không còn cột Đã chi và Còn phải chi; có Tổng chi phí tính theo 6 nhóm, kèm chi tiết khi rê chuột', async () => {
     setup();
-    expect(screen.queryAllByText('Đã chi').length).toBe(1);   // chỉ còn trong bảng "Chi phí theo công trình", không còn ở bảng công trình
+    expect(screen.queryAllByText('Đã chi').length).toBe(1);        // chỉ còn trong bảng "Chi phí theo công trình", không còn ở bảng công trình
+    expect(screen.queryAllByText('Còn phải chi').length).toBe(0);  // không còn cột Còn phải chi ở bất kỳ bảng nào
+    expect(screen.queryByTestId('remaining-cost')).toBeNull();
     // vật tư 500.000 + kho 100.000 + thầu phụ 1.000.000 (400.000 đã chi + 600.000 chưa trả) + công trường 50.000 = 1.650.000
     // đã chi = 200.000 (đơn) + 100.000 (kho) + 400.000 + 50.000 = 750.000; còn phải chi = 900.000
-    await waitFor(() => expect(screen.getAllByTestId('remaining-cost')[0].textContent).toContain('900.000'));
-    expect(screen.getAllByTestId('total-cost')[0].textContent).toContain('1.650.000');
+    await waitFor(() => expect(screen.getAllByTestId('total-cost')[0].textContent).toContain('1.650.000'));
     expect(screen.getAllByTestId('total-cost')[0].getAttribute('title')).toMatch(/Thầu phụ: 1\.000\.000/);
     D.contracts = []; D.orders = [];
   });
@@ -97,7 +98,8 @@ describe('Phòng Dự Án — Tổng chi phí / Còn phải chi / bảng Chi ph�
     setup();
     await waitFor(() => expect(screen.getAllByTestId('cost-row')).toHaveLength(1));   // công trình Y chưa có chi phí → ẩn
     const row = screen.getAllByTestId('cost-row')[0].textContent!;
-    for (const x of ['500.000', '100.000', '1.000.000', '50.000', '1.650.000', '750.000', '900.000']) expect(row).toContain(x);
+    for (const x of ['500.000', '100.000', '1.000.000', '50.000', '1.650.000', '750.000']) expect(row).toContain(x);
+    expect(row).not.toContain('900.000');   // không còn cột Còn phải chi
     expect(screen.getByTestId('cost-grand-total').textContent).toContain('1.650.000');
     expect(screen.getByTestId('cost-footer').textContent).toContain('1.650.000');
     fireEvent.change(screen.getByLabelText('Hiển thị'), { target: { value: 'all' } });

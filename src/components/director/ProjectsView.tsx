@@ -142,8 +142,8 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
   const missionPager = usePager(filteredMissions, [mq, mProject, mView, mAssignee].join('|'));
 
   const exportCsv = () => {
-    const head = ['Mã', 'Công trình', 'Loại', 'Trạng thái', 'Trưởng dự án', 'Khách hàng', 'Tiến độ (%)', 'Kết thúc dự kiến', 'Giá trị hợp đồng', 'Đã thu', 'Tổng chi phí', 'Còn phải chi', 'Việc đang mở', 'Việc quá hạn'];
-    const body = filteredProjects.map(p => { const f = fin.get(p.id); const ts = taskStats.get(p.id); return [p.code, p.name, TYPE_LABEL[p.type || 'general'], STATUS_LABEL[p.status] || p.status, empName(p.pmId), custName(p.customerId), p.progress || 0, toDay(p.endDate), f?.contractValue || 0, f?.collected || 0, costs.get(p.id)?.total || 0, costs.get(p.id)?.remaining || 0, ts?.open || 0, ts?.overdue || 0]; });
+    const head = ['Mã', 'Công trình', 'Loại', 'Trạng thái', 'Trưởng dự án', 'Khách hàng', 'Tiến độ (%)', 'Kết thúc dự kiến', 'Giá trị hợp đồng', 'Đã thu', 'Tổng chi phí', 'Việc đang mở', 'Việc quá hạn'];
+    const body = filteredProjects.map(p => { const f = fin.get(p.id); const ts = taskStats.get(p.id); return [p.code, p.name, TYPE_LABEL[p.type || 'general'], STATUS_LABEL[p.status] || p.status, empName(p.pmId), custName(p.customerId), p.progress || 0, toDay(p.endDate), f?.contractValue || 0, f?.collected || 0, costs.get(p.id)?.total || 0, ts?.open || 0, ts?.overdue || 0]; });
     const csv = [head, ...body].map(l => l.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `cong-trinh-${today}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -191,7 +191,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11.5px]">
               <thead><tr className={tableHead}>
-                <Th>Công trình</Th><Th>Trưởng dự án</Th><Th className="min-w-[120px]">Tiến độ</Th><Th>Kết thúc dự kiến</Th><Th right>Giá trị HĐ</Th><Th right>Đã thu</Th><Th right>Tổng chi phí</Th><Th right>Còn phải chi</Th><Th right>Việc mở / quá hạn</Th><Th>Trạng thái</Th>
+                <Th>Công trình</Th><Th>Trưởng dự án</Th><Th className="min-w-[120px]">Tiến độ</Th><Th>Kết thúc dự kiến</Th><Th right>Giá trị HĐ</Th><Th right>Đã thu</Th><Th right>Tổng chi phí</Th><Th right>Việc mở / quá hạn</Th><Th>Trạng thái</Th>
               </tr></thead>
               <tbody>
                 {projectPager.rows.map(p => {
@@ -205,7 +205,6 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(f?.contractValue || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(f?.collected || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-800 font-bold" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="total-cost">{fmtFull(costs.get(p.id)?.total || 0)}{costRisk(p.id, false) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
-                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-700" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="remaining-cost">{fmtFull(costs.get(p.id)?.remaining || 0)}</td>
                       <td className="px-3 py-2.5 text-right">{ts?.open || 0}{(ts?.overdue || 0) > 0 && <span className="text-rose-600 font-bold"> / {ts?.overdue}</span>}</td>
                       <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[p.status] || 'slate'}>{STATUS_LABEL[p.status] || p.status}</Badge></td>
                     </tr>
@@ -220,7 +219,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
 
       {/* Chi phí theo công trình — tổng hợp TẤT CẢ các khoản (cách tính ở lib/projectCost.ts). Danh sách theo bộ lọc công trình phía trên. */}
       <Card title="Chi phí theo công trình" icon={<Wallet className="w-4 h-4 text-rose-500" />}
-        right={<span className="text-[10.5px] text-slate-500">Tổng chi phí: <b className="text-slate-800 font-mono" data-testid="cost-grand-total">{fmtFull(costSum.total)}</b> · Còn phải chi: <b className="text-amber-700 font-mono">{fmtFull(costSum.remaining)}</b></span>}>
+        right={<span className="text-[10.5px] text-slate-500">Tổng chi phí: <b className="text-slate-800 font-mono" data-testid="cost-grand-total">{fmtFull(costSum.total)}</b></span>}>
         <FilterBar onReset={() => { setCq(''); setCShow('hasCost'); }} active={!!cq || cShow !== 'hasCost'}>
           <SearchBox value={cq} onChange={setCq} placeholder="Tên hoặc mã công trình…" />
           <SelectBox label="Hiển thị" value={cShow} onChange={v => setCShow(v as 'hasCost' | 'all')} options={[{ value: 'hasCost', label: 'Công trình đã có chi phí' }, { value: 'all', label: 'Tất cả công trình' }]} />
@@ -229,7 +228,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11.5px]">
               <thead><tr className={tableHead}>
-                <Th>Công trình</Th><Th right>Vật tư (đơn mua hàng)</Th><Th right>Kho</Th><Th right>Thầu phụ</Th><Th right>Chi phí công trường</Th><Th right>Chi khác</Th><Th right>Chờ duyệt</Th><Th right>Tổng chi phí</Th><Th right>Đã chi</Th><Th right>Còn phải chi</Th><Th right>Trong đó tiền mặt</Th>
+                <Th>Công trình</Th><Th right>Vật tư (đơn mua hàng)</Th><Th right>Kho</Th><Th right>Thầu phụ</Th><Th right>Chi phí công trường</Th><Th right>Chi khác</Th><Th right>Chờ duyệt</Th><Th right>Tổng chi phí</Th><Th right>Đã chi</Th><Th right>Trong đó tiền mặt</Th>
               </tr></thead>
               <tbody>
                 {costPager.rows.map(({ p, c }) => (
@@ -238,7 +237,6 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                     {[c.material, c.warehouse, c.subcontract, c.site, c.other, c.pending].map((v, i) => <td key={i} className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-600">{fmtFull(v)}</td>)}
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold text-slate-800">{fmtFull(c.total)}</td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(c.paid)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-700">{fmtFull(c.remaining)}</td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-500">{fmtFull(c.cash)}</td>
                   </tr>
                 ))}
@@ -248,7 +246,6 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                 {[costSum.material, costSum.warehouse, costSum.subcontract, costSum.site, costSum.other, costSum.pending].map((v, i) => <td key={i} className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(v)}</td>)}
                 <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-900">{fmtFull(costSum.total)}</td>
                 <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-700">{fmtFull(costSum.paid)}</td>
-                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-800">{fmtFull(costSum.remaining)}</td>
                 <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-600">{fmtFull(costSum.cash)}</td>
               </tr></tfoot>
             </table>
