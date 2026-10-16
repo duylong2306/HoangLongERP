@@ -1,11 +1,13 @@
 // ─── Tab "Phòng Dự Án" của Bảng điều hành Giám đốc ─────────────────────────────────────────────────────────────
 // Một cái nhìn đủ để điều hành: bao nhiêu công trình đang chạy / trễ / vượt chi, từng công trình tiến độ - tiền - việc ra sao, và danh sách công việc
 // (đang làm, quá hạn, chưa làm, chờ duyệt) có lọc theo công trình / người phụ trách. Danh sách dài đều có phân trang + chọn số dòng.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { HardHat, ListChecks, FileDown } from 'lucide-react';
 import type { Project, Task, Receipt, Payment, Employee, Customer } from '../../types';
 import { todayYmd, toDay, bucketTasks, buildProjectFinance, type ProjectFinanceRow } from '../../lib/executiveDashboard';
 import { matchesQuery } from '../../lib/directorViews';
+import { buildProjectCosts, describeProjectCost, type ProjectCost } from '../../lib/projectCost';
+import { dbService } from '../../lib/dbService';
 import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, usePager, fmtFull, fmtShort, dmy, tableHead, Th, type Tone } from './kit';
 
 interface Props {
@@ -28,6 +30,20 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
 
   // ─── Số liệu từng công trình ───
   const fin = useMemo(() => new Map(buildProjectFinance(projects, receipts, payments, today).map(r => [r.project.id, r] as const)), [projects, receipts, payments, today]);
+  // ─── Tổng chi phí = Đã chi + Còn phải chi (xem lib/projectCost.ts) — cần đơn mua hàng, đề xuất chi, hợp đồng thầu phụ ───
+  // Mỗi nguồn tải độc lập: nguồn nào lỗi/chưa có quyền thì chỉ thiếu phần đó, các cột khác vẫn hiện.
+  const [orders, setOrders] = useState<any[]>([]); const [advances, setAdvances] = useState<any[]>([]); const [contracts, setContracts] = useState<any[]>([]);
+  useEffect(() => {
+    let alive = true;
+    Promise.allSettled([dbService.purchaseOrders.list(), dbService.subcontractorAdvances.list(), dbService.archivedQuotes.list('subcontractor')]).then(([o, a, c]) => {
+      if (!alive) return;
+      if (o.status === 'fulfilled') setOrders(o.value || []);
+      if (a.status === 'fulfilled') setAdvances(a.value || []);
+      if (c.status === 'fulfilled') setContracts(c.value || []);
+    });
+    return () => { alive = false; };
+  }, []);
+  const costs = useMemo(() => buildProjectCosts(projects.map(p => p.id), { payments, orders, advances, contracts }), [projects, payments, orders, advances, contracts]);
   const taskStats = useMemo(() => {
     const m = new Map<string, { open: number; overdue: number; todo: number; doing: number }>();
     for (const p of projects) {
@@ -89,8 +105,8 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
   const taskPager = usePager(filteredTasks, [tq, tProject, tView, tAssignee].join('|'));
 
   const exportCsv = () => {
-    const head = ['Mã', 'Công trình', 'Loại', 'Trạng thái', 'Trưởng dự án', 'Khách hàng', 'Tiến độ (%)', 'Kết thúc dự kiến', 'Giá trị hợp đồng', 'Đã thu', 'Đã chi', 'Việc đang mở', 'Việc quá hạn'];
-    const body = filteredProjects.map(p => { const f = fin.get(p.id); const ts = taskStats.get(p.id); return [p.code, p.name, TYPE_LABEL[p.type || 'general'], STATUS_LABEL[p.status] || p.status, empName(p.pmId), custName(p.customerId), p.progress || 0, toDay(p.endDate), f?.contractValue || 0, f?.collected || 0, f?.spent || 0, ts?.open || 0, ts?.overdue || 0]; });
+    const head = ['Mã', 'Công trình', 'Loại', 'Trạng thái', 'Trưởng dự án', 'Khách hàng', 'Tiến độ (%)', 'Kết thúc dự kiến', 'Giá trị hợp đồng', 'Đã thu', 'Đã chi', 'Tổng chi phí', 'Còn phải chi', 'Việc đang mở', 'Việc quá hạn'];
+    const body = filteredProjects.map(p => { const f = fin.get(p.id); const ts = taskStats.get(p.id); return [p.code, p.name, TYPE_LABEL[p.type || 'general'], STATUS_LABEL[p.status] || p.status, empName(p.pmId), custName(p.customerId), p.progress || 0, toDay(p.endDate), f?.contractValue || 0, f?.collected || 0, f?.spent || 0, costs.get(p.id)?.total || 0, costs.get(p.id)?.remaining || 0, ts?.open || 0, ts?.overdue || 0]; });
     const csv = [head, ...body].map(l => l.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `cong-trinh-${today}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -138,7 +154,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11.5px]">
               <thead><tr className={tableHead}>
-                <Th>Công trình</Th><Th>Trưởng dự án</Th><Th className="min-w-[120px]">Tiến độ</Th><Th>Kết thúc dự kiến</Th><Th right>Giá trị HĐ</Th><Th right>Đã thu</Th><Th right>Đã chi</Th><Th right>Việc mở / quá hạn</Th><Th>Trạng thái</Th>
+                <Th>Công trình</Th><Th>Trưởng dự án</Th><Th className="min-w-[120px]">Tiến độ</Th><Th>Kết thúc dự kiến</Th><Th right>Giá trị HĐ</Th><Th right>Đã thu</Th><Th right>Đã chi</Th><Th right>Tổng chi phí</Th><Th right>Còn phải chi</Th><Th right>Việc mở / quá hạn</Th><Th>Trạng thái</Th>
               </tr></thead>
               <tbody>
                 {projectPager.rows.map(p => {
@@ -152,6 +168,8 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(f?.contractValue || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(f?.collected || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(f?.spent || 0)}{f && (f.flags.includes('overBudget') || f.flags.includes('loss')) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
+                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-800 font-bold" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="total-cost">{fmtFull(costs.get(p.id)?.total || 0)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-700" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="remaining-cost">{fmtFull(costs.get(p.id)?.remaining || 0)}</td>
                       <td className="px-3 py-2.5 text-right">{ts?.open || 0}{(ts?.overdue || 0) > 0 && <span className="text-rose-600 font-bold"> / {ts?.overdue}</span>}</td>
                       <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[p.status] || 'slate'}>{STATUS_LABEL[p.status] || p.status}</Badge></td>
                     </tr>

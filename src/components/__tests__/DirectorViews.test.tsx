@@ -36,6 +36,23 @@ const emp = (id: string, name: string, extra: any = {}) => ({ id, name, departme
 const employees = [emp('E1', 'An'), emp('E2', 'Bình', { department: 'Văn phòng' }), emp('E3', 'Cường'), emp('E4', 'Dũng', { status: 'retired' })];
 const rangeText = () => screen.getAllByTestId('pager-range')[0].textContent;
 
+describe('Phòng Dự Án — cột Tổng chi phí / Còn phải chi', () => {
+  it('hiện Đã chi, Tổng chi phí = đã chi + còn phải chi (thầu phụ chưa trả + đơn còn nợ), kèm chi tiết khi rê chuột', async () => {
+    D.contracts = [{ id: 'K1', projectId: 'PX', subcontractorId: 'TP1', subcontractorName: 'Minh', contractValue: 1_000_000, isApproved: true }];
+    D.orders = [{ id: 'O1', projectId: 'PX', status: 'confirmed', tongTien: 500_000, thanhToanThucTe: 200_000, congNo: 300_000 }];
+    const projects = [{ id: 'PX', code: 'CTX', name: 'Công trình X', type: 'construction', status: 'processing', contractValue: 5_000_000, progress: 10, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' }] as any;
+    const payments = [{ id: 'p1', projectId: 'PX', subcontractorId: 'TP1', category: 'subcontractor_advance', status: 'approved', amount: 400_000 }] as any;
+    render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={payments} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={vi.fn()} />);
+    expect(screen.getByText('Tổng chi phí')).toBeTruthy();
+    expect(screen.getByText('Còn phải chi')).toBeTruthy();
+    // đã chi 400.000 + thầu phụ còn 600.000 + đơn còn nợ 300.000 → còn phải chi 900.000, tổng 1.300.000
+    await waitFor(() => expect(screen.getByTestId('remaining-cost').textContent).toContain('900.000'));
+    expect(screen.getByTestId('total-cost').textContent).toContain('1.300.000');
+    expect(screen.getByTestId('total-cost').getAttribute('title')).toMatch(/thầu phụ chưa trả: 600\.000/);
+    D.contracts = []; D.orders = [];
+  });
+});
+
 describe('Phòng Dự Án — lọc & phân trang', () => {
   const projects = Array.from({ length: 25 }, (_, i) => ({ id: `P${i}`, code: `CT${i}`, name: `Công trình ${String(i).padStart(2, '0')}`, type: i % 2 ? 'furniture' : 'construction', status: 'processing', contractValue: 1_000_000 * (i + 1), progress: i, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' })) as any;
   const open = (nav = vi.fn()) => { render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={[]} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={nav} />); return nav; };
