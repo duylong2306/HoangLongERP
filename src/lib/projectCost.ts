@@ -1,28 +1,33 @@
-// TỔNG CHI PHÍ CÔNG TRÌNH = ĐÃ CHI + CÒN PHẢI CHI (Bảng điều hành Giám đốc → Phòng Dự Án).
+// CHI PHÍ THEO CÔNG TRÌNH (Bảng điều hành Giám đốc → Phòng Dự Án).
 //
-//   Đã chi        : phiếu chi ĐÃ DUYỆT gắn công trình (không tính nạp quỹ tiền mặt) — đúng số cột "Đã chi" hiện có.
-//   Còn phải chi  : các khoản đã phát sinh/cam kết cho công trình nhưng CHƯA chi, gồm 4 nhóm (không trùng nhau):
-//     1. Hợp đồng thầu phụ ĐÃ DUYỆT còn chưa trả = Σ giá trị hợp đồng − tiền đã chi cho thầu phụ đó tại công trình (không âm).
-//     2. Đơn mua hàng của công trình còn công nợ (bỏ đơn nháp/đã hủy).
-//     3. Đề xuất chi đang chờ duyệt / chờ lập phiếu CHƯA có phiếu chi (đã có phiếu rồi thì phiếu đã được tính ở nhóm 4 hoặc Đã chi).
-//     4. Phiếu chi đang CHỜ DUYỆT (chưa tính vào Đã chi).
-//   Tổng chi phí = Đã chi + Còn phải chi.
-// Hàm thuần (không gọi DB) để dễ kiểm tra. Mọi nhóm đều tách riêng để hiển thị "chi tiết từng khoản" cho người xem đối chiếu.
+// Phần lớn tiền trả nhà cung cấp KHÔNG gắn công trình ở phiếu chi — chi phí vật tư của công trình nằm ở ĐƠN MUA HÀNG (đơn có gắn công trình).
+// Nên chi phí công trình được tổng hợp theo 6 nhóm (không trùng nhau):
+//   1. Vật tư (nhà cung cấp) : Σ tổng tiền đơn mua hàng của công trình (bỏ nháp/đã hủy); đã chi = số đã thanh toán của đơn.
+//   2. Kho                  : Σ tổng tiền đơn NỘI BỘ xuất từ kho cho công trình (không có công nợ → coi như đã chi).
+//   3. Thầu phụ             : đã chi tạm ứng/thanh toán thầu phụ + phần hợp đồng thầu phụ ĐÃ DUYỆT còn chưa trả
+//                              (mỗi hợp đồng/thầu phụ tính max(giá trị hợp đồng, đã chi) để trả vượt không làm âm).
+//   4. Chi phí công trường  : phiếu chi "chi phí công trường" đã duyệt.
+//   5. Chi khác             : các phiếu chi đã duyệt còn lại gắn công trình (chi khác, nhân công, vận chuyển…), trừ nạp quỹ tiền mặt.
+//   6. Chờ duyệt            : phiếu chi đang chờ duyệt + đề xuất chi chờ duyệt/chờ lập phiếu CHƯA có phiếu (chưa chi, nhưng sẽ chi).
+//   Tổng chi phí = 1 + 2 + 3 + 4 + 5 + 6.   Đã chi = phần đã trả của 1–5.   Còn phải chi = Tổng chi phí − Đã chi.
+//   "Trong đó tiền mặt" chỉ để tham khảo (tiền mặt / rút từ quỹ tiền mặt đã chi), KHÔNG cộng thêm vào tổng.
+// Phiếu chi trả cho đơn mua hàng (có purchaseOrderId của đơn đã tính) KHÔNG cộng lần nữa — đã nằm trong số đã thanh toán của đơn.
+// Hàm thuần (không gọi DB) để dễ kiểm tra.
 import type { Payment } from '../types';
+import { WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID } from '../types';
 
 export interface ProjectCost {
-  spent: number;             // Đã chi
-  subcontractUnpaid: number; // 1. thầu phụ còn phải trả
-  orderUnpaid: number;       // 2. đơn mua hàng còn công nợ
-  proposalPending: number;   // 3. đề xuất chờ duyệt/chờ lập phiếu (chưa có phiếu)
-  paymentPending: number;    // 4. phiếu chi chờ duyệt
-  remaining: number;         // Còn phải chi = 1+2+3+4
-  total: number;             // Tổng chi phí = spent + remaining
+  material: number;      // 1. Vật tư (nhà cung cấp) — tổng tiền đơn
+  warehouse: number;     // 2. Kho
+  subcontract: number;   // 3. Thầu phụ (đã chi + chưa trả)
+  site: number;          // 4. Chi phí công trường
+  other: number;         // 5. Chi khác
+  pending: number;       // 6. Chờ duyệt
+  paid: number;          // Đã chi
+  total: number;         // Tổng chi phí
+  remaining: number;     // Còn phải chi = total − paid
+  cash: number;          // Trong đó tiền mặt (tham khảo)
 }
-
-const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const isCashFund = (p: Payment) => (p.category as string) === 'cash_fund';
-const EMPTY: ProjectCost = { spent: 0, subcontractUnpaid: 0, orderUnpaid: 0, proposalPending: 0, paymentPending: 0, remaining: 0, total: 0 };
 
 export interface CostInputs {
   payments: Payment[];
@@ -31,31 +36,50 @@ export interface CostInputs {
   contracts: any[];   // ArchivedQuote sector 'subcontractor'
 }
 
+const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const isCashFundDeposit = (p: Payment) => (p.category as string) === 'cash_fund';
+const emptyCost = (): ProjectCost => ({ material: 0, warehouse: 0, subcontract: 0, site: 0, other: 0, pending: 0, paid: 0, total: 0, remaining: 0, cash: 0 });
 /** Hợp đồng thầu phụ đã duyệt: cờ isApproved, hoặc trạng thái 'Hoàn thành' (cách app suy ra "đã duyệt"). */
 const isApprovedContract = (c: any) => c?.isApproved === true || String(c?.status || '').trim().toLowerCase() === 'hoàn thành';
+const isWarehouseOrder = (o: any) => !!o?.fromWarehouse || o?.supplierId === WAREHOUSE_SOURCE_ID;
 
 export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<string, ProjectCost> {
   const out = new Map<string, ProjectCost>();
   const wanted = new Set(projectIds);
-  projectIds.forEach(id => out.set(id, { ...EMPTY }));
+  projectIds.forEach(id => out.set(id, emptyCost()));
   const get = (id?: string) => (id && wanted.has(id) ? out.get(id)! : null);
 
-  // Đề xuất đã có phiếu chi (liên kết relatedAdvanceId) → không tính lại ở nhóm 3
-  const advanceWithPayment = new Set(inp.payments.map(p => p.relatedAdvanceId).filter(Boolean) as string[]);
-
-  // Phiếu chi theo công trình
-  const approvedByProject = new Map<string, Payment[]>();
-  for (const p of inp.payments) {
-    const c = get(p.projectId); if (!c || isCashFund(p)) continue;
-    if (p.status === 'approved') {
-      c.spent += num(p.amount);
-      (approvedByProject.get(p.projectId!) || approvedByProject.set(p.projectId!, []).get(p.projectId!)!).push(p);
-    } else if (p.status === 'pending') {
-      c.paymentPending += num(p.amount);
-    }
+  // ── 1 & 2. Đơn mua hàng ──
+  const countedOrderIds = new Set<string>();
+  for (const o of inp.orders) {
+    const c = get(o.projectId); if (!c) continue;
+    if (o.projectId === WAREHOUSE_PROJECT_ID || o.status === 'draft' || o.status === 'cancelled') continue;
+    const total = num(o.tongTien);
+    countedOrderIds.add(o.id);
+    if (isWarehouseOrder(o)) { c.warehouse += total; c.paid += total; continue; }
+    c.material += total;
+    c.paid += Math.min(total, Math.max(0, num(o.thanhToanThucTe)));
   }
 
-  // 1. Thầu phụ: gom hợp đồng đã duyệt theo (công trình, thầu phụ); trừ tiền đã chi cho thầu phụ đó tại công trình
+  // ── Phiếu chi theo công trình (bỏ nạp quỹ; bỏ phiếu trả cho đơn đã tính ở trên) ──
+  const subPaidByProject = new Map<string, Payment[]>();
+  for (const p of inp.payments) {
+    const c = get(p.projectId); if (!c || isCashFundDeposit(p)) continue;
+    const forCountedOrder = !!p.purchaseOrderId && countedOrderIds.has(p.purchaseOrderId);
+    if (p.status === 'pending') { if (!forCountedOrder) c.pending += num(p.amount); continue; }
+    if (p.status !== 'approved') continue;
+    // "Trong đó tiền mặt": cả phiếu trả đơn mua hàng (số đã chi thật), chỉ để tham khảo
+    if (p.paymentMethod === 'cash' || p.paymentMethod === 'cash_fund') c.cash += num(p.amount);
+    if (forCountedOrder) continue;
+    const amt = num(p.amount);
+    if (p.category === 'subcontractor_advance') {
+      c.subcontract += amt; c.paid += amt;
+      (subPaidByProject.get(p.projectId!) || subPaidByProject.set(p.projectId!, []).get(p.projectId!)!).push(p);
+    } else if (p.category === 'site_expense') { c.site += amt; c.paid += amt; }
+    else { c.other += amt; c.paid += amt; }
+  }
+
+  // ── 3. Hợp đồng thầu phụ đã duyệt: phần chưa trả = max(0, giá trị − đã chi cho thầu phụ đó tại công trình) ──
   const groups = new Map<string, { projectId: string; subId?: string; subName?: string; value: number }>();
   for (const k of inp.contracts) {
     if (!isApprovedContract(k) || !get(k.projectId)) continue;
@@ -65,45 +89,48 @@ export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<st
     groups.set(key, g);
   }
   for (const g of groups.values()) {
-    const paid = (approvedByProject.get(g.projectId) || [])
-      .filter(p => p.category !== 'supplier_payment')   // tiền trả nhà cung cấp trùng tên không trừ vào hợp đồng thầu phụ
+    const paid = (subPaidByProject.get(g.projectId) || [])
       .filter(p => (g.subId && p.subcontractorId === g.subId) || (!p.subcontractorId && g.subName && p.recipient === g.subName))
       .reduce((s, p) => s + num(p.amount), 0);
-    get(g.projectId)!.subcontractUnpaid += Math.max(0, g.value - paid);
+    get(g.projectId)!.subcontract += Math.max(0, g.value - paid);   // phần đã chi đã cộng ở trên; chỉ cộng thêm phần chưa trả
   }
 
-  // 2. Đơn mua hàng còn công nợ
-  for (const o of inp.orders) {
-    const c = get(o.projectId); if (!c) continue;
-    if (o.status === 'draft' || o.status === 'cancelled') continue;
-    const debt = o.congNo != null ? num(o.congNo) : num(o.tongTien) - num(o.thanhToanThucTe);
-    c.orderUnpaid += Math.max(0, debt);
-  }
-
-  // 3. Đề xuất chi chờ duyệt / chờ lập phiếu, chưa có phiếu (bỏ nạp quỹ tiền mặt)
+  // ── 6. Đề xuất chi chờ duyệt / chờ lập phiếu, chưa có phiếu (bỏ nạp quỹ tiền mặt) ──
+  const advanceWithPayment = new Set(inp.payments.map(p => p.relatedAdvanceId).filter(Boolean) as string[]);
   for (const a of inp.advances) {
     const c = get(a.projectId); if (!c) continue;
     if (a.status !== 'pending_approval' && a.status !== 'pending_payment') continue;
     if (a.type === 'cash_fund_deposit') continue;
     if (a.paymentId || advanceWithPayment.has(a.id)) continue;
-    c.proposalPending += num(a.approvedAmount ?? a.amount);
+    c.pending += num(a.approvedAmount ?? a.amount);
   }
 
   for (const c of out.values()) {
-    c.remaining = c.subcontractUnpaid + c.orderUnpaid + c.proposalPending + c.paymentPending;
-    c.total = c.spent + c.remaining;
+    c.total = c.material + c.warehouse + c.subcontract + c.site + c.other + c.pending;
+    c.remaining = Math.max(0, c.total - c.paid);
   }
   return out;
+}
+
+/** Cảnh báo ngân sách theo MÔ HÌNH MỚI: tổng chi phí so với giá trị hợp đồng; chi thực > thu. */
+export function costBudgetFlags(contractValue: number, collected: number, c: ProjectCost) {
+  const over = contractValue > 0 && c.total > contractValue;
+  const near = !over && contractValue > 0 && c.total / contractValue >= 0.8;
+  const loss = collected > 0 && c.paid > collected;
+  return { over, near, loss, risk: over || loss };
 }
 
 /** Chuỗi "chi tiết từng khoản" cho tooltip. */
 export function describeProjectCost(c: ProjectCost, fmt: (n: number) => string): string {
   return [
-    `Đã chi: ${fmt(c.spent)}`,
+    `Tổng chi phí: ${fmt(c.total)}`,
+    `  • Vật tư (đơn mua hàng): ${fmt(c.material)}`,
+    `  • Kho (xuất cho công trình): ${fmt(c.warehouse)}`,
+    `  • Thầu phụ: ${fmt(c.subcontract)}`,
+    `  • Chi phí công trường: ${fmt(c.site)}`,
+    `  • Chi khác: ${fmt(c.other)}`,
+    `  • Chờ duyệt: ${fmt(c.pending)}`,
+    `Đã chi: ${fmt(c.paid)} (trong đó tiền mặt: ${fmt(c.cash)})`,
     `Còn phải chi: ${fmt(c.remaining)}`,
-    `  • Hợp đồng thầu phụ chưa trả: ${fmt(c.subcontractUnpaid)}`,
-    `  • Đơn mua hàng còn công nợ: ${fmt(c.orderUnpaid)}`,
-    `  • Đề xuất chờ duyệt / chờ lập phiếu: ${fmt(c.proposalPending)}`,
-    `  • Phiếu chi chờ duyệt: ${fmt(c.paymentPending)}`,
   ].join('\n');
 }

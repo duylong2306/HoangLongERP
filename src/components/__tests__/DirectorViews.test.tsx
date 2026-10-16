@@ -69,19 +69,39 @@ describe('Phòng Dự Án — Nhiệm vụ toàn doanh nghiệp', () => {
   });
 });
 
-describe('Phòng Dự Án — cột Tổng chi phí / Còn phải chi', () => {
-  it('hiện Đã chi, Tổng chi phí = đã chi + còn phải chi (thầu phụ chưa trả + đơn còn nợ), kèm chi tiết khi rê chuột', async () => {
+describe('Phòng Dự Án — Tổng chi phí / Còn phải chi / bảng Chi phí theo công trình', () => {
+  const projects = [{ id: 'PX', code: 'CTX', name: 'Công trình X', type: 'construction', status: 'processing', contractValue: 5_000_000, progress: 10, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' }, { id: 'PY', code: 'CTY', name: 'Công trình Y', type: 'construction', status: 'processing', contractValue: 1_000_000, progress: 10, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' }] as any;
+  const payments = [
+    { id: 'p1', projectId: 'PX', subcontractorId: 'TP1', category: 'subcontractor_advance', status: 'approved', amount: 400_000, paymentMethod: 'transfer' },
+    { id: 'p2', projectId: 'PX', category: 'site_expense', status: 'approved', amount: 50_000, paymentMethod: 'cash' },
+  ] as any;
+  const setup = () => {
     D.contracts = [{ id: 'K1', projectId: 'PX', subcontractorId: 'TP1', subcontractorName: 'Minh', contractValue: 1_000_000, isApproved: true }];
-    D.orders = [{ id: 'O1', projectId: 'PX', status: 'confirmed', tongTien: 500_000, thanhToanThucTe: 200_000, congNo: 300_000 }];
-    const projects = [{ id: 'PX', code: 'CTX', name: 'Công trình X', type: 'construction', status: 'processing', contractValue: 5_000_000, progress: 10, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' }] as any;
-    const payments = [{ id: 'p1', projectId: 'PX', subcontractorId: 'TP1', category: 'subcontractor_advance', status: 'approved', amount: 400_000 }] as any;
-    render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={payments} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={vi.fn()} />);
-    expect(screen.getByText('Tổng chi phí')).toBeTruthy();
-    expect(screen.getByText('Còn phải chi')).toBeTruthy();
-    // đã chi 400.000 + thầu phụ còn 600.000 + đơn còn nợ 300.000 → còn phải chi 900.000, tổng 1.300.000
-    await waitFor(() => expect(screen.getByTestId('remaining-cost').textContent).toContain('900.000'));
-    expect(screen.getByTestId('total-cost').textContent).toContain('1.300.000');
-    expect(screen.getByTestId('total-cost').getAttribute('title')).toMatch(/thầu phụ chưa trả: 600\.000/);
+    D.orders = [
+      { id: 'O1', projectId: 'PX', status: 'confirmed', supplierId: 'S1', tongTien: 500_000, thanhToanThucTe: 200_000, congNo: 300_000 },
+      { id: 'O2', projectId: 'PX', status: 'completed', supplierId: '__warehouse__', tongTien: 100_000, thanhToanThucTe: 0, congNo: 0 },
+    ];
+    return render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={payments} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={vi.fn()} />);
+  };
+  it('bảng công trình: không còn cột Đã chi; có Tổng chi phí và Còn phải chi, tính theo 6 nhóm, kèm chi tiết khi rê chuột', async () => {
+    setup();
+    expect(screen.queryAllByText('Đã chi').length).toBe(1);   // chỉ còn trong bảng "Chi phí theo công trình", không còn ở bảng công trình
+    // vật tư 500.000 + kho 100.000 + thầu phụ 1.000.000 (400.000 đã chi + 600.000 chưa trả) + công trường 50.000 = 1.650.000
+    // đã chi = 200.000 (đơn) + 100.000 (kho) + 400.000 + 50.000 = 750.000; còn phải chi = 900.000
+    await waitFor(() => expect(screen.getAllByTestId('remaining-cost')[0].textContent).toContain('900.000'));
+    expect(screen.getAllByTestId('total-cost')[0].textContent).toContain('1.650.000');
+    expect(screen.getAllByTestId('total-cost')[0].getAttribute('title')).toMatch(/Thầu phụ: 1\.000\.000/);
+    D.contracts = []; D.orders = [];
+  });
+  it('bảng Chi phí theo công trình: từng cột, dòng cộng, tiền mặt, và ẩn công trình chưa có chi phí', async () => {
+    setup();
+    await waitFor(() => expect(screen.getAllByTestId('cost-row')).toHaveLength(1));   // công trình Y chưa có chi phí → ẩn
+    const row = screen.getAllByTestId('cost-row')[0].textContent!;
+    for (const x of ['500.000', '100.000', '1.000.000', '50.000', '1.650.000', '750.000', '900.000']) expect(row).toContain(x);
+    expect(screen.getByTestId('cost-grand-total').textContent).toContain('1.650.000');
+    expect(screen.getByTestId('cost-footer').textContent).toContain('1.650.000');
+    fireEvent.change(screen.getByLabelText('Hiển thị'), { target: { value: 'all' } });
+    expect(screen.getAllByTestId('cost-row')).toHaveLength(2);
     D.contracts = []; D.orders = [];
   });
 });
