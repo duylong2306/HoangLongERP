@@ -2,10 +2,11 @@
 // Một cái nhìn đủ để điều hành: bao nhiêu công trình đang chạy / trễ / vượt chi, từng công trình tiến độ - tiền - việc ra sao, và danh sách công việc
 // (đang làm, quá hạn, chưa làm, chờ duyệt) có lọc theo công trình / người phụ trách. Danh sách dài đều có phân trang + chọn số dòng.
 import React, { useEffect, useMemo, useState } from 'react';
-import { HardHat, ListChecks, FileDown } from 'lucide-react';
+import { HardHat, ListChecks, FileDown, Flag } from 'lucide-react';
 import type { Project, Task, Receipt, Payment, Employee, Customer } from '../../types';
 import { todayYmd, toDay, bucketTasks, buildProjectFinance, type ProjectFinanceRow } from '../../lib/executiveDashboard';
 import { matchesQuery } from '../../lib/directorViews';
+import { buildMissionRows, inMissionView, sortMissions, MISSION_VIEW_LABEL, type MissionView } from '../../lib/missionToday';
 import { buildProjectCosts, describeProjectCost, type ProjectCost } from '../../lib/projectCost';
 import { dbService } from '../../lib/dbService';
 import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, usePager, fmtFull, fmtShort, dmy, tableHead, Th, type Tone } from './kit';
@@ -103,6 +104,24 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
   }).sort((a, b) => (overdueMap.get(b.id) || 0) - (overdueMap.get(a.id) || 0) || (toDay(a.deadline) || '9999').localeCompare(toDay(b.deadline) || '9999')),
   [tasks, tView, tProject, tAssignee, tq, overdueMap, employees, projects]);
   const taskPager = usePager(filteredTasks, [tq, tProject, tView, tAssignee].join('|'));
+
+  // ─── Nhiệm vụ toàn doanh nghiệp (mặc định: việc phải làm HÔM NAY) ───
+  const [mq, setMq] = useState(''); const [mProject, setMProject] = useState('all'); const [mView, setMView] = useState<MissionView>('today'); const [mAssignee, setMAssignee] = useState('all');
+  const missionFilterActive = !!mq || mProject !== 'all' || mView !== 'today' || mAssignee !== 'all';
+  const resetMissions = () => { setMq(''); setMProject('all'); setMView('today'); setMAssignee('all'); };
+  const allMissions = useMemo(() => buildMissionRows(tasks, today), [tasks, today]);
+  const missionCounts = useMemo(() => ({
+    today: allMissions.filter(r => inMissionView(r, 'today', today)).length,
+    overdue: allMissions.filter(r => inMissionView(r, 'overdue', today)).length,
+  }), [allMissions, today]);
+  const missionAssigneeOptions = useMemo(() => [{ value: 'all', label: 'Tất cả' }, ...Array.from(new Set(allMissions.flatMap(r => [r.assigneeId, ...r.memberIds]).filter(Boolean))).map(id => ({ value: id as string, label: empName(id as string) }))], [allMissions, employees]);
+  const filteredMissions = useMemo(() => sortMissions(allMissions.filter(r => {
+    if (!inMissionView(r, mView, today)) return false;
+    if (mProject !== 'all' && r.projectId !== mProject) return false;
+    if (mAssignee !== 'all' && r.assigneeId !== mAssignee && !r.memberIds.includes(mAssignee)) return false;
+    return matchesQuery(mq, r.name, r.taskName, empName(r.assigneeId), projects.find(p => p.id === r.projectId)?.name);
+  })), [allMissions, mView, mProject, mAssignee, mq, today, employees, projects]);
+  const missionPager = usePager(filteredMissions, [mq, mProject, mView, mAssignee].join('|'));
 
   const exportCsv = () => {
     const head = ['Mã', 'Công trình', 'Loại', 'Trạng thái', 'Trưởng dự án', 'Khách hàng', 'Tiến độ (%)', 'Kết thúc dự kiến', 'Giá trị hợp đồng', 'Đã thu', 'Đã chi', 'Tổng chi phí', 'Còn phải chi', 'Việc đang mở', 'Việc quá hạn'];
@@ -216,6 +235,39 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
           </div>
         )}
         {taskPager.bar}
+      </Card>
+
+      {/* Nhiệm vụ toàn doanh nghiệp — mặc định chỉ hiện việc phải làm HÔM NAY */}
+      <Card title="Nhiệm vụ toàn doanh nghiệp" icon={<Flag className="w-4 h-4 text-amber-500" />}
+        right={<span className="text-[10.5px] text-slate-500">Hôm nay: <b className="text-slate-800" data-testid="mission-today-count">{missionCounts.today}</b> · Quá hạn: <b className="text-rose-600">{missionCounts.overdue}</b></span>}>
+        <FilterBar onReset={resetMissions} active={missionFilterActive}>
+          <SearchBox value={mq} onChange={setMq} placeholder="Tên nhiệm vụ, công việc, người phụ trách, công trình…" />
+          <SelectBox label="Tình trạng" value={mView} onChange={v => setMView(v as MissionView)} options={(Object.keys(MISSION_VIEW_LABEL) as MissionView[]).map(v => ({ value: v, label: MISSION_VIEW_LABEL[v] }))} />
+          <SelectBox label="Công trình" value={mProject} onChange={setMProject} options={[{ value: 'all', label: 'Tất cả' }, ...projects.map(p => ({ value: p.id, label: p.name }))]} />
+          <SelectBox label="Người tham gia" value={mAssignee} onChange={setMAssignee} options={missionAssigneeOptions} />
+        </FilterBar>
+        {filteredMissions.length === 0 ? <Empty>{mView === 'today' && !missionFilterActive ? 'Hôm nay chưa có nhiệm vụ nào cần làm.' : 'Không có nhiệm vụ nào khớp bộ lọc.'}</Empty> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11.5px]">
+              <thead><tr className={tableHead}><Th>Nhiệm vụ</Th><Th>Công việc</Th><Th>Công trình</Th><Th>Phụ trách</Th><Th>Hạn</Th><Th>Tình trạng</Th></tr></thead>
+              <tbody>
+                {missionPager.rows.map(r => (
+                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/60" data-testid="mission-row">
+                    <td className="px-3 py-2.5 font-bold text-slate-800">{r.name}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{r.taskName}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{projects.find(p => p.id === r.projectId)?.name || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{empName(r.assigneeId)}{r.memberIds.filter(id => id !== r.assigneeId).length > 0 && <span className="text-slate-400"> +{r.memberIds.filter(id => id !== r.assigneeId).length}</span>}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">{dmy(r.deadline)}</td>
+                    <td className="px-3 py-2.5">
+                      {r.daysLate > 0 ? <Badge tone="rose">Trễ {r.daysLate} ngày</Badge> : r.status === 'completed' ? <Badge tone="emerald">Hoàn thành</Badge> : r.status === 'doing' ? <Badge tone="sky">Đang làm</Badge> : <Badge tone="slate">Chưa làm</Badge>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {missionPager.bar}
       </Card>
     </div>
   );

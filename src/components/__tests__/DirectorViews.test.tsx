@@ -36,6 +36,39 @@ const emp = (id: string, name: string, extra: any = {}) => ({ id, name, departme
 const employees = [emp('E1', 'An'), emp('E2', 'Bình', { department: 'Văn phòng' }), emp('E3', 'Cường'), emp('E4', 'Dũng', { status: 'retired' })];
 const rangeText = () => screen.getAllByTestId('pager-range')[0].textContent;
 
+describe('Phòng Dự Án — Nhiệm vụ toàn doanh nghiệp', () => {
+  const projects = [{ id: 'PA', code: 'A', name: 'Công trình A', type: 'construction', status: 'processing', contractValue: 1, progress: 1, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' }, { id: 'PB', code: 'B', name: 'Công trình B', type: 'construction', status: 'processing', contractValue: 1, progress: 1, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' }] as any;
+  const tasks = [
+    { id: 'T1', name: 'Công việc 1', projectId: 'PA', deadline: '2026-10-20', status: 'doing', missions: [
+      { id: 'm1', name: 'Đổ bê tông', status: 'doing', memberIds: ['E1'], mainAssigneeId: 'E1' },
+      { id: 'm2', name: 'Chưa làm xa', status: 'todo', memberIds: [] },
+      { id: 'm3', name: 'Trễ hạn', status: 'doing', memberIds: [], deadline: '2026-10-05' },
+    ] },
+    { id: 'T2', name: 'Công việc 2', projectId: 'PB', deadline: '2026-10-09', status: 'doing', missions: [{ id: 'm4', name: 'Đến hạn hôm nay', status: 'todo', memberIds: ['E2'], mainAssigneeId: 'E2' }] },
+  ] as any;
+  const open = () => render(<ProjectsView projects={projects} tasks={tasks} receipts={[]} payments={[]} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={vi.fn()} />);
+  const names = () => screen.getAllByTestId('mission-row').map(r => r.querySelector('td')!.textContent);
+  it('mặc định chỉ hiện nhiệm vụ HÔM NAY của mọi công trình, đếm đúng', () => {
+    open();
+    expect(names().sort()).toEqual(['Đến hạn hôm nay', 'Đổ bê tông']);
+    expect(screen.getByTestId('mission-today-count').textContent).toBe('2');
+  });
+  it('đổi tình trạng sang Quá hạn / Tất cả; lọc theo công trình', () => {
+    open();
+    const sel = screen.getAllByLabelText('Tình trạng')[2];   // [0] sức khỏe công trình, [1] công việc, [2] nhiệm vụ
+    fireEvent.change(sel, { target: { value: 'overdue' } });
+    expect(names()).toEqual(['Trễ hạn']);
+    fireEvent.change(sel, { target: { value: 'all' } });
+    expect(names()).toHaveLength(4);
+    fireEvent.change(screen.getAllByLabelText('Công trình')[1], { target: { value: 'PB' } });
+    expect(names()).toEqual(['Đến hạn hôm nay']);
+  });
+  it('không có nhiệm vụ hôm nay → thông báo rỗng', () => {
+    render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={[]} employees={employees} customers={[]} onNavigateTab={vi.fn()} />);
+    expect(screen.getByText('Hôm nay chưa có nhiệm vụ nào cần làm.')).toBeTruthy();
+  });
+});
+
 describe('Phòng Dự Án — cột Tổng chi phí / Còn phải chi', () => {
   it('hiện Đã chi, Tổng chi phí = đã chi + còn phải chi (thầu phụ chưa trả + đơn còn nợ), kèm chi tiết khi rê chuột', async () => {
     D.contracts = [{ id: 'K1', projectId: 'PX', subcontractorId: 'TP1', subcontractorName: 'Minh', contractValue: 1_000_000, isApproved: true }];
