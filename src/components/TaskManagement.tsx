@@ -17,6 +17,8 @@ import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, 
 import { useNotification, isUserInRoleGroup, getConfiguredApprovers, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 import { materialInboxFor, materialProposalTotal, COORDINATOR_STATUS_LABEL } from '../lib/materialApproval';
+import MyWorkOverview, { type InboxItem } from './MyWorkOverview';
+import { buildMyWorkItems, assignedByMe, readMyTasksView, writeMyTasksView, viewStorageKey, pinsStorageKey, todayYmd, type MyTasksView, type MyWorkItem } from '../lib/myWork';
 import { canDoTaskAction, loadTaskPermissionMatrix, isTaskReadOnlyFor } from './hr/hrTaskPermissions';
 
 interface TaskManagementProps {
@@ -80,6 +82,11 @@ export default function TaskManagement({
 
   // Phạm vi SCOPE: "assigned" (Công việc được giao), "all" (Nhiệm vụ liên quan) hoặc "toreview" (Công việc phải duyệt)
   const [taskScope, setTaskScope] = useState<'assigned' | 'all' | 'toreview'>(initialTaskScope || 'assigned');
+
+  // Kiểu xem "Việc của tôi": Cột (Kanban, mặc định) hoặc Tổng quan — nhớ lựa chọn trong localStorage theo từng người dùng + doanh nghiệp
+  const viewKey = React.useMemo(() => companyScopedKey(viewStorageKey(currentUser?.id)), [currentUser?.id]);
+  const [viewMode, setViewMode] = useState<MyTasksView>(() => readMyTasksView(companyScopedKey(viewStorageKey(currentUser?.id))));
+  const changeViewMode = (v: MyTasksView) => { setViewMode(v); writeMyTasksView(viewKey, v); };
 
   // Trạng thái cho Chi tiết công việc chọn Xem
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -883,6 +890,45 @@ export default function TaskManagement({
   }), [materialProposals, currentUser, isFinanceAdmin]);
   const myPendingMaterial = materialInbox.toApprove;
   const myMaterialCoordination = materialInbox.toCoordinate;
+  // ─── Kiểu xem TỔNG QUAN: gom việc/nhiệm vụ của tôi + các mục chờ xử lý (dùng đúng bộ lọc quyền và đúng hàm duyệt của kiểu Cột) ───
+  const todayStr = React.useMemo(() => todayYmd(), []);
+  const overviewItems = React.useMemo<MyWorkItem[]>(() => buildMyWorkItems(tasks, {
+    userId: currentUser?.id, userName: currentUser?.name,
+    projectName: (id) => (id ? projectsById.get(id)?.name || '' : ''),
+    canReceiveTask: (t) => canDoTaskAction(currentUser, t, t.projectId ? projectsById.get(t.projectId) : undefined, 'receiveTask', taskMatrix),
+  }), [tasks, currentUser, projectsById, taskMatrix]);
+  const overviewByMe = React.useMemo(() => assignedByMe(tasks, {
+    userId: currentUser?.id, userName: currentUser?.name,
+    projectName: (id) => (id ? projectsById.get(id)?.name || '' : ''),
+    employeeName: (id) => employees.find(e => e.id === id)?.name || '—',
+  }), [tasks, currentUser, projectsById, employees]);
+  // "Nhận việc" — cùng hành vi nút "Nhận Việc"/"Nhận NV" của kiểu Cột
+  const receiveOverviewItem = (it: MyWorkItem) => {
+    const t = tasks.find(x => x.id === it.taskId); if (!t) return;
+    if (it.kind === 'task') {
+      onUpdateTask(t.id, {
+        status: 'doing', completionRate: 20,
+        workLogs: [...(t.workLogs || []), { id: `wl_start_${Date.now()}`, actorId: currentUser.id, actorName: currentUser.name, action: 'Nhận Việc', timestamp: new Date().toISOString(), notes: `${currentUser.name} đã Nhận Việc từ danh sách việc.` }],
+      });
+    } else {
+      onUpdateTask(t.id, { missions: (t.missions || []).map(m => m.id === it.missionId ? { ...m, status: 'doing' as const } : m) });
+      addToast({ title: '✅ Đã nhận nhiệm vụ', message: `Nhiệm vụ "${it.title}" đã chuyển sang trạng thái Đang làm.`, type: 'success' });
+    }
+  };
+  const overviewInbox = React.useMemo<InboxItem[]>(() => {
+    const out: InboxItem[] = [];
+    // Công việc chờ tôi duyệt kết quả (mở chi tiết để duyệt — cần xem báo cáo)
+    tasks.filter(t => t.status === 'reviewing' && (t.assignerId === currentUser?.id || t.assignerId === currentUser?.name || t.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name)))
+      .forEach(t => out.push({ key: `rv:${t.id}`, chip: 'Duyệt việc', chipTone: 'sky', title: t.name, meta: `${t.projectId ? projectsById.get(t.projectId)?.name || '' : 'Nhiệm vụ nội bộ'} · chờ duyệt kết quả`, actions: [{ label: 'Mở & duyệt', tone: 'main', onClick: () => setSelectedTaskId(t.id) }] }));
+    visiblePendingLeaves.forEach(l => out.push({ key: `lv:${l.id}`, chip: 'Nghỉ phép', chipTone: 'rose', title: `${l.empName} — ${l.type}`, meta: `${l.fromDate} → ${l.toDate}`, actions: [{ label: 'Từ chối', tone: 'no', onClick: () => handleApproveLeaveWithPair(l.id, 'rejected') }, { label: 'Duyệt', tone: 'ok', onClick: () => handleApproveLeaveWithPair(l.id, 'approved') }] }));
+    myPendingPayments.forEach(p => out.push({ key: `pm:${p.id}`, chip: 'Phiếu chi', chipTone: 'amber', title: `Phát cho ${p.recipient}`, meta: `${p.notes || ''}`.slice(0, 90), amount: p.amount, actions: [{ label: 'Từ chối', tone: 'no', onClick: () => handleApprovePayment(p.id, 'rejected') }, { label: 'Duyệt', tone: 'ok', onClick: () => handleApprovePayment(p.id, 'approved') }] }));
+    myPendingAdvances.forEach(a => out.push({ key: `ad:${a.id}`, chip: 'Duyệt chi', chipTone: 'amber', title: (a.reason || a.id).slice(0, 90), meta: `${a.projectName || '—'} · ${a.creatorName || a.creator || ''} · ${a.id}`, amount: a.amount, actions: [{ label: 'Từ chối', tone: 'no', onClick: () => handleApproveAdvance(a.id, 'rejected') }, { label: 'Duyệt', tone: 'ok', onClick: () => handleApproveAdvance(a.id, 'approved') }] }));
+    myPendingTravelExpenses.forEach((t: any) => out.push({ key: `tr:${t.rowId || t.id}`, chip: 'Công tác phí', chipTone: 'emerald', title: `${t.creatorName || t.employeeName || 'Nhân viên'} — ${t.code || t.id}`, meta: `${t.completedDate || t.createdAt || ''}`, amount: Number(t.amount || 0), actions: [{ label: 'Từ chối', tone: 'no', onClick: () => handleApproveTravelExpense(t.rowId || t.id, 'rejected') }, { label: 'Duyệt', tone: 'ok', onClick: () => handleApproveTravelExpense(t.rowId || t.id, 'approved') }] }));
+    myPendingVouchers.forEach(v => out.push({ key: `vc:${v.id}`, chip: 'Lập phiếu', chipTone: 'orange', title: (v.reason || v.id).slice(0, 90), meta: `${v.projectName || '—'} · ${v.creatorName || v.creator || 'Kế Toán'} · ${v.id}`, amount: v.amount, actions: [{ label: 'Lập phiếu (KT)', tone: 'main', onClick: () => onOpenFinanceVoucher?.(v.id) }] }));
+    materialInbox.toApprove.forEach((m: any) => out.push({ key: `mp:${m.id}`, chip: 'Vật tư', chipTone: 'violet', title: `${m.code || m.id} — chờ duyệt`, meta: `${m.projectName || 'Không gắn dự án'} · ${m.createdByName || ''} · ${(m.items || []).length} dòng`, amount: materialProposalTotal(m), actions: [{ label: 'Xem & duyệt', tone: 'main', onClick: () => onOpenMaterialProposal?.(m.id) }] }));
+    materialInbox.toCoordinate.forEach((m: any) => out.push({ key: `mc:${m.id}`, chip: 'Vật tư', chipTone: 'violet', title: `${m.code || m.id} — ${COORDINATOR_STATUS_LABEL[m.status] || m.status}`, meta: `${m.projectName || 'Không gắn dự án'} · ${m.createdByName || ''} · ${(m.items || []).length} dòng`, right: m.status === 'find_supplier' ? 'Tìm NCC' : 'Chờ đặt hàng', actions: [{ label: 'Mở & xử lý', tone: 'main', onClick: () => onOpenMaterialProposal?.(m.id) }] }));
+    return out;
+  }, [tasks, currentUser, projectsById, visiblePendingLeaves, myPendingPayments, myPendingAdvances, myPendingTravelExpenses, myPendingVouchers, materialInbox, onOpenFinanceVoucher, onOpenMaterialProposal]);
   const toReviewUncompletedCount = toReviewTasksCount
     + materialInbox.count
     + myPendingLeaves.length
@@ -936,7 +982,32 @@ export default function TaskManagement({
             Nhận việc được giao, xét duyệt theo yêu cầu.
           </p>
         </div>
+        {/* Chọn kiểu xem: Cột (Kanban) hoặc Tổng quan — được nhớ cho các lần sau */}
+        <div className="inline-flex bg-slate-800/60 border border-slate-700 rounded-xl p-0.5 gap-0.5" role="group" aria-label="Kiểu xem" data-testid="mytasks-view-switch">
+          <button type="button" onClick={() => changeViewMode('kanban')} aria-pressed={viewMode === 'kanban'}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${viewMode === 'kanban' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'}`}>▦ Cột (Kanban)</button>
+          <button type="button" onClick={() => changeViewMode('overview')} aria-pressed={viewMode === 'overview'}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${viewMode === 'overview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'}`}>◧ Tổng quan</button>
+        </div>
       </div>
+
+      {/* KIỂU TỔNG QUAN */}
+      {viewMode === 'overview' && (
+        <MyWorkOverview
+          today={todayStr}
+          user={currentUser}
+          items={overviewItems}
+          inbox={overviewInbox}
+          byMe={overviewByMe}
+          employees={employees}
+          pinKey={companyScopedKey(pinsStorageKey(currentUser?.id))}
+          onOpenTask={(id) => setSelectedTaskId(id)}
+          onReceive={receiveOverviewItem}
+        />
+      )}
+
+      {/* KIỂU CỘT (KANBAN) — giữ nguyên toàn bộ như cũ, chỉ ẩn khi đang xem Tổng quan */}
+      {viewMode === 'kanban' && (<>
 
       {/* CHUYỂN ĐỔI PHẠM VI CÔNG VIỆC: ĐƯỢC GIAO / PHẢI DUYỆT / LIÊN QUAN (Đồng bộ dải màu) */}
       <div className="grid grid-cols-3 p-1 bg-slate-950 border border-slate-800 rounded-xl">
@@ -2259,6 +2330,8 @@ export default function TaskManagement({
           )}
         </div>
       )}
+
+      </>)}
 
       {/* MODAL CHI TIẾT CÔNG VIỆC CHUYÊN SÂU HOÀN CHỈNH */}
       {selectedTaskId && (() => {
