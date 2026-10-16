@@ -4180,6 +4180,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onRedirectToSubcontractor={handleRedirectToSubcontractor}
               onRedirectToHrLeaves={() => { setActiveTab('employees'); setHrSubTab('leaves'); }}
               onOpenFinanceVoucher={openFinanceVoucher}
+              onOpenMaterialProposal={openMaterialProposal}
               subcontractorAdvances={subcontractorAdvances}
               initialTaskId={deepLinkTaskId ?? undefined}
               onInitialTaskOpened={() => setDeepLinkTaskId(null)}

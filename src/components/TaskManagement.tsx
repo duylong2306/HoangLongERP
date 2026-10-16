@@ -14,8 +14,9 @@ import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
-import { useNotification, isUserInRoleGroup, getConfiguredApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
+import { useNotification, isUserInRoleGroup, getConfiguredApprovers, getMaterialApprovers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
+import { isMaterialApprover, pendingMaterialForApprover, materialProposalTotal } from '../lib/materialApproval';
 import { canDoTaskAction, loadTaskPermissionMatrix, isTaskReadOnlyFor } from './hr/hrTaskPermissions';
 
 interface TaskManagementProps {
@@ -35,6 +36,8 @@ interface TaskManagementProps {
   onRedirectToHrLeaves?: () => void; // Điều hướng sang menu Phòng Nhân Sự > Đơn nghỉ phép
   /** Điều hướng sang Tài Chính > Đề xuất thu chi và tự động mở form lập phiếu cho đề xuất có id tương ứng. */
   onOpenFinanceVoucher?: (proposalId: string) => void;
+  /** Điều hướng sang Điều Phối Vật Tư và mở chi tiết đề xuất vật tư có id tương ứng (để duyệt). */
+  onOpenMaterialProposal?: (proposalId: string) => void;
   subcontractorAdvances?: SubcontractorAdvanceProposal[]; // Đề xuất tạm ứng / Thu Chi từ Tài Chính
   /** Công việc cần bung modal chi tiết ngay khi vào tab (deep link từ thông báo đẩy). */
   initialTaskId?: string;
@@ -62,6 +65,7 @@ export default function TaskManagement({
   onRedirectToSubcontractor,
   onRedirectToHrLeaves,
   onOpenFinanceVoucher,
+  onOpenMaterialProposal,
   subcontractorAdvances = [],
   initialTaskId,
   onInitialTaskOpened,
@@ -189,6 +193,8 @@ export default function TaskManagement({
   const [payments, setPayments] = useState<Payment[]>([]);
   // Công Tác Phí (hrm_travel_expenses) chờ duyệt — hiển thị trong cột Phòng Kế toán
   const [travelExpenses, setTravelExpenses] = useState<any[]>([]);
+  // Đề xuất VẬT TƯ (material_proposals) — loại đề xuất còn lại, cần Người xét duyệt vật tư duyệt
+  const [materialProposals, setMaterialProposals] = useState<any[]>([]);
 
   // Tải leaves & payments từ Supabase ngay khi mount (để badge "Công việc phải duyệt"
   // hiển thị đúng số ngay từ đầu, không phải chờ mở tab), và tải lại khi chuyển tab.
@@ -196,9 +202,12 @@ export default function TaskManagement({
     const loadLeaves = () => dbService.hrmLeaves.list().then(data => setLeaves(data || [])).catch(console.error);
     const loadPayments = () => dbService.payments.list().then(data => setPayments(data || [])).catch(console.error);
     const loadTravelExpenses = () => dbService.hrmTravelExpenses.list().then(data => setTravelExpenses(data || [])).catch(console.error);
+    const loadMaterial = () => dbService.materialProposals.list().then(data => setMaterialProposals(data || [])).catch(console.error);
     loadLeaves();
     loadPayments();
     loadTravelExpenses();
+    loadMaterial();
+    window.addEventListener('hl-material-proposals-updated', loadMaterial);
     // Trước đây chỉ tải lại khi chuyển tab (đổi taskScope) hoặc remount — nếu ai
     // đó duyệt/tạo đơn nghỉ phép, phiếu chi, công tác phí ở tab khác trong lúc
     // người dùng đang xem "Việc của tôi", badge "Công việc phải duyệt" sẽ hiện
@@ -212,6 +221,7 @@ export default function TaskManagement({
       window.removeEventListener('hl-payments-updated', loadPayments);
       window.removeEventListener('hl-hrm-leaves-updated', loadLeaves);
       window.removeEventListener('hl-hrm-travel-expenses-updated', loadTravelExpenses);
+      window.removeEventListener('hl-material-proposals-updated', loadMaterial);
     };
   }, [taskScope]);
 
@@ -865,7 +875,13 @@ export default function TaskManagement({
      (a.creatorName && currentUser?.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase()) ||
      (a.creator && currentUser?.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))
   ), [subcontractorAdvances, currentUser, isFinanceApprover]);
+  // ĐỀ XUẤT VẬT TƯ chờ duyệt (trạng thái CHỜ DUYỆT) mà user là Người xét duyệt vật tư / Giám đốc
+  const myPendingMaterial = React.useMemo(() => pendingMaterialForApprover(
+    materialProposals,
+    isMaterialApprover(currentUser?.id, currentUser?.username, isFinanceAdmin, getMaterialApprovers().map(a => a.id)),
+  ), [materialProposals, currentUser, isFinanceAdmin]);
   const toReviewUncompletedCount = toReviewTasksCount
+    + myPendingMaterial.length
     + myPendingLeaves.length
     + myPendingPayments.length
     + myPendingAdvances.length
@@ -1655,6 +1671,8 @@ export default function TaskManagement({
                     myPendingTravelExpenses.length
                     +
                     myPendingVouchers.length
+                    +
+                    myPendingMaterial.length
                   } cần xử lý
                 </span>
               </div>
@@ -1673,6 +1691,8 @@ export default function TaskManagement({
                 ];
 
                 if (allPending.length === 0) {
+                  // Còn đề xuất vật tư / chờ lập phiếu ở phần dưới → không hiện câu "không có đề xuất" gây hiểu nhầm
+                  if (myPendingMaterial.length + myPendingVouchers.length > 0) return null;
                   return (
                     <div className="text-center py-16 text-slate-500 italic text-xs">
                       Không có đề xuất tài chính nào chờ duyệt.
@@ -1843,6 +1863,45 @@ export default function TaskManagement({
                   }
                 });
               })()}
+
+              {/* PHẦN ĐỀ XUẤT VẬT TƯ CHỜ DUYỆT — người xét duyệt vật tư; mở Điều Phối Vật Tư để duyệt (không duyệt ngay tại đây vì cần xem báo giá/dòng vật tư) */}
+              {myPendingMaterial.length > 0 && (
+                <div className="space-y-2 pt-3 mt-3 border-t border-dashed border-slate-800" data-testid="my-pending-material">
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+                    <h4 className="font-extrabold text-[11px] text-sky-400 uppercase tracking-wider">Đề xuất vật tư chờ duyệt</h4>
+                    <span className="bg-sky-50 border border-sky-200 text-sky-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">{myPendingMaterial.length}</span>
+                  </div>
+                  {myPendingMaterial.map((m: any) => (
+                    <div key={m.id} data-testid="my-pending-material-item" className="bg-slate-950/80 border border-sky-500/30 p-3.5 rounded-lg hover:border-sky-400 transition-all duration-150 space-y-3 shadow-sm">
+                      <div className="flex justify-between items-center bg-slate-900/50 px-2.5 py-1 rounded border border-slate-850">
+                        <span className="text-[10px] font-mono font-extrabold text-sky-700 tracking-wider bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded">{m.code || m.id}</span>
+                        <span className="text-[11.5px] font-mono font-black text-rose-400">{materialProposalTotal(m).toLocaleString('vi-VN')} đ</span>
+                      </div>
+                      <div className="space-y-1.5 text-[10.5px] text-slate-400">
+                        <div className="text-slate-200">Dự án: <strong className="text-slate-100 text-xs font-bold leading-none">{m.projectName || m.project_name || 'Không gắn dự án'}</strong></div>
+                        {(m.taskName || m.task_name) && <div className="font-mono text-[10px]">Công việc: <strong className="text-slate-300">{m.taskName || m.task_name}</strong></div>}
+                        <p>Người đề xuất: <strong className="text-slate-300">{m.createdByName || m.created_by_name || '—'}</strong> · {(m.items || []).length} dòng vật tư{m.supplierName ? ` · NCC: ${m.supplierName}` : ''}</p>
+                        <p className="text-sky-400 font-bold text-[9px] uppercase flex items-center gap-2">
+                          <span>Đề Xuất Vật Tư</span>
+                          <span className="bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded-full font-bold text-[8px]">Chờ duyệt</span>
+                        </p>
+                      </div>
+                      <div className="flex gap-1.5 pt-1 border-t border-slate-900 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onOpenMaterialProposal?.(m.id)}
+                          className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1 rounded text-[10.5px] font-black transition cursor-pointer flex items-center gap-1"
+                          title="Mở Điều Phối Vật Tư để xem và duyệt đề xuất này"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Xem & duyệt
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* PHẦN ĐỀ XUẤT THU CHI CHỜ LẬP PHIẾU (KT) — người dùng được chỉ định lập phiếu */}
               {myPendingVouchers.length > 0 && (
