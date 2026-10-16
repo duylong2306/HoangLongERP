@@ -3,7 +3,7 @@ import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, C
 import {
   Plus, Check, Clock, Filter, CheckSquare, Eye, Users, ShieldCheck,
   MessageSquare, UserPlus, Trash2, Shield, DollarSign, Zap, FileText,
-  Briefcase, Award, CheckCircle2, X
+  Briefcase, Award, CheckCircle2, X, Columns3, LayoutDashboard
 } from 'lucide-react';
 import TaskDetailModal from './TaskDetailModal';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../lib/leaveRequests';
@@ -971,23 +971,27 @@ export default function TaskManagement({
 
   return (
     <div className="space-y-4 text-slate-100">
-      {/* KHU VỰC TIÊU ĐỀ & NÚT THÊM VIỆC */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900 text-white p-4 rounded-xl border border-slate-800 gap-3">
-        <div>
-          <h2 className="text-base font-extrabold flex items-center gap-2">
-            <CheckSquare className={`w-5 h-5 ${accentTextClass}`} />
-            Bảng Điều Hành Công Việc
-          </h2>
-          <p className="text-[11px] text-slate-400 font-medium">
-            Nhận việc được giao, xét duyệt theo yêu cầu.
-          </p>
+      {/* KHU VỰC TIÊU ĐỀ + CHỌN KIỂU XEM — biểu tượng màu, nút gạt tròn có thanh trượt (lựa chọn được nhớ cho các lần sau) */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-xs gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-[42px] h-[42px] rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 grid place-items-center text-white shadow-lg shadow-orange-500/30">
+            <CheckSquare className="w-[22px] h-[22px]" />
+          </div>
+          <div>
+            <h2 className="text-[19px] font-extrabold tracking-tight text-slate-900 leading-tight">Việc của tôi</h2>
+            <p className="text-[12px] text-slate-500 font-medium">Nhận việc được giao, xét duyệt theo yêu cầu.</p>
+          </div>
         </div>
-        {/* Chọn kiểu xem: Cột (Kanban) hoặc Tổng quan — được nhớ cho các lần sau */}
-        <div className="inline-flex bg-slate-800/60 border border-slate-700 rounded-xl p-0.5 gap-0.5" role="group" aria-label="Kiểu xem" data-testid="mytasks-view-switch">
+        <div className="relative grid grid-cols-2 w-[270px] p-1 rounded-full bg-slate-100 border border-slate-200" role="group" aria-label="Kiểu xem" data-testid="mytasks-view-switch">
+          <span aria-hidden className={`absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-white shadow-md ring-1 ring-slate-200 transition-transform duration-200 ease-out ${viewMode === 'overview' ? 'translate-x-full' : 'translate-x-0'}`} />
           <button type="button" onClick={() => changeViewMode('kanban')} aria-pressed={viewMode === 'kanban'}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${viewMode === 'kanban' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'}`}>▦ Cột (Kanban)</button>
+            className={`relative z-10 flex items-center justify-center gap-1.5 py-2 rounded-full text-[12.5px] font-bold cursor-pointer transition-colors ${viewMode === 'kanban' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'}`}>
+            <Columns3 className="w-4 h-4" />Cột (Kanban)
+          </button>
           <button type="button" onClick={() => changeViewMode('overview')} aria-pressed={viewMode === 'overview'}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${viewMode === 'overview' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-300 hover:text-white'}`}>◧ Tổng quan</button>
+            className={`relative z-10 flex items-center justify-center gap-1.5 py-2 rounded-full text-[12.5px] font-bold cursor-pointer transition-colors ${viewMode === 'overview' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'}`}>
+            <LayoutDashboard className="w-4 h-4" />Tổng quan
+          </button>
         </div>
       </div>
 
