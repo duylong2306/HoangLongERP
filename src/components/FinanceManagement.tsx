@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
-import { isPaymentForNamedLiability } from '../lib/liabilityPayments';
+import { isPaymentForNamedLiability, liabilityKeys } from '../lib/liabilityPayments';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
@@ -2053,7 +2053,12 @@ export default function FinanceManagement({
     const paymentsBySubcontractorId = new Map<string, Payment[]>();
     const paymentsByRecipient = new Map<string, Payment[]>();
     const paymentsByAdvanceId = new Map<string, Payment[]>();
+    const paymentsBySupplierId = new Map<string, Payment[]>();   // khớp công nợ NCC theo MÃ NCC (khóa chính), không theo tên
     payments.forEach(p => {
+      if (p.supplierId) {
+        const arr = paymentsBySupplierId.get(p.supplierId);
+        if (arr) arr.push(p); else paymentsBySupplierId.set(p.supplierId, [p]);
+      }
       if (p.subcontractorId) {
         const arr = paymentsBySubcontractorId.get(p.subcontractorId);
         if (arr) arr.push(p); else paymentsBySubcontractorId.set(p.subcontractorId, [p]);
@@ -2072,7 +2077,8 @@ export default function FinanceManagement({
       // Ứng viên = phiếu chi khớp subcontractorId HOẶC recipient===tên thầu phụ
       // (giữ đúng logic OR gốc), gộp + khử trùng theo id trước khi lọc projectId.
       const bySub = sub.subcontractorId ? (paymentsBySubcontractorId.get(sub.subcontractorId) || []) : [];
-      const byName = sub.subcontractorName ? (paymentsByRecipient.get(sub.subcontractorName) || []) : [];
+      // Theo tên chỉ là dự phòng cho phiếu cũ chưa có mã: phiếu đã gắn MÃ THẦU PHỤ KHÁC (trùng tên) thì không tính
+      const byName = sub.subcontractorName ? (paymentsByRecipient.get(sub.subcontractorName) || []).filter(p => !p.subcontractorId || p.subcontractorId === sub.subcontractorId) : [];
       const candidateById = new Map<string, Payment>();
       bySub.forEach(p => candidateById.set(p.id, p));
       byName.forEach(p => candidateById.set(p.id, p));
@@ -2125,7 +2131,7 @@ export default function FinanceManagement({
     // nếu có nhiều công nợ CÙNG TÊN thì tổng phiếu chi của tên đó chỉ được phân bổ MỘT LẦN
     // (lần lượt vào từng công nợ tới hết tổng giá trị, phần dư dồn vào công nợ cuối) — trước đây
     // mỗi công nợ cùng tên đều nhận đủ toàn bộ phiếu chi nên 1 phiếu chi bị tính nhiều lần.
-    const isNameMatched = (l: any) => !l.subcontractorId && !l.relatedAdvanceId;
+    const isNameMatched = (l: any) => { const k = liabilityKeys(l); return !k.subcontractorId && !k.supplierId && !l.relatedAdvanceId; };
     const lastIdxByName = new Map<string, number>();
     const countByName = new Map<string, number>();
     customLiabilities.forEach((l, i) => {
@@ -2139,8 +2145,13 @@ export default function FinanceManagement({
       // Công nợ đầu kỳ Thầu Phụ: khớp chính xác theo subcontractorId của phiếu chi.
       // Nợ tạm ứng: khớp theo relatedAdvanceId.
       // Nợ thủ công NCC / khác: khớp theo tên người nhận (recipient).
-      const paymentsMade = liab.subcontractorId
-        ? (paymentsBySubcontractorId.get(liab.subcontractorId) || []).filter(p => p.status === 'approved')
+      // KHỚP THEO MÃ TRƯỚC: mã thầu phụ (cột hoặc suy từ id opbal_sub_…), mã NCC (suy từ id opbal_sup_…), mã đề xuất tạm ứng; chỉ công nợ nhập tay
+      // không có mã nào mới khớp theo TÊN người nhận (có lọc đúng loại — xem isPaymentForNamedLiability).
+      const keys = liabilityKeys(liab);
+      const paymentsMade = keys.subcontractorId
+        ? (paymentsBySubcontractorId.get(keys.subcontractorId) || []).filter(p => p.status === 'approved')
+        : keys.supplierId
+        ? (paymentsBySupplierId.get(keys.supplierId) || []).filter(p => p.status === 'approved')
         : liab.relatedAdvanceId
           ? (paymentsByAdvanceId.get(liab.relatedAdvanceId) || []).filter(p => p.status === 'approved')
           : (paymentsByRecipient.get(liab.name) || []).filter(p => p.status === 'approved' && isPaymentForNamedLiability(liab, p));
@@ -2350,8 +2361,10 @@ export default function FinanceManagement({
       .reduce((sum, l) => sum + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
     // Các phiếu chi đã duyệt trước đó cho NCC (khớp theo TÊN người nhận như Công nợ Trả), trừ phiếu đang lập
     const priorPaid = payments
-      // Chỉ tính phiếu trả NCC — không tính phiếu tạm ứng thầu phụ cùng tên (đơn vị vừa là thầu phụ vừa là NCC)
-      .filter(p => p.status === 'approved' && p.recipient === supplierName && p.id !== paymentId && !p.subcontractorId && p.category !== 'subcontractor_advance')
+      // Khớp theo MÃ NCC (khóa chính); chỉ phiếu cũ chưa có mã NCC mới dự phòng theo tên — và không tính phiếu thầu phụ cùng tên
+      .filter(p => p.status === 'approved' && p.id !== paymentId && (p.supplierId
+        ? p.supplierId === proposal.subcontractorId
+        : p.recipient === supplierName && !p.subcontractorId && p.category !== 'subcontractor_advance'))
       .reduce((sum, p) => sum + (p.amount || 0), 0);
     return { pool, openingDebt, priorPaid };
   };

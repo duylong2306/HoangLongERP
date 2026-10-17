@@ -16,3 +16,13 @@ export function isPaymentForNamedLiability(liab: Pick<Liability, 'id' | 'categor
   if (liab.category === 'Thầu Phụ') return p.category !== 'supplier_payment';
   return true;
 }
+
+// ─── KHỚP THEO MÃ (khóa chính) TRƯỚC, tên chỉ là phương án dự phòng ───
+// Mã thầu phụ / mã NCC của 1 công nợ: ưu tiên cột subcontractorId; công nợ đầu kỳ có mã nằm trong id ('opbal_sub_<mã>' / 'opbal_sup_<mã>').
+// Công nợ nhập tay hoàn toàn (không suy ra được mã) mới khớp theo tên người nhận.
+export function liabilityKeys(l: Pick<Liability, 'id' | 'subcontractorId'>): { supplierId?: string; subcontractorId?: string } {
+  if (l.subcontractorId) return { subcontractorId: l.subcontractorId };
+  if (l.id?.startsWith('opbal_sub_')) return { subcontractorId: l.id.slice('opbal_sub_'.length) };
+  if (l.id?.startsWith('opbal_sup_')) return { supplierId: l.id.slice('opbal_sup_'.length) };
+  return {};
+}

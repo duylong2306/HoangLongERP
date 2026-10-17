@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { isPaymentForNamedLiability as ok } from '../liabilityPayments';
+import { isPaymentForNamedLiability as ok, liabilityKeys } from '../liabilityPayments';
 
 // Ca thật: CÔNG TY TNHH HƯNG NGUYÊN KHANG vừa là Thầu phụ (CTTHNK_11) vừa là NCC (NCC_IMP_..._7)
 const ncc: any = { id: 'opbal_sup_NCC_IMP_1785742333287_7', category: 'Nhà Cung Cấp' };
@@ -37,6 +37,21 @@ describe('phiếu chi khớp theo tên — công nợ NCC / Thầu phụ cùng t
   it('FinanceManagement dùng hàm này ở công nợ khớp theo tên và ở tự phân bổ đơn hàng', () => {
     const src = fs.readFileSync('src/components/FinanceManagement.tsx', 'utf8');
     expect(src).toMatch(/isPaymentForNamedLiability\(liab, p\)/);
-    expect(src).toMatch(/p\.recipient === supplierName && p\.id !== paymentId && !p\.subcontractorId && p\.category !== 'subcontractor_advance'/);
+    expect(src).toMatch(/p\.supplierId === proposal\.subcontractorId/);   // tự phân bổ: khớp theo MÃ NCC
+  });
+  it('FinanceManagement khớp công nợ theo MÃ trước (mã NCC, mã thầu phụ), tên chỉ dự phòng', () => {
+    const src = fs.readFileSync('src/components/FinanceManagement.tsx', 'utf8');
+    expect(src).toMatch(/paymentsBySupplierId\.get\(keys\.supplierId\)/);
+    expect(src).toMatch(/paymentsBySubcontractorId\.get\(keys\.subcontractorId\)/);
+    expect(src).toMatch(/liabilityKeys\(l\)/);
+  });
+});
+
+describe('liabilityKeys — mã của công nợ', () => {
+  it('ưu tiên cột subcontractorId; công nợ đầu kỳ lấy mã từ id; công nợ nhập tay không có mã', () => {
+    expect(liabilityKeys({ id: 'x', subcontractorId: 'TP1' } as any)).toEqual({ subcontractorId: 'TP1' });
+    expect(liabilityKeys({ id: 'opbal_sub_CTTHNK_11' } as any)).toEqual({ subcontractorId: 'CTTHNK_11' });
+    expect(liabilityKeys({ id: 'opbal_sup_NCC_IMP_1785742333287_7' } as any)).toEqual({ supplierId: 'NCC_IMP_1785742333287_7' });
+    expect(liabilityKeys({ id: 'liab_1789000' } as any)).toEqual({});
   });
 });
