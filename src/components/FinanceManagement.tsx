@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
-import { isPaymentForNamedLiability, liabilityKeys, liabilityMatchesEntity, findSupplierLiability, paymentBelongsToSubcontractor } from '../lib/liabilityPayments';
+import { isPaymentForNamedLiability, liabilityKeys, liabilityMatchesEntity, findSupplierLiability, paymentBelongsToSubcontractor, allocateSubcontractPayments } from '../lib/liabilityPayments';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
@@ -2077,31 +2077,41 @@ export default function FinanceManagement({
       }
     });
 
-    const subs = approvedSubContracts.map(sub => {
+    // Phiếu chi ứng viên của 1 hợp đồng thầu phụ (chưa xét dự án — phần phân bổ giữa các hợp đồng xử lý bên dưới)
+    const candidatePaymentsOf = (sub: any): Payment[] => {
       // Ứng viên = phiếu chi khớp subcontractorId HOẶC recipient===tên thầu phụ
-      // (giữ đúng logic OR gốc), gộp + khử trùng theo id trước khi lọc projectId.
+      // (giữ đúng logic OR gốc), gộp + khử trùng theo id.
       const bySub = sub.subcontractorId ? (paymentsBySubcontractorId.get(sub.subcontractorId) || []) : [];
       // Theo tên chỉ là dự phòng cho phiếu cũ chưa có mã: phiếu đã gắn MÃ THẦU PHỤ KHÁC (trùng tên) thì không tính
       const byName = sub.subcontractorName ? (paymentsByRecipient.get(sub.subcontractorName) || []).filter(p => !p.subcontractorId || p.subcontractorId === sub.subcontractorId) : [];
       const candidateById = new Map<string, Payment>();
       bySub.forEach(p => candidateById.set(p.id, p));
       byName.forEach(p => candidateById.set(p.id, p));
-      const paymentsMade = Array.from(candidateById.values()).filter(p => {
-        // 1 thầu phụ có thể có NHIỀU hợp đồng ở NHIỀU dự án khác nhau (xem taskId/
-        // projectId ở mergedLiabilities bên dưới) — nếu phiếu chi có gắn rõ dự án cụ
-        // thể (vd Chi phí Công trình cho 1 công trình), CHỈ được tính vào đúng hợp
-        // đồng của dự án đó, không cộng dồn vào hợp đồng khác cùng thầu phụ ở dự án
-        // khác. Phiếu chi Thanh Toán Công Nợ (không gắn dự án cụ thể) vẫn tính chung
-        // như trước — không có project để phân biệt.
-        if (p.projectId && sub.projectId && p.projectId !== sub.projectId) return false;
-        // Phiếu chi "Chi Nhà Cung Cấp" (supplier_payment) chỉ khớp được vào thầu phụ khi gắn ĐÚNG
-        // mã thầu phụ. Nếu chỉ trùng TÊN (1 công ty vừa là NCC vật tư vừa là thầu phụ) thì đó là
-        // tiền trả công nợ NCC — không được trừ vào hợp đồng thầu phụ (trước đây làm hụt "Còn lại"
-        // của thầu phụ đúng bằng số tiền đã trả cho NCC).
-        if (p.category === 'supplier_payment' && (!sub.subcontractorId || p.subcontractorId !== sub.subcontractorId)) return false;
-        return true;
-      });
-      const totalPaidAmount = paymentsMade.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
+      // Phiếu chi "Chi Nhà Cung Cấp" (supplier_payment) chỉ khớp được vào thầu phụ khi gắn ĐÚNG mã thầu phụ. Nếu chỉ trùng TÊN
+      // (1 công ty vừa là NCC vật tư vừa là thầu phụ) thì đó là tiền trả công nợ NCC — không được trừ vào hợp đồng thầu phụ.
+      return Array.from(candidateById.values()).filter(p => !(p.category === 'supplier_payment' && (!sub.subcontractorId || p.subcontractorId !== sub.subcontractorId)));
+    };
+    // 1 thầu phụ có thể có NHIỀU hợp đồng ở NHIỀU dự án: phiếu có dự án → đúng hợp đồng của dự án đó; phiếu "Thanh Toán Công Nợ" (không dự án)
+    // chỉ tính MỘT lần, phân bổ lần lượt vào các hợp đồng (xem allocateSubcontractPayments) — trước đây cộng vào TỪNG hợp đồng nên bị nhân đôi.
+    const paidByContract: Record<string, number> = {};
+    {
+      const groups = new Map<string, any[]>();
+      for (const sub of approvedSubContracts as any[]) {
+        const key = sub.subcontractorId || sub.subcontractorName || sub.id;
+        (groups.get(key) || groups.set(key, []).get(key)!).push(sub);
+      }
+      for (const list of groups.values()) {
+        const ordered = [...list].sort((a, b) => String(a.date || a.createdAt || a.id).localeCompare(String(b.date || b.createdAt || b.id)));
+        const approvedPays = candidatePaymentsOf(ordered[0]).filter(p => p.status === 'approved');
+        Object.assign(paidByContract, allocateSubcontractPayments(
+          ordered.map(c => ({ id: c.id, projectId: c.projectId, total: ((c as any).openingDebt ?? 0) + (c.contractValue || 0) })),
+          approvedPays.map(p => ({ id: p.id, amount: p.amount, projectId: p.projectId })),
+        ));
+      }
+    }
+
+    const subs = approvedSubContracts.map(sub => {
+      const totalPaidAmount = paidByContract[sub.id] ?? 0;
       const value = sub.contractValue || 0;
       const openingDebt = (sub as any).openingDebt ?? 0;
       // Cập nhật: Tổng giá trị = Công nợ đầu kỳ + Phát Sinh (cột ảo, không lưu DB)

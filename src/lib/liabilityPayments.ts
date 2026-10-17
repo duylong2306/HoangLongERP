@@ -75,3 +75,35 @@ export function paymentBelongsToSubcontractor(
   if (p.supplierId || p.category === 'supplier_payment') return false;
   return !!sub.name && p.recipient === sub.name;
 }
+
+// ─── PHÂN BỔ TIỀN ĐÃ TRẢ CHO CÁC HỢP ĐỒNG CỦA CÙNG 1 THẦU PHỤ (mỗi phiếu chi chỉ tính MỘT lần) ───
+// Trước đây phiếu "Thanh Toán Công Nợ" (không gắn dự án) được cộng vào TỪNG hợp đồng của thầu phụ → khi thầu phụ có 2 hợp đồng, cùng 1 phiếu
+// bị tính 2 lần (VD TRẦN HOÀNG TRUNG HIẾU: phiếu 292tr hiện ở cả 2 hợp đồng, "đã trả" 634tr trong khi thực tế chỉ 342tr).
+// Quy tắc: (1) phiếu có dự án trùng đúng 1 hợp đồng → tính thẳng cho hợp đồng đó; (2) phiếu không gắn dự án (hoặc khớp nhiều hợp đồng) → vào
+// "quỹ chung" rồi phân bổ lần lượt theo thứ tự hợp đồng, mỗi hợp đồng nhận tối đa phần còn lại của nó, phần dư dồn vào hợp đồng cuối;
+// (3) phiếu có dự án nhưng không khớp hợp đồng nào thì bỏ qua (giữ đúng quy tắc cũ).
+export function allocateSubcontractPayments(
+  contracts: { id: string; projectId?: string; total: number }[],
+  payments: { id: string; amount: number; projectId?: string }[],
+): Record<string, number> {
+  const paid: Record<string, number> = Object.fromEntries(contracts.map(c => [c.id, 0]));
+  const pool: { amount: number; set: typeof contracts }[] = [];
+  for (const p of payments) {
+    const m = contracts.filter(c => !p.projectId || !c.projectId || p.projectId === c.projectId);
+    if (m.length === 0) continue;
+    const exact = p.projectId ? m.filter(c => c.projectId === p.projectId) : [];
+    const set = exact.length ? exact : m;
+    if (set.length === 1) paid[set[0].id] += p.amount || 0;
+    else pool.push({ amount: p.amount || 0, set });
+  }
+  for (const item of pool) {
+    let left = item.amount;
+    for (const c of item.set) {
+      const take = Math.min(left, Math.max(0, c.total - paid[c.id]));
+      paid[c.id] += take; left -= take;
+      if (left <= 0) break;
+    }
+    if (left > 0) paid[item.set[item.set.length - 1].id] += left;   // dư → hợp đồng cuối (có thể thành số âm "trả vượt")
+  }
+  return paid;
+}

@@ -55,3 +55,38 @@ describe('liabilityKeys — mã của công nợ', () => {
     expect(liabilityKeys({ id: 'liab_1789000' } as any)).toEqual({});
   });
 });
+
+import { allocateSubcontractPayments } from '../liabilityPayments';
+describe('allocateSubcontractPayments — mỗi phiếu chỉ tính MỘT lần giữa các hợp đồng của cùng thầu phụ', () => {
+  const A = { id: 'A', projectId: 'P1', total: 300_000_000 };
+  const B = { id: 'B', projectId: 'P2', total: 200_000_000 };
+  it('ca thật TRẦN HOÀNG TRUNG HIẾU: 4 phiếu không dự án (292tr) + 1 phiếu dự án P2 (50tr) → tổng 342tr, không nhân đôi', () => {
+    const r = allocateSubcontractPayments([A, B], [
+      { id: '1', amount: 145_000_000 }, { id: '2', amount: 37_000_000 }, { id: '3', amount: 60_000_000 }, { id: '4', amount: 50_000_000 },
+      { id: '5', amount: 50_000_000, projectId: 'P2' },
+    ]);
+    expect(r).toEqual({ A: 292_000_000, B: 50_000_000 });
+    expect(r.A + r.B).toBe(342_000_000);                    // trước đây hiển thị 634tr
+    expect(300_000_000 - r.A + (200_000_000 - r.B)).toBe(158_000_000);   // còn phải trả thật: 500tr − 342tr
+  });
+  it('phiếu có dự án chỉ tính cho hợp đồng của dự án đó; phiếu dự án không khớp hợp đồng nào thì bỏ qua', () => {
+    const r = allocateSubcontractPayments([A, B], [{ id: '1', amount: 10, projectId: 'P1' }, { id: '2', amount: 99, projectId: 'PX' }]);
+    expect(r).toEqual({ A: 10, B: 0 });
+  });
+  it('quỹ chung lấp đầy hợp đồng đầu rồi sang hợp đồng sau; dư dồn hợp đồng cuối (trả vượt)', () => {
+    expect(allocateSubcontractPayments([A, B], [{ id: '1', amount: 350_000_000 }])).toEqual({ A: 300_000_000, B: 50_000_000 });
+    expect(allocateSubcontractPayments([A, B], [{ id: '1', amount: 600_000_000 }])).toEqual({ A: 300_000_000, B: 300_000_000 });
+  });
+  it('thứ tự thanh toán: phiếu dự án được tính trước khi chia quỹ chung (không chiếm phần của nhau)', () => {
+    const r = allocateSubcontractPayments([A, B], [{ id: '1', amount: 200_000_000 }, { id: '2', amount: 200_000_000, projectId: 'P2' }]);
+    expect(r.B).toBe(200_000_000);               // B đã đủ nhờ phiếu dự án
+    expect(r.A).toBe(200_000_000);               // quỹ chung vào A
+  });
+  it('1 hợp đồng: nhận tất cả phiếu khớp; hợp đồng không gắn dự án nhận phiếu mọi dự án', () => {
+    expect(allocateSubcontractPayments([A], [{ id: '1', amount: 5 }, { id: '2', amount: 7, projectId: 'P1' }, { id: '3', amount: 9, projectId: 'P9' }])).toEqual({ A: 12 });
+    expect(allocateSubcontractPayments([{ id: 'C', total: 100 }], [{ id: '1', amount: 40, projectId: 'P9' }])).toEqual({ C: 40 });
+  });
+  it('FinanceManagement dùng hàm phân bổ này', () => {
+    expect(fs.readFileSync('src/components/FinanceManagement.tsx', 'utf8')).toMatch(/allocateSubcontractPayments\(/);
+  });
+});
