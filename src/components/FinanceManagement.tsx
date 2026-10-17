@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
+import { isPaymentForNamedLiability } from '../lib/liabilityPayments';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
@@ -2142,7 +2143,7 @@ export default function FinanceManagement({
         ? (paymentsBySubcontractorId.get(liab.subcontractorId) || []).filter(p => p.status === 'approved')
         : liab.relatedAdvanceId
           ? (paymentsByAdvanceId.get(liab.relatedAdvanceId) || []).filter(p => p.status === 'approved')
-          : (paymentsByRecipient.get(liab.name) || []).filter(p => p.status === 'approved');
+          : (paymentsByRecipient.get(liab.name) || []).filter(p => p.status === 'approved' && isPaymentForNamedLiability(liab, p));
       const openingDebt = liab.openingDebt ?? (liab.isOpeningDebt ? liab.value : 0);
       // NCC: Phát Sinh = tổng tongTien PO đã ghi nhận; Thầu Phụ/Khác: giữ nguyên value
       const value = liab.category === 'Nhà Cung Cấp' ? getRecordedPOSum(liab) : (liab.value || 0);
@@ -2349,7 +2350,8 @@ export default function FinanceManagement({
       .reduce((sum, l) => sum + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
     // Các phiếu chi đã duyệt trước đó cho NCC (khớp theo TÊN người nhận như Công nợ Trả), trừ phiếu đang lập
     const priorPaid = payments
-      .filter(p => p.status === 'approved' && p.recipient === supplierName && p.id !== paymentId)
+      // Chỉ tính phiếu trả NCC — không tính phiếu tạm ứng thầu phụ cùng tên (đơn vị vừa là thầu phụ vừa là NCC)
+      .filter(p => p.status === 'approved' && p.recipient === supplierName && p.id !== paymentId && !p.subcontractorId && p.category !== 'subcontractor_advance')
       .reduce((sum, p) => sum + (p.amount || 0), 0);
     return { pool, openingDebt, priorPaid };
   };
