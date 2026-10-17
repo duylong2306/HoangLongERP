@@ -18,6 +18,51 @@ const inbox = (onOk = vi.fn(), onNo = vi.fn()): InboxItem[] => [
 const mount = (o: any = {}) => render(<MyWorkOverview today={TODAY} user={me} items={items} inbox={inbox()} byMe={[]} employees={emps} pinKey={KEY} onOpenTask={vi.fn()} onReceive={vi.fn()} {...o} />);
 beforeEach(() => localStorage.clear());
 
+const withMissions = buildMyWorkItems([
+  task('t1', { assigneeId: 'u9', deadline: '2026-10-20', missions: [
+    { id: 'm1', name: 'NV phụ trách', status: 'doing', mainAssigneeId: 'u1', memberIds: ['u1', 'u2', 'u3'], deadline: '2026-10-17' },
+    { id: 'm2', name: 'NV tham gia', status: 'todo', mainAssigneeId: 'u9', memberIds: ['u1'] },
+    { id: 'm3', name: 'NV đã xong', status: 'completed', mainAssigneeId: 'u1', memberIds: [], completedAt: '2026-10-14T09:00:00' },
+  ] }),
+  task('t2', { name: 'Việc đã xong', status: 'completed' }),
+], { userId: 'u1', userName: me.name, projectName: () => 'Công trình A', canReceiveTask: () => true, includeCompleted: true });
+
+describe('MyWorkOverview — Nhiệm vụ', () => {
+  it('có ô số Nhiệm vụ của tôi (chỉ đếm nhiệm vụ đang mở)', () => {
+    mount({ items: withMissions });
+    expect(screen.getByTestId('mywork-stat-Nhiệm vụ của tôi').textContent).toBe('2');
+  });
+  it('nhiệm vụ hiện nhãn vai trò: Phụ trách chính (+số người) / Tham gia', () => {
+    mount({ items: withMissions });
+    const roles = screen.getAllByTestId('mywork-role').map(r => r.textContent);
+    expect(roles.some(r => r!.startsWith('Phụ trách chính') && r!.includes('+2 người'))).toBe(true);   // m1: có 2 người tham gia khác
+    expect(roles).toContain('Tham gia');
+  });
+  it('lọc theo loại: Nhiệm vụ chỉ còn nhiệm vụ; Công việc chỉ còn công việc; Tất cả đủ', () => {
+    mount({ items: withMissions });
+    const all = () => screen.getByTestId('mywork-all');
+    fireEvent.click(within(screen.getByTestId('mywork-kind-filter')).getByText(/^Nhiệm vụ/));
+    const rows = () => within(all()).getAllByTestId('mywork-row');
+    expect(rows().every(r => r.textContent!.includes('Nhiệm vụ'))).toBe(true);
+    expect(within(all()).getAllByTestId('mywork-role').length).toBe(3);   // 2 đang mở + 1 đã xong (nhóm Đã hoàn thành cũng theo bộ lọc)
+    fireEvent.click(within(screen.getByTestId('mywork-kind-filter')).getByText(/^Công việc/));
+    expect(within(all()).queryAllByTestId('mywork-role').length).toBe(0);
+    expect(rows().every(r => !r.textContent!.includes('Phụ trách') && !r.textContent!.includes('Tham gia'))).toBe(true);
+  });
+  it('nhóm Đã hoàn thành (thu gọn) có cả nhiệm vụ và công việc đã xong, không tính vào số liệu việc đang mở', () => {
+    mount({ items: withMissions });
+    const done = screen.getByTestId('mywork-group-done');
+    expect(done).toHaveProperty('open', false);
+    expect(within(done).getAllByTestId('mywork-row')).toHaveLength(2);
+    expect(done.textContent).toContain('✓ Hoàn thành');
+    expect(screen.getByTestId('mywork-stat-Mới, chờ nhận').textContent).toBe('1');   // chỉ NV tham gia (chưa làm) — nhưng không phải phụ trách chính nên vẫn đếm là chờ
+  });
+  it('nhiệm vụ đã xong không có nút ghim', () => {
+    mount({ items: withMissions });
+    expect(within(screen.getByTestId('mywork-group-done')).queryAllByLabelText('Ghim vào Tập trung hôm nay')).toHaveLength(0);
+  });
+});
+
 describe('MyWorkOverview', () => {
   it('lời chào, 5 chỉ số tách riêng Quá hạn / Hôm nay / Mới chờ nhận / Chờ xử lý / Tôi giao', () => {
     mount();

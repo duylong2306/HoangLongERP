@@ -43,6 +43,9 @@ export interface MyWorkItem {
   status: 'todo' | 'doing' | 'reviewing' | 'overdue' | 'completed' | string;
   isLead: boolean;          // nhiệm vụ: là phụ trách chính
   canReceive: boolean;      // có thể bấm "Nhận việc" (chưa làm + đúng quyền)
+  role: 'assignee' | 'lead' | 'member';   // công việc: được giao; nhiệm vụ: phụ trách chính / tham gia
+  memberCount: number;      // số người tham gia nhiệm vụ (không tính phụ trách chính)
+  doneDay: string;          // ngày hoàn thành (chỉ khi đã xong), '' nếu chưa
 }
 
 export interface BuildOpts {
@@ -50,6 +53,8 @@ export interface BuildOpts {
   projectName: (projectId?: string) => string;
   /** Quyền "Nhận việc" của công việc (ma trận quyền công việc) — mặc định cho phép khi là người được giao */
   canReceiveTask?: (t: Task) => boolean;
+  /** Gồm cả việc/nhiệm vụ ĐÃ HOÀN THÀNH (như kiểu Cột hiển thị) — mặc định không */
+  includeCompleted?: boolean;
 }
 
 /** Công việc của tôi = tôi là người được giao, hoặc là phụ trách chính của 1 nhiệm vụ trong đó (đúng như tab "Công việc được giao"). */
@@ -61,20 +66,24 @@ export function isMyTask(t: Task, userId?: string, userName?: string): boolean {
 export function buildMyWorkItems(tasks: Task[], o: BuildOpts): MyWorkItem[] {
   const out: MyWorkItem[] = [];
   for (const t of tasks) {
-    if (isMyTask(t, o.userId, o.userName) && t.status !== 'completed') {
+    if (isMyTask(t, o.userId, o.userName) && (o.includeCompleted || t.status !== 'completed')) {
       out.push({
         key: `task:${t.id}`, kind: 'task', taskId: t.id, title: t.name, taskName: t.name, projectId: t.projectId, project: o.projectName(t.projectId),
         due: toDay(t.deadline), rate: Number.isFinite(Number(t.completionRate)) ? Number(t.completionRate) : 0, status: t.status, isLead: t.assigneeId === o.userId,
         canReceive: t.status === 'todo' && (o.canReceiveTask ? o.canReceiveTask(t) : (t.assigneeId === o.userId)),
+        role: 'assignee', memberCount: 0, doneDay: t.status === 'completed' ? toDay((t as any).completedDate || (t as any).completedAt || (t as any).updatedAt) : '',
       });
     }
     for (const m of (t.missions || [])) {
       const mine = m.mainAssigneeId === o.userId || (m.memberIds || []).includes(o.userId as string);
-      if (!mine || m.status === 'completed') continue;
+      if (!mine || (m.status === 'completed' && !o.includeCompleted)) continue;
+      const lead = m.mainAssigneeId === o.userId;
       out.push({
         key: `mis:${t.id}:${m.id}`, kind: 'mission', taskId: t.id, missionId: m.id, title: m.name || '(chưa đặt tên)', taskName: t.name, projectId: t.projectId,
-        project: o.projectName(t.projectId), due: toDay(m.deadline) || toDay(t.deadline), rate: null, status: m.status, isLead: m.mainAssigneeId === o.userId,
-        canReceive: m.status === 'todo' && m.mainAssigneeId === o.userId,   // chỉ phụ trách chính được nhận nhiệm vụ (đúng nút "Nhận NV" hiện có)
+        project: o.projectName(t.projectId), due: toDay(m.deadline) || toDay(t.deadline), rate: null, status: m.status, isLead: lead,
+        canReceive: m.status === 'todo' && lead,   // chỉ phụ trách chính được nhận nhiệm vụ (đúng nút "Nhận NV" hiện có)
+        role: lead ? 'lead' : 'member', memberCount: (m.memberIds || []).filter(x => x !== m.mainAssigneeId && x !== o.userId).length,   // người tham gia khác (không tính phụ trách chính và chính tôi)
+        doneDay: m.status === 'completed' ? toDay(m.completedAt) : '',
       });
     }
   }

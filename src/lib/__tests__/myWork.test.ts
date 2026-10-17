@@ -105,3 +105,28 @@ describe('lưu lựa chọn', () => {
     s.setItem(k, '{hỏng'); expect(readPins(k, TODAY, s)).toEqual([]);
   });
 });
+
+describe('nhiệm vụ & việc đã hoàn thành (ngang kiểu Cột)', () => {
+  const t = task('a', { assigneeId: 'u9', missions: [
+    { id: 'm1', name: 'NV chính', status: 'doing', mainAssigneeId: 'u1', memberIds: ['u2', 'u3'] },
+    { id: 'm2', name: 'NV tham gia', status: 'todo', mainAssigneeId: 'u9', memberIds: ['u1'] },
+    { id: 'm3', name: 'NV xong', status: 'completed', mainAssigneeId: 'u1', memberIds: [], completedAt: '2026-10-14T09:00:00' },
+  ] });
+  it('mặc định không có việc đã hoàn thành; includeCompleted thì có kèm ngày hoàn thành', () => {
+    expect(buildMyWorkItems([t], opts).some(i => i.status === 'completed')).toBe(false);
+    const all = buildMyWorkItems([t], { ...opts, includeCompleted: true });
+    const done = all.find(i => i.key === 'mis:a:m3')!;
+    expect(done.status).toBe('completed');
+    expect(done.doneDay).toBe('2026-10-14');
+  });
+  it('vai trò và số người tham gia của nhiệm vụ', () => {
+    const all = buildMyWorkItems([t], { ...opts, includeCompleted: true });
+    expect(all.find(i => i.key === 'mis:a:m1')).toMatchObject({ role: 'lead', memberCount: 2 });
+    expect(all.find(i => i.key === 'mis:a:m2')).toMatchObject({ role: 'member', memberCount: 0 });
+  });
+  it('công việc đã hoàn thành của tôi cũng có khi includeCompleted', () => {
+    const d = task('d', { status: 'completed', completedDate: '2026-10-10' });
+    expect(buildMyWorkItems([d], opts)).toEqual([]);
+    expect(buildMyWorkItems([d], { ...opts, includeCompleted: true })[0]).toMatchObject({ key: 'task:d', status: 'completed', doneDay: '2026-10-10' });
+  });
+});

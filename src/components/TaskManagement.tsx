@@ -896,6 +896,7 @@ export default function TaskManagement({
     userId: currentUser?.id, userName: currentUser?.name,
     projectName: (id) => (id ? projectsById.get(id)?.name || '' : ''),
     canReceiveTask: (t) => canDoTaskAction(currentUser, t, t.projectId ? projectsById.get(t.projectId) : undefined, 'receiveTask', taskMatrix),
+    includeCompleted: true,   // như kiểu Cột: có cả việc/nhiệm vụ đã hoàn thành (gom trong nhóm "Đã hoàn thành")
   }), [tasks, currentUser, projectsById, taskMatrix]);
   const overviewByMe = React.useMemo(() => assignedByMe(tasks, {
     userId: currentUser?.id, userName: currentUser?.name,

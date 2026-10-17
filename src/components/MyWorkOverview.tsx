@@ -75,11 +75,19 @@ export default function MyWorkOverview({ today, user, items, inbox, byMe, employ
     return next;
   });
 
-  const groups = useMemo(() => groupByBucket(items, today), [items, today]);
-  const focus = useMemo(() => focusItems(items, today, pins), [items, today, pins]);
-  const strip = useMemo(() => weekStrip(items, today), [items, today]);
-  const waiting = useMemo(() => awaitingReceive(items), [items]);
-  const projects = useMemo(() => countByProject(items).slice(0, 6), [items]);
+  // items có thể gồm cả việc/nhiệm vụ ĐÃ HOÀN THÀNH (như kiểu Cột): chỉ việc đang mở mới tính vào số liệu, Tập trung, chờ nhận, theo công trình
+  const open = useMemo(() => items.filter(i => i.status !== 'completed'), [items]);
+  const doneAll = useMemo(() => items.filter(i => i.status === 'completed').sort((a, b) => (b.doneDay || '').localeCompare(a.doneDay || '')), [items]);
+  const [kindFilter, setKindFilter] = useState<'all' | 'task' | 'mission'>('all');
+  const byKind = (list: MyWorkItem[]) => (kindFilter === 'all' ? list : list.filter(i => i.kind === kindFilter));
+  const openMissions = open.filter(i => i.kind === 'mission').length;
+  const openTasks = open.length - openMissions;
+  const groups = useMemo(() => groupByBucket(byKind(open), today), [open, today, kindFilter]);
+  const focus = useMemo(() => focusItems(open, today, pins), [open, today, pins]);
+  const strip = useMemo(() => weekStrip(open, today), [open, today]);
+  const waiting = useMemo(() => awaitingReceive(open), [open]);
+  const projects = useMemo(() => countByProject(open).slice(0, 6), [open]);
+  const doneShown = byKind(doneAll);
   const empById = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
   const firstName = (user.name || '').trim().split(/\s+/).pop() || user.name;
   const lateCount = groups.late.length, todayCount = groups.today.length;
@@ -95,18 +103,19 @@ export default function MyWorkOverview({ today, user, items, inbox, byMe, employ
             <span className={`text-[9.5px] font-extrabold uppercase px-1.5 py-0.5 rounded ${it.kind === 'task' ? 'bg-sky-100 text-sky-700' : 'bg-indigo-100 text-indigo-700'}`}>{it.kind === 'task' ? 'Công việc' : 'Nhiệm vụ'}</span>
             {it.project && <span className="inline-flex items-center gap-1 font-semibold text-slate-600"><i className="w-[7px] h-[7px] rounded-sm inline-block" style={{ background: colorOf(it.project) }} />{it.project}</span>}
             {it.kind === 'mission' && <span className="truncate">· {it.taskName}</span>}
-            <span className={`font-bold ${it.status === 'doing' ? 'text-sky-600' : 'text-slate-400'}`}>{it.status === 'doing' ? 'Đang làm' : it.status === 'todo' ? 'Chưa làm' : ''}</span>
+            {it.kind === 'mission' && <span className={`text-[9.5px] font-extrabold px-1.5 py-0.5 rounded ${it.role === 'lead' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-600'}`} data-testid="mywork-role">{it.role === 'lead' ? 'Phụ trách chính' : 'Tham gia'}{it.memberCount > 0 ? ` · +${it.memberCount} người` : ''}</span>}
+            <span className={`font-bold ${it.status === 'completed' ? 'text-emerald-600' : it.status === 'doing' ? 'text-sky-600' : 'text-slate-400'}`}>{it.status === 'completed' ? '✓ Hoàn thành' : it.status === 'doing' ? 'Đang làm' : it.status === 'todo' ? 'Chưa làm' : ''}</span>
           </div>
         </button>
         <div className="flex items-center gap-2">
           {it.rate !== null && <Ring pct={it.rate} />}
-          <DueBadge due={it.due} today={today} />
+          {it.status === 'completed' ? <span className="text-[10.5px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">{it.doneDay ? dm(it.doneDay) : 'Xong'}</span> : <DueBadge due={it.due} today={today} />}
           {it.canReceive && (opts.showReceive || it.status === 'todo') && (
             <button type="button" data-testid="mywork-receive" onClick={() => onReceive(it)} className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer">Nhận việc</button>
           )}
-          <button type="button" aria-label={pinned ? 'Bỏ ghim' : 'Ghim vào Tập trung hôm nay'} title={pinned ? 'Bỏ ghim' : 'Ghim vào Tập trung hôm nay'} onClick={() => togglePin(it.key)} className={`cursor-pointer ${pinned ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}>
+          {it.status !== 'completed' && <button type="button" aria-label={pinned ? 'Bỏ ghim' : 'Ghim vào Tập trung hôm nay'} title={pinned ? 'Bỏ ghim' : 'Ghim vào Tập trung hôm nay'} onClick={() => togglePin(it.key)} className={`cursor-pointer ${pinned ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}>
             <Pin className="w-3.5 h-3.5" fill={pinned ? 'currentColor' : 'none'} />
-          </button>
+          </button>}
         </div>
       </div>
     );
@@ -116,6 +125,7 @@ export default function MyWorkOverview({ today, user, items, inbox, byMe, employ
     { label: 'Quá hạn', n: lateCount, cls: 'text-rose-600' },
     { label: 'Hôm nay', n: todayCount, cls: 'text-amber-600' },
     { label: 'Mới, chờ nhận', n: waiting.length, cls: 'text-sky-600' },
+    { label: 'Nhiệm vụ của tôi', n: openMissions, cls: 'text-indigo-600' },
     { label: 'Chờ tôi xử lý', n: inbox.length, cls: 'text-indigo-600' },
     { label: 'Tôi giao', n: byMe.length, cls: 'text-emerald-600' },
   ];
@@ -141,7 +151,7 @@ export default function MyWorkOverview({ today, user, items, inbox, byMe, employ
           );
         })}
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2.5">
         {stats.map(s => (
           <div key={s.label} className="bg-white border border-slate-200 rounded-2xl px-3.5 py-2.5 flex items-baseline gap-2">
             <b className={`text-2xl font-extrabold ${s.cls}`} data-testid={`mywork-stat-${s.label}`}>{s.n}</b>
@@ -185,9 +195,18 @@ export default function MyWorkOverview({ today, user, items, inbox, byMe, employ
                 <h3 className="text-sm font-extrabold">Tất cả việc của tôi</h3>
                 <p className="text-[11px] text-slate-500">Gom theo mốc thời gian · bấm tiêu đề nhóm để thu gọn</p>
               </div>
-              <span className="bg-slate-100 rounded-full px-2.5 py-0.5 text-xs font-extrabold text-slate-500">{items.length}</span>
+              <span className="bg-slate-100 rounded-full px-2.5 py-0.5 text-xs font-extrabold text-slate-500">{open.length}</span>
             </div>
-            {items.length === 0 && <div className="px-4 py-8 text-center text-slate-500 text-xs">Chưa có việc nào được giao cho bạn.</div>}
+            <div className="flex gap-1.5 px-4 pb-2.5" role="group" aria-label="Lọc theo loại" data-testid="mywork-kind-filter">
+              {([['all', 'Tất cả', open.length], ['task', 'Công việc', openTasks], ['mission', 'Nhiệm vụ', openMissions]] as const).map(([k, l, n]) => (
+                <button key={k} type="button" onClick={() => setKindFilter(k)} aria-pressed={kindFilter === k}
+                  className={`px-3 py-1 rounded-full text-[11.5px] font-bold border cursor-pointer ${kindFilter === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'}`}>
+                  {l} <span className="opacity-70">{n}</span>
+                </button>
+              ))}
+            </div>
+            {open.length === 0 && doneAll.length === 0 && <div className="px-4 py-8 text-center text-slate-500 text-xs">Chưa có việc nào được giao cho bạn.</div>}
+            {open.length > 0 && byKind(open).length === 0 && <div className="px-4 py-6 text-center text-slate-500 text-xs">Không có {kindFilter === 'mission' ? 'nhiệm vụ' : 'công việc'} nào đang mở.</div>}
             {BUCKET_ORDER.map(b => groups[b].length === 0 ? null : (
               <details key={b} open={b === 'late' || b === 'today' || b === 'week'} className="group" data-testid={`mywork-group-${b}`}>
                 <summary className="list-none cursor-pointer flex items-center gap-2 px-4 py-2 bg-slate-50 border-t border-slate-200 [&::-webkit-details-marker]:hidden">
@@ -199,6 +218,18 @@ export default function MyWorkOverview({ today, user, items, inbox, byMe, employ
                 {groups[b].map(i => row(i))}
               </details>
             ))}
+            {doneShown.length > 0 && (
+              <details className="group" data-testid="mywork-group-done">
+                <summary className="list-none cursor-pointer flex items-center gap-2 px-4 py-2 bg-slate-50 border-t border-slate-200 [&::-webkit-details-marker]:hidden">
+                  <i className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-700">Đã hoàn thành</h4>
+                  <span className="bg-slate-100 rounded-full px-2 text-[10.5px] font-extrabold text-slate-500">{doneShown.length}</span>
+                  <span className="ml-auto text-slate-400 text-xs group-open:rotate-90 transition-transform">▸</span>
+                </summary>
+                {doneShown.slice(0, 15).map(i => row(i))}
+                {doneShown.length > 15 && <p className="px-4 py-2 text-[11px] text-slate-500 border-t border-slate-100">+{doneShown.length - 15} mục đã hoàn thành khác (gần nhất hiển thị trước)</p>}
+              </details>
+            )}
           </section>
         </div>
 
