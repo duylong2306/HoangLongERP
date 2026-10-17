@@ -107,3 +107,24 @@ export function allocateSubcontractPayments(
   }
   return paid;
 }
+
+// ─── CẢNH BÁO LỆCH GIỮA ĐƠN MUA / PHIẾU TRẢ NCC VÀ CÔNG NỢ TRẢ ───
+// (1) Đơn mua còn công nợ nhưng CHƯA ghi nhận vào Công nợ trả (phải bấm "Ghi nhận" ở tab Đơn hàng) → công nợ trả đang thiếu khoản này.
+// (2) Phiếu trả NCC đã duyệt mà NCC đó KHÔNG có dòng công nợ nào (chưa nhập nợ đầu kỳ, hoặc đơn chưa ghi nhận) → khoản đã chi không hiện ở Công nợ trả.
+export interface OrderLite { id: string; supplierId?: string; supplierName?: string; status?: string; congNo?: number; fromWarehouse?: boolean }
+export function findUnrecordedOrders<O extends OrderLite>(orders: O[], liabs: { category: string; recordedPurchaseOrderIds?: string[] }[]): O[] {
+  const recorded = new Set(liabs.filter(l => l.category === 'Nhà Cung Cấp').flatMap(l => l.recordedPurchaseOrderIds || []));
+  return orders.filter(o =>
+    (o.status === 'confirmed' || o.status === 'completed') && Number(o.congNo) > 0 &&
+    !o.fromWarehouse && o.supplierId !== '__warehouse__' && !recorded.has(o.id));
+}
+export function findOrphanSupplierPayments<P extends { category?: string; status?: string; supplierId?: string }>(
+  payments: P[],
+  liabs: { id: string; category: string; subcontractorId?: string; recordedPurchaseOrderIds?: string[] }[],
+  orders: { id: string; supplierId?: string }[],
+): P[] {
+  const supplierOfOrder = new Map(orders.map(o => [o.id, o.supplierId]));
+  const hasLiability = (supId: string) => liabs.some(l => liabilityKeys(l).supplierId === supId)
+    || liabs.some(l => l.category === 'Nhà Cung Cấp' && (l.recordedPurchaseOrderIds || []).some(id => supplierOfOrder.get(id) === supId));
+  return payments.filter(p => p.status === 'approved' && p.category === 'supplier_payment' && !!p.supplierId && !hasLiability(p.supplierId));
+}

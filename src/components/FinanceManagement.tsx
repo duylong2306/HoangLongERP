@@ -1,7 +1,8 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
-import { isPaymentForNamedLiability, liabilityKeys, liabilityMatchesEntity, findSupplierLiability, paymentBelongsToSubcontractor, allocateSubcontractPayments } from '../lib/liabilityPayments';
+import { allocateReceipts } from '../lib/receivableAllocation';
+import { isPaymentForNamedLiability, liabilityKeys, liabilityMatchesEntity, findSupplierLiability, paymentBelongsToSubcontractor, allocateSubcontractPayments, findUnrecordedOrders, findOrphanSupplierPayments } from '../lib/liabilityPayments';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
@@ -1637,11 +1638,30 @@ export default function FinanceManagement({
       return { ...r, collected, remaining, openingDebt, contractValue };
     });
 
+    // 1 khách có NHIỀU dòng nhập tay: tiền đã thu của khách chỉ chia MỘT lần giữa các dòng (dòng công nợ đầu kỳ trước, rồi theo ngày) —
+    // trước đây mỗi dòng nhận TOÀN BỘ phiếu thu của khách nên bị cộng đôi. Khách chỉ có 1 dòng thì nhận đủ như cũ.
+    const allocatedCollected: Record<string, number> = {};
+    {
+      const byCust = new Map<string, any[]>();
+      dbCustoms.forEach(r => { if (r.customerId && !String(r.id || '').startsWith('autorec_')) (byCust.get(r.customerId) || byCust.set(r.customerId, []).get(r.customerId)!).push(r); });
+      byCust.forEach((rows, custId) => {
+        if (rows.length < 2) return;
+        const total = receipts.filter(rec => rec.customerId === custId).reduce((sm, rec) => sm + rec.amount, 0);
+        const ordered = [...rows].sort((a, b) => (b.isOpeningDebt ? 1 : 0) - (a.isOpeningDebt ? 1 : 0) || String(a.date || a.createdAt || a.id).localeCompare(String(b.date || b.createdAt || b.id)));
+        Object.assign(allocatedCollected, allocateReceipts(
+          ordered.map(r => ({ id: r.id, capacity: ((r.openingDebt ?? (r.isOpeningDebt ? (r.contractValue || 0) : 0)) || 0) + (r.isOpeningDebt ? 0 : (r.contractValue || 0)) })),
+          total,
+        ));
+      });
+    }
+
     // Manual items: re-compute collected theo customerId hoặc salesOrderId
     const customs = dbCustoms.map(r => {
       let collected = 0;
       if (r.customerId) {
-        collected = receipts.filter(rec => rec.customerId === r.customerId).reduce((s, rec) => s + rec.amount, 0);
+        collected = r.id in allocatedCollected
+          ? allocatedCollected[r.id]
+          : receipts.filter(rec => rec.customerId === r.customerId).reduce((s, rec) => s + rec.amount, 0);
       } else {
         const soMatch = r.projectName.match(/ĐH\s+(\S+)/);
         const salesOrderId = soMatch ? soMatch[1] : null;
@@ -2046,6 +2066,13 @@ export default function FinanceManagement({
     // Fallback: nếu PO đã xóa hoặc không tìm thấy, giữ lại value gốc
     return total > 0 ? total : (liab.value || 0);
   };
+
+  // Cảnh báo lệch giữa Đơn hàng / Phiếu trả NCC và Công nợ trả (xem lib/liabilityPayments.ts)
+  const liabAlerts = useMemo(() => ({
+    unrecorded: findUnrecordedOrders(purchaseOrders as any[], customLiabilities as any[]),
+    orphanPays: findOrphanSupplierPayments(payments, customLiabilities as any[], purchaseOrders as any[]),
+  }), [purchaseOrders, customLiabilities, payments]);
+  const [showLiabAlerts, setShowLiabAlerts] = useState(false);
 
   // Combined liabilities list
   const mergedLiabilities = useMemo(() => {
@@ -9516,6 +9543,7 @@ export default function FinanceManagement({
                               <td className="px-3 py-3 text-right font-mono text-emerald-400 font-bold">+{g.daThu.toLocaleString('vi-VN')} đ</td>
                               <td className={`px-3 py-3 text-right font-mono font-black ${g.conLai < 0 ? 'text-emerald-700 bg-emerald-50' : 'text-orange-700 bg-orange-50'}`}>
                                 {g.conLai >= 0 ? `${g.conLai.toLocaleString('vi-VN')} đ` : `-${Math.abs(g.conLai).toLocaleString('vi-VN')} đ`}
+                                {g.conLai < 0 && <span className="block text-[9px] font-bold uppercase tracking-wide text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
                               </td>
                               <td className="px-3 py-3 text-slate-400 italic max-w-xs truncate" title={g.customer?.notes}>
                                 {g.customer?.notes || '-'}
@@ -9554,6 +9582,7 @@ export default function FinanceManagement({
                                   <td className="px-3 py-2.5 text-right font-mono text-emerald-400">+{(r.collected || 0).toLocaleString('vi-VN')} đ</td>
                                   <td className="px-3 py-2.5 text-right font-mono font-black text-slate-400">
                                     {isOutOfProjectRow ? '—' : (conLaiCT >= 0 ? `${conLaiCT.toLocaleString('vi-VN')} đ` : `-${Math.abs(conLaiCT).toLocaleString('vi-VN')} đ`)}
+                                    {!isOutOfProjectRow && conLaiCT < 0 && <span className="block text-[9px] font-bold uppercase tracking-wide text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
                                   </td>
                                   <td className="px-3 py-2.5 text-slate-400 text-[10px] max-w-xs truncate" title={r.notes}>{r.notes || '-'}</td>
                                   <td className="px-3 py-2.5">
@@ -9599,6 +9628,7 @@ export default function FinanceManagement({
                         </td>
                         <td className={`px-3 py-3 text-right font-mono font-black ${receivablePageInfo.totals.conLai < 0 ? 'text-emerald-700 bg-emerald-50' : 'text-orange-700 bg-orange-50'}`}>
                           {receivablePageInfo.totals.conLai >= 0 ? `${receivablePageInfo.totals.conLai.toLocaleString('vi-VN')} đ` : `-${Math.abs(receivablePageInfo.totals.conLai).toLocaleString('vi-VN')} đ`}
+                          {receivablePageInfo.totals.conLai < 0 && <span className="block text-[9px] font-bold uppercase tracking-wide text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
                         </td>
                         <td className="px-3 py-3"></td>
                         <td className="px-3 py-3"></td>
@@ -9739,6 +9769,35 @@ export default function FinanceManagement({
                   </button>
                   </div>
                 </div>
+
+                {(liabAlerts.unrecorded.length > 0 || liabAlerts.orphanPays.length > 0) && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl px-3.5 py-2.5 text-amber-900" data-testid="liab-alerts">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-extrabold text-[11px] uppercase tracking-wide">⚠ Cần kiểm tra — số liệu chưa khớp giữa các màn hình</span>
+                      <button type="button" onClick={() => setShowLiabAlerts(v => !v)} className="text-[10.5px] font-bold underline cursor-pointer">{showLiabAlerts ? 'Thu gọn' : 'Xem chi tiết'}</button>
+                    </div>
+                    <ul className="text-[11px] mt-1 space-y-0.5 list-disc pl-4">
+                      {liabAlerts.unrecorded.length > 0 && <li><b>{liabAlerts.unrecorded.length} đơn mua còn công nợ chưa ghi nhận</b> vào Công nợ trả — tổng nợ <b>{liabAlerts.unrecorded.reduce((sm, o: any) => sm + (o.congNo || 0), 0).toLocaleString('vi-VN')} đ</b> (Công nợ trả đang thiếu khoản này; vào tab Đơn hàng bấm "Ghi nhận").</li>}
+                      {liabAlerts.orphanPays.length > 0 && <li><b>{liabAlerts.orphanPays.length} phiếu trả NCC</b> ({liabAlerts.orphanPays.reduce((sm, p: any) => sm + (p.amount || 0), 0).toLocaleString('vi-VN')} đ) mà NCC đó <b>chưa có dòng công nợ nào</b> — khoản đã chi này không hiện ở Công nợ trả (chưa nhập nợ đầu kỳ hoặc đơn chưa ghi nhận).</li>}
+                    </ul>
+                    {showLiabAlerts && (
+                      <div className="mt-2 grid gap-2 md:grid-cols-2 text-[10.5px]">
+                        {liabAlerts.unrecorded.length > 0 && (
+                          <div className="bg-white/70 rounded-lg p-2 border border-amber-200"><b>Đơn chưa ghi nhận</b>
+                            {liabAlerts.unrecorded.slice(0, 12).map((o: any) => <div key={o.id} className="flex justify-between gap-2"><span className="truncate">{o.id} · {o.supplierName}</span><span className="font-mono shrink-0">{(o.congNo || 0).toLocaleString('vi-VN')} đ</span></div>)}
+                            {liabAlerts.unrecorded.length > 12 && <div className="italic">+{liabAlerts.unrecorded.length - 12} đơn khác</div>}
+                          </div>
+                        )}
+                        {liabAlerts.orphanPays.length > 0 && (
+                          <div className="bg-white/70 rounded-lg p-2 border border-amber-200"><b>Phiếu trả NCC chưa có công nợ</b>
+                            {liabAlerts.orphanPays.slice(0, 12).map((p: any) => <div key={p.id} className="flex justify-between gap-2"><span className="truncate">{p.code} · {p.recipient}</span><span className="font-mono shrink-0">{(p.amount || 0).toLocaleString('vi-VN')} đ</span></div>)}
+                            {liabAlerts.orphanPays.length > 12 && <div className="italic">+{liabAlerts.orphanPays.length - 12} phiếu khác</div>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
                   <div className="flex flex-col gap-1">

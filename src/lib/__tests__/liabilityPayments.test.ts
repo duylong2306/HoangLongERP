@@ -90,3 +90,57 @@ describe('allocateSubcontractPayments — mỗi phiếu chỉ tính MỘT lần 
     expect(fs.readFileSync('src/components/FinanceManagement.tsx', 'utf8')).toMatch(/allocateSubcontractPayments\(/);
   });
 });
+
+import { findUnrecordedOrders, findOrphanSupplierPayments } from '../liabilityPayments';
+import { allocateReceipts } from '../receivableAllocation';
+describe('cảnh báo lệch đơn mua / phiếu trả NCC so với Công nợ trả', () => {
+  const liabs: any[] = [
+    { id: 'opbal_sup_S1', category: 'Nhà Cung Cấp', recordedPurchaseOrderIds: [] },
+    { id: 'u1', category: 'Nhà Cung Cấp', recordedPurchaseOrderIds: ['O1'] },
+    { id: 'tp', category: 'Thầu Phụ', recordedPurchaseOrderIds: ['O9'] },   // công nợ thầu phụ không tính là đã ghi nhận đơn mua
+  ];
+  it('đơn còn nợ chưa ghi nhận: chỉ đơn xác nhận/hoàn thành, còn nợ > 0, không phải đơn nội bộ kho', () => {
+    const orders: any[] = [
+      { id: 'O1', status: 'confirmed', congNo: 100, supplierId: 'S2' },                        // đã ghi nhận
+      { id: 'O2', status: 'confirmed', congNo: 200, supplierId: 'S2' },                        // CHƯA → cảnh báo
+      { id: 'O3', status: 'completed', congNo: 300, supplierId: 'S3' },                        // CHƯA → cảnh báo
+      { id: 'O4', status: 'draft', congNo: 400, supplierId: 'S3' },                            // nháp
+      { id: 'O5', status: 'confirmed', congNo: 0, supplierId: 'S3' },                          // hết nợ
+      { id: 'O6', status: 'confirmed', congNo: 500, supplierId: '__warehouse__' },              // nội bộ kho
+      { id: 'O7', status: 'confirmed', congNo: 600, supplierId: 'S3', fromWarehouse: true },
+      { id: 'O9', status: 'confirmed', congNo: 700, supplierId: 'S3' },                        // chỉ nằm trong công nợ thầu phụ → vẫn chưa ghi nhận
+    ];
+    expect(findUnrecordedOrders(orders, liabs).map(o => o.id)).toEqual(['O2', 'O3', 'O9']);
+  });
+  it('phiếu trả NCC chưa có công nợ: NCC có nợ đầu kỳ hoặc có đơn đã ghi nhận thì không cảnh báo', () => {
+    const orders = [{ id: 'O1', supplierId: 'S2' }];
+    const pays: any[] = [
+      { id: 'a', category: 'supplier_payment', status: 'approved', supplierId: 'S1' },   // có nợ đầu kỳ opbal_sup_S1
+      { id: 'b', category: 'supplier_payment', status: 'approved', supplierId: 'S2' },   // đơn O1 của S2 đã ghi nhận
+      { id: 'c', category: 'supplier_payment', status: 'approved', supplierId: 'S3' },   // KHÔNG có gì → cảnh báo
+      { id: 'd', category: 'supplier_payment', status: 'pending', supplierId: 'S3' },    // chờ duyệt: bỏ qua
+      { id: 'e', category: 'subcontractor_advance', status: 'approved', supplierId: 'S3' },
+      { id: 'f', category: 'supplier_payment', status: 'approved' },                     // không mã NCC: không xét
+    ];
+    expect(findOrphanSupplierPayments(pays, liabs, orders).map(p => p.id)).toEqual(['c']);
+  });
+  it('FinanceManagement hiện banner cảnh báo và nhãn Dư có', () => {
+    const src = fs.readFileSync('src/components/FinanceManagement.tsx', 'utf8');
+    expect(src).toMatch(/data-testid="liab-alerts"/);
+    expect(src).toMatch(/Dư có · khách trả trước/);
+    expect(src).toMatch(/allocateReceipts\(/);
+  });
+});
+
+describe('allocateReceipts — phiếu thu của khách chỉ chia MỘT lần giữa các dòng công nợ nhập tay', () => {
+  it('1 dòng nhận đủ như cũ; nhiều dòng chia lần lượt theo phần còn lại; dư dồn dòng cuối', () => {
+    expect(allocateReceipts([{ id: 'a', capacity: 100 }], 500)).toEqual({ a: 500 });
+    expect(allocateReceipts([{ id: 'a', capacity: 100 }, { id: 'b', capacity: 200 }], 250)).toEqual({ a: 100, b: 150 });
+    expect(allocateReceipts([{ id: 'a', capacity: 100 }, { id: 'b', capacity: 200 }], 900)).toEqual({ a: 100, b: 800 });
+    expect(allocateReceipts([{ id: 'a', capacity: 100 }, { id: 'b', capacity: 200 }], 0)).toEqual({ a: 0, b: 0 });
+  });
+  it('tổng các dòng luôn bằng tổng đã thu của khách (không cộng đôi)', () => {
+    const r = allocateReceipts([{ id: 'a', capacity: 300 }, { id: 'b', capacity: 300 }, { id: 'c', capacity: 300 }], 700);
+    expect(r.a + r.b + r.c).toBe(700);
+  });
+});
