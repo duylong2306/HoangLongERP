@@ -1,4 +1,6 @@
-﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+﻿import { findUniqueEmployeeByName } from '../lib/employeeLookup';
+import { paymentBelongsToSubcontractor } from '../lib/liabilityPayments';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage, ChatAttachment } from '../types';
 import {
   X, Check, Clock, AlertCircle, FileUp, Users, Trash2,
@@ -299,7 +301,8 @@ export default function TaskDetailModal({
 
   // Payments made to this subcontractor on this project
   const subPaymentsMade = paymentsList.filter(p => {
-    const isRecipient = p.recipient === selectedTask.subcontractorName || p.recipient === selectedTask.subcontractorId;
+    // Theo MÃ thầu phụ trước; chỉ phiếu cũ chưa có mã mới dự phòng theo tên (không tính phiếu trả NCC cùng tên)
+    const isRecipient = paymentBelongsToSubcontractor(p, { id: selectedTask.subcontractorId, name: selectedTask.subcontractorName });
     const isApprovedPayment = p.status === 'approved';
     const matchesProject = !p.projectId || p.projectId === selectedTask.projectId;
     return isRecipient && isApprovedPayment && matchesProject;
@@ -478,9 +481,8 @@ export default function TaskDetailModal({
   // Hàm tìm id nhân viên theo tên (dùng khi import)
   const empIdByName = (name?: string): string | undefined => {
     if (!name || !name.trim()) return undefined;
-    const trimmed = name.trim();
-    const emp = employees.find(e => e.name === trimmed || e.name?.includes(trimmed));
-    return emp ? emp.id : undefined;
+    // Khớp CHÍNH XÁC và chỉ khi duy nhất 1 người trùng tên (không còn "includes" gây chọn nhầm)
+    return findUniqueEmployeeByName(employees, name)?.id;
   };
 
   const handleExportMissionsExcel = () => {

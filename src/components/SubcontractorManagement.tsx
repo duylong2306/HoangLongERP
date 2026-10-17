@@ -1,3 +1,4 @@
+import { paymentBelongsToSubcontractor } from '../lib/liabilityPayments';
 import React, { useState, useEffect, useMemo } from 'react';
 import { dbService } from '../lib/dbService';
 import { Employee, ArchivedQuote, Project, Payment } from '../types';
@@ -126,8 +127,8 @@ export default function SubcontractorManagement({
     payments.forEach(p => {
       if (p.status !== 'approved') return;
       for (const [, e] of map) {
-        if ((e.subcontractorId && p.subcontractorId && e.subcontractorId === p.subcontractorId) ||
-            (e.subcontractorName && p.recipient && e.subcontractorName === p.recipient)) {
+        // Theo MÃ thầu phụ trước; chỉ phiếu cũ chưa có mã mới dự phòng theo tên (không tính phiếu trả NCC cùng tên)
+        if (paymentBelongsToSubcontractor(p, { id: e.subcontractorId, name: e.subcontractorName })) {
           e.paid += (p.amount || 0);
           break;
         }

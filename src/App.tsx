@@ -39,7 +39,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators, isConfiguredApproverForPayment, isConfiguredApproverForProposal } from './context';
 import { Toast } from './context/NotificationContext';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
 
@@ -67,6 +67,8 @@ import ForcePasswordModal from './components/ForcePasswordModal';
 import { startPresence, stopPresence } from './lib/presence';
 import { getPasswordNotice, setPasswordNotice, type PasswordNotice } from './lib/passwordChange';
 import { materialInboxFor } from './lib/materialApproval';
+import { findSupplierLiability } from './lib/liabilityPayments';
+import { isPaymentPendingForUser, isAdvancePendingForUser } from './lib/approvalInbox';
 import MessagesView from './components/MessagesView';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
@@ -3034,7 +3036,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         // Trả lại Công nợ Trả (accounting_liabilities) theo nhà cung cấp
         try {
           const liabs: any[] = await dbService.accountingLiabilities.list();
-          const liab = liabs.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === order.supplierName);
+          const liab = findSupplierLiability(liabs, { supplierId: order.supplierId, supplierName: order.supplierName, orders: purchaseOrders });   // theo MÃ NCC trước, tên chỉ dự phòng
           if (liab) {
             const newPaidL = Math.max(0, (liab.paid || 0) - (targetPayment.amount || 0));
             const updatedLiab = { ...liab, paid: newPaidL, remaining: (liab.value || 0) - newPaidL };
@@ -3078,7 +3080,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       dbService.payments.save({ ...targetPayment, status });
 
       // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
-      const proposerEmployee = findEmployeeByName(employees, targetPayment.proposer);
+      const proposerEmployee = (targetPayment.proposerId ? employees.find(e => e.id === targetPayment.proposerId) : undefined) || findEmployeeByName(employees, targetPayment.proposer);   // mã người lập trước, tên dự phòng
       if (currentUser && proposerEmployee && currentUser.id !== proposerEmployee.id) {
         sendApprovalDirectMessage({
           senderId: currentUser.id,
@@ -3114,7 +3116,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           // Giảm Công nợ Trả (accounting_liabilities) theo nhà cung cấp
           try {
             const liabs: any[] = await dbService.accountingLiabilities.list();
-            const liab = liabs.find((l: any) => l.category === 'Nhà Cung Cấp' && l.name === order.supplierName);
+            const liab = findSupplierLiability(liabs, { supplierId: order.supplierId, supplierName: order.supplierName, orders: purchaseOrders });   // theo MÃ NCC trước, tên chỉ dự phòng
             if (liab) {
               const newPaidL = (liab.paid || 0) + (targetPayment.amount || 0);
               const updatedLiab = { ...liab, paid: newPaidL, remaining: (liab.value || 0) - newPaidL };
@@ -3383,24 +3385,15 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const myPendingLeaves = leaves.filter(l =>
       l.status === 'pending' && isLeaveApproverFor(currentUser.id, currentUser.name, l as any) // gồm cả những người khác trong danh sách duyệt cấu hình
     );
-    // Đề xuất tài chính chờ duyệt (đồng bộ TaskManagement myPendingPayments/myPendingAdvances):
-    // chỉ định làm người duyệt, hoặc thuộc nhóm Kế toán / Giám đốc → xem toàn bộ.
-    const isFinanceApprover = isRoleAccounting(currentUser.id) || isRoleAdmin(currentUser.id);
+    // Đề xuất tài chính chờ duyệt — CÙNG quy tắc với "Việc của tôi" (lib/approvalInbox.ts): Giám đốc, người được cấu hình duyệt đúng loại hồ sơ,
+    // hoặc người được chỉ định trên phiếu (khớp theo MÃ). Trước đây huy hiệu rộng hơn (gồm cả Kế toán và người lập/người nhận) nên số có thể lớn hơn số thẻ thật.
+    const isFinanceAdminBadge = isRoleAdmin(currentUser.id);
+    const employeeIdsBadge = new Set(employees.map(e => e.id));
     const myPendingPayments = payments.filter(p =>
-      p.status === 'pending' &&
-      (isFinanceApprover ||
-       p.proposer === currentUser.name ||
-       p.recipient === currentUser.name ||
-       p.approver === currentUser.name ||
-       (p.approver && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
-       p.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+      isPaymentPendingForUser(p, currentUser, { isAdmin: isFinanceAdminBadge, isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })
     );
     const myPendingAdvances = subcontractorAdvances.filter(a =>
-      a.status === 'pending_approval' &&
-      (isFinanceApprover ||
-       a.approver === currentUser.id ||
-       (a.approverName && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
-       a.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name))
+      isAdvancePendingForUser(a, currentUser, { isAdmin: isFinanceAdminBadge, isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsBadge })
     );
     // Công tác phí chờ duyệt (đồng bộ TaskManagement myPendingTravelExpenses):
     // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.

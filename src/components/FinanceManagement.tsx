@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
-import { isPaymentForNamedLiability, liabilityKeys } from '../lib/liabilityPayments';
+import { isPaymentForNamedLiability, liabilityKeys, liabilityMatchesEntity, findSupplierLiability, paymentBelongsToSubcontractor } from '../lib/liabilityPayments';
 import { Receipt, Payment, Project, Customer, Employee, SupplierPartner, SubcontractorAdvanceProposal, Supplier, InventoryItem, ArchivedQuote, Liability, AccountingProductItem, SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem, Task, WAREHOUSE_SOURCE_ID, WAREHOUSE_PROJECT_ID, CashFundConfig } from '../types';
 import { useNotification, isUserInRoleGroup, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, hasModulePermission } from '../context';
 import SearchableSelect from './SearchableSelect';
@@ -969,7 +969,11 @@ export default function FinanceManagement({
   //  - Phân loại "Thầu Phụ"     → đề xuất Chi Thầu Phụ + hình thức "Thanh Toán Công Nợ" (debt)
   const handleOpenProposalFromLiability = (item: any) => {
     const isSub = item.category === 'Thầu Phụ';
-    const subId = suppliers.find((s: any) => s.name === item.name)?.id || '';
+    // Mã đơn vị: lấy từ mã công nợ (opbal_sub_/opbal_sup_/cột subcontractorId); chỉ công nợ nhập tay không mã mới tra theo tên — và tra ĐÚNG danh mục
+    // (thầu phụ → danh mục thầu phụ, NCC → danh mục NCC; trước đây thầu phụ cũng tra trong danh mục NCC nên có thể ra sai mã)
+    const keys = liabilityKeys(item);
+    const subId = (isSub ? keys.subcontractorId : keys.supplierId)
+      || (isSub ? allSubcontractors : suppliers).find((s: any) => s.name === item.name)?.id || '';
     const amount = Math.round(item.remaining || 0);
     setActiveSubTab('de_xuat_thu_chi');
     setSearchTerm('');
@@ -4217,13 +4221,14 @@ export default function FinanceManagement({
         const advSubId = activeProposalForPayment.subcontractorId;
         const advName = activeProposalForPayment.subcontractorName || 'Thầu phụ';
         const isRealSubcontractorAdvance = activeProposalForPayment.type === 'subcontractor_advance';
+        // Khớp theo MÃ thầu phụ trước; tên chỉ dự phòng cho công nợ nhập tay / hợp đồng cũ chưa có mã
         const hasExistingRow = customLiabilities.some(l =>
-          (advSubId && l.subcontractorId && l.subcontractorId === advSubId) ||
-          (l.name && l.name === advName) ||
+          liabilityMatchesEntity(l, { id: advSubId, name: advName }, 'subcontractor') ||
           (l.relatedAdvanceId && l.relatedAdvanceId === activeProposalForPayment.id)
         ) || approvedSubContracts.some(s =>
-          (advSubId && s.subcontractorId && s.subcontractorId === advSubId) ||
-          (s.subcontractorName && s.subcontractorName === advName)
+          s.subcontractorId
+            ? !!advSubId && s.subcontractorId === advSubId
+            : !!s.subcontractorName && s.subcontractorName === advName
         );
         if (isRealSubcontractorAdvance && !hasExistingRow) {
           const newLiab: Liability = {
@@ -4251,7 +4256,8 @@ export default function FinanceManagement({
           updatePayrollWithAdvance(
             activeProposalForPayment.subcontractorName,
             Number(payAmount),
-            activeProposalForPayment.taskName || ''
+            activeProposalForPayment.taskName || '',
+            activeProposalForPayment.subcontractorId || ''   // với ứng lương, subcontractorId = mã nhân viên
           );
         }
 
@@ -4773,7 +4779,7 @@ export default function FinanceManagement({
   };
 
   // Cập nhật bảng lương khi duyệt đề xuất ứng lương nhân sự
-  const updatePayrollWithAdvance = async (empName: string, amount: number, taskName: string) => {
+  const updatePayrollWithAdvance = async (empName: string, amount: number, taskName: string, empId: string = '') => {
     try {
       // Trích xuất kỳ lương từ taskName (định dạng: "Ứng lương kỳ MM/YYYY")
       const periodMatch = taskName.match(/Ứng lương kỳ\s*([\d]{2}\/[\d]{4})/);
@@ -4787,7 +4793,8 @@ export default function FinanceManagement({
       }
 
       // Tìm bản ghi bảng lương của nhân sự trong kỳ lương tương ứng
-      let payrollItem = currentPayroll.find((p: any) => p.empName === empName && p.month === period);
+      // Theo MÃ nhân viên trước; bản ghi cũ chưa có empId mới dự phòng theo tên
+      let payrollItem = currentPayroll.find((p: any) => (empId && p.empId ? p.empId === empId : p.empName === empName) && p.month === period);
       if (payrollItem) {
         payrollItem.advances = (payrollItem.advances || 0) + amount;
         payrollItem.netSalary = (payrollItem.netSalary || 0) - amount;
@@ -4795,7 +4802,7 @@ export default function FinanceManagement({
         // Nếu chưa có bản ghi, tạo mới
         payrollItem = {
           id: `PL-${Date.now().toString().slice(-4)}`,
-          empId: '',
+          empId,
           empName: empName,
           month: period,
           baseSalary: 0,
@@ -5162,7 +5169,8 @@ export default function FinanceManagement({
       addToast({ title: 'ℹ️ Đã trả hết hàng', message: `Đơn ${order.id} đã được trả lại toàn bộ cho NCC, không có công nợ để ghi nhận.`, type: 'info' });
       return false;
     }
-    const existing = customLiabilities.find(l => l.name === order.supplierName && l.category === 'Nhà Cung Cấp');
+    // Theo MÃ NCC trước (opbal_sup_<mã> / đơn đã ghi nhận của cùng NCC); tên chỉ dự phòng khi khớp đúng 1 công nợ
+    const existing = findSupplierLiability(customLiabilities, { supplierId: order.supplierId, supplierName: order.supplierName, orders: purchaseOrders });
     if (existing) {
       // NCC đã có liability → gắn PO id vào recordedPurchaseOrderIds
       const newIds = Array.from(new Set([...(existing.recordedPurchaseOrderIds || []), order.id]));
@@ -6991,13 +6999,13 @@ export default function FinanceManagement({
                           || projectSubContracts[0];
                         const subLiab = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance')
                           ? (advanceContract ? mergedLiabilities.find(l => l.id === advanceContract.id) : undefined)
-                          : (selSub ? mergedLiabilities.find(l => l.name === selSub.name) : undefined);
+                          : (selSub ? mergedLiabilities.find(l => liabilityMatchesEntity(l, selSub, quickProposalType === 'subcontractor_advance' ? 'subcontractor' : 'supplier')) : undefined);
                         // Thanh Toán Công Nợ: hiển thị TỔNG công nợ trả của TẤT CẢ công việc/hợp đồng
                         // đã liên kết với thầu phụ này (không phải chỉ 1 hợp đồng đầu tiên trùng tên
                         // như "subLiab" ở trên) — vì thanh toán công nợ không gắn 1 dự án/công việc cụ
                         // thể, số tiền còn nợ phải là tổng cộng dồn qua mọi công việc thầu phụ đã làm.
                         const debtSubItems = (quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' && selSub)
-                          ? mergedLiabilities.filter(l => l.category === 'Thầu Phụ' && (l.subcontractorId ? l.subcontractorId === selSub.id : l.name === selSub.name))
+                          ? mergedLiabilities.filter(l => l.category === 'Thầu Phụ' && liabilityMatchesEntity(l, selSub, 'subcontractor'))
                           : [];
                         const debtTotals = debtSubItems.reduce((acc, l) => ({
                           tongGiaTri: acc.tongGiaTri + (l.tongGiaTri || 0),

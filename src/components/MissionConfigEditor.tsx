@@ -1,3 +1,4 @@
+import { findUniqueEmployeeByName } from '../lib/employeeLookup';
 import React, { useState, useRef, useEffect } from 'react';
 import { Employee, SubTaskMissionTemplate } from '../types';
 import { CheckSquare, Plus, X, Download, Upload, Briefcase, User } from 'lucide-react';
@@ -25,9 +26,8 @@ const formatDateForExcel = (d?: string): string => {
 /** Chuyển tên nhân viên → id */
 const empIdByName = (employees: Employee[], name?: string): string | undefined => {
   if (!name || !name.trim()) return undefined;
-  const trimmed = name.trim();
-  const emp = employees.find(e => e.name === trimmed || e.name?.includes(trimmed));
-  return emp ? emp.id : undefined;
+  // Khớp CHÍNH XÁC và chỉ khi duy nhất 1 người trùng tên (không còn "includes" gây chọn nhầm)
+  return findUniqueEmployeeByName(employees, name)?.id;
 };
 
 const empNameById = (employees: Employee[], empId?: string): string => {

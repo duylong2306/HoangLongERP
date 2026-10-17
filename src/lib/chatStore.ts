@@ -1,3 +1,4 @@
+import { findUniqueEmployeeByName } from './employeeLookup';
 import { Conversation, ChatMessage, ChatAttachment } from '../types';
 import { getSupabase, getCurrentCompanyId, getCurrentAccessToken } from './supabase';
 import { buildPushUrl } from './pushDeepLink';
@@ -222,9 +223,9 @@ export async function getOrCreateDirectConv(
   return getOrCreatePersonalConversation(userId1, userId2, user1Name, user2Name);
 }
 
-// Tra cứu nhân viên theo TÊN — nhiều đơn (nghỉ phép, phiếu chi) chỉ lưu tên
-// người duyệt/đề xuất ("Trương Hữu Long (Giám đốc)"), cần ánh xạ sang ID để
-// dựng hội thoại cá nhân. Ưu tiên khớp chính xác, rồi bỏ phần chức danh.
+// Tra cứu nhân viên theo TÊN — chỉ dùng khi đơn cũ CHƯA có mã người duyệt/đề xuất (nhiều đơn chỉ lưu tên, vd "Trương Hữu Long (Giám đốc)").
+// Khớp CHÍNH XÁC (rồi bỏ phần chức danh trong ngoặc) và chỉ khi ĐÚNG 1 người trùng tên — không còn đoán theo "includes" (từng chọn nhầm người).
+// Nơi gọi nên dùng MÃ (proposerId/approverId/creatorId) trước, hàm này chỉ là dự phòng.
 export function findEmployeeByName(
   employees: { id: string; name?: string }[],
   name?: string | null,
@@ -232,14 +233,7 @@ export function findEmployeeByName(
   if (!name) return undefined;
   const trimmed = String(name).trim();
   if (!trimmed) return undefined;
-  const exact = employees.find(e => e.name === trimmed);
-  if (exact) return exact;
-  const base = trimmed.split('(')[0].trim();
-  return (
-    employees.find(e => e.name === base) ||
-    employees.find(e => e.name?.includes(base)) ||
-    employees.find(e => e.name && base.includes(e.name))
-  );
+  return findUniqueEmployeeByName(employees, trimmed) || findUniqueEmployeeByName(employees, trimmed.split('(')[0]);
 }
 
 // ─── Xét duyệt → hội thoại cá nhân ─────────────────────────────────────────

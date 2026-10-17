@@ -716,7 +716,8 @@ export function isLeaveApproverFor(
   leave: { type?: string; approverId?: string; approverName?: string; approvals?: { approverId?: string }[] }
 ): boolean {
   if (!empId) return false;
-  if (leave.approverId === empId || (empName && leave.approverName === empName)) return true;
+  // Theo MÃ người duyệt trước; tên chỉ dự phòng cho đơn cũ chưa ghi mã (tránh trùng tên/đổi tên)
+  if (leave.approverId === empId || (!leave.approverId && empName && leave.approverName === empName)) return true;
   if (leave.approvals?.some(ap => ap.approverId === empId || (empName && ap.approverId === empName))) return true;
   const list = getConfiguredApprovers(leaveApprovalDocType(leave));
   if (!list.some(a => a.id === empId)) return false;

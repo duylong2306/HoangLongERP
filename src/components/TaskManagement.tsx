@@ -16,6 +16,7 @@ import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { useNotification, isUserInRoleGroup, getConfiguredApprovers, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
+import { isPaymentPendingForUser, isAdvancePendingForUser, isPaymentRelatedToUser } from '../lib/approvalInbox';
 import { materialInboxFor, materialProposalTotal, COORDINATOR_STATUS_LABEL } from '../lib/materialApproval';
 import MyWorkOverview, { type InboxItem } from './MyWorkOverview';
 import { buildMyWorkItems, assignedByMe, readMyTasksView, writeMyTasksView, viewStorageKey, pinsStorageKey, todayYmd, type MyTasksView, type MyWorkItem } from '../lib/myWork';
@@ -466,7 +467,7 @@ export default function TaskManagement({
       dbService.payments.save({ ...updatedPayment, status }).catch(err =>
         console.warn('Lỗi khi lưu trạng thái duyệt thanh toán lên Supabase:', err));
       // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
-      const proposerEmp = findEmployeeByName(employees, updatedPayment.proposer);
+      const proposerEmp = (updatedPayment.proposerId ? employees.find(e => e.id === updatedPayment.proposerId) : undefined) || findEmployeeByName(employees, updatedPayment.proposer);   // mã người lập trước, tên dự phòng
       if (currentUser.id && proposerEmp?.id && currentUser.id !== proposerEmp.id) {
         sendApprovalDirectMessage({
           senderId: currentUser.id,
@@ -575,7 +576,7 @@ export default function TaskManagement({
   };
 
   const handleClearPendingPayments = async () => {
-    const pendingList = payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name));
+    const pendingList = payments.filter(p => p.status === 'pending' && isPaymentRelatedToUser(p, currentUser));
     if (pendingList.length === 0) {
       addToast({ title: 'ℹ️ Thông báo', message: 'Không có dữ liệu chờ duyệt nào.', type: 'warning' });
       return;
@@ -844,22 +845,14 @@ export default function TaskManagement({
   // (tự duyệt chi tiền cho chính mình). Bỏ 2 điều kiện đó — chỉ còn thẩm quyền THẬT
   // (finance approver / được chỉ định duyệt), đúng như comment mô tả và đúng nguyên
   // tắc "không tự duyệt" đã áp dụng ở canApproveProposal (FinanceManagement.tsx).
+  // Quy tắc DÙNG CHUNG với huy hiệu menu (lib/approvalInbox.ts): khớp theo MÃ người duyệt, tên chỉ dự phòng cho bản ghi cũ chưa có mã
+  const employeeIdSet = React.useMemo(() => new Set(employees.map(e => e.id)), [employees]);
   const myPendingPayments = React.useMemo(() => payments.filter(p =>
-    p.status === 'pending' &&
-    (isFinanceAdmin ||
-     isConfiguredApproverForPayment(currentUser?.id, p) ||
-     p.approver === currentUser?.name ||
-     (p.approver && currentUser?.name && p.approver.toLowerCase().includes(currentUser.name.toLowerCase())) || // dung sai chuỗi "Tên (Chức danh)"
-     p.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
+    isPaymentPendingForUser(p, currentUser, { isAdmin: isFinanceAdmin, isConfiguredApprover: isConfiguredApproverForPayment(currentUser?.id, p) })
   ), [payments, currentUser, isFinanceAdmin]);
   const myPendingAdvances = React.useMemo(() => subcontractorAdvances.filter(a =>
-    a.status === 'pending_approval' &&
-    (isFinanceAdmin ||
-     isConfiguredApproverForProposal(currentUser?.id, a) ||
-     a.approver === currentUser?.id ||
-     (a.approverName && currentUser?.name && a.approverName.toLowerCase() === currentUser.name.toLowerCase()) ||
-     a.approvals?.some(ap => ap.approverId === currentUser?.id || ap.approverId === currentUser?.name))
-  ), [subcontractorAdvances, currentUser, isFinanceAdmin]);
+    isAdvancePendingForUser(a, currentUser, { isAdmin: isFinanceAdmin, isConfiguredApprover: isConfiguredApproverForProposal(currentUser?.id, a), employeeIds: employeeIdSet })
+  ), [subcontractorAdvances, currentUser, isFinanceAdmin, employeeIdSet]);
   // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê Duyệt → Công Tác
   // Phí). ⚠️ Bỏ fallback "thuộc nhóm Kế toán → duyệt tất cả" (isRoleAccounting) — cùng lý do rà
   // soát ở trên, chỉ người được add riêng cho "Công Tác Phí" (hoặc admin) mới được duyệt.
@@ -1731,7 +1724,7 @@ export default function TaskManagement({
                 </h3>
               </div>
               <div className="flex items-center gap-2">
-                {payments.filter(p => p.status === 'pending' && (p.proposer === currentUser.name || p.recipient === currentUser.name || p.approver === currentUser.name)).length > 0 && (
+                {payments.filter(p => p.status === 'pending' && isPaymentRelatedToUser(p, currentUser)).length > 0 && (
                   <button
                     onClick={handleClearPendingPayments}
                     title="Xóa toàn bộ các đề xuất đang chờ duyệt trong bộ nhớ tạm"

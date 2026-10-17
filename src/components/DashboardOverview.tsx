@@ -1,3 +1,5 @@
+import { isPaymentProposedBy } from '../lib/approvalInbox';
+import { findUniqueEmployeeByName } from '../lib/employeeLookup';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
 import { computeDailyWorkday, getAttendanceStatusText, readHrmConfigFromStorage } from './hr/hrCalculations';
@@ -149,9 +151,9 @@ export default function DashboardOverview({
     const isPM = currentUser ? isRoleOffice(currentUser.id) : false;
     if (isPM) {
       const isProjectPM = projects.find(p => p.id === mr.projectId)?.pmId === currentUser.id;
-      return isProjectPM || mr.proposer === currentUser.name;
+      return isProjectPM || isPaymentProposedBy(mr, currentUser);
     }
-    return mr.proposer === currentUser.name;
+    return isPaymentProposedBy(mr, currentUser);
   });
 
   // 2.2 Yêu cầu tạm ứng (Advance requests)
@@ -3015,7 +3017,7 @@ export default function DashboardOverview({
                   setLeaveApproverPosition(configuredApprover.position || '');
                 } else {
                   setLeaveApprover('Trương Hữu Long');
-                  setLeaveApproverId('');
+                  setLeaveApproverId(findUniqueEmployeeByName(hrmEmployees as any[], 'Trương Hữu Long')?.id || '');   // mặc định cũ: có mã thì chọn theo mã
                   setLeaveApproverPosition('');
                 }
                 setLeaveModalOpen(true);
@@ -3985,10 +3987,10 @@ export default function DashboardOverview({
                   }
                   return (
                     <select
-                      value={leaveApprover}
+                      value={leaveApproverId}
                       onChange={(e) => {
-                        const emp = hrmEmployees.find((em: any) => em.name === e.target.value);
-                        setLeaveApprover(e.target.value);
+                        const emp = hrmEmployees.find((em: any) => em.id === e.target.value);   // chọn theo MÃ nhân viên (không theo tên)
+                        setLeaveApprover(emp?.name || '');
                         setLeaveApproverId(emp?.id || '');
                         setLeaveApproverPosition(emp?.position || '');
                       }}
@@ -3996,7 +3998,7 @@ export default function DashboardOverview({
                     >
                       <option value="">Chọn người xét duyệt...</option>
                       {hrmEmployees.map((emp: any) => (
-                        <option key={emp.id} value={emp.name}>
+                        <option key={emp.id} value={emp.id}>
                           {emp.name} ({emp.position || emp.role})
                         </option>
                       ))}
