@@ -192,17 +192,17 @@ body {
   color: #1e293b;
 }
 
-/* ─── MOBILE: full màn hình mặc định nhưng CHO PHÉP người dùng co dãn (pinch-zoom) ───
+/* ─── MOBILE: full màn hình, KHÔNG cho phóng to/thu nhỏ (đã khóa zoom ở index.html + touch-action bên dưới) ───
    Trên desktop giữ nguyên app-shell cố định (overflow: hidden).
-   Trên mobile/tablet: bỏ khóa overflow để sau khi phóng to có thể kéo (pan) xem toàn trang.
+   Trên mobile/tablet: bỏ khóa overflow để trang cuộn được theo chiều dọc/ngang.
    min-height: 100% giữ giao diện vẫn phủ kín màn hình khi vừa load. */
 @media (max-width: 1024px) {
   html, body {
     height: auto;
     min-height: 100%;
     overflow: auto;
-    /* Cho phép kéo ngang/dọc + phóng to thu nhỏ bằng 2 ngón */
-    touch-action: pan-x pan-y pinch-zoom;
+    /* Chỉ cho kéo ngang/dọc — KHÔNG pinch-zoom (cố định trang) */
+    touch-action: pan-x pan-y;
     -webkit-text-size-adjust: 100%;
   }
   #root {

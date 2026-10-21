@@ -43,3 +43,24 @@ describe('Ngăn kéo chi tiết — đồng bộ thiết kế mới', () => {
     expect(task).toMatch(/flex-wrap gap-2 justify-end" style=\{\{ paddingBottom: 'max\(env\(safe-area-inset-bottom\), 16px\)' \}\}/);
   });
 });
+
+describe('Thích ứng điện thoại toàn ứng dụng', () => {
+  const idx = fs.readFileSync('src/index.css', 'utf8');
+  const app = fs.readFileSync('src/App.tsx', 'utf8');
+  it('không còn cho phép pinch-zoom (đã khóa zoom)', () => {
+    expect(idx).not.toMatch(/touch-action:[^;]*pinch-zoom/);
+    expect(css).toMatch(/touch-action:\s*pan-x pan-y/);
+  });
+  it('hộp thoại toàn màn hình tự né tai thỏ/vạch home/cạnh khía (trừ ngăn kéo đã có tiêu đề xanh riêng)', () => {
+    expect(css).toMatch(/\.fixed\.inset-0:not\(:has\(\.lx-drawer-head\)\)[^{]*\{[^}]*padding-top:[^}]*safe-top/);
+    expect(css).toMatch(/\.fixed\.inset-0\.p-4:not\(:has\(\.lx-drawer-head\)\)\s*\{[^}]*max\(1rem/);
+  });
+  it('trang ngoài khung ứng dụng (đăng nhập, giới thiệu…) có dải xanh LoLo né tai thỏ; khung ứng dụng đánh dấu lx-shell', () => {
+    expect(app).toContain('lx-shell');
+    expect(css).toMatch(/body:not\(:has\(\.lx-shell\)\)\s*\{[^}]*padding-top:\s*var\(--lx-safe-top\)/);
+    expect(css).toMatch(/html\s*\{\s*background:\s*#0a4fd8/);
+  });
+  it('chiều cao màn hình dùng dvh (không bị thanh địa chỉ Safari che đáy)', () => {
+    expect(css).toMatch(/@supports \(height: 100dvh\)[^}]*\.h-screen\s*\{\s*height:\s*100dvh/s);
+  });
+});

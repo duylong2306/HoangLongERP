@@ -22,7 +22,8 @@ import { todayYmd } from '../../lib/myWork';
 
 const me: any = { id: 'me', name: 'Trương Hữu Long', role: 'director' };
 const emps: any[] = [me, { id: 'ny', name: 'Lê Nguyễn Gia Ny' }, { id: 'tang', name: 'Hồ Văn Tặng' }];
-const day = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+// Ngày theo GIỜ ĐỊA PHƯƠNG (todayYmd cũng theo giờ địa phương) — dùng toISOString (UTC) làm test sai lệch 1 ngày sau nửa đêm ở múi giờ +7
+const day = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const task = (id: string, o: any = {}) => ({ id, name: 'Việc ' + id, status: 'doing', assigneeId: 'me', assignerId: 'tang', deadline: day(0), completionRate: 40, missions: [], ...o });
 const item = (id: string, o: any = {}) => ({ key: `task:${id}`, kind: 'task', taskId: id, title: 'Việc ' + id, taskName: 'Việc ' + id, project: 'CĂN TIN', due: day(0), rate: 40, status: 'doing', isLead: true, canReceive: false, role: 'assignee', memberCount: 0, doneDay: '', ...o });
 

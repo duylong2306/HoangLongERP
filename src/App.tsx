@@ -3570,7 +3570,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     <AuthProvider employees={employees} addToast={addToast}>
       <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
         <div
-          className="flex min-h-screen w-full md:h-screen md:w-screen bg-slate-950 md:overflow-hidden text-slate-200 font-sans transition-all duration-200"
+          className="lx-shell flex min-h-screen w-full md:h-screen md:w-screen bg-slate-950 md:overflow-hidden text-slate-200 font-sans transition-all duration-200"
           style={{ fontFamily: currentFont }}
           id="erp_container"
         >

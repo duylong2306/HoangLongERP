@@ -137,3 +137,30 @@ html, body { touch-action: pan-x pan-y; }
 @media (max-width: 767px) { .lx-dh-close .lx-dh-close-text { display: none; } .lx-dh-close { padding: 0; width: 36px; } }
 /* Vùng cuộn của ngăn kéo: chừa vạch home phía dưới */
 .lx-drawer-body { padding-bottom: max(var(--lx-safe-bottom), 0px); }
+
+/* ─── THÍCH ỨNG ĐIỆN THOẠI TOÀN ỨNG DỤNG (tai thỏ, vạch home, thanh địa chỉ co giãn) ─── */
+/* 1) Chiều cao màn hình: dùng dvh (tính cả lúc thanh địa chỉ Safari co/giãn) thay cho vh — 100vh trên iPhone cao hơn vùng nhìn thấy nên nội dung dưới cùng bị che. */
+@supports (height: 100dvh) {
+  .h-screen { height: 100dvh; }
+  .min-h-screen { min-height: 100dvh; }
+}
+/* 2) Trang nằm NGOÀI khung ứng dụng (đăng nhập, giới thiệu, đăng ký, quản trị nền tảng, trang gia hạn…): không có thanh tiêu đề riêng nên chừa tai thỏ bằng dải xanh LoLo phía trên
+      và vạch home phía dưới. Trang trong khung ứng dụng (.lx-shell) đã có thanh tiêu đề xanh + thanh dưới tự né. */
+html { background: #0a4fd8; }
+body { background-color: #f3f6fb; }
+body:not(:has(.lx-shell)) { padding-top: var(--lx-safe-top); padding-bottom: var(--lx-safe-bottom); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+body:not(:has(.lx-shell)) #root { background: #fff; }
+/* 3) Hộp thoại / lớp phủ toàn màn hình (hơn 140 chỗ trong ứng dụng): không để nội dung chui dưới tai thỏ, vạch home hay cạnh khía khi xoay ngang.
+      Ngăn kéo đã có tiêu đề xanh riêng (lx-drawer-head) tự né nên bỏ qua để không né đôi. */
+.fixed.inset-0:not(:has(.lx-drawer-head)):not(.lx-sheet) {
+  padding-top: max(var(--lx-safe-top), 0px);
+  padding-bottom: max(var(--lx-safe-bottom), 0px);
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+/* hộp thoại có sẵn đệm p-4: lấy giá trị LỚN HƠN giữa đệm có sẵn và vùng an toàn (không mất khoảng thở) */
+.fixed.inset-0.p-4:not(:has(.lx-drawer-head)) { padding: max(1rem, var(--lx-safe-top)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, var(--lx-safe-bottom)) max(1rem, env(safe-area-inset-left, 0px)); }
+/* 4) Ảnh/video không vượt khung */
+img, video { max-width: 100%; }
+/* 5) Vùng chạm tối thiểu ~40px cho nút biểu tượng trên điện thoại */
+@media (max-width: 767px) { button[aria-label], [role="tab"] { min-height: 40px; } }
