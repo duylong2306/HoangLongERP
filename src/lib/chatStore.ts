@@ -2,6 +2,7 @@ import { findUniqueEmployeeByName } from './employeeLookup';
 import { Conversation, ChatMessage, ChatAttachment } from '../types';
 import { getSupabase, getCurrentCompanyId, getCurrentAccessToken } from './supabase';
 import { buildPushUrl } from './pushDeepLink';
+import { isWorkThreadId, workThreadId, uniqueMembers } from './workThread';
 
 // =====================================================================
 // KIẾN TRÚC SUPABASE-ONLY + IN-MEMORY CACHE
@@ -376,6 +377,32 @@ export async function sendGroupChatMessage(params: {
   });
 }
 
+/**
+ * Tìm hoặc tạo LUỒNG THẢO LUẬN của 1 mục "Việc của tôi" (xem lib/workThread.ts).
+ * Mã hội thoại xác định theo khóa mục → idempotent. Nếu đã có, chỉ BỔ SUNG thành viên còn thiếu (không xóa ai).
+ */
+export async function ensureWorkThread(p: { key: string; title: string; memberIds: string[]; createdBy: string }): Promise<Conversation | null> {
+  const memberIds = uniqueMembers(p.memberIds);
+  if (!p.key || memberIds.length === 0) return null;
+  const id = workThreadId(p.key);
+  const existing = conversationsCache.get(id);
+  if (existing) {
+    const missing = memberIds.filter(m => !existing.participantIds.includes(m));
+    if (missing.length === 0) return existing;
+    const updated = { ...existing, participantIds: [...existing.participantIds, ...missing] };
+    conversationsCache.set(id, updated);
+    await pushConversation(updated);
+    return updated;
+  }
+  const conv: Conversation = {
+    id, type: 'group', name: `💬 ${p.title}`.slice(0, 120), avatar: '💬', color: '#0068ff',
+    participantIds: memberIds, createdBy: p.createdBy, createdAt: new Date().toISOString(), unreadCount: 0,
+  };
+  conversationsCache.set(id, conv);
+  await pushConversation(conv);
+  return conv;
+}
+
 export async function deleteConversation(convId: string): Promise<void> {
   const sb = getSupabase();
   if (!sb) return;
@@ -705,7 +732,7 @@ export async function markMessagesReadByUser(convId: string, userId: string): Pr
 // Lấy hội thoại của user (filter theo participantIds)
 export function getUserConversations(convs: Conversation[], userId: string): Conversation[] {
   return convs
-    .filter(c => c.participantIds.includes(userId))
+    .filter(c => c.participantIds.includes(userId) && !isWorkThreadId(c.id))   // luồng thảo luận của "Việc của tôi" không tính vào Tin nhắn thường
     .sort((a, b) => (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt));
 }
 

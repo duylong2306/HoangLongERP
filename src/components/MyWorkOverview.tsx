@@ -11,7 +11,7 @@ import { diffDays } from '../lib/executiveDashboard';
 // Kiểu xem TỔNG QUAN của "Việc của tôi" — gom việc, nhiệm vụ và các mục chờ xử lý vào một màn hình (xem lib/myWork.ts).
 // Thành phần thuần hiển thị: dữ liệu và hành động (Nhận việc, Duyệt, Mở…) do TaskManagement truyền xuống.
 
-export interface InboxAction { label: string; tone: 'ok' | 'no' | 'main'; onClick: () => void }
+export interface InboxAction { label: string; tone: 'ok' | 'no' | 'main' | 'plain'; onClick: () => void }
 export interface InboxItem {
   key: string;
   chip: string;                     // nhãn loại: "Duyệt chi", "Nghỉ phép", "Vật tư"…
@@ -20,6 +20,7 @@ export interface InboxItem {
   meta: string;
   amount?: number;
   right?: string;                   // chữ nhỏ bên phải (vd "Tìm NCC")
+  memberIds?: string[];             // người cùng thảo luận mục này trong Tin nhắn (người lập/đề xuất) — chỉ dùng ở tab Việc của tôi của Tin nhắn
   actions: InboxAction[];
 }
 

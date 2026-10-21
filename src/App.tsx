@@ -67,6 +67,10 @@ import ForcePasswordModal from './components/ForcePasswordModal';
 import { startPresence, stopPresence } from './lib/presence';
 import { getPasswordNotice, setPasswordNotice, type PasswordNotice } from './lib/passwordChange';
 import { materialInboxFor } from './lib/materialApproval';
+import { buildMyWorkItems, type MyWorkItem } from './lib/myWork';
+import { buildWorkInbox } from './lib/workInbox';
+import { groupPendingAbsencePairs } from './lib/leaveRequests';
+import { canDoTaskAction, loadTaskPermissionMatrix } from './components/hr/hrTaskPermissions';
 import { findSupplierLiability } from './lib/liabilityPayments';
 import { isPaymentPendingForUser, isAdvancePendingForUser } from './lib/approvalInbox';
 import MessagesHost from './components/MessagesHost';
@@ -3419,6 +3423,46 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
   })();
 
+  // ─── Dữ liệu cho tab "Việc của tôi" trong Tin nhắn: CÙNG quy tắc quyền với menu Việc của tôi (TaskManagement) ───
+  const messagesWork = (() => {
+    // Chỉ tính khi đã mở menu Tin nhắn (App render rất thường xuyên — tránh tốn công khi chưa cần)
+    if (!currentUser || !hasVisitedMessages) return { items: [] as MyWorkItem[], inbox: [] as ReturnType<typeof buildWorkInbox> };
+    const taskMatrixW = loadTaskPermissionMatrix();   // đọc 1 lần cho cả danh sách
+    const projectName = (id?: string) => (id ? projects.find(p => p.id === id)?.name || '' : '');
+    const items = buildMyWorkItems(tasks, {
+      userId: currentUser.id, userName: currentUser.name, projectName,
+      canReceiveTask: (t) => canDoTaskAction(currentUser, t, t.projectId ? projects.find(p => p.id === t.projectId) : undefined, 'receiveTask', taskMatrixW),
+    });
+    const isAdminW = isRoleAdmin(currentUser.id);
+    const employeeIdsW = new Set(employees.map(e => e.id));
+    const pendingLeavesW = groupPendingAbsencePairs(leaves.filter(l => l.status === 'pending' && isLeaveApproverFor(currentUser.id, currentUser.name, l as any))).visible;
+    const matW = materialInboxFor(materialProposalsForBadge, currentUser, {
+      isAdmin: isAdminW, approverIds: getMaterialApprovers().map(a => a.id), coordinatorIds: getMaterialCoordinators().map(c => c.id),
+    });
+    const canCtp = canApproveTravelExpenseCfg(currentUser.id);
+    const inbox = buildWorkInbox({
+      employeeIds: employeeIdsW,
+      reviewingTasks: tasks.filter(t => t.status === 'reviewing' && (t.assignerId === currentUser.id || t.assignerId === currentUser.name || t.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name)))
+        .map(t => ({ id: t.id, name: t.name, project: projectName(t.projectId), assigneeId: t.assigneeId })),
+      leaves: pendingLeavesW as any,
+      payments: payments.filter(p => isPaymentPendingForUser(p, currentUser, { isAdmin: isAdminW, isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })) as any,
+      advances: subcontractorAdvances.filter(a => isAdvancePendingForUser(a, currentUser, { isAdmin: isAdminW, isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsW })) as any,
+      travel: ctpSummary.filter((t: any) => t.status === 'pending' && canCtp),
+      // Chờ LẬP PHIẾU (KT): cả phòng Kế toán/Giám đốc, hoặc chính người lập (đúng như TaskManagement.myPendingVouchers)
+      vouchers: subcontractorAdvances.filter(a => a.status === 'pending_payment' && (isRoleAccounting(currentUser.id) || isAdminW || a.creator === currentUser.id
+        || (a.creatorName && currentUser.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase())
+        || (a.creator && currentUser.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))) as any,
+      materialToApprove: matW.toApprove, materialToCoordinate: matW.toCoordinate,
+      open: {
+        task: (id) => { setDeepLinkTaskId(id); setActiveTab('tasks'); },
+        finance: (id) => openFinanceVoucher(id),
+        material: (id) => openMaterialProposal(id),
+        myWork: () => setActiveTab('tasks'),
+      },
+    });
+    return { items, inbox };
+  })();
+
   if (!currentUser) {
     if (isInitializing || employees.length === 0) {
       return (
@@ -5462,6 +5506,19 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               currentUser={currentUser!}
               employees={employees}
               tasks={tasks}
+              workItems={messagesWork.items}
+              workInbox={messagesWork.inbox}
+              onReceiveWork={(it) => {
+                // "Nhận việc" — cùng hành vi nút Nhận Việc/Nhận NV của menu Việc của tôi
+                const t = tasks.find(x => x.id === it.taskId); if (!t) return;
+                if (it.kind === 'task') {
+                  handleUpdateTask(t.id, { status: 'doing', completionRate: 20, workLogs: [...(t.workLogs || []), { id: `wl_start_${Date.now()}`, actorId: currentUser!.id, actorName: currentUser!.name, action: 'Nhận Việc', timestamp: new Date().toISOString(), notes: `${currentUser!.name} đã Nhận Việc từ danh sách việc.` }] });
+                } else {
+                  handleUpdateTask(t.id, { missions: (t.missions || []).map(m => m.id === it.missionId ? { ...m, status: 'doing' as const } : m) });
+                  addToast({ title: '✅ Đã nhận nhiệm vụ', message: `Nhiệm vụ "${it.title}" đã chuyển sang trạng thái Đang làm.`, type: 'success' });
+                }
+              }}
+              onOpenWorkTask={(id) => { setDeepLinkTaskId(id); setActiveTab('tasks'); }}
               onNavigateTab={(tab) => setActiveTab(tab)}
               initialConversationId={initialConvId ?? undefined}
               showBadgeCounts={showBadgeCounts}

@@ -18,6 +18,11 @@ import {
   CATEGORY_LABEL, type Category, type ListTab,
 } from '../lib/chatInfo';
 import UserAvatar from './UserAvatar';
+import { WorkList, WorkDetail } from './MessagesWork';
+import type { InboxItem } from './MyWorkOverview';
+import { buildWorkEntries } from '../lib/workEntries';
+import { workThreadId, isWorkThreadId } from '../lib/workThread';
+import { todayYmd, type MyWorkItem } from '../lib/myWork';
 
 // GIAO DIỆN TIN NHẮN KIỂU MỚI (lấy cảm hứng từ Zalo): danh sách hội thoại | khung chat | thông tin hội thoại.
 // Dùng lại toàn bộ hệ thống nhắn tin có sẵn (chatStore: realtime, đã xem, ghim tin, cảm xúc, trả lời, @nhắc tên, đính kèm...).
@@ -32,6 +37,11 @@ interface Props {
   initialConversationId?: string;
   showBadgeCounts?: boolean;
   onToggleBadgeCounts?: (next: boolean) => void;
+  /** Tab "Việc của tôi": việc/nhiệm vụ của tôi, các mục chờ xử lý và hành động (do App dựng theo đúng quy tắc quyền của menu Việc của tôi) */
+  workItems?: MyWorkItem[];
+  workInbox?: InboxItem[];
+  onReceiveWork?: (it: MyWorkItem) => void;
+  onOpenWorkTask?: (taskId: string) => void;
 }
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
@@ -57,7 +67,7 @@ function ConvAvatar({ conv, employees, me, size }: { conv: Conversation; employe
   );
 }
 
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -85,6 +95,21 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const updatePrefs = (next: ChatPrefs) => { setPrefs(next); writePrefs(pKey, next); window.dispatchEvent(new CustomEvent('hl-chat-prefs-updated')); };
   const toggleMute = (id: string) => { const was = prefs.muted.includes(id); updatePrefs({ ...prefs, muted: toggleIn(prefs.muted, id) }); addToast({ title: was ? '🔔 Đã bật thông báo' : '🔕 Đã tắt thông báo', message: was ? 'Hội thoại này sẽ báo tin mới trở lại.' : 'Tin mới của hội thoại này không tính vào huy hiệu chưa đọc.', type: 'info' }); };
   const togglePinConv = (id: string) => updatePrefs({ ...prefs, pinned: toggleIn(prefs.pinned, id) });
+
+  // ─── Tab "Việc của tôi" (cột trái chuyển giữa Tin nhắn | Việc của tôi) ───
+  const [leftMode, setLeftMode] = useState<'chat' | 'work'>('chat');
+  const [workKey, setWorkKey] = useState<string | null>(null);
+  const today = useMemo(() => todayYmd(), []);
+  const workEntries = useMemo(() => buildWorkEntries({
+    items: workItems, inbox: workInbox, tasks, me, today,
+    onReceive: it => onReceiveWork?.(it), onOpenTask: id => onOpenWorkTask?.(id),
+  }), [workItems, workInbox, tasks, me, today, onReceiveWork, onOpenWorkTask]);
+  const workSel = useMemo(() => workEntries.find(e => e.key === workKey) || null, [workEntries, workKey]);   // mục đã xử lý xong biến mất khỏi danh sách → tự đóng
+  // Mục có thảo luận chưa đọc (luồng riêng của mục, không lẫn vào Tin nhắn thường)
+  const workUnreadKeys = useMemo(() => {
+    const unreadIds = new Set(conversations.filter(c => isWorkThreadId(c.id) && (c.unreadCount || 0) > 0).map(c => c.id));
+    return new Set(workEntries.filter(e => unreadIds.has(workThreadId(e.key))).map(e => e.key));
+  }, [conversations, workEntries]);
 
   // ─── Bộ lọc danh sách ───
   const [tab, setTab] = useState<ListTab>('all');
@@ -378,7 +403,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
 
   return (
     <div className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden text-slate-900 h-[calc(100vh-190px)] min-h-[520px]" data-testid="zalo-root">
-      <div className={`grid h-full ${infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
+      <div className={`grid h-full ${leftMode === 'chat' && infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
         {/* ── DANH SÁCH ── */}
         <section className={`${showList ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 border-r border-slate-200`}>
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">
@@ -389,6 +414,13 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <button type="button" title="Nhắn tin mới" aria-label="Nhắn tin mới" onClick={() => setNewChatOpen(true)} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><UserPlus className="w-[18px] h-[18px]" /></button>
             <button type="button" title="Tạo nhóm" aria-label="Tạo nhóm" onClick={() => { setGroupMembers([]); setGroupOpen(true); }} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Users className="w-[18px] h-[18px]" /></button>
           </div>
+          {/* Chuyển Tin nhắn | Việc của tôi */}
+          <div className="grid grid-cols-2 mx-3 mb-2 p-1 rounded-full bg-slate-100 border border-slate-200" role="group" aria-label="Chọn danh sách" data-testid="zalo-left-switch">
+            <button type="button" aria-pressed={leftMode === 'chat'} onClick={() => setLeftMode('chat')} data-testid="zalo-mode-chat" className={`flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[12.5px] font-bold cursor-pointer ${leftMode === 'chat' ? 'bg-white text-slate-900 shadow ring-1 ring-slate-200' : 'text-slate-500'}`}><MessageSquare className="w-4 h-4" />Tin nhắn</button>
+            <button type="button" aria-pressed={leftMode === 'work'} onClick={() => setLeftMode('work')} data-testid="zalo-mode-work" className={`flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[12.5px] font-bold cursor-pointer ${leftMode === 'work' ? 'bg-white text-slate-900 shadow ring-1 ring-slate-200' : 'text-slate-500'}`}><ClipboardList className="w-4 h-4" />Việc của tôi{workEntries.length > 0 && <span className="min-w-[17px] h-[17px] px-1 rounded-full bg-red-500 text-white text-[10.5px] grid place-items-center" data-testid="zalo-work-badge">{workEntries.length}</span>}</button>
+          </div>
+          {leftMode === 'work' && <div className="flex-1 overflow-y-auto min-h-0" data-testid="zalo-worklist"><WorkList entries={workEntries} selectedKey={workKey} unreadKeys={workUnreadKeys} today={today} query={query} onSelect={k => { setWorkKey(k); setMobileView('chat'); }} /></div>}
+          {leftMode === 'chat' && <>
           <div className="relative flex items-center gap-4 px-3.5 border-b border-slate-100">
             {([['all', 'Tất cả'], ['unread', 'Chưa đọc']] as const).map(([k, l]) => (
               <button key={k} type="button" onClick={() => setTab(k)} aria-pressed={tab === k} className={`py-2 text-[13px] font-bold border-b-2 -mb-px cursor-pointer ${tab === k ? 'text-blue-600 border-blue-600' : 'text-slate-500 border-transparent'}`}>
@@ -421,11 +453,16 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 </button>);
             })}
           </div>
+          </>}
         </section>
 
         {/* ── KHUNG CHAT ── */}
         <section className={`${showChat ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-gradient-to-br from-[#dbe3d3] via-[#c9d6df] to-[#d5d9ea]`} data-testid="zalo-chat">
-          {!inChat ? (
+          {leftMode === 'work' ? (
+            workSel
+              ? <WorkDetail key={workSel.key} entry={workSel} me={me} meName={currentUser.name} employees={employees} today={today} onBack={() => setMobileView('list')} />
+              : <div className="flex-1 grid place-items-center text-center p-6 bg-slate-50" data-testid="work-placeholder"><div><ClipboardList className="w-12 h-12 mx-auto text-slate-300 mb-3" /><b className="block text-[15px]">Việc của tôi</b><p className="text-[13px] text-slate-500 mt-1">Chọn một việc hoặc đề xuất bên trái để xử lý và trao đổi.</p></div></div>
+          ) : !inChat ? (
             <div className="flex-1 grid place-items-center text-center p-6 bg-slate-50"><div><MessageSquare className="w-12 h-12 mx-auto text-slate-300 mb-3" /><b className="block text-[15px]">Chào mừng đến với Tin nhắn</b><p className="text-[13px] text-slate-500 mt-1">Chọn một hội thoại bên trái hoặc bấm biểu tượng thêm người để bắt đầu.</p></div></div>
           ) : (<>
             <header className="bg-white flex items-center gap-3 px-3 sm:px-4 py-2.5 border-b border-slate-200">
@@ -531,9 +568,9 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
         </section>
 
         {/* ── THÔNG TIN (màn rộng: cột thứ 3; điện thoại: phủ toàn màn hình) ── */}
-        {isDesktop && infoOpen && selected && <div className="min-h-0">{infoPanel}</div>}
+        {leftMode === 'chat' && isDesktop && infoOpen && selected && <div className="min-h-0">{infoPanel}</div>}
       </div>
-      {!isDesktop && infoOpen && selected && showChat && <div className="absolute inset-0 z-40 bg-white overflow-y-auto" data-testid="zalo-info-mobile">{infoPanel}</div>}
+      {leftMode === 'chat' && !isDesktop && infoOpen && selected && showChat && <div className="absolute inset-0 z-40 bg-white overflow-y-auto" data-testid="zalo-info-mobile">{infoPanel}</div>}
 
       {/* ── Hộp thoại ── */}
       {newChatOpen && (

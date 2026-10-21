@@ -1,6 +1,7 @@
 // Logic thuần cho giao diện Tin nhắn kiểu mới: phân loại / lọc / sắp hội thoại, gom ảnh-tệp-liên kết, tin đã ghim, nhóm tin theo ngày.
 import type { ChatMessage, Conversation } from '../types';
 import type { ChatPrefs } from './chatPrefs';
+import { isWorkThreadId } from './workThread';
 
 export type ListTab = 'all' | 'unread';
 export type Category = 'all' | 'personal' | 'group' | 'project' | 'task' | 'pinned' | 'muted';
@@ -25,7 +26,7 @@ export function filterConversations(
 ): Conversation[] {
   const q = norm(o.query.trim());
   return convs
-    .filter(c => c.participantIds.includes(o.userId))
+    .filter(c => c.participantIds.includes(o.userId) && !isWorkThreadId(c.id))   // luồng thảo luận "Việc của tôi" chỉ hiện ở tab Việc của tôi
     .filter(c => o.tab === 'all' || (c.unreadCount || 0) > 0)
     .filter(c => {
       if (o.category === 'all') return true;

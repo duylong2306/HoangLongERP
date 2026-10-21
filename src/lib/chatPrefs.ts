@@ -1,3 +1,4 @@
+import { isWorkThreadId } from './workThread';
 // TÙY CHỌN RIÊNG của từng người trong Tin nhắn: tắt thông báo hội thoại, ghim hội thoại, kiểu giao diện (cũ/mới).
 // Lưu trong localStorage theo người dùng + doanh nghiệp (không đồng bộ giữa các máy). Hàm thuần nhận storage để dễ kiểm tra.
 export interface ChatPrefs { muted: string[]; pinned: string[] }
@@ -32,5 +33,5 @@ export function writeMessagesUi(key: string, v: MessagesUi, storage: W | null = 
 /** Số tin chưa đọc để hiện trên huy hiệu menu: KHÔNG tính hội thoại đã tắt thông báo. */
 export function unreadForBadge(convs: { id: string; unreadCount?: number }[], prefs: ChatPrefs): number {
   const muted = new Set(prefs.muted);
-  return convs.reduce((s, c) => s + (muted.has(c.id) ? 0 : (c.unreadCount || 0)), 0);
+  return convs.reduce((s, c) => s + (muted.has(c.id) || isWorkThreadId(c.id) ? 0 : (c.unreadCount || 0)), 0);   // luồng "Việc của tôi" tính ở huy hiệu riêng
 }

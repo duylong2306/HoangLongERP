@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { LayoutList, MessageSquareText } from 'lucide-react';
 import type { Employee, Task } from '../types';
+import type { MyWorkItem } from '../lib/myWork';
+import type { InboxItem } from './MyWorkOverview';
 import MessagesView from './MessagesView';
 import MessagesZalo from './MessagesZalo';
 import { companyScopedKey } from '../lib/supabase';
@@ -9,6 +11,7 @@ import { uiKey, readMessagesUi, writeMessagesUi, type MessagesUi } from '../lib/
 // Cổng vào menu Tin nhắn: chọn KIỂU MỚI (kiểu Zalo, mặc định) hoặc KIỂU CŨ; lựa chọn được nhớ trong trình duyệt theo từng người dùng.
 interface Props {
   currentUser: Employee; employees: Employee[]; onNavigateTab?: (tab: string) => void; tasks?: Task[]; onUpdateTask?: (taskId: string, updates: any) => void;
+  workItems?: MyWorkItem[]; workInbox?: InboxItem[]; onReceiveWork?: (it: MyWorkItem) => void; onOpenWorkTask?: (taskId: string) => void;
   initialConversationId?: string; showBadgeCounts?: boolean; onToggleBadgeCounts?: (next: boolean) => void;
 }
 
