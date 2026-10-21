@@ -532,7 +532,11 @@ export async function maybeSendAttendanceChatMessage(params: {
 
 // ─── Messages CRUD (async + cache) ────────────────────────────────────────
 
-export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 'read'>): Promise<ChatMessage> {
+/**
+ * @param onLocal gọi NGAY sau khi tin đã vào bộ nhớ đệm (trước mọi lệnh gọi mạng) → giao diện hiện tin của chính mình tức thì như Zalo,
+ *                không phải chờ các lần ghi lên Supabase.
+ */
+export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 'read'>, onLocal?: (m: ChatMessage) => void): Promise<ChatMessage> {
   const newMsg: ChatMessage = {
     ...msg,
     id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -552,35 +556,10 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
       // Không tăng unreadCount — tin nhắn của chính mình không tính là chưa đọc
     });
   }
+  try { onLocal?.(newMsg); } catch (e) { console.warn('addMessage onLocal lỗi (bỏ qua):', e); }
 
-  // Đảm bảo conversation tồn tại trên cloud TRƯỚC KHI insert message.
-  // chat_messages.conversation_id có FK tới conversations(id) (ON DELETE CASCADE),
-  // nên nếu conversation chưa có trên cloud, insert message sẽ lỗi 23503 (foreign
-  // key) và — nếu bị swallow — tin nhắn bị MẤT SILENT (hiện tạm rồi biến mất khi
-  // reload). Upsert conversation trước để chắc chắn FK target tồn tại.
-  if (conv) {
-    await pushConversation({ ...conv, lastMessageAt: newMsg.createdAt });
-  }
-
-  // Push message lên Supabase. Nếu lỗi FK (conversation chưa kịp có trên cloud do
-  // race / push trước thất bại) → upsert lại conversation rồi thử lại 1 lần.
-  let pushErr = await pushMessage(newMsg);
-  if (
-    pushErr &&
-    (pushErr.code === '23503' ||
-      (pushErr.message || '').toLowerCase().includes('foreign key'))
-  ) {
-    if (conv) await pushConversation({ ...conv, lastMessageAt: newMsg.createdAt });
-    pushErr = await pushMessage(newMsg);
-  }
-  if (pushErr) console.error('pushMessage failed (tin nhắn có thể không được lưu):', pushErr.message);
-
-  // Push conversation LÊN SUPABASE: +1 vào unread_counts CHO TỪNG THÀNH VIÊN
-  // NHẬN (trừ người gửi) — thay vì +1 vào 1 số dùng chung cho cả hội thoại
-  // (bug cũ: người này đọc thì badge của người khác cũng bị xóa theo). Đồng
-  // thời denormalize lastMessage để danh sách hội thoại hiển thị đúng tin
-  // nhắn cuối mà không cần tải lịch sử tin nhắn (messagesCache) của hội
-  // thoại đó trong phiên hiện tại.
+  // Tính sẵn bản hội thoại mới: +1 chưa đọc CHO TỪNG THÀNH VIÊN NHẬN (trừ người gửi — bug cũ: 1 số dùng chung, người này đọc thì người khác mất huy hiệu)
+  // và denormalize lastMessage để danh sách hiện đúng tin cuối mà không cần tải lịch sử.
   let convForPush = conv;
   if (conv) {
     const nextCounts: Record<string, number> = { ...(conv.unreadCounts || {}) };
@@ -601,8 +580,19 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
       },
     };
     conversationsCache.set(msg.conversationId, convForPush);
-    await pushConversation(convForPush);
   }
+
+  // GHI SONG SONG tin nhắn và hội thoại (trước đây 3 lệnh nối đuôi: upsert hội thoại → chèn tin → upsert hội thoại, tốn 3 lượt mạng
+  // trước khi người nhận thấy tin). Tin nhắn có khóa ngoại tới hội thoại (conversation_id → conversations.id): nếu hội thoại CHƯA có
+  // trên cloud thì chèn tin lỗi 23503 — khi đó đợi lệnh upsert hội thoại xong rồi chèn lại 1 lần (hiếm, chỉ hội thoại vừa tạo).
+  const convPush = convForPush ? pushConversation(convForPush) : Promise.resolve(null);
+  let pushErr = await pushMessage(newMsg);
+  if (pushErr && (pushErr.code === '23503' || (pushErr.message || '').toLowerCase().includes('foreign key'))) {
+    await convPush;
+    pushErr = await pushMessage(newMsg);
+  }
+  await convPush;
+  if (pushErr) console.error('pushMessage failed (tin nhắn có thể không được lưu):', pushErr.message);
 
   // 🔔 Gửi Web Push cho người nhận (khi app đóng / background)
   // Gọi async, không block UI. Bỏ qua lỗi nếu Supabase chưa cấu hình.
@@ -1019,8 +1009,18 @@ function createConvChannel(userId: string): any {
       event: '*', schema: 'public', table: 'conversations',
       ...(companyId ? { filter: `company_id=eq.${companyId}` } : {}),
     },
-      async () => {
-        await loadConversationsFromCloud(userId);
+      async (payload: any) => {
+        // ÁP THẲNG dòng realtime vào bộ nhớ đệm thay vì tải lại TOÀN BỘ hội thoại sau mỗi sự kiện (chậm, và là nguyên nhân tin mới hiện trễ).
+        // Chỉ khi sự kiện thiếu dữ liệu mới tải lại như cũ.
+        const row = payload?.new && payload.new.id ? payload.new : null;
+        if (payload?.eventType === 'DELETE' && payload?.old?.id) {
+          conversationsCache.delete(payload.old.id);
+        } else if (row) {
+          const c = convFromRow(row, userId);
+          if (c.participantIds.includes(userId)) conversationsCache.set(c.id, c); else conversationsCache.delete(c.id);   // bị gỡ khỏi hội thoại → biến mất
+        } else {
+          await loadConversationsFromCloud(userId);
+        }
         _convCallbacks.forEach(cb => cb());
       })
     .subscribe((status: string, err: any) => {
@@ -1089,7 +1089,7 @@ export function subscribeConversations(userId: string, onChange: () => void): ()
  */
 export function subscribeMessages(
   conversationId: string,
-  onChange: (msgs: ChatMessage[]) => void
+  onChange: (msgs: ChatMessage[], kind?: 'insert' | 'update') => void
 ): () => void {
   const sb = getSupabase();
   if (!sb) return () => {};
@@ -1102,11 +1102,22 @@ export function subscribeMessages(
   let reconnectAttempts = 0;
   let intentionalClose = false;
 
-  const handleInsert = async () => {
-    // Chỉ reload cửa sổ đã load (từ _loadedFromIso) thay vì toàn bộ lịch sử
+  // Tải lại cửa sổ đã load (dự phòng: sự kiện thiếu dữ liệu, hoặc vừa kết nối lại sau khi mất kênh)
+  const reloadWindow = async (kind: 'insert' | 'update') => {
     const from = _loadedFromIso.get(conversationId);
     const msgs = await loadMessagesFromCloud(conversationId, from ? { fromIso: from } : undefined);
-    onChange(msgs);
+    onChange(msgs, kind);
+  };
+  // ÁP THẲNG dòng realtime vào bộ nhớ đệm → tin hiện NGAY, không phải chờ 1 lượt truy vấn tải lại (trước đây mỗi tin mới kéo lại cả cửa sổ
+  // kèm ảnh/tệp nên trễ; thông báo đẩy tới trước tin trong khung chat). Dòng quá lớn (ảnh/tệp) bị Realtime cắt → dùng cách tải lại.
+  const applyRow = (payload: any, kind: 'insert' | 'update') => {
+    const row = payload?.new;
+    if (!row || !row.id || row.conversation_id !== conversationId || (Array.isArray(payload?.errors) && payload.errors.length)) { reloadWindow(kind); return; }
+    const m = msgFromRow(row);
+    const byId = new Map(getMessages(conversationId).map(x => [x.id, x] as const));
+    byId.set(m.id, kind === 'update' ? { ...byId.get(m.id), ...m } : m);
+    saveMessages(conversationId, Array.from(byId.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+    onChange(getMessages(conversationId), kind);
   };
 
   const createChannel = (): any => {
@@ -1115,9 +1126,15 @@ export function subscribeMessages(
       .channel(`messages_${conversationId}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
-        handleInsert)
+        (p: any) => applyRow(p, 'insert'))
+      // Sửa / thu hồi / ghim / cảm xúc / "đã xem" của người khác cũng hiện ngay (kind='update' để nơi gọi KHÔNG đánh dấu đã đọc lại → không vòng lặp)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${conversationId}` },
+        (p: any) => applyRow(p, 'update'))
       .subscribe((status: string, err: any) => {
         if (status === 'SUBSCRIBED') {
+          // Kết nối LẠI sau khi mất kênh → có thể đã lỡ tin: tải bù 1 lần
+          if (reconnectAttempts > 0) reloadWindow('insert');
           reconnectAttempts = 0;
           if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {

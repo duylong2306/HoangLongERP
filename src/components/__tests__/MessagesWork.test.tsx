@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 // Tab "Việc của tôi" trong Tin nhắn kiểu mới: danh sách theo nhóm, chi tiết + luồng thảo luận riêng của từng mục, hành động.
 const store = vi.hoisted(() => ({ convs: [] as any[], msgs: {} as Record<string, any[]> }));
 const fn = vi.hoisted(() => ({
-  addMessage: vi.fn(async (m: any) => { const x = { ...m, id: 'new_' + Math.random(), createdAt: new Date().toISOString(), read: false }; (store.msgs[m.conversationId] ||= []).push(x); return x; }),
+  addMessage: vi.fn(async (m: any, onLocal?: (x: any) => void) => { const x = { ...m, id: 'new_' + Math.random(), createdAt: new Date().toISOString(), read: false }; (store.msgs[m.conversationId] ||= []).push(x); onLocal?.(x); return x; }),
   ensureWorkThread: vi.fn(async (p: any) => ({ id: 'conv_work_' + p.key.replace(/[^A-Za-z0-9_-]/g, '_'), participantIds: p.memberIds })),
   markConversationRead: vi.fn(async () => {}), markMessagesReadByUser: vi.fn(async () => {}),
   sendApprovalDirectMessage: vi.fn(async () => null),

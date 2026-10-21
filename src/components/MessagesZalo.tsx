@@ -167,15 +167,16 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     const start = new Date(Math.min(Date.now() - TWO_DAYS, latest - TWO_DAYS)).toISOString();
     windowRef.current = start; setHasMoreOlder(true);
     let alive = true;
-    const refresh = (msgs?: ChatMessage[]) => {
+    const refresh = (msgs?: ChatMessage[], kind?: 'insert' | 'update') => {
       if (!alive) return;
       setMessages(applyWindow(msgs || getMessages(convId)));
-      markConversationRead(convId, me); markMessagesReadByUser(convId, me);
+      // Sự kiện CẬP NHẬT (sửa/thu hồi/cảm xúc/đã xem) chỉ vẽ lại — không đánh dấu đã đọc lại (tránh vòng lặp ghi → sự kiện → ghi)
+      if (kind !== 'update') { markConversationRead(convId, me); markMessagesReadByUser(convId, me); }
       setConversations(getConversations());
     };
     refresh();
     loadMessagesFromCloud(convId, { fromIso: start }).then(msgs => { refresh(); setHasMoreOlder(msgs.length > 0); });
-    const unsub = subscribeMessages(convId, (msgs) => refresh(msgs));
+    const unsub = subscribeMessages(convId, (msgs, kind) => refresh(msgs, kind));
     return () => { alive = false; unsub(); };
   }, [selectedId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -236,13 +237,18 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       if (!conv) return;
       const names: string[] = []; const re = /@([^\s,.:;!?]+)/g; let m;
       while ((m = re.exec(body)) !== null) if (!names.includes(m[1])) names.push(m[1]);
+      const convId = conv.id;
+      // Hiện tin của mình và xóa ô soạn NGAY (như Zalo) — việc ghi lên máy chủ chạy sau, không bắt người dùng chờ
       await addMessage({
-        conversationId: conv.id, senderId: me, senderName: currentUser.name, senderRole: currentUser.role || 'member',
+        conversationId: convId, senderId: me, senderName: currentUser.name, senderRole: currentUser.role || 'member',
         content: body || (attachments[0] ? `📎 ${attachments[0].name}` : ''), attachments: attachments.length ? [...attachments] : undefined,
         replyTo: replyTo ?? undefined, mentions: names.length ? names : undefined,
+      }, () => {
+        setMessages(applyWindow(getMessages(convId))); setConversations(getConversations());
+        setText(''); setAttachments([]); setReplyTo(null); setMention(null); setEmojiOpen(false);
+        setSending(false);   // cho phép gõ và gửi tin kế tiếp ngay, không chờ máy chủ
       });
-      setMessages(applyWindow(getMessages(conv.id))); setConversations(getConversations());
-      setText(''); setAttachments([]); setReplyTo(null); setMention(null); setEmojiOpen(false);
+      setConversations(getConversations());
     } finally { setSending(false); }
   };
 

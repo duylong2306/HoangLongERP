@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, within, act } from '@testing-librar
 // Tin nhắn kiểu mới (Zalo): danh sách, tab Chưa đọc, Phân loại, tắt thông báo, ghim, gửi/trả lời/chuyển tiếp/thu hồi, thông tin hội thoại.
 const store = vi.hoisted(() => ({ convs: [] as any[], msgs: {} as Record<string, any[]> }));
 const fn = vi.hoisted(() => ({
-  addMessage: vi.fn(async (m: any) => { const x = { ...m, id: 'new_' + Math.random(), createdAt: new Date().toISOString(), read: false }; (store.msgs[m.conversationId] ||= []).push(x); return x; }),
+  addMessage: vi.fn(async (m: any, onLocal?: (x: any) => void) => { const x = { ...m, id: 'new_' + Math.random(), createdAt: new Date().toISOString(), read: false }; (store.msgs[m.conversationId] ||= []).push(x); onLocal?.(x); return x; }),
   markConversationRead: vi.fn(async () => {}), markMessagesReadByUser: vi.fn(async () => {}),
   softDeleteMessage: vi.fn(async (c: string, id: string) => { store.msgs[c] = store.msgs[c].map(m => m.id === id ? { ...m, deleted: true, content: 'x' } : m); return true; }),
   togglePinMessage: vi.fn(async (c: string, id: string) => { store.msgs[c] = store.msgs[c].map(m => m.id === id ? { ...m, pinned: !m.pinned } : m); return null; }),

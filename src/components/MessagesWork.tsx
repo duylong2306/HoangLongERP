@@ -81,13 +81,13 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
   useEffect(() => {
     let alive = true;
     setMsgs(getMessages(convId));
-    const refresh = (m?: ChatMessage[]) => { if (!alive) return; setMsgs(m || getMessages(convId)); markConversationRead(convId, me); markMessagesReadByUser(convId, me); };
+    const refresh = (m?: ChatMessage[], kind?: 'insert' | 'update') => { if (!alive) return; setMsgs(m || getMessages(convId)); if (kind !== 'update') { markConversationRead(convId, me); markMessagesReadByUser(convId, me); } };
     (async () => {
       await ensureWorkThread({ key: entry.key, title: entry.title, memberIds: entry.memberIds, createdBy: me });
       if (!alive) return;
       await loadMessagesFromCloud(convId); refresh();
     })();
-    const unsub = subscribeMessages(convId, m => refresh(m));
+    const unsub = subscribeMessages(convId, (m, kind) => refresh(m, kind));
     return () => { alive = false; unsub(); };
   }, [convId, memberKey]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -99,8 +99,8 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
     try {
       // Luồng có thể chưa kịp tạo (mạng chậm) → bảo đảm trước khi gửi
       await ensureWorkThread({ key: entry.key, title: entry.title, memberIds: entry.memberIds, createdBy: me });
-      await addMessage({ conversationId: convId, senderId: me, senderName: meName, content, system: false } as any);
-      setText(''); setMsgs(getMessages(convId));
+      // Hiện tin và xóa ô nhập NGAY, ghi lên máy chủ chạy sau
+      await addMessage({ conversationId: convId, senderId: me, senderName: meName, content, system: false } as any, () => { setText(''); setMsgs(getMessages(convId)); });
     } finally { setSending(false); }
   }, [text, sending, entry, convId, me, meName]);
 

@@ -185,11 +185,11 @@ export default function MessagesView({
       // khác) và chỉ update chat_messages.read (không phải INSERT) nên KHÔNG
       // gây loop với subscribeMessages (chỉ lắng nghe INSERT) — an toàn để gọi
       // ở đây, sửa đúng bug "đang xem trực tiếp mà badge chưa đọc không tự reset".
-      const unsub = subscribeMessages(convId, (msgs) => {
+      const unsub = subscribeMessages(convId, (msgs, kind) => {
         if (mounted) {
           setConvMessages(applyWindow(msgs));
-          markConversationRead(convId, currentUser.id);
-          markMessagesReadByUser(convId, currentUser.id);
+          // Sự kiện CẬP NHẬT (sửa/thu hồi/cảm xúc/đã xem) chỉ vẽ lại, không đánh dấu đã đọc lại (tránh vòng lặp)
+          if (kind !== 'update') { markConversationRead(convId, currentUser.id); markMessagesReadByUser(convId, currentUser.id); }
           setConversations(getConversations());
         }
       });
