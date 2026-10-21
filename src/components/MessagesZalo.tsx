@@ -6,7 +6,7 @@ import {
   loadMessagesProgressive,
   getConversations, getMessages, addMessage, getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
   markConversationRead, markMessagesReadByUser, updateMessage, softDeleteMessage, togglePinMessage, toggleMessageReaction,
-  addMemberToConversation, isUserInConversation, loadConversationsFromCloud, loadMessagesFromCloud, subscribeConversations, subscribeMessages,
+  addMemberToConversation, loadConversationsFromCloud, loadMessagesFromCloud, subscribeConversations, subscribeMessages,
   searchMessagesInConversation, sendApprovalDirectMessage,
 } from '../lib/chatStore';
 import { usePresence } from '../lib/presence';
@@ -47,21 +47,16 @@ interface Props {
   onOpenWorkTask?: (taskId: string) => void;
   /** Tạo công việc mới (lưu lên hệ thống) — dùng cho "Tạo công việc từ tin nhắn" */
   onCreateTask?: (t: Task) => Promise<void> | void;
-  /** Phần phụ đặt ngay đầu cột danh sách (công tắc Kiểu mới/Kiểu cũ do MessagesHost truyền xuống) */
-  headerExtra?: React.ReactNode;
   projects?: { id: string; name: string; pmId?: string }[];
 }
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 const PICKER_EMOJIS = ['😊', '😂', '🥰', '😍', '😉', '😎', '🤔', '😅', '😭', '😡', '👍', '👏', '🙏', '💪', '🎉', '🔥', '❤️', '✅', '⚠️', '📌'];
-const PAL = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#14b8a6', '#8b5cf6', '#f97316', '#ef4444', '#64748b'];
-const colorOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return PAL[h % PAL.length]; };
-const initials = (n: string) => { const p = (n || '?').replace('📁', '').trim().split(/\s+/); return (p[0]?.[0] || '?') + (p.length > 1 ? p[p.length - 1][0] : ''); };
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const fmtSize = (n?: number) => (!n ? '' : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], headerExtra }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [] }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -522,7 +517,6 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       <div className={`grid h-full ${leftMode === 'chat' && infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
         {/* ── DANH SÁCH ── */}
         <section className={`${showList ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 border-r border-slate-200`}>
-          {headerExtra}
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">
             <label className="flex-1 flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-2 text-[13px] text-slate-500">
               <Search className="w-4 h-4 shrink-0" />

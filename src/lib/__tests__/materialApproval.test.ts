@@ -28,7 +28,8 @@ describe('TaskManagement — nối đề xuất vật tư', () => {
   it('tải đề xuất vật tư, nghe sự kiện cập nhật, đếm vào "cần xử lý" và có nút mở Điều Phối Vật Tư', () => {
     expect(src).toMatch(/dbService\.materialProposals\.list\(\)/);
     expect(src).toMatch(/hl-material-proposals-updated/);
-    expect(src).toMatch(/materialInbox\.count\s*\n\s*\} cần xử lý/);
+    expect(src).toMatch(/materialInbox\.toApprove\.forEach/);   // đề xuất vật tư chờ duyệt vào danh sách "Chờ tôi xử lý"
+    expect(src).toMatch(/materialInbox\.toCoordinate\.forEach/);   // và việc điều phối
     expect(src).toMatch(/onOpenMaterialProposal\?\.\(m\.id\)/);
   });
   it('App truyền onOpenMaterialProposal cho TaskManagement', () => {
@@ -69,6 +70,6 @@ describe('việc điều phối vật tư', () => {
     expect(app).toMatch(/\+ materialInbox\.count;/);
     expect(app).toMatch(/hl-material-proposals-updated/);
     expect(tm).toMatch(/materialInboxFor\(materialProposals/);
-    expect(tm).toMatch(/my-material-coordination/);
+    expect(tm).toMatch(/materialInbox\.toCoordinate/);   // việc điều phối cũng nằm trong "Chờ tôi xử lý" (kiểu Kanban có tab riêng đã bỏ)
   });
 });

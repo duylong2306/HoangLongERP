@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildMyWorkItems, groupByBucket, focusItems, weekStrip, awaitingReceive, assignedByMe, countByProject, bucketOf,
-  readMyTasksView, writeMyTasksView, readPins, writePins, viewStorageKey, pinsStorageKey, MY_TASKS_VIEW_DEFAULT,
+  readPins, writePins, pinsStorageKey,
 } from '../myWork';
 
 const TODAY = '2026-10-16';
@@ -83,20 +83,8 @@ describe('Tôi giao & theo công trình', () => {
   });
 });
 
-describe('lưu lựa chọn', () => {
+describe('lưu việc ghim', () => {
   const mem = () => { const m: Record<string, string> = {}; return { getItem: (k: string) => (k in m ? m[k] : null), setItem: (k: string, v: string) => { m[k] = v; } }; };
-  it('kiểu xem: mặc định Tổng quan; lưu kanban rồi đọc lại; giá trị lạ → mặc định; lỗi lưu trữ không làm hỏng', () => {
-    const s = mem(); const k = viewStorageKey('u1');
-    expect(MY_TASKS_VIEW_DEFAULT).toBe('overview');
-    expect(readMyTasksView(k, s)).toBe('overview');
-    writeMyTasksView(k, 'kanban', s);
-    expect(readMyTasksView(k, s)).toBe('kanban');   // ai đã chọn Kanban thì vẫn giữ Kanban
-    s.setItem(k, 'abc'); expect(readMyTasksView(k, s)).toBe('overview');
-    const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
-    expect(readMyTasksView(k, bad)).toBe('overview');
-    expect(() => writeMyTasksView(k, 'kanban', bad)).not.toThrow();
-  });
-  it('mỗi người một khóa riêng', () => expect(viewStorageKey('u1')).not.toBe(viewStorageKey('u2')));
   it('ghim: chỉ hiệu lực trong ngày, sang ngày khác tự làm mới', () => {
     const s = mem(); const k = pinsStorageKey('u1');
     writePins(k, TODAY, ['task:a'], s);

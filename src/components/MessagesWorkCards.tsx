@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { X, ClipboardList, Search } from 'lucide-react';
 import type { Employee, ChatMessage, Task } from '../types';
 import type { WorkEntry } from '../lib/workEntries';

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { ChevronLeft, Send, MessageSquare, CheckCircle2 } from 'lucide-react';
 import type { Employee, ChatMessage } from '../types';
 import { ensureWorkThread, getMessages, addMessage, markConversationRead, markMessagesReadByUser, loadMessagesFromCloud, subscribeMessages } from '../lib/chatStore';

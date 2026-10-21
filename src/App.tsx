@@ -76,7 +76,7 @@ import MobileNav from './components/shell/MobileNav';
 import type { NavTop, NavGroup, NavLeaf } from './components/shell/navModel';
 import { findSupplierLiability } from './lib/liabilityPayments';
 import { isPaymentPendingForUser, isAdvancePendingForUser } from './lib/approvalInbox';
-import MessagesHost from './components/MessagesHost';
+import MessagesZalo from './components/MessagesZalo';
 import { useChatPrefs } from './lib/useChatPrefs';
 import { unreadForBadge } from './lib/chatPrefs';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
@@ -94,8 +94,6 @@ import {
   Clock,
   Shield,
   HelpCircle,
-  LogOut,
-  UserCog,
   Sparkles,
   ChevronDown,
   ChevronRight,
@@ -103,8 +101,6 @@ import {
   Search,
   BriefcaseIcon,
   CircleDot,
-  Sliders,
-  Palette,
   Info,
   Plus,
   Trash2,
@@ -121,7 +117,6 @@ import {
   CheckCircle,
   BarChart3,
   X,
-  Menu,
   RefreshCw,
   Calendar,
   ArrowLeft,
@@ -950,7 +945,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setTabHistory(prev => activeTab !== tab ? [...prev, activeTab] : prev);
     setActiveTabState(tab);
   }, [activeTab]);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   // Yêu cầu đổi mật khẩu của phiên (đặt ở Login.tsx sau khi máy chủ báo); đọc lại ở handleLoginSuccess
   const [pwNotice, setPwNotice] = useState<PasswordNotice | null>(() => getPasswordNotice());
@@ -962,14 +956,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     startPresence(currentUser.id);
     return () => stopPresence();
   }, [currentUser?.id]);
-  const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
 
   useEffect(() => {
     sessionStorage.setItem('hl_erp_active_tab', activeTab);
-  }, [activeTab]);
-
-  useEffect(() => {
-    setMobileMenuOpen(false);
   }, [activeTab]);
 
   // Giữ FinanceManagement MOUNTED sau lần đầu vào tab (ẩn bằng CSS display:none
@@ -1053,20 +1042,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     localStorage.setItem('hl_erp_sidebar_collapsed', sidebarCollapsed ? 'true' : 'false');
   }, [sidebarCollapsed]);
 
-  // Đóng dropdown tài khoản khi click ra ngoài
-  useEffect(() => {
-    if (!showUserMenu) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('#user_account_dropdown')) return;
-      setShowUserMenu(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside, true);
-    return () => document.removeEventListener('mousedown', handleClickOutside, true);
-  }, [showUserMenu]);
+
   // Hội thoại cần mở khi điều hướng vào Messenger
   const [initialConvId, setInitialConvId] = useState<string | null>(null);
-  // Sau khi MessagesView đã nhận initialConvId, reset để lần click sau vẫn kích hoạt lại
+  // Sau khi Tin nhắn đã nhận initialConvId, reset để lần click sau vẫn kích hoạt lại
   useEffect(() => {
     if (initialConvId) {
       const t = setTimeout(() => setInitialConvId(null), 300);
@@ -1154,15 +1133,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   //   2. Edge Function (send-attendance-reminders) — backup
 
   // Trạng thái cây thư mục Sidebar dạng mô phỏng
-  const [isDirectorGroupExpanded, setIsDirectorGroupExpanded] = useState(true);
   const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary'>('summary'); // mặc định mở Bảng điều hành Giám đốc (Tổng Hợp)
-  const [isProjectGroupExpanded, setIsProjectGroupExpanded] = useState(true);
-  const [isHrGroupExpanded, setIsHrGroupExpanded] = useState(true);
-  const [isFinanceGroupExpanded, setIsFinanceGroupExpanded] = useState(true);
-  const [isWarehouseGroupExpanded, setIsWarehouseGroupExpanded] = useState(true);
-  const [isLibraryGroupExpanded, setIsLibraryGroupExpanded] = useState(true);
-  const [isSubcontractorGroupExpanded, setIsSubcontractorGroupExpanded] = useState(true);
-  const [isAccountGroupExpanded, setIsAccountGroupExpanded] = useState(true);
   const [sidebarSearch, setSidebarSearch] = useState('');
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1608,7 +1579,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   }, [setActiveTab]);
 
   // Deep link từ tin nhắn thông báo công việc (task/mission) → mở tab Công việc
-  // và bung modal chi tiết của công việc được giao (hl-open-task do MessagesView dispatch).
+  // và bung modal chi tiết của công việc được giao (hl-open-task do Tin nhắn dispatch).
   useEffect(() => {
     const handleOpenTask = (e: Event) => {
       const taskId = (e as CustomEvent).detail?.taskId;
@@ -2424,25 +2395,6 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       window.removeEventListener('hl-task-permissions-updated', handleTaskPermUpdated);
       window.removeEventListener('hl-employees-updated', handleEmployeesUpdated);
     };
-  }, []);
-
-  // Đồng hồ góc Trái dưới (Y hệt ảnh mồi)
-  const [currentTime, setCurrentTime] = useState<string>('');
-  
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      let hours = now.getHours();
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12;
-      hours = hours ? hours : 12; // đổi số 0 thành 12
-      setCurrentTime(`${hours}:${minutes} ${ampm}`);
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
   }, []);
 
   // Bộ xử lý Đăng nhập thành công & Ghi nhớ / Tự động đăng nhập
@@ -5100,7 +5052,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               lần quay lại tab. */}
           {hasVisitedMessages && (
             <div style={{ display: activeTab === 'messages' ? undefined : 'none' }} className="lx-fill md:h-full">
-            <MessagesHost
+            <MessagesZalo
               currentUser={currentUser!}
               employees={employees}
               tasks={tasks}

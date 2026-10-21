@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
-// "Việc của tôi": công tắc Cột (Kanban) ↔ Tổng quan, lưu localStorage, và hành động trong Tổng quan dùng đúng hàm của kiểu Cột.
+// "Việc của tôi": chỉ còn kiểu Tổng quan (đã bỏ kiểu Cột/Kanban) và hành động trong Tổng quan dùng đúng hàm.
 vi.mock('../../lib/dbService', () => ({ dbService: {
   hrmLeaves: { list: vi.fn(async () => []) }, payments: { list: vi.fn(async () => []) }, hrmTravelExpenses: { list: vi.fn(async () => []) },
   materialProposals: { list: vi.fn(async () => []) }, employees: { list: vi.fn(async () => []), save: vi.fn() }, subcontractorAdvances: { list: vi.fn(async () => []) },
@@ -26,24 +26,17 @@ const tasks: any[] = [
 const mount = (onUpdateTask = vi.fn()) => render(<TaskManagement tasks={tasks} projects={[]} employees={[me]} currentUser={me} onAddTask={vi.fn()} onUpdateTask={onUpdateTask} />);
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
-describe('Việc của tôi — công tắc kiểu xem', () => {
-  it('mặc định là Tổng quan; chuyển sang Cột (Kanban) thì hiện các tab cũ và ẩn Tổng quan', () => {
+describe('Việc của tôi — chỉ còn kiểu Tổng quan', () => {
+  it('luôn hiện Tổng quan; không còn công tắc Cột (Kanban) và các tab cũ', () => {
     mount();
     expect(screen.getByTestId('mywork-overview')).toBeTruthy();
+    expect(screen.queryByTestId('mytasks-view-switch')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cột (Kanban)' })).toBeNull();
     expect(screen.queryByText('Công việc được giao')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Cột (Kanban)' }));
-    expect(screen.queryByTestId('mywork-overview')).toBeNull();
-    expect(screen.getByText('Công việc được giao')).toBeTruthy();
   });
-  it('nhớ lựa chọn: người đã chọn Kanban lần sau vẫn vào Kanban; đổi lại Tổng quan cũng được nhớ', () => {
-    const { unmount } = mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Cột (Kanban)' }));
-    expect(localStorage.getItem('hl_my_tasks_view_u1')).toBe('kanban');
-    unmount();
+  it('người từng chọn Kanban (đã lưu trong trình duyệt) vẫn vào Tổng quan', () => {
+    localStorage.setItem('hl_my_tasks_view_u1', 'kanban');
     mount();
-    expect(screen.queryByTestId('mywork-overview')).toBeNull();   // phiên sau: vẫn Kanban
-    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' }));
-    expect(localStorage.getItem('hl_my_tasks_view_u1')).toBe('overview');
     expect(screen.getByTestId('mywork-overview')).toBeTruthy();
   });
   it('Tổng quan: "Nhận việc" chuyển công việc sang Đang làm đúng như kiểu Cột (nhật ký + 20%)', () => {

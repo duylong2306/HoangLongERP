@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { LayoutGrid, User, ChevronLeft, UserCog, Palette, RefreshCw, LogOut } from 'lucide-react';
 import type { NavTop, NavGroup, NavUser } from './navModel';
 import { UserAvatar } from './AppRail';

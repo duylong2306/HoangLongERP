@@ -1,19 +1,8 @@
-// "VIỆC CỦA TÔI" — kiểu xem TỔNG QUAN (lựa chọn thay cho kiểu Cột/Kanban).
+// "VIỆC CỦA TÔI" — kiểu xem TỔNG QUAN (kiểu duy nhất; kiểu Cột/Kanban cũ đã bỏ).
 // Hàm thuần (không gọi DB/giao diện) để dễ kiểm tra: gom việc & nhiệm vụ của 1 người, chia mốc thời gian, dải 7 ngày,
 // danh sách "Tôi giao", việc ghim hôm nay và ghi nhớ kiểu xem đã chọn.
 import type { Task } from '../types';
 import { toDay, todayYmd, addDays, diffDays } from './executiveDashboard';
-
-// ─── Kiểu xem đã chọn (lưu localStorage theo người dùng + doanh nghiệp) ───
-export type MyTasksView = 'kanban' | 'overview';
-export const MY_TASKS_VIEW_DEFAULT: MyTasksView = 'overview';   // mặc định Tổng quan để người dùng kiểm thử giao diện mới (ai đã chọn Kanban thì vẫn giữ Kanban)
-export const viewStorageKey = (userId?: string) => `hl_my_tasks_view_${userId || 'anon'}`;
-export function readMyTasksView(key: string, storage: Pick<Storage, 'getItem'> | null = typeof localStorage !== 'undefined' ? localStorage : null): MyTasksView {
-  try { const v = storage?.getItem(key); return v === 'overview' || v === 'kanban' ? v : MY_TASKS_VIEW_DEFAULT; } catch { return MY_TASKS_VIEW_DEFAULT; }
-}
-export function writeMyTasksView(key: string, v: MyTasksView, storage: Pick<Storage, 'setItem'> | null = typeof localStorage !== 'undefined' ? localStorage : null) {
-  try { storage?.setItem(key, v); } catch { /* trình duyệt chặn lưu → bỏ qua, vẫn dùng được trong phiên */ }
-}
 
 // ─── Việc ghim "Tập trung hôm nay": hết ngày tự làm mới ───
 export const pinsStorageKey = (userId?: string) => `hl_my_tasks_pins_${userId || 'anon'}`;

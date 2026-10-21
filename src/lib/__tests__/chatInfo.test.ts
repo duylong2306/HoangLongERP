@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readPrefs, writePrefs, toggleIn, unreadForBadge, readMessagesUi, writeMessagesUi, prefsKey, uiKey, MESSAGES_UI_DEFAULT } from '../chatPrefs';
+import { readPrefs, writePrefs, toggleIn, unreadForBadge, prefsKey } from '../chatPrefs';
 import { filterConversations, sortConversations, categoryOf, collectMedia, extractLinks, pinnedMessages, dayLabel, listTime, isFirstOfRun, isPinnedConv } from '../chatInfo';
 
 const conv = (id: string, o: any = {}) => ({ id, type: 'personal', name: id, participantIds: ['me', 'x'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0, ...o }) as any;
@@ -7,15 +7,6 @@ const none = { muted: [], pinned: [] };
 const mem = () => { const m: Record<string, string> = {}; return { getItem: (k: string) => (k in m ? m[k] : null), setItem: (k: string, v: string) => { m[k] = v; } }; };
 
 describe('chatPrefs', () => {
-  it('kiểu giao diện mặc định MỚI; lưu cũ rồi đọc lại; giá trị lạ → mặc định; lỗi lưu trữ không hỏng', () => {
-    const s = mem(); const k = uiKey('u1');
-    expect(MESSAGES_UI_DEFAULT).toBe('new');
-    expect(readMessagesUi(k, s)).toBe('new');
-    writeMessagesUi(k, 'classic', s); expect(readMessagesUi(k, s)).toBe('classic');
-    s.setItem(k, 'xyz'); expect(readMessagesUi(k, s)).toBe('new');
-    const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
-    expect(readMessagesUi(k, bad)).toBe('new'); expect(() => writeMessagesUi(k, 'classic', bad)).not.toThrow();
-  });
   it('tắt thông báo / ghim: lưu & đọc lại, dữ liệu hỏng → rỗng, mỗi người một khóa', () => {
     const s = mem(); const k = prefsKey('u1');
     writePrefs(k, { muted: ['a'], pinned: ['b'] }, s); expect(readPrefs(k, s)).toEqual({ muted: ['a'], pinned: ['b'] });

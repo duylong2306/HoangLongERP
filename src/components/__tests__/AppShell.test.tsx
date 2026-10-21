@@ -85,4 +85,13 @@ describe('Cấu hình trang', () => {
     const fs = await import('node:fs'); const app = fs.readFileSync('src/App.tsx', 'utf8'); const css = fs.readFileSync('src/components/shell/shell.css', 'utf8');
     expect(app).not.toContain('pt-[50px]'); expect(css).toContain('safe-area-inset-top'); expect(css).toContain('safe-area-inset-bottom');
   });
+  it('Tin nhắn chỉ còn giao diện kiểu mới (MessagesZalo); huy hiệu bỏ hội thoại đã tắt thông báo; đã bỏ kiểu cũ và kiểu Kanban', async () => {
+    const fs = await import('node:fs'); const app = fs.readFileSync('src/App.tsx', 'utf8');
+    expect(app).toMatch(/<MessagesZalo\n/); expect(app).not.toContain('MessagesHost'); expect(app).not.toContain('MessagesView');
+    expect(app.match(/unreadForBadge\(/g)).toHaveLength(1);   // 1 chỗ tính duy nhất, dùng chung cho menu trái, thanh dưới và chuông
+    expect(fs.existsSync('src/components/MessagesView.tsx')).toBe(false);
+    expect(fs.existsSync('src/components/MessagesHost.tsx')).toBe(false);
+    const tm = fs.readFileSync('src/components/TaskManagement.tsx', 'utf8');
+    expect(tm).not.toContain('Cột (Kanban)'); expect(tm).not.toContain('mytasks-view-switch');
+  });
 });
