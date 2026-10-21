@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 
 // Tab "Việc của tôi" trong Tin nhắn kiểu mới: danh sách theo nhóm, chi tiết + luồng thảo luận riêng của từng mục, hành động.
-const store = vi.hoisted(() => ({ convs: [] as any[], msgs: {} as Record<string, any[]> }));
+const store = vi.hoisted(() => ({ convs: [] as any[], msgs: {} as Record<string, any[]>, convCb: null as null | (() => void), onProgressive: null as null | (() => void) }));
 const fn = vi.hoisted(() => ({
   addMessage: vi.fn(async (m: any, onLocal?: (x: any) => void) => { const x = { ...m, id: 'new_' + Math.random(), createdAt: new Date().toISOString(), read: false }; (store.msgs[m.conversationId] ||= []).push(x); onLocal?.(x); return x; }),
   ensureWorkThread: vi.fn(async (p: any) => ({ id: 'conv_work_' + p.key.replace(/[^A-Za-z0-9_-]/g, '_'), participantIds: p.memberIds })),
@@ -11,8 +11,8 @@ const fn = vi.hoisted(() => ({
 }));
 vi.mock('../../lib/chatStore', () => ({
   getConversations: () => store.convs.map(c => ({ ...c })), getMessages: (id: string) => (store.msgs[id] || []).map(m => ({ ...m })),
-  ...fn, getOrCreatePersonalConversation: vi.fn(), loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => []),
-  subscribeConversations: () => () => {}, subscribeMessages: () => () => {},
+  ...fn, getOrCreatePersonalConversation: vi.fn(), loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => { store.onProgressive?.(); return []; }),
+  subscribeConversations: (_u: string, cb: () => void) => { store.convCb = cb; return () => {}; }, subscribeMessages: () => () => {},
 }));
 vi.mock('../../context', () => ({ useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false }));
 import MessagesZalo from '../MessagesZalo';
@@ -37,7 +37,7 @@ beforeEach(() => {
   localStorage.clear(); stopPresence(); Object.values(fn).forEach(f => f.mockClear()); receive.mockClear(); openTask.mockClear(); openApp.mockClear(); approve.mockClear(); createTask.mockClear();
   (Element.prototype as any).scrollIntoView = vi.fn();
   store.convs = [{ id: 'p_ny', type: 'personal', name: 'Gia Ny', participantIds: ['me', 'ny'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0 }];
-  store.msgs = {};
+  store.msgs = {}; store.convCb = null; store.onProgressive = null;
 });
 
 describe('Tab Việc của tôi trong Tin nhắn', () => {
@@ -184,5 +184,30 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
     fireEvent.click(screen.getByTitle('Thêm'));
     expect(screen.getByTestId('zalo-msgmenu').className).toContain('bottom-full');
     spy.mockRestore();
+  });
+  it('đang mở sẵn hội thoại mà số chưa đọc tăng (tin tới trước khi hội thoại cập nhật) → tự đánh dấu đã đọc', async () => {
+    mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    await screen.findByTestId('zalo-messages'); fn.markConversationRead.mockClear();
+    store.convs = store.convs.map(c => c.id === 'p_ny' ? { ...c, unreadCount: 2 } : c);
+    act(() => store.convCb?.());
+    expect(fn.markConversationRead).toHaveBeenCalledWith('p_ny', 'me');
+  });
+  it('bấm lại hội thoại đang mở → tải lại tin (không "không có tác dụng")', async () => {
+    mount(); const row = document.querySelector('[data-conv="p_ny"]') as HTMLElement;
+    fireEvent.click(row); await screen.findByTestId('zalo-messages');
+    const loads = (await import('../../lib/chatStore')).loadMessagesProgressive as any; loads.mockClear();
+    fireEvent.click(row);
+    await waitFor(() => expect(loads).toHaveBeenCalled());
+  });
+  it('lưới an toàn: realtime chậm → cứ ~4 giây tự hỏi tin mới và hiện lên', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'cũ', createdAt: '2026-10-21T10:00:00Z', read: true }];
+      mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+      await screen.findByTestId('zalo-messages');
+      store.onProgressive = () => { store.msgs.p_ny.push({ id: 'm2', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'tin mới tới', createdAt: '2026-10-21T10:00:05Z', read: false }); store.onProgressive = null; };
+      await act(async () => { await vi.advanceTimersByTimeAsync(4100); });
+      await waitFor(() => expect(screen.getByText('tin mới tới')).toBeTruthy());
+    } finally { vi.useRealTimers(); }
   });
 });

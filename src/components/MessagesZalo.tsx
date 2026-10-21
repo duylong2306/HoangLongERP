@@ -123,6 +123,9 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const [showCategory, setShowCategory] = useState(false);
 
   const selected = useMemo(() => conversations.find(c => c.id === selectedId) || null, [conversations, selectedId]);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+  const [reloadTick, setReloadTick] = useState(0);   // bấm lại hội thoại đang mở → tải lại + đánh dấu đã đọc
   const empName = useCallback((id?: string) => employees.find(e => e.id === id)?.name || '', [employees]);
   const convName = useCallback((c: Conversation) => (c.type === 'personal' ? (empName(c.participantIds.find(i => i !== me)) || c.name) : c.name).replace('📁 ', ''), [empName, me]);
   const otherOf = (c: Conversation) => employees.find(e => e.id === c.participantIds.find(i => i !== me));
@@ -135,7 +138,14 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   useEffect(() => {
     let alive = true;
     (async () => { await loadConversationsFromCloud(me); if (alive) setConversations(getConversations()); })();
-    const unsub = subscribeConversations(me, () => { if (alive) setConversations(getConversations()); });
+    const unsub = subscribeConversations(me, () => {
+      if (!alive) return;
+      const all = getConversations();
+      setConversations(all);
+      // Đang mở sẵn đúng hội thoại này mà có tin mới → đánh dấu đã đọc NGAY (trước đây tin tới trước khi số chưa đọc kịp cập nhật nên huy hiệu kẹt lại, bấm vào không hết)
+      const sid = selectedIdRef.current; const cur = sid ? all.find(c => c.id === sid) : null;
+      if (cur && (cur.unreadCount || 0) > 0 && document.visibilityState === 'visible') { markConversationRead(cur.id, me); markMessagesReadByUser(cur.id, me); }
+    });
     const onVisible = () => { if (document.visibilityState === 'visible') loadConversationsFromCloud(me).then(() => alive && setConversations(getConversations())); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { alive = false; unsub(); document.removeEventListener('visibilitychange', onVisible); };
@@ -178,9 +188,23 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     refresh();
     // Tải 2 bước: chữ trước (vẽ ngay), ảnh/tệp sau — mở hội thoại có ảnh vẫn nhanh
     loadMessagesProgressive(convId, { fromIso: start }, () => refresh(undefined, 'update')).then(msgs => { refresh(undefined, 'update'); setHasMoreOlder(msgs.length > 0); markConversationRead(convId, me); markMessagesReadByUser(convId, me); });
-    const unsub = subscribeMessages(convId, (msgs, kind) => refresh(msgs, kind));
-    return () => { alive = false; unsub(); };
-  }, [selectedId]);   // eslint-disable-line react-hooks/exhaustive-deps
+    const unsub = subscribeMessages(convId, (msgs, kind) => {
+      if (kind === 'insert') { const last = msgs[msgs.length - 1]; if (last) console.info('[Chat] tin mới qua realtime, trễ', Math.max(0, Date.now() - new Date(last.createdAt).getTime()), 'ms'); }
+      refresh(msgs, kind);
+    });
+    // LƯỚI AN TOÀN: nếu kênh realtime chậm/rớt, cứ ~4 giây (khi đang xem tab) hỏi nhẹ tin mới hơn tin cuối đang có → tin không bao giờ trễ quá vài giây
+    let polling = false;
+    const timer = setInterval(async () => {
+      if (polling || document.visibilityState !== 'visible') return;
+      polling = true;
+      try {
+        const before = getMessages(convId); const lastAt = before[before.length - 1]?.createdAt || start;
+        await loadMessagesProgressive(convId, { fromIso: lastAt });
+        if (alive && getMessages(convId).length !== before.length) refresh();
+      } finally { polling = false; }
+    }, 4000);
+    return () => { alive = false; unsub(); clearInterval(timer); };
+  }, [selectedId, reloadTick]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Tự cuộn xuống cuối như Zalo ───
   // pinned = đang ở sát đáy (người dùng chưa cuộn lên xem tin cũ). Khi pinned: tin mới / ảnh tải xong làm khung cao thêm đều tự kéo xuống đáy.
@@ -533,7 +557,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             {listed.map(c => {
               const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const pinned = isPinnedConv(c, prefs); const o = otherOf(c);
               return (
-                <button key={c.id} type="button" data-testid="zalo-conv" data-conv={c.id} onClick={() => { setSelectedId(c.id); setPendingEmpId(null); setMobileView('chat'); }}
+                <button key={c.id} type="button" data-testid="zalo-conv" data-conv={c.id} onClick={() => { if (selectedId === c.id) setReloadTick(t => t + 1); setSelectedId(c.id); setPendingEmpId(null); setMobileView('chat'); }}
                   className={`w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
                   <span className="relative"><ConvAvatar conv={c} employees={employees} me={me} size={48} />{c.type === 'personal' && isOnline(o?.id) && <i className="absolute right-0 bottom-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}</span>
                   <span className="min-w-0">
