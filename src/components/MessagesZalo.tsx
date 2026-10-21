@@ -3,6 +3,7 @@ import { Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image 
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
+  loadMessagesProgressive,
   getConversations, getMessages, addMessage, getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
   markConversationRead, markMessagesReadByUser, updateMessage, softDeleteMessage, togglePinMessage, toggleMessageReaction,
   addMemberToConversation, isUserInConversation, loadConversationsFromCloud, loadMessagesFromCloud, subscribeConversations, subscribeMessages,
@@ -175,15 +176,32 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       setConversations(getConversations());
     };
     refresh();
-    loadMessagesFromCloud(convId, { fromIso: start }).then(msgs => { refresh(); setHasMoreOlder(msgs.length > 0); });
+    // Tải 2 bước: chữ trước (vẽ ngay), ảnh/tệp sau — mở hội thoại có ảnh vẫn nhanh
+    loadMessagesProgressive(convId, { fromIso: start }, () => refresh(undefined, 'update')).then(msgs => { refresh(undefined, 'update'); setHasMoreOlder(msgs.length > 0); markConversationRead(convId, me); markMessagesReadByUser(convId, me); });
     const unsub = subscribeMessages(convId, (msgs, kind) => refresh(msgs, kind));
     return () => { alive = false; unsub(); };
   }, [selectedId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Tự cuộn xuống cuối như Zalo ───
+  // pinned = đang ở sát đáy (người dùng chưa cuộn lên xem tin cũ). Khi pinned: tin mới / ảnh tải xong làm khung cao thêm đều tự kéo xuống đáy.
+  // Mở hội thoại khác luôn nhảy xuống cuối; tin của CHÍNH MÌNH vừa gửi cũng luôn xuống cuối.
+  const pinnedRef = useRef(true);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const toBottom = () => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; };
+  useEffect(() => { pinnedRef.current = true; }, [selectedId]);
   const lastLenRef = useRef(0);
   useEffect(() => {
-    if (messages.length !== lastLenRef.current) { lastLenRef.current = messages.length; endRef.current?.scrollIntoView?.({ behavior: 'smooth' }); }
-  }, [messages.length, selectedId]);
+    const last = messages[messages.length - 1];
+    const changed = messages.length !== lastLenRef.current;
+    lastLenRef.current = messages.length;
+    if (changed && (pinnedRef.current || last?.senderId === me)) { pinnedRef.current = true; toBottom(); requestAnimationFrame(toBottom); }
+  }, [messages.length, selectedId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const inner = innerRef.current; if (!inner || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => { if (pinnedRef.current) toBottom(); });   // ảnh/tệp tải xong làm cao thêm → vẫn dính đáy
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [selectedId, leftMode]);
 
   const loadOlder = async () => {
     if (!selected || !windowRef.current || loadingOlder || !hasMoreOlder) return;
@@ -318,6 +336,14 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
 
   // ─── Thao tác trên tin ───
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Menu "⋯" mở LÊN trên (mặc định) hay XUỐNG dưới: tin sát mép trên khung thì mở xuống, kẻo menu bị khung cuộn cắt mất (menu cao ~300px)
+  const [menuDown, setMenuDown] = useState(false);
+  const toggleMenu = (e: React.MouseEvent<HTMLElement>, id: string) => {
+    if (menuFor === id) { setMenuFor(null); return; }
+    const list = listRef.current;
+    if (list) { const b = e.currentTarget.getBoundingClientRect(), l = list.getBoundingClientRect(); const above = b.top - l.top, below = l.bottom - b.bottom; setMenuDown(above < 320 && below > above); }
+    setMenuFor(id);
+  };
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -471,7 +497,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">
             <label className="flex-1 flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-2 text-[13px] text-slate-500">
               <Search className="w-4 h-4 shrink-0" />
-              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Tìm kiếm" aria-label="Tìm kiếm hội thoại" className="bg-transparent outline-none w-full text-slate-900" />
+              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Tìm kiếm" aria-label="Tìm kiếm hội thoại" className="chat-plain-input bg-transparent outline-none w-full text-slate-900" />
             </label>
             <button type="button" title="Nhắn tin mới" aria-label="Nhắn tin mới" onClick={() => setNewChatOpen(true)} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><UserPlus className="w-[18px] h-[18px]" /></button>
             <button type="button" title="Tạo nhóm" aria-label="Tạo nhóm" onClick={() => { setGroupMembers([]); setGroupOpen(true); }} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Users className="w-[18px] h-[18px]" /></button>
@@ -556,7 +582,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 {searchQ.trim() && <div className="max-h-40 overflow-y-auto mt-1.5">{searchHits.length === 0 ? <div className="text-[12px] text-slate-500 px-1 py-1">Không tìm thấy</div> : searchHits.slice(0, 20).map(h => <button key={h.id} type="button" onClick={() => jumpTo(h.id)} className="w-full text-left px-2 py-1 text-[12.5px] hover:bg-slate-50 rounded truncate cursor-pointer"><b>{h.senderName}</b> · {hhmm(h.createdAt)} — {h.content}</button>)}</div>}
               </div>)}
 
-            <div ref={listRef} onScroll={e => { if ((e.currentTarget as HTMLDivElement).scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 min-h-0" data-testid="zalo-messages">
+            <div ref={listRef} onScroll={e => { const el = e.currentTarget as HTMLDivElement; pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; if (el.scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 min-h-0" data-testid="zalo-messages">
+              <div ref={innerRef}>
               {loadingOlder && <div className="text-center text-[12px] text-slate-600 py-2"><Loader2 className="w-4 h-4 inline animate-spin mr-1" />Đang tải tin cũ hơn…</div>}
               {messages.length === 0 && <div className="text-center text-[13px] text-slate-600 py-10">Chưa có tin nhắn. Hãy gửi lời chào 👋</div>}
               {messages.map((m, i) => {
@@ -591,9 +618,9 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                             <button type="button" title="Trả lời" aria-label="Trả lời" onClick={() => setReplyTo({ id: m.id, senderName: m.senderName, content: m.content })} className="w-7 h-7 rounded-full bg-white/90 shadow grid place-items-center cursor-pointer"><CornerUpLeft className="w-3.5 h-3.5" /></button>
                             <button type="button" title="Chuyển tiếp" aria-label="Chuyển tiếp" onClick={() => { setForwardMsg(m); setFwdTargets([]); }} className="w-7 h-7 rounded-full bg-white/90 shadow grid place-items-center cursor-pointer"><Forward className="w-3.5 h-3.5" /></button>
                             <div className="relative">
-                              <button type="button" title="Thêm" aria-label="Thêm" onClick={() => setMenuFor(menuFor === m.id ? null : m.id)} className="w-7 h-7 rounded-full bg-white/90 shadow grid place-items-center cursor-pointer"><MoreHorizontal className="w-3.5 h-3.5" /></button>
+                              <button type="button" title="Thêm" aria-label="Thêm" onClick={e => toggleMenu(e, m.id)} className="w-7 h-7 rounded-full bg-white/90 shadow grid place-items-center cursor-pointer"><MoreHorizontal className="w-3.5 h-3.5" /></button>
                               {menuFor === m.id && (
-                                <div className={`absolute z-30 bottom-full mb-1 ${mineMsg ? 'right-0' : 'left-0'} bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-52`} role="menu" data-testid="zalo-msgmenu">
+                                <div className={`absolute z-30 ${menuDown ? 'top-full mt-1' : 'bottom-full mb-1'} ${mineMsg ? 'right-0' : 'left-0'} bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-56`} role="menu" data-testid="zalo-msgmenu">
                                   <div className="flex justify-around px-2 py-1.5 border-b border-slate-100">{QUICK_EMOJIS.map(e => <button key={e} type="button" onClick={() => react(m, e)} className="text-lg hover:scale-125 transition cursor-pointer" aria-label={`Thả ${e}`}>{e}</button>)}</div>
                                   <button type="button" role="menuitem" onClick={() => pinMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Pin className="w-4 h-4" />{m.pinned ? 'Bỏ ghim tin nhắn' : 'Ghim tin nhắn'}</button>
                                   {onCreateTask && m.content && !m.relatedEntity?.card && <button type="button" role="menuitem" onClick={() => { setCreateFrom(m); setMenuFor(null); }} data-testid="zalo-menu-createtask" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><ClipboardList className="w-4 h-4" />Tạo công việc từ tin nhắn</button>}
@@ -608,6 +635,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                   </React.Fragment>);
               })}
               <div ref={endRef} />
+              </div>
             </div>
 
             <footer className="bg-white border-t border-slate-200 relative" data-testid="zalo-composer">
@@ -629,7 +657,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               </div>
               <div className="flex items-center gap-2 px-4 pb-3 pt-1">
                 <input value={text} onChange={e => onTextChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                  placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="flex-1 outline-none text-[14px] py-1.5" />
+                  placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="chat-plain-input flex-1 outline-none text-[14px] py-1.5" />
                 {text.trim() || attachments.length || editing
                   ? <button type="button" onClick={() => send()} disabled={sending} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
                   : <button type="button" onClick={() => send('👍')} aria-label="Gửi 👍" className="p-2 rounded-lg text-amber-500 hover:bg-amber-50 cursor-pointer"><ThumbsUp className="w-5 h-5" /></button>}

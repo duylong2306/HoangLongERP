@@ -14,7 +14,7 @@ const fn = vi.hoisted(() => ({
 vi.mock('../../lib/chatStore', () => ({
   getConversations: () => store.convs.map(c => ({ ...c })), getMessages: (id: string) => (store.msgs[id] || []).map(m => ({ ...m })),
   ...fn, createGroupConversation: vi.fn(), deleteConversation: vi.fn(), addMemberToConversation: vi.fn(), isUserInConversation: () => true,
-  loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), subscribeConversations: () => () => {}, subscribeMessages: () => () => {},
+  loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => []), subscribeConversations: () => () => {}, subscribeMessages: () => () => {},
   searchMessagesInConversation: (msgs: any[], q: string) => msgs.filter(m => (m.content || '').includes(q)),
 }));
 const addToast = vi.fn();

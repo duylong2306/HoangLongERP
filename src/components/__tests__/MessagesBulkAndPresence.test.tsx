@@ -14,7 +14,7 @@ vi.mock('../../lib/chatStore', () => ({
   getUserConversations: () => convs, deleteMessageFromConversation: vi.fn(), updateMessage: vi.fn(),
   searchMessagesInConversation: () => [], getConversationUnreadCount: () => 0, addMemberToConversation: vi.fn(),
   toggleMessageReaction: vi.fn(), isUserInConversation: () => true,
-  loadConversationsFromCloud: vi.fn(async () => {}), loadMessagesFromCloud: vi.fn(async () => []),
+  loadConversationsFromCloud: vi.fn(async () => {}), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => []),
   subscribeConversations: () => () => {}, subscribeMessages: () => () => {},
 }));
 const addToast = vi.fn();

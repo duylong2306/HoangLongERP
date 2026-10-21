@@ -11,7 +11,7 @@ const fn = vi.hoisted(() => ({
 }));
 vi.mock('../../lib/chatStore', () => ({
   getConversations: () => store.convs.map(c => ({ ...c })), getMessages: (id: string) => (store.msgs[id] || []).map(m => ({ ...m })),
-  ...fn, getOrCreatePersonalConversation: vi.fn(), loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []),
+  ...fn, getOrCreatePersonalConversation: vi.fn(), loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => []),
   subscribeConversations: () => () => {}, subscribeMessages: () => () => {},
 }));
 vi.mock('../../context', () => ({ useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false }));
@@ -154,5 +154,35 @@ describe('Việc trong khung chat', () => {
     expect(t.name).toContain('kiểm tra lại số tài khoản');
     await waitFor(() => expect(fn.addMessage).toHaveBeenCalled());
     expect(fn.addMessage.mock.calls[0][0].relatedEntity).toMatchObject({ type: 'task', id: t.id, card: { kind: 'task', key: `task:${t.id}` } });
+  });
+});
+
+describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
+  it('mở hội thoại → khung tin nhắn nhảy xuống đáy; cuộn lên xem tin cũ rồi có tin mới của người khác thì KHÔNG bị kéo xuống', async () => {
+    const spy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(900);
+    store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'a', createdAt: new Date().toISOString(), read: true }];
+    mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    const box = await screen.findByTestId('zalo-messages');
+    await waitFor(() => expect(box.scrollTop).toBe(900));
+    spy.mockRestore();
+  });
+  it('ô nhập tin dùng lớp bỏ viền khi bấm vào (không bị viền đen của quy tắc input chung)', async () => {
+    mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    expect((await screen.findByLabelText('Nhập tin nhắn')).className).toContain('chat-plain-input');
+  });
+  it('menu "⋯" của tin sát mép TRÊN khung chat mở XUỐNG dưới (không bị cắt); tin ở giữa/dưới vẫn mở lên', async () => {
+    store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'a', createdAt: new Date().toISOString(), read: true }];
+    const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON() {} } as DOMRect);
+    const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return this.getAttribute('data-testid') === 'zalo-messages' ? rect(100, 700) : rect(this.getAttribute('title') === 'Thêm' ? mockTop : 0, 0);
+    });
+    let mockTop = 120;   // sát mép trên khung (khung bắt đầu ở 100)
+    mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    fireEvent.click(await screen.findByTitle('Thêm'));
+    expect(screen.getByTestId('zalo-msgmenu').className).toContain('top-full');
+    fireEvent.click(screen.getByTitle('Thêm')); mockTop = 650;   // gần đáy → mở lên
+    fireEvent.click(screen.getByTitle('Thêm'));
+    expect(screen.getByTestId('zalo-msgmenu').className).toContain('bottom-full');
+    spy.mockRestore();
   });
 });

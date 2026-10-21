@@ -127,6 +127,12 @@ export function initializeSupabase(url: string, anonKey: string, accessToken?: s
       global: accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
     });
     currentConfig = { url, anonKey, accessToken: accessToken || null };
+    // REALTIME phải mang đúng JWT đăng nhập. Header Authorization ở `global` CHỈ áp dụng cho REST; kết nối WebSocket Realtime mặc định dùng
+    // khóa anon (vì app không dùng Supabase Auth) → sau khi RLS chặn anon, Realtime KHÔNG gửi sự kiện nào của các bảng có RLS (tin nhắn,
+    // hội thoại, công việc…) → tin mới phải chờ tải lại/bấm lại hội thoại. setAuth(token) giữ nguyên qua mọi lần nối lại/đăng ký kênh.
+    if (accessToken) {
+      Promise.resolve(supabaseInstance.realtime.setAuth(accessToken)).catch((e: any) => console.warn('[Supabase] Không đặt được token cho Realtime:', e?.message || e));
+    }
     console.log("[Supabase] Successfully initialized with URL:", url, accessToken ? '(kèm JWT company_id)' : '(chỉ anon key)');
     // Báo cho App re-subscribe realtime khi client chưa sẵn sàng lúc mount (G2).
     // App lắng nghe event này để gọi lại setupRealtimeChannel(getSupabase()).

@@ -373,6 +373,16 @@ select:focus {
   box-shadow: 0 0 0 1px #64748b !important;
 }
 
+/* Ô nhập trong Tin nhắn (kiểu Zalo): KHÔNG viền/bóng khi bấm vào — ghi đè quy tắc input:focus chung ở trên (cần !important vì quy tắc chung cũng dùng !important) */
+.chat-plain-input,
+.chat-plain-input:focus {
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background-color: transparent !important;
+}
+
 /* Buttons and select dropdown lists */
 select option {
   background-color: #ffffff !important;

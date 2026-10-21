@@ -977,6 +977,51 @@ export async function loadMessagesFromCloud(
   }
 }
 
+// Các cột NHẸ của tin nhắn (không có `attachments` — ảnh/tệp có thể là chuỗi base64 rất nặng). att0 = mã tệp đính kèm đầu tiên (hoặc null)
+// để biết tin nào có tệp mà không phải tải cả tệp.
+const MSG_LIGHT_COLS = 'id,conversation_id,sender_id,sender_name,sender_role,content,created_at,read,system,edited,edited_at,deleted,deleted_at,pinned,reply_to,mentions,reactions,read_by,related_entity,att0:attachments->0->>id';
+
+/**
+ * Mở hội thoại NHANH: tải 2 bước. Bước 1 chỉ tải phần chữ (nhẹ) → gọi onLight để vẽ ngay; bước 2 mới tải ảnh/tệp của các tin có đính kèm rồi gắn vào.
+ * Trước đây tải cả ảnh/tệp (base64) cùng lúc nên mở hội thoại có ảnh phải chờ lâu. Cột thiếu/lỗi → quay về cách tải cũ.
+ */
+export async function loadMessagesProgressive(
+  conversationId: string,
+  opts: { fromIso?: string } = {},
+  onLight?: () => void,
+): Promise<ChatMessage[]> {
+  const sb = getSupabase();
+  if (!sb) return getMessages(conversationId);
+  try {
+    let q = sb.from('chat_messages').select(MSG_LIGHT_COLS).eq('conversation_id', conversationId);
+    if (opts.fromIso) q = q.gte('created_at', opts.fromIso);
+    const { data, error } = await q.order('created_at', { ascending: true });
+    if (error) return loadMessagesFromCloud(conversationId, opts);
+    const rows: any[] = data || [];
+    const byId = new Map(getMessages(conversationId).map(m => [m.id, m] as const));
+    for (const r of rows) {
+      const m = msgFromRow(r);
+      byId.set(m.id, { ...m, attachments: byId.get(m.id)?.attachments ?? m.attachments });   // giữ tệp đã có trong bộ nhớ đệm
+    }
+    const sorted = () => Array.from(byId.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    saveMessages(conversationId, sorted());
+    if (opts.fromIso) { const prev = _loadedFromIso.get(conversationId); if (!prev || opts.fromIso < prev) _loadedFromIso.set(conversationId, opts.fromIso); }
+    onLight?.();
+    // Bước 2: tệp của các tin có đính kèm mà chưa có trong bộ nhớ đệm (chia lô nhỏ để mỗi lượt không quá nặng)
+    const need = rows.filter(r => r.att0 && !(byId.get(r.id)?.attachments?.length)).map(r => r.id as string);
+    for (let i = 0; i < need.length; i += 10) {
+      const { data: atts, error: e2 } = await sb.from('chat_messages').select('id,attachments').in('id', need.slice(i, i + 10));
+      if (e2) { console.error('loadMessagesProgressive attachments error:', e2.message); break; }
+      for (const a of (atts || []) as any[]) { const cur = byId.get(a.id); if (cur) byId.set(a.id, { ...cur, attachments: a.attachments ?? undefined }); }
+      saveMessages(conversationId, sorted());
+    }
+    return getMessages(conversationId);
+  } catch (e) {
+    console.error('loadMessagesProgressive exception:', e);
+    return loadMessagesFromCloud(conversationId, opts);
+  }
+}
+
 /**
  * Subscribe realtime cho danh sách hội thoại.
  * Hỗ trợ N callback (multi-component): channel chỉ subscribe 1 lần duy nhất.
