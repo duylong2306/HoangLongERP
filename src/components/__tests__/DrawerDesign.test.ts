@@ -30,4 +30,16 @@ describe('Ngăn kéo chi tiết — đồng bộ thiết kế mới', () => {
     expect(proj).toMatch(/useEffect\(\(\) => \{ setMobileTab\('info'\); \}, \[selectedProjectId\]\)/);   // mở dự án khác → về thẻ Thông tin
     expect(proj).toMatch(/lg:hidden shrink-0 grid grid-cols-2/);                // thanh thẻ chỉ hiện dưới 1024px
   });
+  it('chi tiết công việc trên điện thoại: thẻ Chi tiết | Liên thông, menu liên thông không che chi tiết', () => {
+    expect(task).toContain('task-mobile-tabs');
+    expect(task).toMatch(/onOpenConnectedTool && mobileTab === 'tools' \? 'max-lg:hidden'/);   // chi tiết ẩn khi đang xem Liên thông
+    expect(task).toMatch(/mobileTab === 'tools' \? 'max-lg:flex-1 max-lg:min-h-0' : 'max-lg:hidden'/);   // liên thông ẩn khi đang xem Chi tiết, và lấp đầy khi hiện
+    expect(task).toMatch(/useEffect\(\(\) => \{ setMobileTab\('detail'\); \}, \[taskId\]\)/);
+  });
+  it('hộp thoại nhiệm vụ: tiêu đề xanh né tai thỏ, nút đóng gọn, chân chừa vạch home', () => {
+    expect(task).toContain('mission-detail-close');
+    const i = task.indexOf('CHI TIẾT NHIỆM VỤ THI CÔNG');
+    expect(task.slice(i - 900, i)).toContain('lx-drawer-head');
+    expect(task).toMatch(/flex-wrap gap-2 justify-end" style=\{\{ paddingBottom: 'max\(env\(safe-area-inset-bottom\), 16px\)' \}\}/);
+  });
 });

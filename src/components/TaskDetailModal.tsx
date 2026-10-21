@@ -646,6 +646,9 @@ export default function TaskDetailModal({
   const [newMissionChecklist, setNewMissionChecklist] = useState<string[]>([]);
   const [newMissionChecklistInput, setNewMissionChecklistInput] = useState('');
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
+  // Điện thoại: chi tiết công việc chia 2 thẻ "Chi tiết" | "Liên thông" (trước đây menu liên thông xếp dưới và chiếm hết màn hình, che chi tiết). Máy tính giữ nguyên.
+  const [mobileTab, setMobileTab] = useState<'detail' | 'tools'>('detail');
+  useEffect(() => { setMobileTab('detail'); }, [taskId]);
   const [newMissionDeadline, setNewMissionDeadline] = useState(() => getDefaultMissionDeadline());
 
   // Trạng thái chỉnh sửa Nhiệm vụ (tên + hạn hoàn thành) — chỉ áp dụng cho nhiệm vụ CHƯA hoàn thành.
@@ -1698,8 +1701,17 @@ export default function TaskDetailModal({
           </button>
         </div>
 
+        {/* Thẻ chuyển Chi tiết | Liên thông — chỉ ở màn hình hẹp và khi có công cụ liên thông */}
+        {onOpenConnectedTool && (
+          <div className="lg:hidden shrink-0 grid grid-cols-2 bg-white border-b border-slate-200" role="tablist" aria-label="Chi tiết công việc" data-testid="task-mobile-tabs">
+            {([['detail', 'Chi tiết công việc'], ['tools', 'Công cụ liên thông']] as const).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={mobileTab === k} onClick={() => setMobileTab(k)}
+                className={`py-3 text-[13px] font-extrabold border-b-[3px] cursor-pointer transition-colors ${mobileTab === k ? 'text-[#0a4fd8] border-[#0a4fd8] bg-[#f3f7ff]' : 'text-slate-500 border-transparent'}`}>{label}</button>))}
+          </div>
+        )}
+
         {/* Dynamic Connected Layout Container */}
-        <div className="lx-drawer-body flex-1 flex flex-col lg:flex-row overflow-hidden">
+        <div className={`lx-drawer-body flex-1 flex flex-col lg:flex-row overflow-hidden ${onOpenConnectedTool && mobileTab === 'tools' ? 'max-lg:hidden' : ''}`}>
           
           {/* Scrollable Core Elements */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/70 flex flex-col justify-between" id="modal_left_scrollable">
@@ -3369,7 +3381,7 @@ export default function TaskDetailModal({
           // Luôn hiển thị panel khi có callback — mỗi nút tự xử lý trạng thái enabled/disabled
 
           return (
-            <div className="w-full lg:w-[360px] bg-slate-950 border-t lg:border-t-0 lg:border-l border-slate-800 p-4 space-y-4 shrink-0 overflow-y-auto flex flex-col justify-between" id="modal_right_pane">
+            <div className={`w-full lg:w-[360px] bg-slate-950 border-t lg:border-t-0 lg:border-l border-slate-800 p-4 space-y-4 shrink-0 overflow-y-auto flex flex-col justify-between ${mobileTab === 'tools' ? 'max-lg:flex-1 max-lg:min-h-0' : 'max-lg:hidden'}`} id="modal_right_pane">
               <div className="space-y-4">
                 {(() => {
                   return (
@@ -4061,12 +4073,12 @@ export default function TaskDetailModal({
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="p-4 border-b border-slate-900 bg-slate-900/50 flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className={`w-5 h-5 ${isMissionCompleted ? 'text-emerald-400' : 'text-amber-500'}`} />
-                  <div>
-                    <span className="block text-[9.5px] uppercase font-mono font-extrabold text-slate-500">CHI TIẾT NHIỆM VỤ THI CÔNG</span>
-                    <span className="block text-[12.5px] font-extrabold text-white mt-0.5">{mission.name}</span>
+              <div className="lx-drawer-head p-4 border-b border-slate-900 bg-slate-900/50 flex justify-between items-center gap-3 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="lx-dh-icon w-9 h-9 rounded-xl grid place-items-center shrink-0"><CheckCircle2 className="w-5 h-5" /></span>
+                  <div className="min-w-0">
+                    <span className="lx-dh-sub block text-[9.5px] uppercase font-mono font-extrabold">CHI TIẾT NHIỆM VỤ THI CÔNG{isMissionCompleted ? ' · ĐÃ HOÀN THÀNH' : ''}</span>
+                    <span className="lx-dh-title block text-[13px] font-extrabold mt-0.5 break-words">{mission.name}</span>
                   </div>
                 </div>
                 <button 
@@ -4076,9 +4088,9 @@ export default function TaskDetailModal({
                     setMissionAttachedFile(null);
                     resetMissionReportState();
                   }}
-                  className="p-1 px-2 rounded-lg bg-slate-900 hover:bg-slate-850 text-slate-400 hover:text-white border border-slate-800 transition cursor-pointer text-[10.5px] font-bold"
+                  className="lx-dh-close shrink-0" aria-label="Đóng" data-testid="mission-detail-close"
                 >
-                  ✕ Đóng
+                  ✕<span className="lx-dh-close-text"> Đóng</span>
                 </button>
               </div>
 
@@ -4698,7 +4710,7 @@ export default function TaskDetailModal({
               </div>
 
               {/* Footer actions */}
-              <div className="p-4 border-t border-slate-900 bg-slate-950/80 shrink-0 flex gap-2 justify-end">
+              <div className="p-4 border-t border-slate-900 bg-slate-950/80 shrink-0 flex flex-wrap gap-2 justify-end" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 16px)' }}>
                 <button
                   type="button"
                   onClick={() => {
