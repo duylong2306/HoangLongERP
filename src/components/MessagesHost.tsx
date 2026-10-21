@@ -24,16 +24,19 @@ export default function MessagesHost(props: Props) {
     <button type="button" onClick={() => choose(v)} aria-pressed={ui === v}
       className={`relative z-10 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-full text-[12px] font-bold cursor-pointer transition-colors ${ui === v ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'}`}>{icon}{label}</button>
   );
+  const switcher = (
+    <div className="relative inline-grid grid-cols-2 p-1 rounded-full bg-slate-100 border border-slate-200" role="group" aria-label="Kiểu giao diện Tin nhắn" data-testid="messages-ui-switch">
+      <span aria-hidden className={`absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-white shadow-md ring-1 ring-slate-200 transition-transform duration-200 ease-out ${ui === 'classic' ? 'translate-x-full' : 'translate-x-0'}`} />
+      {btn('new', 'Kiểu mới', <MessageSquareText className="w-4 h-4" />)}
+      {btn('classic', 'Kiểu cũ', <LayoutList className="w-4 h-4" />)}
+    </div>
+  );
+  // Kiểu mới: chiếm TRỌN vùng nội dung như Zalo (công tắc nằm gọn đầu cột danh sách). Kiểu cũ giữ bố cục có lề như trước.
   return (
-    <div className="space-y-2" data-testid="messages-host">
-      <div className="flex justify-end">
-        <div className="relative inline-grid grid-cols-2 p-1 rounded-full bg-slate-100 border border-slate-200" role="group" aria-label="Kiểu giao diện Tin nhắn" data-testid="messages-ui-switch">
-          <span aria-hidden className={`absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-white shadow-md ring-1 ring-slate-200 transition-transform duration-200 ease-out ${ui === 'classic' ? 'translate-x-full' : 'translate-x-0'}`} />
-          {btn('new', 'Kiểu mới', <MessageSquareText className="w-4 h-4" />)}
-          {btn('classic', 'Kiểu cũ', <LayoutList className="w-4 h-4" />)}
-        </div>
-      </div>
-      {ui === 'new' ? <MessagesZalo {...props} /> : <MessagesView {...props} />}
+    <div className="h-full min-h-0" data-testid="messages-host">
+      {ui === 'new'
+        ? <MessagesZalo {...props} headerExtra={<div className="px-3 pt-2 flex justify-end">{switcher}</div>} />
+        : <div className="p-3 space-y-2 h-full overflow-y-auto"><div className="flex justify-end">{switcher}</div><MessagesView {...props} /></div>}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
   CATEGORY_LABEL, type Category, type ListTab,
 } from '../lib/chatInfo';
 import UserAvatar from './UserAvatar';
+import ConvAvatar from './ConvAvatar';
 import { WorkList, WorkDetail } from './MessagesWork';
 import { WorkCardView, SendWorkDialog, CreateTaskDialog, cardOfEntry, type NewTaskInput } from './MessagesWorkCards';
 import type { InboxItem } from './MyWorkOverview';
@@ -46,6 +47,8 @@ interface Props {
   onOpenWorkTask?: (taskId: string) => void;
   /** Tạo công việc mới (lưu lên hệ thống) — dùng cho "Tạo công việc từ tin nhắn" */
   onCreateTask?: (t: Task) => Promise<void> | void;
+  /** Phần phụ đặt ngay đầu cột danh sách (công tắc Kiểu mới/Kiểu cũ do MessagesHost truyền xuống) */
+  headerExtra?: React.ReactNode;
   projects?: { id: string; name: string; pmId?: string }[];
 }
 
@@ -58,21 +61,7 @@ const initials = (n: string) => { const p = (n || '?').replace('📁', '').trim(
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const fmtSize = (n?: number) => (!n ? '' : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-/** Avatar hội thoại: cá nhân dùng avatar tài khoản; nhóm ghép tối đa 4 người. */
-function ConvAvatar({ conv, employees, me, size }: { conv: Conversation; employees: Employee[]; me: string; size: number }) {
-  if (conv.type === 'personal') {
-    const other = employees.find(e => e.id === conv.participantIds.find(i => i !== me));
-    return <UserAvatar employee={other || null} name={conv.name} size={size >= 56 ? 'xl' : size >= 44 ? 'lg' : 'md'} noRing />;
-  }
-  const members = conv.participantIds.slice(0, 4).map(id => employees.find(e => e.id === id)?.name || conv.name);
-  return (
-    <span className="grid grid-cols-2 grid-rows-2 gap-px rounded-full overflow-hidden bg-white shrink-0" style={{ width: size, height: size }}>
-      {members.map((n, i) => <i key={i} className="grid place-items-center text-white not-italic font-bold" style={{ background: colorOf(n), fontSize: Math.max(8, size / 6) }}>{initials(n)}</i>)}
-    </span>
-  );
-}
-
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [] }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], headerExtra }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -373,6 +362,21 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [pinsOpen, setPinsOpen] = useState(false);
+  // Chạm 2 lần nhanh vào 1 tin (điện thoại) → thả/bỏ tim ❤️. Chỉ tính cú chạm 1 ngón gần như không di chuyển (cuộn/vuốt không tính),
+  // và bỏ qua chạm vào nút, liên kết, ảnh, ô nhập bên trong tin.
+  const tapStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const lastTapRef = useRef<{ id: string; t: number } | null>(null);
+  const onMsgTouchStart = (e: React.TouchEvent) => { const t = e.touches[0]; tapStartRef.current = e.touches.length === 1 && t ? { x: t.clientX, y: t.clientY, t: Date.now() } : null; };
+  const onMsgTouchEnd = (e: React.TouchEvent, m: ChatMessage) => {
+    const st = tapStartRef.current; tapStartRef.current = null;
+    const t = e.changedTouches[0];
+    if (!st || !t || m.deleted || m.system) return;
+    if ((e.target as HTMLElement).closest('button,a,img,input,textarea,video')) return;
+    const now = Date.now();
+    if (Math.abs(t.clientX - st.x) > 10 || Math.abs(t.clientY - st.y) > 10 || now - st.t > 300) { lastTapRef.current = null; return; }
+    const last = lastTapRef.current;
+    if (last && last.id === m.id && now - last.t < 350) { lastTapRef.current = null; react(m, '❤️'); } else lastTapRef.current = { id: m.id, t: now };
+  };
   const react = async (m: ChatMessage, emoji: string) => { await toggleMessageReaction(selected!.id, m.id, me, emoji); setMessages(applyWindow(getMessages(selected!.id))); setMenuFor(null); };
   const pinMsg = async (m: ChatMessage) => { await togglePinMessage(selected!.id, m.id); setMessages(applyWindow(getMessages(selected!.id))); setMenuFor(null); addToast({ title: m.pinned ? '📌 Đã bỏ ghim' : '📌 Đã ghim tin nhắn', message: '', type: 'info' }); };
   const recall = async (m: ChatMessage) => { if (!confirm('Thu hồi tin nhắn này với mọi người?')) return; await softDeleteMessage(selected!.id, m.id); setMessages(applyWindow(getMessages(selected!.id))); setConversations(getConversations()); setMenuFor(null); };
@@ -514,10 +518,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   );
 
   return (
-    <div className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden text-slate-900 h-[calc(100vh-190px)] min-h-[520px]" data-testid="zalo-root">
+    <div className="relative bg-white overflow-hidden text-slate-900 h-full min-h-0" data-testid="zalo-root">
       <div className={`grid h-full ${leftMode === 'chat' && infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
         {/* ── DANH SÁCH ── */}
         <section className={`${showList ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 border-r border-slate-200`}>
+          {headerExtra}
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">
             <label className="flex-1 flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-2 text-[13px] text-slate-500">
               <Search className="w-4 h-4 shrink-0" />
@@ -549,7 +554,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
           </div>
           <div className="flex-1 overflow-y-auto min-h-0" data-testid="zalo-list">
             {workEntries.length > 0 && !query.trim() && (
-              <button type="button" onClick={() => setLeftMode('work')} data-testid="zalo-today" className="w-[calc(100%-1.5rem)] mx-3 mt-2 mb-1 flex items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#0068ff] to-[#4f8dff] text-white px-3.5 py-2.5 text-left cursor-pointer">
+              <button type="button" onClick={() => setLeftMode('work')} data-testid="zalo-today" style={{ color: '#ffffff' }} className="w-[calc(100%-1.5rem)] mx-3 mt-2 mb-1 flex items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#1f6bff] to-[#0a4fd8] px-3.5 py-2.5 text-left cursor-pointer">
                 <span><b className="block text-[14px]">Hôm nay</b><span className="block text-[12px] opacity-95">{workEntries.filter(e => e.section === 'today').length} việc đến hạn · {workEntries.filter(e => e.section === 'late').length} quá hạn · {workEntries.filter(e => e.section === 'inbox').length} mục chờ bạn xử lý</span></span>
                 <span className="text-[12px] font-bold bg-white/20 rounded-full px-3 py-1 whitespace-nowrap">Xem →</span>
               </button>)}
@@ -619,7 +624,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                   <React.Fragment key={m.id}>
                     {newDay && <div className="flex justify-center my-3"><span className="bg-slate-700/50 text-white text-[11.5px] rounded-full px-3 py-0.5">{dayLabel(m.createdAt)}</span></div>}
                     {m.system ? <div className="flex justify-center my-2"><span className="bg-white/60 text-slate-600 text-[12px] rounded-full px-3 py-0.5">{m.content}</span></div> : (
-                      <div id={`zmsg-${m.id}`} data-testid="zalo-msg" className={`group flex gap-2 items-end ${mineMsg ? 'justify-end' : ''} ${first ? 'mt-3' : 'mt-0.5'} ${reacts.length ? 'mb-3' : ''}`}>
+                      <div id={`zmsg-${m.id}`} data-testid="zalo-msg" onTouchStart={onMsgTouchStart} onTouchEnd={e => onMsgTouchEnd(e, m)} className={`group flex gap-2 items-end ${mineMsg ? 'justify-end' : ''} ${first ? 'mt-3' : 'mt-0.5'} ${reacts.length ? 'mb-3' : ''}`}>
                         {!mineMsg && (first ? <UserAvatar employee={employees.find(e => e.id === m.senderId) || null} name={m.senderName} size="sm" noRing className="shrink-0" /> : <span className="w-7 shrink-0" />)}
                         <div className={`relative max-w-[78%] sm:max-w-[70%] ${mineMsg ? 'order-2' : ''}`}>
                           <div className={`rounded-xl px-3 py-2 shadow-sm text-[14px] leading-snug break-words ${m.deleted ? 'bg-white/55 text-slate-500 italic shadow-none' : mineMsg ? 'bg-[#d6e6ff]' : 'bg-white'}`}>

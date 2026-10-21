@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor, within, act } from '@testing-librar
 const store = vi.hoisted(() => ({ convs: [] as any[], msgs: {} as Record<string, any[]>, convCb: null as null | (() => void), onProgressive: null as null | (() => void) }));
 const fn = vi.hoisted(() => ({
   addMessage: vi.fn(async (m: any, onLocal?: (x: any) => void) => { const x = { ...m, id: 'new_' + Math.random(), createdAt: new Date().toISOString(), read: false }; (store.msgs[m.conversationId] ||= []).push(x); onLocal?.(x); return x; }),
+  toggleMessageReaction: vi.fn(async () => {}),
   ensureWorkThread: vi.fn(async (p: any) => ({ id: 'conv_work_' + p.key.replace(/[^A-Za-z0-9_-]/g, '_'), participantIds: p.memberIds })),
   markConversationRead: vi.fn(async () => {}), markMessagesReadByUser: vi.fn(async () => {}),
   sendApprovalDirectMessage: vi.fn(async () => null),
@@ -209,5 +210,15 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(4100); });
       await waitFor(() => expect(screen.getByText('tin mới tới')).toBeTruthy());
     } finally { vi.useRealTimers(); }
+  });
+  it('chạm 2 lần nhanh vào tin (điện thoại) → thả tim ❤️; chạm 1 lần, chạm chậm hoặc vuốt thì KHÔNG', async () => {
+    store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'xin chào', createdAt: new Date().toISOString(), read: true }];
+    mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    const msg = await screen.findByTestId('zalo-msg');
+    const tap = (x = 10, y = 10, ex = x, ey = y) => { fireEvent.touchStart(msg, { touches: [{ clientX: x, clientY: y }] }); fireEvent.touchEnd(msg, { changedTouches: [{ clientX: ex, clientY: ey }] }); };
+    tap(); expect(fn.toggleMessageReaction).not.toHaveBeenCalled();            // mới 1 cú chạm
+    tap(); await waitFor(() => expect(fn.toggleMessageReaction).toHaveBeenCalledWith('p_ny', 'm1', 'me', '❤️'));
+    fn.toggleMessageReaction.mockClear();
+    tap(10, 10, 10, 80); tap(10, 10, 10, 80); expect(fn.toggleMessageReaction).not.toHaveBeenCalled();   // vuốt (di chuyển xa) không tính
   });
 });

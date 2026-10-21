@@ -71,6 +71,9 @@ import { buildMyWorkItems, type MyWorkItem } from './lib/myWork';
 import { buildWorkInbox } from './lib/workInbox';
 import { groupPendingAbsencePairs } from './lib/leaveRequests';
 import { canDoTaskAction, loadTaskPermissionMatrix } from './components/hr/hrTaskPermissions';
+import AppRail from './components/shell/AppRail';
+import MobileNav from './components/shell/MobileNav';
+import type { NavTop, NavGroup, NavLeaf } from './components/shell/navModel';
 import { findSupplierLiability } from './lib/liabilityPayments';
 import { isPaymentPendingForUser, isAdvancePendingForUser } from './lib/approvalInbox';
 import MessagesHost from './components/MessagesHost';
@@ -121,7 +124,10 @@ import {
   Menu,
   RefreshCw,
   Calendar,
-  ArrowLeft
+  ArrowLeft,
+  Package,
+  Wrench,
+  Settings as SettingsIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
@@ -3496,6 +3502,82 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return { items, inbox };
   })();
 
+  // ─── MÔ HÌNH MENU (thanh trái máy tính + thanh dưới điện thoại) — CÙNG quy tắc phân quyền với menu cũ ───
+  const chatUnreadForNav = currentUser ? unreadForBadge(getUserConversations(getConversations(), currentUser.id), chatPrefsApp) : 0;   // không tính hội thoại đã tắt thông báo
+  const leaf = (id: string, label: string, active: boolean, onSelect: () => void): NavLeaf => ({ id, label, active, onSelect });
+  const navTops: NavTop[] = !currentUser ? [] : [
+    ...(isAccessible('dashboard') ? [{ ...leaf('dashboard', 'Tổng quan', activeTab === 'dashboard', () => setActiveTab('dashboard')), icon: <LayoutDashboard className="lx-i" /> }] : []),
+    ...(isAccessible('tasks') ? [{ ...leaf('tasks', 'Việc của tôi', activeTab === 'tasks', () => setActiveTab('tasks')), icon: <CheckSquare className="lx-i" />, badge: myUncompletedCount }] : []),
+    ...(isAccessible('messages') ? [{ ...leaf('messages', 'Tin nhắn', activeTab === 'messages', () => setActiveTab('messages')), icon: <MessageSquare className="lx-i" />, badge: chatUnreadForNav }] : []),
+  ];
+  const navGroups: NavGroup[] = !currentUser ? [] : (() => {
+    const out: NavGroup[] = [];
+    const add = (id: string, label: string, icon: React.ReactNode, children: (NavLeaf | false)[]) => {
+      const kids = children.filter((c): c is NavLeaf => !!c);
+      if (kids.length > 0) out.push({ id, label, icon, children: kids, active: kids.some(k => k.active) });
+    };
+    // Giám đốc: 1 mục, mở bảng điều hành theo phòng ban đang chọn (đúng như menu cũ)
+    if (isRoleAdmin(currentUser.id)) {
+      const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor', summary: 'director-summary' };
+      add('director', 'Phòng Giám Đốc', <BarChart3 className="lx-i" />, [leaf('director-dash', 'Dashboard Tổng Hợp', activeTab.startsWith('director-'), () => setActiveTab(subTabMap[directorSubDept] || 'director-summary'))]);
+    }
+    if (isAccessible('projects-construction') || isAccessible('projects-furniture') || isAccessible('projects-mechanical')) {
+      add('projects', 'Phòng Dự Án', <Folder className="lx-i" />, [
+        isAccessible('projects-construction') && leaf('projects-construction', 'Xây dựng', activeTab === 'projects-construction', () => setActiveTab('projects-construction')),
+        isAccessible('projects-furniture') && leaf('projects-furniture', 'Nội thất', activeTab === 'projects-furniture', () => setActiveTab('projects-furniture')),
+        isAccessible('projects-mechanical') && leaf('projects-mechanical', 'Cơ khí', activeTab === 'projects-mechanical', () => setActiveTab('projects-mechanical')),
+      ]);
+    }
+    if (isAccessible('hr-office')) {
+      add('hr', 'Phòng Nhân Sự', <Users className="lx-i" />, [
+        isAccessible('employees') && leaf('hr-profiles', 'Hệ thống Nhân sự', activeTab === 'employees' && hrSubTab !== 'hr_data', () => { setActiveTab('employees'); setHrSubTab('profiles'); }),
+        isAccessible('hr-data') && leaf('hr-data', 'Dữ liệu nhân sự', activeTab === 'employees' && hrSubTab === 'hr_data', () => { setActiveTab('employees'); setHrSubTab('hr_data'); }),
+      ]);
+    }
+    if (isAccessible('accounting-office')) {
+      add('accounting', 'Phòng Kế Toán', <DollarSign className="lx-i" />, [
+        isAccessible('finance') && leaf('finance', 'Tài Chính - Kế Toán', activeTab === 'finance' && financeSubTab !== 'du_lieu_ke_toan', () => { setActiveTab('finance'); setFinanceSubTab('de_xuat_thu_chi'); }),
+        isAccessible('finance-data') && leaf('finance-data', 'Dữ Liệu Kế Toán', activeTab === 'finance' && financeSubTab === 'du_lieu_ke_toan', () => { setActiveTab('finance'); setFinanceSubTab('du_lieu_ke_toan'); }),
+      ]);
+    }
+    if (isAccessible('warehouse-office')) {
+      add('warehouse', 'Kho', <Package className="lx-i" />, [
+        isAccessible('material-coordination') && leaf('material-coordination', 'Điều phối vật tư', activeTab === 'material-coordination', () => setActiveTab('material-coordination')),
+        isAccessible('warehouse-management') && leaf('warehouse-management', 'Quản lý tồn kho', activeTab === 'warehouse-management', () => setActiveTab('warehouse-management')),
+        isAccessible('warehouse-data') && leaf('warehouse-data', 'Dữ Liệu Kho', activeTab === 'warehouse-data', () => setActiveTab('warehouse-data')),
+      ]);
+    }
+    if (isAccessible('subcontractor-office') && isAccessible('subcontractor-management')) {
+      add('subcontractor', 'Thầu Phụ', <Wrench className="lx-i" />, [
+        leaf('subcontractor-management', 'Quản Lý Thầu Phụ', activeTab === 'subcontractor-management', () => { localStorage.removeItem('hl_view_contract_id'); localStorage.removeItem('hl_preselected_task_id'); setActiveTab('subcontractor-management'); }),
+      ]);
+    }
+    if (isAccessible('library-office')) {
+      const q = (tab: string) => () => { setActiveTab(tab); setPreselectedCustomerId(''); setPreselectedProjectId(''); };
+      const qSub = () => { localStorage.removeItem('hl_view_contract_id'); localStorage.removeItem('hl_preselected_task_id'); setActiveTab('quotes-subcontractor'); setPreselectedCustomerId(''); setPreselectedProjectId(''); };
+      add('library', 'Thư Viện', <BookOpen className="lx-i" />, [
+        isAccessible('quotes-construction') && leaf('quotes-construction', 'Hồ Sơ Xây Dựng', activeTab === 'quotes-construction', q('quotes-construction')),
+        isAccessible('quotes') && leaf('quotes', 'Hồ Sơ Nội Thất', activeTab === 'quotes', q('quotes')),
+        isAccessible('quotes-mechanical') && leaf('quotes-mechanical', 'Hồ Sơ Cơ Khí', activeTab === 'quotes-mechanical', q('quotes-mechanical')),
+        isAccessible('quotes-subcontractor') && leaf('quotes-subcontractor', 'Hồ Sơ Thầu Phụ', activeTab === 'quotes-subcontractor', qSub),
+      ]);
+    }
+    if (isAccessible('system-office')) {
+      add('system', 'Cài đặt hệ thống', <SettingsIcon className="lx-i" />, [
+        isAccessible('settings-accounts') && leaf('settings-accounts', 'Tài Khoản Hệ Thống', activeTab === 'settings-accounts', () => setActiveTab('settings-accounts')),
+        isAccessible('settings-accounts') && isAccessible('settings-roles') && leaf('settings-roles', 'Phân Quyền Và Vai Trò', activeTab === 'settings-roles', () => setActiveTab('settings-roles')),
+        leaf('settings', 'Cài Đặt Hệ Thống', activeTab === 'settings', () => setActiveTab('settings')),
+        isAccessible('display-settings') && leaf('display-settings', 'Cấu Hình Giao Diện', activeTab === 'display-settings', () => setActiveTab('display-settings')),
+      ]);
+    }
+    return out;
+  })();
+  const navUser = !currentUser ? null : {
+    name: currentUser.name, avatar: currentUser.avatar, subtitle: displaySettings.brandName,
+    onProfile: () => setShowProfileModal(true), onDisplaySettings: isAccessible('display-settings') ? () => setActiveTab('display-settings') : undefined,
+    onReload: () => window.location.reload(), onLogout: () => handleLogout(),
+  };
+
   if (!currentUser) {
     if (isInitializing || employees.length === 0) {
       return (
@@ -3536,442 +3618,25 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     <AuthProvider employees={employees} addToast={addToast}>
       <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
         <div
-          className="flex min-h-screen w-full lg:h-screen lg:w-screen bg-slate-950 lg:overflow-hidden text-slate-200 font-sans transition-all duration-200"
+          className="flex min-h-screen w-full md:h-screen md:w-screen bg-slate-950 md:overflow-hidden text-slate-200 font-sans transition-all duration-200"
           style={{ fontFamily: currentFont }}
           id="erp_container"
         >
       
-      {/* BACKGROUND OVERLAY FOR MOBILE SIDEBAR */}
-      {mobileMenuOpen && (
-        <div 
-          className="fixed inset-0 bg-black/60 z-40 md:hidden transition-opacity duration-300"
-          onClick={() => setMobileMenuOpen(false)}
-        />
-      )}
-
-
-      {/* 1. SIDEBAR TRÁI KIỂU FLOWBITE */}
-      <aside
-          className={`fixed md:relative top-0 bottom-0 left-0 z-50 md:z-auto w-64 h-full max-h-screen flex flex-col shrink-0 transition-transform duration-300 ease-in-out bg-neutral-50 border-r border-gray-200 ${
-            mobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:translate-x-0'
-          }`}
-          id="left_sidebar_flowbite"
-          aria-label="Sidebar"
-        >
-          <div className="h-full px-3 py-4 overflow-y-auto flex flex-col">
-            {/* LOGO & THƯƠNG HIỆU */}
-            <div className="flex items-center justify-between border-b border-gray-200 pb-3 mb-3">
-              <div className="flex items-center gap-2.5">
-                <img src="/lolo-icon-192.png" alt={displaySettings.brandName} className="w-9 h-9 rounded-lg shadow-sm shrink-0" />
-                <div className="min-w-0">
-                  <h2 className="font-extrabold text-xs tracking-wide leading-none uppercase text-gray-900 truncate">{displaySettings.brandName}</h2>
-                  <span className="text-[9px] font-bold tracking-widest mt-1 block uppercase text-gray-500 truncate">{displaySettings.brandSlogan}</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen(false)}
-                className="md:hidden p-1.5 text-gray-500 hover:text-gray-900 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-                title="Đóng menu"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* MENU CHÍNH KIỂU FLOWBITE */}
-            <nav className="flex-1">
-              <ul className="space-y-1.5 font-medium text-sm">
-                {/* Nhóm tiêu điểm chung */}
-                {isAccessible('dashboard') && (
-                  <li>
-                    <button
-                      onClick={() => { setActiveTab('dashboard'); if (mobileMenuOpen) setMobileMenuOpen(false); }}
-                      className={`w-full flex items-center px-2 py-2 rounded-lg group cursor-pointer transition-colors ${activeTab === 'dashboard' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
-                    >
-                      <LayoutDashboard className={`w-5 h-5 shrink-0 transition duration-75 ${activeTab === 'dashboard' ? 'text-emerald-600' : 'text-gray-500 group-hover:text-gray-900'}`} />
-                      <span className="ms-3">Tổng quan</span>
-                    </button>
-                  </li>
-                )}
-
-                {isAccessible('tasks') && (
-                  <li>
-                    <button
-                      onClick={() => { setActiveTab('tasks'); if (mobileMenuOpen) setMobileMenuOpen(false); }}
-                      className={`w-full flex items-center px-2 py-2 rounded-lg group cursor-pointer transition-colors ${activeTab === 'tasks' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
-                    >
-                      <CheckSquare className={`w-5 h-5 shrink-0 transition duration-75 ${activeTab === 'tasks' ? 'text-emerald-600' : 'text-gray-500 group-hover:text-gray-900'}`} />
-                      <span className="flex-1 ms-3 text-left whitespace-nowrap truncate">Việc của tôi</span>
-                      {myUncompletedCount > 0 && (
-                        <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium bg-danger-soft text-fg-danger-strong rounded-full">{myUncompletedCount}</span>
-                      )}
-                    </button>
-                  </li>
-                )}
-
-                {isAccessible('messages') && (
-                  <li>
-                    <button
-                      onClick={() => { setActiveTab('messages'); if (mobileMenuOpen) setMobileMenuOpen(false); }}
-                      className={`w-full flex items-center px-2 py-2 rounded-lg group cursor-pointer transition-colors ${activeTab === 'messages' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
-                    >
-                      <MessageSquare className={`w-5 h-5 shrink-0 transition duration-75 ${activeTab === 'messages' ? 'text-emerald-600' : 'text-gray-500 group-hover:text-gray-900'}`} />
-                      <span className="flex-1 ms-3 text-left whitespace-nowrap truncate">Tin nhắn</span>
-                      {(() => {
-                        const conversations = getConversations();
-                        const userConvs = getUserConversations(conversations, currentUser?.id ?? '');
-                        const chatUnreadCount = unreadForBadge(userConvs, chatPrefsApp);   // không tính hội thoại đã tắt thông báo
-                        return chatUnreadCount > 0 ? (
-                          <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium text-white bg-rose-600 rounded-full">{chatUnreadCount > 99 ? '99+' : chatUnreadCount}</span>
-                        ) : null;
-                      })()}
-                    </button>
-                  </li>
-                )}
-              </ul>
-
-              {/* Các phân hệ - kiểu Flowbite dropdown */}
-              <ul className="space-y-1 font-medium text-sm border-t border-gray-200 pt-3 mt-3">
-                {/* PHÒNG GIÁM ĐỐC */}
-                {isRoleAdmin(currentUser.id) && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsDirectorGroupExpanded(!isDirectorGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <BarChart3 className="w-5 h-5 shrink-0 text-emerald-500 transition duration-75 group-hover:text-emerald-600" />
-                        <span className="text-left whitespace-nowrap">Phòng Giám Đốc</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isDirectorGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isDirectorGroupExpanded && (
-                      <ul className="py-1 space-y-1">
-                        <li>
-                          <button
-                            onClick={() => {
-                              const subTabMap: Record<string, string> = { projects: 'director-projects', hr: 'director-hr', accounting: 'director-finance', warehouse: 'director-warehouse', subcontractor: 'director-subcontractor', summary: 'director-summary' };
-                              setActiveTab(subTabMap[directorSubDept] || 'director-summary');
-                              if (mobileMenuOpen) setMobileMenuOpen(false);
-                            }}
-                            className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab.startsWith('director-') ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
-                          >
-                            Dashboard Tổng Hợp
-                          </button>
-                        </li>
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* PHÒNG DỰ ÁN */}
-                {(isAccessible('projects-construction') || isAccessible('projects-furniture') || isAccessible('projects-mechanical')) && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsProjectGroupExpanded(!isProjectGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Folder className="w-5 h-5 shrink-0 text-sky-500 transition duration-75 group-hover:text-sky-600" />
-                        <span className="text-left whitespace-nowrap">Phòng Dự Án</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isProjectGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isProjectGroupExpanded && (
-                      <ul className="py-1 space-y-1">
-                        {isAccessible('projects-construction') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('projects-construction'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'projects-construction' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Xây dựng
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('projects-furniture') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('projects-furniture'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'projects-furniture' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Nội thất
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('projects-mechanical') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('projects-mechanical'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'projects-mechanical' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Cơ khí
-                            </button>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* PHÒNG NHÂN SỰ */}
-                {isAccessible('hr-office') && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsHrGroupExpanded(!isHrGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Users className="w-5 h-5 shrink-0 text-amber-500 transition duration-75 group-hover:text-amber-600" />
-                        <span className="text-left whitespace-nowrap">Phòng Nhân Sự</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isHrGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isHrGroupExpanded && (
-                      <ul className="py-1 space-y-1">
-                        {isAccessible('employees') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('employees'); setHrSubTab('profiles'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${(activeTab === 'employees' && hrSubTab !== 'hr_data') ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Hệ thống Nhân sự
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('hr-data') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('employees'); setHrSubTab('hr_data'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${(activeTab === 'employees' && hrSubTab === 'hr_data') ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Dữ liệu nhân sự
-                            </button>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* PHÒNG KẾ TOÁN */}
-                {isAccessible('accounting-office') && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsFinanceGroupExpanded(!isFinanceGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <DollarSign className="w-5 h-5 shrink-0 text-rose-500 transition duration-75 group-hover:text-rose-600" />
-                        <span className="text-left whitespace-nowrap">Phòng Kế Toán</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isFinanceGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isFinanceGroupExpanded && (
-                      <ul className="py-1 space-y-1">
-                        {isAccessible('finance') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('finance'); setFinanceSubTab('de_xuat_thu_chi'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${(activeTab === 'finance' && financeSubTab !== 'du_lieu_ke_toan') ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Tài Chính - Kế Toán
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('finance-data') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('finance'); setFinanceSubTab('du_lieu_ke_toan'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${(activeTab === 'finance' && financeSubTab === 'du_lieu_ke_toan') ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Dữ Liệu Kế Toán
-                            </button>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* KHO */}
-                {isAccessible('warehouse-office') && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsWarehouseGroupExpanded(!isWarehouseGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Database className="w-5 h-5 shrink-0 text-teal-500 transition duration-75 group-hover:text-teal-600" />
-                        <span className="text-left whitespace-nowrap">Kho</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isWarehouseGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isWarehouseGroupExpanded && (
-                      <ul className="py-1 space-y-1">
-                        {isAccessible('material-coordination') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('material-coordination'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'material-coordination' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Điều phối vật tư
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('warehouse-management') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('warehouse-management'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-management' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Quản lý tồn kho
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('warehouse-data') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('warehouse-data'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'warehouse-data' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Dữ Liệu Kho
-                            </button>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* THẦU PHỤ */}
-                {isAccessible('subcontractor-office') && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsSubcontractorGroupExpanded(!isSubcontractorGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Folder className="w-5 h-5 shrink-0 text-orange-500 transition duration-75 group-hover:text-orange-600" />
-                        <span className="text-left whitespace-nowrap">Thầu Phụ</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isSubcontractorGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isSubcontractorGroupExpanded && isAccessible('subcontractor-management') && (
-                      <ul className="py-1 space-y-1">
-                        <li>
-                          <button onClick={() => { localStorage.removeItem('hl_view_contract_id'); localStorage.removeItem('hl_preselected_task_id'); setActiveTab('subcontractor-management'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'subcontractor-management' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                            Quản Lý Thầu Phụ
-                          </button>
-                        </li>
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* THƯ VIỆN */}
-                {isAccessible('library-office') && (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setIsLibraryGroupExpanded(!isLibraryGroupExpanded)}
-                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                    >
-                      <span className="flex items-center gap-2">
-                        <BookOpen className="w-5 h-5 shrink-0 text-blue-500 transition duration-75 group-hover:text-blue-600" />
-                        <span className="text-left whitespace-nowrap">Thư Viện</span>
-                      </span>
-                      <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isLibraryGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                    </button>
-                    {isLibraryGroupExpanded && (
-                      <ul className="py-1 space-y-1">
-                        {isAccessible('quotes-construction') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('quotes-construction'); setPreselectedCustomerId(''); setPreselectedProjectId(''); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'quotes-construction' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Hồ Sơ Xây Dựng
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('quotes') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('quotes'); setPreselectedCustomerId(''); setPreselectedProjectId(''); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'quotes' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Hồ Sơ Nội Thất
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('quotes-mechanical') && (
-                          <li>
-                            <button onClick={() => { setActiveTab('quotes-mechanical'); setPreselectedCustomerId(''); setPreselectedProjectId(''); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'quotes-mechanical' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Hồ Sơ Cơ Khí
-                            </button>
-                          </li>
-                        )}
-                        {isAccessible('quotes-subcontractor') && (
-                          <li>
-                            <button onClick={() => { localStorage.removeItem('hl_view_contract_id'); localStorage.removeItem('hl_preselected_task_id'); setActiveTab('quotes-subcontractor'); setPreselectedCustomerId(''); setPreselectedProjectId(''); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'quotes-subcontractor' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                              Hồ Sơ Thầu Phụ
-                            </button>
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                )}
-
-                {/* CÀI ĐẶT HỆ THỐNG */}
-                {isAccessible('system-office') && (
-                  <li className="border-t border-gray-200 pt-3 mt-3">
-                    {isAccessible('settings-accounts') && (
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => setIsAccountGroupExpanded(!isAccountGroupExpanded)}
-                          className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-900 text-gray-600 group cursor-pointer transition-colors"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Users className="w-5 h-5 shrink-0 text-indigo-500 transition duration-75 group-hover:text-indigo-600" />
-                            <span className="text-left whitespace-nowrap">Quản Lý Tài Khoản</span>
-                          </span>
-                          <svg className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${isAccountGroupExpanded ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-                        </button>
-                        {isAccountGroupExpanded && (
-                          <ul className="py-1 space-y-1">
-                            <li>
-                              <button onClick={() => { setActiveTab('settings-accounts'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'settings-accounts' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                                Tài Khoản Hệ Thống
-                              </button>
-                            </li>
-                            {isAccessible('settings-roles') && (
-                              <li>
-                                <button onClick={() => { setActiveTab('settings-roles'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center pl-10 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${activeTab === 'settings-roles' ? 'bg-gray-100 text-gray-900 font-semibold' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                                  Phân Quyền Và Vai Trò
-                                </button>
-                              </li>
-                            )}
-                          </ul>
-                        )}
-                      </div>
-                    )}
-
-                    <button onClick={() => { setActiveTab('settings'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center px-2 py-2 mt-1 rounded-lg cursor-pointer transition-colors ${activeTab === 'settings' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                      <Sliders className="w-5 h-5 shrink-0 text-violet-500 mr-2 transition duration-75" />
-                      Cài Đặt Hệ Thống
-                    </button>
-                    {isAccessible('display-settings') && (
-                      <button onClick={() => { setActiveTab('display-settings'); if (mobileMenuOpen) setMobileMenuOpen(false); }} className={`w-full flex items-center px-2 py-2 mt-1 rounded-lg cursor-pointer transition-colors ${activeTab === 'display-settings' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-                        <Palette className="w-5 h-5 shrink-0 text-fuchsia-500 mr-2 transition duration-75" />
-                        Cấu Hình Giao Diện
-                      </button>
-                    )}
-                  </li>
-                )}
-              </ul>
-            </nav>
-
-            {/* ĐỒNG HỒ / CHÂN SIDEBAR */}
-            <div className="border-t border-gray-200 pt-3 mt-3 text-gray-500 shrink-0">
-              <span className="text-[9px] text-gray-400 block font-semibold mb-1">Cán bộ: {currentUser.name}</span>
-              <div className="text-2xl font-black font-sans leading-none text-gray-900">{currentTime || '12:00 PM'}</div>
-              <div className="text-[9px] text-gray-400 mt-1.5 leading-normal">{displaySettings.motivationQuote}</div>
-              {/* Mã build ngắn (ngày + commit) — theo dõi bản đang chạy sau mỗi lần deploy */}
-              <div className="text-[8px] text-gray-300 mt-1 font-mono">v{import.meta.env.VITE_BUILD_DATE} · {import.meta.env.VITE_BUILD_COMMIT}</div>
-            </div>
-          </div>
-        </aside>
+      {/* 1. THANH MENU TRÁI kiểu Zalo (máy tính): thu gọn 68px, bấm logo để mở rộng. Điện thoại dùng thanh dưới (MobileNav) ở cuối trang. */}
+      {navUser && <AppRail brandName={displaySettings.brandName} brandSlogan={displaySettings.brandSlogan} tops={navTops} groups={navGroups} user={navUser}
+        buildTag={`v${import.meta.env.VITE_BUILD_DATE} · ${import.meta.env.VITE_BUILD_COMMIT}`} />}
+      {/* THANH DƯỚI trên điện thoại: 5 mục (Tổng quan, Việc, Tin nhắn, Danh mục, Tôi) */}
+      {navUser && <MobileNav tops={navTops} groups={navGroups} user={navUser} activeTab={activeTab} />}
 
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
-      <div className="flex-1 flex flex-col min-w-0 lg:overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
+      <div className="flex-1 flex flex-col min-w-0 md:overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
 
-        {/* HEADER TOP-BAR - Tall header with 39px top padding to avoid iPhone Dynamic Island. Content/scontrols aligned at bottom via items-end */}
-        <header className="bg-slate-900/50 border-b border-slate-800 px-4 md:px-6 pt-[50px] pb-[10px] flex justify-between items-end shrink-0 shadow-lg" id="top_header_bar">
-          <div className="flex items-center gap-3">
-            {/* Hamburger Button */}
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="md:hidden p-1.5 text-slate-450 hover:text-slate-200 hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer"
-              title="Mở menu"
-            >
-              <Menu className="w-5 h-5 text-slate-300" />
-            </button>
-
-            <span className="text-sm md:text-base font-extrabold text-slate-100 tracking-tight font-sans truncate max-w-[150px] sm:max-w-xs md:max-w-none">
+        {/* THANH TIÊU ĐỀ: điện thoại = nền xanh LoLo phủ cả vùng tai thỏ (đệm env(safe-area-inset-top)), máy tính = thanh trắng gọn.
+            Trang Tin nhắn trên máy tính ẩn thanh này để nội dung chiếm hết màn hình như Zalo. */}
+        <header className={`lx-header sticky top-0 z-30 md:static ${activeTab === 'messages' ? 'lx-hide-md' : ''}`} id="top_header_bar">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="lx-title">
               {activeTab === 'dashboard' && displaySettings.dashboardTitle}
               {activeTab === 'projects' && 'Quản Lý Mốc Thi Công'}
               {activeTab === 'projects-construction' && 'Dự Án Xây Dựng'}
@@ -3994,121 +3659,21 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               {activeTab.startsWith('director-') && '🛡️ PHÒNG GIÁM ĐỐC - BẢNG ĐIỀU HÀNH TỔNG HỢP'}
             </span>
           </div>
-
-          {/* Thông tin đăng nhập giả lập */}
-          <div className="flex items-center gap-2 sm:gap-3 text-xs font-semibold">
+          <div className="flex items-center gap-2">
             {dbSeedSuccess && (
-              <div className="hidden sm:block bg-emerald-900/50 text-emerald-400 border border-emerald-800/60 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-300">
-                {dbSeedSuccess}
-              </div>
+              <div className="hidden sm:block bg-emerald-900/50 text-emerald-400 border border-emerald-800/60 px-3 py-1.5 rounded-lg text-xs font-bold">{dbSeedSuccess}</div>
             )}
-
-            {/* CHUÔNG 🔔 → LỐI TẮT VÀO TIN NHẮN (badge = tổng tin chat chưa đọc) */}
-            {(() => {
-              const chatConvs = getUserConversations(getConversations(), currentUser?.id ?? '');
-              const chatUnreadCount = unreadForBadge(chatConvs, chatPrefsApp);   // không tính hội thoại đã tắt thông báo
-
-              return (
-                <div className="flex items-center gap-2">
-                  {/* Nút quay lại (back) — thay thế cử chỉ vuốt về tab trước trên mobile */}
-                  <button
-                    onClick={() => {
-                      setTabHistory(prev => {
-                        if (prev.length === 0) return prev;
-                        const last = prev[prev.length - 1];
-                        setActiveTabState(last);
-                        return prev.slice(0, -1);
-                      });
-                    }}
-                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors flex items-center justify-center h-8.5 w-8.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Quay lại trang trước"
-                    id="back_nav_btn"
-                    disabled={tabHistory.length === 0}
-                  >
-                    <ArrowLeft className="w-4 h-4 text-emerald-400" />
-                  </button>
-
-                  {/* Nút reload trang */}
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors flex items-center justify-center h-8.5 w-8.5"
-                    title="Tải lại trang"
-                    id="reload_page_btn"
-                  >
-                    <RefreshCw className="w-4 h-4 text-emerald-400" />
-                  </button>
-
-                  <div className="relative" id="notification_bell_root">
-                    <button
-                      onClick={() => { setActiveTab('messages'); if (mobileMenuOpen) setMobileMenuOpen(false); }}
-                      className="p-2 text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer transition-colors relative flex items-center justify-center h-8.5 w-8.5"
-                      title="Tin nhắn"
-                      id="notification_bell_btn"
-                    >
-                      <Bell className="w-4 h-4 text-emerald-400" />
-                      {showBadgeCounts && chatUnreadCount > 0 ? (
-                        <span className="absolute -top-1 -right-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-rose-600 text-[9px] font-black text-white ring-1 ring-rose-500 animate-pulse">
-                          {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                        </span>
-                      ) : null}
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* TÀI KHOẢN ĐĂNG NHẬP - Avatar + tên, click sổ tùy chọn */}
-            <div className="relative" id="user_account_dropdown">
-              <button
-                type="button"
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 p-1 sm:pr-2 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
-              >
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black bg-slate-800 border border-slate-700 text-slate-200 shrink-0 overflow-hidden">
-                  {currentUser.avatar ? (
-                    currentUser.avatar.startsWith('http') ? (
-                      <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <span className="text-base">{currentUser.avatar}</span>
-                    )
-                  ) : (
-                    currentUser.name.charAt(0)
-                  )}
-                </div>
-                <span className="hidden sm:block text-xs font-bold text-slate-200 truncate max-w-[120px]">{currentUser.name}</span>
-                <svg className={`hidden sm:block w-4 h-4 shrink-0 text-slate-400 transition-transform duration-200 ${showUserMenu ? 'rotate-0' : '-rotate-90'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7"/></svg>
-              </button>
-
-              {showUserMenu && (
-                <div className="absolute right-0 top-full mt-1 w-44 z-50 bg-slate-900 border border-slate-800 rounded-lg shadow-xl py-1">
-                  <button
-                    type="button"
-                    onClick={() => { setShowUserMenu(false); setShowProfileModal(true); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer transition-colors"
-                  >
-                    <UserCog className="w-4 h-4 shrink-0 text-slate-400" />
-                    Sửa hồ sơ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowUserMenu(false); setActiveTab('display-settings'); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-indigo-400 hover:bg-indigo-950/40 cursor-pointer transition-colors"
-                  >
-                    <Palette className="w-4 h-4 shrink-0" />
-                    Giao diện & Màu sắc
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowUserMenu(false); handleLogout(); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-950/40 cursor-pointer transition-colors"
-                  >
-                    <LogOut className="w-4 h-4 shrink-0" />
-                    Đăng xuất
-                  </button>
-                </div>
-              )}
-            </div>
-
+            {/* Quay lại trang trước (thay cử chỉ vuốt về trên điện thoại) */}
+            <button type="button" className="lx-hbtn" title="Quay lại trang trước" id="back_nav_btn" disabled={tabHistory.length === 0}
+              onClick={() => { setTabHistory(prev => { if (prev.length === 0) return prev; const last = prev[prev.length - 1]; setActiveTabState(last); return prev.slice(0, -1); }); }}>
+              <ArrowLeft />
+            </button>
+            <button type="button" className="lx-hbtn" title="Tải lại trang" id="reload_page_btn" onClick={() => window.location.reload()}><RefreshCw /></button>
+            {/* Chuông → lối tắt vào Tin nhắn (số = tin chưa đọc, không tính hội thoại đã tắt thông báo) */}
+            <button type="button" className="lx-hbtn" title="Tin nhắn" id="notification_bell_btn" onClick={() => setActiveTab('messages')}>
+              <Bell />
+              {showBadgeCounts && chatUnreadForNav > 0 ? <span className="lx-hbadge">{chatUnreadForNav > 99 ? '99+' : chatUnreadForNav}</span> : null}
+            </button>
           </div>
         </header>
 
@@ -4121,7 +3686,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
         <main
-          className="flex-1 p-3 sm:p-6 lg:overflow-y-auto"
+          className={`flex-1 min-h-0 ${activeTab === 'messages' ? 'p-0 md:overflow-hidden' : 'p-3 sm:p-6 md:overflow-y-auto lx-main-pad'}`}
           id="main_content_scroller"
         >
           {!isAccessible(activeTab) ? (
@@ -5534,7 +5099,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               cuộn, ô tìm kiếm...) và không phải tạo lại channel realtime mỗi
               lần quay lại tab. */}
           {hasVisitedMessages && (
-            <div style={{ display: activeTab === 'messages' ? undefined : 'none' }}>
+            <div style={{ display: activeTab === 'messages' ? undefined : 'none' }} className="lx-fill md:h-full">
             <MessagesHost
               currentUser={currentUser!}
               employees={employees}

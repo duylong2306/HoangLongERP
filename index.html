@@ -2,8 +2,9 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <!-- Mặc định vừa khít màn hình (initial-scale=1) nhưng cho phép người dùng tự co dãn tới 5x -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+    <!-- Cố định trang: KHÔNG cho phóng to/thu nhỏ (như app). viewport-fit=cover để nền phủ tới mép tai thỏ; nội dung tự né bằng env(safe-area-inset-*) (xem shell.css).
+         iOS Safari bỏ qua user-scalable=no với cử chỉ 2 ngón nên còn chặn thêm sự kiện gesture* ở script cuối <body> + touch-action trong shell.css. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>LoLo - Nền tảng ERP đa doanh nghiệp</title>
 
     <!-- PWA Manifest -->
@@ -33,6 +34,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-  </body>
+      <script>
+      // Chặn phóng to bằng 2 ngón trên iOS Safari (gesturestart/change/end) — bổ trợ cho user-scalable=no
+      ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) {
+        document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+      });
+    </script>
+</body>
 </html>
 

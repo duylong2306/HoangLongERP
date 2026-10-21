@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
 // Tin nhắn: công tắc Kiểu mới (mặc định) / Kiểu cũ, nhớ trong localStorage theo người dùng.
-vi.mock('../MessagesZalo', () => ({ default: () => <div data-testid="ui-new">kiểu mới</div> }));
+// Kiểu mới nhận công tắc qua prop headerExtra (đặt đầu cột danh sách) — mô phỏng bằng cách hiển thị nó
+vi.mock('../MessagesZalo', () => ({ default: (p: any) => <div data-testid="ui-new">kiểu mới{p.headerExtra}</div> }));
 vi.mock('../MessagesView', () => ({ default: () => <div data-testid="ui-classic">kiểu cũ</div> }));
 import MessagesHost from '../MessagesHost';
 
@@ -31,6 +32,6 @@ describe('MessagesHost', () => {
     const fs = await import('node:fs');
     const app = fs.readFileSync('src/App.tsx', 'utf8');
     expect(app).toMatch(/<MessagesHost\n/);
-    expect(app.match(/unreadForBadge\(/g)).toHaveLength(2);
+    expect(app.match(/unreadForBadge\(/g)).toHaveLength(1);   // 1 chỗ tính duy nhất, dùng chung cho menu trái, thanh dưới và chuông
   });
 });
