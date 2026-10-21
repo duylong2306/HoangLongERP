@@ -81,7 +81,7 @@
 }
 
 /* ─── THANH DƯỚI (điện thoại) ─── */
-.lx-bnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 58;   /* cao hơn trang Danh mục/Tôi (55) để thanh dưới luôn hiện */
+.lx-bnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;   /* trên trang Danh mục/Tôi (45) nhưng DƯỚI các ngăn kéo/hộp thoại chi tiết (z ≥ 50) để chúng phủ kín cả thanh dưới */
   display: flex; justify-content: space-around; background: #fff; border-top: 1px solid var(--lx-line);
   padding: 6px 4px calc(var(--lx-safe-bottom) + 4px); box-shadow: 0 -2px 12px rgba(15,23,42,.06); }
 .lx-bn { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; padding: 4px 6px; border: 0; background: none; color: #8a95a8; font: inherit; font-size: 10.5px; font-weight: 600; cursor: pointer; }
@@ -97,7 +97,7 @@
 @media (min-width: 768px) { .lx-fill { height: 100%; min-height: 0; } }
 
 /* ─── TRANG DANH MỤC / TÔI (điện thoại) ─── */
-.lx-sheet { position: fixed; inset: 0; z-index: 55; background: #f3f6fb; display: flex; flex-direction: column; animation: lxIn .18s ease-out; }
+.lx-sheet { position: fixed; inset: 0; z-index: 45; background: #f3f6fb; display: flex; flex-direction: column; animation: lxIn .18s ease-out; }
 @keyframes lxIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .lx-sh { display: flex; align-items: center; gap: 12px; flex: none; padding: calc(var(--lx-safe-top) + 6px) 14px 12px; background: linear-gradient(135deg, var(--lx-2), var(--lx-1)); color: #fff; }
 .lx-sh b { font-size: 19px; letter-spacing: -.01em; }
@@ -119,3 +119,21 @@
 
 /* Không cho phóng to/thu nhỏ bằng 2 ngón; vẫn cuộn bình thường */
 html, body { touch-action: pan-x pan-y; }
+
+/* ─── NGĂN KÉO / HỘP THOẠI CHI TIẾT (Dự án, Công việc…) đồng bộ ngôn ngữ mới ─── */
+/* Tiêu đề: nền xanh LoLo, chữ trắng; ở điện thoại chừa vùng tai thỏ phía trên. Chữ trong tiêu đề phải ép màu vì index.css ép lớp text-white thành chữ tối. */
+.lx-drawer-head { background: linear-gradient(135deg, var(--lx-2), var(--lx-1)) !important; color: #fff !important; border-bottom: 0 !important;
+  padding-top: max(var(--lx-safe-top), 14px) !important; padding-left: max(env(safe-area-inset-left, 0px), 16px) !important; padding-right: max(env(safe-area-inset-right, 0px), 16px) !important; }
+.lx-drawer-head .lx-dh-title { color: #fff !important; }
+.lx-drawer-head .lx-dh-sub { color: rgba(255,255,255,.82) !important; }
+.lx-drawer-head .lx-dh-sub b, .lx-drawer-head .lx-dh-sub span { color: inherit !important; }
+.lx-drawer-head .lx-dh-icon { background: rgba(255,255,255,.2) !important; color: #fff !important; box-shadow: none !important; animation: none !important; }
+.lx-drawer-head .lx-dh-icon svg { color: #fff !important; }
+/* Hàng nút: tự xuống dòng thay vì tràn ra ngoài màn hình */
+.lx-dh-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lx-dh-actions button { white-space: nowrap; }
+.lx-dh-close { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 36px; height: 36px; border-radius: 10px; border: 0; cursor: pointer; background: rgba(255,255,255,.2) !important; color: #fff !important; font-weight: 700; font-size: 12px; padding: 0 10px; }
+.lx-dh-close svg { color: #fff !important; }
+@media (max-width: 767px) { .lx-dh-close .lx-dh-close-text { display: none; } .lx-dh-close { padding: 0; width: 36px; } }
+/* Vùng cuộn của ngăn kéo: chừa vạch home phía dưới */
+.lx-drawer-body { padding-bottom: max(var(--lx-safe-bottom), 0px); }

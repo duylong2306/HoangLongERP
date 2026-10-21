@@ -3273,9 +3273,9 @@ export default function ProjectKanbanBoard({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Drawer Header */}
-            <div className="p-4 bg-slate-950 border-b border-slate-800 shrink-0 flex justify-between items-center">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg animate-pulse">
+            <div className="lx-drawer-head p-4 bg-slate-950 border-b border-slate-800 shrink-0 flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="lx-dh-icon w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg shrink-0">
                   <Briefcase className="w-5 h-5 text-slate-950" />
                 </div>
                 <div>
@@ -3287,8 +3287,8 @@ export default function ProjectKanbanBoard({
                        {sector === 'construction' ? 'PHÂN HỆ XÂY DỰNG' : sector === 'furniture' ? 'PHÂN HỆ NỘI THẤT' : 'PHÂN HỆ CƠ KHÍ'}
                     </span>
                   </div>
-                  <h4 className="font-black text-white text-base mt-0.5">{selectedProject.name}</h4>
-                  <div className="flex items-center gap-1.5 mt-0.5 text-slate-400">
+                  <h4 className="lx-dh-title font-black text-white text-base mt-0.5 break-words">{selectedProject.name}</h4>
+                  <div className="lx-dh-sub flex flex-wrap items-center gap-x-1.5 mt-0.5 text-slate-400">
                     <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">Khách hàng / Chủ nhà:</span>
                     <span className="text-emerald-400 font-extrabold text-[11px]">
                       {customers.find(c => c.id === editCustomerId)?.name || 'Ẩn danh'}
@@ -3297,7 +3297,7 @@ export default function ProjectKanbanBoard({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="lx-dh-actions md:shrink-0">
                 <button
                   onClick={() => {
                     try {
@@ -3441,18 +3441,15 @@ export default function ProjectKanbanBoard({
                   </>
                 )}
 
-                <button
-                  onClick={() => setSelectedProjectId(null)}
-                  className="p-1 px-3 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg border border-slate-800 font-bold flex items-center gap-1 cursor-pointer"
-                >
+                <button onClick={() => setSelectedProjectId(null)} className="lx-dh-close" aria-label="Đóng" data-testid="project-detail-close">
                   <X className="w-4 h-4" />
-                  Đóng Chi tiết
+                  <span className="lx-dh-close-text">Đóng Chi tiết</span>
                 </button>
               </div>
             </div>
 
             {/* Drawer Content */}
-            <div className="flex-1 overflow-hidden flex flex-col lg:flex-row" id="drawer_scrollable_body">
+            <div className="lx-drawer-body flex-1 overflow-hidden flex flex-col lg:flex-row" id="drawer_scrollable_body">
               {/* Left major side detail (7 columns width analog) */}
               <div className="flex-1 p-4 md:p-5 space-y-6 overflow-y-auto h-full border-b lg:border-b-0 lg:border-r border-slate-800" id="drawer_left_pane">
                 

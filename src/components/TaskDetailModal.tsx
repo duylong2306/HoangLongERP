@@ -1678,9 +1678,9 @@ export default function TaskDetailModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-4 bg-slate-950 border-b border-slate-800 shrink-0 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
+        <div className="lx-drawer-head p-4 bg-slate-950 border-b border-slate-800 shrink-0 flex justify-between items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="lx-dh-icon w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shrink-0">
               <Zap className="w-5.5 h-5.5 text-slate-950 animate-pulse" />
             </div>
             <div>
@@ -1689,20 +1689,17 @@ export default function TaskDetailModal({
                   {selectedTask.code}
                 </span>
               </div>
-              <h4 className="font-extrabold text-white text-md mt-1">CHI TIẾT CÔNG VIỆC</h4>
+              <h4 className="lx-dh-title font-extrabold text-white text-md mt-1">CHI TIẾT CÔNG VIỆC</h4>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 px-3 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg border border-slate-800 cursor-pointer flex items-center gap-1.5 transition text-[11px] font-bold"
-          >
+          <button onClick={onClose} className="lx-dh-close shrink-0" aria-label="Đóng" data-testid="task-detail-close">
             <X className="w-4 h-4" />
-            Đóng bảng tin
+            <span className="lx-dh-close-text">Đóng bảng tin</span>
           </button>
         </div>
 
         {/* Dynamic Connected Layout Container */}
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        <div className="lx-drawer-body flex-1 flex flex-col lg:flex-row overflow-hidden">
           
           {/* Scrollable Core Elements */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/70 flex flex-col justify-between" id="modal_left_scrollable">
