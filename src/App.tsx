@@ -69,7 +69,9 @@ import { getPasswordNotice, setPasswordNotice, type PasswordNotice } from './lib
 import { materialInboxFor } from './lib/materialApproval';
 import { findSupplierLiability } from './lib/liabilityPayments';
 import { isPaymentPendingForUser, isAdvancePendingForUser } from './lib/approvalInbox';
-import MessagesView from './components/MessagesView';
+import MessagesHost from './components/MessagesHost';
+import { useChatPrefs } from './lib/useChatPrefs';
+import { unreadForBadge } from './lib/chatPrefs';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
@@ -942,6 +944,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   // Yêu cầu đổi mật khẩu của phiên (đặt ở Login.tsx sau khi máy chủ báo); đọc lại ở handleLoginSuccess
   const [pwNotice, setPwNotice] = useState<PasswordNotice | null>(() => getPasswordNotice());
+  // Tùy chọn Tin nhắn của người dùng (tắt thông báo/ghim hội thoại) — dùng cho huy hiệu chưa đọc ở menu
+  const chatPrefsApp = useChatPrefs(currentUser?.id);
   // Trạng thái online/offline: đã đăng nhập → "điểm danh" vào kênh presence của công ty; đăng xuất/đóng app → tự gỡ (xem lib/presence.ts)
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -3539,7 +3543,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                       {(() => {
                         const conversations = getConversations();
                         const userConvs = getUserConversations(conversations, currentUser?.id ?? '');
-                        const chatUnreadCount = userConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+                        const chatUnreadCount = unreadForBadge(userConvs, chatPrefsApp);   // không tính hội thoại đã tắt thông báo
                         return chatUnreadCount > 0 ? (
                           <span className="inline-flex items-center justify-center w-5 h-5 ms-2 text-[10px] font-medium text-white bg-rose-600 rounded-full">{chatUnreadCount > 99 ? '99+' : chatUnreadCount}</span>
                         ) : null;
@@ -3925,7 +3929,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
             {/* CHUÔNG 🔔 → LỐI TẮT VÀO TIN NHẮN (badge = tổng tin chat chưa đọc) */}
             {(() => {
               const chatConvs = getUserConversations(getConversations(), currentUser?.id ?? '');
-              const chatUnreadCount = chatConvs.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+              const chatUnreadCount = unreadForBadge(chatConvs, chatPrefsApp);   // không tính hội thoại đã tắt thông báo
 
               return (
                 <div className="flex items-center gap-2">
@@ -5454,7 +5458,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               lần quay lại tab. */}
           {hasVisitedMessages && (
             <div style={{ display: activeTab === 'messages' ? undefined : 'none' }}>
-            <MessagesView
+            <MessagesHost
               currentUser={currentUser!}
               employees={employees}
               tasks={tasks}
