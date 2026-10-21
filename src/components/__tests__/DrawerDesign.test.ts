@@ -23,4 +23,11 @@ describe('Ngăn kéo chi tiết — đồng bộ thiết kế mới', () => {
     expect(task).toMatch(/z-\[110\]/);
     expect(Number(/\.lx-sheet\s*\{[^}]*z-index:\s*(\d+)/.exec(css)![1])).toBeLessThan(nav);   // trang Danh mục dưới thanh dưới
   });
+  it('điện thoại: chi tiết dự án chia 2 thẻ Thông tin | Công việc, không để danh sách công việc che hết thông tin', () => {
+    expect(proj).toContain('project-mobile-tabs');
+    expect(proj).toMatch(/mobileTab === 'info' \? '' : 'max-lg:hidden'/);    // cột thông tin ẩn khi đang ở thẻ Công việc
+    expect(proj).toMatch(/mobileTab === 'tasks' \? '' : 'max-lg:hidden'/);   // cột công việc ẩn khi đang ở thẻ Thông tin
+    expect(proj).toMatch(/useEffect\(\(\) => \{ setMobileTab\('info'\); \}, \[selectedProjectId\]\)/);   // mở dự án khác → về thẻ Thông tin
+    expect(proj).toMatch(/lg:hidden shrink-0 grid grid-cols-2/);                // thanh thẻ chỉ hiện dưới 1024px
+  });
 });

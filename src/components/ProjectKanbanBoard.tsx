@@ -1813,6 +1813,9 @@ export default function ProjectKanbanBoard({
   });
   const [subTaskPriority, setSubTaskPriority] = useState<TaskPriority>('medium');
   const [showSubtaskForm, setShowSubtaskForm] = useState(false);
+  // Điện thoại: ngăn kéo chi tiết dự án chia 2 thẻ "Thông tin" | "Công việc" (trước đây danh sách công việc chiếm hết màn hình, che mất thông tin dự án). Máy tính vẫn hiện 2 cột.
+  const [mobileTab, setMobileTab] = useState<'info' | 'tasks'>('info');
+  useEffect(() => { setMobileTab('info'); }, [selectedProjectId]);
   const [subTaskIsApprovalEnabled, setSubTaskIsApprovalEnabled] = useState(false);
   const [subTaskIsCostEnabled, setSubTaskIsCostEnabled] = useState(false);
   const [subTaskIsMaterialEnabled, setSubTaskIsMaterialEnabled] = useState(false);
@@ -3449,9 +3452,15 @@ export default function ProjectKanbanBoard({
             </div>
 
             {/* Drawer Content */}
-            <div className="lx-drawer-body flex-1 overflow-hidden flex flex-col lg:flex-row" id="drawer_scrollable_body">
+            {/* Thẻ chuyển Thông tin | Công việc — chỉ hiện ở màn hình hẹp (dưới 1024px) */}
+            <div className="lg:hidden shrink-0 grid grid-cols-2 bg-white border-b border-slate-200" role="tablist" aria-label="Chi tiết dự án" data-testid="project-mobile-tabs">
+              {([['info', 'Thông tin dự án'], ['tasks', `Công việc (${tasks.filter(t => t.projectId === selectedProject.id).length})`]] as const).map(([k, label]) => (
+                <button key={k} type="button" role="tab" aria-selected={mobileTab === k} onClick={() => setMobileTab(k)}
+                  className={`py-3 text-[13px] font-extrabold border-b-[3px] cursor-pointer transition-colors ${mobileTab === k ? 'text-[#0a4fd8] border-[#0a4fd8] bg-[#f3f7ff]' : 'text-slate-500 border-transparent'}`}>{label}</button>))}
+            </div>
+            <div className="lx-drawer-body flex-1 min-h-0 overflow-hidden flex flex-col lg:flex-row" id="drawer_scrollable_body">
               {/* Left major side detail (7 columns width analog) */}
-              <div className="flex-1 p-4 md:p-5 space-y-6 overflow-y-auto h-full border-b lg:border-b-0 lg:border-r border-slate-800" id="drawer_left_pane">
+              <div className={`flex-1 p-4 md:p-5 space-y-6 overflow-y-auto h-full border-b lg:border-b-0 lg:border-r border-slate-800 ${mobileTab === 'info' ? '' : 'max-lg:hidden'}`} id="drawer_left_pane">
                 
                 {/* 1. Basic detail card */}
                 <div className="bg-slate-950 border border-slate-850 p-5 rounded-2xl space-y-4">
@@ -3933,7 +3942,7 @@ export default function ProjectKanbanBoard({
               </div>
 
               {/* Right utility rail panels - REPLACED WITH SUBTASK LIST & CREATION */}
-              <div className="w-full lg:w-[640px] bg-slate-950 p-4 md:p-5 space-y-4 flex flex-col shrink-0 h-full overflow-hidden border-t lg:border-t-0 lg:border-l border-slate-800" id="drawer_right_pane">
+              <div className={`w-full lg:w-[640px] bg-slate-950 p-4 md:p-5 space-y-4 flex flex-col shrink-0 h-full overflow-hidden border-t lg:border-t-0 lg:border-l border-slate-800 ${mobileTab === 'tasks' ? '' : 'max-lg:hidden'}`} id="drawer_right_pane">
                 <div className="flex-1 flex flex-col min-h-0">
                   
                   {/* ===========================================================================
