@@ -3413,7 +3413,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       approverIds: getMaterialApprovers().map(a => a.id),
       coordinatorIds: getMaterialCoordinators().map(c => c.id),
     });
+    // Đề xuất chờ LẬP PHIẾU (KT): cả phòng Kế toán/Giám đốc hoặc chính người lập — cùng quy tắc với danh sách "Chờ tôi xử lý" (trước đây huy hiệu bỏ sót nên thấp hơn số thẻ thật)
+    const myPendingVouchersBadge = subcontractorAdvances.filter(a => a.status === 'pending_payment' && (isRoleAccounting(currentUser.id) || isFinanceAdminBadge || a.creator === currentUser.id
+      || (a.creatorName && currentUser.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase())
+      || (a.creator && currentUser.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))).length;
     const toReviewUncompletedCount = toReviewTasksCount
+      + myPendingVouchersBadge
       + myPendingLeaves.length
       + myPendingPayments.length
       + myPendingAdvances.length

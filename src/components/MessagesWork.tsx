@@ -52,9 +52,9 @@ export function WorkList({ entries, selectedKey, onSelect, unreadKeys, today, qu
             {rows.map(e => (
               <button key={e.key} type="button" data-testid="work-row" data-work={e.key} onClick={() => onSelect(e.key)}
                 className={`w-full text-left grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 items-center cursor-pointer ${selectedKey === e.key ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
-                <span className={`w-11 h-11 rounded-2xl grid place-items-center text-[10px] font-black text-center leading-tight ${TONE[e.chipTone] || TONE.slate}`}>{e.chip.slice(0, 7)}</span>
+                <span className={`w-12 h-12 rounded-2xl grid place-items-center px-0.5 text-[9.5px] font-black text-center leading-[1.1] break-words ${TONE[e.chipTone] || TONE.slate}`}>{e.chip}</span>
                 <span className="min-w-0">
-                  <span className="flex items-center gap-2"><b className="text-[14px] font-semibold truncate">{e.title}</b>{unreadKeys.has(e.key) && <i className="ml-auto w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" data-testid="work-unread" aria-label="Có thảo luận mới" />}</span>
+                  <span className="flex items-center gap-2"><b className="text-[14px] font-semibold truncate" title={e.title}>{e.title}</b>{unreadKeys.has(e.key) && <i className="ml-auto w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" data-testid="work-unread" aria-label="Có thảo luận mới" />}</span>
                   <span className="flex items-center justify-between gap-2 mt-0.5"><span className="text-[12.5px] text-slate-500 truncate">{e.meta}</span>{e.amount ? <b className="text-[12px] text-rose-600 whitespace-nowrap">{money(e.amount)}</b> : e.right ? <b className="text-[11px] text-slate-500 whitespace-nowrap">{e.right}</b> : <DueChip due={e.due} today={today} />}</span>
                 </span>
               </button>
