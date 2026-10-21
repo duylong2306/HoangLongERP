@@ -3428,6 +3428,33 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return assignedUncompletedCount + relatedUncompletedCount + toReviewUncompletedCount;
   })();
 
+  // Duyệt/Từ chối ĐỀ XUẤT THU CHI ngay trong Tin nhắn — cùng hành vi handleApproveAdvance của menu Việc của tôi (TaskManagement):
+  // kiểm quyền bằng đúng quy tắc huy hiệu, lưu trạng thái, nhắn kết quả cho người lập, báo lại.
+  const approveAdvanceFromMessages = async (id: string, decision: 'approved' | 'rejected') => {
+    if (!currentUser) return;
+    const adv = subcontractorAdvances.find(a => a.id === id);
+    const allowed = !!adv && isAdvancePendingForUser(adv, currentUser, { isAdmin: isRoleAdmin(currentUser.id), isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, adv), employeeIds: new Set(employees.map(e => e.id)) });
+    if (!adv || !allowed) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt đề xuất này (hoặc đề xuất đã được xử lý).', type: 'warning' }); return; }
+    const updated = { ...adv, status: decision === 'approved' ? 'pending_payment' : 'rejected' } as SubcontractorAdvanceProposal;
+    try {
+      await dbService.subcontractorAdvances.save(updated);
+      window.dispatchEvent(new CustomEvent('hl-subcontractor-advances-updated', { detail: updated }));
+      const creatorEmp = adv.creator ? employees.find(e => e.id === adv.creator) : findEmployeeByName(employees, adv.creatorName);
+      if (creatorEmp?.id && currentUser.id !== creatorEmp.id) {
+        sendApprovalDirectMessage({
+          senderId: currentUser.id, senderName: currentUser.name, senderRole: currentUser.role, recipientId: creatorEmp.id, recipientName: creatorEmp.name || adv.creatorName || 'Người lập đề xuất',
+          content: decision === 'approved'
+            ? `✅ Đã duyệt đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`
+            : `❌ Đã từ chối đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`,
+          relatedEntity: { type: 'advance', id: adv.id },
+        });
+      }
+      addToast({ title: decision === 'approved' ? '✅ Đã phê duyệt' : '❌ Đã từ chối', message: `Đề xuất ${id} → ${decision === 'approved' ? 'Chờ Lập Phiếu (KT)' : 'Từ Chối'}`, type: decision === 'approved' ? 'success' : 'info' });
+    } catch (err) {
+      addToast({ title: '❌ Lỗi', message: `Thất bại: ${err instanceof Error ? err.message : String(err)}`, type: 'error' });
+    }
+  };
+
   // ─── Dữ liệu cho tab "Việc của tôi" trong Tin nhắn: CÙNG quy tắc quyền với menu Việc của tôi (TaskManagement) ───
   const messagesWork = (() => {
     // Chỉ tính khi đã mở menu Tin nhắn (App render rất thường xuyên — tránh tốn công khi chưa cần)
@@ -3463,6 +3490,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         finance: (id) => openFinanceVoucher(id),
         material: (id) => openMaterialProposal(id),
         myWork: () => setActiveTab('tasks'),
+        approve: (kind, id, decision) => { if (kind === 'pm') { if (payments.some(p => p.id === id)) handleApprovePayment(id, decision); } else approveAdvanceFromMessages(id, decision); },
       },
     });
     return { items, inbox };
@@ -5524,6 +5552,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                 }
               }}
               onOpenWorkTask={(id) => { setDeepLinkTaskId(id); setActiveTab('tasks'); }}
+              onCreateTask={handleAddTask}
+              projects={projects}
               onNavigateTab={(tab) => setActiveTab(tab)}
               initialConversationId={initialConvId ?? undefined}
               showBadgeCounts={showBadgeCounts}

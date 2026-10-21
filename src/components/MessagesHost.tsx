@@ -12,6 +12,7 @@ import { uiKey, readMessagesUi, writeMessagesUi, type MessagesUi } from '../lib/
 interface Props {
   currentUser: Employee; employees: Employee[]; onNavigateTab?: (tab: string) => void; tasks?: Task[]; onUpdateTask?: (taskId: string, updates: any) => void;
   workItems?: MyWorkItem[]; workInbox?: InboxItem[]; onReceiveWork?: (it: MyWorkItem) => void; onOpenWorkTask?: (taskId: string) => void;
+  onCreateTask?: (t: Task) => Promise<void> | void; projects?: { id: string; name: string; pmId?: string }[];
   initialConversationId?: string; showBadgeCounts?: boolean; onToggleBadgeCounts?: (next: boolean) => void;
 }
 

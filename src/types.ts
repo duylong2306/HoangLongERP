@@ -1031,8 +1031,11 @@ export interface ChatMessage {
     users: string[];      // Danh sách userId đã thả emoji này
   }[];
   relatedEntity?: {       // Thực thể liên quan để điều hướng (task, project, mission, leave, payment, advance, travel_expense)
-    type: 'task' | 'project' | 'mission' | 'leave' | 'payment' | 'advance' | 'travel_expense';
+    type: 'task' | 'project' | 'mission' | 'leave' | 'payment' | 'advance' | 'travel_expense' | 'material';
     id: string;
+    // THẺ VIỆC/ĐỀ XUẤT hiện trong khung chat (gửi từ tab Việc của tôi): có nút Nhận việc / Duyệt / Từ chối / Mở ngay trong tin nhắn.
+    // key = khóa mục của "Việc của tôi" (vd task:<id>, ap:ad:<id>) để tra trạng thái và hành động HIỆN TẠI của người xem.
+    card?: { kind: 'task' | 'approval'; key: string; title: string; sub?: string; amount?: number; chip?: string };
   };
 }
 

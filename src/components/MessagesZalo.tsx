@@ -6,7 +6,7 @@ import {
   getConversations, getMessages, addMessage, getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
   markConversationRead, markMessagesReadByUser, updateMessage, softDeleteMessage, togglePinMessage, toggleMessageReaction,
   addMemberToConversation, isUserInConversation, loadConversationsFromCloud, loadMessagesFromCloud, subscribeConversations, subscribeMessages,
-  searchMessagesInConversation,
+  searchMessagesInConversation, sendApprovalDirectMessage,
 } from '../lib/chatStore';
 import { usePresence } from '../lib/presence';
 import { companyScopedKey } from '../lib/supabase';
@@ -19,6 +19,7 @@ import {
 } from '../lib/chatInfo';
 import UserAvatar from './UserAvatar';
 import { WorkList, WorkDetail } from './MessagesWork';
+import { WorkCardView, SendWorkDialog, CreateTaskDialog, cardOfEntry, type NewTaskInput } from './MessagesWorkCards';
 import type { InboxItem } from './MyWorkOverview';
 import { buildWorkEntries } from '../lib/workEntries';
 import { workThreadId, isWorkThreadId } from '../lib/workThread';
@@ -42,6 +43,9 @@ interface Props {
   workInbox?: InboxItem[];
   onReceiveWork?: (it: MyWorkItem) => void;
   onOpenWorkTask?: (taskId: string) => void;
+  /** Tạo công việc mới (lưu lên hệ thống) — dùng cho "Tạo công việc từ tin nhắn" */
+  onCreateTask?: (t: Task) => Promise<void> | void;
+  projects?: { id: string; name: string; pmId?: string }[];
 }
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
@@ -67,7 +71,7 @@ function ConvAvatar({ conv, employees, me, size }: { conv: Conversation; employe
   );
 }
 
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [] }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -240,6 +244,58 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       setMessages(applyWindow(getMessages(conv.id))); setConversations(getConversations());
       setText(''); setAttachments([]); setReplyTo(null); setMention(null); setEmojiOpen(false);
     } finally { setSending(false); }
+  };
+
+  // ─── Việc trong chat: gửi thẻ việc/đề xuất, tạo công việc từ tin nhắn ───
+  const [sendWorkOpen, setSendWorkOpen] = useState(false);
+  const [createFrom, setCreateFrom] = useState<ChatMessage | null>(null);
+  /** Hội thoại đang mở; nếu mới chọn người (chưa có hội thoại) thì tạo luôn. */
+  const ensureConv = async (): Promise<Conversation | null> => {
+    if (selected) return selected;
+    if (!pendingEmpId) return null;
+    const emp = employees.find(e => e.id === pendingEmpId); if (!emp) return null;
+    const c = await getOrCreatePersonalConversation(me, emp.id, currentUser.name, emp.name);
+    setSelectedId(c.id); setPendingEmpId(null); setConversations(getConversations());
+    return c;
+  };
+  const pushCard = async (conv: Conversation, entity: { type: any; id: string }, card: any, lead: string) => {
+    await addMessage({
+      conversationId: conv.id, senderId: me, senderName: currentUser.name, senderRole: currentUser.role || 'member',
+      content: lead, relatedEntity: { ...entity, card },
+    });
+    setMessages(applyWindow(getMessages(conv.id))); setConversations(getConversations());
+  };
+  /** "Gửi việc vào hội thoại": đưa 1 việc/đề xuất của tôi vào hội thoại dưới dạng thẻ có nút xử lý. */
+  const sendWorkCard = async (e: (typeof workEntries)[number]) => {
+    setSendWorkOpen(false);
+    const conv = await ensureConv(); if (!conv) return;
+    const { card, entity } = cardOfEntry(e);
+    await pushCard(conv, entity, card, `📌 ${e.chip}: ${e.title}`);
+  };
+  /** "Tạo công việc từ tin nhắn": tạo công việc thật, rồi gửi thẻ việc vào hội thoại (và nhắn riêng người nhận nếu họ không ở trong hội thoại này). */
+  const createTaskFromMessage = async (v: NewTaskInput) => {
+    if (!onCreateTask) return;
+    setCreateFrom(null);
+    const conv = await ensureConv(); if (!conv) return;
+    const n = tasks.length + 1;
+    const task: Task = {
+      id: `task_${Date.now()}`, code: `CV-${n < 10 ? `00${n}` : n < 100 ? `0${n}` : n}`, projectId: v.projectId, name: v.name,
+      description: createFrom?.content ? `Tạo từ tin nhắn của ${createFrom.senderName}: ${createFrom.content}`.slice(0, 500) : '',
+      assignerId: me, assigneeId: v.assigneeId, department: '', deadline: v.deadline, priority: 'medium', status: 'todo', completionRate: 0,
+      approvals: [],
+      workLogs: [{ id: `wl_init_${Date.now()}`, actorId: me, actorName: currentUser.name, action: 'Khởi tạo công việc từ tin nhắn.', timestamp: new Date().toISOString() }],
+    };
+    await onCreateTask(task);
+    const assignee = employees.find(e => e.id === v.assigneeId);
+    const proj = projects.find(p => p.id === v.projectId)?.name;
+    const card = { kind: 'task' as const, key: `task:${task.id}`, title: task.name, sub: `${assignee?.name || ''}${proj ? ` · ${proj}` : ''} · hạn ${v.deadline.slice(8, 10)}/${v.deadline.slice(5, 7)}`, chip: 'Công việc' };
+    await pushCard(conv, { type: 'task', id: task.id }, card, `📌 ${currentUser.name} đã giao công việc "${task.name}"${assignee ? ` cho ${assignee.name}` : ''} (hạn ${v.deadline}).`);
+    // Người nhận việc chưa có trong hội thoại này → nhắn riêng để họ thấy ngay (cùng cách giao việc ở menu Công việc)
+    if (assignee && v.assigneeId !== me && !conv.participantIds.includes(v.assigneeId)) {
+      sendApprovalDirectMessage({ senderId: me, senderName: currentUser.name, senderRole: currentUser.role, recipientId: assignee.id, recipientName: assignee.name,
+        content: `📌 ${currentUser.name} đã GIAO cho bạn công việc "${task.name}" (Hạn: ${v.deadline}).`, relatedEntity: { type: 'task', id: task.id } });
+    }
+    addToast({ title: '✅ Đã tạo công việc', message: `"${task.name}" đã được giao${assignee ? ` cho ${assignee.name}` : ''}.`, type: 'success' });
   };
 
   const onTextChange = (v: string) => {
@@ -436,6 +492,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               </div>)}
           </div>
           <div className="flex-1 overflow-y-auto min-h-0" data-testid="zalo-list">
+            {workEntries.length > 0 && !query.trim() && (
+              <button type="button" onClick={() => setLeftMode('work')} data-testid="zalo-today" className="w-[calc(100%-1.5rem)] mx-3 mt-2 mb-1 flex items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#0068ff] to-[#4f8dff] text-white px-3.5 py-2.5 text-left cursor-pointer">
+                <span><b className="block text-[14px]">Hôm nay</b><span className="block text-[12px] opacity-95">{workEntries.filter(e => e.section === 'today').length} việc đến hạn · {workEntries.filter(e => e.section === 'late').length} quá hạn · {workEntries.filter(e => e.section === 'inbox').length} mục chờ bạn xử lý</span></span>
+                <span className="text-[12px] font-bold bg-white/20 rounded-full px-3 py-1 whitespace-nowrap">Xem →</span>
+              </button>)}
             {listed.length === 0 && <div className="py-14 text-center text-slate-500 text-[13px]"><MessageSquare className="w-8 h-8 mx-auto mb-2 text-slate-300" />{tab === 'unread' ? 'Không có tin chưa đọc 🎉' : 'Không có hội thoại nào'}</div>}
             {listed.map(c => {
               const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const pinned = isPinnedConv(c, prefs); const o = otherOf(c);
@@ -511,7 +572,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                               {(m.attachments || []).filter(a => a.type !== 'file' && (a.mimeType || 'image/').startsWith('image/')).map(a => <button key={a.id} type="button" onClick={() => setExpanded(a.url)} className="block mb-1 cursor-pointer"><img src={a.url} alt={a.name} className="max-w-[240px] max-h-[200px] rounded-lg object-cover" /></button>)}
                               {(m.attachments || []).filter(a => a.type === 'file' || !(a.mimeType || 'image/').startsWith('image/')).map(a => <a key={a.id} href={a.url} download={a.name} className="flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-1.5 mb-1 text-[12.5px]"><Paperclip className="w-4 h-4 text-slate-500" /><span className="truncate max-w-[200px]">{a.name}</span><small className="text-slate-500">{fmtSize(a.size)}</small></a>)}
                               {m.content && !(m.attachments?.length && m.content.startsWith('📎')) && <div>{renderContent(m.content)}</div>}
-                              {m.relatedEntity && <button type="button" onClick={() => openRelated(m)} className="mt-1.5 text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 cursor-pointer inline-flex items-center gap-1"><ClipboardList className="w-3.5 h-3.5" />Mở chi tiết</button>}
+                              {m.relatedEntity?.card && <WorkCardView card={m.relatedEntity.card} entry={workEntries.find(e => e.key === m.relatedEntity!.card!.key)} onOpen={m.relatedEntity.type === 'task' ? () => onOpenWorkTask?.(m.relatedEntity!.id) : undefined} />}
+                              {m.relatedEntity && !m.relatedEntity.card && <button type="button" onClick={() => openRelated(m)} className="mt-1.5 text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 cursor-pointer inline-flex items-center gap-1"><ClipboardList className="w-3.5 h-3.5" />Mở chi tiết</button>}
                             </>)}
                             {(first || m.edited) && !m.deleted && <div className="text-[10.5px] text-slate-500 mt-0.5">{hhmm(m.createdAt)}{m.edited ? ' · đã chỉnh sửa' : ''}{m.pinned ? ' · 📌' : ''}</div>}
                           </div>
@@ -528,6 +590,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                                 <div className={`absolute z-30 bottom-full mb-1 ${mineMsg ? 'right-0' : 'left-0'} bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-52`} role="menu" data-testid="zalo-msgmenu">
                                   <div className="flex justify-around px-2 py-1.5 border-b border-slate-100">{QUICK_EMOJIS.map(e => <button key={e} type="button" onClick={() => react(m, e)} className="text-lg hover:scale-125 transition cursor-pointer" aria-label={`Thả ${e}`}>{e}</button>)}</div>
                                   <button type="button" role="menuitem" onClick={() => pinMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Pin className="w-4 h-4" />{m.pinned ? 'Bỏ ghim tin nhắn' : 'Ghim tin nhắn'}</button>
+                                  {onCreateTask && m.content && !m.relatedEntity?.card && <button type="button" role="menuitem" onClick={() => { setCreateFrom(m); setMenuFor(null); }} data-testid="zalo-menu-createtask" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><ClipboardList className="w-4 h-4" />Tạo công việc từ tin nhắn</button>}
+                                  {workEntries.length > 0 && <button type="button" role="menuitem" onClick={() => { setSendWorkOpen(true); setMenuFor(null); }} data-testid="zalo-menu-sendwork" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><Paperclip className="w-4 h-4" />Gửi việc vào hội thoại</button>}
                                   <button type="button" role="menuitem" onClick={() => copyMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Copy className="w-4 h-4" />Sao chép</button>
                                   {mineMsg && !m.attachments?.length && <button type="button" role="menuitem" onClick={() => { setEditing({ id: m.id, text: m.content }); setText(m.content); setMenuFor(null); }} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Edit3 className="w-4 h-4" />Chỉnh sửa</button>}
                                   {mineMsg && <button type="button" role="menuitem" onClick={() => recall(m)} className="w-full text-left px-3 py-1.5 text-[13px] text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"><Trash2 className="w-4 h-4" />Thu hồi</button>}
@@ -553,6 +617,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 <button type="button" title="Biểu tượng cảm xúc" aria-label="Biểu tượng cảm xúc" onClick={() => setEmojiOpen(v => !v)} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Smile className="w-5 h-5" /></button>
                 <button type="button" title="Gửi ảnh" aria-label="Gửi ảnh" onClick={() => imgRef.current?.click()} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><ImageIcon className="w-5 h-5" /></button>
                 <button type="button" title="Đính kèm tệp" aria-label="Đính kèm tệp" onClick={() => fileRef.current?.click()} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Paperclip className="w-5 h-5" /></button>
+                {workEntries.length > 0 && <button type="button" title="Gửi việc vào hội thoại" aria-label="Gửi việc vào hội thoại" onClick={() => setSendWorkOpen(true)} data-testid="zalo-sendwork-btn" className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><ClipboardList className="w-[18px] h-[18px]" /></button>}
                 <input ref={imgRef} type="file" accept="image/*" multiple hidden onChange={e => onFiles(e, 'image')} data-testid="zalo-img-input" />
                 <input ref={fileRef} type="file" multiple hidden onChange={e => onFiles(e, 'file')} data-testid="zalo-file-input" />
               </div>
@@ -571,6 +636,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
         {leftMode === 'chat' && isDesktop && infoOpen && selected && <div className="min-h-0">{infoPanel}</div>}
       </div>
       {leftMode === 'chat' && !isDesktop && infoOpen && selected && showChat && <div className="absolute inset-0 z-40 bg-white overflow-y-auto" data-testid="zalo-info-mobile">{infoPanel}</div>}
+
+      {sendWorkOpen && <SendWorkDialog entries={workEntries} onPick={sendWorkCard} onClose={() => setSendWorkOpen(false)} />}
+      {createFrom && <CreateTaskDialog initialName={createFrom.content} employees={employees} me={me} projects={projects}
+        defaultAssigneeId={selected?.type === 'personal' ? selected.participantIds.find(i => i !== me) : undefined} defaultProjectId={selected?.projectId}
+        onCreate={createTaskFromMessage} onClose={() => setCreateFrom(null)} />}
 
       {/* ── Hộp thoại ── */}
       {newChatOpen && (
