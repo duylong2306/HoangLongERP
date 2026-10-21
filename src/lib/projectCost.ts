@@ -134,3 +134,75 @@ export function describeProjectCost(c: ProjectCost, fmt: (n: number) => string):
     `Còn phải chi: ${fmt(c.remaining)}`,
   ].join('\n');
 }
+
+// ─── CHI TIẾT TỪNG KHOẢN của tổng chi phí (cho màn hình "Chi tiết chi phí") ───
+// Dựng danh sách khoản theo ĐÚNG quy tắc của buildProjectCosts → cộng từng nhóm ra đúng số ở bảng (có test đối chiếu).
+export type CostGroup = 'material' | 'warehouse' | 'subcontract' | 'site' | 'other' | 'pending';
+export interface CostItem {
+  id: string; group: CostGroup;
+  title: string;       // tên khoản (đơn mua hàng, phiếu chi, hợp đồng…)
+  sub?: string;        // dòng phụ: nhà cung cấp / người nhận / ghi chú
+  date?: string;       // YYYY-MM-DD (nếu có)
+  amount: number;      // số tiền tính vào tổng chi phí
+  paid: number;        // phần đã chi trong khoản này
+  tag?: string;        // nhãn nhỏ (vd "Chờ duyệt", "Tiền mặt", "Chưa trả")
+}
+export const COST_GROUPS: { key: CostGroup; label: string; color: string; hint: string }[] = [
+  { key: 'material', label: 'Vật tư (nhà cung cấp)', color: '#0a4fd8', hint: 'Tổng tiền các đơn mua hàng của công trình' },
+  { key: 'warehouse', label: 'Kho', color: '#0ea5e9', hint: 'Vật tư xuất từ kho cho công trình' },
+  { key: 'subcontract', label: 'Thầu phụ', color: '#f59e0b', hint: 'Đã trả thầu phụ + phần hợp đồng đã duyệt còn chưa trả' },
+  { key: 'site', label: 'Chi phí công trường', color: '#10b981', hint: 'Phiếu chi "chi phí công trường" đã duyệt' },
+  { key: 'other', label: 'Chi khác', color: '#8b5cf6', hint: 'Phiếu chi đã duyệt khác: nhân công, vận chuyển…' },
+  { key: 'pending', label: 'Chờ duyệt', color: '#e11d48', hint: 'Chưa chi, nhưng sẽ chi (phiếu/đề xuất đang chờ)' },
+];
+const day = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : undefined);
+
+export function buildProjectCostItems(projectId: string, inp: CostInputs): CostItem[] {
+  const items: CostItem[] = [];
+  const countedOrderIds = new Set<string>();
+  for (const o of inp.orders) {
+    if (o.projectId !== projectId || o.projectId === WAREHOUSE_PROJECT_ID || o.status === 'draft' || o.status === 'cancelled') continue;
+    countedOrderIds.add(o.id);
+    const total = num(o.tongTien);
+    const wh = isWarehouseOrder(o);
+    items.push({
+      id: `o:${o.id}`, group: wh ? 'warehouse' : 'material', title: `Đơn mua hàng ${o.code || o.maDon || o.id}`, sub: wh ? 'Xuất từ kho' : (o.supplierName || o.nhaCungCap || ''),
+      date: day(o.ngayDat || o.date || o.createdAt), amount: total, paid: wh ? total : Math.min(total, Math.max(0, num(o.thanhToanThucTe))),
+      tag: wh ? undefined : (num(o.thanhToanThucTe) >= total && total > 0 ? 'Đã thanh toán đủ' : num(o.thanhToanThucTe) > 0 ? 'Thanh toán một phần' : 'Chưa thanh toán'),
+    });
+  }
+  const subPaid: Payment[] = [];
+  for (const p of inp.payments) {
+    if (p.projectId !== projectId || isCashFundDeposit(p)) continue;
+    const forCounted = !!p.purchaseOrderId && countedOrderIds.has(p.purchaseOrderId);
+    const cash = p.paymentMethod === 'cash' || p.paymentMethod === 'cash_fund';
+    if (p.status === 'pending') {
+      if (!forCounted) items.push({ id: `p:${p.id}`, group: 'pending', title: `Phiếu chi ${p.code || p.id}`, sub: [p.recipient, (p as any).notes].filter(Boolean).join(' · '), date: day((p as any).date || (p as any).createdAt), amount: num(p.amount), paid: 0, tag: 'Phiếu chi chờ duyệt' });
+      continue;
+    }
+    if (p.status !== 'approved' || forCounted) continue;
+    const amt = num(p.amount);
+    const group: CostGroup = p.category === 'subcontractor_advance' ? 'subcontract' : p.category === 'site_expense' ? 'site' : 'other';
+    if (group === 'subcontract') subPaid.push(p);
+    items.push({ id: `p:${p.id}`, group, title: `Phiếu chi ${p.code || p.id}`, sub: [p.recipient, (p as any).notes].filter(Boolean).join(' · '), date: day((p as any).date || (p as any).createdAt), amount: amt, paid: amt, tag: cash ? 'Tiền mặt' : undefined });
+  }
+  // Hợp đồng thầu phụ đã duyệt: phần còn chưa trả (giống buildProjectCosts)
+  const groups = new Map<string, { subId?: string; subName?: string; value: number }>();
+  for (const k of inp.contracts) {
+    if (!isApprovedContract(k) || k.projectId !== projectId) continue;
+    const key = `${k.subcontractorId || k.subcontractorName || k.id}`;
+    const g = groups.get(key) || { subId: k.subcontractorId, subName: k.subcontractorName, value: 0 };
+    g.value += num(k.contractValue); groups.set(key, g);
+  }
+  for (const [key, g] of groups) {
+    const paid = subPaid.filter(p => (g.subId && p.subcontractorId === g.subId) || (!p.subcontractorId && g.subName && p.recipient === g.subName)).reduce((s, p) => s + num(p.amount), 0);
+    const left = Math.max(0, g.value - paid);
+    if (left > 0) items.push({ id: `c:${key}`, group: 'subcontract', title: `Hợp đồng thầu phụ ${g.subName || ''}`.trim(), sub: `Giá trị hợp đồng ${g.value.toLocaleString('vi-VN')} đ, đã trả ${paid.toLocaleString('vi-VN')} đ`, amount: left, paid: 0, tag: 'Còn chưa trả' });
+  }
+  const advanceWithPayment = new Set(inp.payments.map(p => p.relatedAdvanceId).filter(Boolean) as string[]);
+  for (const a of inp.advances) {
+    if (a.projectId !== projectId || (a.status !== 'pending_approval' && a.status !== 'pending_payment') || a.type === 'cash_fund_deposit' || a.paymentId || advanceWithPayment.has(a.id)) continue;
+    items.push({ id: `a:${a.id}`, group: 'pending', title: `Đề xuất chi ${a.id}`, sub: [a.creatorName || a.creator, a.reason].filter(Boolean).join(' · ').slice(0, 120), date: day(a.createdAt || a.date), amount: num(a.approvedAmount ?? a.amount), paid: 0, tag: a.status === 'pending_approval' ? 'Chờ duyệt' : 'Chờ lập phiếu' });
+  }
+  return items;
+}

@@ -7,7 +7,8 @@ import type { Project, Task, Receipt, Payment, Employee, Customer } from '../../
 import { todayYmd, toDay, bucketTasks, buildProjectFinance, type ProjectFinanceRow } from '../../lib/executiveDashboard';
 import { matchesQuery } from '../../lib/directorViews';
 import { buildMissionRows, inMissionView, sortMissions, MISSION_VIEW_LABEL, type MissionView } from '../../lib/missionToday';
-import { buildProjectCosts, describeProjectCost, costBudgetFlags, type ProjectCost } from '../../lib/projectCost';
+import { buildProjectCosts, buildProjectCostItems, describeProjectCost, costBudgetFlags, type ProjectCost } from '../../lib/projectCost';
+import ProjectCostDetail from './ProjectCostDetail';
 import { dbService } from '../../lib/dbService';
 import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, usePager, fmtFull, fmtShort, dmy, tableHead, Th, type Tone } from './kit';
 
@@ -44,6 +45,8 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
     });
     return () => { alive = false; };
   }, []);
+  // Bấm vào số "Tổng chi phí" → mở chi tiết từng khoản (ngăn kéo bên phải / toàn màn hình trên điện thoại)
+  const [costDetailId, setCostDetailId] = useState<string | null>(null);
   const costs = useMemo(() => buildProjectCosts(projects.map(p => p.id), { payments, orders, advances, contracts }), [projects, payments, orders, advances, contracts]);
   // Cảnh báo ngân sách theo tổng chi phí MỚI (vượt giá trị hợp đồng / chi thực > đã thu); withNear = gồm cả "sắp chạm 80% hợp đồng"
   const costRisk = (id: string, withNear: boolean) => {
@@ -204,7 +207,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                       <td className="px-3 py-2.5 whitespace-nowrap">{dmy(toDay(p.endDate))}{f?.flags.includes('late') && <span className="block"><Badge tone="rose">Trễ tiến độ</Badge></span>}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(f?.contractValue || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(f?.collected || 0)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-800 font-bold" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="total-cost">{fmtFull(costs.get(p.id)?.total || 0)}{costRisk(p.id, false) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
+                      <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-800 font-bold" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="total-cost"><button type="button" onClick={e => { e.stopPropagation(); setCostDetailId(p.id); }} className="font-mono font-bold text-slate-800 underline decoration-dotted underline-offset-4 hover:text-blue-700 cursor-pointer" data-testid="open-cost-detail" title="Xem chi tiết các khoản chi">{fmtFull(costs.get(p.id)?.total || 0)}</button>{costRisk(p.id, false) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
                       <td className="px-3 py-2.5 text-right">{ts?.open || 0}{(ts?.overdue || 0) > 0 && <span className="text-rose-600 font-bold"> / {ts?.overdue}</span>}</td>
                       <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[p.status] || 'slate'}>{STATUS_LABEL[p.status] || p.status}</Badge></td>
                     </tr>
@@ -235,7 +238,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                   <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50/60" data-testid="cost-row">
                     <td className="px-3 py-2.5"><div className="font-bold text-slate-800">{p.name}</div><div className="text-[10px] text-slate-400 font-mono">{p.code}</div></td>
                     {[c.material, c.warehouse, c.subcontract, c.site, c.other, c.pending].map((v, i) => <td key={i} className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-600">{fmtFull(v)}</td>)}
-                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold text-slate-800">{fmtFull(c.total)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold text-slate-800"><button type="button" onClick={() => setCostDetailId(p.id)} className="font-mono font-bold underline decoration-dotted underline-offset-4 hover:text-blue-700 cursor-pointer" data-testid="open-cost-detail-2" title="Xem chi tiết các khoản chi">{fmtFull(c.total)}</button></td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(c.paid)}</td>
                     <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-500">{fmtFull(c.cash)}</td>
                   </tr>
@@ -322,6 +325,12 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
         )}
         {missionPager.bar}
       </Card>
+
+      {/* Chi tiết từng khoản của "Tổng chi phí" */}
+      {costDetailId && (() => {
+        const proj = projects.find(x => x.id === costDetailId); const cost = costs.get(costDetailId);
+        return proj && cost ? <ProjectCostDetail project={proj} cost={cost} items={buildProjectCostItems(costDetailId, { payments, orders, advances, contracts })} onClose={() => setCostDetailId(null)} /> : null;
+      })()}
     </div>
   );
 }
