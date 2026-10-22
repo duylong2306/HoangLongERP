@@ -71,6 +71,7 @@ import { buildMyWorkItems, type MyWorkItem } from './lib/myWork';
 import { buildWorkInbox } from './lib/workInbox';
 import { groupPendingAbsencePairs } from './lib/leaveRequests';
 import { canDoTaskAction, loadTaskPermissionMatrix } from './components/hr/hrTaskPermissions';
+import { lastMenuKey, readLastMenu, writeLastMenu, NOT_RESTORABLE } from './lib/lastMenu';
 import AppRail from './components/shell/AppRail';
 import MobileNav from './components/shell/MobileNav';
 import type { NavTop, NavGroup, NavLeaf } from './components/shell/navModel';
@@ -957,6 +958,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     return () => stopPresence();
   }, [currentUser?.id]);
 
+  // Ghi nhận TRƯỚC khi effect bên dưới ghi 'dashboard' vào sessionStorage: phiên này đã có trang đang mở (tải lại trang) hoặc mở bằng đường dẫn có tham số (deep link thông báo)?
+  const skipRestoreMenu = useRef(!!sessionStorage.getItem('hl_erp_active_tab') || window.location.search.length > 1);
   useEffect(() => {
     sessionStorage.setItem('hl_erp_active_tab', activeTab);
   }, [activeTab]);
@@ -1135,6 +1138,26 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Trạng thái cây thư mục Sidebar dạng mô phỏng
   const [directorSubDept, setDirectorSubDept] = useState<'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary'>('summary'); // mặc định mở Bảng điều hành Giám đốc (Tổng Hợp)
   const [sidebarSearch, setSidebarSearch] = useState('');
+
+  // ─── NHỚ MENU DÙNG GẦN NHẤT cho phiên sau (theo người + doanh nghiệp) ───
+  // Mở lại: vào thẳng trang đã dùng lần trước (kể cả tab con). Không áp dụng khi tải lại trang trong cùng phiên hoặc mở từ thông báo (đã có đích riêng).
+  // Nếu người dùng không còn quyền vào trang đó thì cơ chế kiểm quyền sẵn có sẽ đưa về Tổng quan.
+  const lastMenuRestored = useRef(false);
+  useEffect(() => {
+    if (!currentUser?.id || lastMenuRestored.current) return;
+    lastMenuRestored.current = true;
+    if (skipRestoreMenu.current) return;
+    const saved = readLastMenu(companyScopedKey(lastMenuKey(currentUser.id)));
+    if (!saved || NOT_RESTORABLE.has(saved.tab)) return;
+    if (saved.hr) setHrSubTab(saved.hr);
+    if (saved.fin) setFinanceSubTab(saved.fin);
+    if (saved.dir && ['projects', 'hr', 'accounting', 'warehouse', 'subcontractor', 'summary'].includes(saved.dir)) setDirectorSubDept(saved.dir as typeof directorSubDept);
+    setActiveTabState(saved.tab);
+  }, [currentUser?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!currentUser?.id || !lastMenuRestored.current) return;
+    writeLastMenu(companyScopedKey(lastMenuKey(currentUser.id)), { tab: activeTab, hr: hrSubTab, fin: financeSubTab, dir: directorSubDept });
+  }, [currentUser?.id, activeTab, hrSubTab, financeSubTab, directorSubDept]);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -3570,7 +3593,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     <AuthProvider employees={employees} addToast={addToast}>
       <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
         <div
-          className="lx-shell flex min-h-screen w-full md:h-screen md:w-screen bg-slate-950 md:overflow-hidden text-slate-200 font-sans transition-all duration-200"
+          className={`lx-shell flex min-h-screen w-full md:h-screen md:w-screen bg-slate-950 md:overflow-hidden text-slate-200 font-sans transition-all duration-200 ${activeTab === 'messages' ? 'max-md:h-[100dvh] max-md:overflow-hidden' : ''}`}
           style={{ fontFamily: currentFont }}
           id="erp_container"
         >
@@ -3582,7 +3605,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       {navUser && <MobileNav tops={navTops} groups={navGroups} user={navUser} activeTab={activeTab} />}
 
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
-      <div className="flex-1 flex flex-col min-w-0 md:overflow-hidden bg-slate-950 text-slate-200" id="right_content_pane">
+      <div className={`flex-1 flex flex-col min-w-0 md:overflow-hidden bg-slate-950 text-slate-200 ${activeTab === 'messages' ? 'max-md:min-h-0 max-md:overflow-hidden' : ''}`} id="right_content_pane">
 
         {/* THANH TIÊU ĐỀ: điện thoại = nền xanh LoLo phủ cả vùng tai thỏ (đệm env(safe-area-inset-top)), máy tính = thanh trắng gọn.
             Trang Tin nhắn trên máy tính ẩn thanh này để nội dung chiếm hết màn hình như Zalo. */}
@@ -3638,7 +3661,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
         {/* VÙNG ĐIỀU HƯỚNG TỚI CÁC TAB CHI TIẾT */}
         <main
-          className={`flex-1 min-h-0 ${activeTab === 'messages' ? 'p-0 md:overflow-hidden' : 'p-3 sm:p-6 md:overflow-y-auto lx-main-pad'}`}
+          className={`flex-1 min-h-0 ${activeTab === 'messages' ? 'p-0 overflow-hidden lx-main-pad' : 'p-3 sm:p-6 md:overflow-y-auto lx-main-pad'}`}
           id="main_content_scroller"
         >
           {!isAccessible(activeTab) ? (
@@ -5051,7 +5074,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               cuộn, ô tìm kiếm...) và không phải tạo lại channel realtime mỗi
               lần quay lại tab. */}
           {hasVisitedMessages && (
-            <div style={{ display: activeTab === 'messages' ? undefined : 'none' }} className="lx-fill md:h-full">
+            <div style={{ display: activeTab === 'messages' ? undefined : 'none' }} className="h-full min-h-0">
             <MessagesZalo
               currentUser={currentUser!}
               employees={employees}

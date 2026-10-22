@@ -92,9 +92,6 @@
 /* chừa chỗ cho thanh dưới ở điện thoại */
 .lx-main-pad { padding-bottom: calc(var(--lx-bnav) + var(--lx-safe-bottom)); }
 @media (min-width: 768px) { .lx-main-pad { padding-bottom: 0; } }
-/* Trang cần chiếm đủ chiều cao (Tin nhắn): trừ thanh tiêu đề + thanh dưới ở điện thoại */
-.lx-fill { height: calc(100dvh - var(--lx-hdr) - var(--lx-safe-top) - var(--lx-bnav) - var(--lx-safe-bottom)); min-height: 360px; }
-@media (min-width: 768px) { .lx-fill { height: 100%; min-height: 0; } }
 
 /* ─── TRANG DANH MỤC / TÔI (điện thoại) ─── */
 .lx-sheet { position: fixed; inset: 0; z-index: 45; background: #f3f6fb; display: flex; flex-direction: column; animation: lxIn .18s ease-out; }
