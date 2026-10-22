@@ -40,3 +40,14 @@ export function isPaymentRelatedToUser(p: Payment, u: User): boolean {
   // người nhận: theo mã nhân viên; phiếu cũ chưa có mã (và không phải NCC/thầu phụ) mới dự phòng theo tên
   return p.employeeId ? p.employeeId === u.id : (!p.supplierId && !p.subcontractorId && nameEq(p.recipient, u.name));
 }
+
+/**
+ * Đề xuất chờ LẬP PHIẾU (KT) (status 'pending_payment') — CHỈ thành viên nhóm Kế toán hoặc chính người lập đề xuất.
+ * Giám đốc / Siêu Admin KHÔNG thấy (không phải bước duyệt). isAccountingMember do nơi gọi truyền (isAccountingGroupMember).
+ */
+export function isVoucherPendingForUser(a: SubcontractorAdvanceProposal, u: User, ctx: { isAccountingMember: boolean }): boolean {
+  if (a.status !== 'pending_payment') return false;
+  if (ctx.isAccountingMember) return true;
+  // Người lập: khớp theo mã; tên chỉ là dự phòng cho bản ghi cũ lưu tên thay vì mã
+  return (!!u.id && a.creator === u.id) || nameEq(a.creatorName, u.name) || nameEq(a.creator, u.name);
+}

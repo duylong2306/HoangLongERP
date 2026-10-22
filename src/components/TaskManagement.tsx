@@ -9,9 +9,9 @@ import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
-import { useNotification, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isRoleAccounting, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
+import { useNotification, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isAccountingGroupMember, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
-import { isPaymentPendingForUser, isAdvancePendingForUser } from '../lib/approvalInbox';
+import { isPaymentPendingForUser, isAdvancePendingForUser, isVoucherPendingForUser } from '../lib/approvalInbox';
 import { materialInboxFor, materialProposalTotal, COORDINATOR_STATUS_LABEL } from '../lib/materialApproval';
 import MyWorkOverview, { type InboxItem } from './MyWorkOverview';
 import { buildMyWorkItems, assignedByMe, pinsStorageKey, todayYmd, type MyWorkItem } from '../lib/myWork';
@@ -536,14 +536,11 @@ export default function TaskManagement({
   // Đây là bước "Kế toán lập phiếu chi", KHÔNG phải bước xét duyệt — vẫn giữ cho CẢ phòng Kế toán
   // thấy (isRoleAccounting), vì mặc định người lập phiếu là "Kế Toán" nói chung, không gắn với
   // 1 loại hồ sơ "Quyền Phê Duyệt" cụ thể như bước duyệt ở trên.
-  const isFinanceApprover = isRoleAccounting(currentUser?.id) || isRoleAdmin(currentUser?.id);
+  // Chỉ Kế toán (thành viên thật của nhóm) hoặc người lập mới thấy — Giám đốc/Siêu Admin không thấy.
+  const isVoucherAccountant = isAccountingGroupMember(currentUser?.id);
   const myPendingVouchers = React.useMemo(() => subcontractorAdvances.filter(a =>
-    a.status === 'pending_payment' &&
-    (isFinanceApprover ||
-     a.creator === currentUser?.id ||
-     (a.creatorName && currentUser?.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase()) ||
-     (a.creator && currentUser?.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))
-  ), [subcontractorAdvances, currentUser, isFinanceApprover]);
+    isVoucherPendingForUser(a, { id: currentUser?.id, name: currentUser?.name }, { isAccountingMember: isVoucherAccountant })
+  ), [subcontractorAdvances, currentUser, isVoucherAccountant]);
   // ĐỀ XUẤT VẬT TƯ: (1) chờ DUYỆT — Người xét duyệt vật tư / Giám đốc; (2) việc ĐIỀU PHỐI (Tìm nhà cung cấp / Chờ đặt hàng) — Người điều phối vật tư
   const materialInbox = React.useMemo(() => materialInboxFor(materialProposals, currentUser, {
     isAdmin: isFinanceAdmin,

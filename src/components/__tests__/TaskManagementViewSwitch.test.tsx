@@ -11,7 +11,7 @@ vi.mock('../TaskDetailModal', () => ({ default: (p: any) => <div data-testid="ta
 vi.mock('../ConnectedToolsModal', () => ({ default: () => null }));
 vi.mock('../../context', () => ({
   useNotification: () => ({ addToast: vi.fn() }), isUserInRoleGroup: () => false, getConfiguredApprovers: () => [], getMaterialApprovers: () => [], getMaterialCoordinators: () => [],
-  isRoleAdmin: () => false, isRoleAccounting: () => false, isConfiguredApproverForProposal: () => false, isConfiguredApproverForPayment: () => false,
+  isRoleAdmin: () => false, isRoleAccounting: () => false, isAccountingGroupMember: () => false, isConfiguredApproverForProposal: () => false, isConfiguredApproverForPayment: () => false,
   canApproveTravelExpense: () => false, isLeaveApproverFor: () => false,
 }));
 vi.mock('../hr/hrTaskPermissions', () => ({ canDoTaskAction: () => true, loadTaskPermissionMatrix: () => ({}), isTaskReadOnlyFor: () => false }));

@@ -35,6 +35,7 @@ export interface CostInputs {
   orders: any[];      // PurchaseOrder
   advances: any[];    // SubcontractorAdvanceProposal (đề xuất chi)
   contracts: any[];   // ArchivedQuote sector 'subcontractor'
+  proposals?: any[];  // Đề xuất vật tư — để loại các đơn mua hàng sinh từ đề xuất ĐÃ HỦY
 }
 
 const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -42,6 +43,12 @@ const isCashFundDeposit = (p: Payment) => (p.category as string) === 'cash_fund'
 const emptyCost = (): ProjectCost => ({ material: 0, warehouse: 0, subcontract: 0, site: 0, other: 0, pending: 0, paid: 0, total: 0, remaining: 0, cash: 0 });
 /** Hợp đồng thầu phụ đã duyệt: cờ isApproved, hoặc trạng thái 'Hoàn thành' (cách app suy ra "đã duyệt"). */
 const isApprovedContract = (c: any) => c?.isApproved === true || String(c?.status || '').trim().toLowerCase() === 'hoàn thành';
+/**
+ * Đơn mua hàng sinh từ một ĐỀ XUẤT VẬT TƯ ĐÃ HỦY mà đơn vẫn ở trạng thái đặt hàng (chưa nhập hàng): hủy đề xuất không tự hủy đơn nên đơn vẫn "treo" và bị tính vào chi phí.
+ * Bỏ khỏi chi phí. Đơn đã HOÀN TẤT (đã nhập hàng) giữ nguyên vì hàng đã về thật; tiền đã trả cho đơn bị bỏ vẫn tính qua phiếu chi.
+ */
+const cancelledProposalIds = (proposals?: any[]) => new Set((proposals || []).filter(p => p?.status === 'cancelled').map(p => p.id as string));
+const isVoidedByProposal = (o: any, cancelled: Set<string>) => !!o?.proposalId && cancelled.has(o.proposalId) && o.status !== 'completed';
 const isWarehouseOrder = (o: any) => !!o?.fromWarehouse || o?.supplierId === WAREHOUSE_SOURCE_ID;
 
 // ── Nhận diện phiếu chi TRẢ CHO THẦU PHỤ ──
@@ -74,9 +81,10 @@ export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<st
 
   // ── 1 & 2. Đơn mua hàng ──
   const countedOrderIds = new Set<string>();
+  const cancelledProps = cancelledProposalIds(inp.proposals);
   for (const o of inp.orders) {
     const c = get(o.projectId); if (!c) continue;
-    if (o.projectId === WAREHOUSE_PROJECT_ID || o.status === 'draft' || o.status === 'cancelled') continue;
+    if (o.projectId === WAREHOUSE_PROJECT_ID || o.status === 'draft' || o.status === 'cancelled' || isVoidedByProposal(o, cancelledProps)) continue;
     const total = num(o.tongTien);
     countedOrderIds.add(o.id);
     if (isWarehouseOrder(o)) { c.warehouse += total; c.paid += total; continue; }
@@ -185,8 +193,9 @@ const day = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ?
 export function buildProjectCostItems(projectId: string, inp: CostInputs): CostItem[] {
   const items: CostItem[] = [];
   const countedOrderIds = new Set<string>();
+  const cancelledProps = cancelledProposalIds(inp.proposals);
   for (const o of inp.orders) {
-    if (o.projectId !== projectId || o.projectId === WAREHOUSE_PROJECT_ID || o.status === 'draft' || o.status === 'cancelled') continue;
+    if (o.projectId !== projectId || o.projectId === WAREHOUSE_PROJECT_ID || o.status === 'draft' || o.status === 'cancelled' || isVoidedByProposal(o, cancelledProps)) continue;
     countedOrderIds.add(o.id);
     const total = num(o.tongTien);
     const wh = isWarehouseOrder(o);

@@ -54,3 +54,31 @@ describe('Phiếu chi trả thầu phụ lập qua đề xuất "Chi phí công 
     expect(buildProjectCosts(['P1'], over).get('P1')!).toMatchObject({ subcontract: 150e6, site: 0 });
   });
 });
+
+// Đơn mua hàng sinh từ đề xuất vật tư ĐÃ HỦY (hủy đề xuất không tự hủy đơn) không được tính vào chi phí.
+describe('Đơn mua hàng của đề xuất vật tư đã hủy', () => {
+  const order = (o: any) => ({ id: 'o' + Math.random().toString(36).slice(2, 6), projectId: 'P1', status: 'confirmed', supplierId: 'S1', supplierName: 'NCC', tongTien: 0, thanhToanThucTe: 0, ...o });
+  const inp = (orders: any[], proposals: any[], payments: any[] = []): CostInputs => ({ orders, proposals, payments, advances: [], contracts: [] });
+  it('đơn đang đặt (confirmed) mà đề xuất nguồn đã hủy → bỏ khỏi chi phí (đúng ca PO-1792111437560-0: 2.187.550đ)', () => {
+    const o = [order({ id: 'PO-A', tongTien: 2187550, proposalId: 'MP1' }), order({ id: 'PO-B', tongTien: 1837360, proposalId: 'MP2' })];
+    const props = [{ id: 'MP1', status: 'cancelled' }, { id: 'MP2', status: 'received' }];
+    const c = buildProjectCosts(['P1'], inp(o, props)).get('P1')!;
+    expect(c.material).toBe(1837360);
+    expect(buildProjectCostItems('P1', inp(o, props)).map(i => i.id)).toEqual(['o:PO-B']);
+  });
+  it('đơn đã HOÀN TẤT (đã nhập hàng) vẫn tính dù đề xuất bị hủy sau đó; đơn không có đề xuất / đề xuất còn hiệu lực không bị ảnh hưởng', () => {
+    const o = [order({ id: 'PO-C', tongTien: 11e6, proposalId: 'MP1', status: 'completed' }), order({ id: 'PO-D', tongTien: 5e6 }), order({ id: 'PO-E', tongTien: 7e6, proposalId: 'MP3' })];
+    const c = buildProjectCosts(['P1'], inp(o, [{ id: 'MP1', status: 'cancelled' }, { id: 'MP3', status: 'ordered' }])).get('P1')!;
+    expect(c.material).toBe(23e6);
+  });
+  it('tiền ĐÃ trả cho đơn bị bỏ vẫn tính (qua phiếu chi), không bị mất', () => {
+    const o = [order({ id: 'PO-F', tongTien: 4e6, thanhToanThucTe: 1e6, proposalId: 'MP1' })];
+    const pays = [{ id: 'pp', projectId: 'P1', status: 'approved', category: 'supplier_payment', amount: 1e6, purchaseOrderId: 'PO-F', paymentMethod: 'transfer' }];
+    const c = buildProjectCosts(['P1'], inp(o, [{ id: 'MP1', status: 'cancelled' }], pays)).get('P1')!;
+    expect(c).toMatchObject({ material: 0, other: 1e6, paid: 1e6 });
+  });
+  it('không truyền danh sách đề xuất → hành vi cũ (không loại đơn nào)', () => {
+    const c = buildProjectCosts(['P1'], { orders: [order({ tongTien: 3e6, proposalId: 'MP1' })], payments: [], advances: [], contracts: [] }).get('P1')!;
+    expect(c.material).toBe(3e6);
+  });
+});

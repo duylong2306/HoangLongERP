@@ -34,20 +34,21 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
   const fin = useMemo(() => new Map(buildProjectFinance(projects, receipts, payments, today).map(r => [r.project.id, r] as const)), [projects, receipts, payments, today]);
   // ─── Tổng chi phí = Đã chi + Còn phải chi (xem lib/projectCost.ts) — cần đơn mua hàng, đề xuất chi, hợp đồng thầu phụ ───
   // Mỗi nguồn tải độc lập: nguồn nào lỗi/chưa có quyền thì chỉ thiếu phần đó, các cột khác vẫn hiện.
-  const [orders, setOrders] = useState<any[]>([]); const [advances, setAdvances] = useState<any[]>([]); const [contracts, setContracts] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]); const [advances, setAdvances] = useState<any[]>([]); const [contracts, setContracts] = useState<any[]>([]); const [proposals, setProposals] = useState<any[]>([]);
   useEffect(() => {
     let alive = true;
-    Promise.allSettled([dbService.purchaseOrders.list(), dbService.subcontractorAdvances.list(), dbService.archivedQuotes.list('subcontractor')]).then(([o, a, c]) => {
+    Promise.allSettled([dbService.purchaseOrders.list(), dbService.subcontractorAdvances.list(), dbService.archivedQuotes.list('subcontractor'), dbService.materialProposals.list()]).then(([o, a, c, mp]) => {
       if (!alive) return;
       if (o.status === 'fulfilled') setOrders(o.value || []);
       if (a.status === 'fulfilled') setAdvances(a.value || []);
       if (c.status === 'fulfilled') setContracts(c.value || []);
+      if (mp.status === 'fulfilled') setProposals(mp.value || []);
     });
     return () => { alive = false; };
   }, []);
   // Bấm vào số "Tổng chi phí" → mở chi tiết từng khoản (ngăn kéo bên phải / toàn màn hình trên điện thoại)
   const [costDetailId, setCostDetailId] = useState<string | null>(null);
-  const costs = useMemo(() => buildProjectCosts(projects.map(p => p.id), { payments, orders, advances, contracts }), [projects, payments, orders, advances, contracts]);
+  const costs = useMemo(() => buildProjectCosts(projects.map(p => p.id), { payments, orders, advances, contracts, proposals }), [projects, payments, orders, advances, contracts, proposals]);
   // Cảnh báo ngân sách theo tổng chi phí MỚI (vượt giá trị hợp đồng / chi thực > đã thu); withNear = gồm cả "sắp chạm 80% hợp đồng"
   const costRisk = (id: string, withNear: boolean) => {
     const f = fin.get(id), c = costs.get(id);
@@ -329,7 +330,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
       {/* Chi tiết từng khoản của "Tổng chi phí" */}
       {costDetailId && (() => {
         const proj = projects.find(x => x.id === costDetailId); const cost = costs.get(costDetailId);
-        return proj && cost ? <ProjectCostDetail project={proj} cost={cost} items={buildProjectCostItems(costDetailId, { payments, orders, advances, contracts })} onClose={() => setCostDetailId(null)} /> : null;
+        return proj && cost ? <ProjectCostDetail project={proj} cost={cost} items={buildProjectCostItems(costDetailId, { payments, orders, advances, contracts, proposals })} onClose={() => setCostDetailId(null)} /> : null;
       })()}
     </div>
   );

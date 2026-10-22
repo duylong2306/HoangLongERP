@@ -852,6 +852,15 @@ export function isRoleAdmin(empId: string | undefined): boolean {
 export function isRoleAccounting(empId: string | undefined): boolean {
   return isUserInRoleGroup(empId, 'role_accounting') || isUserInRoleGroupKind(empId, 'accounting');
 }
+/**
+ * THÀNH VIÊN THẬT của nhóm Kế toán — KHÔNG có lối tắt Siêu Admin / emp_admin như isRoleAccounting.
+ * Dùng cho việc "Lập phiếu (KT)": chỉ Kế toán (và người lập đề xuất) được thấy, Giám đốc/Siêu Admin thì không.
+ */
+export function isAccountingGroupMember(empId: string | undefined): boolean {
+  if (!empId) return false;
+  return loadHrmRoleGroups().some(g => g.memberIds?.includes(empId)
+    && (g.id === 'role_accounting' || getRoleGroupKind(g.permissions) === 'accounting'));
+}
 export function isRoleOffice(empId: string | undefined): boolean {
   return isUserInRoleGroup(empId, 'role_office') || isUserInRoleGroupKind(empId, 'office');
 }

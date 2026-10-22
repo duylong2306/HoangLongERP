@@ -39,7 +39,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators, isConfiguredApproverForPayment, isConfiguredApproverForProposal } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isAccountingGroupMember, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators, isConfiguredApproverForPayment, isConfiguredApproverForProposal } from './context';
 import { Toast } from './context/NotificationContext';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
 
@@ -76,7 +76,7 @@ import AppRail from './components/shell/AppRail';
 import MobileNav from './components/shell/MobileNav';
 import type { NavTop, NavGroup, NavLeaf } from './components/shell/navModel';
 import { findSupplierLiability } from './lib/liabilityPayments';
-import { isPaymentPendingForUser, isAdvancePendingForUser } from './lib/approvalInbox';
+import { isPaymentPendingForUser, isAdvancePendingForUser, isVoucherPendingForUser } from './lib/approvalInbox';
 import MessagesZalo from './components/MessagesZalo';
 import { useChatPrefs } from './lib/useChatPrefs';
 import { unreadForBadge } from './lib/chatPrefs';
@@ -3399,10 +3399,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       approverIds: getMaterialApprovers().map(a => a.id),
       coordinatorIds: getMaterialCoordinators().map(c => c.id),
     });
-    // Đề xuất chờ LẬP PHIẾU (KT): cả phòng Kế toán/Giám đốc hoặc chính người lập — cùng quy tắc với danh sách "Chờ tôi xử lý" (trước đây huy hiệu bỏ sót nên thấp hơn số thẻ thật)
-    const myPendingVouchersBadge = subcontractorAdvances.filter(a => a.status === 'pending_payment' && (isRoleAccounting(currentUser.id) || isFinanceAdminBadge || a.creator === currentUser.id
-      || (a.creatorName && currentUser.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase())
-      || (a.creator && currentUser.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))).length;
+    // Đề xuất chờ LẬP PHIẾU (KT): CHỈ Kế toán hoặc chính người lập (Giám đốc không thấy) — cùng quy tắc với danh sách "Chờ tôi xử lý" (trước đây huy hiệu bỏ sót nên thấp hơn số thẻ thật)
+    const myPendingVouchersBadge = subcontractorAdvances.filter(a => isVoucherPendingForUser(a, currentUser, { isAccountingMember: isAccountingGroupMember(currentUser.id) })).length;
     const toReviewUncompletedCount = toReviewTasksCount
       + myPendingVouchersBadge
       + myPendingLeaves.length
@@ -3466,10 +3464,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       payments: payments.filter(p => isPaymentPendingForUser(p, currentUser, { isAdmin: isAdminW, isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })) as any,
       advances: subcontractorAdvances.filter(a => isAdvancePendingForUser(a, currentUser, { isAdmin: isAdminW, isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsW })) as any,
       travel: ctpSummary.filter((t: any) => t.status === 'pending' && canCtp),
-      // Chờ LẬP PHIẾU (KT): cả phòng Kế toán/Giám đốc, hoặc chính người lập (đúng như TaskManagement.myPendingVouchers)
-      vouchers: subcontractorAdvances.filter(a => a.status === 'pending_payment' && (isRoleAccounting(currentUser.id) || isAdminW || a.creator === currentUser.id
-        || (a.creatorName && currentUser.name && a.creatorName.toLowerCase() === currentUser.name.toLowerCase())
-        || (a.creator && currentUser.name && a.creator.toLowerCase() === currentUser.name.toLowerCase()))) as any,
+      // Chờ LẬP PHIẾU (KT): chỉ Kế toán hoặc chính người lập (đúng như TaskManagement.myPendingVouchers)
+      vouchers: subcontractorAdvances.filter(a => isVoucherPendingForUser(a, currentUser, { isAccountingMember: isAccountingGroupMember(currentUser.id) })) as any,
       materialToApprove: matW.toApprove, materialToCoordinate: matW.toCoordinate,
       open: {
         task: (id) => { setDeepLinkTaskId(id); setActiveTab('tasks'); },
