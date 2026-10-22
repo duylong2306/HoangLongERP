@@ -1,4 +1,5 @@
 import { isPaymentProposedBy } from '../lib/approvalInbox';
+import { isTravelExpenseBeneficiary } from '../lib/ctpOwnership';
 import { findUniqueEmployeeByName } from '../lib/employeeLookup';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
@@ -225,16 +226,12 @@ export default function DashboardOverview({
   // --- LỌC TRẠNG THÁI CÔNG TÁC PHÍ (Tổng Quan) ---
   const [ctpStatusFilter, setCtpStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
-  // CTP hiển thị trong Tổng Quan: CHỈ công tác phí do NGƯỜI KHỞI TẠO
-  // (creatorId/creatorName) gửi — để họ theo dõi trạng thái xét duyệt.
+  // CTP hiển thị trong Tổng Quan: CHỈ công tác phí mà user là NGƯỜI ĐƯỢC HƯỞNG (empId),
+  // không phải người lập — để người hưởng theo dõi trạng thái xét duyệt khoản của mình.
   // Người duyệt sẽ xử lý ở tab Công tác phí (Nhân sự) hoặc cột Kế toán
   // (Công việc phải duyệt — Việc của tôi), không duyệt trên Tổng Quan nữa.
   const ctpList = React.useMemo(() => {
-    const list = (travelExpensesSummary || []).filter((item: any) => {
-      const creatorId = item.creatorId || item.employeeId || item.empId;
-      const creatorMatch = creatorId ? creatorId === currentUser?.id : item.employeeName === currentUser?.name;
-      return !!creatorMatch;
-    });
+    const list = (travelExpensesSummary || []).filter((item: any) => isTravelExpenseBeneficiary(item, currentUser));
     if (ctpStatusFilter === 'all') return list;
     return list.filter((item: any) => {
       const st = item.status as CTPStatus;
@@ -3059,7 +3056,7 @@ export default function DashboardOverview({
               Công Tác Phí Của Tôi
             </h3>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Theo dõi trạng thái xét duyệt công tác phí của bạn.
+              Theo dõi trạng thái xét duyệt các khoản công tác phí bạn được hưởng.
             </p>
           </div>
 
