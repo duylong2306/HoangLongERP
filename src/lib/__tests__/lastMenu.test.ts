@@ -56,9 +56,11 @@ describe('App — nhớ menu & bố cục Tin nhắn trên điện thoại', () 
 describe('Tên miền đăng ký doanh nghiệp: lolo.com.vn', () => {
   const v = JSON.parse(fs.readFileSync('vercel.json', 'utf8'));
   it('địa chỉ gốc cũ (lolo.io.vn, www.lolo.io.vn) chuyển sang www.lolo.com.vn, giữ đường dẫn; địa chỉ riêng từng công ty KHÔNG bị chuyển', () => {
-    const hosts = (v.redirects as any[]).map(r => r.has[0].value).sort();
+    const hosts = Array.from(new Set((v.redirects as any[]).map(r => r.has[0].value))).sort();
     expect(hosts).toEqual(['lolo.io.vn', 'www.lolo.io.vn']);
-    for (const r of v.redirects) { expect(r.destination).toBe('https://www.lolo.com.vn/:path*'); expect(r.permanent).toBe(false); }
+    // Mỗi host có 2 luật: đường dẫn gốc "/" và các đường dẫn con (:path+) — mẫu :path* không khớp "/" nên phải viết riêng
+    for (const h of hosts) expect((v.redirects as any[]).filter(r => r.has[0].value === h).map(r => r.source).sort()).toEqual(['/', '/:path+']);
+    for (const r of v.redirects) { expect(['https://www.lolo.com.vn/', 'https://www.lolo.com.vn/:path+']).toContain(r.destination); expect(r.permanent).toBe(false); }
     expect(hosts.some((h: string) => h.includes('hoanglong'))).toBe(false);
   });
   it('mã nguồn không còn ghi cứng địa chỉ lolo.io.vn (địa chỉ lấy từ cấu hình VITE_BASE_DOMAIN)', () => {

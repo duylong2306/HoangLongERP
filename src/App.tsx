@@ -123,6 +123,7 @@ import {
   ArrowLeft,
   Package,
   Wrench,
+  KeyRound,
   Settings as SettingsIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -130,6 +131,7 @@ import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, com
 import SubscriptionBanner from './components/subscription/SubscriptionBanner';
 import PushPermissionBanner from './components/PushPermissionBanner';
 import InstallAppPrompt from './components/InstallAppPrompt';
+import ResetPasswordDialog from './components/ResetPasswordDialog';
 import { buildDocumentTitle, DEFAULT_DOCUMENT_TITLE } from './lib/documentTitle';
 import {
   parsePushData,
@@ -948,6 +950,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setActiveTabState(tab);
   }, [activeTab]);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  // Quản trị viên đặt lại mật khẩu cho nhân viên (Tài Khoản Hệ Thống) — xem components/ResetPasswordDialog.tsx + api/reset-password.ts
+  const [resetPwTarget, setResetPwTarget] = useState<{ id: string; name: string; username?: string } | null>(null);
   // Yêu cầu đổi mật khẩu của phiên (đặt ở Login.tsx sau khi máy chủ báo); đọc lại ở handleLoginSuccess
   const [pwNotice, setPwNotice] = useState<PasswordNotice | null>(() => getPasswordNotice());
   // Tùy chọn Tin nhắn của người dùng (tắt thông báo/ghim hội thoại) — dùng cho huy hiệu chưa đọc ở menu
@@ -4089,6 +4093,20 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                               </div>
                             ) : (
                               <div className="flex justify-end gap-2">
+                                {/* ĐẶT LẠI MẬT KHẨU: chỉ quản trị viên (máy chủ kiểm lại), không cho chính mình và tài khoản quản trị gốc */}
+                                {isRoleAdmin(currentUser.id) && emp.id !== currentUser.id && emp.id !== 'emp_admin' && emp.username !== 'admin' && (
+                                  <button type="button" data-testid={`reset-pw-${emp.id}`} title="Đặt lại mật khẩu"
+                                    onClick={() => {
+                                      if (!hasModulePermission(currentUser?.id, 'settings_accounts', 'edit')) {
+                                        addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Tài Khoản Hệ Thống.', type: 'warning' });
+                                        return;
+                                      }
+                                      setResetPwTarget({ id: emp.id, name: emp.name, username: emp.username });
+                                    }}
+                                    className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold rounded text-[10px] transition-all cursor-pointer inline-flex items-center gap-1">
+                                    <KeyRound className="w-3 h-3" /> ĐẶT LẠI MK
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -5134,6 +5152,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
       {/* Yêu cầu đổi mật khẩu sau đăng nhập: 'force' (admin bắt buộc) hoặc 'default' (đang dùng mật khẩu mặc định 123) */}
       {pwNotice && <ForcePasswordModal notice={pwNotice} onDone={() => setPwNotice(null)} />}
+      {resetPwTarget && <ResetPasswordDialog employee={resetPwTarget} onClose={() => setResetPwTarget(null)} />}
 
       <UserProfileModal
         isOpen={showProfileModal}

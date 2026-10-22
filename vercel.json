@@ -1,25 +1,47 @@
 {
   "redirects": [
     {
-      "source": "/:path*",
+      "source": "/",
       "has": [
         {
           "type": "host",
           "value": "lolo.io.vn"
         }
       ],
-      "destination": "https://www.lolo.com.vn/:path*",
+      "destination": "https://www.lolo.com.vn/",
       "permanent": false
     },
     {
-      "source": "/:path*",
+      "source": "/:path+",
+      "has": [
+        {
+          "type": "host",
+          "value": "lolo.io.vn"
+        }
+      ],
+      "destination": "https://www.lolo.com.vn/:path+",
+      "permanent": false
+    },
+    {
+      "source": "/",
       "has": [
         {
           "type": "host",
           "value": "www.lolo.io.vn"
         }
       ],
-      "destination": "https://www.lolo.com.vn/:path*",
+      "destination": "https://www.lolo.com.vn/",
+      "permanent": false
+    },
+    {
+      "source": "/:path+",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.lolo.io.vn"
+        }
+      ],
+      "destination": "https://www.lolo.com.vn/:path+",
       "permanent": false
     }
   ],

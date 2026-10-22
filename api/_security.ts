@@ -92,3 +92,21 @@ export function validateNewPassword(newPassword: string, oldPassword: string, us
   if (username && newPassword.toLowerCase() === String(username).toLowerCase()) return 'Mật khẩu mới không được trùng tên đăng nhập.';
   return null;
 }
+
+// Quản trị viên ĐẶT LẠI mật khẩu cho nhân viên: tăng token_version (đăng xuất mọi máy của người đó), BẬT cờ bắt đổi mật khẩu ở lần
+// đăng nhập kế tiếp, xóa khóa tạm. Trả false nếu bảng employee_security chưa có (khi đó mật khẩu vẫn đổi được nhưng không ép đổi/không thu hồi phiên).
+export async function revokeAndForceChange(sb: SupabaseClient, companyId: string, employeeId: string, state: SecurityState): Promise<boolean> {
+  if (!state.available) return false;
+  await upsertSecurity(sb, companyId, employeeId, { token_version: (state.row?.token_version || 0) + 1, must_change_password: true, failed_attempts: 0, locked_until: null });
+  return true;
+}
+
+// Mật khẩu tạm ngẫu nhiên (không dùng ký tự dễ nhầm 0/O/1/l/I): 10 ký tự gồm chữ hoa, chữ thường, số.
+export function generateTempPassword(randomInt: (max: number) => number): string {
+  const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnpqrstuvwxyz', '23456789'];
+  const all = sets.join('');
+  const out = sets.map(set => set[randomInt(set.length)]);           // mỗi loại ít nhất 1 ký tự
+  while (out.length < 10) out.push(all[randomInt(all.length)]);
+  for (let i = out.length - 1; i > 0; i--) { const j = randomInt(i + 1); [out[i], out[j]] = [out[j], out[i]]; }
+  return out.join('');
+}
