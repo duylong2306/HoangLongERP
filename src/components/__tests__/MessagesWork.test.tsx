@@ -233,4 +233,20 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
     await waitFor(() => expect(screen.queryByTestId('zalo-jump-bottom')).toBeNull());
     expect(box.scrollTop).toBe(2000);
   });
+  describe('nút "Mở công trình" — tôn trọng phân quyền', () => {
+    const projConv = { id: 'conv_project_P7', type: 'group', name: '📁 CĂN TIN', participantIds: ['me', 'ny'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0, projectId: 'P7' };
+    it('được phép → mở đúng dự án của nhóm chat (truyền mã dự án)', async () => {
+      store.convs.push(projConv); const onOpenProject = vi.fn();
+      mount({ canOpenProject: (id: string) => id === 'P7', onOpenProject });
+      fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
+      fireEvent.click(await screen.findByTestId('zalo-open-project')); expect(onOpenProject).toHaveBeenCalledWith('P7');
+    });
+    it('không có quyền / không còn công trình → nút bị thay bằng thông báo, không mở được', async () => {
+      store.convs.push(projConv); const onOpenProject = vi.fn();
+      mount({ canOpenProject: () => false, onOpenProject });
+      fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
+      expect(await screen.findByTestId('zalo-open-project-denied')).toBeTruthy(); expect(screen.queryByTestId('zalo-open-project')).toBeNull();
+      expect(onOpenProject).not.toHaveBeenCalled();
+    });
+  });
 });

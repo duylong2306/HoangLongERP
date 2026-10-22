@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readPrefs, writePrefs, toggleIn, unreadForBadge, prefsKey } from '../chatPrefs';
-import { filterConversations, sortConversations, categoryOf, collectMedia, extractLinks, pinnedMessages, dayLabel, listTime, isFirstOfRun, isPinnedConv } from '../chatInfo';
+import { scrollTopAfterPrepend, filterConversations, sortConversations, categoryOf, collectMedia, extractLinks, pinnedMessages, dayLabel, listTime, isFirstOfRun, isPinnedConv } from '../chatInfo';
 
 const conv = (id: string, o: any = {}) => ({ id, type: 'personal', name: id, participantIds: ['me', 'x'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0, ...o }) as any;
 const none = { muted: [], pinned: [] };
@@ -81,5 +81,17 @@ describe('thông tin hội thoại & hiển thị', () => {
     expect(listTime(undefined, now)).toBe('');
     const ms = [msg('1', '2026-10-20T08:00:00Z', { senderId: 'a' }), msg('2', '2026-10-20T08:02:00Z', { senderId: 'a' }), msg('3', '2026-10-20T08:30:00Z', { senderId: 'a' }), msg('4', '2026-10-20T08:31:00Z', { senderId: 'b' })];
     expect([0, 1, 2, 3].map(i => isFirstOfRun(ms, i))).toEqual([true, false, true, true]);
+  });
+});
+
+describe('scrollTopAfterPrepend — không bị kéo ngược sau khi tải tin cũ', () => {
+  it('đang đọc tin cũ: giữ nguyên chỗ đang đọc (vị trí hiện tại + phần chiều cao vừa thêm)', () => {
+    expect(scrollTopAfterPrepend({ pinned: false, scrollTop: 40, prevHeight: 1000, newHeight: 1600 })).toBe(640);
+  });
+  it('đã bấm "xuống cuối" trong lúc tải (pinned) → không chỉnh, KHÔNG nhảy về chỗ cũ', () => {
+    expect(scrollTopAfterPrepend({ pinned: true, scrollTop: 5000, prevHeight: 1000, newHeight: 1600 })).toBeNull();
+  });
+  it('không bao giờ ra số âm', () => {
+    expect(scrollTopAfterPrepend({ pinned: false, scrollTop: 0, prevHeight: 1000, newHeight: 900 })).toBe(0);
   });
 });

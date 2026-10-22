@@ -3547,6 +3547,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
     return out;
   })();
+  // ─── "Mở công trình" từ Tin nhắn: mở thẳng chi tiết dự án, TÔN TRỌNG phân quyền (phải được vào phân hệ dự án tương ứng) ───
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const projectTabOf = (pr: Project) => (pr.type === 'furniture' ? 'projects-furniture' : pr.type === 'mechanical' ? 'projects-mechanical' : 'projects-construction');
+  const canOpenProject = (id: string) => { const pr = projects.find(x => x.id === id); return !!pr && isAccessible(projectTabOf(pr)); };
+  const openProjectFromChat = (id: string) => {
+    const pr = projects.find(x => x.id === id);
+    if (!pr) { addToast({ title: '🔍 Không tìm thấy công trình', message: 'Công trình có thể đã bị xóa.', type: 'warning' }); return; }
+    if (!isAccessible(projectTabOf(pr))) { addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không được xem công trình này.', type: 'warning' }); return; }
+    setPendingProjectId(id); setActiveTab(projectTabOf(pr));
+  };
   const navUser = !currentUser ? null : {
     name: currentUser.name, avatar: currentUser.avatar, subtitle: displaySettings.brandName,
     onProfile: () => setShowProfileModal(true), onDisplaySettings: isAccessible('display-settings') ? () => setActiveTab('display-settings') : undefined,
@@ -3724,6 +3734,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           {activeTab === 'projects-construction' && (
             <ProjectKanbanBoard
               sector="construction"
+              initialProjectId={pendingProjectId ?? undefined}
+              onInitialProjectOpened={() => setPendingProjectId(null)}
               projects={projects}
               customers={customers}
               employees={employees}
@@ -3749,6 +3761,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           {activeTab === 'projects-furniture' && (
             <ProjectKanbanBoard
               sector="furniture"
+              initialProjectId={pendingProjectId ?? undefined}
+              onInitialProjectOpened={() => setPendingProjectId(null)}
               projects={projects}
               customers={customers}
               employees={employees}
@@ -3774,6 +3788,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           {activeTab === 'projects-mechanical' && (
             <ProjectKanbanBoard
               sector="mechanical"
+              initialProjectId={pendingProjectId ?? undefined}
+              onInitialProjectOpened={() => setPendingProjectId(null)}
               projects={projects}
               customers={customers}
               employees={employees}
@@ -5093,6 +5109,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               }}
               onOpenWorkTask={(id) => { setDeepLinkTaskId(id); setActiveTab('tasks'); }}
               onCreateTask={handleAddTask}
+              canOpenProject={canOpenProject}
+              onOpenProject={openProjectFromChat}
               projects={projects}
               onNavigateTab={(tab) => setActiveTab(tab)}
               initialConversationId={initialConvId ?? undefined}

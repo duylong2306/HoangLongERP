@@ -102,3 +102,13 @@ export function isFirstOfRun(msgs: ChatMessage[], i: number): boolean {
   const a = msgs[i - 1], b = msgs[i];
   return a.senderId !== b.senderId || a.system || b.system || dayKey(a.createdAt) !== dayKey(b.createdAt) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() > 5 * 60000;
 }
+
+/**
+ * Giữ nguyên chỗ đang đọc sau khi tải thêm tin CŨ (chèn phía trên): vị trí cuộn mới = vị trí HIỆN TẠI + phần chiều cao vừa thêm.
+ * Dùng vị trí hiện tại (không phải vị trí lúc bắt đầu tải) để nếu người dùng đã cuộn đi nơi khác trong lúc chờ — vd bấm "xuống cuối" —
+ * thì không bị kéo ngược về chỗ cũ. Đang ở đáy (pinned) → trả null: không chỉnh, để cơ chế dính đáy lo.
+ */
+export function scrollTopAfterPrepend(o: { pinned: boolean; scrollTop: number; prevHeight: number; newHeight: number }): number | null {
+  if (o.pinned) return null;
+  return Math.max(0, o.scrollTop + (o.newHeight - o.prevHeight));
+}

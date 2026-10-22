@@ -15,7 +15,7 @@ import {
   prefsKey, readPrefs, writePrefs, toggleIn, type ChatPrefs,
 } from '../lib/chatPrefs';
 import {
-  filterConversations, sortConversations, categoryOf, isPinnedConv, collectMedia, extractLinks, pinnedMessages, dayKey, dayLabel, listTime, isFirstOfRun,
+  scrollTopAfterPrepend, filterConversations, sortConversations, categoryOf, isPinnedConv, collectMedia, extractLinks, pinnedMessages, dayKey, dayLabel, listTime, isFirstOfRun,
   CATEGORY_LABEL, type Category, type ListTab,
 } from '../lib/chatInfo';
 import UserAvatar from './UserAvatar';
@@ -47,6 +47,9 @@ interface Props {
   onOpenWorkTask?: (taskId: string) => void;
   /** Tạo công việc mới (lưu lên hệ thống) — dùng cho "Tạo công việc từ tin nhắn" */
   onCreateTask?: (t: Task) => Promise<void> | void;
+  /** "Mở công trình" từ nhóm chat công trình: App kiểm tra quyền (truy cập phân hệ dự án) rồi mở thẳng chi tiết dự án */
+  canOpenProject?: (projectId: string) => boolean;
+  onOpenProject?: (projectId: string) => void;
   projects?: { id: string; name: string; pmId?: string }[];
 }
 
@@ -56,7 +59,7 @@ const PICKER_EMOJIS = ['😊', '😂', '🥰', '😍', '😉', '😎', '🤔', '
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const fmtSize = (n?: number) => (!n ? '' : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [] }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], canOpenProject, onOpenProject }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -197,7 +200,14 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   // Nút "xuống cuối" (như Zalo): hiện khi đã cuộn lên xa đáy; kèm số tin mới đến trong lúc đang xem tin cũ
   const [showJump, setShowJump] = useState(false);
   const [newWhileUp, setNewWhileUp] = useState(0);
-  const jumpToBottom = () => { pinnedRef.current = true; setShowJump(false); setNewWhileUp(0); const el = listRef.current; if (el) el.scrollTo ? el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }) : (el.scrollTop = el.scrollHeight); };
+  // Trong lúc cuộn mượt xuống đáy sau khi bấm nút, các sự kiện cuộn trung gian KHÔNG được coi là "người dùng rời đáy" (jumpLock), và cuối cùng chốt xuống đáy thật.
+  const jumpLockUntil = useRef(0);
+  const jumpToBottom = () => {
+    pinnedRef.current = true; setShowJump(false); setNewWhileUp(0); jumpLockUntil.current = Date.now() + 800;
+    const el = listRef.current; if (!el) return;
+    if (el.scrollTo) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); else el.scrollTop = el.scrollHeight;
+    setTimeout(() => { if (pinnedRef.current) toBottom(); }, 450);
+  };
   const innerRef = useRef<HTMLDivElement>(null);
   const toBottom = () => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; };
   useEffect(() => { pinnedRef.current = true; setShowJump(false); setNewWhileUp(0); }, [selectedId]);
@@ -222,10 +232,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     if (!selected || !windowRef.current || loadingOlder || !hasMoreOlder) return;
     const older = new Date(new Date(windowRef.current).getTime() - TWO_DAYS).toISOString();
     setLoadingOlder(true);
-    const el = listRef.current; const prevH = el?.scrollHeight ?? 0; const prevTop = el?.scrollTop ?? 0;
+    const el = listRef.current; const prevH = el?.scrollHeight ?? 0;
     const fetched = await loadMessagesFromCloud(selected.id, { fromIso: older });
     windowRef.current = older; setMessages(applyWindow(getMessages(selected.id))); setHasMoreOlder(fetched.length > 0); setLoadingOlder(false);
-    requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevH + prevTop; });
+    // Chỉnh vị trí theo chỗ ĐANG đọc lúc tải xong (không phải lúc bắt đầu tải) → bấm "xuống cuối" khi đang tải tin cũ không bị kéo ngược lại
+    requestAnimationFrame(() => { if (!el) return; const t = scrollTopAfterPrepend({ pinned: pinnedRef.current, scrollTop: el.scrollTop, prevHeight: prevH, newHeight: el.scrollHeight }); if (t !== null) el.scrollTop = t; });
   };
 
   // ─── Soạn tin ───
@@ -485,7 +496,16 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       {(selected.projectId || selected.taskId) && (
         <div className="border-t-8 border-slate-100 px-4 py-3">
           <div className="font-bold text-[13px] mb-1.5">{selected.taskId ? 'Công việc liên quan' : 'Công trình'}</div>
-          <button type="button" onClick={() => selected.taskId ? window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: selected.taskId } })) : onNavigateTab?.('projects-construction')} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer">{selected.taskId ? 'Mở công việc' : 'Mở công trình'}</button>
+          {selected.taskId ? (
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: selected.taskId } }))} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer">Mở công việc</button>
+          ) : (() => {
+            // Mở thẳng chi tiết công trình — chỉ khi người dùng được vào phân hệ dự án đó (phân quyền do App kiểm); không thì nút bị khóa kèm lý do
+            const pid = selected.projectId || String(selected.id).replace('conv_project_', '');
+            const allowed = canOpenProject ? canOpenProject(pid) : true;
+            return allowed
+              ? <button type="button" onClick={() => onOpenProject ? onOpenProject(pid) : onNavigateTab?.('projects-construction')} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-project">Mở công trình</button>
+              : <span className="inline-block text-[12px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5" data-testid="zalo-open-project-denied" title="Bạn không có quyền xem công trình này hoặc công trình không còn tồn tại">Bạn không có quyền xem công trình này</span>;
+          })()}
         </div>
       )}
       {selected.type !== 'personal' && (
@@ -613,7 +633,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               </div>)}
 
             <div className="relative flex-1 min-h-0 flex flex-col">
-            <div ref={listRef} onScroll={e => { const el = e.currentTarget as HTMLDivElement; const dist = el.scrollHeight - el.scrollTop - el.clientHeight; pinnedRef.current = dist < 120; setShowJump(dist > 320); if (dist < 120) setNewWhileUp(0); if (el.scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5 py-3 min-h-0 overscroll-contain" data-testid="zalo-messages">
+            <div ref={listRef} onScroll={e => { const el = e.currentTarget as HTMLDivElement; if (Date.now() < jumpLockUntil.current) return;   // đang cuộn mượt xuống đáy theo nút → bỏ qua
+                const dist = el.scrollHeight - el.scrollTop - el.clientHeight; pinnedRef.current = dist < 120; setShowJump(dist > 320); if (dist < 120) setNewWhileUp(0); if (el.scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5 py-3 min-h-0 overscroll-contain" data-testid="zalo-messages">
               <div ref={innerRef}>
               {loadingOlder && <div className="text-center text-[12px] text-slate-600 py-2"><Loader2 className="w-4 h-4 inline animate-spin mr-1" />Đang tải tin cũ hơn…</div>}
               {messages.length === 0 && <div className="text-center text-[13px] text-slate-600 py-10">Chưa có tin nhắn. Hãy gửi lời chào 👋</div>}

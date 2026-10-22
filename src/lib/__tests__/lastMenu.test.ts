@@ -43,4 +43,12 @@ describe('App — nhớ menu & bố cục Tin nhắn trên điện thoại', () 
     expect(zalo).toMatch(/overflow-y-auto overflow-x-hidden[^"]*data-testid="zalo-messages"|overflow-x-hidden px-3 sm:px-5 py-3 min-h-0 overscroll-contain" data-testid="zalo-messages"/);
     expect(zalo).toContain('[overflow-wrap:anywhere]');
   });
+  it('Mở công trình từ Tin nhắn: App kiểm quyền phân hệ trước khi mở; bảng dự án mở sẵn chi tiết dự án được yêu cầu', () => {
+    const app2 = fs.readFileSync('src/App.tsx', 'utf8');
+    const kanban = fs.readFileSync('src/components/ProjectKanbanBoard.tsx', 'utf8');
+    expect(app2).toMatch(/canOpenProject = \(id: string\) => \{ const pr = projects\.find\(x => x\.id === id\); return !!pr && isAccessible\(projectTabOf\(pr\)\); \}/);
+    expect(app2).toMatch(/if \(!isAccessible\(projectTabOf\(pr\)\)\) \{ addToast\(\{ title: '⛔ Không có quyền'/);
+    expect((app2.match(/initialProjectId=\{pendingProjectId \?\? undefined\}/g) || []).length).toBe(3);   // cả 3 phân hệ: Xây dựng, Nội thất, Cơ khí
+    expect(kanban).toMatch(/setSelectedProjectId\(initialProjectId\)/);
+  });
 });

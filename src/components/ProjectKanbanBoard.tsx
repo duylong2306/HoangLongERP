@@ -86,6 +86,9 @@ interface ProjectKanbanBoardProps {
   quotes?: Quote[];
   onRedirectToQuote?: (projectId: string) => void;
   onRedirectToSubcontractor?: (projectId: string, subcontractorId: string, workName: string) => void;
+  /** Mở sẵn chi tiết dự án này khi vào bảng (vd từ nút "Mở công trình" ở Tin nhắn) */
+  initialProjectId?: string;
+  onInitialProjectOpened?: () => void;
 }
 
 export default function ProjectKanbanBoard({
@@ -107,7 +110,9 @@ export default function ProjectKanbanBoard({
   currentUser,
   quotes,
   onRedirectToQuote,
-  onRedirectToSubcontractor
+  onRedirectToSubcontractor,
+  initialProjectId,
+  onInitialProjectOpened
 }: ProjectKanbanBoardProps) {
   const { addToast } = useNotification(); // Toast thông báo từ context
 
@@ -517,6 +522,12 @@ export default function ProjectKanbanBoard({
   // selectedProjectId → dự án đang mở drawer
   // overlayTaskId → Task đang overlay (xem qua)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  // Mở sẵn chi tiết dự án được yêu cầu từ nơi khác (App đã kiểm tra quyền trước khi chuyển sang đây)
+  useEffect(() => {
+    if (!initialProjectId || !projects.some(p => p.id === initialProjectId)) return;
+    setSelectedProjectId(initialProjectId);
+    onInitialProjectOpened?.();
+  }, [initialProjectId, projects]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [overlayTaskId, setOverlayTaskId] = useState<string | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
