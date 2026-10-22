@@ -4,7 +4,8 @@
 // Nên chi phí công trình được tổng hợp theo 6 nhóm (không trùng nhau):
 //   1. Vật tư (nhà cung cấp) : Σ tổng tiền đơn mua hàng của công trình (bỏ nháp/đã hủy); đã chi = số đã thanh toán của đơn.
 //   2. Kho                  : Σ tổng tiền đơn NỘI BỘ xuất từ kho cho công trình (không có công nợ → coi như đã chi).
-//   3. Thầu phụ             : đã chi tạm ứng/thanh toán thầu phụ + phần hợp đồng thầu phụ ĐÃ DUYỆT còn chưa trả
+//   3. Thầu phụ             : mọi phiếu chi đã duyệt TRẢ CHO THẦU PHỤ (đề xuất "Chi Thầu Phụ", hoặc đề xuất "Chi phí công trình" nhưng người nhận là thầu phụ ĐÃ CÓ HỢP ĐỒNG ĐÃ DUYỆT ở công trình — nhận theo mã)
+//                              + phần hợp đồng thầu phụ ĐÃ DUYỆT còn chưa trả
 //                              (mỗi hợp đồng/thầu phụ tính max(giá trị hợp đồng, đã chi) để trả vượt không làm âm).
 //   4. Chi phí công trường  : phiếu chi "chi phí công trường" đã duyệt.
 //   5. Chi khác             : các phiếu chi đã duyệt còn lại gắn công trình (chi khác, nhân công, vận chuyển…), trừ nạp quỹ tiền mặt.
@@ -43,6 +44,28 @@ const emptyCost = (): ProjectCost => ({ material: 0, warehouse: 0, subcontract: 
 const isApprovedContract = (c: any) => c?.isApproved === true || String(c?.status || '').trim().toLowerCase() === 'hoàn thành';
 const isWarehouseOrder = (o: any) => !!o?.fromWarehouse || o?.supplierId === WAREHOUSE_SOURCE_ID;
 
+// ── Nhận diện phiếu chi TRẢ CHO THẦU PHỤ ──
+// Trước đây chỉ phiếu có category 'subcontractor_advance' (đề xuất "Chi Thầu Phụ") mới tính vào Thầu phụ. Nhưng tiền trả thầu phụ cũng hay được lập bằng
+// đề xuất "Chi phí công trình" → phiếu mang category 'site_expense' → bị cộng vào "Chi phí công trường" TRONG KHI hợp đồng thầu phụ vẫn tính đủ giá trị
+// → tính ĐÔI (vd NGUYỄN VĂN HÒA: hợp đồng 130tr + 90tr phiếu chi công trường). Nay: phiếu của một thầu phụ ĐÃ CÓ HỢP ĐỒNG ĐÃ DUYỆT ở công trình đó
+// được xếp vào Thầu phụ và trừ vào phần hợp đồng còn chưa trả. Nhận ra thầu phụ theo MÃ: mã trên phiếu, hoặc mã trên đề xuất gốc của phiếu (nhiều phiếu chỉ lưu mã ở đề xuất);
+// chỉ khi phiếu không có mã nào mới dựa vào tên người nhận khớp CHÍNH XÁC tên thầu phụ của hợp đồng.
+interface ContractSubs { ids: Set<string>; names: Set<string> }
+function contractSubsByProject(contracts: any[]): Map<string, ContractSubs> {
+  const m = new Map<string, ContractSubs>();
+  for (const k of contracts) {
+    if (!isApprovedContract(k) || !k.projectId) continue;
+    const e = m.get(k.projectId) || m.set(k.projectId, { ids: new Set(), names: new Set() }).get(k.projectId)!;
+    if (k.subcontractorId) e.ids.add(k.subcontractorId); else if (k.subcontractorName) e.names.add(k.subcontractorName);
+  }
+  return m;
+}
+const advanceIndex = (advances: any[]) => new Map<string, any>(advances.map(a => [a.id, a] as const));
+const resolveSubId = (p: Payment, adv: Map<string, any>): string | undefined => p.subcontractorId || adv.get((p as any).relatedAdvanceId)?.subcontractorId || undefined;
+const isSubcontractPayment = (p: Payment, subId: string | undefined, cs?: ContractSubs): boolean =>
+  p.category === 'subcontractor_advance' || (!!cs && (subId ? cs.ids.has(subId) : !!p.recipient && cs.names.has(p.recipient)));
+interface SubPay { p: Payment; subId?: string }
+
 export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<string, ProjectCost> {
   const out = new Map<string, ProjectCost>();
   const wanted = new Set(projectIds);
@@ -62,7 +85,8 @@ export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<st
   }
 
   // ── Phiếu chi theo công trình (bỏ nạp quỹ; bỏ phiếu trả cho đơn đã tính ở trên) ──
-  const subPaidByProject = new Map<string, Payment[]>();
+  const subPaidByProject = new Map<string, SubPay[]>();
+  const advById = advanceIndex(inp.advances), cSubs = contractSubsByProject(inp.contracts);
   for (const p of inp.payments) {
     const c = get(p.projectId); if (!c || isCashFundDeposit(p)) continue;
     const forCountedOrder = !!p.purchaseOrderId && countedOrderIds.has(p.purchaseOrderId);
@@ -72,9 +96,10 @@ export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<st
     if (p.paymentMethod === 'cash' || p.paymentMethod === 'cash_fund') c.cash += num(p.amount);
     if (forCountedOrder) continue;
     const amt = num(p.amount);
-    if (p.category === 'subcontractor_advance') {
+    const subId = resolveSubId(p, advById);
+    if (isSubcontractPayment(p, subId, cSubs.get(p.projectId!))) {
       c.subcontract += amt; c.paid += amt;
-      (subPaidByProject.get(p.projectId!) || subPaidByProject.set(p.projectId!, []).get(p.projectId!)!).push(p);
+      (subPaidByProject.get(p.projectId!) || subPaidByProject.set(p.projectId!, []).get(p.projectId!)!).push({ p, subId });
     } else if (p.category === 'site_expense') { c.site += amt; c.paid += amt; }
     else { c.other += amt; c.paid += amt; }
   }
@@ -90,8 +115,8 @@ export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<st
   }
   for (const g of groups.values()) {
     const paid = (subPaidByProject.get(g.projectId) || [])
-      .filter(p => (g.subId && p.subcontractorId === g.subId) || (!p.subcontractorId && g.subName && p.recipient === g.subName))
-      .reduce((s, p) => s + num(p.amount), 0);
+      .filter(x => (g.subId && x.subId === g.subId) || (!x.subId && g.subName && x.p.recipient === g.subName))
+      .reduce((s, x) => s + num(x.p.amount), 0);
     get(g.projectId)!.subcontract += Math.max(0, g.value - paid);   // phần đã chi đã cộng ở trên; chỉ cộng thêm phần chưa trả
   }
 
@@ -171,7 +196,8 @@ export function buildProjectCostItems(projectId: string, inp: CostInputs): CostI
       tag: wh ? undefined : (num(o.thanhToanThucTe) >= total && total > 0 ? 'Đã thanh toán đủ' : num(o.thanhToanThucTe) > 0 ? 'Thanh toán một phần' : 'Chưa thanh toán'),
     });
   }
-  const subPaid: Payment[] = [];
+  const subPaid: SubPay[] = [];
+  const advById = advanceIndex(inp.advances), csub = contractSubsByProject(inp.contracts).get(projectId);
   for (const p of inp.payments) {
     if (p.projectId !== projectId || isCashFundDeposit(p)) continue;
     const forCounted = !!p.purchaseOrderId && countedOrderIds.has(p.purchaseOrderId);
@@ -182,8 +208,9 @@ export function buildProjectCostItems(projectId: string, inp: CostInputs): CostI
     }
     if (p.status !== 'approved' || forCounted) continue;
     const amt = num(p.amount);
-    const group: CostGroup = p.category === 'subcontractor_advance' ? 'subcontract' : p.category === 'site_expense' ? 'site' : 'other';
-    if (group === 'subcontract') subPaid.push(p);
+    const subId = resolveSubId(p, advById);
+    const group: CostGroup = isSubcontractPayment(p, subId, csub) ? 'subcontract' : p.category === 'site_expense' ? 'site' : 'other';
+    if (group === 'subcontract') subPaid.push({ p, subId });
     items.push({ id: `p:${p.id}`, group, title: `Phiếu chi ${p.code || p.id}`, sub: [p.recipient, (p as any).notes].filter(Boolean).join(' · '), date: day((p as any).date || (p as any).createdAt), amount: amt, paid: amt, tag: cash ? 'Tiền mặt' : undefined });
   }
   // Hợp đồng thầu phụ đã duyệt: phần còn chưa trả (giống buildProjectCosts)
@@ -195,7 +222,7 @@ export function buildProjectCostItems(projectId: string, inp: CostInputs): CostI
     g.value += num(k.contractValue); groups.set(key, g);
   }
   for (const [key, g] of groups) {
-    const paid = subPaid.filter(p => (g.subId && p.subcontractorId === g.subId) || (!p.subcontractorId && g.subName && p.recipient === g.subName)).reduce((s, p) => s + num(p.amount), 0);
+    const paid = subPaid.filter(x => (g.subId && x.subId === g.subId) || (!x.subId && g.subName && x.p.recipient === g.subName)).reduce((s, x) => s + num(x.p.amount), 0);
     const left = Math.max(0, g.value - paid);
     if (left > 0) items.push({ id: `c:${key}`, group: 'subcontract', title: `Hợp đồng thầu phụ ${g.subName || ''}`.trim(), sub: `Giá trị hợp đồng ${g.value.toLocaleString('vi-VN')} đ, đã trả ${paid.toLocaleString('vi-VN')} đ`, amount: left, paid: 0, tag: 'Còn chưa trả' });
   }
