@@ -1,4 +1,4 @@
-// XÁC THỰC TRANG QUẢN TRỊ NỀN TẢNG (lolo.io.vn/quantri) — tách biệt hoàn toàn với đăng nhập ERP của doanh nghiệp.
+// XÁC THỰC TRANG QUẢN TRỊ NỀN TẢNG (lolo.com.vn/quantri) — tách biệt hoàn toàn với đăng nhập ERP của doanh nghiệp.
 // File bắt đầu bằng "_" nên Vercel không coi là endpoint. KHÔNG import từ src/ (xem api/login.ts).
 //
 // Token quản trị được ký bằng KHÓA RIÊNG suy ra từ SUPABASE_JWT_SECRET (sha256 + nhãn "platform-admin"), nên:

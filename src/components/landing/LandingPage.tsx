@@ -7,8 +7,8 @@ import PlanFeatures from '../subscription/PlanFeatures';
 import { slugify } from '../../lib/slug';
 import { getBaseDomainForDisplay, getTenantUrl } from '../../lib/tenant';
 
-// TRANG GIỚI THIỆU + ĐĂNG KÝ DOANH NGHIỆP (Giai đoạn 2) — hiện ở địa chỉ gốc (www.lolo.io.vn), kiểu KiotViet:
-// khách nhập thông tin → hệ thống tạo doanh nghiệp + tài khoản quản trị và cấp địa chỉ riêng <tên>.lolo.io.vn.
+// TRANG GIỚI THIỆU + ĐĂNG KÝ DOANH NGHIỆP (Giai đoạn 2) — hiện ở địa chỉ gốc (www.lolo.com.vn), kiểu KiotViet:
+// khách nhập thông tin → hệ thống tạo doanh nghiệp + tài khoản quản trị và cấp địa chỉ riêng <tên>.lolo.com.vn.
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (KHÔNG dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm
 // (!important) cho giao diện ERP nền sáng → chữ trắng trên nền xanh sẽ thành chữ tối, khó đọc.
 // Được main.tsx chọn khi tên miền là "root" (xem src/lib/tenant.ts); KHÔNG nạp ứng dụng ERP/Supabase ở trang này.

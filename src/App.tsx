@@ -129,6 +129,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getSupabase, initializeSupabase, setAuthToken, getCurrentCompanyId, companyScopedKey } from './lib/supabase';
 import SubscriptionBanner from './components/subscription/SubscriptionBanner';
 import PushPermissionBanner from './components/PushPermissionBanner';
+import InstallAppPrompt from './components/InstallAppPrompt';
 import { buildDocumentTitle, DEFAULT_DOCUMENT_TITLE } from './lib/documentTitle';
 import {
   parsePushData,
@@ -3278,7 +3279,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   }
 
   // Quản lý doanh nghiệp (tạo công ty, gói, hạn dùng) KHÔNG còn nằm trong ERP: đã tách ra trang quản trị nền tảng riêng
-  // (lolo.io.vn/quantri, tài khoản riêng — xem api/platform.ts). Trước đây menu này dành cho admin của công ty Hoàng Long
+  // (lolo.com.vn/quantri, tài khoản riêng — xem api/platform.ts). Trước đây menu này dành cho admin của công ty Hoàng Long
   // nên quyền quản trị nền tảng bị dính vào tài khoản của 1 doanh nghiệp (lỗ hổng bảo mật).
 
   const isAccessible = (tab: string): boolean => {
@@ -3613,6 +3614,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         buildTag={`v${import.meta.env.VITE_BUILD_DATE} · ${import.meta.env.VITE_BUILD_COMMIT}`} />}
       {/* THANH DƯỚI trên điện thoại: 5 mục (Tổng quan, Việc, Tin nhắn, Danh mục, Tôi) */}
       {navUser && <MobileNav tops={navTops} groups={navGroups} user={navUser} activeTab={activeTab} />}
+      {/* Thẻ nhắc cài ứng dụng ra màn hình chính (Android: nút Cài đặt; iPhone: hướng dẫn Thêm vào Màn hình chính) */}
+      {navUser && <InstallAppPrompt />}
 
       {/* (NỘI DUNG CHÍNH BÊN PHẢI) */}
       <div className={`flex-1 flex flex-col min-w-0 md:overflow-hidden bg-slate-950 text-slate-200 ${activeTab === 'messages' ? 'max-md:min-h-0 max-md:overflow-hidden' : ''}`} id="right_content_pane">

@@ -52,3 +52,18 @@ describe('App — nhớ menu & bố cục Tin nhắn trên điện thoại', () 
     expect(kanban).toMatch(/setSelectedProjectId\(initialProjectId\)/);
   });
 });
+
+describe('Tên miền đăng ký doanh nghiệp: lolo.com.vn', () => {
+  const v = JSON.parse(fs.readFileSync('vercel.json', 'utf8'));
+  it('địa chỉ gốc cũ (lolo.io.vn, www.lolo.io.vn) chuyển sang www.lolo.com.vn, giữ đường dẫn; địa chỉ riêng từng công ty KHÔNG bị chuyển', () => {
+    const hosts = (v.redirects as any[]).map(r => r.has[0].value).sort();
+    expect(hosts).toEqual(['lolo.io.vn', 'www.lolo.io.vn']);
+    for (const r of v.redirects) { expect(r.destination).toBe('https://www.lolo.com.vn/:path*'); expect(r.permanent).toBe(false); }
+    expect(hosts.some((h: string) => h.includes('hoanglong'))).toBe(false);
+  });
+  it('mã nguồn không còn ghi cứng địa chỉ lolo.io.vn (địa chỉ lấy từ cấu hình VITE_BASE_DOMAIN)', () => {
+    for (const f of ['src/App.tsx', 'src/components/landing/LandingPage.tsx', 'src/components/platform/PlatformConsole.tsx', 'api/platform.ts', 'api/_platformAuth.ts', 'api/_company.ts']) {
+      expect(fs.readFileSync(f, 'utf8')).not.toContain('lolo.io.vn');
+    }
+  });
+});

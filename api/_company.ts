@@ -1,5 +1,5 @@
 // Tạo DOANH NGHIỆP MỚI + tài khoản quản trị đầu tiên — dùng chung cho:
-//   • api/platform.ts (chủ nền tảng tạo công ty ở trang quản trị lolo.io.vn/quantri);
+//   • api/platform.ts (chủ nền tảng tạo công ty ở trang quản trị lolo.com.vn/quantri);
 //   • api/register-company.ts (khách tự đăng ký ở website công khai — Giai đoạn 2).
 // Tách ra 1 chỗ để 2 luồng luôn tạo công ty GIỐNG HỆT nhau (không lệch quy ước emp_admin...).
 // File bắt đầu bằng "_" nên Vercel không coi là endpoint. KHÔNG import từ src/ (xem api/login.ts).

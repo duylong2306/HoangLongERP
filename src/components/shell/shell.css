@@ -169,3 +169,24 @@ html:root, html:root body { overflow-x: hidden; overscroll-behavior-x: none; }
 @supports (overflow-x: clip) { html:root, html:root body { overflow-x: clip; } }
 /* Khung chat/Tin nhắn: không cuộn ngang, không "kéo nảy" làm trượt cả trang */
 [data-testid="zalo-root"] { overscroll-behavior: contain; }
+
+/* ─── THẺ NHẮC CÀI ỨNG DỤNG RA MÀN HÌNH CHÍNH ─── */
+.lx-install { position: fixed; z-index: 47; left: 12px; right: 12px; bottom: calc(var(--lx-bnav) + var(--lx-safe-bottom) + 10px); max-width: 460px; margin: 0 auto;
+  background: #fff; color: var(--lx-ink); border-radius: 18px; padding: 14px 14px 12px; border: 1px solid var(--lx-line); box-shadow: 0 12px 36px rgba(15,23,42,.28); animation: lxIn .25s ease-out; }
+@media (min-width: 768px) { .lx-install { bottom: 16px; left: auto; right: 16px; margin: 0; } }
+.lx-install-x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 0; border-radius: 999px; background: #f1f5f9; color: #64748b; display: grid; place-items: center; cursor: pointer; }
+.lx-install-row { display: flex; gap: 12px; align-items: center; padding-right: 26px; }
+.lx-install-ico { width: 52px; height: 52px; border-radius: 14px; flex: none; box-shadow: 0 2px 8px rgba(10,79,216,.35); }
+.lx-install-txt b { display: block; font-size: 15px; letter-spacing: -.01em; }
+.lx-install-txt span { display: block; font-size: 12.5px; color: var(--lx-mut); margin-top: 2px; line-height: 1.35; }
+.lx-install-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.lx-install-main { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 18px; border: 0; border-radius: 12px; cursor: pointer; font: inherit; font-weight: 800; font-size: 14px;
+  background: linear-gradient(135deg, var(--lx-2), var(--lx-1)); color: #ffffff; }
+.lx-install-main:disabled { opacity: .6; }
+.lx-install-sub { min-height: 40px; padding: 0 14px; border: 0; border-radius: 12px; background: #f1f5f9; color: #475569; cursor: pointer; font: inherit; font-weight: 700; font-size: 14px; }
+.lx-install-steps { list-style: none; margin: 12px 0 0; padding: 10px 12px; background: #f3f7ff; border-radius: 12px; display: grid; gap: 8px; font-size: 13px; }
+.lx-install-steps li { display: flex; align-items: center; gap: 10px; }
+.lx-install-steps i { width: 26px; height: 26px; border-radius: 8px; background: #fff; color: var(--lx-2); display: grid; place-items: center; flex: none; font-style: normal; font-weight: 800; box-shadow: 0 1px 3px rgba(15,23,42,.12); }
+/* Mũi tên nhún nhảy chỉ xuống thanh công cụ Safari (nút Chia sẻ nằm giữa thanh dưới) */
+.lx-install-arrow { text-align: center; color: var(--lx-2); font-size: 22px; line-height: 1; margin-top: 6px; animation: lxBounce 1s ease-in-out infinite; }
+@keyframes lxBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }

@@ -1,5 +1,5 @@
 // ============================================================================
-// Vercel Serverless Function — API TRANG QUẢN TRỊ NỀN TẢNG (lolo.io.vn/quantri).
+// Vercel Serverless Function — API TRANG QUẢN TRỊ NỀN TẢNG (lolo.com.vn/quantri).
 // ============================================================================
 // Thay cho api/admin-companies.ts cũ (đã xóa): trước đây quyền quản trị nền tảng gắn vào admin của công ty
 // Hoàng Long ngay trong ERP — nay là tài khoản RIÊNG (bảng platform_admins), token RIÊNG (api/_platformAuth.ts).

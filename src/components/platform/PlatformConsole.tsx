@@ -9,7 +9,7 @@ import AccountsTab from './AccountsTab';
 import LogsTab from './LogsTab';
 import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT, type PlatformAdmin } from './platformApi';
 
-// TRANG QUẢN TRỊ NỀN TẢNG (lolo.io.vn/quantri) — tách hẳn khỏi ERP của các doanh nghiệp.
+// TRANG QUẢN TRỊ NỀN TẢNG (lolo.com.vn/quantri) — tách hẳn khỏi ERP của các doanh nghiệp.
 // Được src/main.tsx chọn khi đường dẫn bắt đầu bằng /quantri ở địa chỉ gốc (không bao giờ ở subdomain doanh nghiệp).
 // Quyền thật nằm ở máy chủ (api/platform.ts kiểm tra token + tài khoản mỗi lần); giao diện này chỉ là vỏ.
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
