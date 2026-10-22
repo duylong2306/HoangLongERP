@@ -9,7 +9,7 @@ import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
-import { useNotification, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isAccountingGroupMember, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
+import { useNotification, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isAccountingGroupMember, isAdminFallbackApprover, isAdminFallbackForPayment, isAdminFallbackForProposal, canSeeTravelExpenseApproval, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 import { isPaymentPendingForUser, isAdvancePendingForUser, isVoucherPendingForUser } from '../lib/approvalInbox';
 import { materialInboxFor, materialProposalTotal, COORDINATOR_STATUS_LABEL } from '../lib/materialApproval';
@@ -517,17 +517,17 @@ export default function TaskManagement({
   // Quy tắc DÙNG CHUNG với huy hiệu menu (lib/approvalInbox.ts): khớp theo MÃ người duyệt, tên chỉ dự phòng cho bản ghi cũ chưa có mã
   const employeeIdSet = React.useMemo(() => new Set(employees.map(e => e.id)), [employees]);
   const myPendingPayments = React.useMemo(() => payments.filter(p =>
-    isPaymentPendingForUser(p, currentUser, { isAdmin: isFinanceAdmin, isConfiguredApprover: isConfiguredApproverForPayment(currentUser?.id, p) })
+    isPaymentPendingForUser(p, currentUser, { isAdmin: isAdminFallbackForPayment(currentUser?.id, p), isConfiguredApprover: isConfiguredApproverForPayment(currentUser?.id, p) })
   ), [payments, currentUser, isFinanceAdmin]);
   const myPendingAdvances = React.useMemo(() => subcontractorAdvances.filter(a =>
-    isAdvancePendingForUser(a, currentUser, { isAdmin: isFinanceAdmin, isConfiguredApprover: isConfiguredApproverForProposal(currentUser?.id, a), employeeIds: employeeIdSet })
+    isAdvancePendingForUser(a, currentUser, { isAdmin: isAdminFallbackForProposal(currentUser?.id, a), isConfiguredApprover: isConfiguredApproverForProposal(currentUser?.id, a), employeeIds: employeeIdSet })
   ), [subcontractorAdvances, currentUser, isFinanceAdmin, employeeIdSet]);
   // CÔNG TÁC PHÍ chờ duyệt: user hiện tại được cấu hình xét duyệt CTP (Quyền Phê Duyệt → Công Tác
   // Phí). ⚠️ Bỏ fallback "thuộc nhóm Kế toán → duyệt tất cả" (isRoleAccounting) — cùng lý do rà
   // soát ở trên, chỉ người được add riêng cho "Công Tác Phí" (hoặc admin) mới được duyệt.
   const canApproveTravelExpense = React.useMemo(() => {
     // Quy tắc DÙNG CHUNG ở 3 nơi (xem canApproveTravelExpense trong SettingsContext)
-    return canApproveTravelExpenseCfg(currentUser?.id);
+    return canSeeTravelExpenseApproval(currentUser?.id);
   }, [currentUser]);
   const myPendingTravelExpenses = React.useMemo(() => travelExpenses.filter((t: any) =>
     t.status === 'pending' && canApproveTravelExpense
@@ -543,7 +543,7 @@ export default function TaskManagement({
   ), [subcontractorAdvances, currentUser, isVoucherAccountant]);
   // ĐỀ XUẤT VẬT TƯ: (1) chờ DUYỆT — Người xét duyệt vật tư / Giám đốc; (2) việc ĐIỀU PHỐI (Tìm nhà cung cấp / Chờ đặt hàng) — Người điều phối vật tư
   const materialInbox = React.useMemo(() => materialInboxFor(materialProposals, currentUser, {
-    isAdmin: isFinanceAdmin,
+    isAdmin: isAdminFallbackApprover(currentUser?.id, 'material_approver'),
     approverIds: getMaterialApprovers().map(a => a.id),
     coordinatorIds: getMaterialCoordinators().map(c => c.id),
   }), [materialProposals, currentUser, isFinanceAdmin]);

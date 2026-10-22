@@ -683,6 +683,28 @@ export function isConfiguredApproverForPayment(empId: string | undefined, paymen
   return getConfiguredApprovers(docType).some(a => a.id === empId);
 }
 
+/**
+ * DANH SÁCH "Chờ tôi xử lý" + HUY HIỆU: Giám đốc (nhóm admin) KHÔNG tự thấy việc duyệt của người khác nữa —
+ * chỉ thấy khi được chỉ định trong Quyền Phê Duyệt. Ngoại lệ duy nhất: loại hồ sơ CHƯA chỉ định ai thì Giám đốc
+ * làm người duyệt dự phòng (để hồ sơ không bị kẹt không ai thấy). Chỉ ảnh hưởng danh sách/huy hiệu, không đổi nút duyệt ở màn Tài chính.
+ */
+export function isAdminFallbackApprover(empId: string | undefined, docType: ApprovalPermission['documentType']): boolean {
+  return isRoleAdmin(empId) && getConfiguredApprovers(docType).length === 0;
+}
+export function isAdminFallbackForPayment(empId: string | undefined, payment: { category?: string }): boolean {
+  return isAdminFallbackApprover(empId, getPaymentApprovalDocType(payment));
+}
+export function isAdminFallbackForProposal(empId: string | undefined, proposal: { type?: string; taskName?: string }): boolean {
+  return isAdminFallbackApprover(empId, getProposalApprovalDocType(proposal));
+}
+/** Công tác phí cho danh sách/huy hiệu: đã cấu hình → đúng những người đó; chưa cấu hình → Giám đốc + Kế toán dự phòng. */
+export function canSeeTravelExpenseApproval(empId: string | undefined): boolean {
+  if (!empId) return false;
+  const list = getConfiguredApprovers('travel_expense');
+  if (list.length > 0) return list.some(a => a.id === empId);
+  return isRoleAdmin(empId) || isRoleAccounting(empId);
+}
+
 // ─── Kiểm tra quyền duyệt theo cấu hình Quyền Phê Duyệt (dùng chung, rà soát vòng 5 — 09/10/2026) ─────────────────
 
 /**

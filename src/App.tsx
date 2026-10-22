@@ -39,7 +39,7 @@ import {
 import { DisplaySettingsProvider, useDisplaySettings } from './context/DisplaySettingsContext';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isAccountingGroupMember, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators, isConfiguredApproverForPayment, isConfiguredApproverForProposal } from './context';
+import { isUserInRoleGroup, setRoleGroupsCache, loadHrmRoleGroups, setApprovalConfigCache, getConfiguredApprover, isRoleAdmin, isRoleAccounting, isAccountingGroupMember, isAdminFallbackApprover, isAdminFallbackForPayment, isAdminFallbackForProposal, canSeeTravelExpenseApproval, isRoleOffice, isRoleTechnical, hasModulePermission, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor, getMaterialApprovers, getMaterialCoordinators, isConfiguredApproverForPayment, isConfiguredApproverForProposal } from './context';
 import { Toast } from './context/NotificationContext';
 import { migrateLegacyData } from './lib/migrateLocalStorage';
 
@@ -3384,18 +3384,18 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const isFinanceAdminBadge = isRoleAdmin(currentUser.id);
     const employeeIdsBadge = new Set(employees.map(e => e.id));
     const myPendingPayments = payments.filter(p =>
-      isPaymentPendingForUser(p, currentUser, { isAdmin: isFinanceAdminBadge, isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })
+      isPaymentPendingForUser(p, currentUser, { isAdmin: isAdminFallbackForPayment(currentUser.id, p), isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })
     );
     const myPendingAdvances = subcontractorAdvances.filter(a =>
-      isAdvancePendingForUser(a, currentUser, { isAdmin: isFinanceAdminBadge, isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsBadge })
+      isAdvancePendingForUser(a, currentUser, { isAdmin: isAdminFallbackForProposal(currentUser.id, a), isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsBadge })
     );
     // Công tác phí chờ duyệt (đồng bộ TaskManagement myPendingTravelExpenses):
     // user hiện tại được cấu hình xét duyệt CTP hoặc thuộc nhóm Kế toán → xem toàn bộ.
-    const canApproveTravelExpense = canApproveTravelExpenseCfg(currentUser.id); // quy tắc dùng chung (SettingsContext)
+    const canApproveTravelExpense = canSeeTravelExpenseApproval(currentUser.id); // quy tắc dùng chung (SettingsContext)
     const myPendingTravelExpenses = ctpSummary.filter((t: any) => t.status === 'pending' && canApproveTravelExpense);
     // Đề xuất vật tư (đồng bộ TaskManagement): chờ duyệt (người xét duyệt vật tư/Giám đốc) + việc điều phối (người điều phối được chỉ định)
     const materialInbox = materialInboxFor(materialProposalsForBadge, currentUser, {
-      isAdmin: isRoleAdmin(currentUser.id),
+      isAdmin: isAdminFallbackApprover(currentUser.id, 'material_approver'),
       approverIds: getMaterialApprovers().map(a => a.id),
       coordinatorIds: getMaterialCoordinators().map(c => c.id),
     });
@@ -3417,7 +3417,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const approveAdvanceFromMessages = async (id: string, decision: 'approved' | 'rejected') => {
     if (!currentUser) return;
     const adv = subcontractorAdvances.find(a => a.id === id);
-    const allowed = !!adv && isAdvancePendingForUser(adv, currentUser, { isAdmin: isRoleAdmin(currentUser.id), isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, adv), employeeIds: new Set(employees.map(e => e.id)) });
+    const allowed = !!adv && isAdvancePendingForUser(adv, currentUser, { isAdmin: isAdminFallbackForProposal(currentUser.id, adv), isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, adv), employeeIds: new Set(employees.map(e => e.id)) });
     if (!adv || !allowed) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền duyệt đề xuất này (hoặc đề xuất đã được xử lý).', type: 'warning' }); return; }
     const updated = { ...adv, status: decision === 'approved' ? 'pending_payment' : 'rejected' } as SubcontractorAdvanceProposal;
     try {
@@ -3453,16 +3453,16 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const employeeIdsW = new Set(employees.map(e => e.id));
     const pendingLeavesW = groupPendingAbsencePairs(leaves.filter(l => l.status === 'pending' && isLeaveApproverFor(currentUser.id, currentUser.name, l as any))).visible;
     const matW = materialInboxFor(materialProposalsForBadge, currentUser, {
-      isAdmin: isAdminW, approverIds: getMaterialApprovers().map(a => a.id), coordinatorIds: getMaterialCoordinators().map(c => c.id),
+      isAdmin: isAdminFallbackApprover(currentUser.id, 'material_approver'), approverIds: getMaterialApprovers().map(a => a.id), coordinatorIds: getMaterialCoordinators().map(c => c.id),
     });
-    const canCtp = canApproveTravelExpenseCfg(currentUser.id);
+    const canCtp = canSeeTravelExpenseApproval(currentUser.id);
     const inbox = buildWorkInbox({
       employeeIds: employeeIdsW,
       reviewingTasks: tasks.filter(t => t.status === 'reviewing' && (t.assignerId === currentUser.id || t.assignerId === currentUser.name || t.approvals?.some(ap => ap.approverId === currentUser.id || ap.approverId === currentUser.name)))
         .map(t => ({ id: t.id, name: t.name, project: projectName(t.projectId), assigneeId: t.assigneeId })),
       leaves: pendingLeavesW as any,
-      payments: payments.filter(p => isPaymentPendingForUser(p, currentUser, { isAdmin: isAdminW, isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })) as any,
-      advances: subcontractorAdvances.filter(a => isAdvancePendingForUser(a, currentUser, { isAdmin: isAdminW, isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsW })) as any,
+      payments: payments.filter(p => isPaymentPendingForUser(p, currentUser, { isAdmin: isAdminFallbackForPayment(currentUser.id, p), isConfiguredApprover: isConfiguredApproverForPayment(currentUser.id, p) })) as any,
+      advances: subcontractorAdvances.filter(a => isAdvancePendingForUser(a, currentUser, { isAdmin: isAdminFallbackForProposal(currentUser.id, a), isConfiguredApprover: isConfiguredApproverForProposal(currentUser.id, a), employeeIds: employeeIdsW })) as any,
       travel: ctpSummary.filter((t: any) => t.status === 'pending' && canCtp),
       // Chờ LẬP PHIẾU (KT): chỉ Kế toán hoặc chính người lập (đúng như TaskManagement.myPendingVouchers)
       vouchers: subcontractorAdvances.filter(a => isVoucherPendingForUser(a, currentUser, { isAccountingMember: isAccountingGroupMember(currentUser.id) })) as any,
