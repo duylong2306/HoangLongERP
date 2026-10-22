@@ -222,4 +222,15 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
     fn.toggleMessageReaction.mockClear();
     tap(10, 10, 10, 80); tap(10, 10, 10, 80); expect(fn.toggleMessageReaction).not.toHaveBeenCalled();   // vuốt (di chuyển xa) không tính
   });
+  it('nút "xuống cuối" (như Zalo): chỉ hiện khi đã cuộn lên xa đáy; bấm thì xuống cuối và ẩn', async () => {
+    store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'a', createdAt: new Date().toISOString(), read: true }];
+    mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    const box = (await screen.findByTestId('zalo-messages')) as HTMLElement;
+    expect(screen.queryByTestId('zalo-jump-bottom')).toBeNull();                 // đang ở đáy → không có nút
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, value: 2000 }); Object.defineProperty(box, 'clientHeight', { configurable: true, value: 500 });
+    box.scrollTop = 0; fireEvent.scroll(box);                                      // cuộn lên cách đáy 1500px
+    const btn = await screen.findByTestId('zalo-jump-bottom'); fireEvent.click(btn);
+    await waitFor(() => expect(screen.queryByTestId('zalo-jump-bottom')).toBeNull());
+    expect(box.scrollTop).toBe(2000);
+  });
 });

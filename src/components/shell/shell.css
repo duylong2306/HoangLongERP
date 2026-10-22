@@ -161,3 +161,11 @@ body:not(:has(.lx-shell)) #root { background: #fff; }
 img, video { max-width: 100%; }
 /* 5) Vùng chạm tối thiểu ~40px cho nút biểu tượng trên điện thoại */
 @media (max-width: 767px) { button[aria-label], [role="tab"] { min-height: 40px; } }
+
+/* ─── CỐ ĐỊNH TRANG, KHÔNG KÉO LỆCH NGANG ───
+   Trước đây trang/khung cuộn có thể bị kéo ngang (nội dung rộng hơn màn hình: đường dẫn dài, bảng, thẻ…) làm lệch cả giao diện.
+   Chặn cuộn NGANG ở gốc (độ ưu tiên cao hơn quy tắc overflow:auto của index.css); cuộn DỌC giữ nguyên. Bảng rộng đã nằm trong khung overflow-x-auto riêng nên vẫn kéo ngang được trong khung đó. */
+html:root, html:root body { overflow-x: hidden; overscroll-behavior-x: none; }
+@supports (overflow-x: clip) { html:root, html:root body { overflow-x: clip; } }
+/* Khung chat/Tin nhắn: không cuộn ngang, không "kéo nảy" làm trượt cả trang */
+[data-testid="zalo-root"] { overscroll-behavior: contain; }

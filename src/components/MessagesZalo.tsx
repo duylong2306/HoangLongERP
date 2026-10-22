@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
+import { ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
@@ -194,15 +194,22 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   // pinned = đang ở sát đáy (người dùng chưa cuộn lên xem tin cũ). Khi pinned: tin mới / ảnh tải xong làm khung cao thêm đều tự kéo xuống đáy.
   // Mở hội thoại khác luôn nhảy xuống cuối; tin của CHÍNH MÌNH vừa gửi cũng luôn xuống cuối.
   const pinnedRef = useRef(true);
+  // Nút "xuống cuối" (như Zalo): hiện khi đã cuộn lên xa đáy; kèm số tin mới đến trong lúc đang xem tin cũ
+  const [showJump, setShowJump] = useState(false);
+  const [newWhileUp, setNewWhileUp] = useState(0);
+  const jumpToBottom = () => { pinnedRef.current = true; setShowJump(false); setNewWhileUp(0); const el = listRef.current; if (el) el.scrollTo ? el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }) : (el.scrollTop = el.scrollHeight); };
   const innerRef = useRef<HTMLDivElement>(null);
   const toBottom = () => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight; };
-  useEffect(() => { pinnedRef.current = true; }, [selectedId]);
+  useEffect(() => { pinnedRef.current = true; setShowJump(false); setNewWhileUp(0); }, [selectedId]);
   const lastLenRef = useRef(0);
+  const lastLenBefore = useRef(0);
   useEffect(() => {
+    lastLenBefore.current = lastLenRef.current;
     const last = messages[messages.length - 1];
     const changed = messages.length !== lastLenRef.current;
     lastLenRef.current = messages.length;
-    if (changed && (pinnedRef.current || last?.senderId === me)) { pinnedRef.current = true; toBottom(); requestAnimationFrame(toBottom); }
+    if (changed && (pinnedRef.current || last?.senderId === me)) { pinnedRef.current = true; setShowJump(false); setNewWhileUp(0); toBottom(); requestAnimationFrame(toBottom); }
+    else if (changed && messages.length > 0 && lastLenBefore.current < messages.length) setNewWhileUp(n => n + 1);   // tin mới đến khi đang đọc tin cũ → đếm để hiện trên nút
   }, [messages.length, selectedId]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const inner = innerRef.current; if (!inner || typeof ResizeObserver === 'undefined') return;
@@ -605,7 +612,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 {searchQ.trim() && <div className="max-h-40 overflow-y-auto mt-1.5">{searchHits.length === 0 ? <div className="text-[12px] text-slate-500 px-1 py-1">Không tìm thấy</div> : searchHits.slice(0, 20).map(h => <button key={h.id} type="button" onClick={() => jumpTo(h.id)} className="w-full text-left px-2 py-1 text-[12.5px] hover:bg-slate-50 rounded truncate cursor-pointer"><b>{h.senderName}</b> · {hhmm(h.createdAt)} — {h.content}</button>)}</div>}
               </div>)}
 
-            <div ref={listRef} onScroll={e => { const el = e.currentTarget as HTMLDivElement; pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; if (el.scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 min-h-0" data-testid="zalo-messages">
+            <div className="relative flex-1 min-h-0 flex flex-col">
+            <div ref={listRef} onScroll={e => { const el = e.currentTarget as HTMLDivElement; const dist = el.scrollHeight - el.scrollTop - el.clientHeight; pinnedRef.current = dist < 120; setShowJump(dist > 320); if (dist < 120) setNewWhileUp(0); if (el.scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5 py-3 min-h-0 overscroll-contain" data-testid="zalo-messages">
               <div ref={innerRef}>
               {loadingOlder && <div className="text-center text-[12px] text-slate-600 py-2"><Loader2 className="w-4 h-4 inline animate-spin mr-1" />Đang tải tin cũ hơn…</div>}
               {messages.length === 0 && <div className="text-center text-[13px] text-slate-600 py-10">Chưa có tin nhắn. Hãy gửi lời chào 👋</div>}
@@ -621,7 +629,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                       <div id={`zmsg-${m.id}`} data-testid="zalo-msg" onTouchStart={onMsgTouchStart} onTouchEnd={e => onMsgTouchEnd(e, m)} className={`group flex gap-2 items-end ${mineMsg ? 'justify-end' : ''} ${first ? 'mt-3' : 'mt-0.5'} ${reacts.length ? 'mb-3' : ''}`}>
                         {!mineMsg && (first ? <UserAvatar employee={employees.find(e => e.id === m.senderId) || null} name={m.senderName} size="sm" noRing className="shrink-0" /> : <span className="w-7 shrink-0" />)}
                         <div className={`relative max-w-[78%] sm:max-w-[70%] ${mineMsg ? 'order-2' : ''}`}>
-                          <div className={`rounded-xl px-3 py-2 shadow-sm text-[14px] leading-snug break-words ${m.deleted ? 'bg-white/55 text-slate-500 italic shadow-none' : mineMsg ? 'bg-[#d6e6ff]' : 'bg-white'}`}>
+                          <div className={`rounded-xl px-3 py-2 shadow-sm text-[14px] leading-snug break-words [overflow-wrap:anywhere] min-w-0 ${m.deleted ? 'bg-white/55 text-slate-500 italic shadow-none' : mineMsg ? 'bg-[#d6e6ff]' : 'bg-white'}`}>
                             {group && !mineMsg && first && !m.deleted && <div className="text-[12px] text-slate-500 mb-0.5">{m.senderName}</div>}
                             {m.deleted ? 'Tin nhắn đã được thu hồi' : (<>
                               {m.replyTo && <div className="border-l-[3px] border-blue-500 bg-slate-500/10 rounded-md px-2.5 py-1.5 mb-1.5 text-[12.5px]"><b className="block font-semibold">{m.replyTo.senderName}</b><span className="text-slate-600 line-clamp-2">{m.replyTo.content}</span></div>}
@@ -659,6 +667,13 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               })}
               <div ref={endRef} />
               </div>
+            </div>
+            {showJump && (
+              <button type="button" onClick={jumpToBottom} aria-label="Xuống tin mới nhất" title="Xuống tin mới nhất" data-testid="zalo-jump-bottom"
+                className="absolute right-3 bottom-3 w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 grid place-items-center text-slate-600 hover:text-blue-600 cursor-pointer z-10">
+                <ChevronsDown className="w-6 h-6" />
+                {newWhileUp > 0 && <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[11px] font-bold grid place-items-center" style={{ color: '#ffffff' }} data-testid="zalo-jump-count">{newWhileUp > 99 ? '99+' : newWhileUp}</span>}
+              </button>)}
             </div>
 
             <footer className="bg-white border-t border-slate-200 relative" data-testid="zalo-composer">

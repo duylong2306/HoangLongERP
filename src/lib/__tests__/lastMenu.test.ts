@@ -35,4 +35,12 @@ describe('App — nhớ menu & bố cục Tin nhắn trên điện thoại', () 
     expect(app).toMatch(/activeTab === 'messages' \? 'p-0 overflow-hidden lx-main-pad'/);
     expect(app).not.toContain('lx-fill');
   });
+  it('không kéo lệch ngang: gốc trang chặn cuộn ngang; danh sách tin không cuộn ngang; tin dài tự xuống dòng', () => {
+    const css = fs.readFileSync('src/components/shell/shell.css', 'utf8');
+    const zalo = fs.readFileSync('src/components/MessagesZalo.tsx', 'utf8');
+    expect(css).toMatch(/html:root,\s*html:root body\s*\{[^}]*overflow-x:\s*hidden/);
+    expect(css).toMatch(/overflow-x:\s*clip/);
+    expect(zalo).toMatch(/overflow-y-auto overflow-x-hidden[^"]*data-testid="zalo-messages"|overflow-x-hidden px-3 sm:px-5 py-3 min-h-0 overscroll-contain" data-testid="zalo-messages"/);
+    expect(zalo).toContain('[overflow-wrap:anywhere]');
+  });
 });
