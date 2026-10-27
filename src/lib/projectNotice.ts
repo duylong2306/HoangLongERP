@@ -23,7 +23,7 @@ export interface ProjectNoticeParams {
   objName?: string;
   from?: string;
   to?: string;
-  /** true: ngoài nhật ký còn gửi tin vào nhóm chat (VD báo cáo nhiệm vụ kèm ảnh — nội dung do người viết) */
+  /** true: ngoài nhật ký còn gửi tin vào nhóm chat (mặc định KHÔNG: ảnh/tệp đính kèm hiện trong nhật ký) */
   alsoChat?: boolean;
 }
 
@@ -47,13 +47,19 @@ export async function postProjectNotice(p: ProjectNoticeParams): Promise<void> {
       ids.forEach(mid => addMemberToConversation(conv.id, mid));
     }
     const ctx = entityContext(p.relatedEntity);
+    // Ảnh/tệp đính kèm hiện NGAY TRONG nhật ký (kèm lối tắt mở nhiệm vụ) thay vì gửi tin có ảnh vào nhóm chat.
+    // Tệp còn ở dạng base64 (upload lên kho thất bại → lưu cục bộ) không đưa vào nhật ký được (quá nặng) → vẫn gửi nhóm chat như cũ.
+    const atts = p.attachments || [];
+    const hasInline = atts.some(a => String(a.url || '').startsWith('data:'));
+    const evAtts = atts.filter(a => a.url && !String(a.url).startsWith('data:')).map(a => ({ id: a.id, type: a.type, name: a.name, url: a.url }));
     const logged = await recordProjectEventFromMessage(p.content, {
       projectId: p.project.id,
       actor: { id: p.actor.id, name: p.actor.name },
       taskId: p.taskId ?? ctx.taskId, missionId: p.missionId ?? ctx.missionId,
       type: p.type, objKind: p.objKind ?? ctx.objKind, objName: p.objName, from: p.from, to: p.to,
+      attachments: evAtts.length ? evAtts : undefined,
     });
-    if ((!logged || p.alsoChat) && conv) {
+    if ((!logged || p.alsoChat || hasInline) && conv) {
       await sendGroupChatMessage({
         conversationId: conv.id, senderId: p.actor.id, senderName: p.actor.name, senderRole: p.actor.role,
         content: p.content, relatedEntity: p.relatedEntity, attachments: p.attachments,

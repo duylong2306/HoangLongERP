@@ -22,6 +22,8 @@ export interface ProjectEventInput {
   detail?: string;
   from?: string;
   to?: string;
+  /** Ảnh / tệp đính kèm (vd. báo cáo hoàn thành nhiệm vụ) — chỉ lưu đường dẫn (không nhúng base64 vào nhật ký) */
+  attachments?: { id?: string; type?: string; name?: string; url: string }[];
 }
 
 export interface ProjectEventRow {
@@ -111,6 +113,8 @@ export async function recordProjectEvent(input: ProjectEventInput): Promise<bool
       detail: input.detail ?? null,
       from_val: input.from ?? null,
       to_val: input.to ?? null,
+      // Chỉ gửi cột này khi có tệp — để DB chưa chạy migration 20261031 (chưa có cột) vẫn ghi được các sự kiện thường
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     });
     if (error) {
       if (isMissingTable(error)) tableMissing = true;

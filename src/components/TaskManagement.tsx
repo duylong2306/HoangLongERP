@@ -41,6 +41,8 @@ interface TaskManagementProps {
   subcontractorAdvances?: SubcontractorAdvanceProposal[]; // Đề xuất tạm ứng / Thu Chi từ Tài Chính
   /** Công việc cần bung modal chi tiết ngay khi vào tab (deep link từ thông báo đẩy). */
   initialTaskId?: string;
+  /** Nhiệm vụ cần mở thẳng bên trong `initialTaskId` (lối tắt từ Nhật ký dự án) */
+  initialMissionId?: string;
   /** Gọi lại sau khi đã mở `initialTaskId`, để App reset state deep link. */
   onInitialTaskOpened?: () => void;
   /** Phạm vi khởi tạo (deep link từ tin nhắn xét duyệt → mở thẳng bảng "Công việc phải duyệt"). */
@@ -68,6 +70,7 @@ export default function TaskManagement({
   onOpenMaterialProposal,
   subcontractorAdvances = [],
   initialTaskId,
+  initialMissionId,
   onInitialTaskOpened,
   initialTaskScope,
   onInitialTaskScopeOpened
@@ -75,6 +78,8 @@ export default function TaskManagement({
   const { addToast } = useNotification();
   // Trạng thái cho Chi tiết công việc chọn Xem
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Nhiệm vụ mở thẳng khi bung chi tiết công việc từ deep link (giữ lại vì App xóa initialMissionId ngay sau khi mở)
+  const [openMissionId, setOpenMissionId] = useState<string | null>(null);
 
   // ── Deep link từ thông báo đẩy ──────────────────────────────────────────
   // App truyền `initialTaskId` khi người dùng bấm vào thông báo đẩy của một
@@ -87,6 +92,7 @@ export default function TaskManagement({
     if (!task) return;
 
     setSelectedTaskId(initialTaskId);
+    setOpenMissionId(initialMissionId || null);
     onInitialTaskOpened?.();
   }, [initialTaskId, tasks, currentUser?.id, onInitialTaskOpened]);
 
@@ -637,7 +643,8 @@ export default function TaskManagement({
         return (
           <TaskDetailModal
             taskId={selectedTaskId}
-            onClose={() => setSelectedTaskId(null)}
+            initialMissionId={openMissionId ?? undefined}
+            onClose={() => { setSelectedTaskId(null); setOpenMissionId(null); }}
             tasks={tasks}
             projects={projects}
             employees={employees}

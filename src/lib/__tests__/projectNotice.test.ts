@@ -23,10 +23,23 @@ describe('postProjectNotice', () => {
     await postProjectNotice(base);
     expect(M.send).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'conv_project_P1', content: '✅ xong', senderId: 'u1' }));
   });
-  it('tin có đính kèm (báo cáo kèm ảnh) → vừa ghi nhật ký vừa gửi nhóm chat', async () => {
+  it('tin có đính kèm (báo cáo kèm ảnh) → ảnh/tệp ghi vào NHẬT KÝ, KHÔNG gửi nhóm chat', async () => {
     M.record.mockResolvedValue(true);
-    await postProjectNotice({ ...base, attachments: [{ id: 'a' } as any], alsoChat: true });
-    expect(M.send).toHaveBeenCalledWith(expect.objectContaining({ attachments: [{ id: 'a' }] }));
+    await postProjectNotice({ ...base, attachments: [{ id: 'a', type: 'image', name: 'a.jpg', url: 'https://kho/a.jpg', size: 9 } as any] });
+    expect(M.send).not.toHaveBeenCalled();
+    // chỉ giữ các trường cần để hiển thị (không mang cả size/mimeType)
+    expect(M.record).toHaveBeenCalledWith('✅ xong', expect.objectContaining({ attachments: [{ id: 'a', type: 'image', name: 'a.jpg', url: 'https://kho/a.jpg' }] }));
+  });
+  it('tệp còn dạng base64 (upload lên kho thất bại) không đưa vào nhật ký được → vẫn gửi nhóm chat như cũ', async () => {
+    M.record.mockResolvedValue(true);
+    await postProjectNotice({ ...base, attachments: [{ id: 'a', type: 'image', name: 'a.jpg', url: 'data:image/jpeg;base64,AA' } as any] });
+    expect(M.send).toHaveBeenCalledWith(expect.objectContaining({ attachments: [expect.objectContaining({ id: 'a' })] }));
+    expect(M.record.mock.calls[0][1].attachments).toBeUndefined();
+  });
+  it('alsoChat = true vẫn ép gửi thêm vào nhóm chat (dùng khi thật sự cần)', async () => {
+    M.record.mockResolvedValue(true);
+    await postProjectNotice({ ...base, attachments: [{ id: 'a', url: 'https://kho/a.jpg' } as any], alsoChat: true });
+    expect(M.send).toHaveBeenCalled();
   });
   it('lỗi bất kỳ không làm hỏng thao tác chính', async () => {
     M.ensure.mockRejectedValue(new Error('mạng'));

@@ -42,4 +42,21 @@ describe('Nhật ký dự án — điểm nối', () => {
     expect(zalo).toContain('>Mở dự án<');
     expect(zalo).not.toContain('>Mở công trình<');
   });
+
+  it('báo cáo nhiệm vụ kèm ảnh/tệp chỉ vào nhật ký (không còn ép gửi nhóm chat), dòng nhật ký gắn tên nhiệm vụ', () => {
+    const i = taskModal.indexOf('const notifyProjectChat = ');
+    const body = taskModal.slice(i, taskModal.indexOf('\n  };', i));
+    expect(body).not.toMatch(/alsoChat/);
+    expect(taskModal).toMatch(/\{ objName: mission\?\.name \}/);
+  });
+
+  it('lối tắt nhiệm vụ: Nhật ký → sự kiện hl-open-task (kèm missionId) → App → Quản lý công việc → chi tiết công việc tự chọn nhiệm vụ', () => {
+    const mgmt = read('components/TaskManagement.tsx');
+    expect(app).toMatch(/setDeepLinkMissionId\(\(e as CustomEvent\)\.detail\?\.missionId \|\| null\)/);
+    expect(app).toMatch(/initialMissionId=\{deepLinkMissionId \?\? undefined\}/);
+    expect(app).toMatch(/onInitialTaskOpened=\{\(\) => \{ setDeepLinkTaskId\(null\); setDeepLinkMissionId\(null\); \}\}/);   // xóa cùng lúc
+    expect(mgmt).toMatch(/setOpenMissionId\(initialMissionId \|\| null\)/);
+    expect(mgmt).toMatch(/initialMissionId=\{openMissionId \?\? undefined\}/);
+    expect(taskModal).toMatch(/initialMissionId && selectedTask\?\.missions\?\.some\(m => m\.id === initialMissionId\)\) setSelectedMissionId\(initialMissionId\)/);
+  });
 });

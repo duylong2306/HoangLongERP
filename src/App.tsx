@@ -84,6 +84,7 @@ import { isPaymentPendingForUser, isAdvancePendingForUser, isVoucherPendingForUs
 import MessagesZalo from './components/MessagesZalo';
 import { useChatPrefs } from './lib/useChatPrefs';
 import { unreadForBadge } from './lib/chatPrefs';
+import { useProjectActivityUnread, activityProjectKey } from './lib/useProjectActivityUnread';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
@@ -960,6 +961,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const [pwNotice, setPwNotice] = useState<PasswordNotice | null>(() => getPasswordNotice());
   // Tùy chọn Tin nhắn của người dùng (tắt thông báo/ghim hội thoại) — dùng cho huy hiệu chưa đọc ở menu
   const chatPrefsApp = useChatPrefs(currentUser?.id);
+  // 📒 Số dự án có hoạt động mới trong Nhật ký (mỗi dự án tính 1) — cộng vào huy hiệu Tin nhắn / chuông bên dưới
+  const activityUnreadForNav = useProjectActivityUnread(
+    currentUser?.id,
+    currentUser ? activityProjectKey(getUserConversations(getConversations(), currentUser.id), chatPrefsApp.muted) : '',
+  );
   // Trạng thái online/offline: đã đăng nhập → "điểm danh" vào kênh presence của công ty; đăng xuất/đóng app → tự gỡ (xem lib/presence.ts)
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -1077,6 +1083,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Công việc cần bung modal chi tiết (truyền xuống <TaskManagement initialTaskId>)
   const [deepLinkTaskId, setDeepLinkTaskId] = useState<string | null>(null);
+  // Nhiệm vụ cần mở thẳng bên trong công việc (từ lối tắt ở Nhật ký dự án); xóa cùng lúc với deepLinkTaskId
+  const [deepLinkMissionId, setDeepLinkMissionId] = useState<string | null>(null);
   // Deep link công việc đang chờ `tasks` tải xong để tra ID/mã
   const [pendingTaskLink, setPendingTaskLink] = useState<PushDeepLink | null>(null);
   // Deep link xét duyệt (leave/payment/advance) → mở thẳng "Công việc phải duyệt" trong tab Công việc
@@ -1637,6 +1645,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const handleOpenTask = (e: Event) => {
       const taskId = (e as CustomEvent).detail?.taskId;
       if (!taskId) return;
+      setDeepLinkMissionId((e as CustomEvent).detail?.missionId || null);
       setDeepLinkTaskId(taskId);
       setActiveTab('tasks');
     };
@@ -3586,7 +3595,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   })();
 
   // ─── MÔ HÌNH MENU (thanh trái máy tính + thanh dưới điện thoại) — CÙNG quy tắc phân quyền với menu cũ ───
-  const chatUnreadForNav = currentUser ? unreadForBadge(getUserConversations(getConversations(), currentUser.id), chatPrefsApp) : 0;   // không tính hội thoại đã tắt thông báo
+  // Tin chưa đọc (không tính hội thoại đã tắt thông báo) + số dự án có hoạt động mới trong Nhật ký
+  const chatUnreadForNav = (currentUser ? unreadForBadge(getUserConversations(getConversations(), currentUser.id), chatPrefsApp) : 0) + activityUnreadForNav;
   const leaf = (id: string, label: string, active: boolean, onSelect: () => void): NavLeaf => ({ id, label, active, onSelect });
   const navTops: NavTop[] = !currentUser ? [] : [
     ...(isAccessible('dashboard') ? [{ ...leaf('dashboard', 'Tổng quan', activeTab === 'dashboard', () => setActiveTab('dashboard')), icon: <LayoutDashboard className="lx-i" /> }] : []),
@@ -3956,7 +3966,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onOpenMaterialProposal={openMaterialProposal}
               subcontractorAdvances={subcontractorAdvances}
               initialTaskId={deepLinkTaskId ?? undefined}
-              onInitialTaskOpened={() => setDeepLinkTaskId(null)}
+              initialMissionId={deepLinkMissionId ?? undefined}
+              onInitialTaskOpened={() => { setDeepLinkTaskId(null); setDeepLinkMissionId(null); }}
               initialTaskScope={approvalDeepLink ? 'toreview' : undefined}
               onInitialTaskScopeOpened={() => setApprovalDeepLink(null)}
             />

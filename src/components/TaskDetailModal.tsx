@@ -100,6 +100,8 @@ interface TaskDetailModalProps {
   onOpenConnectedTool?: (tool: 'approval' | 'cost' | 'material' | 'quotation' | 'contract' | 'acceptance' | 'liquidation') => void;
   customers?: Customer[];
   onRedirectToSubcontractor?: (projectId: string, subcontractorId: string, workName: string) => void;
+  /** Mở thẳng nhiệm vụ này khi vào chi tiết công việc (lối tắt từ Nhật ký dự án) */
+  initialMissionId?: string;
 }
 
 export default function TaskDetailModal({
@@ -114,7 +116,8 @@ export default function TaskDetailModal({
   isReadOnly = false,
   onOpenConnectedTool,
   customers,
-  onRedirectToSubcontractor
+  onRedirectToSubcontractor,
+  initialMissionId
 }: TaskDetailModalProps) {
   const { addToast } = useNotification();
   const selectedTask = tasks.find(t => t.id === taskId);
@@ -176,8 +179,8 @@ export default function TaskDetailModal({
   // của ensureProjectChatGroup để đảm bảo conversation đã được upsert lên Supabase
   // (tránh vi phạm FK conversation_id khi push message song song).
   // NAY: ghi vào NHẬT KÝ (nút "Lịch sử" của công việc / "Nhật ký dự án") thay vì nhắn vào nhóm chat — nhóm chat chỉ còn thảo luận.
-  // Riêng tin có ĐÍNH KÈM (báo cáo nhiệm vụ kèm ảnh/tệp — nội dung do người viết) vẫn gửi vào nhóm chat để mọi người xem ảnh,
-  // và đồng thời ghi 1 dòng nhật ký. Chưa chạy migration nhật ký → tự gửi vào nhóm như cũ (xem lib/projectNotice.ts).
+  // Tin có ĐÍNH KÈM (báo cáo nhiệm vụ kèm ảnh/tệp) cũng chỉ ghi vào nhật ký: ảnh/tệp hiện ngay trong dòng nhật ký, kèm lối tắt mở nhiệm vụ.
+  // Chưa chạy migration nhật ký (hoặc tệp còn dạng base64) → tự gửi vào nhóm như cũ (xem lib/projectNotice.ts).
   const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[], extraMemberIds?: string[], extra?: { from?: string; to?: string; objName?: string }) => {
     const pid = selectedTask.projectId;
     if (!pid || !currentUser) return;
@@ -188,7 +191,6 @@ export default function TaskDetailModal({
       memberIds: [selectedTask.assigneeId, selectedTask.assignerId, ...(extraMemberIds || [])],
       taskId: selectedTask.id, objName: extra?.objName ?? selectedTask.name, from: extra?.from, to: extra?.to,
       objKind: relatedEntity && (relatedEntity as any).type === 'mission' ? 'mission' : (relatedEntity && (relatedEntity as any).type === 'advance' ? 'proposal' : 'task'),
-      alsoChat: !!(attachments && attachments.length > 0),
     });
   };
 
@@ -637,6 +639,10 @@ export default function TaskDetailModal({
   const [newMissionChecklist, setNewMissionChecklist] = useState<string[]>([]);
   const [newMissionChecklistInput, setNewMissionChecklistInput] = useState('');
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
+  // Lối tắt từ Nhật ký dự án: vào thẳng khung chi tiết của nhiệm vụ (chỉ khi nhiệm vụ còn trong công việc này)
+  useEffect(() => {
+    if (initialMissionId && selectedTask?.missions?.some(m => m.id === initialMissionId)) setSelectedMissionId(initialMissionId);
+  }, [taskId, initialMissionId]);
   // Điện thoại: chi tiết công việc chia 2 thẻ "Chi tiết" | "Liên thông" (trước đây menu liên thông xếp dưới và chiếm hết màn hình, che chi tiết). Máy tính giữ nguyên.
   const [mobileTab, setMobileTab] = useState<'detail' | 'tools'>('detail');
   useEffect(() => { setMobileTab('detail'); }, [taskId]);
@@ -4919,7 +4925,9 @@ export default function TaskDetailModal({
                                 mimeType: isImg ? 'image/jpeg' : undefined,
                               };
                             })
-                          : undefined
+                          : undefined,
+                        undefined,
+                        { objName: mission?.name }   // dòng nhật ký gắn tên NHIỆM VỤ (bấm để mở)
                       );
 
                       // Clear states

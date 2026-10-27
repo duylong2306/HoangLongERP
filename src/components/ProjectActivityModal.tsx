@@ -16,7 +16,8 @@ interface Props {
   /** Có hàm này mới hiện nút "Xuất Excel" (dữ liệu dự án đầy đủ do nơi gọi cung cấp) */
   onExport?: () => void | Promise<void>;
   /** Mặc định mở công việc bằng sự kiện 'hl-open-task' (như nút ở khung thông tin hội thoại) */
-  onOpenTask?: (taskId: string) => void;
+  /** missionId: mở thẳng nhiệm vụ trong công việc (nếu sự kiện thuộc 1 nhiệm vụ) */
+  onOpenTask?: (taskId: string, missionId?: string) => void;
   /** Người đang xem: có thì đánh dấu "đã xem nhật ký dự án" khi mở và khi đóng (chỉ với nhật ký cả dự án, không phải lịch sử 1 công việc) */
   viewerId?: string;
   /** Dùng cho kiểm thử: thay hàm tải trang */
@@ -133,7 +134,7 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
     return out;
   }, [shown]);
 
-  const openTask = (id: string) => (onOpenTask ? onOpenTask(id) : window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: id } })));
+  const openTask = (id: string, missionId?: string) => (onOpenTask ? onOpenTask(id, missionId) : window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: id, missionId } })));
   const doExport = async () => { if (!onExport || exporting) return; setExporting(true); try { await onExport(); } finally { setExporting(false); } };
 
   return (
@@ -215,7 +216,7 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
                       <div className="text-[13.5px] leading-snug">
                         {ev.actorName && <b>{ev.actorName} </b>}{ev.text}
                         {ev.objName && (ev.taskId && !taskId
-                          ? <button type="button" onClick={() => openTask(ev.taskId!)} className="ml-1 text-[11.5px] font-bold text-blue-700 bg-blue-50 rounded px-1.5 cursor-pointer">{ev.objName}</button>
+                          ? <button type="button" onClick={() => openTask(ev.taskId!, ev.missionId)} className="ml-1 text-[11.5px] font-bold text-blue-700 bg-blue-50 rounded px-1.5 cursor-pointer">{ev.objName}</button>
                           : <span className="ml-1 text-[11.5px] font-bold text-blue-700 bg-blue-50 rounded px-1.5">{ev.objName}</span>)}
                       </div>
                       {(ev.from || ev.to) && (
@@ -242,6 +243,8 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
                         <span className={`font-bold border rounded-full px-2 ${tone.badge}`}>{meta.label}</span>
                         <span>{hhmm(ev.createdAt)}</span>
                         {ev.objKind && <span>{OBJ_LABEL[ev.objKind] || ''}</span>}
+                        {/* Lối tắt về công việc / nhiệm vụ của sự kiện (không hiện khi đang xem lịch sử của chính công việc đó) */}
+                        {ev.taskId && !taskId && <button type="button" onClick={() => openTask(ev.taskId!, ev.missionId)} className="font-bold text-blue-700 cursor-pointer" data-testid="activity-open-task">Mở {ev.objKind === 'mission' ? 'nhiệm vụ' : 'công việc'} ›</button>}
                       </div>
                     </div>
                   );

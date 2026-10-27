@@ -62,6 +62,22 @@ describe('classifyEvent', () => {
   });
 });
 
+describe('đính kèm trong nhật ký', () => {
+  it('có tệp thì gửi cột attachments; không có thì KHÔNG gửi cột này (DB chưa có cột vẫn ghi được sự kiện thường)', async () => {
+    await recordProjectEvent({ projectId: 'P1', text: 'đã hoàn thành', attachments: [{ id: 'a', type: 'image', name: 'a.jpg', url: 'https://kho/a.jpg' }] });
+    await recordProjectEvent({ projectId: 'P1', text: 'đã nhận việc' });
+    expect(S.inserted[0].attachments).toEqual([{ id: 'a', type: 'image', name: 'a.jpg', url: 'https://kho/a.jpg' }]);
+    expect('attachments' in S.inserted[1]).toBe(false);
+  });
+  it('tải lại: đính kèm trả về trong dòng nhật ký, mảng rỗng → không có', async () => {
+    S.rows = [ev('a', 0, { attachments: [{ id: 'x', url: 'https://k/x.jpg' }] }), ev('b', 0, { attachments: [] })];
+    const r = await loadProjectEventsPage('P1');
+    const byId = Object.fromEntries(r.rows.map(x => [x.id, x]));
+    expect(byId.a.attachments).toEqual([{ id: 'x', url: 'https://k/x.jpg' }]);
+    expect(byId.b.attachments).toBeUndefined();
+  });
+});
+
 describe('recordProjectEvent', () => {
   it('lưu đủ trường (snake_case) kèm công ty', async () => {
     const ok = await recordProjectEvent({ projectId: 'P1', taskId: 'T1', actor: { id: 'u1', name: 'Long' }, type: 'han', objKind: 'task', objName: 'Sơn', text: 'đã đổi hạn', from: '18/10', to: '22/10' });
