@@ -23,21 +23,41 @@ self.addEventListener('push', (event) => {
   const { title, body, icon, image, data } = payload;
   const notificationData = data || payload.data || {};
 
+  // THẺ (tag) quyết định thông báo nào bị thay thế: cùng thẻ → thông báo mới ĐÈ thông báo cũ.
+  // Máy chủ send-push đặt `tag` ở NGOÀI CÙNG gói push (không nằm trong data) — trước đây chỗ này chỉ đọc data.tag
+  // nên mọi push đều rơi về một thẻ chung, tin sau đè tin trước của mọi hội thoại. Nay ưu tiên:
+  //   1) thẻ máy chủ gửi riêng (VD nhắc điểm danh: 'attendance-<ca>-<ngày>');
+  //   2) thẻ trong data;
+  //   3) tin chat → MỖI HỘI THOẠI MỘT THÔNG BÁO ('conv-<mã>'): tin mới của cùng hội thoại thay tin cũ, hội thoại khác không bị đè.
+  const DEFAULT_TAG = 'web-push-notification';
+  const pickTag = () => {
+    if (payload.tag && payload.tag !== DEFAULT_TAG) return payload.tag;   // thẻ mặc định của máy chủ = "không có thẻ riêng"
+    if (notificationData.tag) return notificationData.tag;
+    if (notificationData.conversationId) return 'conv-' + notificationData.conversationId;
+    return DEFAULT_TAG;
+  };
+  const tag = pickTag();
+
   const options = {
     body: body || '',
     icon: icon || '/lolo-icon-192.png',
     image: image || '',
     data: notificationData,
-    tag: notificationData.tag || 'web-push-notification',
+    tag,
+    // Thông báo thay thế theo thẻ vẫn phải RUNG/BÁO ÂM lại (mặc định trình duyệt thay lặng lẽ → mất tin mới)
+    renotify: true,
     requireInteraction: true,
     badge: '/lolo-badge-72.png',
     vibrate: [200, 100, 200],
     timestamp: Date.now(),
   };
 
-  // Add actions if provided
-  if (notificationData.actions && Array.isArray(notificationData.actions)) {
-    options.actions = notificationData.actions;
+  // Nút bấm: máy chủ gửi `actions` ở ngoài cùng gói push (VD "Điểm danh ngay") — trước đây bị bỏ qua vì chỉ đọc data.actions
+  const actions = Array.isArray(payload.actions) && payload.actions.length ? payload.actions
+    : (Array.isArray(notificationData.actions) ? notificationData.actions : null);
+  if (actions) {
+    // Hàm send-push mặc định ghi nhãn nút KHÔNG DẤU ('Mo') — hiện đúng tiếng Việt ở phía máy khách, khỏi phải triển khai lại hàm
+    options.actions = actions.map(a => (a && a.title === 'Mo' ? { ...a, title: 'Mở' } : a));
   } else if (notificationData.action) {
     options.actions = [{ action: 'open', title: 'Mở' }];
   }
@@ -67,6 +87,8 @@ function hlNormalizePushUrl(data) {
   var taskCode = data.taskCode;
   var conversationId = data.conversationId;
   var projectId = data.projectId;
+  var targetKind = data.targetKind;
+  var targetId = data.targetId;
 
   // Bóc thêm thông tin từ data.url (kể cả định dạng đường dẫn cũ)
   try {
@@ -77,6 +99,8 @@ function hlNormalizePushUrl(data) {
     conversationId =
       conversationId || q.get('conversation') || q.get('conversationId') || undefined;
     projectId = projectId || q.get('projectId') || undefined;
+    targetKind = targetKind || q.get('tk') || undefined;
+    targetId = targetId || q.get('ti') || undefined;
 
     var legacy = u.pathname.match(/^\/(tasks|projects|messages)\/([^/]+)\/?$/);
     if (legacy) {
@@ -94,6 +118,7 @@ function hlNormalizePushUrl(data) {
   else if (taskCode) params.set('taskCode', taskCode);
   if (conversationId) params.set('conversation', conversationId);
   if (projectId && !taskId && !taskCode) params.set('projectId', projectId);
+  if (targetKind && targetId) { params.set('tk', targetKind); params.set('ti', targetId); }
 
   var qs = params.toString();
   return qs ? '/?' + qs : '/';

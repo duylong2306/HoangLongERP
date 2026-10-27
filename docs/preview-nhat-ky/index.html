@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Xem trước Nhật ký hoạt động</title>
+<style>
+:root{--blue:#0d47c9;--blue-50:#eef3fd;--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--bg:#f8fafc;
+--green:#059669;--green-50:#ecfdf5;--amber:#d97706;--amber-50:#fffbeb;--vio:#7c3aed;--vio-50:#f5f3ff;--red:#dc2626;--red-50:#fef2f2;--sky:#0284c7;--sky-50:#f0f9ff;--rose:#be185d;--rose-50:#fdf2f8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header.top{background:var(--blue);color:#fff;padding:14px 16px}
+header.top h1{margin:0;font-size:17px}
+header.top p{margin:2px 0 0;font-size:12px;opacity:.85}
+.wrap{max-width:1040px;margin:0 auto;padding:16px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font-weight:700;font-size:12.5px;cursor:pointer;color:var(--mut)}
+.tab.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.sec-title{font-weight:800;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:22px 0 8px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px}
+.pad{padding:14px}
+.note{background:var(--blue-50);border:1px solid #c7d6f7;color:#1e3a8a;border-radius:12px;padding:10px 12px;font-size:12.5px;margin-bottom:12px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:#f1f5f9;border-radius:16px 16px 0 0}
+.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 11px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--mut)}
+.chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+input.s,select.s{border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12.5px;background:#fff}
+.day{font-weight:800;font-size:12px;color:var(--mut);margin:14px 0 6px;display:flex;align-items:center;gap:8px}
+.day:after{content:"";flex:1;height:1px;background:var(--line)}
+/* A: timeline dọc */
+.tl{position:relative;margin-left:14px;border-left:2px solid var(--line);padding-left:18px}
+.ev{position:relative;padding:8px 10px;border-radius:12px;margin-bottom:4px}
+.ev:hover{background:#f8fafc}
+.ev .dot{position:absolute;left:-31px;top:10px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;background:#fff;border:2px solid var(--line)}
+.ev .l1{font-size:13.5px}
+.ev .l1 b{font-weight:800}
+.ev .meta{font-size:11.5px;color:var(--mut);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ob{background:var(--blue-50);color:var(--blue);border-radius:6px;padding:0 6px;font-weight:700;font-size:11.5px;cursor:pointer}
+.diff{margin-top:5px;font-size:12.5px;display:inline-flex;gap:6px;align-items:center;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:3px 8px}
+.diff s{color:var(--red)}.diff i{font-style:normal;color:var(--green);font-weight:700}
+.badge{border-radius:999px;font-size:10.5px;font-weight:800;padding:1px 8px;border:1px solid}
+.t-giao{background:var(--sky-50);color:var(--sky);border-color:#bae6fd}
+.t-tt{background:var(--green-50);color:var(--green);border-color:#a7f3d0}
+.t-han{background:var(--amber-50);color:var(--amber);border-color:#fde68a}
+.t-duyet{background:var(--vio-50);color:var(--vio);border-color:#ddd6fe}
+.t-tc{background:var(--rose-50);color:var(--rose);border-color:#fbcfe8}
+.t-xoa{background:var(--red-50);color:var(--red);border-color:#fecaca}
+/* B: bảng */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{background:#f1f5f9;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);position:sticky;top:0}
+td{padding:8px 10px;border-top:1px solid var(--line);vertical-align:top}
+tr:hover td{background:#f8fafc}
+.tbl{overflow:auto;max-height:430px}
+/* C: mốc */
+.ms{display:flex;gap:0;align-items:stretch;margin:6px 0 4px;overflow:auto}
+.m{flex:1;min-width:120px;text-align:center;position:relative;padding-top:26px}
+.m:before{content:"";position:absolute;top:10px;left:0;right:0;height:4px;background:var(--line)}
+.m.done:before{background:var(--green)} .m.cur:before{background:linear-gradient(90deg,var(--green) 55%,var(--line) 55%)}
+.m i{position:absolute;top:2px;left:50%;margin-left:-9px;width:18px;height:18px;border-radius:50%;background:#fff;border:3px solid var(--line)}
+.m.done i{border-color:var(--green);background:var(--green)} .m.cur i{border-color:var(--blue);background:#fff;box-shadow:0 0 0 4px #dbe5fb}
+.m b{display:block;font-size:12px}.m small{color:var(--mut);font-size:11px}
+.m .cnt{display:inline-block;margin-top:4px;font-size:11px;background:#f1f5f9;border-radius:999px;padding:1px 8px}
+.m .flag{display:inline-block;margin-top:4px;font-size:11px;background:var(--red-50);color:var(--red);border-radius:999px;padding:1px 8px;font-weight:800}
+.alert{display:flex;gap:10px;align-items:flex-start;border:1px solid #fecaca;background:var(--red-50);border-radius:12px;padding:9px 12px;margin-bottom:6px;font-size:12.5px}
+.alert.y{border-color:#fde68a;background:var(--amber-50)}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px}
+.kpi div{border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:#fff}
+.kpi b{font-size:19px;display:block}.kpi span{font-size:11px;color:var(--mut)}
+/* D: theo đối tượng */
+.obj{border:1px solid var(--line);border-radius:14px;margin-bottom:8px;background:#fff;overflow:hidden}
+.obj>summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.obj>summary::-webkit-details-marker{display:none}
+.stp{display:flex;gap:3px;align-items:center;font-size:10.5px;color:var(--mut)}
+.stp span{padding:1px 7px;border-radius:999px;background:#f1f5f9}
+.stp .on{background:var(--green);color:#fff;font-weight:800}
+.obj .body{border-top:1px dashed var(--line);padding:6px 12px 10px;background:#fafcff}
+.row{display:flex;gap:8px;padding:4px 0;font-size:12.5px}
+.row time{color:var(--mut);min-width:48px;font-size:11.5px}
+/* điện thoại */
+.phone{width:330px;margin:0 auto;border:8px solid #0f172a;border-radius:30px;overflow:hidden;background:#fff}
+.phone .bar{background:var(--blue);color:#fff;padding:26px 12px 10px;font-weight:800;font-size:14px}
+.phone .sub{display:flex;border-bottom:1px solid var(--line);font-size:12px;font-weight:800;color:var(--mut)}
+.phone .sub span{flex:1;text-align:center;padding:9px 0}.phone .sub .on{color:var(--blue);border-bottom:3px solid var(--blue)}
+.phone .ev .dot{left:-31px}
+.grid2{display:grid;grid-template-columns:1fr 360px;gap:16px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+/* vị trí đặt */
+.pl{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.pl .card{padding:12px}
+.pl h4{margin:0 0 4px;font-size:14px}
+.pl p{margin:0 0 8px;color:var(--mut);font-size:12.5px}
+.wf{border:1px solid var(--line);border-radius:10px;background:#f8fafc;padding:8px;font-size:11px}
+.wf .nav{display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap}
+.wf .nav span{padding:2px 8px;border-radius:6px;background:#fff;border:1px solid var(--line);color:var(--mut)}
+.wf .nav .hl{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:800}
+.wf .ln{height:7px;border-radius:4px;background:#e2e8f0;margin:5px 0}
+.wf .ln.b{background:#bfd0f5}
+.stars{color:var(--amber);font-weight:800;font-size:12px}
+.pro,.con{font-size:12px;margin:2px 0}.pro:before{content:"✔ ";color:var(--green)}.con:before{content:"✖ ";color:var(--red)}
+.rec{border:2px solid var(--blue);background:var(--blue-50)}
+</style>
+</head>
+<body>
+<header class="top"><h1>Xem trước: Nhật ký hoạt động</h1><p>Dự án mẫu: "Cổng sắt Anh Khanh" · dữ liệu minh họa, chưa nối vào ứng dụng</p></header>
+<div class="wrap">
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-k="A">A · Dòng thời gian</button>
+    <button class="tab" data-k="B">B · Bảng tra cứu</button>
+    <button class="tab" data-k="C">C · Tổng quan theo mốc</button>
+    <button class="tab" data-k="D">D · Theo từng công việc</button>
+    <button class="tab" data-k="E">Đặt ở đâu?</button>
+  </div>
+
+  <section id="A">
+    <div class="note"><b>A · Dòng thời gian</b> — giống "hoạt động" của Notion/Trello. Dễ đọc nhất, hợp cho cả điện thoại. Có lọc theo loại, theo người và tìm chữ; sự kiện nào đổi giá trị đều hiện <i>cũ → mới</i>. Bấm tên công việc để mở thẳng.</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="toolbar" id="aTools"></div>
+        <div class="pad" id="aList"></div>
+      </div>
+      <div>
+        <div class="sec-title" style="margin-top:0">Trên điện thoại</div>
+        <div class="phone">
+          <div class="bar">Cổng sắt Anh Khanh</div>
+          <div class="sub"><span>Thảo luận</span><span class="on">Hoạt động</span><span>Công việc</span></div>
+          <div class="pad" id="aPhone" style="max-height:470px;overflow:auto"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="B" hidden>
+    <div class="note"><b>B · Bảng tra cứu</b> — dạng sổ nhật ký cho Giám Đốc / Kế toán cần soát: lọc nhiều tiêu chí, tìm theo người hoặc mã, xuất Excel. Dày đặc thông tin, ít "đẹp" hơn nhưng tra nhanh nhất.</div>
+    <div class="card">
+      <div class="toolbar">
+        <input class="s" id="bQ" placeholder="Tìm người, công việc, mã phiếu…">
+        <select class="s" id="bType"><option value="">Mọi loại</option></select>
+        <select class="s" id="bWho"><option value="">Mọi người</option></select>
+        <select class="s" id="bObj"><option value="">Dự án / Công việc / Nhiệm vụ</option><option>Dự án</option><option>Công việc</option><option>Nhiệm vụ</option></select>
+        <span style="flex:1"></span><button class="chip" onclick="alert('Bản thật: xuất Excel theo bộ lọc')">⬇ Xuất Excel</button>
+      </div>
+      <div class="tbl"><table><thead><tr><th>Thời gian</th><th>Người làm</th><th>Loại</th><th>Đối tượng</th><th>Nội dung</th><th>Thay đổi</th></tr></thead><tbody id="bBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="C" hidden>
+    <div class="note"><b>C · Tổng quan theo mốc</b> — một màn để Giám Đốc biết dự án đang ở đâu và chỗ nào kẹt. Thanh mốc giai đoạn, số việc, cảnh báo trễ/kẹt duyệt; bấm mốc để xuống dòng thời gian chi tiết của giai đoạn đó.</div>
+    <div class="card pad">
+      <div class="kpi"><div><b>14/22</b><span>Công việc xong</span></div><div><b>63%</b><span>Tiến độ chung</span></div><div><b style="color:var(--red)">3</b><span>Việc trễ hạn</span></div><div><b style="color:var(--amber)">2</b><span>Chờ duyệt &gt; 2 ngày</span></div><div><b>148 tr</b><span>Đã chi / 210 tr</span></div></div>
+      <div class="ms">
+        <div class="m done"><i></i><b>Khởi tạo</b><small>02/10</small><span class="cnt">4 sự kiện</span></div>
+        <div class="m done"><i></i><b>Báo giá</b><small>05/10</small><span class="cnt">9 sự kiện</span></div>
+        <div class="m done"><i></i><b>Hợp đồng</b><small>09/10</small><span class="cnt">6 sự kiện</span></div>
+        <div class="m cur"><i></i><b>Thi công</b><small>đang chạy · 14 ngày</small><span class="cnt">57 sự kiện</span><br><span class="flag">3 việc trễ</span></div>
+        <div class="m"><i></i><b>Nghiệm thu</b><small>dự kiến 05/11</small></div>
+        <div class="m"><i></i><b>Thanh lý</b><small>dự kiến 12/11</small></div>
+      </div>
+      <div class="sec-title">Cần chú ý</div>
+      <div class="alert"><span>⏰</span><div><b>3 công việc trễ hạn</b> — "Hàn khung cổng" (trễ 4 ngày, Bình), "Sơn tĩnh điện" (trễ 2 ngày), "Lắp bản lề" (trễ 1 ngày)</div></div>
+      <div class="alert y"><span>⏳</span><div><b>Đề xuất vật tư VT-104 chờ duyệt 3 ngày</b> — người duyệt: Ny</div></div>
+      <div class="alert y"><span>💸</span><div><b>Chi vượt dự kiến 12%</b> ở nhóm Thầu phụ so với hợp đồng</div></div>
+      <div class="sec-title">Mới nhất ở giai đoạn Thi công</div>
+      <div id="cList"></div>
+    </div>
+  </section>
+
+  <section id="D" hidden>
+    <div class="note"><b>D · Theo từng công việc</b> — mỗi công việc là một thẻ có thanh trạng thái; bấm mở ra thấy riêng nhật ký của việc đó. Hợp với người làm việc hằng ngày (trưởng nhóm, thợ), ít rối hơn đọc cả dự án.</div>
+    <div class="card pad" id="dList"></div>
+  </section>
+
+  <section id="E" hidden>
+    <div class="note"><b>Đặt nhật ký ở đâu?</b> Có 5 chỗ hợp lý. Mỗi chỗ phục vụ một câu hỏi khác nhau, nên nên kết hợp chứ không chọn một.</div>
+    <div class="pl">
+      <div class="card rec"><h4>① Tab "Hoạt động" trong chi tiết dự án <span class="stars">★ Nên làm trước</span></h4>
+        <p>Trả lời: "Dự án này đang diễn ra những gì?"</p>
+        <div class="wf"><div class="nav"><span>Tổng quan</span><span>Công việc</span><span>Thảo luận</span><span class="hl">Hoạt động</span><span>Hồ sơ</span></div><div class="ln b"></div><div class="ln"></div><div class="ln"></div></div>
+        <div class="pro">Đúng chỗ người ta đã vào để xem dự án</div><div class="pro">Thảo luận và Hoạt động ngồi cạnh nhau, tách bạch</div><div class="con">Chỉ thấy từng dự án một</div></div>
+
+      <div class="card rec"><h4>② Mục "Lịch sử" trong chi tiết công việc <span class="stars">★ Nên làm trước</span></h4>
+        <p>Trả lời: "Việc này đã qua tay ai, đổi gì?"</p>
+        <div class="wf"><div class="nav"><span>Chi tiết</span><span>Nhiệm vụ</span><span>Hồ sơ</span><span class="hl">Lịch sử</span></div><div class="ln b"></div><div class="ln"></div></div>
+        <div class="pro">Người làm việc thấy ngay đúng việc của mình</div><div class="pro">Thay thế <code>workLogs</code> rải rác hiện nay</div><div class="con">Không có cái nhìn toàn dự án</div></div>
+
+      <div class="card"><h4>③ Menu "Nhật ký hoạt động" toàn công ty</h4>
+        <p>Trả lời: "Hôm nay công ty có gì lạ?" — dành Giám Đốc / Kế toán.</p>
+        <div class="wf"><div class="nav"><span>Tổng quan</span><span>Dự án</span><span class="hl">Nhật ký</span><span>Tài chính</span></div><div class="ln b"></div><div class="ln"></div><div class="ln"></div></div>
+        <div class="pro">Soát chéo mọi dự án, lọc theo người</div><div class="pro">Hợp kiểu bảng B</div><div class="con">Thêm một menu; cần phân quyền xem</div></div>
+
+      <div class="card"><h4>④ Thẻ "Mới nhất" ở trang Tổng quan</h4>
+        <p>Trả lời: "Tôi vừa bỏ lỡ gì?" — 5 dòng gần nhất ở các dự án tôi tham gia.</p>
+        <div class="wf"><div class="nav"><span class="hl">Tổng quan</span></div><div class="ln b" style="width:60%"></div><div class="ln"></div><div class="ln"></div><div class="ln b" style="width:40%"></div></div>
+        <div class="pro">Không cần mở dự án; thay phần tin rác ở Tin nhắn</div><div class="con">Chỉ tóm tắt; cần bấm xem tiếp</div></div>
+
+      <div class="card"><h4>⑤ Tab "Hoạt động" trong Tin nhắn</h4>
+        <p>Cạnh "Thảo luận" và "Việc của tôi": một tab riêng gom sự kiện, không rung máy.</p>
+        <div class="wf"><div class="nav"><span>Tin nhắn</span><span>Việc của tôi</span><span class="hl">Hoạt động</span></div><div class="ln b"></div><div class="ln"></div></div>
+        <div class="pro">Người quen mở Tin nhắn không phải đổi thói quen</div><div class="con">Dễ lại thành chỗ "rác" nếu không lọc theo mức quan trọng</div></div>
+    </div>
+    <div class="sec-title">Gợi ý kết hợp</div>
+    <div class="card pad">
+      <b>Bộ tối thiểu hiệu quả:</b> ① + ② (cùng một nguồn dữ liệu) <b>+</b> ④ ở Tổng quan. Làm vậy Tin nhắn chỉ còn lại <i>thảo luận người viết</i> và <i>việc cần tôi xử lý</i>.<br>
+      <b>Giai đoạn sau:</b> ③ cho Giám Đốc (kiểu bảng B), và C làm màn tổng quan đầu tab "Hoạt động" của dự án.
+    </div>
+  </section>
+</div>
+
+<script>
+const TYPES={giao:['📌','Giao việc','t-giao'],tt:['🔄','Trạng thái','t-tt'],han:['⏰','Hạn / ưu tiên','t-han'],duyet:['✅','Duyệt','t-duyet'],tc:['💰','Tài chính','t-tc'],xoa:['🗑️','Xóa / sửa','t-xoa']};
+// d = ngày (0 = hôm nay), h = giờ:phút
+const EV=[
+ {d:0,h:'14:20',who:'Long',t:'duyet',ob:'Công việc',n:'Lắp khung cổng',txt:'đã duyệt hoàn thành',from:'Chờ duyệt',to:'Hoàn thành'},
+ {d:0,h:'11:05',who:'Ny',t:'tc',ob:'Dự án',n:'Phiếu chi PC-0231',txt:'đã lập phiếu chi cho thầu phụ Hòa',from:'',to:'12.000.000đ'},
+ {d:0,h:'09:40',who:'Bình',t:'tt',ob:'Nhiệm vụ',n:'Hàn khung cổng › Cắt thép',txt:'đã chuyển trạng thái',from:'Đang làm',to:'Xong'},
+ {d:0,h:'08:15',who:'Tiến',t:'han',ob:'Công việc',n:'Sơn tĩnh điện',txt:'đã đổi hạn',from:'18/10',to:'22/10'},
+ {d:1,h:'16:40',who:'Tiến',t:'giao',ob:'Dự án',n:'Cổng sắt Anh Khanh',txt:'đã chuyển Trưởng Dự Án',from:'Long',to:'Bình'},
+ {d:1,h:'15:10',who:'Bình',t:'giao',ob:'Công việc',n:'Lắp bản lề',txt:'đã giao cho Hòa',from:'',to:'Hòa'},
+ {d:1,h:'10:30',who:'Ny',t:'duyet',ob:'Dự án',n:'Đề xuất VT-104',txt:'đã gửi xét duyệt (Thép hộp 40×80 × 24)',from:'',to:'Chờ duyệt'},
+ {d:1,h:'09:00',who:'Hòa',t:'xoa',ob:'Nhiệm vụ',n:'Sơn tĩnh điện › Chà nhám',txt:'đã xóa nhiệm vụ',from:'',to:''},
+ {d:3,h:'13:25',who:'Long',t:'tt',ob:'Dự án',n:'Cổng sắt Anh Khanh',txt:'đã chuyển giai đoạn',from:'Hợp đồng',to:'Thi công'},
+ {d:3,h:'08:50',who:'Ny',t:'tc',ob:'Dự án',n:'Hợp đồng HD-0087',txt:'đã duyệt hợp đồng',from:'Chờ duyệt',to:'Đã duyệt'},
+];
+const dayLbl=d=>d===0?'Hôm nay':d===1?'Hôm qua':`${d} ngày trước`;
+const av=n=>`<span style="display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;font-size:10px;font-weight:800">${n[0]}</span>`;
+const diff=e=>(e.from||e.to)?`<div class="diff">${e.from?`<s>${e.from}</s> →`:''} <i>${e.to}</i></div>`:'';
+const evHtml=e=>{const T=TYPES[e.t];return `<div class="ev"><span class="dot" style="border-color:currentColor">${T[0]}</span>
+<div class="l1">${av(e.who)} <b>${e.who}</b> ${e.txt} <span class="ob">${e.n}</span></div>${diff(e)}
+<div class="meta"><span class="badge ${T[2]}">${T[1]}</span><span>${e.h}</span><span>${e.ob}</span></div></div>`};
+
+// ---------- A
+let aType='',aQ='',aWho='';
+const people=[...new Set(EV.map(e=>e.who))];
+function drawA(){
+  const list=EV.filter(e=>(!aType||e.t===aType)&&(!aWho||e.who===aWho)&&(!aQ||(e.who+e.n+e.txt).toLowerCase().includes(aQ.toLowerCase())));
+  let h='',last=-1;
+  list.forEach(e=>{if(e.d!==last){h+=`<div class="day">${dayLbl(e.d)}</div><div class="tl">`;last=e.d} h+=evHtml(e); const nx=list[list.indexOf(e)+1]; if(!nx||nx.d!==e.d)h+='</div>'});
+  document.getElementById('aList').innerHTML=h||'<p style="color:var(--mut)">Không có sự kiện phù hợp.</p>';
+  document.getElementById('aPhone').innerHTML=list.slice(0,6).map(e=>`<div class="tl" style="margin-left:10px;padding-left:16px">${evHtml(e)}</div>`).join('');
+}
+const aT=document.getElementById('aTools');
+aT.innerHTML=`<input class="s" placeholder="🔍 Tìm…" id="aq" style="width:130px"><select class="s" id="awho"><option value="">Mọi người</option>${people.map(p=>`<option>${p}</option>`).join('')}</select><span class="chip on" data-t="">Tất cả</span>`+Object.entries(TYPES).map(([k,v])=>`<span class="chip" data-t="${k}">${v[0]} ${v[1]}</span>`).join('');
+aT.onclick=e=>{const c=e.target.closest('.chip');if(!c)return;aType=c.dataset.t;aT.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===c));drawA()};
+document.getElementById('aq').oninput=e=>{aQ=e.target.value;drawA()};
+document.getElementById('awho').onchange=e=>{aWho=e.target.value;drawA()};
+drawA();
+
+// ---------- B
+const bT=document.getElementById('bType'),bW=document.getElementById('bWho');
+Object.entries(TYPES).forEach(([k,v])=>bT.insertAdjacentHTML('beforeend',`<option value="${k}">${v[1]}</option>`));
+people.forEach(p=>bW.insertAdjacentHTML('beforeend',`<option>${p}</option>`));
+function drawB(){
+  const q=document.getElementById('bQ').value.toLowerCase(),t=bT.value,w=bW.value,o=document.getElementById('bObj').value;
+  document.getElementById('bBody').innerHTML=EV.filter(e=>(!t||e.t===t)&&(!w||e.who===w)&&(!o||e.ob===o)&&(!q||(e.who+e.n+e.txt).toLowerCase().includes(q)))
+   .map(e=>`<tr><td style="white-space:nowrap">${e.h}<br><span style="color:var(--mut);font-size:11px">${dayLbl(e.d)}</span></td><td>${av(e.who)} ${e.who}</td><td><span class="badge ${TYPES[e.t][2]}">${TYPES[e.t][1]}</span></td><td><span class="ob">${e.n}</span><br><span style="color:var(--mut);font-size:11px">${e.ob}</span></td><td>${e.txt}</td><td>${e.from?`<s style="color:var(--red)">${e.from}</s> → `:''}<b style="color:var(--green)">${e.to}</b></td></tr>`).join('');
+}
+['bQ','bType','bWho','bObj'].forEach(i=>document.getElementById(i).addEventListener('input',drawB));drawB();
+
+// ---------- C
+document.getElementById('cList').innerHTML='<div class="tl">'+EV.slice(0,6).map(evHtml).join('')+'</div>';
+
+// ---------- D
+const TASKS=[
+ {n:'Lắp khung cổng',st:3,who:'Bình',due:'20/10',log:[['14:20','Long đã duyệt hoàn thành'],['hôm qua','Bình gửi duyệt hoàn thành'],['3 ngày','Bình nhận việc (20%)']]},
+ {n:'Hàn khung cổng',st:2,who:'Bình',due:'18/10 · trễ 4 ngày',late:1,log:[['09:40','Bình xong nhiệm vụ "Cắt thép"'],['2 ngày','Tiến thêm Hòa vào nhiệm vụ "Hàn mối"'],['5 ngày','Tiến giao cho Bình']]},
+ {n:'Sơn tĩnh điện',st:1,who:'Hòa',due:'22/10',log:[['08:15','Tiến đổi hạn 18/10 → 22/10'],['hôm qua','Hòa xóa nhiệm vụ "Chà nhám"']]},
+];
+const STEPS=['Mới giao','Đang làm','Chờ duyệt','Hoàn thành'];
+document.getElementById('dList').innerHTML=TASKS.map((t,i)=>`<details class="obj" ${i===0?'open':''}><summary><b>${t.n}</b>
+ <span class="stp">${STEPS.map((s,k)=>`<span class="${k===t.st?'on':''}">${s}</span>`).join('')}</span>
+ <span style="margin-left:auto;font-size:12px;color:${t.late?'var(--red)':'var(--mut)'}">${av(t.who)} ${t.who} · ${t.due}</span></summary>
+ <div class="body">${t.log.map(l=>`<div class="row"><time>${l[0]}</time><span>${l[1]}</span></div>`).join('')}</div></details>`).join('');
+
+// ---------- tabs
+document.getElementById('tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;
+ document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b));
+ ['A','B','C','D','E'].forEach(k=>document.getElementById(k).hidden=k!==b.dataset.k)};
+// mở thẳng tab theo #A..#E (tiện chụp/chia sẻ liên kết)
+const h=location.hash.slice(1);if(h){const b=document.querySelector('.tab[data-k="'+h+'"]');if(b)b.click()}
+</script>
+</body>
+</html>

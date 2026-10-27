@@ -1,4 +1,6 @@
-﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+﻿import { recordProjectEventFromMessage } from '../lib/projectEvents';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import * as MT from '../lib/messageTemplates';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import { allocateReceipts } from '../lib/receivableAllocation';
@@ -1119,7 +1121,11 @@ export default function FinanceManagement({
         approverEmp?.id,
       ].filter(Boolean) as string[]));
       memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
-      await sendGroupChatMessage({
+      // 📒 Ghi vào NHẬT KÝ dự án (nhóm chat chỉ còn thảo luận); chưa chạy migration → gửi vào nhóm chat như cũ
+      const logged = await recordProjectEventFromMessage(content, {
+        projectId: proposal.projectId, actor: { id: currentUser?.id, name: currentUser?.name || 'Hệ thống' }, objKind: 'proposal', objName: proposal.id,
+      });
+      if (!logged) await sendGroupChatMessage({
         conversationId: convId,
         senderId: currentUser?.id || '',
         senderName: currentUser?.name || 'Hệ thống',
@@ -1164,17 +1170,14 @@ export default function FinanceManagement({
           senderRole: currentUser.role,
           recipientId: creatorEmp.id,
           recipientName: creatorEmp.name || proposal.creatorName || 'Người lập đề xuất',
-          content: `✅ Đã duyệt đề xuất tạm ứng ${proposal.id} (${proposal.taskName || proposal.subcontractorName}) ${proposal.amount.toLocaleString('vi-VN')}đ.`,
+          content: MT.ketQuaTamUng(true, { code: proposal.id, amount: proposal.amount, task: proposal.taskName || proposal.subcontractorName }),
           relatedEntity: { type: 'advance', id: proposal.id },
         });
       }
       // Tin nhắn NHÓM CHAT dự án: người xét duyệt đã duyệt đề xuất
       await notifyAdvanceProjectChat(
         proposal,
-        `✅ ĐÃ DUYỆT ĐỀ XUẤT TẠM ỨNG THẦU PHỤ\n` +
-        `Mã đề xuất: ${proposal.id}\n` +
-        `Thầu phụ: ${proposal.subcontractorName}\n` +
-        `Công việc: ${proposal.taskName || proposal.projectName || '—'}\n` +
+        `✅ Duyệt tạm ứng ${proposal.id}: ${finalApproved.toLocaleString('vi-VN')}đ · Thầu phụ ${proposal.subcontractorName} · ${proposal.taskName || proposal.projectName || '—'}\n` +
         `Số tiền duyệt chi: ${finalApproved.toLocaleString('vi-VN')}đ${finalApproved !== proposal.amount ? ` (đề xuất ${proposal.amount.toLocaleString('vi-VN')}đ)` : ''}\n` +
         `Người lập đề xuất: ${proposal.creatorName || '—'}\n` +
         `Người xét duyệt: ${currentUser.name}\n` +
@@ -1238,7 +1241,7 @@ export default function FinanceManagement({
           senderRole: currentUser.role,
           recipientId: creatorEmp.id,
           recipientName: creatorEmp.name || proposal.creatorName || 'Người lập đề xuất',
-          content: `❌ Đã từ chối đề xuất tạm ứng ${proposal.id} (${proposal.taskName || proposal.subcontractorName}) ${proposal.amount.toLocaleString('vi-VN')}đ.`,
+          content: MT.ketQuaTamUng(false, { code: proposal.id, amount: proposal.amount, task: proposal.taskName || proposal.subcontractorName }),
           relatedEntity: { type: 'advance', id: proposal.id },
         });
       }
@@ -4023,7 +4026,10 @@ export default function FinanceManagement({
           senderRole: (currentUser as any)?.role,
           recipientId: approverEmp.id,
           recipientName: approverEmp.name || approverName,
-          content: `🔔 Đề xuất ${quickProposalType === 'subcontractor_advance' ? (isDebtMode ? 'THANH TOÁN CÔNG NỢ THẦU PHỤ' : 'TẠM ỨNG THẦU PHỤ') : quickProposalType === 'supplier_payment_proposal' ? 'CHI NHÀ CUNG CẤP' : quickProposalType === 'cash_fund_deposit' ? 'NẠP QUỸ TIỀN MẶT' : quickProposalType === 'other_expense_proposal' ? 'CHI KHÁC' : 'CHI PHÍ DỰ ÁN'} ${proposalCode} (${projectNameForSave}) ${amount.toLocaleString('vi-VN')}đ. Lý do: ${newProposal.reason}. Vui lòng xem xét.`,
+          content: MT.canDuyetDeXuatChi({
+            loai: (quickProposalType === 'subcontractor_advance' ? (isDebtMode ? 'thanh toán công nợ thầu phụ' : 'tạm ứng thầu phụ') : quickProposalType === 'supplier_payment_proposal' ? 'chi nhà cung cấp' : quickProposalType === 'cash_fund_deposit' ? 'nạp quỹ tiền mặt' : quickProposalType === 'other_expense_proposal' ? 'chi khác' : 'chi phí dự án'),
+            code: proposalCode, amount, project: projectNameForSave, reason: newProposal.reason,
+          }),
           relatedEntity: { type: 'advance', id: proposalCode },
         });
       }
@@ -4304,7 +4310,7 @@ export default function FinanceManagement({
         // Tin nhắn NHÓM CHAT dự án: người lập phiếu chi đã tất toán đề xuất
         await notifyAdvanceProjectChat(
           activeProposalForPayment,
-          `💰 ĐÃ LẬP PHIẾU CHI TẤT TOÁN ĐỀ XUẤT TẠM ỨNG\n` +
+          `💰 Lập phiếu chi tất toán tạm ứng\n` +
           `Mã đề xuất: ${activeProposalForPayment.id}\n` +
           `Thầu phụ: ${activeProposalForPayment.subcontractorName}\n` +
           `Công việc: ${activeProposalForPayment.taskName || activeProposalForPayment.projectName || '—'}\n` +

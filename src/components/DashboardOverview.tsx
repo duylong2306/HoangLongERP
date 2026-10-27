@@ -1,4 +1,5 @@
 import { isPaymentProposedBy } from '../lib/approvalInbox';
+import * as MT from '../lib/messageTemplates';
 import { isTravelExpenseBeneficiary } from '../lib/ctpOwnership';
 import { findUniqueEmployeeByName } from '../lib/employeeLookup';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -1763,7 +1764,7 @@ export default function DashboardOverview({
         senderRole: currentUser.role,
         recipientId: approverEmp.id,
         recipientName: approverEmp.name || newRequest.approverName,
-        content: `🔔 ${currentUser.name} đã gửi ĐƠN NGHỈ PHÉP "${newRequest.type}"${leaveShift ? ` (${shiftLabel(leaveShift)})` : ''} từ ${newRequest.fromDate} đến ${newRequest.toDate} (${newRequest.daysCount} ngày). Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        content: MT.canDuyetNghiPhep({ type: newRequest.type, shift: leaveShift || undefined, fromDate: newRequest.fromDate, toDate: newRequest.toDate, daysCount: newRequest.daysCount, reason: newRequest.reason }),
         relatedEntity: { type: 'leave', id: newRequest.id },
       });
     }
@@ -1852,7 +1853,7 @@ export default function DashboardOverview({
         senderRole: currentUser.role,
         recipientId: approverEmp.id,
         recipientName: approverEmp.name || finalApproverName,
-        content: `🔔 ${currentUser.name} đã gửi BÁO CÁO CHẤM CÔNG "${newRequest.type}" (${isWholeDay ? 'cả ngày' : (newRequest.shift || '')}) ngày ${newRequest.fromDate}. Lý do: ${newRequest.reason}. Vui lòng xem xét.`,
+        content: MT.canDuyetChamCong({ type: newRequest.type, wholeDay: isWholeDay, shift: newRequest.shift, date: newRequest.fromDate, reason: newRequest.reason }),
         relatedEntity: { type: 'leave', id: newRequest.id },
       });
     }
@@ -1952,7 +1953,7 @@ export default function DashboardOverview({
           senderRole: currentUser.role,
           recipientId: approverEmp.id,
           recipientName: approverEmp.name || finalApproverName,
-          content: `🔔 ${currentUser.name} đã gửi ĐỀ XUẤT TẠM ỨNG LƯƠNG ${proposalId} (${newProposal.taskName}) ${amount.toLocaleString('vi-VN')}đ. Lý do: ${newProposal.reason}. Vui lòng xem xét.`,
+          content: MT.canDuyetTamUngLuong({ code: proposalId, amount, reason: newProposal.reason }),
           relatedEntity: { type: 'advance', id: proposalId },
         });
       }

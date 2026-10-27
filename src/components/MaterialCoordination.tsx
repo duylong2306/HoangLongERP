@@ -1,3 +1,5 @@
+import { recordProjectEventFromMessage } from '../lib/projectEvents';
+import * as MT from '../lib/messageTemplates';
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { isUserInRoleGroup, getMaterialCoordinators, getMaterialApprovers, isRoleAdmin, isRoleAccounting, isRoleOffice, isRoleTechnical, hasModulePermission } from '../context';
@@ -416,7 +418,11 @@ export default function MaterialCoordination({
       if (conv) {
         [currentUser?.id, prop.createdBy].filter(Boolean).forEach((mid: string) => addMemberToConversation(conv.id, mid));
       }
-      await sendGroupChatMessage({
+      // 📒 Ghi vào NHẬT KÝ dự án (nhóm chat chỉ còn thảo luận); chưa chạy migration → gửi vào nhóm chat như cũ
+      const logged = await recordProjectEventFromMessage(content, {
+        projectId: prop.projectId, actor: { id: currentUser?.id, name: currentUser?.name || 'Hệ thống' }, objKind: 'material', objName: prop.code,
+      });
+      if (!logged) await sendGroupChatMessage({
         conversationId: `conv_project_${prop.projectId}`,
         senderId: currentUser?.id || 'system',
         senderName: currentUser?.name || 'Hệ thống',
@@ -731,12 +737,15 @@ export default function MaterialCoordination({
           // 👥 Thêm người tạo đề xuất nhanh vào nhóm chat dự án — nếu chưa từng
           // tham gia dự án này, họ sẽ không thấy nhóm chat dù được nhắc trong tin.
           if (conv && creatorId) addMemberToConversation(conv.id, creatorId);
-          await sendGroupChatMessage({
+          // 📒 Ghi vào NHẬT KÝ dự án (nhóm chat chỉ còn thảo luận); chưa chạy migration → gửi vào nhóm chat như cũ
+          const quickMsg = MT.nk.deXuatVatTu({ code, project: proj.name, lines: validItems.map(i => `• ${i.name} × ${i.qty} ${i.unit}`) });
+          const logged = await recordProjectEventFromMessage(quickMsg, { projectId: proj.id, actor: { id: creatorId, name: creatorName }, objKind: 'material', objName: code });
+          if (!logged) await sendGroupChatMessage({
             conversationId: `conv_project_${proj.id}`,
             senderId: creatorId,
             senderName: creatorName,
             senderRole: 'pm' as any,
-            content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${proj.name}\n— ${validItems.map(i => `• ${i.name} × ${i.qty} ${i.unit}`).join('\n')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
+            content: quickMsg,
             relatedEntity: { type: 'project', id: proj.id } as any,
           });
         } catch (e) { /* ignore */ }
@@ -1343,7 +1352,7 @@ export default function MaterialCoordination({
     if (!(prop.quotes || []).length) { showNotification('Cần ít nhất 1 báo giá để gửi xét duyệt.', 'Thiếu báo giá', 'warning'); return; }
     const proposer = prop.createdByName || currentUser?.name || '—';
     await saveProposal({ ...prop, status: 'waiting_approval' });
-    await sendProjectChat(prop, `📝 ĐỀ XUẤT VẬT TƯ ${prop.code} GỬI XÉT DUYỆT\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\n→ Chờ Người xét duyệt duyệt.`);
+    await sendProjectChat(prop, `📝 Gửi duyệt đề xuất vật tư ${prop.code}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\n→ Chờ Người xét duyệt duyệt.`);
     showNotification(`Đã gửi đề xuất sang bước CHỜ DUYỆT (${(prop.quotes || []).length} báo giá).`, 'Gửi xét duyệt', 'success');
     setSelectedDocKey(null);
     setIsEditing(false);
@@ -1372,7 +1381,7 @@ export default function MaterialCoordination({
       supplierId: quote.supplierId,
       supplierName: quote.supplierName,
     });
-    await sendProjectChat(prop, `✅ ĐỀ XUẤT VẬT TƯ ${prop.code} ĐÃ ĐƯỢC DUYỆT\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười xét duyệt: ${approver}\nBáo giá được chọn: ${quote.supplierName}\n→ Chuyển sang bước CHỜ ĐẶT HÀNG.`);
+    await sendProjectChat(prop, `✅ Duyệt đề xuất vật tư ${prop.code}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười xét duyệt: ${approver}\nBáo giá được chọn: ${quote.supplierName}\n→ Chuyển sang bước CHỜ ĐẶT HÀNG.`);
     showNotification(`Đã duyệt và chuyển sang CHỜ ĐẶT HÀNG với báo giá của ${quote.supplierName}.`, 'Duyệt thành công', 'success');
     setSelectedDocKey(null);
     setIsEditing(false);
@@ -1383,7 +1392,7 @@ export default function MaterialCoordination({
     const proposer = prop.createdByName || currentUser?.name || '—';
     const approver = currentUser?.name || '—';
     await saveProposal({ ...prop, status: 'find_supplier' });
-    await sendProjectChat(prop, `❌ ĐỀ XUẤT VẬT TƯ ${prop.code} BỊ TỪ CHỐI\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười xét duyệt: ${approver}\n→ Quay lại bước TÌM NHÀ CUNG CẤP.`);
+    await sendProjectChat(prop, `❌ Từ chối đề xuất vật tư ${prop.code}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười xét duyệt: ${approver}\n→ Quay lại bước TÌM NHÀ CUNG CẤP.`);
     showNotification('Đã từ chối đề xuất, quay lại TÌM NHÀ CUNG CẤP.', 'Từ chối', 'info');
     setSelectedDocKey(null);
     setIsEditing(false);
@@ -1397,7 +1406,7 @@ export default function MaterialCoordination({
       async () => {
         const proposer = prop.createdByName || currentUser?.name || '—';
         await saveProposal({ ...prop, status: 'cancelled' });
-        await sendProjectChat(prop, `🗑 ĐỀ XUẤT VẬT TƯ ${prop.code} ĐÃ BỊ HỦY\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}`);
+        await sendProjectChat(prop, `🗑 Hủy đề xuất vật tư ${prop.code}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}`);
         showNotification(`Đã chuyển đề xuất ${prop.code} vào Thùng rác (tự xóa sau 30 ngày).`, 'Đã hủy', 'info');
         setSelectedDocKey(null);
         setIsEditing(false);
@@ -1579,7 +1588,7 @@ export default function MaterialCoordination({
     if (createdIds.length > 0) summaryParts.push(`${createdIds.length} đơn hàng mua (${createdIds.join(', ')})`);
     if (stockDeductedCount > 0) summaryParts.push(`trừ kho ${stockDeductedCount} mặt hàng`);
     const summary = summaryParts.join(', ') || 'không có thay đổi';
-    await sendProjectChat(prop, `🛒 ĐÃ XỬ LÝ ĐỀ XUẤT ${prop.code}: ${summary}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười điều phối: ${coordinator}\n→ ${allWarehouseOnly ? 'Đã nhận hàng (xuất kho).' : 'Chờ Đặt hàng.'}`);
+    await sendProjectChat(prop, `🛒 Xử lý đề xuất vật tư ${prop.code}: ${summary}\nDự án: ${prop.projectName}\nNgười đề xuất: ${proposer}\nNgười điều phối: ${coordinator}\n→ ${allWarehouseOnly ? 'Đã nhận hàng (xuất kho).' : 'Chờ Đặt hàng.'}`);
     showNotification(`Đã xử lý đề xuất: ${summary}.`, 'Xử lý đề xuất vật tư', 'success');
     } finally {
       setIsCreatingOrder(false);
@@ -1589,7 +1598,7 @@ export default function MaterialCoordination({
   const markOrdered = async (prop: any) => {
     const coordinator = currentUser?.name || '—';
     await saveProposal({ ...prop, status: 'ordered' });
-    await sendProjectChat(prop, `🚚 ĐỀ XUẤT VẬT TƯ ${prop.code} ĐÃ ĐẶT HÀNG THÀNH CÔNG\nDự án: ${prop.projectName}\nNgười điều phối: ${coordinator}\n→ Chờ nhận hàng và ghi nhận công nợ.`);
+    await sendProjectChat(prop, `🚚 Đặt hàng thành công: đề xuất vật tư ${prop.code}\nDự án: ${prop.projectName}\nNgười điều phối: ${coordinator}\n→ Chờ nhận hàng và ghi nhận công nợ.`);
     showNotification(`Đã chuyển ${prop.code} sang ĐẶT HÀNG THÀNH CÔNG.`, 'Đặt hàng', 'success');
     setSelectedDocKey(null);
     setIsEditing(false);
@@ -1684,7 +1693,7 @@ export default function MaterialCoordination({
     } else {
       await saveProposal({ ...proposal });
     }
-    await sendProjectChat(proposal, `📦 ĐỀ XUẤT VẬT TƯ ${proposal.code} ĐÃ NHẬN HÀNG${allReceived ? '' : ' MỘT PHẦN'}\nĐơn hàng: ${order.id}\nNhà cung cấp: ${order.supplierName}\nNgười nhận: ${currentUser?.name || '—'}${allReceived ? '\n→ Đã nhận đủ đơn hàng này.' : '\n→ Còn lại hàng chờ nhận tiếp.'}`);
+    await sendProjectChat(proposal, `📦 Nhận hàng${allReceived ? '' : ' một phần'}: đề xuất vật tư ${proposal.code}\nĐơn hàng: ${order.id}\nNhà cung cấp: ${order.supplierName}\nNgười nhận: ${currentUser?.name || '—'}${allReceived ? '\n→ Đã nhận đủ đơn hàng này.' : '\n→ Còn lại hàng chờ nhận tiếp.'}`);
     showNotification(
       allReceived ? `Đã nhận đủ đơn hàng ${order.id}.` : `Đã nhận một phần đơn hàng ${order.id}. Số lượng còn lại được giữ lại.`,
       'Nhận hàng', 'success'
@@ -1828,7 +1837,7 @@ export default function MaterialCoordination({
         if (allPOsReceived) {
           await saveProposal({ ...prop, status: 'received' });
         }
-        await sendProjectChat(prop, `⚠️ ĐÃ CHỐT THIẾU HÀNG cho đơn ${order.id}\nNhà cung cấp: ${order.supplierName}\nThiếu: ${shortSummary}\nNgười chốt: ${currentUser?.name || '—'}\n→ Giá trị đơn đã giảm về đúng phần đã nhận, không chờ giao thêm.`);
+        await sendProjectChat(prop, `⚠️ Chốt thiếu hàng: đơn ${order.id}\nNhà cung cấp: ${order.supplierName}\nThiếu: ${shortSummary}\nNgười chốt: ${currentUser?.name || '—'}\n→ Giá trị đơn đã giảm về đúng phần đã nhận, không chờ giao thêm.`);
         showNotification(`Đã chốt số lượng thực nhận cho đơn ${order.id}. Giá trị đơn giảm còn ${newTongTien.toLocaleString('vi-VN')} đ.`, 'Chốt số lượng', 'success');
         window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
         window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));

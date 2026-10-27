@@ -1,3 +1,6 @@
+import { postProjectNotice } from '../lib/projectNotice';
+import * as MT from '../lib/messageTemplates';
+import { recordProjectEventFromMessage } from '../lib/projectEvents';
 import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -393,7 +396,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
       senderId: currentUser?.id || 'emp_1',
       senderName: currentUser?.name || 'Người dùng',
       senderRole: currentUser?.role || 'staff',
-      content: `🔔 [HỆ THỐNG LIÊN THÔNG BÁO CÁO]: Đã thiết lập yêu cầu phê duyệt liên thông tự động: "Ủy quyền duyệt một cấp dán chỉ mộc". Người duyệt: ${approverName}. Kính trình xem xét kết quả.`,
+      content: MT.canDuyetLienThong({ step: 'Ủy quyền duyệt một cấp dán chỉ mộc', approver: approverName }),
       createdAt: timestamp
     };
 
@@ -414,7 +417,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
         senderRole: currentUser.role,
         recipientId: approverId,
         recipientName: approverEmp?.name || approverName,
-        content: `🔔 ${currentUser.name || 'Người dùng'} đã gửi Yêu cầu phê duyệt công việc "${activeTask.name}". Vui lòng xem xét.`,
+        content: MT.canDuyetHoanThanh({ task: activeTask.name }),
         relatedEntity: { type: 'task', id: activeTask.id },
       });
     }
@@ -1390,7 +1393,7 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                                   senderRole: creatorEmp.role,
                                   recipientId: approverEmp.id,
                                   recipientName: approverEmp.name || proposal.approverName || 'Người xét duyệt',
-                                  content: `🔔 Đề xuất tạm ứng ${proposal.id} (${proposal.taskName}) ${totalVal.toLocaleString('vi-VN')}đ. Lý do: ${ctCostDescription || ''}. Vui lòng xem xét.`,
+                                  content: MT.canDuyetTamUngThauPhu({ code: proposal.id, amount: totalVal, task: proposal.taskName, reason: ctCostDescription }),
                                   relatedEntity: { type: 'advance', id: proposal.id },
                                 });
                               }
@@ -2224,6 +2227,13 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                           }
 
                           updateProjectWithRule(selectedProject.id, updates);
+                          // 📒 Nhật ký: ký duyệt hồ sơ dự án (hợp đồng / nghiệm thu / thanh lý)
+                          if (currentUser) postProjectNotice({
+                            project: { id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId },
+                            actor: { id: currentUser.id, name: currentUser.name, role: currentUser.role },
+                            content: MT.nk.kyDuyetHoSo({ loai: (({ contract: 'hợp đồng', acceptance: 'biên bản nghiệm thu', liquidation: 'hồ sơ thanh lý' } as Record<string, string>)[activeConnectedTool] || 'hồ sơ'), code: newDocObj.code }),
+                            objKind: 'project', objName: newDocObj.code,
+                          });
 
                           // ── ĐỒNG BỘ VÀO LƯU TRỮ HỒ SƠ THEO LĨNH VỰC (Nội thất / Xây dựng / Cơ khí) ──
                           // Menu "Hồ Sơ Dự Án" và "Lưu Trữ Hồ Sơ Nội Thất / Xây Dựng / Cơ Khí"
@@ -2449,12 +2459,19 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                     // 👥 Thêm người tạo đề xuất vào nhóm chat dự án — nếu chưa từng
                     // tham gia dự án này, họ sẽ không thấy nhóm chat dù được nhắc trong tin.
                     if (conv && creatorId) addMemberToConversation(conv.id, creatorId);
-                    await sendGroupChatMessage({
+                    // 📒 Ghi vào NHẬT KÝ dự án (nhóm chat chỉ còn thảo luận); chưa chạy migration → gửi vào nhóm chat như cũ
+                    const matMsg = MT.nk.deXuatVatTu({
+                      code, project: selectedProject.name, congViec: connectedTaskId ? `Công việc ${taskName}` : undefined,
+                      lines: ctMaterialRows.map(i => `• ${i.name} × ${i.qty} ${i.unit}${i.maSanPham ? '' : ' (chưa có mã → tìm NCC)'}`),
+                      note: bothGroups ? `Tách 2 đề xuất: ${withCodeCount} VT có mã → chờ đặt hàng; ${withoutCodeCount} VT chưa có mã → tìm NCC` : (withCodeCount ? 'Toàn bộ có mã → chờ đặt hàng' : 'Cần tìm nhà cung cấp (chưa có mã)'),
+                    });
+                    const logged = await recordProjectEventFromMessage(matMsg, { projectId: selectedProject.id, actor: { id: creatorId, name: creatorName }, taskId: connectedTaskId || undefined, objKind: 'material', objName: code });
+                    if (!logged) await sendGroupChatMessage({
                       conversationId: `conv_project_${selectedProject.id}`,
                       senderId: creatorId,
                       senderName: creatorName,
                       senderRole: 'pm' as any,
-                      content: `📦 ĐỀ XUẤT VẬT TƯ MỚI ${code}\nDự án: ${selectedProject.name}${connectedTaskId ? `\nCông việc: ${taskName}` : ''}\n— ${ctMaterialRows.map(i => `• ${i.name} × ${i.qty} ${i.unit}${i.maSanPham ? '' : ' (chưa có mã → TÌM NCC)'}`).join('\n')}\n→ ${bothGroups ? `Đã tách thành 2 đề xuất: ${withCodeCount} VT có mã → CHỜ ĐẶT HÀNG, ${withoutCodeCount} VT chưa có mã → TÌM NCC` : (withCodeCount ? 'Toàn bộ có mã → CHỜ ĐẶT HÀNG' : 'Cần TÌM NHÀ CUNG CẤP (chưa có mã)')}\n→ Đã gửi tới bảng Điều phối vật tư.`,
+                      content: matMsg,
                       relatedEntity: { type: 'project', id: selectedProject.id } as any,
                     });
                   } catch (e) {

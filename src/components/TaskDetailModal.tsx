@@ -1,4 +1,8 @@
-﻿import { findUniqueEmployeeByName } from '../lib/employeeLookup';
+﻿import { createPortal } from 'react-dom';
+import ProjectActivityModal from './ProjectActivityModal';
+import * as MT from '../lib/messageTemplates';
+import { postProjectNotice } from '../lib/projectNotice';
+import { findUniqueEmployeeByName } from '../lib/employeeLookup';
 import { paymentBelongsToSubcontractor } from '../lib/liabilityPayments';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Task, TaskUpdatePayload, Project, Employee, TaskPriority, TaskStatus, TaskComment, SubTaskMission, Customer, SubcontractorAdvanceProposal, Payment, ArchivedQuote, SupplierPartner, ChatMessage, ChatAttachment } from '../types';
@@ -117,6 +121,7 @@ export default function TaskDetailModal({
   if (!selectedTask) return null;
 
   const [advProposalApprover, setAdvProposalApprover] = useState('Ban Giám Đốc');
+  const [historyOpen, setHistoryOpen] = useState(false); // khung Lịch sử riêng của công việc
   const [subcontractors, setSubcontractors] = useState<any[]>([]);
 
   const isCurrentUserAdmin = currentUser.role === 'director' || currentUser.id === 'NV_ADMIN' || currentUser.id === 'emp_admin';
@@ -170,38 +175,21 @@ export default function TaskDetailModal({
   // về null → tin nhắn bị bỏ qua SILENT (không lỗi). Gửi tin nhắn BÊN TRONG .then
   // của ensureProjectChatGroup để đảm bảo conversation đã được upsert lên Supabase
   // (tránh vi phạm FK conversation_id khi push message song song).
-  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[], extraMemberIds?: string[]) => {
+  // NAY: ghi vào NHẬT KÝ (nút "Lịch sử" của công việc / "Nhật ký dự án") thay vì nhắn vào nhóm chat — nhóm chat chỉ còn thảo luận.
+  // Riêng tin có ĐÍNH KÈM (báo cáo nhiệm vụ kèm ảnh/tệp — nội dung do người viết) vẫn gửi vào nhóm chat để mọi người xem ảnh,
+  // và đồng thời ghi 1 dòng nhật ký. Chưa chạy migration nhật ký → tự gửi vào nhóm như cũ (xem lib/projectNotice.ts).
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], attachments?: ChatAttachment[], extraMemberIds?: string[], extra?: { from?: string; to?: string; objName?: string }) => {
     const pid = selectedTask.projectId;
-    if (!pid) return;
-    const convId = `conv_project_${pid}`;
-    ensureProjectChatGroup({
-      id: pid,
-      name: project?.name || selectedTask.name,
-      pmId: project?.pmId,
-    }).then(conv => {
-      if (!conv) return;
-      // Thêm các nhân sự liên quan vào nhóm (idempotent) để họ mở được nhóm.
-      // extraMemberIds: cho phép caller truyền thêm mainAssigneeId/memberIds của
-      // Nhiệm vụ vừa gán — nếu không truyền, người được gán ở cấp Nhiệm vụ sẽ
-      // không lọt vào nhóm chat dự án cho tới khi có ai đó bấm "Đồng bộ nhân sự".
-      const memberIds = Array.from(new Set([
-        currentUser?.id,
-        selectedTask.assigneeId,
-        selectedTask.assignerId,
-        project?.pmId,
-        ...(extraMemberIds || []),
-      ].filter(Boolean) as string[]));
-      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
-      sendGroupChatMessage({
-        conversationId: convId,
-        senderId: currentUser.id,
-        senderName: currentUser.name,
-        senderRole: currentUser.role,
-        content,
-        relatedEntity,
-        attachments,
-      });
-    }).catch(() => {});
+    if (!pid || !currentUser) return;
+    postProjectNotice({
+      project: { id: pid, name: project?.name || selectedTask.name, pmId: project?.pmId },
+      actor: { id: currentUser.id, name: currentUser.name, role: currentUser.role },
+      content, relatedEntity, attachments,
+      memberIds: [selectedTask.assigneeId, selectedTask.assignerId, ...(extraMemberIds || [])],
+      taskId: selectedTask.id, objName: extra?.objName ?? selectedTask.name, from: extra?.from, to: extra?.to,
+      objKind: relatedEntity && (relatedEntity as any).type === 'mission' ? 'mission' : (relatedEntity && (relatedEntity as any).type === 'advance' ? 'proposal' : 'task'),
+      alsoChat: !!(attachments && attachments.length > 0),
+    });
   };
 
   // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
@@ -220,6 +208,7 @@ export default function TaskDetailModal({
     return ok === true;
   };
 
+  const TASK_STATUS_LABEL: Record<string, string> = { todo: 'Chưa làm', doing: 'Đang làm', reviewing: 'Chờ duyệt', completed: 'Hoàn thành', overdue: 'Quá hạn' };
   const assignee = employees.find(e => e.id === selectedTask.assigneeId);
   const assigner = employees.find(e => e.id === selectedTask.assignerId);
 
@@ -625,6 +614,8 @@ export default function TaskDetailModal({
         onUpdateTask(selectedTask.id, {
           missions: [...currentMissions, ...processedRows]
         });
+        // 📒 Nhật ký: nhập hàng loạt nhiệm vụ từ Excel (1 dòng tóm tắt, tên các nhiệm vụ nằm ở phần chi tiết)
+        notifyProjectChat(`${MT.nk.nhapExcel({ count: processedRows.length, task: selectedTask.name })}\n${processedRows.slice(0, 30).map((r: any) => `• ${r.name}`).join('\n')}`, { type: 'task', id: selectedTask.id });
         addToast({ title: '✅ Nhập thành công', message: `Đã import ${processedRows.length} nhiệm vụ chi tiết từ Excel.`, type: 'success' });
       } catch (err) {
         addToast({ title: '⛔ Lỗi', message: 'Không thể đọc file Excel. Vui lòng kiểm tra định dạng.', type: 'error' });
@@ -842,7 +833,7 @@ export default function TaskDetailModal({
 
     const ok = await notifyProjectChatAfterSave(
       onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-      `✏️ ${currentUser.name} đã cập nhật Nhiệm Vụ "${mission.name}" → "${name}"${mission.deadline !== finalDeadline ? ` (Hạn mới: ${formatDateTime(finalDeadline)})` : ''}.`,
+      MT.nk.suaNhiemVu({ from: mission.name, to: name, deadline: mission.deadline !== finalDeadline ? finalDeadline : undefined }),
       { type: 'mission', id: mission.id }
     );
 
@@ -1356,7 +1347,7 @@ export default function TaskDetailModal({
 
     addToast({ title: '✅ Thành công', message: 'Đã gửi vi phạm thành công!', type: 'success' });
     // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-    notifyProjectChat(`⚠️ ${currentUser.name} đã ghi nhận vi phạm cho: [${loggedNames.join(', ')}] trong công việc "${selectedTask.name}".`);
+    notifyProjectChat(MT.nk.vipham({ names: loggedNames.join(', '), task: selectedTask.name }));
     const proj = projects.find(p => p.id === selectedTask.projectId);
     setViolationRows([
       { 
@@ -1408,7 +1399,7 @@ export default function TaskDetailModal({
       senderId: currentUser.id,
       senderName: currentUser.name,
       senderRole: currentUser.role || 'user',
-      content: `🔔 [HỆ THỐNG LIÊN THÔNG BÁO CÁO]: Đã thiết lập yêu cầu phê duyệt liên thông tự động: "${approverName}". Người duyệt: ${approverName}. Kính trình xem xét kết quả.`,
+      content: MT.canDuyetLienThong({ step: 'Yêu cầu phê duyệt công việc', approver: approverName }),
       createdAt: timestamp
     };
 
@@ -1418,6 +1409,10 @@ export default function TaskDetailModal({
       approvals: updatedApprovals,
       comments: [newComment, ...(selectedTask.comments || [])]
     });
+    if (saveResult !== false) {
+      // 📒 Nhật ký: gửi yêu cầu duyệt công việc (trước đây chỉ nhắn riêng người duyệt, dự án không có dấu vết)
+      notifyProjectChat(MT.nk.guiDuyetHoanThanh({ task: selectedTask.name, approver: approverName }), { type: 'task', id: selectedTask.id }, undefined, undefined, { from: TASK_STATUS_LABEL[selectedTask.status] || selectedTask.status, to: 'Chờ duyệt' });
+    }
     if (saveResult === false) {
       // ⛔ Save thất bại → báo lỗi, không đóng modal, không gửi tin nhóm.
       addToast({
@@ -1435,7 +1430,7 @@ export default function TaskDetailModal({
       senderRole: currentUser.role,
       recipientId: approverId,
       recipientName: approverEmp?.name || approverName,
-      content: `🔔 ${currentUser.name} đã gửi Yêu cầu phê duyệt công việc "${selectedTask.name}". Vui lòng xem xét.`,
+      content: MT.canDuyetHoanThanh({ task: selectedTask.name, project: project?.name }),
       relatedEntity: { type: 'task', id: selectedTask.id },
     });
 
@@ -1536,22 +1531,16 @@ export default function TaskDetailModal({
           senderRole: creatorEmp.role,
           recipientId: approverEmp.id,
           recipientName: approverEmp.name || approver,
-          content: `🔔 Đề xuất tạm ứng ${code} (${taskName}) ${amount.toLocaleString('vi-VN')}đ cho thầu phụ ${subcontractorName}. Lý do: ${reason}. Vui lòng xem xét.`,
+          content: MT.canDuyetTamUngThauPhu({ code, amount, subcontractor: subcontractorName, task: taskName, reason }),
           relatedEntity: { type: 'advance', id: code },
         });
       }
 
       // 💬 Tin nhắn NHÓM CHAT dự án: người lập đề xuất đã gửi đề xuất tạm ứng
       notifyProjectChat(
-        `📝 ĐỀ XUẤT TẠM ỨNG THẦU PHỤ\n` +
-        `Mã đề xuất: ${code}\n` +
-        `Thầu phụ: ${subcontractorName}\n` +
-        `Công việc: ${taskName}\n` +
-        `Số tiền: ${amount.toLocaleString('vi-VN')}đ\n` +
+        `💰 Đề xuất tạm ứng ${code}: ${amount.toLocaleString('vi-VN')}đ · Thầu phụ ${subcontractorName} · Công việc ${taskName}\n` +
         `Lý do: ${reason || '—'}\n` +
-        `Người lập đề xuất: ${creator}\n` +
-        `Người xét duyệt: ${approver}\n` +
-        `→ Chờ xét duyệt.`,
+        `Người lập: ${creator} · Người duyệt: ${approver} · Chờ duyệt`,
         { type: 'advance', id: code }
       );
 
@@ -1695,11 +1684,23 @@ export default function TaskDetailModal({
               <h4 className="lx-dh-title font-extrabold text-white text-md mt-1">CHI TIẾT CÔNG VIỆC</h4>
             </div>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+          {/* Lịch sử công việc: mọi hành động của công việc này và các nhiệm vụ trong nó */}
+          {selectedTask.projectId && (
+            <button onClick={() => setHistoryOpen(true)} className="lx-dh-close shrink-0" aria-label="Lịch sử công việc" data-testid="task-history-open">
+              <span>🕘</span>
+              <span className="lx-dh-close-text">Lịch sử</span>
+            </button>
+          )}
           <button onClick={onClose} className="lx-dh-close shrink-0" aria-label="Đóng" data-testid="task-detail-close">
             <X className="w-4 h-4" />
             <span className="lx-dh-close-text">Đóng bảng tin</span>
           </button>
+          </div>
         </div>
+        {historyOpen && selectedTask.projectId && createPortal(
+          <ProjectActivityModal projectId={selectedTask.projectId} projectName={project?.name} taskId={selectedTask.id} taskName={selectedTask.name} onClose={() => setHistoryOpen(false)} />,
+          document.body)}
 
         {/* Thẻ chuyển Chi tiết | Liên thông — chỉ ở màn hình hẹp và khi có công cụ liên thông */}
         {onOpenConnectedTool && (
@@ -1883,7 +1884,7 @@ export default function TaskDetailModal({
                               onUpdateTask(selectedTask.id, {
                                 assigneeId: val
                               }),
-                              `👤 ${currentUser.name} đã chuyển Phụ Trách Chính công việc "${selectedTask.name}" sang ${empName}.`,
+                              MT.nk.doiPhuTrachViec({ task: selectedTask.name, to: empName }),
                               { type: 'task', id: selectedTask.id }
                             );
                             if (ok === false) {
@@ -1937,6 +1938,8 @@ export default function TaskDetailModal({
                           subcontractorId: val,
                           subcontractorName: matchedName
                         });
+                        // 📒 Nhật ký: đổi thầu phụ của công việc
+                        notifyProjectChat(MT.nk.doiThauPhu(selectedTask.name), { type: 'task', id: selectedTask.id }, undefined, undefined, { from: selectedTask.subcontractorName || '(chưa chọn)', to: matchedName || '(bỏ chọn)' });
                       }}
                       className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 w-full focus:outline-none focus:border-orange-500 cursor-pointer disabled:cursor-not-allowed"
                     >
@@ -2275,7 +2278,7 @@ export default function TaskDetailModal({
                         onUpdateTask(selectedTask.id, {
                           missions: [...currentMissions, newMission]
                         }),
-                        `📝 ${currentUser.name} đã khởi tạo Nhiệm Vụ "${newMission.name}" cho công việc "${selectedTask.name}".`,
+                        MT.nk.taoNhiemVu({ mission: newMission.name, task: selectedTask.name }),
                         { type: 'task', id: selectedTask.id },
                         // Thêm Phụ trách chính + Nhân sự tham gia của Nhiệm vụ vừa tạo vào
                         // nhóm chat dự án — nếu không, người mới được gán ở cấp Nhiệm vụ sẽ
@@ -2308,7 +2311,7 @@ export default function TaskDetailModal({
                           senderRole: currentUser.role,
                           recipientId: selectedTask.assigneeId,
                           recipientName: parentAssigneeEmp.name,
-                          content: `🧩 ${currentUser.name} đã thêm Nhiệm Vụ "${newMission.name}" vào công việc "${selectedTask.name}" của bạn.`,
+                          content: MT.themNhiemVu({ mission: newMission.name, task: selectedTask.name }),
                           relatedEntity: { type: 'task', id: selectedTask.id },
                         });
                       }
@@ -2611,7 +2614,7 @@ export default function TaskDetailModal({
                                         });
                                         const ok = await notifyProjectChatAfterSave(
                                           onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-                                          `🔓 ${currentUser.name} đã bỏ Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                                          MT.nk.boGan(mission.name),
                                           { type: 'mission', id: mission.id }
                                         );
                                         if (ok === false) {
@@ -2672,7 +2675,7 @@ export default function TaskDetailModal({
                                           const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
                                           const ok = await notifyProjectChatAfterSave(
                                             onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-                                            `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                                            MT.nk.gan({ who: _newAssignee, mission: mission.name }),
                                             { type: 'mission', id: mission.id },
                                             // Thêm người vừa được gán vào nhóm chat dự án — nếu không, người
                                             // mới lần đầu tham gia Nhiệm vụ sẽ không thấy nhóm chat này.
@@ -2734,7 +2737,7 @@ export default function TaskDetailModal({
                                         const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
                                         const ok = await notifyProjectChatAfterSave(
                                           onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-                                          `➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`,
+                                          MT.nk.botNguoi({ who: _removed, mission: mission.name }),
                                           { type: 'mission', id: mission.id }
                                         );
                                         if (ok === false) {
@@ -2785,7 +2788,7 @@ export default function TaskDetailModal({
                                       const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
                                       const ok = await notifyProjectChatAfterSave(
                                         onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-                                        `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
+                                        MT.nk.themNguoi({ who: _added, mission: mission.name }),
                                         { type: 'mission', id: mission.id },
                                         // Thêm nhân sự vừa được gán vào nhóm chat dự án.
                                         [val]
@@ -3796,7 +3799,7 @@ export default function TaskDetailModal({
                           status: 'doing',
                           completionRate: 20
                         }),
-                        `🙋 ${currentUser.name} đã Nhận Việc "${selectedTask.name}".`,
+                        MT.nk.nhanViec(selectedTask.name),
                         { type: 'task', id: selectedTask.id }
                       );
                       if (ok === false) {
@@ -3842,7 +3845,7 @@ export default function TaskDetailModal({
                           return;
                         }
                         // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
-                        notifyProjectChat(`🎉 ${currentUser.name} (Phụ Trách Chính) đã HOÀN THÀNH công việc "${selectedTask.name}".`);
+                        notifyProjectChat(MT.nk.hoanThanhViec(selectedTask.name));
                       }}
                       className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-emerald-600' : ''}`}
                     >
@@ -3900,7 +3903,7 @@ export default function TaskDetailModal({
                             status: 'doing',
                             completionRate: 50
                           }),
-                          `❌ ${currentUser.name} đã TỪ CHỐI duyệt công việc "${selectedTask.name}".`,
+                          MT.nk.duyetHoanThanh(false, selectedTask.name),
                           { type: 'task', id: selectedTask.id }
                         );
                         if (ok === false) {
@@ -3929,7 +3932,7 @@ export default function TaskDetailModal({
                             status: 'completed',
                             completionRate: 100
                           }),
-                          `✅ ${currentUser.name} đã XÉT DUYỆT hoàn thành công việc "${selectedTask.name}".`,
+                          MT.nk.duyetHoanThanh(true, selectedTask.name),
                           { type: 'task', id: selectedTask.id }
                         );
                         if (ok === false) {
@@ -4124,7 +4127,7 @@ export default function TaskDetailModal({
                             const _newAssignee = employees.find(emp => emp.id === val)?.name || 'Người dùng';
                             const ok = await notifyProjectChatAfterSave(
                               onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-                              `👤 ${currentUser.name} đã gán ${_newAssignee} làm Phụ Trách Chính Nhiệm Vụ "${mission.name}".`,
+                              MT.nk.gan({ who: _newAssignee, mission: mission.name }),
                               { type: 'mission', id: mission.id },
                               // Thêm người vừa được gán vào nhóm chat dự án.
                               [val]
@@ -4191,7 +4194,7 @@ export default function TaskDetailModal({
                             const _added = employees.find(emp => emp.id === val)?.name || 'Thành viên';
                             const ok = await notifyProjectChatAfterSave(
                               onUpdateTask(selectedTask.id, { missions: updatedMissions }),
-                              `➕ ${currentUser.name} đã thêm ${_added} vào Nhiệm Vụ "${mission.name}".`,
+                              MT.nk.themNguoi({ who: _added, mission: mission.name }),
                               { type: 'mission', id: mission.id },
                               // Thêm nhân sự vừa được gán vào nhóm chat dự án.
                               [val]
@@ -4247,7 +4250,7 @@ export default function TaskDetailModal({
                                 onUpdateTask(selectedTask.id, { missions: updatedMissions });
                                 // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage)
                                 const _removed = employees.find(emp => emp.id === memId)?.name || 'Thành viên';
-                                notifyProjectChat(`➖ ${currentUser.name} đã xóa ${_removed} khỏi Nhiệm Vụ "${mission.name}".`);
+                                notifyProjectChat(MT.nk.botNguoi({ who: _removed, mission: mission.name }));
                               }}
                               className="text-slate-500 hover:text-rose-400 font-extrabold text-[9px] pl-1 cursor-pointer border-none bg-transparent"
                               title={`Xóa ${emp.name}`}
@@ -4289,6 +4292,8 @@ export default function TaskDetailModal({
                                 m.id === mission.id ? { ...m, completedChecklistTexts: updatedCompleted } : m
                               );
                               onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                              // 📒 Nhật ký: tích / bỏ tích đầu mục kiểm soát kỹ thuật của nhiệm vụ
+                              notifyProjectChat(MT.nk.tichMuc({ done: !currentCompleted.includes(chk), item: chk, mission: mission.name }), { type: 'mission', id: mission.id });
                             }}
                             className={`flex items-center gap-2 text-[10.5px] select-none ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
                           >
@@ -4355,6 +4360,8 @@ export default function TaskDetailModal({
                                       return next;
                                     });
                                     onUpdateTask(selectedTask.id, { missions: updatedMissions });
+                                    // 📒 Nhật ký: xóa dòng công tác phí của nhiệm vụ
+                                    notifyProjectChat(MT.nk.xoaCongTacPhi({ content: item.content || 'Công tác phí', mission: mission.name }), { type: 'mission', id: mission.id });
                                     // ─── XÓA ĐỒNG BỘ KHỎI BẢNG hrm_travel_expenses ───
                                     // Trước đây chỉ xóa khỏi missions/local, dòng CTP vẫn nằm lại
                                     // trong bảng tổng hợp → bảng Công tác phí bị nhân bản (pending
@@ -4506,7 +4513,7 @@ export default function TaskDetailModal({
                                     senderRole: currentUser.role,
                                     recipientId: ctpApprover.id,
                                     recipientName: ctpApprover.name,
-                                    content: `🚗 ${currentUser.name} vừa đăng ký CÔNG TÁC PHÍ "${selectedNorm.content}" cho ${creatorName} (${Number(selectedNorm.unitPrice).toLocaleString('vi-VN')} đ) trong nhiệm vụ "${mission.name}". Vui lòng xét duyệt.`,
+                                    content: MT.canDuyetCongTacPhi({ content: selectedNorm.content, amount: Number(selectedNorm.unitPrice), employee: creatorName, mission: mission.name }),
                                     relatedEntity: { type: 'travel_expense', id: newAllowance.rowId },
                                   }).catch((e) => console.warn('[TravelExpense] ⚠️ Gửi tin cho người duyệt thất bại:', e?.message || e));
                                 });
@@ -4897,9 +4904,7 @@ export default function TaskDetailModal({
                       // hay dòng file kèm nút Tải về, xem MessagesView.tsx).
                       const _reportText = missionReportText.trim();
                       const _reportImgs = [...missionReportImages];
-                      const _missionReportMsg = `✅ ${currentUser.name} đã Xác Nhận Hoàn Thành Nhiệm Vụ "${mission?.name || selectedMissionId}".`
-                        + (_reportText ? `\n\n📋 Báo cáo: ${_reportText}` : '')
-                        + (_reportImgs.length > 0 ? `\n📎 ${_reportImgs.length} tệp đính kèm báo cáo.` : '');
+                      const _missionReportMsg = MT.nk.hoanThanhNhiemVu({ mission: mission?.name || selectedMissionId || '', report: _reportText, files: _reportImgs.length });
                       notifyProjectChat(
                         _missionReportMsg,
                         { type: 'mission', id: mission?.id || selectedMissionId || '' },

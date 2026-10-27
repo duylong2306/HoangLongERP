@@ -6,7 +6,7 @@ import { isWorkThreadId } from './workThread';
 export type ListTab = 'all' | 'unread';
 export type Category = 'all' | 'personal' | 'group' | 'project' | 'task' | 'pinned' | 'muted';
 export const CATEGORY_LABEL: Record<Category, string> = {
-  all: 'Tất cả', personal: 'Cá nhân', group: 'Nhóm', project: 'Công trình', task: 'Công việc', pinned: 'Đã ghim', muted: 'Đã tắt thông báo',
+  all: 'Tất cả', personal: 'Cá nhân', group: 'Nhóm', project: 'Dự án', task: 'Công việc', pinned: 'Đã ghim', muted: 'Đã tắt thông báo',
 };
 
 /** Công trình = nhóm chat dự án (id conv_project_… hoặc có projectId); Công việc = type 'task'. */

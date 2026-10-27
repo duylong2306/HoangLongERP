@@ -15,6 +15,13 @@ vi.mock('../../lib/chatStore', () => ({
   ...fn, getOrCreatePersonalConversation: vi.fn(), loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => { store.onProgressive?.(); return []; }),
   subscribeConversations: (_u: string, cb: () => void) => { store.convCb = cb; return () => {}; }, subscribeMessages: () => () => {},
 }));
+const unreadMock: Record<string, any> = {};
+vi.mock('../../lib/projectEventReads', () => ({
+  loadUnreadSummary: async () => ({ ...unreadMock }),
+  markProjectSeen: vi.fn(async () => {}),
+  projectIdOfConversation: (c: any) => c.taskId ? undefined : (c.projectId || (String(c.id).startsWith('conv_project_') ? String(c.id).slice(13) : undefined)),
+}));
+vi.mock('../ProjectActivityModal', () => ({ default: (p: any) => <div data-testid="activity-stub" data-pid={p.projectId} data-export={p.onExport ? '1' : '0'} onClick={p.onClose} /> }));
 vi.mock('../../context', () => ({ useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false }));
 import MessagesZalo from '../MessagesZalo';
 import { stopPresence } from '../../lib/presence';
@@ -202,12 +209,13 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
     await waitFor(() => expect(loads).toHaveBeenCalled());
   });
   it('lưới an toàn: realtime chậm → cứ ~4 giây tự hỏi tin mới và hiện lên', async () => {
+    // Dùng thời điểm GẦN HIỆN TẠI: khung chat chỉ tải tin trong 2 ngày gần nhất, nên mốc ngày cố định sẽ làm test hỏng dần theo thời gian
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'cũ', createdAt: '2026-10-21T10:00:00Z', read: true }];
+      store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'cũ', createdAt: new Date(Date.now() - 60000).toISOString(), read: true }];
       mount(); fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
       await screen.findByTestId('zalo-messages');
-      store.onProgressive = () => { store.msgs.p_ny.push({ id: 'm2', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'tin mới tới', createdAt: '2026-10-21T10:00:05Z', read: false }); store.onProgressive = null; };
+      store.onProgressive = () => { store.msgs.p_ny.push({ id: 'm2', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'tin mới tới', createdAt: new Date().toISOString(), read: false }); store.onProgressive = null; };
       await act(async () => { await vi.advanceTimersByTimeAsync(4100); });
       await waitFor(() => expect(screen.getByText('tin mới tới')).toBeTruthy());
     } finally { vi.useRealTimers(); }
@@ -233,7 +241,7 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
     await waitFor(() => expect(screen.queryByTestId('zalo-jump-bottom')).toBeNull());
     expect(box.scrollTop).toBe(2000);
   });
-  describe('nút "Mở công trình" — tôn trọng phân quyền', () => {
+  describe('nút "Mở dự án" + "Nhật ký dự án" — tôn trọng phân quyền', () => {
     const projConv = { id: 'conv_project_P7', type: 'group', name: '📁 CĂN TIN', participantIds: ['me', 'ny'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0, projectId: 'P7' };
     it('được phép → mở đúng dự án của nhóm chat (truyền mã dự án)', async () => {
       store.convs.push(projConv); const onOpenProject = vi.fn();
@@ -241,7 +249,45 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
       fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
       fireEvent.click(await screen.findByTestId('zalo-open-project')); expect(onOpenProject).toHaveBeenCalledWith('P7');
     });
-    it('không có quyền / không còn công trình → nút bị thay bằng thông báo, không mở được', async () => {
+    it('Nhật ký dự án: người không có quyền mở dự án VẪN xem được nhật ký, nhưng không có nút xuất Excel', async () => {
+      store.convs.push(projConv);
+      mount({ canOpenProject: () => false, onExportProjectLog: vi.fn() });
+      fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
+      fireEvent.click(await screen.findByTestId('zalo-open-activity'));
+      const m = await screen.findByTestId('activity-stub');
+      expect(m.getAttribute('data-pid')).toBe('P7'); expect(m.getAttribute('data-export')).toBe('0');
+    });
+    it('Nhật ký dự án: người được xem dự án có nút xuất Excel; nhãn đã đổi sang "Dự án"', async () => {
+      store.convs.push(projConv);
+      mount({ canOpenProject: () => true, onExportProjectLog: vi.fn() });
+      fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
+      expect((await screen.findByTestId('zalo-open-project')).textContent).toBe('Mở dự án');
+      fireEvent.click(screen.getByTestId('zalo-open-activity'));
+      expect((await screen.findByTestId('activity-stub')).getAttribute('data-export')).toBe('1');
+    });
+    it('hoạt động mới: hiện chấm số trên nút Nhật ký, nhãn trong danh sách và dải "Cập nhật mới"; bấm dải mở nhật ký', async () => {
+      store.convs.push(projConv);
+      unreadMock.P7 = { count: 3, latest: [{ text: 'giao việc "Lắp tủ"', actorName: 'Lan' }, { text: 'nhận việc', actorName: 'Hùng' }] };
+      try {
+        mount({ canOpenProject: () => true });
+        expect((await screen.findByTestId('zalo-conv-activity')).textContent).toContain('3 mới');
+        fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
+        const bar = await screen.findByTestId('zalo-activity-bar');
+        expect(bar.textContent).toContain('3 hoạt động mới'); expect(bar.textContent).toContain('Lan giao việc');
+        expect(screen.getByTestId('zalo-activity-badge').textContent).toBe('3');
+        fireEvent.click(bar.querySelector('button') as HTMLElement);
+        expect((await screen.findByTestId('activity-stub')).getAttribute('data-pid')).toBe('P7');
+        expect(screen.queryByTestId('zalo-activity-bar')).toBeNull(); // đang mở nhật ký thì dải tự ẩn
+      } finally { delete unreadMock.P7; }
+    });
+    it('không có hoạt động mới → không có chấm số, nhãn hay dải', async () => {
+      store.convs.push(projConv);
+      mount({ canOpenProject: () => true });
+      fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
+      await screen.findByTestId('zalo-open-activity');
+      expect(screen.queryByTestId('zalo-activity-bar')).toBeNull(); expect(screen.queryByTestId('zalo-activity-badge')).toBeNull(); expect(screen.queryByTestId('zalo-conv-activity')).toBeNull();
+    });
+    it('không có quyền / không còn dự án → nút bị thay bằng thông báo, không mở được', async () => {
       store.convs.push(projConv); const onOpenProject = vi.fn();
       mount({ canOpenProject: () => false, onOpenProject });
       fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);

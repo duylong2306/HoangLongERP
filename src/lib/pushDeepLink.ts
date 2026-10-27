@@ -35,11 +35,17 @@ export interface PushDeepLink {
   projectId?: string;
   /** Phân loại thông báo — dùng để chọn tab khi không có ID cụ thể. */
   category?: string;
+  /**
+   * Đích "thực thể liên quan" của tin: 'mission' (nhiệm vụ → mở công việc chứa nó) hoặc loại cần duyệt
+   * (leave / payment / advance / travel_expense / material → mở nơi duyệt). Công việc dùng `taskId` như cũ.
+   */
+  targetKind?: string;
+  targetId?: string;
 }
 
 /** Có ít nhất một đích đến cụ thể hay không. */
 export function hasDeepLinkTarget(link: PushDeepLink): boolean {
-  return Boolean(link.taskId || link.taskCode || link.conversationId || link.projectId);
+  return Boolean(link.taskId || link.taskCode || link.conversationId || link.projectId || (link.targetKind && link.targetId));
 }
 
 /**
@@ -59,6 +65,9 @@ export function buildPushUrl(link: PushDeepLink): string {
   if (link.projectId && !link.taskId && !link.taskCode) {
     params.set('projectId', link.projectId);
   }
+
+  // Đích thực thể (nhiệm vụ / phiếu cần duyệt): 2 tham số ngắn 'tk' (loại) + 'ti' (mã)
+  if (link.targetKind && link.targetId) { params.set('tk', link.targetKind); params.set('ti', link.targetId); }
 
   if (link.category) params.set('cat', link.category);
 
@@ -97,6 +106,8 @@ export function parsePushUrl(rawUrl: string): PushDeepLink {
     conversationId: p.get('conversation') || p.get('conversationId') || undefined,
     projectId: p.get('projectId') || undefined,
     category: p.get('cat') || undefined,
+    targetKind: p.get('tk') || undefined,
+    targetId: p.get('ti') || undefined,
   };
 
   // ── Tương thích ngược: định dạng đường dẫn cũ ──
@@ -143,6 +154,8 @@ export function parsePushData(data: Record<string, any> | null | undefined): Pus
     conversationId: data.conversationId || fromUrl.conversationId || undefined,
     projectId: data.projectId || fromUrl.projectId || undefined,
     category: data.category || data.type || fromUrl.category || undefined,
+    targetKind: data.targetKind || fromUrl.targetKind || undefined,
+    targetId: data.targetId || fromUrl.targetId || undefined,
   };
 }
 
@@ -167,7 +180,7 @@ export function clearDeepLinkFromLocation(): void {
   const url = new URL(window.location.href);
   let touched = false;
 
-  for (const key of ['taskId', 'taskCode', 'conversation', 'conversationId', 'projectId', 'cat']) {
+  for (const key of ['taskId', 'taskCode', 'conversation', 'conversationId', 'projectId', 'cat', 'tk', 'ti']) {
     if (url.searchParams.has(key)) {
       url.searchParams.delete(key);
       touched = true;
@@ -184,4 +197,22 @@ export function clearDeepLinkFromLocation(): void {
   if (touched) {
     window.history.replaceState({}, '', url.pathname + url.search + url.hash);
   }
+}
+
+/**
+ * Đích mở thẳng khi người dùng bấm thông báo đẩy của 1 TIN NHẮN hệ thống (suy từ `relatedEntity` của tin):
+ *  - công việc          → mở chi tiết công việc;
+ *  - nhiệm vụ           → mở công việc chứa nhiệm vụ;
+ *  - cần duyệt (🔔)     → mở nơi duyệt (Công việc → "Chờ tôi xử lý"; công tác phí → Nhân sự);
+ *  - kết quả duyệt (✅/❌) và mọi tin còn lại → chỉ mở hội thoại (người lập không có gì để duyệt nữa).
+ * Mã hội thoại luôn được gửi kèm (xem notifyChatPush) để App rơi về hội thoại khi đích không mở được (đã xóa / mất quyền).
+ */
+export function pushTargetFromMessage(msg: { content?: string; relatedEntity?: { type: string; id: string } }): Pick<PushDeepLink, 'taskId' | 'targetKind' | 'targetId'> {
+  const re = msg.relatedEntity;
+  if (!re || !re.id) return {};
+  if (re.type === 'task') return { taskId: re.id };
+  if (re.type === 'mission') return { targetKind: 'mission', targetId: re.id };
+  if (re.type === 'project') return {};
+  // Các loại phiếu / đơn: chỉ tin YÊU CẦU DUYỆT (mở đầu bằng 🔔) mới dẫn tới nơi duyệt
+  return (msg.content || '').trimStart().startsWith('🔔') ? { targetKind: re.type, targetId: re.id } : {};
 }

@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import * as MT from '../lib/messageTemplates';
+import { createPortal } from 'react-dom';
+import ProjectActivityModal from './ProjectActivityModal';
+import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
 import { ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
@@ -50,6 +54,8 @@ interface Props {
   /** "Mở công trình" từ nhóm chat công trình: App kiểm tra quyền (truy cập phân hệ dự án) rồi mở thẳng chi tiết dự án */
   canOpenProject?: (projectId: string) => boolean;
   onOpenProject?: (projectId: string) => void;
+  /** "Xuất Excel" trong Nhật ký dự án — App dựng file đầy đủ thông tin dự án; chỉ hiện cho người được xem dự án (canOpenProject) vì file có giá trị hợp đồng, khách hàng */
+  onExportProjectLog?: (projectId: string) => void | Promise<void>;
   projects?: { id: string; name: string; pmId?: string }[];
 }
 
@@ -59,7 +65,7 @@ const PICKER_EMOJIS = ['😊', '😂', '🥰', '😍', '😉', '😎', '🤔', '
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const fmtSize = (n?: number) => (!n ? '' : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], canOpenProject, onOpenProject }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], canOpenProject, onOpenProject, onExportProjectLog }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -67,6 +73,10 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   // ─── Dữ liệu ───
   const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Nhật ký dự án đang mở (mã dự án) — mọi thành viên nhóm chat dự án đều xem được
+  const [activityPid, setActivityPid] = useState<string | null>(null);
+  // Số hoạt động mới trong nhật ký của từng dự án (kể từ lần người dùng xem nhật ký gần nhất) — hiện chấm số + dải "Cập nhật mới"
+  const [unreadAct, setUnreadAct] = useState<Record<string, UnreadSummary>>({});
   const [pendingEmpId, setPendingEmpId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
@@ -118,6 +128,20 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const otherOf = (c: Conversation) => employees.find(e => e.id === c.participantIds.find(i => i !== me));
 
   const mine = useMemo(() => conversations.filter(c => c.participantIds.includes(me)), [conversations, me]);
+  // Các dự án mà người dùng có nhóm chat — khóa chuỗi để effect bên dưới không chạy lại khi mảng đổi tham chiếu
+  const actProjectKey = useMemo(() => Array.from(new Set(mine.map(projectIdOfConversation).filter(Boolean) as string[])).sort().join(','), [mine]);
+  // Tải số hoạt động mới: lúc mở, mỗi 60 giây, khi quay lại cửa sổ, và khi vừa đánh dấu đã xem (chưa có realtime cho nhật ký)
+  useEffect(() => {
+    const ids = actProjectKey ? actProjectKey.split(',') : [];
+    if (ids.length === 0) { setUnreadAct({}); return; }
+    let alive = true;
+    const refresh = () => { loadUnreadSummary(me, ids).then(r => { if (alive) setUnreadAct(r); }); };
+    refresh();
+    const timer = setInterval(refresh, 60000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('hl-project-seen', refresh);
+    return () => { alive = false; clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('hl-project-seen', refresh); };
+  }, [actProjectKey, me]);
   const listed = useMemo(() => sortConversations(filterConversations(conversations, { userId: me, tab, category, query, prefs, nameOf: convName }), prefs), [conversations, me, tab, category, query, prefs, convName]);
   const unreadTotal = useMemo(() => mine.filter(c => (c.unreadCount || 0) > 0).length, [mine]);
 
@@ -339,11 +363,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     const assignee = employees.find(e => e.id === v.assigneeId);
     const proj = projects.find(p => p.id === v.projectId)?.name;
     const card = { kind: 'task' as const, key: `task:${task.id}`, title: task.name, sub: `${assignee?.name || ''}${proj ? ` · ${proj}` : ''} · hạn ${v.deadline.slice(8, 10)}/${v.deadline.slice(5, 7)}`, chip: 'Công việc' };
-    await pushCard(conv, { type: 'task', id: task.id }, card, `📌 ${currentUser.name} đã giao công việc "${task.name}"${assignee ? ` cho ${assignee.name}` : ''} (hạn ${v.deadline}).`);
+    await pushCard(conv, { type: 'task', id: task.id }, card, MT.giaoViec({ task: task.name, assignee: assignee?.name, deadline: v.deadline, project: proj }));
     // Người nhận việc chưa có trong hội thoại này → nhắn riêng để họ thấy ngay (cùng cách giao việc ở menu Công việc)
     if (assignee && v.assigneeId !== me && !conv.participantIds.includes(v.assigneeId)) {
       sendApprovalDirectMessage({ senderId: me, senderName: currentUser.name, senderRole: currentUser.role, recipientId: assignee.id, recipientName: assignee.name,
-        content: `📌 ${currentUser.name} đã GIAO cho bạn công việc "${task.name}" (Hạn: ${v.deadline}).`, relatedEntity: { type: 'task', id: task.id } });
+        content: MT.giaoViec({ task: task.name, deadline: v.deadline, project: proj }), relatedEntity: { type: 'task', id: task.id } });
     }
     addToast({ title: '✅ Đã tạo công việc', message: `"${task.name}" đã được giao${assignee ? ` cho ${assignee.name}` : ''}.`, type: 'success' });
   };
@@ -456,7 +480,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
 
   const statusLine = (c: Conversation) => {
     if (c.type === 'personal') { const o = otherOf(c); return isOnline(o?.id) ? 'Đang hoạt động' : formatLastSeen(getLastSeen(o?.id)); }
-    return `${new Set(c.participantIds).size} thành viên${categoryOf(c) === 'project' ? ' · Nhóm công trình' : categoryOf(c) === 'task' ? ' · Nhóm công việc' : ''}`;
+    return `${new Set(c.participantIds).size} thành viên${categoryOf(c) === 'project' ? ' · Nhóm dự án' : categoryOf(c) === 'task' ? ' · Nhóm công việc' : ''}`;
   };
   const previewOf = (c: Conversation) => {
     const lm = c.lastMessage; if (!lm) return c.type === 'personal' ? 'Chưa có tin nhắn' : 'Nhóm mới tạo';
@@ -495,7 +519,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       </div>
       {(selected.projectId || selected.taskId) && (
         <div className="border-t-8 border-slate-100 px-4 py-3">
-          <div className="font-bold text-[13px] mb-1.5">{selected.taskId ? 'Công việc liên quan' : 'Công trình'}</div>
+          <div className="font-bold text-[13px] mb-1.5">{selected.taskId ? 'Công việc liên quan' : 'Dự án'}</div>
           {selected.taskId ? (
             <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: selected.taskId } }))} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer">Mở công việc</button>
           ) : (() => {
@@ -503,9 +527,15 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             const pid = selected.projectId || String(selected.id).replace('conv_project_', '');
             const allowed = canOpenProject ? canOpenProject(pid) : true;
             return allowed
-              ? <button type="button" onClick={() => onOpenProject ? onOpenProject(pid) : onNavigateTab?.('projects-construction')} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-project">Mở công trình</button>
-              : <span className="inline-block text-[12px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5" data-testid="zalo-open-project-denied" title="Bạn không có quyền xem công trình này hoặc công trình không còn tồn tại">Bạn không có quyền xem công trình này</span>;
+              ? <button type="button" onClick={() => onOpenProject ? onOpenProject(pid) : onNavigateTab?.('projects-construction')} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-project">Mở dự án</button>
+              : <span className="inline-block text-[12px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5" data-testid="zalo-open-project-denied" title="Bạn không có quyền xem dự án này hoặc dự án không còn tồn tại">Bạn không có quyền xem dự án này</span>;
           })()}
+          {/* Nhật ký dự án — mọi thành viên nhóm chat theo dõi được (kể cả người không có quyền mở dự án) */}
+          {!selected.taskId && (
+            <button type="button" onClick={() => setActivityPid(selected.projectId || String(selected.id).replace('conv_project_', ''))}
+              className="relative ml-2 text-[12px] font-bold text-slate-700 bg-white border border-slate-300 rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-activity">🕘 Nhật ký dự án
+              {(unreadAct[selected.projectId || String(selected.id).replace('conv_project_', '')]?.count || 0) > 0 && <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[11px] font-bold grid place-items-center" style={{ color: '#ffffff' }} data-testid="zalo-activity-badge">{Math.min(unreadAct[selected.projectId || String(selected.id).replace('conv_project_', '')].count, 99)}{unreadAct[selected.projectId || String(selected.id).replace('conv_project_', '')].count > 99 ? '+' : ''}</span>}</button>
+          )}
         </div>
       )}
       {selected.type !== 'personal' && (
@@ -588,7 +618,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                   <span className="relative"><ConvAvatar conv={c} employees={employees} me={me} size={48} />{c.type === 'personal' && isOnline(o?.id) && <i className="absolute right-0 bottom-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}</span>
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5"><b className={`truncate text-[14.5px] ${unread > 0 && !muted ? 'font-extrabold' : 'font-medium'}`}>{convName(c)}</b>
-                      {categoryOf(c) === 'project' && <span className="text-[9.5px] font-extrabold text-blue-600 bg-blue-50 rounded px-1.5 py-px shrink-0">Công trình</span>}
+                      {categoryOf(c) === 'project' && <span className="text-[9.5px] font-extrabold text-blue-600 bg-blue-50 rounded px-1.5 py-px shrink-0">Dự án</span>}
+                      {(unreadAct[projectIdOfConversation(c) || '']?.count || 0) > 0 && <span className="text-[9.5px] font-extrabold text-red-600 bg-red-50 rounded px-1.5 py-px shrink-0" data-testid="zalo-conv-activity">🕘 {unreadAct[projectIdOfConversation(c) || ''].count} mới</span>}
                       <span className="ml-auto text-[11.5px] text-slate-500 shrink-0 flex items-center gap-1">{muted && <BellOff className="w-3 h-3" aria-label="Đã tắt thông báo" />}{listTime(c.lastMessageAt)}</span></span>
                     <span className="flex items-center gap-2"><span className={`truncate text-[13px] ${unread > 0 && !muted ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>{previewOf(c)}</span>
                       {unread > 0 ? <span data-testid="zalo-unread" className={`ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold grid place-items-center ${muted ? 'bg-slate-400' : 'bg-red-500'}`}>{unread}</span> : pinned ? <Pin className="w-3.5 h-3.5 ml-auto text-slate-400 shrink-0" /> : null}</span>
@@ -617,6 +648,22 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 {selected && <button type="button" onClick={() => setInfoOpen(v => !v)} title="Thông tin hội thoại" aria-label="Thông tin hội thoại" aria-pressed={infoOpen} className={`p-2 rounded-lg cursor-pointer ${infoOpen ? 'bg-blue-100 text-blue-600' : 'text-slate-600 hover:bg-slate-100'}`}><PanelRight className="w-[18px] h-[18px]" /></button>}
               </div>
             </header>
+            {/* Dải "Cập nhật mới": tóm tắt hoạt động dự án chưa xem, bấm mở nhật ký; đã xem thì tự ẩn */}
+            {selected && (() => {
+              const pid = projectIdOfConversation(selected);
+              const u = pid ? unreadAct[pid] : undefined;
+              if (!pid || !u || u.count === 0 || activityPid === pid) return null;
+              return (
+                <div className="mx-3 mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2.5 text-[12.5px]" style={{ color: '#0b3aa8' }} data-testid="zalo-activity-bar">
+                  <span aria-hidden>🕘</span>
+                  <button type="button" onClick={() => setActivityPid(pid)} className="flex-1 min-w-0 text-left cursor-pointer">
+                    <b>{u.count} hoạt động mới</b>
+                    <span className="block truncate opacity-90">{u.latest.map(l => (l.actorName ? `${l.actorName} ` : '') + l.text).join(' · ')}</span>
+                  </button>
+                  <button type="button" onClick={() => setActivityPid(pid)} className="font-bold whitespace-nowrap cursor-pointer" style={{ color: '#0d47c9' }}>Xem ›</button>
+                  <button type="button" onClick={() => markProjectSeen(me, pid)} aria-label="Bỏ qua" title="Đánh dấu đã xem" className="p-1 cursor-pointer"><X className="w-4 h-4" /></button>
+                </div>);
+            })()}
             {mutedSel && (
               <div className="mx-3 mt-2 bg-white rounded-xl px-3 py-2 flex items-center gap-2.5 text-[12.5px] text-slate-600 shadow-sm" data-testid="zalo-mutebar"><BellOff className="w-4 h-4 text-slate-500 shrink-0" /><span className="flex-1 truncate">Tin nhắn trong hội thoại sẽ KHÔNG được thông báo cho bạn</span><button type="button" onClick={() => toggleMute(selected!.id)} className="bg-blue-50 text-blue-600 font-bold rounded-lg px-3 py-1 cursor-pointer">Mở lại</button></div>)}
             {pins.length > 0 && (
@@ -758,6 +805,14 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <div className="overflow-y-auto flex-1 py-1">{sortConversations(mine, prefs).map(c => <label key={c.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer"><input type="checkbox" checked={fwdTargets.includes(c.id)} onChange={() => setFwdTargets(toggleIn(fwdTargets, c.id))} data-testid="zalo-fwd-target" /><ConvAvatar conv={c} employees={employees} me={me} size={32} /><span className="text-[13.5px] truncate">{convName(c)}</span></label>)}</div>
             <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setForwardMsg(null)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={doForward} disabled={fwdTargets.length === 0} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[13px] font-bold disabled:opacity-40 cursor-pointer">Gửi ({fwdTargets.length})</button></div></div></div>)}
       {expanded && <div className="absolute inset-0 z-[60] bg-black/80 grid place-items-center p-4" onClick={() => setExpanded(null)} role="dialog" aria-label="Xem ảnh"><img src={expanded} alt="" className="max-w-full max-h-full rounded-lg" /></div>}
+      {activityPid && createPortal(
+        <ProjectActivityModal
+          projectId={activityPid}
+          viewerId={me}
+          projectName={projects.find(p => p.id === activityPid)?.name || (selected ? convName(selected) : '')}
+          onClose={() => setActivityPid(null)}
+          onExport={onExportProjectLog && (canOpenProject ? canOpenProject(activityPid) : true) ? () => onExportProjectLog(activityPid) : undefined}
+        />, document.body)}
     </div>
   );
 }

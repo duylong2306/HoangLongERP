@@ -90,7 +90,7 @@ export function CreateTaskDialog({ initialName, employees, me, projects, default
           <label className="block"><span className="font-bold text-slate-600">Giao cho</span><select value={assignee} onChange={e => setAssignee(e.target.value)} data-testid="work-create-assignee" className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white">{people.map(e => <option key={e.id} value={e.id}>{e.name}{e.id === me ? ' (tôi)' : ''}</option>)}</select></label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="font-bold text-slate-600">Hạn hoàn thành</span><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} data-testid="work-create-deadline" className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2" /></label>
-            <label className="block"><span className="font-bold text-slate-600">Công trình</span><select value={project} onChange={e => setProject(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white"><option value="">Nhiệm vụ nội bộ</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            <label className="block"><span className="font-bold text-slate-600">Dự án</span><select value={project} onChange={e => setProject(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white"><option value="">Nhiệm vụ nội bộ</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           </div>
         </div>
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-200">

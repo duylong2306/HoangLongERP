@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   decodeJwtClaims, sanitizeIds, pgIn, isUuid, authenticateCaller, isServiceToken, pushToUsers, handleSendPush,
 } from '../../../supabase/functions/_shared/tenant-core';
-import { runAttendanceReminders, shiftWindow, vnDateParts } from '../../../supabase/functions/_shared/attendance-core';
+import { runAttendanceReminders, reminderPlan, openLeadMinutes, vnDateParts } from '../../../supabase/functions/_shared/attendance-core';
 
 // Test các hàm Edge đa doanh nghiệp bằng "máy chủ REST giả" trong bộ nhớ: kiểm tra đúng tình huống nguy hiểm — 2 công ty cùng có
 // mã nhân viên "emp_admin" — thông báo/đăng ký/xóa KHÔNG được vượt sang công ty khác.
@@ -187,96 +187,131 @@ describe('send-push đa doanh nghiệp', () => {
   });
 });
 
-describe('nhắc điểm danh đa doanh nghiệp', () => {
-  // 07:10 giờ VN, Thứ Hai 5/10/2026 = 00:10 UTC
-  const THU_HAI_7H10 = new Date('2026-10-05T00:10:00Z');
+describe('nhắc điểm danh đa doanh nghiệp (giờ nhắc theo cấu hình ca từng công ty)', () => {
+  // 07:20 giờ VN, Thứ Hai 5/10/2026 = 00:20 UTC. Công ty A: vào ca 07:30, mở điểm danh trước 15 phút → cửa sổ nhắc 07:15–07:30
+  const THU_HAI_7H20 = new Date('2026-10-05T00:20:00Z');
+  const THU_HAI_12H50 = new Date('2026-10-05T05:50:00Z');   // cửa sổ ca chiều (vào ca 13:00 → 12:45–13:00)
   let db: Record<string, Row[]>; let rest: ReturnType<typeof makeRest>;
   const run = (now: Date, wp = makeWebPush()) => runAttendanceReminders({ supabaseUrl: ENV.SUPABASE_URL, serviceKey: SERVICE, fetchFn: rest.fetchFn as any, webPush: wp.webPush, now }).then(r => ({ r, wp }));
   const sub = (company: string, user: string, ep: string) => ({ id: `${company}-${user}`, company_id: company, user_id: user, endpoint: ep, p256dh: 'k', auth: 'a', created_at: new Date().toISOString() });
+  const cfgA = { id: A, company_id: A, weekend_days: [0], morning_in: '07:30', morning_out: '11:30', afternoon_in: '13:00', afternoon_out: '17:00', punch_open_before_minutes: 15 };
 
   beforeEach(() => {
     db = {
       companies: [{ id: A, slug: 'cong-ty-a', active: true, expires_at: null }, { id: B, slug: 'cong-ty-b', active: true, expires_at: null }],
-      shift_config: [{ id: A, company_id: A, weekend_days: [0] }, { id: B, company_id: B, weekend_days: [0, 1] }],   // công ty B nghỉ cả Thứ Hai
+      shift_config: [cfgA, { id: B, company_id: B, weekend_days: [0, 1] }],   // công ty B nghỉ cả Thứ Hai
       hrm_holidays: [],
+      attendance_records: [],
+      hrm_leaves: [],
       employees: [
-        { id: 'emp_admin', name: 'Admin A', department: 'P1', status: 'working', company_id: A, last_attendance_reminder_sent: '' },
-        { id: 'nv2', name: 'NV2 A', department: 'P1', status: 'working', company_id: A, last_attendance_reminder_sent: '' },
-        { id: 'nghi', name: 'Nghỉ việc', department: 'P1', status: 'resigned', company_id: A, last_attendance_reminder_sent: '' },
-        { id: 'emp_admin', name: 'Admin B', department: 'P9', status: 'working', company_id: B, last_attendance_reminder_sent: '' },
+        { id: 'emp_admin', name: 'Admin A', status: 'working', company_id: A, last_attendance_reminder_sent: '' },
+        { id: 'nv2', name: 'NV2 A', status: 'working', company_id: A, last_attendance_reminder_sent: '' },
+        { id: 'nghi', name: 'Nghỉ việc', status: 'resigned', company_id: A, last_attendance_reminder_sent: '' },
+        { id: 'emp_admin', name: 'Admin B', status: 'working', company_id: B, last_attendance_reminder_sent: '' },
       ],
       push_subscriptions: [sub(A, 'emp_admin', 'https://push/A1'), sub(A, 'nv2', 'https://push/A2'), sub(B, 'emp_admin', 'https://push/B1')],
-      notifications: [],
     };
     rest = makeRest(db, []);
   });
 
-  it('khung giờ: 07:00–07:30 và 12:30–13:00 (giờ VN); ngoài khung thì bỏ qua', () => {
-    expect(shiftWindow(new Date('2026-10-05T00:00:00Z')).shift).toBe('morning');
-    expect(shiftWindow(new Date('2026-10-05T00:30:00Z')).shift).toBe('morning');
-    expect(shiftWindow(new Date('2026-10-05T00:31:00Z')).shift).toBeNull();
-    expect(shiftWindow(new Date('2026-10-05T05:30:00Z')).shift).toBe('afternoon');
-    expect(shiftWindow(new Date('2026-10-05T06:01:00Z')).shift).toBeNull();
-    expect(vnDateParts(new Date('2026-10-05T00:10:00Z'))).toMatchObject({ dow: 1, ddmm: '05/10', today: '2026-10-05' });
+  it('cửa sổ nhắc = [giờ vào ca − số phút mở điểm danh, giờ vào ca); đọc từ cấu hình, kẹp 5–60 phút, thiếu cấu hình thì mặc định', () => {
+    expect(reminderPlan(cfgA, 7 * 60 + 14)).toBeNull();
+    expect(reminderPlan(cfgA, 7 * 60 + 15)).toMatchObject({ shift: 'morning', inTime: '07:30', outTime: '11:30', openTime: '07:15' });
+    expect(reminderPlan(cfgA, 7 * 60 + 29)?.shift).toBe('morning');
+    expect(reminderPlan(cfgA, 7 * 60 + 30)).toBeNull();                                    // đã đến giờ vào ca thì thôi nhắc
+    expect(reminderPlan(cfgA, 12 * 60 + 45)).toMatchObject({ shift: 'afternoon', inTime: '13:00', openTime: '12:45' });
+    // công ty đổi giờ ca: vào ca 08:00, mở trước 30 phút → nhắc từ 07:30
+    expect(reminderPlan({ morning_in: '08:00', punch_open_before_minutes: 30 }, 7 * 60 + 30)).toMatchObject({ inTime: '08:00', openTime: '07:30' });
+    expect(reminderPlan(null, 7 * 60 + 20)).toMatchObject({ shift: 'morning', inTime: '07:30' });   // chưa có cấu hình → 07:30 / 13:00, mở trước 15 phút
+    expect(openLeadMinutes({ punch_open_before_minutes: 1 })).toBe(5); expect(openLeadMinutes({ punch_open_before_minutes: 600 })).toBe(60); expect(openLeadMinutes({})).toBe(15);
+    expect(vnDateParts(THU_HAI_7H20)).toMatchObject({ dow: 1, ddmm: '05/10', today: '2026-10-05', minutes: 440 });
   });
 
-  it('ngoài khung giờ → không làm gì', async () => {
-    const { r, wp } = await run(new Date('2026-10-05T03:00:00Z'));
-    expect(r).toMatchObject({ success: false, reason: 'outside_time_window' }); expect(wp.sent).toEqual([]);
+  it('ngoài cửa sổ → không gửi gì, không ghi gì', async () => {
+    const { r, wp } = await run(new Date('2026-10-05T03:00:00Z'));   // 10:00 VN
+    expect(r.companies).toEqual([expect.objectContaining({ company: 'cong-ty-a', skipped: 'outside_window' }), { company: 'cong-ty-b', skipped: 'weekend' }]);
+    expect(wp.sent).toEqual([]);
+    expect(db.employees.every(e => e.last_attendance_reminder_sent === '')).toBe(true);
   });
 
   it('MỖI công ty theo ngày nghỉ RIÊNG: Thứ Hai A đi làm (được nhắc), B nghỉ (bỏ qua). Mã emp_admin trùng nhau nhưng KHÔNG lẫn', async () => {
-    const { r, wp } = await run(THU_HAI_7H10);
+    const { r, wp } = await run(THU_HAI_7H20);
     expect(r.companies).toEqual([
-      expect.objectContaining({ company: 'cong-ty-a', needsReminder: 2, pushSent: 2 }),
+      expect.objectContaining({ company: 'cong-ty-a', shift: 'morning', needsReminder: 2, pushSent: 2 }),
       { company: 'cong-ty-b', skipped: 'weekend' },
     ]);
     expect(wp.sent.map(s => s.endpoint).sort()).toEqual(['https://push/A1', 'https://push/A2']);   // B1 KHÔNG được gửi
-    expect(wp.sent.every(s => JSON.parse(s.payload).title === '⏰ Điểm danh Ca Sáng')).toBe(true);
   });
 
-  it('đánh dấu "đã nhắc hôm nay" CHỈ cho nhân viên của đúng công ty (emp_admin của B không bị đánh dấu); người nghỉ việc không được nhắc', async () => {
-    await run(THU_HAI_7H10);
+  it('nội dung ghi đúng GIỜ CA của công ty (không còn viết cứng 07:30 / 13:00)', async () => {
+    db.shift_config[0] = { ...cfgA, morning_in: '08:00', morning_out: '12:00', punch_open_before_minutes: 30 };
+    const { wp } = await run(new Date('2026-10-05T00:40:00Z'));   // 07:40 VN, nằm trong 07:30–08:00
+    const pl = JSON.parse(wp.sent[0].payload);
+    expect(pl.title).toBe('⏰ Điểm danh ca sáng · 08:00');
+    expect(pl.body).toContain('trước 08:00');
+    expect(pl.data.detailedContent).toBe('Ca sáng: 08:00 – 12:00. Mở điểm danh từ 07:30.');
+    expect(pl.tag).toBe('attendance-morning-2026-10-05');
+  });
+
+  it('đánh dấu "đã nhắc ca này" CHỈ cho nhân viên của đúng công ty; người nghỉ việc không được nhắc; chạy lại 5 phút sau KHÔNG nhắc trùng', async () => {
+    await run(THU_HAI_7H20);
     const a = db.employees.filter(e => e.company_id === A);
-    expect(a.find(e => e.id === 'emp_admin')!.last_attendance_reminder_sent).toBe('2026-10-05');
+    expect(a.find(e => e.id === 'emp_admin')!.last_attendance_reminder_sent).toBe('2026-10-05:morning');
     expect(a.find(e => e.id === 'nghi')!.last_attendance_reminder_sent).toBe('');
     expect(db.employees.find(e => e.company_id === B)!.last_attendance_reminder_sent).toBe('');
-  });
-
-  it('thông báo trong ứng dụng ghi kèm company_id đúng; chạy lại cùng ngày KHÔNG nhắc trùng (đã sửa lỗi cũ)', async () => {
-    await run(THU_HAI_7H10);
-    expect(db.notifications.map(n => n.company_id)).toEqual([A, A]);
-    expect(db.notifications.every(n => n.category === 'attendance' && n.id.includes(A.slice(0, 8)))).toBe(true);
     const wp2 = makeWebPush();
-    const again = await run(new Date('2026-10-05T00:20:00Z'), wp2);
+    const again = await run(new Date('2026-10-05T00:25:00Z'), wp2);
     expect(wp2.sent).toEqual([]);
     expect(again.r.companies![0]).toMatchObject({ company: 'cong-ty-a', needsReminder: 0 });
   });
 
+  it('ca sáng và ca chiều nhắc ĐỘC LẬP (lỗi cũ: nhắc sáng đánh dấu cả ngày nên buổi chiều không bao giờ được nhắc)', async () => {
+    await run(THU_HAI_7H20);
+    const { wp } = await run(THU_HAI_12H50);
+    expect(wp.sent.map(s => s.endpoint).sort()).toEqual(['https://push/A1', 'https://push/A2']);
+    expect(db.employees.find(e => e.id === 'nv2')!.last_attendance_reminder_sent).toBe('2026-10-05:afternoon');
+  });
+
+  it('bỏ người đã điểm danh vào ca này; bỏ người đang nghỉ phép được duyệt hôm nay (cả ngày hoặc đúng ca), nhưng KHÔNG bỏ báo cáo chấm công', async () => {
+    db.attendance_records = [{ emp_id: 'emp_admin', company_id: A, date: '2026-10-05', time_in_s: '07:10', time_in_c: null }];
+    db.hrm_leaves = [
+      { emp_id: 'nv2', company_id: A, type: 'Nghỉ phép năm', status: 'approved', from_date: '2026-10-05', to_date: '2026-10-06', shift: null },
+    ];
+    let { r } = await run(THU_HAI_7H20);
+    expect(r.companies![0]).toMatchObject({ needsReminder: 0 });   // emp_admin đã vào ca, nv2 nghỉ phép
+    // nghỉ phép CA SÁNG thì buổi chiều vẫn nhắc; "Báo cáo nghỉ ca" không phải nghỉ thật nên vẫn nhắc
+    db.hrm_leaves = [{ emp_id: 'nv2', company_id: A, type: 'Nghỉ phép năm', status: 'approved', from_date: '2026-10-05', to_date: '2026-10-05', shift: 'morning' },
+                     { emp_id: 'emp_admin', company_id: A, type: 'Báo cáo nghỉ ca', status: 'approved', from_date: '2026-10-05', to_date: '2026-10-05', shift: null, is_attendance_correction: true }];
+    ({ r } = await run(THU_HAI_12H50));
+    expect(r.companies![0]).toMatchObject({ shift: 'afternoon', needsReminder: 2 });
+  });
+
   it('ngày lễ riêng của công ty: A có lễ hôm nay thì A bỏ qua, B (không lễ) vẫn được nhắc nếu đi làm', async () => {
     db.hrm_holidays = [{ id: 'h1', company_id: A, date: '06/10' }];
-    const { r, wp } = await run(new Date('2026-10-06T00:10:00Z'));   // Thứ Ba 6/10
-    expect(r.companies).toEqual([{ company: 'cong-ty-a', skipped: 'holiday' }, expect.objectContaining({ company: 'cong-ty-b', needsReminder: 1, pushSent: 1 })]);
+    db.shift_config[1] = { id: B, company_id: B, weekend_days: [0] };
+    const { r, wp } = await run(new Date('2026-10-06T00:20:00Z'));   // Thứ Ba 6/10
+    expect(r.companies).toEqual([{ company: 'cong-ty-a', shift: 'morning', skipped: 'holiday' }, expect.objectContaining({ company: 'cong-ty-b', needsReminder: 1, pushSent: 1 })]);
     expect(wp.sent.map(s => s.endpoint)).toEqual(['https://push/B1']);
   });
 
   it('công ty bị khóa hoặc hết hạn KHÔNG được nhắc', async () => {
     db.companies[0].active = false; db.companies[1].expires_at = '2026-10-05T00:00:00Z';   // đã hết hạn so với giờ giả lập 6/10
-    const { r } = await run(new Date('2026-10-06T00:10:00Z'));
+    const { r } = await run(new Date('2026-10-06T00:20:00Z'));
     expect(r.companies).toEqual([]);
   });
 
   it('lỗi ở 1 công ty không chặn công ty khác', async () => {
+    db.shift_config[1] = { id: B, company_id: B, weekend_days: [0] };
     const real = rest.fetchFn;
     const flaky = async (url: string, init?: any) => (url.includes('employees?') && url.includes(`company_id=eq.${A}`) && (init?.method || 'GET') === 'GET' ? { ok: false, status: 500, json: async () => ({}), text: async () => 'boom' } : real(url, init));
-    const r = await runAttendanceReminders({ supabaseUrl: ENV.SUPABASE_URL, serviceKey: SERVICE, fetchFn: flaky as any, webPush: makeWebPush().webPush, now: new Date('2026-10-06T00:10:00Z') });
+    const r = await runAttendanceReminders({ supabaseUrl: ENV.SUPABASE_URL, serviceKey: SERVICE, fetchFn: flaky as any, webPush: makeWebPush().webPush, now: new Date('2026-10-06T00:20:00Z') });
     expect(r.companies![0]).toMatchObject({ company: 'cong-ty-a' }); expect(r.companies![0].error).toMatch(/employees/);
     expect(r.companies![1]).toMatchObject({ company: 'cong-ty-b', pushSent: 1 });
   });
 
-  it('thiếu cấu hình ca → mặc định nghỉ Chủ nhật (như cũ); Chủ nhật bị bỏ qua', async () => {
+  it('thiếu cấu hình ca → mặc định nghỉ Chủ nhật, vào ca 07:30 / 13:00; Chủ nhật bị bỏ qua', async () => {
     db.shift_config = [];
-    expect((await run(new Date('2026-10-04T00:10:00Z'))).r.companies).toEqual([{ company: 'cong-ty-a', skipped: 'weekend' }, { company: 'cong-ty-b', skipped: 'weekend' }]);   // 4/10 = Chủ nhật
-    expect((await run(THU_HAI_7H10)).r.companies![0]).toMatchObject({ pushSent: 2 });
+    expect((await run(new Date('2026-10-04T00:20:00Z'))).r.companies).toEqual([{ company: 'cong-ty-a', skipped: 'weekend' }, { company: 'cong-ty-b', skipped: 'weekend' }]);   // 4/10 = Chủ nhật
+    expect((await run(THU_HAI_7H20)).r.companies![0]).toMatchObject({ pushSent: 2 });
   });
 });

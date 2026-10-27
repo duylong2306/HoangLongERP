@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { Task, TaskUpdatePayload, Project, Employee, Customer, Quote, LeaveRequest, Payment, SubcontractorAdvanceProposal } from '../types';
+import * as MT from '../lib/messageTemplates';
 import { CheckSquare } from 'lucide-react';
 import TaskDetailModal from './TaskDetailModal';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../lib/leaveRequests';
@@ -9,6 +10,7 @@ import ConnectedToolsModal from './ConnectedToolsModal';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { announceLeaveApproved } from '../lib/leaveAnnounce';
 import { useNotification, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isAccountingGroupMember, isAdminFallbackApprover, isAdminFallbackForPayment, isAdminFallbackForProposal, canSeeTravelExpenseApproval, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
 import { isAttendanceReportType } from '../lib/attendanceMeta';
 import { isPaymentPendingForUser, isAdvancePendingForUser, isVoucherPendingForUser } from '../lib/approvalInbox';
@@ -321,10 +323,14 @@ export default function TaskManagement({
         recipientId: targetLeave.empId,
         recipientName: targetLeave.empName,
         content: status === 'approved'
-          ? `✅ Đã duyệt đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`
-          : `❌ Đã từ chối đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`,
+          ? MT.ketQuaNghiPhep(true, targetLeave)
+          : MT.ketQuaNghiPhep(false, targetLeave),
         relatedEntity: { type: 'leave', id: targetLeave.id },
       });
+    }
+    // 🌴 Đơn nghỉ phép được duyệt → báo lên nhóm chat "Điểm danh" để mọi người chủ động sắp xếp công việc (không kèm lý do nghỉ)
+    if (status === 'approved' && targetLeave && targetLeave.status !== 'approved') {   // chỉ báo lần duyệt đầu, không báo lặp
+      announceLeaveApproved(targetLeave as any, currentUser?.name || 'Quản lý', employees);
     }
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });
@@ -377,8 +383,8 @@ export default function TaskManagement({
           recipientId: proposerEmp.id,
           recipientName: proposerEmp.name || updatedPayment.proposer,
           content: status === 'approved'
-            ? `✅ Đã duyệt phiếu chi ${updatedPayment.code} (${updatedPayment.recipient}) ${updatedPayment.amount.toLocaleString('vi-VN')}đ.`
-            : `❌ Đã từ chối phiếu chi ${updatedPayment.code} (${updatedPayment.recipient}) ${updatedPayment.amount.toLocaleString('vi-VN')}đ.`,
+            ? MT.ketQuaPhieuChi(true, { code: updatedPayment.code, amount: updatedPayment.amount, recipient: updatedPayment.recipient })
+            : MT.ketQuaPhieuChi(false, { code: updatedPayment.code, amount: updatedPayment.amount, recipient: updatedPayment.recipient }),
           relatedEntity: { type: 'payment', id: updatedPayment.id },
         });
       }
@@ -410,8 +416,8 @@ export default function TaskManagement({
           recipientId: creatorEmp.id,
           recipientName: creatorEmp.name || adv.creatorName || 'Người lập đề xuất',
           content: decision === 'approved'
-            ? `✅ Đã duyệt đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`
-            : `❌ Đã từ chối đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`,
+            ? MT.ketQuaTamUng(true, { code: adv.id, amount: adv.amount, task: adv.taskName || adv.subcontractorName })
+            : MT.ketQuaTamUng(false, { code: adv.id, amount: adv.amount, task: adv.taskName || adv.subcontractorName }),
           relatedEntity: { type: 'advance', id: adv.id },
         });
       }
@@ -453,9 +459,7 @@ export default function TaskManagement({
     let recipientId = target.creatorId || target.employeeId || target.empId;
     if (!recipientId) recipientId = findEmployeeByName(employees, target.employeeName)?.id || '';
     if (currentUser?.id && recipientId && currentUser.id !== recipientId) {
-      const decisionText = decision === 'approved'
-        ? `✅ Đã duyệt công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`
-        : `❌ Đã từ chối công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`;
+      const decisionText = MT.ketQuaCongTacPhi(decision === 'approved', { content: target.content || 'Công tác phí', amount: Number(target.amount || 0), mission: target.missionName });
       sendApprovalDirectMessage({
         senderId: currentUser.id,
         senderName: currentUser.name,

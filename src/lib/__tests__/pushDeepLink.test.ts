@@ -5,6 +5,7 @@ import {
   parsePushData,
   hasDeepLinkTarget,
   normalizePushUrl,
+  pushTargetFromMessage,
 } from '../pushDeepLink';
 
 describe('buildPushUrl', () => {
@@ -144,5 +145,28 @@ describe('hasDeepLinkTarget', () => {
   it('phân biệt có đích và không có đích', () => {
     expect(hasDeepLinkTarget({ taskId: 'T-1' })).toBe(true);
     expect(hasDeepLinkTarget({ category: 'tasks' })).toBe(false);
+  });
+});
+
+describe('đích mở thẳng của tin nhắn hệ thống', () => {
+  it('công việc → taskId; nhiệm vụ → đích mission; dự án / tin kết quả duyệt → chỉ hội thoại', () => {
+    expect(pushTargetFromMessage({ content: '📌 Giao việc', relatedEntity: { type: 'task', id: 'T1' } })).toEqual({ taskId: 'T1' });
+    expect(pushTargetFromMessage({ content: '🧩 Nhiệm vụ', relatedEntity: { type: 'mission', id: 'M1' } })).toEqual({ targetKind: 'mission', targetId: 'M1' });
+    expect(pushTargetFromMessage({ content: 'x', relatedEntity: { type: 'project', id: 'P1' } })).toEqual({});
+    expect(pushTargetFromMessage({ content: '✅ Đã duyệt đơn nghỉ phép', relatedEntity: { type: 'leave', id: 'LR-1' } })).toEqual({});
+    expect(pushTargetFromMessage({ content: '❌ Đã từ chối phiếu chi', relatedEntity: { type: 'payment', id: 'PC-1' } })).toEqual({});
+    expect(pushTargetFromMessage({ content: 'chào', relatedEntity: undefined })).toEqual({});
+  });
+  it('tin YÊU CẦU DUYỆT (🔔) → mở nơi duyệt của phiếu đó', () => {
+    expect(pushTargetFromMessage({ content: '🔔 A đã gửi ĐƠN NGHỈ PHÉP', relatedEntity: { type: 'leave', id: 'LR-1' } })).toEqual({ targetKind: 'leave', targetId: 'LR-1' });
+    expect(pushTargetFromMessage({ content: '🔔 Đề xuất tạm ứng', relatedEntity: { type: 'advance', id: 'DX-1' } })).toEqual({ targetKind: 'advance', targetId: 'DX-1' });
+  });
+  it('đích đi trọn vòng: dựng URL ↔ đọc lại, giữ cả hội thoại để dự phòng', () => {
+    const url = buildPushUrl({ conversationId: 'c1', targetKind: 'leave', targetId: 'LR-1' });
+    expect(url).toBe('/?conversation=c1&tk=leave&ti=LR-1');
+    expect(parsePushUrl(url)).toMatchObject({ conversationId: 'c1', targetKind: 'leave', targetId: 'LR-1' });
+    expect(parsePushData({ conversationId: 'c1', targetKind: 'mission', targetId: 'M1' })).toMatchObject({ conversationId: 'c1', targetKind: 'mission', targetId: 'M1' });
+    expect(hasDeepLinkTarget({ targetKind: 'leave', targetId: 'LR-1' })).toBe(true);
+    expect(buildPushUrl({ conversationId: 'c1', taskId: 'T1' })).toBe('/?taskId=T1&conversation=c1');
   });
 });

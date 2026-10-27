@@ -1,3 +1,7 @@
+import { exportProjectLogExcel } from './lib/projectEventsExport';
+import * as MT from './lib/messageTemplates';
+import { postProjectNotice, type ProjectNoticeParams } from './lib/projectNotice';
+import { recordProjectEvent } from './lib/projectEvents';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
 import { hasLoginAccount, sessionRevokeReason, SESSION_REVOKE_MESSAGES } from './lib/employeeAccount';
@@ -1078,19 +1082,37 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   // Deep link xét duyệt (leave/payment/advance) → mở thẳng "Công việc phải duyệt" trong tab Công việc
   const [approvalDeepLink, setApprovalDeepLink] = useState<{ kind: string; id: string } | null>(null);
 
+  // Mở nơi duyệt của 1 phiếu / đơn (nghỉ phép, phiếu chi, tạm ứng, công tác phí...). Dùng chung cho tin nhắn và thông báo đẩy.
+  const openApprovalTarget = (kind: string, id: string) => {
+    if (kind === 'travel_expense') {   // công tác phí → Nhân Sự → Công Tác Phí (nơi kế toán duyệt/từ chối)
+      setHrSubTab('trips');
+      setActiveTab('employees');
+      return;
+    }
+    setApprovalDeepLink({ kind, id });
+    setActiveTab('tasks');
+  };
+
   const handlePushDeepLink = useCallback((link: PushDeepLink) => {
-    // Ưu tiên 1: hội thoại chat
-    if (link.conversationId) {
-      setActiveTab('messages');
-      setInitialConvId(link.conversationId);
+    // Ưu tiên 1: công việc / nhiệm vụ — chuyển tab NGAY, còn modal chi tiết đợi `tasks` tải xong mới bung
+    // (effect resolver bên dưới). Không tìm thấy / không có quyền → rơi về hội thoại của tin (nếu có).
+    if (link.taskId || link.taskCode || (link.targetKind === 'mission' && link.targetId)) {
+      setActiveTab('tasks');
+      setPendingTaskLink(link);
       return;
     }
 
-    // Ưu tiên 2: công việc — chuyển tab NGAY, còn modal chi tiết đợi `tasks`
-    // tải xong mới bung (xử lý ở effect resolver bên dưới).
-    if (link.taskId || link.taskCode) {
-      setActiveTab('tasks');
-      setPendingTaskLink(link);
+    // Ưu tiên 2: phiếu / đơn cần duyệt — mở nơi duyệt; từng nơi tự kiểm quyền (không đủ quyền thì menu đưa về Tổng quan,
+    // còn nút Duyệt tự báo "Không đủ quyền").
+    if (link.targetKind && link.targetId) {
+      openApprovalTarget(link.targetKind, link.targetId);
+      return;
+    }
+
+    // Ưu tiên 3: hội thoại chat
+    if (link.conversationId) {
+      setActiveTab('messages');
+      setInitialConvId(link.conversationId);
       return;
     }
 
@@ -1205,7 +1227,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     if (tasks.length === 0) return; // chưa tải xong → chờ effect chạy lại
 
     const { taskId, taskCode } = pendingTaskLink;
+    // Đích là NHIỆM VỤ → công việc chứa nhiệm vụ đó
+    const missionTask = pendingTaskLink.targetKind === 'mission' && pendingTaskLink.targetId
+      ? tasks.find(t => t.missions?.some(m => m.id === pendingTaskLink.targetId)) : undefined;
     const task =
+      missionTask ||
       (taskId && tasks.find(t => t.id === taskId)) ||
       (taskCode && tasks.find(t => t.code === taskCode)) ||
       // Thông báo cũ có thể nhét MÃ vào ô taskId (hoặc ngược lại) → thử chéo
@@ -1218,9 +1244,14 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     } else {
       addToast({
         title: '🔍 Không mở được chi tiết',
-        message: `Không tìm thấy công việc ${taskId || taskCode} (có thể đã bị xoá hoặc bạn không có quyền xem).`,
+        message: `Không tìm thấy công việc ${taskId || taskCode || 'liên quan'} (có thể đã bị xoá hoặc bạn không có quyền xem).`,
         type: 'warning',
       });
+      // Dự phòng: mở hội thoại chứa tin thông báo để người dùng vẫn đọc được nội dung
+      if (pendingTaskLink.conversationId) {
+        setActiveTab('messages');
+        setInitialConvId(pendingTaskLink.conversationId);
+      }
     }
     setPendingTaskLink(null);
   }, [pendingTaskLink, tasks, addToast]);
@@ -1594,13 +1625,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       const kind = d?.kind as string;
       const id = d?.id as string;
       if (!kind || !id) return;
-      if (kind === 'travel_expense') {
-        setHrSubTab('trips');
-        setActiveTab('employees');
-        return;
-      }
-      setApprovalDeepLink({ kind, id });
-      setActiveTab('tasks');
+      openApprovalTarget(kind, id);
     };
     window.addEventListener('hl-open-approval', handleOpenApproval);
     return () => window.removeEventListener('hl-open-approval', handleOpenApproval);
@@ -2527,12 +2552,24 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   };
 
+  // 📒 NHẬT KÝ DỰ ÁN: ghi 1 sự kiện của người đang đăng nhập vào dự án (lib/projectNotice — tự dự phòng gửi nhóm chat khi chưa chạy migration)
+  const logProjectEvt = (projectId: string | undefined, content: string, extra: Partial<ProjectNoticeParams> = {}) => {
+    if (!projectId || !currentUser) return;
+    const pr = projects.find(p => p.id === projectId);
+    postProjectNotice({
+      project: { id: projectId, name: pr?.name, pmId: pr?.pmId },
+      actor: { id: currentUser.id, name: currentUser.name, role: currentUser.role },
+      content, ...extra,
+    });
+  };
+
   // HANDLERS DỰ ÁN
   const handleAddProject = async (newProj: Project) => {
     setProjects([newProj, ...projects]);
     try {
       await dbService.projects.save(newProj);
       window.dispatchEvent(new CustomEvent('hl-projects-updated'));
+      logProjectEvt(newProj.id, `➕ Tạo dự án: ${newProj.name} (${newProj.code})`, { objKind: 'project', objName: newProj.name });
     } catch (err) {
       console.error('Lỗi lưu project lên Supabase:', err);
       addToast({
@@ -2551,6 +2588,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   const handleUpdateProjectStatus = async (id: string, status: ProjectStatus, progress: number) => {
+    const before = projects.find(p => p.id === id);
+    if (before && before.status !== status) {
+      const ST: Record<string, string> = { new: 'Mới', processing: 'Đang thực hiện', paused: 'Tạm dừng', maintenance: 'Bảo trì', completed: 'Hoàn thành', cancelled: 'Đã hủy' };
+      logProjectEvt(id, `🔄 Trạng thái dự án ${before.name}`, { objKind: 'project', objName: before.name, from: ST[before.status] || before.status, to: ST[status] || status });
+    }
     const updated = projects.map(p => {
       if (p.id === id) {
         const isCompleted = (status === 'completed') || (progress === 100);
@@ -2641,6 +2683,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
    */
   const handleDeleteProject = async (id: string) => {
     const projectName = projects.find(p => p.id === id)?.name || id;
+    // 📒 Ghi nhật ký TRƯỚC khi xóa; dùng ghi trực tiếp (không đi qua postProjectNotice vì nó sẽ tạo lại nhóm chat của dự án sắp xóa)
+    if (currentUser) recordProjectEvent({ projectId: id, actor: { id: currentUser.id, name: currentUser.name }, type: 'xoa', objKind: 'project', objName: projectName, text: `Xóa dự án: ${projectName} (cùng toàn bộ công việc liên quan)` });
 
     // 1. Gỡ khỏi giao diện ngay (optimistic) để thao tác thấy tức thì
     setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
@@ -2782,6 +2826,25 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       // được loại bỏ (xem plan phần D). Hội thoại công việc & luồng duyệt giờ
       // đi qua chat (chatStore.addMessage). Giữ lại duy nhất toast hoàn thành.
 
+      // 📒 NHẬT KÝ: các thay đổi chưa nơi nào ghi lại — đổi tên, đổi hạn, đổi mức ưu tiên, nhận việc / nhận nhiệm vụ từ màn Tổng quan.
+      // (Các sự kiện khác như giao việc, duyệt, hoàn thành đã có đường ghi riêng ở màn chi tiết — không ghi trùng ở đây.)
+      if (newT.projectId) {
+        const ctx = { taskId: newT.id, objKind: 'task' as const, objName: newT.name, relatedEntity: { type: 'task' as const, id: newT.id } };
+        const PRI: Record<string, string> = { high: 'Cao', medium: 'Trung bình', low: 'Thấp' };
+        if (oldT.name !== newT.name) logProjectEvt(newT.projectId, `✏️ Đổi tên công việc`, { ...ctx, from: oldT.name, to: newT.name });
+        if ((oldT.deadline || '') !== (newT.deadline || '')) logProjectEvt(newT.projectId, `⏰ Đổi hạn công việc ${newT.name}`, { ...ctx, from: oldT.deadline || '(chưa đặt)', to: newT.deadline || '(bỏ hạn)' });
+        if (oldT.priority !== newT.priority) logProjectEvt(newT.projectId, `⏰ Đổi ưu tiên công việc ${newT.name}`, { ...ctx, from: PRI[oldT.priority] || oldT.priority, to: PRI[newT.priority] || newT.priority });
+        if (oldT.status === 'todo' && newT.status === 'doing' && (updates.workLogs || []).some((w: any) => String(w?.id || '').startsWith('wl_start_'))) {
+          logProjectEvt(newT.projectId, MT.nk.nhanViec(newT.name), { ...ctx, from: 'Chưa làm', to: 'Đang làm' });
+        }
+        (newT.missions || []).forEach(m => {
+          const om = (oldT.missions || []).find(x => x.id === m.id);
+          if (om && om.status === 'todo' && m.status === 'doing') {
+            logProjectEvt(newT.projectId, `🙋 Nhận nhiệm vụ: ${m.name} (công việc ${newT.name})`, { ...ctx, relatedEntity: { type: 'mission' as const, id: m.id }, missionId: m.id, objKind: 'mission', objName: m.name, from: 'Chưa làm', to: 'Đang làm' });
+          }
+        });
+      }
+
       // PHÁT HIỆN HOÀN THÀNH CÔNG VIỆC → BẮN TOAST NỔI
       const wasCompleted = oldT.status === 'completed' || oldT.completionRate === 100;
       const isNowCompleted = newT.status === 'completed' || newT.completionRate === 100;
@@ -2852,7 +2915,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     });
   };
 
+  // 📒 Nhật ký: xóa công việc (ghi trực tiếp, kèm mã công việc để "Lịch sử" riêng vẫn tra được)
+  const logTaskDeleted = (t?: Task) => {
+    if (!t?.projectId || !currentUser) return;
+    recordProjectEvent({ projectId: t.projectId, taskId: t.id, actor: { id: currentUser.id, name: currentUser.name }, type: 'xoa', objKind: 'task', objName: t.name, text: `Xóa công việc: ${t.name}${t.code ? ` (${t.code})` : ''}` });
+  };
   const handleDeleteTask = (id: string) => {
+    logTaskDeleted(tasksRef.current.find(t => t.id === id));
     setTasks(prev => prev.filter(t => t.id !== id));
     dbService.tasks.delete(id).then(() => {
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
@@ -2867,6 +2936,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   const handleDeleteMultipleTasks = (ids: string[]) => {
+    ids.forEach(id => logTaskDeleted(tasksRef.current.find(t => t.id === id)));
     setTasks(prev => prev.filter(t => !ids.includes(t.id)));
     dbService.tasks.deleteMultiple(ids).then(() => {
       window.dispatchEvent(new CustomEvent('hl-tasks-updated'));
@@ -3072,6 +3142,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     if (targetPayment) {
       dbService.payments.save({ ...targetPayment, status });
+      // 📒 Nhật ký dự án: duyệt / từ chối phiếu chi gắn dự án
+      if (targetPayment.projectId) {
+        logProjectEvt(targetPayment.projectId, MT.ketQuaPhieuChi(status === 'approved', { code: targetPayment.code, amount: targetPayment.amount, recipient: targetPayment.recipient }),
+          { objKind: 'payment', objName: targetPayment.code });
+      }
 
       // 📩 Gửi tin nhắn xét duyệt vào HỘI THOẠI CÁ NHÂN giữa người duyệt và người đề xuất
       const proposerEmployee = (targetPayment.proposerId ? employees.find(e => e.id === targetPayment.proposerId) : undefined) || findEmployeeByName(employees, targetPayment.proposer);   // mã người lập trước, tên dự phòng
@@ -3083,8 +3158,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
           recipientId: proposerEmployee.id,
           recipientName: proposerEmployee.name || targetPayment.proposer,
           content: status === 'approved'
-            ? `✅ Đã duyệt phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`
-            : `❌ Đã từ chối phiếu chi ${targetPayment.code} (${targetPayment.recipient}) ${targetPayment.amount.toLocaleString('vi-VN')}đ.`,
+            ? MT.ketQuaPhieuChi(true, { code: targetPayment.code, amount: targetPayment.amount, recipient: targetPayment.recipient })
+            : MT.ketQuaPhieuChi(false, { code: targetPayment.code, amount: targetPayment.amount, recipient: targetPayment.recipient }),
           relatedEntity: { type: 'payment', id: targetPayment.id },
         });
       }
@@ -3428,8 +3503,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
         sendApprovalDirectMessage({
           senderId: currentUser.id, senderName: currentUser.name, senderRole: currentUser.role, recipientId: creatorEmp.id, recipientName: creatorEmp.name || adv.creatorName || 'Người lập đề xuất',
           content: decision === 'approved'
-            ? `✅ Đã duyệt đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`
-            : `❌ Đã từ chối đề xuất tạm ứng ${adv.id} (${adv.taskName || adv.subcontractorName}) ${adv.amount.toLocaleString('vi-VN')}đ.`,
+            ? MT.ketQuaTamUng(true, { code: adv.id, amount: adv.amount, task: adv.taskName || adv.subcontractorName })
+            : MT.ketQuaTamUng(false, { code: adv.id, amount: adv.amount, task: adv.taskName || adv.subcontractorName }),
           relatedEntity: { type: 'advance', id: adv.id },
         });
       }
@@ -3548,14 +3623,26 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
     return out;
   })();
+  // ─── "Xuất Excel" nhật ký dự án (từ khung Nhật ký trong Tin nhắn): file gồm thông tin dự án đầy đủ + công việc/nhiệm vụ + nhật ký ───
+  const exportProjectLog = async (projectId: string) => {
+    const pr = projects.find(p => p.id === projectId);
+    if (!pr) { addToast({ title: '🔍 Không tìm thấy dự án', message: 'Dự án có thể đã bị xóa.', type: 'warning' }); return; }
+    try {
+      const file = await exportProjectLogExcel({ project: pr, customer: customers.find(c => c.id === pr.customerId) || null, employees, tasks, exportedBy: currentUser?.name });
+      addToast({ title: '✅ Đã xuất nhật ký', message: `Đã tải file ${file}`, type: 'success' });
+    } catch (e: any) {
+      addToast({ title: '❌ Không xuất được', message: e?.message || 'Có lỗi khi xuất nhật ký dự án.', type: 'error' });
+    }
+  };
+
   // ─── "Mở công trình" từ Tin nhắn: mở thẳng chi tiết dự án, TÔN TRỌNG phân quyền (phải được vào phân hệ dự án tương ứng) ───
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   const projectTabOf = (pr: Project) => (pr.type === 'furniture' ? 'projects-furniture' : pr.type === 'mechanical' ? 'projects-mechanical' : 'projects-construction');
   const canOpenProject = (id: string) => { const pr = projects.find(x => x.id === id); return !!pr && isAccessible(projectTabOf(pr)); };
   const openProjectFromChat = (id: string) => {
     const pr = projects.find(x => x.id === id);
-    if (!pr) { addToast({ title: '🔍 Không tìm thấy công trình', message: 'Công trình có thể đã bị xóa.', type: 'warning' }); return; }
-    if (!isAccessible(projectTabOf(pr))) { addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không được xem công trình này.', type: 'warning' }); return; }
+    if (!pr) { addToast({ title: '🔍 Không tìm thấy dự án', message: 'Dự án có thể đã bị xóa.', type: 'warning' }); return; }
+    if (!isAccessible(projectTabOf(pr))) { addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không được xem dự án này.', type: 'warning' }); return; }
     setPendingProjectId(id); setActiveTab(projectTabOf(pr));
   };
   const navUser = !currentUser ? null : {
@@ -5128,6 +5215,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               onCreateTask={handleAddTask}
               canOpenProject={canOpenProject}
               onOpenProject={openProjectFromChat}
+              onExportProjectLog={exportProjectLog}
               projects={projects}
               onNavigateTab={(tab) => setActiveTab(tab)}
               initialConversationId={initialConvId ?? undefined}

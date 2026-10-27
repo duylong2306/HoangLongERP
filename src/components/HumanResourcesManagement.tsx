@@ -1,5 +1,6 @@
 ﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
+import * as MT from '../lib/messageTemplates';
 import { isShiftLeave, shiftLabel, supportsShiftLeave, type LeaveShift } from '../lib/leaveShift';
 import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -22,6 +23,7 @@ import { recordPermissionAudit, diffRoleGroups } from '../lib/permissionAudit';
 import { defaultPermissionsForNewGroup } from '../lib/roleGroupDefaults';
 import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
+import { announceLeaveApproved } from '../lib/leaveAnnounce';
 import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
@@ -1663,9 +1665,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       recipientId = findEmployeeByName(employees, target.employeeName)?.id || '';
     }
     if (currentUser?.id && recipientId && currentUser.id !== recipientId) {
-      const decisionText = decision === 'approved'
-        ? `✅ Đã duyệt công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`
-        : `❌ Đã từ chối công tác phí "${target.content || 'Công tác phí'}" (${Number(target.amount || 0).toLocaleString('vi-VN')} đ) của ${target.employeeName || ''}${target.missionName ? ` — nhiệm vụ "${target.missionName}".` : '.'}`;
+      const decisionText = MT.ketQuaCongTacPhi(decision === 'approved', { content: target.content || 'Công tác phí', amount: Number(target.amount || 0), mission: target.missionName });
       sendApprovalDirectMessage({
         senderId: currentUser.id,
         senderName: currentUser.name,
@@ -3466,10 +3466,14 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         recipientId: targetLeave.empId,
         recipientName: targetLeave.empName,
         content: status === 'approved'
-          ? `✅ Đã duyệt đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`
-          : `❌ Đã từ chối đơn nghỉ phép "${targetLeave.type}" của ${targetLeave.empName} (${targetLeave.fromDate} → ${targetLeave.toDate}).`,
+          ? MT.ketQuaNghiPhep(true, targetLeave)
+          : MT.ketQuaNghiPhep(false, targetLeave),
         relatedEntity: { type: 'leave', id: targetLeave.id },
       });
+    }
+    // 🌴 Đơn nghỉ phép được duyệt → báo lên nhóm chat "Điểm danh" để mọi người chủ động sắp xếp công việc (không kèm lý do nghỉ)
+    if (status === 'approved' && targetLeave && targetLeave.status !== 'approved') {   // chỉ báo lần duyệt đầu, không báo lặp
+      announceLeaveApproved(targetLeave as any, currentUser?.name || 'Quản lý', employees);
     }
     if (status === 'approved') {
       addToast({ title: 'ℹ️ Thông báo', message: "Đã duyệt", type: 'info' });

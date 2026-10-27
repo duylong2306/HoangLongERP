@@ -1,4 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import * as MT from '../lib/messageTemplates';
+import { createPortal } from 'react-dom';
+import { postProjectNotice } from '../lib/projectNotice';
+import { exportProjectLogExcel } from '../lib/projectEventsExport';
+import ProjectActivityModal from './ProjectActivityModal';
 import { Project, ProjectStatus, Customer, Employee, Task, TaskUpdatePayload, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, ensureColumnsHaveAutomationDefaults, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
@@ -128,34 +133,17 @@ export default function ProjectKanbanBoard({
   // nhân sự"), conversation không được nạp vào cache → sendGroupChatMessage trả
   // về null → tin nhắn bị bỏ qua SILENT. Gửi BÊN TRONG .then(ensureProjectChatGroup)
   // để conversation đã upsert lên Supabase trước khi push message (tránh vi phạm FK).
-  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], extraMemberIds?: string[]) => {
+  // NAY: ghi vào NHẬT KÝ DỰ ÁN (nút "Nhật ký dự án" ở chi tiết dự án / khung thông tin hội thoại) thay vì nhắn vào nhóm chat —
+  // nhóm chat chỉ còn thảo luận. Vẫn đảm bảo nhóm tồn tại + người liên quan là thành viên (xem lib/projectNotice.ts).
+  // Chưa chạy migration nhật ký → tự gửi vào nhóm chat như cũ.
+  const notifyProjectChat = (content: string, relatedEntity?: ChatMessage['relatedEntity'], extraMemberIds?: string[], extra?: { from?: string; to?: string; objName?: string }) => {
     const pid = selectedProject?.id;
     if (!pid || !currentUser) return;
-    const convId = `conv_project_${pid}`;
-    ensureProjectChatGroup({
-      id: pid,
-      name: selectedProject?.name || '',
-      pmId: selectedProject?.pmId,
-    }).then(conv => {
-      if (!conv) return;
-      // extraMemberIds: cho phép caller truyền thêm ID (VD: PM MỚI vừa đổi) khi
-      // `selectedProject` (state cục bộ) có thể chưa phản ánh giá trị mới nhất
-      // tại thời điểm hàm này chạy — tránh gap "PM mới không được add ngay".
-      const memberIds = Array.from(new Set([
-        currentUser?.id,
-        selectedProject?.pmId,
-        ...(extraMemberIds || []),
-      ].filter(Boolean) as string[]));
-      memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
-      sendGroupChatMessage({
-        conversationId: convId,
-        senderId: currentUser.id,
-        senderName: currentUser.name,
-        senderRole: currentUser.role,
-        content,
-        relatedEntity,
-      });
-    }).catch(() => {});
+    postProjectNotice({
+      project: { id: pid, name: selectedProject?.name || '', pmId: selectedProject?.pmId },
+      actor: { id: currentUser.id, name: currentUser.name, role: currentUser.role },
+      content, relatedEntity, memberIds: extraMemberIds, ...extra,
+    });
   };
 
   // ─── GỬI THÔNG BÁO VÀO NHÓM CHAT DỰ ÁN SAU KHI SAVE THÀNH CÔNG ───────────
@@ -164,12 +152,13 @@ export default function ProjectKanbanBoard({
     savePromise: void | Promise<void>,
     content: string,
     relatedEntity?: ChatMessage['relatedEntity'],
-    extraMemberIds?: string[]
+    extraMemberIds?: string[],
+    extra?: { from?: string; to?: string; objName?: string }
   ): Promise<void> => {
     try {
       await savePromise;
       if (selectedProject?.id) {
-        notifyProjectChat(content, relatedEntity, extraMemberIds);
+        notifyProjectChat(content, relatedEntity, extraMemberIds, extra);
       }
     } catch (err) {
       console.error('Save failed, not sending chat message:', err);
@@ -186,6 +175,13 @@ export default function ProjectKanbanBoard({
     // Người giao hệ thống = PM dự án (hoặc fallback). Tin gửi từ PM để người nhận biết ai giao.
     const assignerId = autoTask.assignerId || proj.pmId || 'emp_3';
     const assignerEmp = employees.find(e => e.id === assignerId);
+    // 📒 NHẬT KÝ: công việc do quy trình Kanban tự tạo (trước đây chỉ nhắn riêng người nhận, dự án không có dấu vết)
+    postProjectNotice({
+      project: { id: proj.id, name: proj.name, pmId: proj.pmId },
+      actor: { id: assignerId, name: assignerEmp?.name || 'Hệ thống', role: assignerEmp?.role },
+      content: MT.nk.taoCongViecTuDong({ task: autoTask.name, assignee: assigneeEmp?.name, deadline: autoTask.deadline }),
+      memberIds: [autoTask.assigneeId], taskId: autoTask.id, objKind: 'task', objName: autoTask.name,
+    });
     if (assignerEmp && assigneeEmp && assignerEmp.id !== assigneeEmp.id) {
       sendApprovalDirectMessage({
         senderId: assignerEmp.id,
@@ -193,7 +189,7 @@ export default function ProjectKanbanBoard({
         senderRole: assignerEmp.role,
         recipientId: assigneeEmp.id,
         recipientName: assigneeEmp.name,
-        content: `📌 Hệ thống (quy trình Kanban) đã GIAO cho bạn công việc "${autoTask.name}"${autoTask.deadline ? ` (Hạn: ${autoTask.deadline})` : ''}.`,
+        content: MT.giaoViecTuDong({ task: autoTask.name, deadline: autoTask.deadline, project: proj.name }),
         relatedEntity: { type: 'task', id: autoTask.id },
       });
     }
@@ -211,7 +207,7 @@ export default function ProjectKanbanBoard({
         senderRole: assignerEmp?.role,
         recipientId: mAssigneeId,
         recipientName: mAssigneeEmp.name,
-        content: `🧩 Hệ thống (quy trình Kanban) đã giao cho bạn Nhiệm Vụ "${mission.name}" trong công việc "${autoTask.name}"${mission.deadline ? ` (Hạn: ${mission.deadline})` : ''}.`,
+        content: MT.giaoNhiemVuTuDong({ mission: mission.name, task: autoTask.name, deadline: mission.deadline }),
         relatedEntity: { type: 'task', id: autoTask.id },
       });
     });
@@ -288,7 +284,7 @@ export default function ProjectKanbanBoard({
         message: `Đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`,
         type: 'success',
       });
-      notifyProjectChat(`👥 ${currentUser?.name || 'Hệ thống'} đã đồng bộ ${validIds.length} nhân sự dự án vào nhóm chat.`, { type: 'project', id: selectedProject.id });
+      notifyProjectChat(MT.nk.dongBoNhanSu(validIds.length), { type: 'project', id: selectedProject.id });
 
       // Điều hướng về chi tiết tin nhắn của nhóm chat dự án vừa đồng bộ
       window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
@@ -953,6 +949,16 @@ export default function ProjectKanbanBoard({
       calculatedEndStr = selectedProject.endDate;
     }
 
+    // 📒 NHẬT KÝ: liệt kê CỤ THỂ trường nào đổi (cũ → mới) để tra cứu sau này, thay vì câu chung "đã cập nhật thông tin"
+    const fmtVnd = (n: any) => (Number(n) || 0).toLocaleString('vi-VN') + 'đ';
+    const custName = (id?: string) => customers.find(c => c.id === id)?.name || '(chưa chọn)';
+    const diffs: string[] = [];
+    if ((editAddress || '') !== (selectedProject.address || '')) diffs.push(`• Địa chỉ: ${selectedProject.address || '—'} → ${editAddress || '—'}`);
+    if ((editStartDate || '') !== (selectedProject.startDate || '')) diffs.push(`• Ngày bắt đầu: ${selectedProject.startDate || '—'} → ${editStartDate || '—'}`);
+    if ((calculatedEndStr || '') !== (selectedProject.endDate || '')) diffs.push(`• Ngày kết thúc: ${selectedProject.endDate || '—'} → ${calculatedEndStr || '—'}`);
+    if (Number(editContractValue || 0) !== Number(selectedProject.contractValue || 0)) diffs.push(`• Giá trị hợp đồng: ${fmtVnd(selectedProject.contractValue)} → ${fmtVnd(editContractValue)}`);
+    if ((editCustomerId || '') !== (selectedProject.customerId || '')) diffs.push(`• Khách hàng: ${custName(selectedProject.customerId)} → ${custName(editCustomerId)}`);
+
     try {
       await notifyProjectChatAfterSave(
         onUpdateProject(selectedProject.id, {
@@ -965,7 +971,7 @@ export default function ProjectKanbanBoard({
           customerId: editCustomerId,
           cardColor: editCardColor || '',
         } as any),
-        `💾 ${currentUser?.name || 'Người dùng'} đã cập nhật & lưu thông tin dự án "${selectedProject?.name || ''}".`
+        `💾 Cập nhật thông tin dự án ${selectedProject?.name || ''}` + (diffs.length ? `\n${diffs.join('\n')}` : '')
       );
 
       setIsEditingDetails(false);
@@ -1218,12 +1224,13 @@ export default function ProjectKanbanBoard({
       const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mớí';
       await notifyProjectChatAfterSave(
         onUpdateProject(projectId, { ...updates, pmId: updates.pmId }),
-        `👤 ${currentUser?.name || 'Hệ thống'} đã chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`,
+        MT.nk.doiTruongDuAn({ project: proj.name, to: newPmName }),
         undefined,
         // ⚠️ FIX: notifyProjectChat mặc định lấy pmId từ `selectedProject` (state cục
         // bộ) — biến này CHƯA chắc đã re-render với PM mới ngay trong lần gọi này,
         // nên truyền thẳng `updates.pmId` để PM mới được add vào nhóm ngay lập tức.
-        [updates.pmId]
+        [updates.pmId],
+        { objName: proj.name, from: employees.find(e => e.id === proj.pmId)?.name || '(chưa có)', to: newPmName }
       );
       // Return early since we've already called onUpdateProject with the PM change
       return;
@@ -1487,6 +1494,21 @@ export default function ProjectKanbanBoard({
     }
     await onUpdateProject(projectId, updates);
 
+    // 📒 NHẬT KÝ: chuyển giai đoạn (cột Kanban) và đổi trạng thái dự án — trước đây không để lại dấu vết nào
+    if (currentUser) {
+      const colName = (id?: string) => columns.find(c => c.id === id)?.name || id || '';
+      const actor = { id: currentUser.id, name: currentUser.name, role: currentUser.role };
+      if (updates.kanbanColumnId && updates.kanbanColumnId !== originalColId) {
+        postProjectNotice({ project: { id: proj.id, name: proj.name, pmId: updates.pmId || proj.pmId }, actor,
+          content: `🔄 Giai đoạn dự án ${proj.name}`, objKind: 'project', objName: proj.name, from: colName(originalColId), to: colName(updates.kanbanColumnId) });
+      }
+      if (updates.status !== undefined && updates.status !== proj.status) {
+        const ST: Record<string, string> = { new: 'Mới', processing: 'Đang thực hiện', paused: 'Tạm dừng', maintenance: 'Bảo trì', completed: 'Hoàn thành', cancelled: 'Đã hủy' };
+        postProjectNotice({ project: { id: proj.id, name: proj.name, pmId: proj.pmId }, actor,
+          content: `🔄 Trạng thái dự án ${proj.name}`, objKind: 'project', objName: proj.name, from: ST[proj.status] || proj.status, to: ST[updates.status] || updates.status });
+      }
+    }
+
     // 📣 Automation cột (rule.assignId / auto_pm) có thể đã đổi PM (updates.pmId)
     // ngay trong khối automation phía trên — khác nhánh đổi PM THỦ CÔNG ở đầu hàm
     // (đã return sớm và tự thông báo), nhánh automation này rơi thẳng xuống đây
@@ -1497,19 +1519,13 @@ export default function ProjectKanbanBoard({
     if (updates.pmId && updates.pmId !== proj.pmId) {
       const newPmName = employees.find(e => e.id === updates.pmId)?.name || 'Trưởng dự án mới';
       const newPmId = updates.pmId;
-      ensureProjectChatGroup({ id: proj.id, name: proj.name, pmId: newPmId })
-        .then(conv => {
-          if (!conv) return;
-          addMemberToConversation(conv.id, newPmId);
-          sendGroupChatMessage({
-            conversationId: conv.id,
-            senderId: currentUser?.id || 'system',
-            senderName: currentUser?.name || 'Hệ thống',
-            senderRole: currentUser?.role,
-            content: `👤 Hệ thống (quy trình Kanban) đã tự động chuyển Trưởng Dự Án "${proj.name}" sang ${newPmName}.`,
-          });
-        })
-        .catch(() => {});
+      postProjectNotice({
+        project: { id: proj.id, name: proj.name, pmId: newPmId },
+        actor: { id: currentUser?.id || 'system', name: currentUser?.name || 'Hệ thống', role: currentUser?.role },
+        content: MT.nk.doiTruongDuAnTuDong({ project: proj.name, to: newPmName }),
+        memberIds: [newPmId], objKind: 'project', objName: proj.name,
+        from: employees.find(e => e.id === proj.pmId)?.name || '(chưa có)', to: newPmName,
+      });
     }
 
     // ── Chain auto-move: Sau khi project di chuyển thành công sang cột mới,
@@ -1826,6 +1842,7 @@ export default function ProjectKanbanBoard({
   const [showSubtaskForm, setShowSubtaskForm] = useState(false);
   // Điện thoại: ngăn kéo chi tiết dự án chia 2 thẻ "Thông tin" | "Công việc" (trước đây danh sách công việc chiếm hết màn hình, che mất thông tin dự án). Máy tính vẫn hiện 2 cột.
   const [mobileTab, setMobileTab] = useState<'info' | 'tasks'>('info');
+  const [activityOpen, setActivityOpen] = useState(false); // khung Nhật ký dự án
   useEffect(() => { setMobileTab('info'); }, [selectedProjectId]);
   const [subTaskIsApprovalEnabled, setSubTaskIsApprovalEnabled] = useState(false);
   const [subTaskIsCostEnabled, setSubTaskIsCostEnabled] = useState(false);
@@ -2048,7 +2065,7 @@ export default function ProjectKanbanBoard({
           memberIds.forEach(mid => addMemberToConversation(conv.id, mid));
         })
         .catch(() => {});
-      notifyProjectChat(`✏️ ${currentUser?.name || 'Người dùng'} đã cập nhật công việc con "${editSubName}".`, { type: 'task', id: editingSubTask.id });
+      notifyProjectChat(MT.nk.suaViecCon(editSubName), { type: 'task', id: editingSubTask.id });
     }
 
     setEditingSubTask(null);
@@ -2150,7 +2167,7 @@ export default function ProjectKanbanBoard({
     try {
       await onAddTask(childTask);
       // 📣 Gửi thông báo vào NHÓM CHAT DỰ ÁN (hàm sendGroupChatMessage) - CHỈ SAU KHI SAVE THÀNH CÔNG
-      notifyProjectChat(`📝 ${currentUser?.name || 'Người dùng'} đã khởi tạo Công Việc Con "${childTask.name}" cho dự án "${selectedProject?.name || ''}".`, { type: 'task', id: childTask.id });
+      notifyProjectChat(MT.nk.giaoViecCon({ task: childTask.name, project: selectedProject?.name }), { type: 'task', id: childTask.id });
 
       // 📩 Thông báo GIAO VIỆC CON → HỘI THOẠI CÁ NHÂN người được giao (người thi hành chính).
       // Người nhận việc có thể CHƯA có trong nhóm chat dự án → nhắn riêng 1-1 để họ
@@ -2163,7 +2180,7 @@ export default function ProjectKanbanBoard({
           senderRole: currentUser.role,
           recipientId: subTaskAssigneeId,
           recipientName: assigneeEmp.name,
-          content: `📌 ${currentUser.name} đã GIAO cho bạn công việc con "${subTaskName}" thuộc dự án "${selectedProject?.name || ''}"${subTaskDeadline ? ` (Hạn: ${subTaskDeadline})` : ''}.`,
+          content: MT.giaoViecCon({ task: subTaskName, deadline: subTaskDeadline, project: selectedProject?.name }),
           relatedEntity: { type: 'task', id: childTask.id },
         });
       }
@@ -3455,12 +3472,36 @@ export default function ProjectKanbanBoard({
                   </>
                 )}
 
+                {/* Nhật ký dự án: mọi hành động của dự án, công việc, nhiệm vụ, đề xuất (có lọc + xuất Excel) */}
+                <button onClick={() => setActivityOpen(true)} className="lx-dh-close" aria-label="Nhật ký dự án" data-testid="project-activity-open">
+                  <span>🕘</span>
+                  <span className="lx-dh-close-text">Nhật ký</span>
+                </button>
                 <button onClick={() => setSelectedProjectId(null)} className="lx-dh-close" aria-label="Đóng" data-testid="project-detail-close">
                   <X className="w-4 h-4" />
                   <span className="lx-dh-close-text">Đóng Chi tiết</span>
                 </button>
               </div>
             </div>
+
+            {activityOpen && createPortal(
+              <ProjectActivityModal
+                projectId={selectedProject.id}
+                projectName={selectedProject.name}
+                viewerId={currentUser?.id}
+                onClose={() => setActivityOpen(false)}
+                onExport={async () => {
+                  try {
+                    const file = await exportProjectLogExcel({
+                      project: selectedProject, customer: customers.find(c => c.id === selectedProject.customerId) || null,
+                      employees, tasks, stageName: columns.find(c => c.id === getProjectColumnId(selectedProject, columns))?.name, exportedBy: currentUser?.name,
+                    });
+                    addToast({ title: '✅ Đã xuất nhật ký', message: `Đã tải file ${file}`, type: 'success' });
+                  } catch (e: any) {
+                    addToast({ title: '❌ Không xuất được', message: e?.message || 'Có lỗi khi xuất nhật ký dự án.', type: 'error' });
+                  }
+                }}
+              />, document.body)}
 
             {/* Drawer Content */}
             {/* Thẻ chuyển Thông tin | Công việc — chỉ hiện ở màn hình hẹp (dưới 1024px) */}

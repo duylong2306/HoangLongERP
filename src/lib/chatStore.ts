@@ -1,7 +1,8 @@
 import { findUniqueEmployeeByName } from './employeeLookup';
 import { Conversation, ChatMessage, ChatAttachment } from '../types';
 import { getSupabase, getCurrentCompanyId, getCurrentAccessToken } from './supabase';
-import { buildPushUrl } from './pushDeepLink';
+import { buildPushUrl, pushTargetFromMessage } from './pushDeepLink';
+import { buildPushText } from './pushText';
 import { isWorkThreadId, workThreadId, uniqueMembers } from './workThread';
 
 // =====================================================================
@@ -170,6 +171,90 @@ async function pushConversation(conv: Conversation): Promise<any | null> {
   return null;
 }
 
+/**
+ * Cập nhật CHỈ phần "đời sống" của hội thoại khi có tin mới (tin cuối, giờ tin cuối, số chưa đọc) — KHÔNG ghi `participant_ids`.
+ * Trước đây gửi tin nào cũng upsert cả dòng hội thoại từ bản copy trong bộ nhớ của người gửi; bản copy cũ (chưa thấy người mới thêm)
+ * ghi đè danh sách thành viên và làm người đó "bị out" khỏi nhóm. Chỉ khi hội thoại CHƯA có trên máy chủ mới ghi cả dòng (tạo mới).
+ */
+async function pushConversationMeta(conv: Conversation): Promise<any | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const row = convToRow(conv);
+  let q = sb.from('conversations')
+    .update({ last_message_at: row.last_message_at, last_message: row.last_message, unread_counts: row.unread_counts, unread_count: conv.unreadCount ?? 0 })
+    .eq('id', conv.id);
+  const cid = getCurrentCompanyId();
+  if (cid) q = q.eq('company_id', cid);
+  const { data, error } = await q.select('id');
+  if (error) { console.error('pushConversationMeta error:', error.message); return error; }
+  if (!data || data.length === 0) return pushConversation(conv);   // chưa có trên máy chủ → tạo mới đầy đủ
+  return null;
+}
+
+// ─── Thành viên hội thoại: LUÔN dựa trên bản MỚI NHẤT của máy chủ, không dựa vào bản copy trong bộ nhớ ───
+// (Máy chỉ tải các hội thoại mà người dùng đang là thành viên — người chưa ở trong nhóm sẽ không có nhóm trong bộ nhớ;
+//  nếu cứ "tạo nhóm mới rồi ghi đè" như trước thì mất toàn bộ thành viên cũ của nhóm đó.)
+const rpcMissing = { ensure: false, add: false };   // nhớ trong phiên: hàm máy chủ (migration 20261030) chưa có thì dùng đường dự phòng
+const isMissingFn = (e: any) => e?.code === 'PGRST202' || e?.code === '42883' || /could not find the function|does not exist/i.test(e?.message || '');
+
+/** Đọc 1 hội thoại từ máy chủ (bản mới nhất); không có / lỗi → null */
+async function fetchCloudConversation(id: string): Promise<Conversation | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  try {
+    let q = sb.from('conversations').select('*').eq('id', id);
+    const cid = getCurrentCompanyId();
+    if (cid) q = q.eq('company_id', cid);
+    const { data, error } = await q.limit(1);
+    if (error || !data || data.length === 0) return null;
+    return convFromRow(data[0], _convUserId || undefined);
+  } catch { return null; }
+}
+
+/**
+ * Gộp thêm thành viên vào hội thoại nhóm trên máy chủ rồi cập nhật bộ nhớ. Không bao giờ làm mất thành viên có sẵn.
+ * Đường chính: hàm máy chủ add_conversation_members (gộp nguyên tử). Dự phòng (chưa chạy migration): đọc bản mới nhất, gộp, chỉ ghi participant_ids.
+ */
+async function mergeMembersCloud(convId: string, ids: string[]): Promise<Conversation | null> {
+  const clean = Array.from(new Set((ids || []).filter(Boolean)));
+  const sb = getSupabase();
+  const cached = conversationsCache.get(convId);
+  if (cached?.type === 'personal') return null;
+  if (!sb) {   // chế độ cục bộ (chưa cấu hình máy chủ): chỉ cập nhật bộ nhớ
+    if (!cached) return null;
+    const missing = clean.filter(m => !cached.participantIds.includes(m));
+    if (missing.length === 0) return cached;
+    const upd = { ...cached, participantIds: [...cached.participantIds, ...missing] };
+    conversationsCache.set(convId, upd);
+    return upd;
+  }
+  if (clean.length === 0) return cached || fetchCloudConversation(convId);
+  if (!rpcMissing.add) {
+    const { data, error } = await sb.rpc('add_conversation_members', { p_conv_id: convId, p_member_ids: clean });
+    if (!error) {
+      if (!Array.isArray(data)) return null;                        // hội thoại không tồn tại / là 1-1
+      const base = cached || await fetchCloudConversation(convId);
+      if (!base) return null;
+      const upd = { ...base, participantIds: data as string[] };
+      conversationsCache.set(convId, upd);
+      return upd;
+    }
+    if (isMissingFn(error)) rpcMissing.add = true; else { console.warn('add_conversation_members lỗi:', error.message); }
+  }
+  const cloud = await fetchCloudConversation(convId);
+  if (!cloud || cloud.type === 'personal') return null;
+  const merged = Array.from(new Set([...cloud.participantIds, ...clean]));
+  if (merged.length !== cloud.participantIds.length) {
+    let q = sb.from('conversations').update({ participant_ids: merged }).eq('id', convId);
+    const cid = getCurrentCompanyId(); if (cid) q = q.eq('company_id', cid);
+    const { error } = await q;
+    if (error) { console.error('Thêm thành viên thất bại:', error.message); return null; }
+  }
+  const upd = { ...(cached || cloud), participantIds: merged };
+  conversationsCache.set(convId, upd);
+  return upd;
+}
+
 async function pushMessage(msg: ChatMessage): Promise<any | null> {
   const sb = getSupabase();
   if (!sb) return null;
@@ -301,25 +386,30 @@ export async function ensureProjectChatGroup(
   if (!project || !project.id) return null;
 
   const convId = `conv_project_${project.id}`;
-  const existing = conversationsCache.get(convId);
+  const sb = getSupabase();
 
-  const memberIds = Array.from(new Set(
-    [project.pmId].filter(Boolean) as string[]
-  ));
-
-  if (existing) {
-    // Đồng bộ thành viên mới (không xóa ai đã có)
-    const missing = memberIds.filter(id => !existing.participantIds.includes(id));
-    if (missing.length === 0) return existing;
-    const updated = {
-      ...existing,
-      participantIds: [...existing.participantIds, ...missing],
-    };
-    conversationsCache.set(convId, updated);
-    await pushConversation(updated);
-    return updated;
+  // Đường chính: hàm máy chủ ensure_project_chat_group (migration 20261030) — tạo nhóm nếu chưa có, còn lại chỉ GỘP thành viên
+  // theo dữ liệu dự án (trưởng dự án, người trong công việc / nhiệm vụ, Giám đốc & quản trị). Không bao giờ ghi đè nhóm có sẵn.
+  if (sb && !rpcMissing.ensure) {
+    const { data, error } = await sb.rpc('ensure_project_chat_group', { p_project_id: project.id });
+    if (!error && Array.isArray(data) && data[0]) {
+      const conv = convFromRow(data[0], _convUserId || undefined);
+      conversationsCache.set(convId, conv);
+      return conv;
+    }
+    if (error) { if (isMissingFn(error)) rpcMissing.ensure = true; else console.warn('ensure_project_chat_group lỗi:', error.message); }
   }
 
+  // Dự phòng (chưa chạy migration): xem nhóm ĐÃ CÓ trên máy chủ chưa — KHÔNG dựa vào bộ nhớ (người chưa ở trong nhóm không có nhóm trong bộ nhớ)
+  const existing = conversationsCache.get(convId) || await fetchCloudConversation(convId);
+  if (existing) {
+    const merged = project.pmId ? await mergeMembersCloud(convId, [project.pmId]) : null;
+    const conv = merged || existing;
+    conversationsCache.set(convId, conv);
+    return conv;
+  }
+
+  const memberIds = Array.from(new Set([project.pmId].filter(Boolean) as string[]));
   const colors = ['#2AABEE','#E74C3C','#27AE60','#F39C12','#8E44AD','#16A085'];
   const newConv: Conversation = {
     id: convId,
@@ -385,14 +475,12 @@ export async function ensureWorkThread(p: { key: string; title: string; memberId
   const memberIds = uniqueMembers(p.memberIds);
   if (!p.key || memberIds.length === 0) return null;
   const id = workThreadId(p.key);
-  const existing = conversationsCache.get(id);
+  // Luồng có thể đã có trên máy chủ dù bộ nhớ chưa có (người này chưa là thành viên) → đọc bản mới nhất, chỉ gộp thêm thành viên, KHÔNG tạo đè
+  const existing = conversationsCache.get(id) || await fetchCloudConversation(id);
   if (existing) {
     const missing = memberIds.filter(m => !existing.participantIds.includes(m));
-    if (missing.length === 0) return existing;
-    const updated = { ...existing, participantIds: [...existing.participantIds, ...missing] };
-    conversationsCache.set(id, updated);
-    await pushConversation(updated);
-    return updated;
+    if (missing.length === 0) { conversationsCache.set(id, existing); return existing; }
+    return (await mergeMembersCloud(id, missing)) || existing;
   }
   const conv: Conversation = {
     id, type: 'group', name: `💬 ${p.title}`.slice(0, 120), avatar: '💬', color: '#0068ff',
@@ -414,21 +502,12 @@ export async function deleteConversation(convId: string): Promise<void> {
   messagesCache.delete(convId);
 }
 
-// Thêm thành viên vào hội thoại nhóm
+// Thêm thành viên vào hội thoại nhóm — gộp trên máy chủ, không phụ thuộc bộ nhớ của máy này (xem mergeMembersCloud)
 export async function addMemberToConversation(convId: string, memberId: string): Promise<Conversation | null> {
   const conv = conversationsCache.get(convId);
-  if (!conv) return null;
-  if (conv.type === 'personal') return null;
-  if (conv.participantIds.includes(memberId)) return conv;
-
-  const updatedConv = {
-    ...conv,
-    participantIds: [...conv.participantIds, memberId],
-  };
-
-  conversationsCache.set(convId, updatedConv);
-  await pushConversation(updatedConv);
-  return updatedConv;
+  if (conv?.type === 'personal') return null;
+  if (conv?.participantIds.includes(memberId)) return conv;
+  return mergeMembersCloud(convId, [memberId]);
 }
 
 // ─── Nhóm chat "Điểm danh" ─────────────────────────────────────────────────
@@ -440,10 +519,10 @@ export const ATTENDANCE_CONV_ID = 'conv_attendance';
 
 // Nội dung tin theo 4 slot (BỎ QUA tăng ca timeInOT/timeOutOT).
 export const ATTENDANCE_CHAT_CONTENT: Record<string, string> = {
-  timeInS: '⏰ Đến giờ check-in rồi mọi người!',
-  timeOutS: '⏰ Đến giờ check-out rồi mọi người!',
-  timeInC: '⏰ Đến giờ check-in (chiều) rồi mọi người!',
-  timeOutC: '⏰ Đến giờ check-out (chiều) rồi mọi người!',
+  timeInS: '⏰ Đến giờ vào ca sáng. Mời chấm công.',
+  timeOutS: '⏰ Đến giờ ra ca sáng. Mời chấm công.',
+  timeInC: '⏰ Đến giờ vào ca chiều. Mời chấm công.',
+  timeOutC: '⏰ Đến giờ ra ca chiều. Mời chấm công.',
 };
 
 /**
@@ -459,14 +538,11 @@ export async function ensureAttendanceChatGroup(
   ));
   if (memberIds.length === 0) return null;
 
-  const existing = conversationsCache.get(ATTENDANCE_CONV_ID);
+  const existing = conversationsCache.get(ATTENDANCE_CONV_ID) || await fetchCloudConversation(ATTENDANCE_CONV_ID);
   if (existing) {
     const missing = memberIds.filter(id => !existing.participantIds.includes(id));
-    if (missing.length === 0) return existing;
-    const updated = { ...existing, participantIds: [...existing.participantIds, ...missing] };
-    conversationsCache.set(ATTENDANCE_CONV_ID, updated);
-    await pushConversation(updated);
-    return updated;
+    if (missing.length === 0) { conversationsCache.set(ATTENDANCE_CONV_ID, existing); return existing; }
+    return (await mergeMembersCloud(ATTENDANCE_CONV_ID, missing)) || existing;
   }
 
   const newConv: Conversation = {
@@ -585,7 +661,7 @@ export async function addMessage(msg: Omit<ChatMessage, 'id' | 'createdAt' | 're
   // GHI SONG SONG tin nhắn và hội thoại (trước đây 3 lệnh nối đuôi: upsert hội thoại → chèn tin → upsert hội thoại, tốn 3 lượt mạng
   // trước khi người nhận thấy tin). Tin nhắn có khóa ngoại tới hội thoại (conversation_id → conversations.id): nếu hội thoại CHƯA có
   // trên cloud thì chèn tin lỗi 23503 — khi đó đợi lệnh upsert hội thoại xong rồi chèn lại 1 lần (hiếm, chỉ hội thoại vừa tạo).
-  const convPush = convForPush ? pushConversation(convForPush) : Promise.resolve(null);
+  const convPush = convForPush ? pushConversationMeta(convForPush) : Promise.resolve(null);
   let pushErr = await pushMessage(newMsg);
   if (pushErr && (pushErr.code === '23503' || (pushErr.message || '').toLowerCase().includes('foreign key'))) {
     await convPush;
@@ -612,6 +688,7 @@ async function notifyChatPush(msg: ChatMessage, conv?: Conversation): Promise<vo
     const supabase = getSupabase();
     if (!supabase || !conv) return;
 
+    const target = pushTargetFromMessage(msg);
     const recipientIds = (conv.participantIds || []).filter(id => id !== msg.senderId);
     if (!recipientIds.length) return;
 
@@ -632,17 +709,19 @@ async function notifyChatPush(msg: ChatMessage, conv?: Conversation): Promise<vo
       },
       body: JSON.stringify({
         userIds: recipientIds,
-        title: msg.senderName || 'Tin nhắn mới',
-        body: msg.content,
+        // Tin hệ thống: tiêu đề = loại việc (+ tên nhóm), nội dung = dòng đầu có số liệu; tin người dùng gõ giữ nguyên (xem pushText.ts)
+        ...buildPushText(msg, conv),
         data: {
           // ⚠️ TRƯỚC ĐÂY: '/messages?conversation=...'. Host phục vụ file tĩnh và
           // KHÔNG có SPA fallback → mở '/messages' trả về 404 (rõ nhất trên điện
           // thoại, vì app thường đã đóng nên service worker phải mở tab mới).
           // Nay dùng buildPushUrl → '/?conversation=...' (luôn là đường dẫn gốc).
-          url: buildPushUrl({ conversationId: conv.id }),
+          url: buildPushUrl({ conversationId: conv.id, ...target }),
           type: 'chat.message',
           conversationId: conv.id,
           senderId: msg.senderId,
+          // Đích mở thẳng khi bấm (công việc / nhiệm vụ / phiếu cần duyệt); không có thì chỉ mở hội thoại
+          ...target,
         },
       }),
     });

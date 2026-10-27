@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ý tưởng báo hoạt động mới</title>
+<style>
+  :root{--b:#0d47c9;--bl:#e8f0fe;--g:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--red:#dc2626}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:#0f172a;padding:24px 16px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--g);margin:0 0 24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;max-width:1100px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{font-size:15px;margin:0 0 2px;color:var(--b)}
+  .card .why{color:var(--g);font-size:12.5px;margin:0 0 12px}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;background:var(--bl);color:var(--b);margin-left:6px;vertical-align:middle}
+  .pros{font-size:12.5px;margin:12px 0 0;padding-top:10px;border-top:1px dashed var(--line);color:#334155}
+  .pros b{color:#0f172a}
+  /* khung mô phỏng */
+  .mock{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font-size:13px;position:relative}
+  .btn.p{background:var(--b);color:#ffffff;border-color:var(--b)}
+  .dot{position:absolute;top:-7px;right:-7px;min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--red);color:#ffffff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .row{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--line);margin-bottom:6px}
+  .av{width:34px;height:34px;border-radius:50%;background:var(--b);color:#ffffff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+  .muted{color:var(--g);font-size:12px}
+  .bar{display:flex;align-items:center;gap:8px;background:var(--bl);border:1px solid #bfd3fb;color:#0b3aa8;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px}
+  .bar b{color:#0b3aa8}
+  .bar .go{margin-left:auto;color:var(--b);font-weight:600;white-space:nowrap}
+  .pop{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);margin-top:8px;overflow:hidden}
+  .pop .h{background:var(--b);color:#ffffff;padding:8px 12px;font-weight:600;font-size:13px}
+  .pop .i{padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;display:flex;gap:8px}
+  .pop .i.new{background:#f5f9ff}
+  .pop .f{padding:8px 12px;text-align:center;color:var(--b);font-weight:600;font-size:13px}
+  .nd{width:8px;height:8px;border-radius:50%;background:var(--red);margin-top:6px;flex:none}
+  .nd.o{background:#cbd5e1}
+  .sep{display:flex;align-items:center;gap:8px;color:var(--red);font-size:12px;font-weight:600;margin:10px 0}
+  .sep:before,.sep:after{content:"";flex:1;height:1px;background:#fecaca}
+  .msg{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
+  .push{background:#fff;border-radius:12px;padding:10px 12px;box-shadow:0 4px 14px rgba(15,23,42,.15);display:flex;gap:10px;border:1px solid var(--line)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;font-size:12.5px}
+  .seg span{flex:1;text-align:center;padding:6px 4px;border-right:1px solid var(--line)}
+  .seg span:last-child{border:0}
+  .seg .on{background:var(--b);color:#ffffff}
+  .kb{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;position:relative}
+  .kb .t{font-weight:600}
+  .chip{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:99px;background:#fef2f2;color:var(--red);margin-top:6px}
+</style>
+</head>
+<body>
+<h1>Báo hoạt động mới mà không cần mở Nhật ký</h1>
+<p class="sub">5 ý tưởng, có thể dùng kết hợp. Đây là bản xem trước tĩnh, chưa gắn vào ứng dụng.</p>
+
+<div class="grid">
+
+<!-- Ý tưởng 1 -->
+<div class="card">
+  <h2>1. Chấm số chưa xem <span class="tag">Dễ làm · nên có</span></h2>
+  <p class="why">Giống tin nhắn chưa đọc: mỗi người có mốc "đã xem đến lúc nào", số chấm = hoạt động mới sau mốc đó.</p>
+  <div class="mock">
+    <div class="muted" style="margin-bottom:6px">Trong khung thông tin nhóm chat</div>
+    <span class="btn">Mở dự án</span>
+    <span class="btn" style="margin-left:10px">🕘 Nhật ký dự án <span class="dot">5</span></span>
+    <div class="muted" style="margin:14px 0 6px">Trong danh sách hội thoại</div>
+    <div class="row"><div class="av">N</div><div style="flex:1"><b>Nhà anh Tuấn – Q7</b><div class="muted">Dự án · 🕘 5 hoạt động mới</div></div><span class="dot" style="position:static">5</span></div>
+  </div>
+  <p class="pros"><b>Ưu:</b> rẻ, quen thuộc, mỗi người có số riêng. <b>Nhược:</b> vẫn phải chủ động nhìn thấy chấm.</p>
+</div>
+
+<!-- Ý tưởng 2 -->
+<div class="card">
+  <h2>2. Dải "Cập nhật mới" ghim đầu nhóm chat <span class="tag">Nên có</span></h2>
+  <p class="why">Một dòng tóm tắt nằm trên đầu cuộc trò chuyện của dự án, bấm vào mở thẳng nhật ký, đã xem thì tự ẩn.</p>
+  <div class="mock">
+    <div class="bar">🕘 <span><b>3 hoạt động mới</b> · Lan giao việc "Lắp tủ bếp", Hùng nhận việc…</span><span class="go">Xem ›</span></div>
+    <div class="msg">Anh Tuấn: hôm nay thợ vào được chưa em?</div>
+    <div class="msg" style="margin-top:6px">Hùng: Dạ 8h có mặt anh.</div>
+  </div>
+  <p class="pros"><b>Ưu:</b> người đang chat thấy ngay mà chat vẫn sạch (không thành tin rác). <b>Nhược:</b> chỉ thấy khi mở nhóm đó.</p>
+</div>
+
+<!-- Ý tưởng 3 -->
+<div class="card">
+  <h2>3. Xem nhanh bằng thẻ nổi <span class="tag">Tiện</span></h2>
+  <p class="why">Bấm vào nút Nhật ký hiện 5 dòng gần nhất ngay tại chỗ, bấm "Xem tất cả" mới mở khung đầy đủ.</p>
+  <div class="mock">
+    <span class="btn">🕘 Nhật ký dự án <span class="dot">3</span></span>
+    <div class="pop">
+      <div class="h">Mới nhất</div>
+      <div class="i new"><span class="nd"></span><div><b>Lan</b> giao việc "Lắp tủ bếp" cho Hùng<div class="muted">10 phút trước</div></div></div>
+      <div class="i new"><span class="nd"></span><div><b>Hùng</b> nhận việc "Lắp tủ bếp"<div class="muted">8 phút trước</div></div></div>
+      <div class="i new"><span class="nd"></span><div><b>Kế toán</b> duyệt phiếu chi 12.000.000đ<div class="muted">1 giờ trước</div></div></div>
+      <div class="i"><span class="nd o"></span><div><b>Tuấn</b> đổi hạn "Sơn tường" → 30/10<div class="muted">Hôm qua</div></div></div>
+      <div class="f">Xem tất cả ›</div>
+    </div>
+  </div>
+  <p class="pros"><b>Ưu:</b> nắm tình hình trong 2 giây, không đổi màn hình. <b>Nhược:</b> thêm một thành phần giao diện.</p>
+</div>
+
+<!-- Ý tưởng 4 -->
+<div class="card">
+  <h2>4. Chấm trên thẻ dự án (Kanban) <span class="tag">Trực quan</span></h2>
+  <p class="why">Người quản lý nhìn bảng dự án là biết dự án nào vừa có động tĩnh, khỏi mở từng nhóm chat.</p>
+  <div class="mock" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div class="kb"><div class="t">Nhà anh Tuấn – Q7</div><div class="muted">Đang thi công</div><span class="chip">● 5 mới</span></div>
+    <div class="kb"><div class="t">Văn phòng Hưng Phát</div><div class="muted">Báo giá</div></div>
+    <div class="kb"><div class="t">Showroom Bình Thạnh</div><div class="muted">Thi công</div><span class="chip">● 1 mới</span></div>
+    <div class="kb"><div class="t">Biệt thự Thủ Đức</div><div class="muted">Nghiệm thu</div></div>
+  </div>
+  <p class="pros"><b>Ưu:</b> hợp với Giám đốc, Trưởng dự án phải theo dõi nhiều dự án. <b>Nhược:</b> chỉ hữu ích khi dùng bảng Kanban.</p>
+</div>
+
+<!-- Ý tưởng 5 -->
+<div class="card">
+  <h2>5. Mức theo dõi mỗi dự án + bản tin cuối ngày <span class="tag">Giảm làm phiền</span></h2>
+  <p class="why">Mỗi người tự chọn mức nhận thông báo đẩy cho từng dự án; hoạt động nhỏ gom lại thành 1 thông báo tóm tắt.</p>
+  <div class="mock">
+    <div class="muted" style="margin-bottom:4px">🔔 Theo dõi dự án này</div>
+    <div class="seg"><span>Tất cả</span><span class="on">Việc quan trọng</span><span>Bản tin cuối ngày</span><span>Tắt</span></div>
+    <div class="muted" style="margin:14px 0 6px">Thông báo đẩy lúc 17:30</div>
+    <div class="push"><div class="av" style="border-radius:8px">L</div><div><b>Nhà anh Tuấn – Q7</b><div style="font-size:13px">Hôm nay có 7 hoạt động: 2 việc hoàn thành, 1 phiếu chi được duyệt, 1 việc quá hạn.</div></div></div>
+    <div class="sep">Việc quan trọng gửi ngay</div>
+    <div class="push"><div class="av" style="border-radius:8px;background:var(--red)">!</div><div><b>Nhà anh Tuấn – Q7</b><div style="font-size:13px">Việc "Lắp tủ bếp" đã quá hạn 1 ngày.</div></div></div>
+  </div>
+  <p class="pros"><b>Ưu:</b> mỗi người một mức, ít bị làm phiền, vẫn kịp việc gấp. <b>Nhược:</b> cần thêm bảng lưu lựa chọn và phân loại "quan trọng".</p>
+</div>
+
+</div>
+
+<p class="sub" style="margin-top:24px;max-width:760px"><b>Gợi ý của tôi:</b> làm <b>1 + 2</b> trước (chấm số chưa xem và dải ghim đầu nhóm chat), vì rẻ và giải quyết đúng chỗ người dùng đang nhìn. Sau đó thêm <b>5</b> nếu thông báo đẩy còn nhiều, và <b>4</b> cho Giám đốc.</p>
+</body>
+</html>

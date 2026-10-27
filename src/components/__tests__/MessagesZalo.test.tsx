@@ -51,12 +51,12 @@ beforeEach(() => {
 });
 
 describe('Danh sách hội thoại', () => {
-  it('hiện đủ hội thoại, ghim hệ thống (nhóm công trình) lên đầu, nhãn Công trình, số chưa đọc', () => {
+  it('hiện đủ hội thoại, ghim hệ thống (nhóm công trình) lên đầu, nhãn Dự án, số chưa đọc', () => {
     mount();
     const ids = screen.getAllByTestId('zalo-conv').map(r => r.getAttribute('data-conv'));
     expect(ids[0]).toBe('conv_project_A');                      // ghim lên đầu
     expect(ids).toEqual(['conv_project_A', 'p_ny', 'g_diemdanh', 'p_hao']);   // rồi chưa đọc, rồi mới nhất
-    expect(within(row('conv_project_A')).getByText('Công trình')).toBeTruthy();
+    expect(within(row('conv_project_A')).getByText('Dự án')).toBeTruthy();
     expect(within(row('g_diemdanh')).getByTestId('zalo-unread').textContent).toBe('5');
     expect(within(row('p_ny')).getByText(/Dạ anh/)).toBeTruthy();
     expect(within(row('p_hao')).getByText(/^Bạn: OK/)).toBeTruthy();   // tin của chính mình có "Bạn:"
@@ -66,9 +66,9 @@ describe('Danh sách hội thoại', () => {
     fireEvent.click(screen.getByRole('button', { name: /Chưa đọc/ }));
     expect(screen.getAllByTestId('zalo-conv').map(r => r.getAttribute('data-conv'))).toEqual(['p_ny', 'g_diemdanh']);
   });
-  it('Phân loại: Cá nhân / Công trình; tìm kiếm không dấu', () => {
+  it('Phân loại: Cá nhân / Dự án; tìm kiếm không dấu', () => {
     mount();
-    fireEvent.click(screen.getByTestId('zalo-category-btn')); fireEvent.click(screen.getByRole('menuitem', { name: 'Công trình' }));
+    fireEvent.click(screen.getByTestId('zalo-category-btn')); fireEvent.click(screen.getByRole('menuitem', { name: 'Dự án' }));
     expect(screen.getAllByTestId('zalo-conv').map(r => r.getAttribute('data-conv'))).toEqual(['conv_project_A']);
     fireEvent.click(screen.getByTestId('zalo-category-btn')); fireEvent.click(screen.getByRole('menuitem', { name: 'Tất cả' }));
     fireEvent.change(screen.getByLabelText('Tìm kiếm hội thoại'), { target: { value: 'diem danh' } });
