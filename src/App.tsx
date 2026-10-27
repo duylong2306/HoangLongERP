@@ -3289,7 +3289,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
     // 📒 Nhật ký dự án: chỉ ghi khi là báo giá MỚI của 1 dự án (lưu lại báo giá đã có không ghi lại)
     if (newQuote.projectId && !quotes.some(q => q.id === newQuote.id)) {
-      logProjectEvt(newQuote.projectId, MT.nk.baoGiaTao({ code: newQuote.code, total: quoteTotal(newQuote), customer: newQuote.customerName }), { type: 'tao', objKind: 'project' });
+      logProjectEvt(newQuote.projectId, MT.nk.baoGiaTao({ code: newQuote.code, total: quoteTotal(newQuote) }), { type: 'tao', objKind: 'project' });
     }
     setQuotes([newQuote, ...quotes]);
     dbService.quotes.save(newQuote);
@@ -3354,7 +3354,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     // 📒 Nhật ký dự án: báo giá của dự án đổi trạng thái (gửi khách / khách duyệt / khách từ chối / về nháp)
     const cur = quotes.find(q => q.id === quoteId);
     if (cur?.projectId && cur.status !== status) {
-      logProjectEvt(cur.projectId, MT.nk.baoGiaTrangThai(status, { code: cur.code, total: quoteTotal(cur), customer: cur.customerName }),
+      logProjectEvt(cur.projectId, MT.nk.baoGiaTrangThai(status, { code: cur.code, total: quoteTotal(cur) }),
         { type: status === 'sent' ? 'tt' : status === 'draft' ? 'tt' : 'duyet', objKind: 'project' });
     }
     const updated = quotes.map(q => {

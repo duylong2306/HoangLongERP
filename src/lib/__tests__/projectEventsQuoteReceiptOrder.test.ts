@@ -11,15 +11,20 @@ const app = fs.readFileSync(path.resolve(__dirname, '../../App.tsx'), 'utf8');
 const body = (name: string) => { const i = app.indexOf(name); return app.slice(i, app.indexOf('\n  };', i)); };
 
 describe('mẫu câu nhật ký', () => {
-  it('báo giá: lập mới và 4 trạng thái', () => {
-    const p = { code: 'BGNT-01', total: 120000000, customer: 'Chị Lan' };
-    expect(MT.nk.baoGiaTao(p)).toBe('📝 Lập báo giá BGNT-01: 120.000.000đ · Chị Lan');
-    expect(MT.nk.baoGiaTrangThai('sent', p)).toBe('📤 Gửi báo giá BGNT-01: 120.000.000đ · Chị Lan');
-    expect(MT.nk.baoGiaTrangThai('approved', p)).toBe('✅ Khách duyệt báo giá BGNT-01: 120.000.000đ · Chị Lan');
-    expect(MT.nk.baoGiaTrangThai('rejected', p)).toBe('❌ Khách từ chối báo giá BGNT-01: 120.000.000đ · Chị Lan');
-    expect(MT.nk.baoGiaTrangThai('draft', p)).toContain('về bản nháp');
+  it('báo giá: lập mới và các trạng thái (Đã duyệt, không kèm tên khách; mới gửi thì ghi Chờ duyệt)', () => {
+    const p = { code: 'BGNT-01', total: 120000000 };
+    expect(MT.nk.baoGiaTao(p)).toBe('📝 Lập báo giá BGNT-01: 120.000.000đ');
+    expect(MT.nk.baoGiaTrangThai('sent', p)).toBe('📤 Gửi duyệt báo giá BGNT-01: 120.000.000đ · Chờ duyệt');
+    expect(MT.nk.baoGiaTrangThai('approved', p)).toBe('✅ Đã duyệt báo giá BGNT-01: 120.000.000đ');
+    expect(MT.nk.baoGiaTrangThai('rejected', p)).toBe('❌ Từ chối báo giá BGNT-01: 120.000.000đ');
+    expect(MT.nk.baoGiaTrangThai('draft', p)).toBe('🔄 Chuyển báo giá BGNT-01 về bản nháp');
   });
-  it('thiếu tổng tiền / khách thì bỏ phần đó, không để dấu thừa', () => {
+  it('hợp đồng / nghiệm thu / thanh lý: cùng kiểu "Đã duyệt … mã: giá trị"', () => {
+    expect(MT.nk.kyDuyetHoSo({ loai: 'hợp đồng', code: 'CON-DA1', value: 500000000 })).toBe('✅ Đã duyệt hợp đồng CON-DA1: 500.000.000đ');
+    expect(MT.nk.kyDuyetHoSo({ loai: 'biên bản nghiệm thu', code: 'ACC-DA1', value: 500000000, extra: 'Khối lượng 60%' })).toBe('✅ Đã duyệt biên bản nghiệm thu ACC-DA1: Khối lượng 60% · 500.000.000đ');
+    expect(MT.nk.kyDuyetHoSo({ loai: 'hồ sơ thanh lý', code: 'LIQ-DA1' })).toBe('✅ Đã duyệt hồ sơ thanh lý LIQ-DA1');
+  });
+  it('thiếu tổng tiền thì bỏ phần đó, không để dấu thừa', () => {
     expect(MT.nk.baoGiaTao({ code: 'BG-2' })).toBe('📝 Lập báo giá BG-2');
     expect(MT.nk.phieuThuTao({ code: 'PT-1', amount: 5000000 })).toBe('💰 Thu tiền PT-1: 5.000.000đ');
   });
@@ -35,6 +40,7 @@ describe('mẫu câu nhật ký', () => {
     expect(classifyEvent(MT.nk.phieuThuXoa({ code: 'PT-1', amount: 1 })).type).toBe('xoa');
     expect(classifyEvent(MT.nk.donMuaXoa({ id: 'PO-1', total: 1 })).type).toBe('xoa');
     expect(classifyEvent(MT.nk.baoGiaTrangThai('approved', { code: 'BG-1' })).type).toBe('duyet');
+    expect(classifyEvent(MT.nk.kyDuyetHoSo({ loai: 'hợp đồng', code: 'CON-1' })).type).toBe('duyet');
   });
 });
 
@@ -63,6 +69,10 @@ describe('điểm nối trong App.tsx', () => {
     const del = body('const handleDeletePurchaseOrder');
     expect(del.indexOf('purchaseOrders.find(')).toBeLessThan(del.indexOf('setPurchaseOrders('));
     expect(del).toContain('MT.nk.donMuaXoa');
+  });
+  it('ký duyệt hợp đồng / nghiệm thu / thanh lý ghi kèm giá trị, nghiệm thu thêm phần trăm khối lượng', () => {
+    const ct = fs.readFileSync(path.resolve(__dirname, '../../components/ConnectedToolsModal.tsx'), 'utf8');
+    expect(ct).toMatch(/MT\.nk\.kyDuyetHoSo\(\{[\s\S]*?value: newDocObj\.value[\s\S]*?Khối lượng \$\{ctDocAcceptRate\}%[\s\S]*?type: 'duyet'/);
   });
   it('postProjectNotice nhận loại sự kiện tường minh', () => {
     const pn = fs.readFileSync(path.resolve(__dirname, '../projectNotice.ts'), 'utf8');

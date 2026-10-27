@@ -2231,8 +2231,13 @@ export default function ConnectedToolsModal(props: ConnectedToolsModalProps) {
                           if (currentUser) postProjectNotice({
                             project: { id: selectedProject.id, name: selectedProject.name, pmId: selectedProject.pmId },
                             actor: { id: currentUser.id, name: currentUser.name, role: currentUser.role },
-                            content: MT.nk.kyDuyetHoSo({ loai: (({ contract: 'hợp đồng', acceptance: 'biên bản nghiệm thu', liquidation: 'hồ sơ thanh lý' } as Record<string, string>)[activeConnectedTool] || 'hồ sơ'), code: newDocObj.code }),
-                            objKind: 'project', objName: newDocObj.code,
+                            content: MT.nk.kyDuyetHoSo({
+                              loai: (({ contract: 'hợp đồng', acceptance: 'biên bản nghiệm thu', liquidation: 'hồ sơ thanh lý' } as Record<string, string>)[activeConnectedTool] || 'hồ sơ'),
+                              code: newDocObj.code, value: newDocObj.value,
+                              // Nghiệm thu: ghi thêm phần trăm khối lượng đã nghiệm thu
+                              extra: activeConnectedTool === 'acceptance' ? `Khối lượng ${ctDocAcceptRate}%` : undefined,
+                            }),
+                            type: 'duyet', objKind: 'project', objName: newDocObj.code,
                           });
 
                           // ── ĐỒNG BỘ VÀO LƯU TRỮ HỒ SƠ THEO LĨNH VỰC (Nội thất / Xây dựng / Cơ khí) ──

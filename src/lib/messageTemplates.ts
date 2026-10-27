@@ -62,8 +62,8 @@ export const ketQuaHoanThanh = (ok: boolean, task: string) => `${kq(ok)} hoàn t
 
 // ───────────── D. NHẬT KÝ / NHÓM DỰ ÁN (không có tên người — giao diện in sẵn tên người làm) ─────────────
 // Mở đầu bằng biểu tượng + động từ/từ khóa để classifyEvent phân loại đúng (xem projectEvents.ts).
-/** "BG-1: 120.000.000đ · Khách" — bỏ phần thiếu và bỏ luôn dấu hai chấm nếu không còn gì sau mã */
-const bgTail = (p: { code: string; total?: number; customer?: string }) => { const rest = join([p.total ? fmtMoney(p.total) : '', p.customer]); return rest ? `${p.code}: ${rest}` : p.code; };
+/** "BG-1: 120.000.000đ" — bỏ phần thiếu và bỏ luôn dấu hai chấm nếu không còn gì sau mã (tên khách không đưa vào: dự án đã nói rõ khách) */
+const docTail = (p: { code: string; total?: number }) => { const rest = p.total ? fmtMoney(p.total) : ''; return rest ? `${p.code}: ${rest}` : p.code; };
 
 export const nk = {
   doiTruongDuAn: (p: { project: string; to: string }) => `👤 Chuyển Trưởng dự án ${p.project} sang ${p.to}`,
@@ -90,13 +90,16 @@ export const nk = {
   xoaCongTacPhi: (p: { content: string; mission: string }) => `🗑️ Xóa công tác phí: ${p.content} · nhiệm vụ ${p.mission}`,
   nhapExcel: (p: { count: number; task: string }) => `📝 Nhập ${p.count} nhiệm vụ từ Excel · công việc ${p.task}`,
   dongBoNhanSu: (n: number) => `👥 Đồng bộ nhân sự dự án: ${n} người`,
-  kyDuyetHoSo: (p: { loai: string; code: string }) => `✅ Ký duyệt ${p.loai} ${p.code}`,
+  // Hợp đồng / biên bản nghiệm thu / hồ sơ thanh lý: cùng kiểu câu với báo giá; extra = thông tin thêm (vd. "Khối lượng 60%")
+  kyDuyetHoSo: (p: { loai: string; code: string; value?: number; extra?: string }) => `✅ Đã duyệt ${p.loai} ${p.code}${join([p.extra, p.value ? fmtMoney(p.value) : '']) ? `: ${join([p.extra, p.value ? fmtMoney(p.value) : ''])}` : ''}`,
   // Báo giá / phiếu thu / đơn mua gắn với dự án
-  baoGiaTao: (p: { code: string; total?: number; customer?: string }) => `📝 Lập báo giá ${bgTail(p)}`,
-  baoGiaTrangThai: (status: 'draft' | 'sent' | 'approved' | 'rejected', p: { code: string; total?: number; customer?: string }) => {
-    const tail = bgTail(p);
-    return status === 'sent' ? `📤 Gửi báo giá ${tail}` : status === 'approved' ? `✅ Khách duyệt báo giá ${tail}` : status === 'rejected' ? `❌ Khách từ chối báo giá ${tail}` : `🔄 Chuyển báo giá ${tail} về bản nháp`;
-  },
+  baoGiaTao: (p: { code: string; total?: number }) => `📝 Lập báo giá ${docTail(p)}`,
+  // Đã duyệt / Từ chối: người thao tác hiện ở đầu dòng nhật ký (in đậm) nên không lặp tên người trong câu; mới gửi thì ghi rõ đang CHỜ duyệt
+  baoGiaTrangThai: (status: 'draft' | 'sent' | 'approved' | 'rejected', p: { code: string; total?: number }) =>
+    status === 'sent' ? `📤 Gửi duyệt báo giá ${docTail(p)} · Chờ duyệt`
+      : status === 'approved' ? `✅ Đã duyệt báo giá ${docTail(p)}`
+      : status === 'rejected' ? `❌ Từ chối báo giá ${docTail(p)}`
+      : `🔄 Chuyển báo giá ${p.code} về bản nháp`,
   phieuThuTao: (p: { code: string; amount: number; method?: string; customer?: string }) => `💰 Thu tiền ${p.code}: ${join([fmtMoney(p.amount), p.method, p.customer])}`,
   phieuThuSua: (p: { code: string; amount: number }) => `✏️ Sửa phiếu thu ${p.code}: ${fmtMoney(p.amount)}`,
   phieuThuXoa: (p: { code: string; amount: number }) => `🗑️ Xóa phiếu thu ${p.code}: ${fmtMoney(p.amount)}`,
