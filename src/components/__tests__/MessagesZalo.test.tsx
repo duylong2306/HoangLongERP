@@ -269,6 +269,26 @@ describe('Tắt thông báo / ghim hội thoại / thông tin hội thoại', ()
     fireEvent.click(await screen.findByTestId('zalo-remove-avatar'));
     await waitFor(() => expect(fn.updateConversationAvatar).toHaveBeenCalledWith('conv_project_A', ''));
   });
+  it('danh sách: không còn biểu tượng ghim; bấm ngôi sao trên hàng để quan tâm / bỏ quan tâm mà KHÔNG mở hội thoại', () => {
+    mount();
+    expect(document.querySelectorAll('[data-testid="zalo-conv"] svg.lucide-pin').length).toBe(0);   // kể cả nhóm dự án ghim hệ thống
+    expect(screen.queryAllByTestId('zalo-row-star')).toHaveLength(0);
+    const off = within(row('p_hao')).getByTestId('zalo-row-star-off');
+    expect(off.getAttribute('aria-label')).toBe('Đánh dấu quan tâm');
+    fireEvent.click(off);
+    expect(JSON.parse(localStorage.getItem('hl_chat_prefs_me')!).starred).toEqual(['p_hao']);
+    expect(screen.queryByTestId('zalo-info')).toBeNull();                      // chưa chọn hội thoại nào → chưa mở khung chat
+    const on = within(row('p_hao')).getByTestId('zalo-row-star');
+    expect(on.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.keyDown(on, { key: 'Enter' });                                    // bàn phím cũng bỏ được
+    expect(JSON.parse(localStorage.getItem('hl_chat_prefs_me')!).starred).toEqual([]);
+  });
+  it('hàng có tin chưa đọc vẫn hiện cả số chưa đọc lẫn ngôi sao', () => {
+    localStorage.setItem('hl_chat_prefs_me', JSON.stringify({ muted: [], pinned: [], starred: ['p_ny'] }));
+    mount();
+    expect(within(row('p_ny')).getByTestId('zalo-unread').textContent).toBe('2');
+    expect(within(row('p_ny')).getByTestId('zalo-row-star')).toBeTruthy();
+  });
   it('tab đặt sau "Chưa đọc"; menu Phân loại không còn Công việc / Đã ghim', () => {
     mount();
     const tabs = screen.getAllByRole('button').filter(b => ['Tất cả', 'Chưa đọc', 'Quan tâm'].some(t => b.textContent?.startsWith(t) && b.hasAttribute('aria-pressed')));

@@ -653,10 +653,10 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               </button>)}
             {listed.length === 0 && <div className="py-14 text-center text-slate-500 text-[13px]"><MessageSquare className="w-8 h-8 mx-auto mb-2 text-slate-300" />{tab === 'unread' ? 'Không có tin chưa đọc 🎉' : 'Không có hội thoại nào'}</div>}
             {listed.map(c => {
-              const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const pinned = isPinnedConv(c, prefs); const starred = isStarredConv(c, prefs); const o = otherOf(c);
+              const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const starred = isStarredConv(c, prefs); const o = otherOf(c);
               return (
                 <button key={c.id} type="button" data-testid="zalo-conv" data-conv={c.id} onClick={() => { if (selectedId === c.id) setReloadTick(t => t + 1); setSelectedId(c.id); setPendingEmpId(null); setMobileView('chat'); }}
-                  className={`w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                  className={`group w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
                   <span className="relative"><ConvAvatar conv={c} employees={employees} me={me} size={48} />{c.type === 'personal' && isOnline(o?.id) && <i className="absolute right-0 bottom-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}</span>
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5"><b className={`truncate text-[14.5px] ${unread > 0 && !muted ? 'font-extrabold' : 'font-medium'}`}>{convName(c)}</b>
@@ -664,7 +664,17 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                       {(unreadAct[projectIdOfConversation(c) || '']?.count || 0) > 0 && <span className="text-[9.5px] font-extrabold text-red-600 bg-red-50 rounded px-1.5 py-px shrink-0" data-testid="zalo-conv-activity">🕘 {unreadAct[projectIdOfConversation(c) || ''].count} mới</span>}
                       <span className="ml-auto text-[11.5px] text-slate-500 shrink-0 flex items-center gap-1">{muted && <BellOff className="w-3 h-3" aria-label="Đã tắt thông báo" />}{listTime(c.lastMessageAt)}</span></span>
                     <span className="flex items-center gap-2"><span className={`truncate text-[13px] ${unread > 0 && !muted ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>{previewOf(c)}</span>
-                      {unread > 0 ? <span data-testid="zalo-unread" className={`ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold grid place-items-center ${muted ? 'bg-slate-400' : 'bg-red-500'}`}>{unread}</span> : starred ? <Star className="w-3.5 h-3.5 ml-auto text-amber-500 shrink-0" fill="currentColor" data-testid="zalo-row-star" /> : pinned ? <Pin className="w-3.5 h-3.5 ml-auto text-slate-400 shrink-0" /> : null}</span>
+                      {/* Bên phải: số chưa đọc + ⭐ Quan tâm (thay cho biểu tượng ghim). Sao tô vàng = đã quan tâm; chưa quan tâm chỉ hiện mờ khi rê chuột (điện thoại luôn hiện mờ). Bấm sao KHÔNG mở hội thoại. */}
+                      <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                        {unread > 0 && <span data-testid="zalo-unread" className={`shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold grid place-items-center ${muted ? 'bg-slate-400' : 'bg-red-500'}`}>{unread}</span>}
+                        <span role="button" tabIndex={0} aria-label={starred ? 'Bỏ quan tâm' : 'Đánh dấu quan tâm'} aria-pressed={starred} title={starred ? 'Bỏ quan tâm' : 'Quan tâm'} data-testid={starred ? 'zalo-row-star' : 'zalo-row-star-off'}
+                          onClick={e => { e.stopPropagation(); toggleStar(c.id); }}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleStar(c.id); } }}
+                          className={`p-0.5 rounded cursor-pointer ${starred ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-50'}`}>
+                          <Star className={`w-3.5 h-3.5 ${starred ? 'text-amber-500' : 'text-slate-400 hover:text-amber-500'}`} fill={starred ? 'currentColor' : 'none'} />
+                        </span>
+                      </span>
+                    </span>
                   </span>
                 </button>);
             })}
