@@ -46,6 +46,20 @@ describe('classifyEvent', () => {
     expect(classifyEvent('📝 X đã khởi tạo Nhiệm Vụ "N"').type).toBe('tao');
     expect(classifyEvent('xin chào').type).toBe('khac');
   });
+
+  it('từ khóa nằm trong tên công việc / nhiệm vụ (trong dấu nháy) không làm xếp nhầm loại', () => {
+    // Trước đây "tạm ứng" / "duyệt" / "hạn" trong tên bị coi là tin Tài chính / Duyệt / Hạn
+    expect(classifyEvent('📌 Long đã chuyển Phụ Trách Chính công việc "KÝ HỢP ĐỒNG NHẬN TẠM ỨNG" sang An.').type).toBe('giao');
+    expect(classifyEvent('➕ Lan đã thêm An vào Nhiệm Vụ "Duyệt hồ sơ".').type).toBe('giao');
+    expect(classifyEvent('📝 Lan đã khởi tạo Nhiệm Vụ "Mua vật tư phiếu chi".').type).toBe('tao');
+    expect(classifyEvent('📝 Lan đã khởi tạo Nhiệm Vụ "Đổi hạn ưu tiên".').type).toBe('tao');
+  });
+
+  it('từ khóa NGOÀI dấu nháy vẫn được tính và nội dung hiển thị giữ nguyên tên', () => {
+    expect(classifyEvent('💰 ĐÃ LẬP PHIẾU CHI TẠM ỨNG').type).toBe('tc');
+    expect(classifyEvent('📝 Lan đã cập nhật Nhiệm Vụ "A" (Hạn mới: 21/08).').type).toBe('han');
+    expect(classifyEvent('📌 Long đã chuyển công việc "KÝ HỢP ĐỒNG NHẬN TẠM ỨNG" sang An.').text).toContain('"KÝ HỢP ĐỒNG NHẬN TẠM ỨNG"');
+  });
 });
 
 describe('recordProjectEvent', () => {

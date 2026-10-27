@@ -61,7 +61,9 @@ export const EVENT_TYPE_META: Record<ProjectEventType, { icon: string; label: st
  */
 export function classifyEvent(content: string): { type: ProjectEventType; text: string } {
   const s = (content || '').trim();
-  const lower = s.toLowerCase();
+  // Chỉ dò từ khóa NGOÀI phần chữ trong dấu nháy kép (tên công việc / nhiệm vụ / dự án) — tên đối tượng hay chứa từ khóa gây xếp nhầm,
+  // vd. công việc "KÝ HỢP ĐỒNG NHẬN TẠM ỨNG" từng bị coi là tin Tài chính. Nội dung hiển thị (text) vẫn giữ nguyên tên.
+  const lower = s.replace(/["“][^"”]*["”]/g, '""').toLowerCase();
   const first = Array.from(s)[0] || '';
   let type: ProjectEventType = 'khac';
   if (/xóa|hủy|bị hủy/.test(lower) || first === '🗑') type = 'xoa';

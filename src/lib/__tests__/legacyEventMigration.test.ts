@@ -100,7 +100,14 @@ describe('đối chiếu bản sao classifyEvent với bản TypeScript', () => 
     '📦 ĐỀ XUẤT VẬT TƯ VT-1 ĐÃ NHẬN HÀNG', '💰 ĐÃ LẬP PHIẾU CHI', '👤 Long chuyển trưởng dự án', '🔄 Đổi giai đoạn', 'đổi hạn công việc "Sơn"', 'tin thường',
   ];
   it.each(samples)('%s', (s) => {
-    expect(core.classifyEvent(s)).toEqual(classifyTs(s));
+    expect(core.classifyLegacy(s)).toEqual(classifyTs(s));   // bản của công cụ chuyển (đã bỏ phần trong nháy) phải trùng bản trong ứng dụng
+  });
+  it('cả hai bản đều không xếp nhầm theo từ khóa nằm trong tên đối tượng', () => {
+    for (const s of [
+      '📌 Long đã chuyển Phụ Trách Chính công việc "KÝ HỢP ĐỒNG NHẬN TẠM ỨNG" sang An.',
+      '🎉 Long đã HOÀN THÀNH công việc "Mua vật tư phiếu chi".',
+      '➕ Lan đã thêm An vào Nhiệm Vụ "Duyệt hồ sơ".',
+    ]) expect(core.classifyLegacy(s)).toEqual(classifyTs(s));
   });
   it('mọi loại do bản .mjs trả về đều có trong EVENT_TYPE_META', () => {
     for (const s of samples) expect(EVENT_TYPE_META[core.classifyEvent(s).type as keyof typeof EVENT_TYPE_META]).toBeTruthy();
