@@ -7,6 +7,7 @@ import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 import { replacePlaceholders } from '../lib/docPlaceholders';
 import { getDefaultLegalTemplate, legalConfigKey, LegalSector } from '../lib/legalTemplates';
+import { ListSkeleton } from './Skeleton';
 
 /**
  * HỒ SƠ PHÁP LÝ DỰ ÁN — loại tài liệu thứ 5 của hồ sơ báo giá (cạnh Báo giá, Hợp đồng,
@@ -196,9 +197,7 @@ export default function LegalDocument({ quoteData }: LegalDocumentProps) {
 
   if (loadingCustom) {
     return (
-      <div className="p-8 text-center text-slate-500 font-sans">
-        Đang tải mẫu hồ sơ pháp lý từ cơ sở dữ liệu...
-      </div>
+      <div className="p-8"><ListSkeleton rows={6} avatar={false} label="Đang tải mẫu hồ sơ pháp lý…" /></div>
     );
   }
 

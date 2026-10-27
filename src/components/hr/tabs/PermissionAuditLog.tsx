@@ -4,6 +4,8 @@
 import React from 'react';
 import { History, ChevronDown, ChevronRight, RefreshCw, ArrowRight } from 'lucide-react';
 import { loadPermissionAudit, AUDIT_AREA_LABELS, AuditRow } from '../../../lib/permissionAudit';
+import MiniLoader from '../../MiniLoader';
+import { ListSkeleton } from '../../Skeleton';
 
 const dinhDang = (iso: string) => {
   const d = new Date(iso);
@@ -32,11 +34,11 @@ export default function PermissionAuditLog() {
           <p className="text-[10.5px] text-slate-400 mt-1">Mỗi lần bấm "Lưu thay đổi" ở các tab phân quyền được ghi lại: ai đổi, lúc nào, đổi gì (từ → sang). Hiển thị 100 lần gần nhất.</p>
         </div>
         <button type="button" onClick={tai} disabled={state.loading} className="px-3 py-1.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg cursor-pointer flex items-center gap-1 disabled:opacity-50">
-          <RefreshCw className={`w-3 h-3 ${state.loading ? 'animate-spin' : ''}`} /> Tải lại
+          {state.loading ? <MiniLoader size={12} /> : <RefreshCw className="w-3 h-3" />} Tải lại
         </button>
       </div>
 
-      {state.loading && <p className="text-xs text-slate-400">Đang tải nhật ký…</p>}
+      {state.loading && <ListSkeleton rows={4} avatar={false} label="Đang tải nhật ký…" />}
 
       {!state.loading && state.notEnabled && (
         <div role="alert" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">

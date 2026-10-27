@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { platformCall } from './platformApi';
 import { VIETNAM_BANKS } from '../../lib/vietnamBanks';
+import { ListSkeleton } from '../Skeleton';
+import MiniLoader from '../MiniLoader';
 
 // TAB "CẤU HÌNH" — số ngày dùng thử, tài khoản ngân hàng nhận tiền (hiện cho khách khi đặt mua) (đổi mật khẩu nằm ở tab "Tài khoản").
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
@@ -54,7 +56,7 @@ export default function SettingsTab() {
   };
 
   if (loadError) return <Msg ok={false} text={loadError} />;
-  if (!loaded) return <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>;
+  if (!loaded) return <ListSkeleton rows={4} avatar={false} />;
 
   return (
     <div className="max-w-3xl">
@@ -102,7 +104,7 @@ export default function SettingsTab() {
         </fieldset>
 
         {msg && <Msg {...msg} />}
-        <button type="submit" disabled={busy} className={btn}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Lưu cấu hình</button>
+        <button type="submit" disabled={busy} className={btn}>{busy && <MiniLoader size={16} />} Lưu cấu hình</button>
       </form>
 
       <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 mt-6" id="telegram_box">
@@ -119,7 +121,7 @@ export default function SettingsTab() {
           </ol>
         )}
         {telegram.msg && <Msg {...telegram.msg} />}
-        <button type="button" onClick={testTelegram} disabled={telegram.busy} className={btn}>{telegram.busy && <Loader2 className="w-4 h-4 animate-spin" />} Gửi tin nhắn thử</button>
+        <button type="button" onClick={testTelegram} disabled={telegram.busy} className={btn}>{telegram.busy && <MiniLoader size={16} />} Gửi tin nhắn thử</button>
       </section>
     </div>
   );

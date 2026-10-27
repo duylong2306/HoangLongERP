@@ -14,6 +14,7 @@ import {
   todayYmd, toDay, bucketTasks, buildProjectFinance, sumFinance, cashflowByDay, spendByCategory, paymentsOfDay, receiptsOfDay,
   materialByDay, proposalStatusCounts, supplierPayable, summarizeAttendance, buildAlerts, type ProjectFinanceRow,
 } from '../lib/executiveDashboard';
+import MiniLoader from './MiniLoader';
 
 interface ExecutiveDashboardProps {
   projects: Project[];
@@ -221,7 +222,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
           {loadedAt && <span className="text-[10.5px] text-slate-400">Cập nhật {loadedAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>}
           <button type="button" onClick={loadExtras} disabled={refreshing}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 cursor-pointer disabled:opacity-60 transition">
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Làm mới
+            {refreshing ? <MiniLoader size={14} /> : <RefreshCw className="w-3.5 h-3.5" />} Làm mới
           </button>
         </div>
       </div>

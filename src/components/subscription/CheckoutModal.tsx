@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, X, QrCode, Clock, ShieldCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, X, QrCode, Clock, ShieldCheck } from 'lucide-react';
 import CopyButton from '../CopyButton';
 import { subscriptionCall, type SubscriptionOrder, type BankInfo } from '../../lib/subscriptionClient';
 import { buildVietQrPayload } from '../../lib/vietqr';
+import MiniLoader from '../MiniLoader';
 
 // TRANG THANH TOÁN — hiện khi khách bấm mua/gia hạn một gói (hoặc bấm "Thanh toán" ở đơn đang chờ).
 //   1) Mã QR VietQR: quét bằng app ngân hàng sẽ tự điền ngân hàng + số tài khoản + SỐ TIỀN + NỘI DUNG (= mã đơn);
@@ -83,7 +84,7 @@ export default function CheckoutModal({ order, bank, onClose, onChanged, onCance
             {payload ? (
               <>
                 <div className="w-[280px] max-w-full aspect-square bg-white border border-slate-200 rounded-xl flex items-center justify-center overflow-hidden">
-                  {qr ? <img src={qr} alt={`Mã QR chuyển khoản ${vnd(order.amount)} nội dung ${order.code}`} className="w-full h-full" /> : <Loader2 className="w-6 h-6 animate-spin text-slate-400" />}
+                  {qr ? <img src={qr} alt={`Mã QR chuyển khoản ${vnd(order.amount)} nội dung ${order.code}`} className="w-full h-full" /> : <MiniLoader size={24} className="text-slate-400" />}
                 </div>
                 <p className="text-sm text-slate-600 text-center inline-flex items-start gap-1.5"><QrCode className="w-4 h-4 mt-0.5 shrink-0 text-blue-600" /> Mở app ngân hàng → quét mã QR. Số tài khoản, số tiền và nội dung sẽ tự điền.</p>
               </>
@@ -133,7 +134,7 @@ export default function CheckoutModal({ order, bank, onClose, onChanged, onCance
             <>
               <button type="button" onClick={claim} disabled={busy || !hasBank}
                 className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-[#ffffff] font-black py-3 rounded-xl transition-colors">
-                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />} Xác nhận chuyển khoản thành công
+                {busy ? <MiniLoader size={20} /> : <ShieldCheck className="w-5 h-5" />} Xác nhận chuyển khoản thành công
               </button>
               <p className="text-xs text-slate-500 text-center">Chỉ bấm sau khi bạn <b>đã chuyển khoản</b>. Gói chỉ được kích hoạt khi quản trị nền tảng xác nhận tiền đã về.</p>
             </>

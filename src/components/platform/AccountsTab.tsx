@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Loader2, AlertCircle, CheckCircle2, KeyRound, Lock, Unlock, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Plus, AlertCircle, CheckCircle2, KeyRound, Lock, Unlock, ShieldCheck, ShieldOff } from 'lucide-react';
 import CopyButton from '../CopyButton';
 import { platformCall, setPlatformToken } from './platformApi';
 import { formatDateTime } from './format';
 import ConfirmDialog from './ConfirmDialog';
+import { ListSkeleton } from '../Skeleton';
+import MiniLoader from '../MiniLoader';
 
 // TAB "TÀI KHOẢN" — (1) mọi quản trị viên: đổi mật khẩu của chính mình; (2) CHỦ nền tảng: tạo / khóa / đặt lại mật khẩu
 // cho các quản trị viên khác (nhiều người cùng dùng trang quản trị). Quyền thật kiểm tra ở máy chủ (api/platform.ts).
@@ -48,7 +50,7 @@ function ChangePasswordForm() {
       <div><label className={label} htmlFor="st_mat_khau_moi">Mật khẩu mới</label><input id="st_mat_khau_moi" type="password" className={input} value={pw.newPassword} onChange={e => setPw(p => ({ ...p, newPassword: e.target.value }))} autoComplete="new-password" required /><p className="text-xs text-slate-500 mt-1">Từ 10 đến 72 ký tự, có cả chữ và số.</p></div>
       <div><label className={label} htmlFor="st_nhap_lai_mat_khau_moi">Nhập lại mật khẩu mới</label><input id="st_nhap_lai_mat_khau_moi" type="password" className={input} value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} autoComplete="new-password" required /></div>
       {msg && <Msg {...msg} />}
-      <button type="submit" disabled={busy} className={btn}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Đổi mật khẩu</button>
+      <button type="submit" disabled={busy} className={btn}>{busy && <MiniLoader size={16} />} Đổi mật khẩu</button>
     </form>
   );
 }
@@ -119,7 +121,7 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
       {msg && <Msg {...msg} />}
 
       {step === 'idle' && !enabled && (
-        <button type="button" onClick={start} disabled={busy} className={btn}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Bật xác thực hai lớp</button>
+        <button type="button" onClick={start} disabled={busy} className={btn}>{busy && <MiniLoader size={16} />} Bật xác thực hai lớp</button>
       )}
       {step === 'idle' && enabled && (
         <button type="button" onClick={() => { setMsg(null); setStep('disable'); }} className={btnSm}>Tắt xác thực hai lớp</button>
@@ -134,7 +136,7 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
           </ol>
           <div className="flex flex-wrap items-start gap-4">
             <div className="w-[220px] h-[220px] bg-white border border-slate-200 rounded-lg flex items-center justify-center overflow-hidden">
-              {qr ? <img src={qr} alt="Mã QR để thêm tài khoản vào ứng dụng xác thực" className="w-full h-full" /> : <Loader2 className="w-5 h-5 animate-spin text-slate-400" />}
+              {qr ? <img src={qr} alt="Mã QR để thêm tài khoản vào ứng dụng xác thực" className="w-full h-full" /> : <MiniLoader size={20} className="text-slate-400" />}
             </div>
             <div className="min-w-0 flex-1 space-y-2">
               <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Khóa nhập tay</div>
@@ -146,7 +148,7 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy} className={btn}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Xác nhận và bật</button>
+            <button type="submit" disabled={busy} className={btn}>{busy && <MiniLoader size={16} />} Xác nhận và bật</button>
             <button type="button" onClick={reset} className={btnSm}>Hủy</button>
           </div>
         </form>
@@ -175,7 +177,7 @@ function TotpCard({ enabled, onChanged }: { enabled: boolean; onChanged: (on: bo
             <input id="totp_dcode" className={`${input} font-mono tracking-widest max-w-[240px]`} value={code} onChange={e => setCode(e.target.value)} maxLength={useRecoveryCode ? 20 : 7} autoComplete="one-time-code" required /></div>
           <button type="button" onClick={() => { setUseRecoveryCode(v => !v); setCode(''); }} className="text-xs font-semibold text-blue-700 hover:underline">{useRecoveryCode ? 'Dùng mã từ ứng dụng' : 'Dùng mã khôi phục'}</button>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy} className={`${btn} !bg-rose-600 hover:!bg-rose-700`}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Tắt xác thực hai lớp</button>
+            <button type="submit" disabled={busy} className={`${btn} !bg-rose-600 hover:!bg-rose-700`}>{busy && <MiniLoader size={16} />} Tắt xác thực hai lớp</button>
             <button type="button" onClick={reset} className={btnSm}>Hủy</button>
           </div>
         </form>
@@ -258,14 +260,14 @@ function ManageAccounts({ myId }: { myId: string }) {
           <div><label className={label} htmlFor="ac_mat_khau">Mật khẩu ban đầu *</label><input id="ac_mat_khau" type="password" className={input} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete="new-password" required /></div>
         </div>
         <p className="text-xs text-slate-500">Mật khẩu từ 10 đến 72 ký tự, có cả chữ và số. Quản trị viên mới có đủ quyền như bạn, trừ quản lý tài khoản.</p>
-        <button type="submit" disabled={creating} className={btn}>{creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Tạo tài khoản</button>
+        <button type="submit" disabled={creating} className={btn}>{creating ? <MiniLoader size={16} /> : <Plus className="w-4 h-4" />} Tạo tài khoản</button>
       </form>
 
       {notice && <Msg {...notice} />}
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <h2 className="text-base font-black text-slate-900 px-5 pt-5 pb-3">Danh sách quản trị viên</h2>
-        {loading ? <div className="flex items-center gap-2 text-sm text-slate-500 px-5 pb-5"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>
+        {loading ? <div className="px-5 pb-5"><ListSkeleton rows={4} avatar={false} /></div>
           : loadError ? <div className="px-5 pb-5"><Msg ok={false} text={loadError} /></div>
           : (
             <div className="overflow-x-auto">
@@ -312,7 +314,7 @@ function ManageAccounts({ myId }: { myId: string }) {
           <h2 className="text-base font-black text-slate-900">Đặt lại mật khẩu cho "{resetFor.username}"</h2>
           <div><label className={label} htmlFor="ac_mat_khau_moi">Mật khẩu mới</label><input id="ac_mat_khau_moi" type="password" className={input} value={resetFor.password} onChange={e => setResetFor(r => r && { ...r, password: e.target.value })} autoComplete="new-password" required /></div>
           <div className="flex gap-2">
-            <button type="submit" disabled={busyId === resetFor.id} className={btn}>{busyId === resetFor.id && <Loader2 className="w-4 h-4 animate-spin" />} Lưu mật khẩu mới</button>
+            <button type="submit" disabled={busyId === resetFor.id} className={btn}>{busyId === resetFor.id && <MiniLoader size={16} />} Lưu mật khẩu mới</button>
             <button type="button" onClick={() => setResetFor(null)} className={btnSm}>Hủy</button>
           </div>
         </form>

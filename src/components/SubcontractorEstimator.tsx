@@ -6,6 +6,7 @@ import { Quote, ArchivedQuote, Customer, Project, Employee, Supplier, Task } fro
 import RichTextEditor from './RichTextEditor';
 import { docSoTiengViet } from './QuotationTableSheet';
 import { useNotification, hasModulePermission } from '../context';
+import MiniLoader from './MiniLoader';
 
 // Mẫu Hợp Đồng Giao Khoán — cập nhật theo mẫu "Mẫu HĐ Thầu Phụ Mới.docx" do chủ
 // dự án cung cấp (2026-09-14). Giữ nguyên toàn bộ nội dung pháp lý của mẫu gốc
@@ -1840,7 +1841,7 @@ export default function SubcontractorEstimator({
                     : 'bg-amber-500 hover:bg-amber-400 text-white'
                 }`}
               >
-                <Save className={`w-4 h-4 ${dbSaving ? 'animate-spin' : ''}`} />
+                {dbSaving ? <MiniLoader size={16} /> : <Save className="w-4 h-4" />}
                 {dbSaving ? 'Đang lưu...' : 'Lưu'}
               </button>
             </div>

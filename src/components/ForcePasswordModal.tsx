@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { KeyRound, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { KeyRound, Lock, Eye, EyeOff } from 'lucide-react';
 import { useNotification } from '../context';
 import { checkNewPassword, requestPasswordChange, setPasswordNotice, type PasswordNotice } from '../lib/passwordChange';
+import MiniLoader from './MiniLoader';
 
 // Hộp thoại đổi mật khẩu hiện ngay sau đăng nhập khi:
 //  • notice = 'force'   — quản trị viên yêu cầu đổi (cờ must_change_password).
@@ -75,7 +76,7 @@ export default function ForcePasswordModal({ notice, onDone }: Props) {
         <div className="flex gap-2 pt-1">
           <button type="button" onClick={later} disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 disabled:opacity-40">Để sau</button>
           <button type="submit" disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-black uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-white flex items-center justify-center gap-2 disabled:opacity-40">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}Đổi mật khẩu
+            {busy ? <MiniLoader size={16} /> : <Lock className="w-4 h-4" />}Đổi mật khẩu
           </button>
         </div>
       </form>

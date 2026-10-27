@@ -8,6 +8,7 @@ import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
 import LegalTemplatePanel from './LegalTemplatePanel';
 import { useNotification, hasModulePermission } from '../context';
+import MiniLoader from './MiniLoader';
 
 interface MechanicalEstimatorProps {
   onAddQuote?: (newQuote: any) => void;
@@ -1973,7 +1974,7 @@ export default function MechanicalEstimator({
                   : 'bg-pink-600 hover:bg-pink-500 text-white'
               }`}
             >
-              <Save className={`w-4 h-4 ${dbSaving ? 'animate-spin' : ''}`} />
+              {dbSaving ? <MiniLoader size={16} /> : <Save className="w-4 h-4" />}
               {dbSaving ? 'Đang lưu...' : 'Lưu'}
             </button>
           </div>

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import { SettingsProvider } from './context/SettingsContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import LoadingScreen from './components/LoadingScreen';
 import { getHostInfo } from './lib/tenant';
 import { getStoredTokenClaims, clearStoredSession } from './lib/supabase';
 import { chooseScreen } from './lib/boot';
@@ -27,7 +28,7 @@ const hostKind = getHostInfo().kind;
 const boot = chooseScreen(hostKind, window.location.pathname, getStoredTokenClaims(), Date.now());
 
 const renderRoot = (node: React.ReactNode) =>
-  createRoot(document.getElementById('root')!).render(<StrictMode><Suspense fallback={null}>{node}</Suspense></StrictMode>);
+  createRoot(document.getElementById('root')!).render(<StrictMode><Suspense fallback={<LoadingScreen messages={['Đang tải…']} footer="" />}>{node}</Suspense></StrictMode>);
 
 if (boot.screen === 'console') {
   renderRoot(<PlatformConsole />);

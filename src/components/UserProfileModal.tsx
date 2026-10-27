@@ -2,24 +2,10 @@
 import { Employee } from '../types';
 import { checkNewPassword, requestPasswordChange } from '../lib/passwordChange';
 import { dbService } from '../lib/dbService';
-import {
-  X,
-  User,
-  MapPin,
-  Phone,
-  Lock,
-  Camera,
-  Check,
-  Eye,
-  EyeOff,
-  Save,
-  KeyRound,
-  Sparkles,
-  Upload,
-  Loader2
-} from 'lucide-react';
+import { X, User, MapPin, Phone, Lock, Camera, Check, Eye, EyeOff, Save, KeyRound, Sparkles, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNotification } from '../context';
+import MiniLoader from './MiniLoader';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -251,7 +237,7 @@ export default function UserProfileModal({
                     className="absolute -bottom-1 -right-1 p-1 bg-slate-900 rounded-full border border-slate-700 text-slate-400 hover:text-white hover:border-emerald-500 transition-colors cursor-pointer disabled:opacity-60"
                   >
                     {uploadingAvatar ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <MiniLoader size={14} />
                     ) : (
                       <Camera className="w-3.5 h-3.5" />
                     )}
@@ -293,7 +279,7 @@ export default function UserProfileModal({
                       disabled={uploadingAvatar}
                       className="text-[10px] font-bold text-slate-400 hover:text-white flex items-center gap-1 uppercase tracking-wide bg-slate-900/60 p-1 px-2 rounded hover:bg-slate-800 transition-colors disabled:opacity-60 cursor-pointer"
                     >
-                      {uploadingAvatar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3 text-emerald-400" />}
+                      {uploadingAvatar ? <MiniLoader size={12} /> : <Upload className="w-3 h-3 text-emerald-400" />}
                       {uploadingAvatar ? 'Đang tải...' : 'Tải ảnh từ máy'}
                     </button>
                     <button

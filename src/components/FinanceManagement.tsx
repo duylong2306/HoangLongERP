@@ -69,6 +69,7 @@ import {
   Image as ImageIcon,
   Undo2,
 } from 'lucide-react';
+import MiniLoader from './MiniLoader';
 
 // Trạng thái hiển thị của phiếu chi xoay quanh chứng từ (thay cho 'approved'/'pending').
 //  - rejected        → Bác thầu (giữ nguyên ý nghĩa từ chối)
@@ -9377,7 +9378,7 @@ export default function FinanceManagement({
                   </div>
                   {cashFundLoading && (
                     <div className="text-[10px] text-slate-500 italic flex items-center gap-1.5">
-                      <span className="inline-block w-3 h-3 border-2 border-slate-600 border-t-teal-400 rounded-full animate-spin" />
+                      <MiniLoader size={12} className="text-teal-500" />
                       Đang tải dữ liệu Quỹ tiền mặt...
                     </div>
                   )}

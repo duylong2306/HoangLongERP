@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, Check, X, BellRing, Search } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Check, X, BellRing, Search } from 'lucide-react';
 import { platformCall } from './platformApi';
 import ConfirmDialog from './ConfirmDialog';
 import { formatVnd, formatDate, formatDateTime, PERIOD_LABEL, ORDER_STATUS_LABEL, ORDER_STATUS_BADGE } from './format';
+import { ListSkeleton } from '../Skeleton';
 
 // TAB "ĐƠN ĐĂNG KÝ" — khách chọn gói + kỳ hạn (tháng/năm) → đơn "Chờ xác nhận" kèm số tiền + mã chuyển khoản.
 // Admin kiểm tra tiền đã về (theo mã chuyển khoản) rồi bấm XÁC NHẬN để kích hoạt/gia hạn doanh nghiệp.
@@ -108,7 +109,7 @@ export default function OrdersTab() {
         </div>
       )}
       {notice && <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-3 py-2.5 text-sm" role="status"><CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> {notice}</div>}
-      {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>}
+      {loading && <ListSkeleton rows={4} />}
       {loadError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2.5 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {loadError}</div>}
 
       {searching && !loading && !loadError && <p className="text-xs text-slate-500" role="status" id="od_ket_qua_tim">Tìm thấy <b>{shown.length}</b> / {orders.length} đơn (tìm trong tất cả trạng thái).</p>}

@@ -7,6 +7,7 @@ import type { Project } from '../../types';
 import { todayYmd, toDay, materialByDay, proposalStatusCounts, supplierPayable, PROPOSAL_STATUS_LABELS } from '../../lib/executiveDashboard';
 import { matchesQuery, rangeOf, inRange, type DatePreset } from '../../lib/directorViews';
 import { Card, Stat, Badge, Empty, PairBars, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, fmtShort, dm, dmy, tableHead, Th, type Tone } from './kit';
+import MiniLoader from '../MiniLoader';
 
 interface Props { projects: Project[]; onNavigateTab: (tabId: string) => void }
 
@@ -93,7 +94,7 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
   return (
     <div className="space-y-4" id="director_view_warehouse">
       <Card title="Tổng quan kho & vật tư" icon={<PackageOpen className="w-4 h-4 text-teal-500" />}
-        right={<button type="button" onClick={load} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer disabled:opacity-60"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />Làm mới</button>}>
+        right={<button type="button" onClick={load} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer disabled:opacity-60">{loading ? <MiniLoader size={14} /> : <RefreshCw className="w-3.5 h-3.5" />}Làm mới</button>}>
         <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2.5">
           <Stat label="Mặt hàng trong kho" value={String(inventory.length)} sub={`Giá trị tồn ${fmtShort(stockValue)}`} tone="indigo" onClick={() => { setTab('stock'); resetStock(); }} />
           <Stat label="Sắp hết hàng" value={String(lowCount)} tone={lowCount ? 'amber' : 'slate'} onClick={() => { setTab('stock'); resetStock(); setSState('low'); }} active={tab === 'stock' && sState === 'low'} />

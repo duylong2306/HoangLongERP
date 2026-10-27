@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Download, Search, Loader2 } from 'lucide-react';
+import { X, Download, Search } from 'lucide-react';
 import { markProjectSeen } from '../lib/projectEventReads';
 import { EVENT_TYPE_META, EVENT_PAGE_DAYS, loadProjectEventsPage, type EventFilters, type ProjectEventRow, type ProjectEventType } from '../lib/projectEvents';
+import { ListSkeleton } from './Skeleton';
+import MiniLoader from './MiniLoader';
 
 // NHẬT KÝ HOẠT ĐỘNG DỰ ÁN / CÔNG VIỆC — dòng thời gian (kiểu A trong bản xem trước docs/preview-nhat-ky).
 // Mở từ: Tin nhắn (cạnh nút "Mở dự án"), chi tiết dự án, chi tiết công việc (truyền taskId → "Lịch sử" riêng của việc).
@@ -155,7 +157,7 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
           {onExport && (
             <button type="button" onClick={doExport} disabled={exporting} data-testid="activity-export"
               className="shrink-0 flex items-center gap-1 text-[12px] font-bold rounded-lg px-2.5 py-1.5 cursor-pointer disabled:opacity-60" style={{ background: '#ffffff', color: '#0d47c9' }}>
-              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Xuất Excel
+              {exporting ? <MiniLoader size={14} /> : <Download className="w-3.5 h-3.5" />} Xuất Excel
             </button>
           )}
           <button type="button" onClick={onClose} aria-label="Đóng" className="shrink-0 p-1.5 rounded-lg cursor-pointer" style={{ color: '#ffffff' }}><X className="w-5 h-5" /></button>
@@ -256,7 +258,10 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
               </div>
             </div>
           ))}
-          {loading && <div className="flex justify-center py-4 text-slate-400" data-testid="activity-loading"><Loader2 className="w-5 h-5 animate-spin" /></div>}
+          {/* Lần tải đầu (chưa có dòng nào): khung xương; tải thêm 3 ngày cũ hơn: loader nhỏ ở cuối danh sách */}
+          {loading && (groups.length === 0
+            ? <div className="py-4" data-testid="activity-loading"><ListSkeleton rows={5} avatar={false} /></div>
+            : <div className="flex justify-center py-4 text-slate-400" data-testid="activity-loading"><MiniLoader size={20} /></div>)}
           {!loading && hasMore && (
             <button type="button" onClick={loadMore} data-testid="activity-more"
               className="block mx-auto my-3 text-[12px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-4 py-1.5 cursor-pointer">Tải {EVENT_PAGE_DAYS} ngày trước đó</button>

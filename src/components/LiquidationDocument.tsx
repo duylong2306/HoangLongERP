@@ -5,6 +5,7 @@ import { dbService } from '../lib/dbService';
 import { useNotification, useAuth, canApproveProjectDoc } from '../context';
 import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
+import { ListSkeleton } from './Skeleton';
 
 const DEFAULT_MECH_LIQUIDATION_TEMPLATE = `<h3 style="text-align: center;"><strong>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</strong></h3>
 <p style="text-align: center;"><strong>Độc lập - Tự do - Hạnh phúc</strong></p>
@@ -346,9 +347,7 @@ export default function LiquidationDocument({ quoteData }: LiquidationDocumentPr
 
   if (loadingCustom) {
     return (
-      <div className="p-8 text-center text-slate-500 font-sans">
-        Đang tải mẫu thanh lý từ cơ sở dữ liệu...
-      </div>
+      <div className="p-8"><ListSkeleton rows={6} avatar={false} label="Đang tải mẫu thanh lý…" /></div>
     );
   }
 

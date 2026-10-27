@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Loader2, AlertCircle, CheckCircle2, Pencil, X, Trash2, Check } from 'lucide-react';
+import { Plus, AlertCircle, CheckCircle2, Pencil, X, Trash2, Check } from 'lucide-react';
 import { platformCall, ApiError } from './platformApi';
 import { formatVnd } from './format';
+import { ListSkeleton } from '../Skeleton';
+import MiniLoader from '../MiniLoader';
 
 // TAB "GÓI DỊCH VỤ" — cấu hình tên gói, giá theo THÁNG và theo NĂM, số nhân viên tối đa, bật/tắt bán.
 // Giá đổi ở đây chỉ áp dụng cho đơn MỚI; đơn đã tạo giữ nguyên số tiền lúc đặt.
@@ -45,7 +47,7 @@ export default function PlansTab() {
       </div>
 
       {notice && <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-3 py-2.5 text-sm" role="status"><CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> {notice}</div>}
-      {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>}
+      {loading && <ListSkeleton rows={4} />}
       {loadError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2.5 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {loadError}</div>}
 
       {!loading && !loadError && (
@@ -148,7 +150,7 @@ function PlanModal({ initial, isNew, onClose, onSaved }: { initial: Plan; isNew:
         {error && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}</div>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={`${btn} border border-slate-300 text-slate-700 hover:bg-slate-100 !px-4 !py-2`}>Hủy</button>
-          <button type="submit" disabled={busy} className={`${btn} bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] !px-4 !py-2`}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Lưu gói</button>
+          <button type="submit" disabled={busy} className={`${btn} bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] !px-4 !py-2`}>{busy && <MiniLoader size={16} />} Lưu gói</button>
         </div>
       </form>
     </div>

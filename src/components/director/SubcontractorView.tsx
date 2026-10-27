@@ -8,6 +8,7 @@ import type { Project, Payment } from '../../types';
 import { todayYmd, toDay } from '../../lib/executiveDashboard';
 import { matchesQuery, rangeOf, inRange, buildSubcontractorRows, contractAmount, type DatePreset } from '../../lib/directorViews';
 import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, fmtShort, dmy, tableHead, Th } from './kit';
+import MiniLoader from '../MiniLoader';
 
 interface Props { projects: Project[]; payments: Payment[]; onNavigateTab: (tabId: string) => void }
 
@@ -75,7 +76,7 @@ export default function SubcontractorView({ projects, payments, onNavigateTab }:
   return (
     <div className="space-y-4" id="director_view_subcontractor">
       <Card title="Tổng quan nhà thầu phụ" icon={<Briefcase className="w-4 h-4 text-orange-500" />}
-        right={<button type="button" onClick={load} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer disabled:opacity-60"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />Làm mới</button>}>
+        right={<button type="button" onClick={load} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer disabled:opacity-60">{loading ? <MiniLoader size={14} /> : <RefreshCw className="w-3.5 h-3.5" />}Làm mới</button>}>
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
           <Stat label="Thầu phụ hợp tác" value={String(subs.length)} sub={`${working} đang có hợp đồng`} tone="indigo" onClick={resetSub} />
           <Stat label="Giá trị hợp đồng đã duyệt" value={fmtShort(totalContract)} sub={`${contracts.filter(c => c.isApproved === true).length} hợp đồng`} tone="indigo" />

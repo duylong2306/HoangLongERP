@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle2, Clock, Users, X, CreditCard, Hourglass } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Users, X, CreditCard, Hourglass } from 'lucide-react';
 import {
   subscriptionCall, describeRemaining, type SubscriptionStatus, type SubscriptionPlan, type SubscriptionOrder, type BankInfo,
 } from '../../lib/subscriptionClient';
 import PlanFeatures from './PlanFeatures';
 import CheckoutModal from './CheckoutModal';
+import { ListSkeleton } from '../Skeleton';
+import MiniLoader from '../MiniLoader';
 
 // BẢNG GÓI & GIA HẠN của doanh nghiệp — dùng ở 2 nơi: trang "hết hạn" (RenewalPage, token khóa) và cửa sổ "Gói dịch vụ" trong ERP.
 // Hiện: hạn dùng + gói hiện tại + số nhân viên; các gói đang bán (chọn Tháng/Năm, mô tả được/không được nhận);
@@ -71,7 +73,7 @@ export default function SubscriptionPanel({ onChanged, onStatus }: { onChanged?:
   const pending = useMemo(() => (st?.orders || []).filter(o => o.status === 'pending'), [st]);
   const history = useMemo(() => (st?.orders || []).filter(o => o.status !== 'pending').slice(0, 5), [st]);
 
-  if (loading) return <div className="flex items-center gap-2 text-sm text-slate-500 py-6"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>;
+  if (loading) return <div className="py-4"><ListSkeleton rows={3} avatar={false} /></div>;
   if (!st) return <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2.5 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error || 'Không tải được thông tin gói.'}</div>;
 
   const sub = st.subscription;
@@ -136,7 +138,7 @@ export default function SubscriptionPanel({ onChanged, onStatus }: { onChanged?:
             {cancelError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm" role="alert"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {cancelError}</div>}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setCancelTarget(null)} disabled={cancelBusy} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold">Giữ đơn</button>
-              <button type="button" onClick={doCancel} disabled={cancelBusy} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-[#ffffff] text-sm font-bold">{cancelBusy && <Loader2 className="w-4 h-4 animate-spin" />} Xác nhận hủy đơn</button>
+              <button type="button" onClick={doCancel} disabled={cancelBusy} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-[#ffffff] text-sm font-bold">{cancelBusy && <MiniLoader size={16} />} Xác nhận hủy đơn</button>
             </div>
           </div>
         </div>
@@ -177,7 +179,7 @@ export default function SubscriptionPanel({ onChanged, onStatus }: { onChanged?:
                   <div className="mt-auto pt-4">
                     <button disabled={!st.canManage || price <= 0 || busyPlan !== null} onClick={() => order(p)}
                       className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-[#ffffff] font-bold py-2.5 rounded-lg transition-colors">
-                      {busyPlan === p.id && <Loader2 className="w-4 h-4 animate-spin" />} {isCurrent ? 'Gia hạn gói này' : 'Chọn gói này'}
+                      {busyPlan === p.id && <MiniLoader size={16} />} {isCurrent ? 'Gia hạn gói này' : 'Chọn gói này'}
                     </button>
                   </div>
                 </div>

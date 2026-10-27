@@ -86,7 +86,9 @@ import { useChatPrefs } from './lib/useChatPrefs';
 import { unreadForBadge } from './lib/chatPrefs';
 import { useProjectActivityUnread, activityProjectKey } from './lib/useProjectActivityUnread';
 import UpdateBanner from './components/UpdateBanner';
+import LoadingScreen from './components/LoadingScreen';
 import { useAppBadge } from './lib/appBadge';
+import MiniLoader from './components/MiniLoader';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
@@ -3699,14 +3701,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   if (!currentUser) {
     if (isInitializing || employees.length === 0) {
-      return (
-        <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
-            <p className="text-sm text-slate-400 font-medium">Đang tải dữ liệu...</p>
-          </div>
-        </div>
-      );
+      return <LoadingScreen />;
     }
     return (
       <Login
@@ -3721,14 +3716,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   // Splash screen cho giao diện chính: auto-login xong nhưng data chưa load xong
   if (isInitializing) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin" />
-          <p className="text-sm text-slate-400 font-medium">Đang tải dữ liệu...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   const currentFont = displaySettings.fontFamily || 'Inter';
@@ -5088,7 +5076,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
                         >
                           {testConnStatus === 'testing' ? (
                             <>
-                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                              <MiniLoader size={14} className="text-emerald-400" />
                               Đang kết nối...
                             </>
                           ) : (

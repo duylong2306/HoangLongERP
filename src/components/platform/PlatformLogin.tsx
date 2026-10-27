@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Lock, User, Loader2, AlertCircle, ShieldCheck, KeyRound } from 'lucide-react';
+import { Lock, User, AlertCircle, ShieldCheck, KeyRound } from 'lucide-react';
 import { platformCall, setPlatformToken, type PlatformAdmin } from './platformApi';
+import MiniLoader from '../MiniLoader';
 
 // ĐĂNG NHẬP TRANG QUẢN TRỊ NỀN TẢNG — tài khoản riêng (không phải nhân viên của doanh nghiệp nào).
 // Có 2 bước: (1) tên + mật khẩu; (2) nếu tài khoản bật XÁC THỰC HAI LỚP → nhập mã 6 số từ Google Authenticator (hoặc 1 mã khôi phục).
@@ -68,7 +69,7 @@ export default function PlatformLogin({ onLoggedIn }: { onLoggedIn: (admin: Plat
             </div>
           )}
           <button type="submit" disabled={busy} className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] font-bold py-3 rounded-lg transition-colors">
-            {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Đang kiểm tra...</> : 'Xác nhận'}
+            {busy ? <><MiniLoader size={16} /> Đang kiểm tra...</> : 'Xác nhận'}
           </button>
           <div className="flex items-center justify-between text-xs">
             <button type="button" onClick={() => { setUseRecovery(v => !v); setCode(''); setError(null); }} className="font-semibold text-blue-700 hover:underline">{useRecovery ? 'Dùng mã từ ứng dụng' : 'Mất điện thoại? Dùng mã khôi phục'}</button>
@@ -111,7 +112,7 @@ export default function PlatformLogin({ onLoggedIn }: { onLoggedIn: (admin: Plat
         )}
 
         <button type="submit" disabled={busy} className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] font-bold py-3 rounded-lg transition-colors">
-          {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Đang đăng nhập...</> : 'Đăng nhập'}
+          {busy ? <><MiniLoader size={16} /> Đang đăng nhập...</> : 'Đăng nhập'}
         </button>
       </form>
     </div>

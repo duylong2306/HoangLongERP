@@ -39,6 +39,7 @@ import { sendGroupChatMessage, sendApprovalDirectMessage, ensureProjectChatGroup
 import SearchableEmployeeSelect from './SearchableEmployeeSelect';
 import ColumnSettingsModal from './kanban/ColumnSettingsModal';
 import MissionConfigEditor from './MissionConfigEditor';
+import MiniLoader from './MiniLoader';
 
 export type { KanbanColumn } from '../lib/kanbanLogic';
 
@@ -3967,7 +3968,7 @@ export default function ProjectKanbanBoard({
                           <div className="relative shrink-0 w-11 h-11">
                             <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-slate-950 shadow-md border border-sky-400/20 group-hover:scale-105 transition-all">
                               {isSyncingChatMembers
-                                ? <RotateCcw className="w-5 h-5 animate-spin" />
+                                ? <MiniLoader size={20} />
                                 : <MessageSquare className="w-5 h-5" />}
                             </div>
                             <span className="absolute -bottom-1 -right-0.5 bg-slate-950 text-sky-400 border border-slate-800 w-4.5 h-4.5 rounded-full flex items-center justify-center text-[9px] font-bold">

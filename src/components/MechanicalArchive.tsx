@@ -22,6 +22,7 @@ import {
   Lock
 } from 'lucide-react';
 import QuotationTableSheet from './QuotationTableSheet';
+import { ListSkeleton } from './Skeleton';
 
 interface MechanicalArchiveProps {
   currentUser: Employee;
@@ -635,9 +636,7 @@ export default function MechanicalArchive({ currentUser, canEdit = true, canDele
       </div>
 
       {loading ? (
-        <div className="py-12 text-center text-xs text-slate-500 animate-pulse font-bold uppercase tracking-wider">
-          Đang tải dữ liệu hồ sơ cơ khí...
-        </div>
+        <div className="py-6"><ListSkeleton rows={6} /></div>
       ) : filteredList.length === 0 ? (
         <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-2">
           <FileText className="w-8 h-8 text-slate-600 mx-auto" />

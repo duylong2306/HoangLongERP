@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Palette, Loader2, AlertCircle, CheckCircle, Eye, Type } from 'lucide-react';
+import { Save, Palette, AlertCircle, CheckCircle, Eye, Type } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
+import MiniLoader from './MiniLoader';
 
 // Định nghĩa interface cho DisplaySettingsConfig
 interface DisplaySettingsConfig {
@@ -267,7 +268,7 @@ export default function DisplaySettingsPage({ isAdmin }: DisplaySettingsPageProp
           >
             {isLoading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <MiniLoader size={16} />
                 Đang lưu...
               </>
             ) : (

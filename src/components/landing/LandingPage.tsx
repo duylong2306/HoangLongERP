@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Building2, Users, Wallet, Warehouse, HardHat, FolderKanban, CheckCircle2, AlertCircle,
-  Eye, EyeOff, ArrowRight, Loader2, ExternalLink,
-} from 'lucide-react';
+import { Building2, Users, Wallet, Warehouse, HardHat, FolderKanban, CheckCircle2, AlertCircle, Eye, EyeOff, ArrowRight, ExternalLink } from 'lucide-react';
 import PlanFeatures from '../subscription/PlanFeatures';
 import { slugify } from '../../lib/slug';
 import { getBaseDomainForDisplay, getTenantUrl } from '../../lib/tenant';
+import MiniLoader from '../MiniLoader';
 
 // TRANG GIỚI THIỆU + ĐĂNG KÝ DOANH NGHIỆP (Giai đoạn 2) — hiện ở địa chỉ gốc (www.lolo.com.vn), kiểu KiotViet:
 // khách nhập thông tin → hệ thống tạo doanh nghiệp + tài khoản quản trị và cấp địa chỉ riêng <tên>.lolo.com.vn.
@@ -279,7 +277,7 @@ export default function LandingPage() {
                     <span className="inline-flex items-center px-3 text-sm font-mono text-slate-500 bg-slate-100 border border-l-0 border-slate-300 rounded-r-lg whitespace-nowrap">.{baseDomain}</span>
                   </div>
                   <div className="min-h-[1.25rem] mt-1 text-xs">
-                    {slugState.status === 'checking' && <span className="inline-flex items-center gap-1 text-slate-500"><Loader2 className="w-3 h-3 animate-spin" /> Đang kiểm tra...</span>}
+                    {slugState.status === 'checking' && <span className="inline-flex items-center gap-1 text-slate-500"><MiniLoader size={12} /> Đang kiểm tra...</span>}
                     {slugState.status === 'ok' && <span className="inline-flex items-center gap-1 text-emerald-600"><CheckCircle2 className="w-3.5 h-3.5" /> Địa chỉ này dùng được: <b className="font-mono">{slug}.{baseDomain}</b></span>}
                     {slugState.status === 'bad' && <span className="inline-flex items-center gap-1 text-rose-600"><AlertCircle className="w-3.5 h-3.5 shrink-0" /> {slugState.message}</span>}
                     {errors.slug && slugState.status !== 'bad' && <span className="text-rose-600">{errors.slug}</span>}
@@ -333,7 +331,7 @@ export default function LandingPage() {
 
                 <button type="submit" disabled={submitting}
                   className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] font-bold py-3 rounded-lg transition-colors">
-                  {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Đang tạo doanh nghiệp...</> : 'Đăng ký doanh nghiệp'}
+                  {submitting ? <><MiniLoader size={16} /> Đang tạo doanh nghiệp...</> : 'Đăng ký doanh nghiệp'}
                 </button>
                 <p className="text-xs text-slate-500 text-center">Bằng việc đăng ký, bạn đồng ý sử dụng nền tảng cho mục đích quản trị doanh nghiệp hợp pháp.</p>
               </form>

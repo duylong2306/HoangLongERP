@@ -30,9 +30,34 @@
         }
       }
     </style>
+    <!-- MÀN CHỜ SỚM: hiện ngay lúc trình duyệt tải trang, TRƯỚC khi JavaScript chạy (tránh trắng màn hình). React thay thế nội dung #root khi chạy;
+         màn chờ của ứng dụng (src/components/LoadingScreen.tsx) dùng cùng kiểu dáng .lolo-splash* nên chuyển cảnh không chớp. Bản sao CSS tối thiểu — giữ giống src/index.css. -->
+    <style>
+      .lolo-splash{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;color:#ffffff;background:radial-gradient(120% 90% at 50% 20%,#2a7bff 0%,#0d47c9 55%,#0a3aa8 100%);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+      .lolo-splash-box{width:min(260px,76vw);display:flex;flex-direction:column;align-items:center;gap:22px}
+      .lolo-splash-logo{width:96px;height:96px;border-radius:22%;display:block;box-shadow:0 14px 34px rgba(5,25,90,.45);animation:lolo-breathe 2.6s ease-in-out infinite}
+      .lolo-splash-bar{position:relative;width:100%;height:5px;border-radius:99px;background:rgba(255,255,255,.22);overflow:hidden}
+      .lolo-splash-bar:before{content:"";position:absolute;top:0;bottom:0;width:42%;border-radius:99px;background:linear-gradient(90deg,rgba(255,255,255,0),#ffffff,rgba(255,255,255,0));animation:lolo-slide 1.35s ease-in-out infinite}
+      .lolo-splash-msg{position:relative;height:18px;width:100%;text-align:center;font-size:13px;font-weight:600;letter-spacing:.2px;color:#ffffff}
+      .lolo-splash-msg>span{position:absolute;inset:0}
+      .lolo-splash-msg>span.boot{opacity:0;animation:lolo-boot-msg 9s infinite}
+      .lolo-splash-msg>span.boot:nth-child(2){animation-delay:3s}.lolo-splash-msg>span.boot:nth-child(3){animation-delay:6s}
+      .lolo-splash-foot{position:absolute;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;color:rgba(255,255,255,.7);font-size:11.5px}
+      @keyframes lolo-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+      @keyframes lolo-slide{0%{left:-45%}100%{left:103%}}
+      @keyframes lolo-boot-msg{0%{opacity:0;transform:translateY(6px)}6%,30%{opacity:1;transform:none}36%,100%{opacity:0;transform:translateY(-6px)}}
+      @media (prefers-reduced-motion:reduce){.lolo-splash-logo,.lolo-splash-bar:before,.lolo-splash-msg>span.boot{animation:none!important}.lolo-splash-msg>span.boot:first-child{opacity:1}}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="lolo-splash" role="status" aria-label="Đang tải" id="boot-splash">
+      <div class="lolo-splash-box">
+        <img class="lolo-splash-logo" src="/lolo-icon-192.png" alt="LoLo" width="96" height="96">
+        <div class="lolo-splash-bar"></div>
+        <div class="lolo-splash-msg" style="color:#ffffff"><span class="boot">Đang khởi động…</span><span class="boot">Đang kết nối máy chủ…</span><span class="boot">Đang tải dữ liệu công ty…</span></div>
+      </div>
+      <div class="lolo-splash-foot">Nền tảng ERP đa doanh nghiệp</div>
+    </div></div>
     <script type="module" src="/src/main.tsx"></script>
       <script>
       // Chặn phóng to bằng 2 ngón trên iOS Safari (gesturestart/change/end) — bổ trợ cho user-scalable=no

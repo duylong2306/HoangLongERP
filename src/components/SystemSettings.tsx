@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Save, Settings, Calendar, Clock, Loader2, AlertCircle, CheckCircle, Building2 } from 'lucide-react';
+import { Save, Settings, Calendar, Clock, AlertCircle, CheckCircle, Building2 } from 'lucide-react';
 import { SystemConfig } from '../types';
 import { dbService } from '../lib/dbService';
+import MiniLoader from './MiniLoader';
 
 interface SystemSettingsProps {
   currentConfig: SystemConfig;
@@ -302,7 +303,7 @@ export default function SystemSettings({ currentConfig, onConfigUpdate, isAdmin 
           >
             {isLoading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <MiniLoader size={16} />
                 Đang lưu...
               </>
             ) : (

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Camera, MapPin, X, Clock, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Camera, MapPin, X, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { dbService } from '../../lib/dbService';
+import MiniLoader from '../MiniLoader';
 
 interface CheckInModalProps {
   isOpen: boolean;
@@ -241,7 +242,7 @@ export default function CheckInModal({
                 <MapPin className="w-4 h-4 text-amber-400" />
                 <span className="text-[11px] text-slate-300 font-bold">Vị trí GPS</span>
               </div>
-              {geoStatus === 'loading' && <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />}
+              {geoStatus === 'loading' && <MiniLoader size={16} className="text-amber-400" />}
               {geoStatus === 'success' && <CheckCircle className="w-4 h-4 text-emerald-400" />}
               {geoStatus === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
             </div>
@@ -275,7 +276,7 @@ export default function CheckInModal({
                 <Camera className="w-4 h-4 text-amber-400" />
                 <span className="text-[11px] text-slate-300 font-bold">Ảnh check-in</span>
               </div>
-              {cameraStatus === 'loading' && <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />}
+              {cameraStatus === 'loading' && <MiniLoader size={16} className="text-amber-400" />}
               {cameraStatus === 'success' && <CheckCircle className="w-4 h-4 text-emerald-400" />}
             </div>
 

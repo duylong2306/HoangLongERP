@@ -8,6 +8,7 @@ import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
 import LegalTemplatePanel from './LegalTemplatePanel';
+import MiniLoader from './MiniLoader';
 
 export interface HouseEstimatePrice {
   stt: number;
@@ -2139,7 +2140,7 @@ export default function ConstructionEstimator(props: ConstructionEstimatorProps)
                   : 'bg-indigo-650 hover:bg-indigo-600 text-white'
               }`}
             >
-              <Save className={`w-4 h-4 ${dbSaving ? 'animate-spin' : ''}`} />
+              {dbSaving ? <MiniLoader size={16} /> : <Save className="w-4 h-4" />}
               {dbSaving ? 'Đang lưu...' : 'Lưu'}
             </button>
           </div>

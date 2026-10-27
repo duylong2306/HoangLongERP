@@ -69,6 +69,7 @@ import { companyScopedKey } from '../lib/supabase';
 import { sendGroupChatMessage, sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, addMemberToConversation } from '../lib/chatStore';
 import { CTPStatus } from '../lib/travelExpenseStatus';
 import UserAvatar from './UserAvatar';
+import MiniLoader from './MiniLoader';
 
 // Ánh xạ loại dự án (lĩnh vực) → tab Lưu Trữ Hồ Sơ tương ứng
 const sectorArchiveTab = (type?: string): string =>
@@ -1740,7 +1741,7 @@ export default function TaskDetailModal({
                   )}
                   {selectedTask.status === 'reviewing' && (
                     <div className="bg-sky-50 border border-sky-200 text-sky-700 p-4 rounded-xl flex items-start gap-3">
-                      <Clock className="w-5 h-5 text-sky-500 shrink-0 mt-0.5 animate-spin" />
+                      <MiniLoader size={20} className="text-sky-500 shrink-0 mt-0.5" />
                       <div>
                         <span className="font-extrabold text-[12px] block text-slate-900 uppercase tracking-wider">⏳ Trạng thái chờ xét duyệt</span>
                         <span className="text-[11.5px] text-sky-700 leading-relaxed block mt-1">

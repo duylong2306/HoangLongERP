@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, AlertCircle, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { AlertCircle, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { platformCall } from './platformApi';
 import { formatDateTime } from './format';
+import { ListSkeleton } from '../Skeleton';
 
 // TAB "NHẬT KÝ" — lịch sử thao tác của các quản trị viên (ai đổi gì, lúc nào), chỉ lưu 30 ngày rồi tự xóa.
 // Chỉ ĐỌC: không có chức năng sửa/xóa nhật ký. Chi tiết "trước → sau" mở bằng cách bấm vào dòng.
@@ -57,7 +58,7 @@ export default function LogsTab() {
       {error && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm" role="alert"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}</div>}
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        {loading ? <div className="flex items-center gap-2 text-sm text-slate-500 p-5"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>
+        {loading ? <div className="p-5"><ListSkeleton rows={5} avatar={false} /></div>
           : logs.length === 0 ? <p className="text-sm text-slate-500 p-5">Chưa có nhật ký nào.</p>
           : (
             <ul className="divide-y divide-slate-100">

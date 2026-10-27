@@ -1496,3 +1496,36 @@ select.bg-slate-950.border-slate-900 {
 
 
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOADING LoLo — màn chờ (LoadingScreen), loader nhỏ (MiniLoader), khung xương (Skeleton)
+   Thiết kế: nền xanh LoLo #0d47c9, logo thật, ô vuông "pixel" của logo làm điểm nhấn; CSS thuần, tự tắt chuyển động khi máy bật "giảm chuyển động".
+   ⚠️ Màn chờ SỚM trong index.html dùng chính các lớp .lolo-splash* này (bản sao CSS tối thiểu nằm trong <style> của index.html) — sửa ở đây thì sửa cả bên đó.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lolo-splash{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;color:#ffffff;
+  background:radial-gradient(120% 90% at 50% 20%,#2a7bff 0%,#0d47c9 55%,#0a3aa8 100%);font-family:inherit}
+.lolo-splash-box{width:min(260px,76vw);display:flex;flex-direction:column;align-items:center;gap:22px}
+.lolo-splash-logo{width:96px;height:96px;border-radius:22%;display:block;box-shadow:0 14px 34px rgba(5,25,90,.45);animation:lolo-breathe 2.6s ease-in-out infinite}
+.lolo-splash-bar{position:relative;width:100%;height:5px;border-radius:99px;background:rgba(255,255,255,.22);overflow:hidden}
+.lolo-splash-bar:before{content:"";position:absolute;top:0;bottom:0;width:42%;border-radius:99px;background:linear-gradient(90deg,rgba(255,255,255,0),#ffffff,rgba(255,255,255,0));animation:lolo-slide 1.35s ease-in-out infinite}
+.lolo-splash-msg{position:relative;height:18px;width:100%;text-align:center;font-size:13px;font-weight:600;letter-spacing:.2px;color:#ffffff}
+.lolo-splash-msg>span{position:absolute;inset:0;animation:lolo-msg-in .4s ease both}
+.lolo-splash-foot{position:absolute;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;color:rgba(255,255,255,.7);font-size:11.5px}
+@keyframes lolo-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+@keyframes lolo-slide{0%{left:-45%}100%{left:103%}}
+@keyframes lolo-msg-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* Loader nhỏ: 4 ô vuông sáng lần lượt, lấy màu chữ hiện tại (currentColor) nên tự hợp với nút / thẻ */
+.lolo-mini{display:inline-grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:18%;vertical-align:middle;flex-shrink:0;width:16px;height:16px}
+.lolo-mini>i{display:block;border-radius:22%;background:currentColor;animation:lolo-mini 1s ease-in-out infinite}
+.lolo-mini>i:nth-child(2){animation-delay:.12s}.lolo-mini>i:nth-child(4){animation-delay:.24s}.lolo-mini>i:nth-child(3){animation-delay:.36s}
+@keyframes lolo-mini{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+
+/* Khung xương: vệt sáng chạy ngang */
+.lolo-sk{border-radius:8px;background:linear-gradient(90deg,#eef2f7 25%,#f8fafc 45%,#eef2f7 65%);background-size:300% 100%;animation:lolo-shim 1.5s linear infinite}
+@keyframes lolo-shim{0%{background-position:100% 0}100%{background-position:0 0}}
+
+@media (prefers-reduced-motion:reduce){
+  .lolo-splash-logo,.lolo-splash-bar:before,.lolo-splash-msg>span,.lolo-sk{animation:none!important}
+  .lolo-mini>i{animation:none!important;opacity:.7}
+}

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import MiniLoader from '../MiniLoader';
 
 // HỘP XÁC NHẬN NẰM TRONG TRANG (thay window.confirm) cho các thao tác nguy hiểm ở trang quản trị.
 // Lý do: trình duyệt nhúng / ứng dụng bọc web thường chặn hộp thoại gốc — có nơi tự trả "đồng ý" mà không hiện gì, khiến thao tác
@@ -28,7 +29,7 @@ export default function ConfirmDialog({ title, children, confirmLabel, danger = 
         <div className="flex justify-end gap-2 pt-1">
           <button ref={cancelRef} type="button" onClick={onClose} disabled={busy} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold">Hủy bỏ</button>
           <button type="button" onClick={onConfirm} disabled={busy} className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[#ffffff] text-sm font-bold disabled:opacity-60 ${danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />} {confirmLabel}
+            {busy && <MiniLoader size={16} />} {confirmLabel}
           </button>
         </div>
       </div>

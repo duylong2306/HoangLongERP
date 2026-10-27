@@ -8,6 +8,7 @@ import RichTextEditor from './RichTextEditor';
 import { exportHtmlToWord } from '../lib/wordExport';
 import { docSoTiengViet } from './QuotationTableSheet';
 import { replaceContractValueInHtml } from '../lib/subcontractorContractValue';
+import { ListSkeleton } from './Skeleton';
 
 // Bản in Hợp Đồng Thầu Phụ — trước đây là các ô <input> cố định bind trực tiếp
 // vào tempQuote.<field>, nay chuyển sang 1 vùng văn bản tự do (contentEditable)
@@ -517,9 +518,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
       </div>
 
       {loading ? (
-        <div className="py-12 text-center text-xs text-slate-500 animate-pulse font-bold uppercase tracking-wider">
-          Đang tải dữ liệu hồ sơ thầu phụ...
-        </div>
+        <div className="py-6"><ListSkeleton rows={6} /></div>
       ) : filteredList.length === 0 ? (
         <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-2">
           <FileText className="w-8 h-8 text-slate-600 mx-auto" />

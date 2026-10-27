@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Package, ReceiptText, Settings, Users, ScrollText, LogOut, Loader2 } from 'lucide-react';
+import { Building2, Package, ReceiptText, Settings, Users, ScrollText, LogOut } from 'lucide-react';
 import PlatformLogin from './PlatformLogin';
 import CompaniesTab from './CompaniesTab';
 import PlansTab from './PlansTab';
@@ -8,6 +8,7 @@ import SettingsTab from './SettingsTab';
 import AccountsTab from './AccountsTab';
 import LogsTab from './LogsTab';
 import { getPlatformToken, setPlatformToken, platformCall, UNAUTHORIZED_EVENT, type PlatformAdmin } from './platformApi';
+import MiniLoader from '../MiniLoader';
 
 // TRANG QUẢN TRỊ NỀN TẢNG (lolo.com.vn/quantri) — tách hẳn khỏi ERP của các doanh nghiệp.
 // Được src/main.tsx chọn khi đường dẫn bắt đầu bằng /quantri ở địa chỉ gốc (không bao giờ ở subdomain doanh nghiệp).
@@ -52,7 +53,7 @@ export default function PlatformConsole() {
   };
 
   if (checking) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500"><MiniLoader size={24} /></div>;
   }
   if (!admin) return <PlatformLogin onLoggedIn={setAdmin} />;
 

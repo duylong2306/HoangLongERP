@@ -3,6 +3,7 @@ import { dbService } from '../lib/dbService';
 import { hasModulePermission, useNotification } from '../context';
 import { useAuth } from '../context/AuthContext';
 import { Save, RefreshCw, FileText, Settings, UserCheck, Shield, HelpCircle, CheckCircle } from 'lucide-react';
+import MiniLoader from './MiniLoader';
 
 export default function DocumentTemplatesEditor() {
   const { currentUser } = useAuth();
@@ -186,7 +187,7 @@ export default function DocumentTemplatesEditor() {
           className={`px-4.5 py-2 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-2 shadow-md transition-all shrink-0 hover:scale-[1.01] ${saveStatus === 'success' ? 'bg-[#00a651]' : saveStatus === 'error' ? 'bg-rose-600' : 'bg-emerald-600 hover:bg-[#008f45]'}`}
         >
           {saving ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            <MiniLoader size={14} />
           ) : (
             <Save className="w-3.5 h-3.5" />
           )}

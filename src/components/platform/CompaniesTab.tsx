@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Loader2, AlertCircle, CheckCircle2, ExternalLink, Search, Pencil, Lock, Unlock, X } from 'lucide-react';
+import { Plus, AlertCircle, CheckCircle2, ExternalLink, Search, Pencil, Lock, Unlock, X } from 'lucide-react';
 import CopyButton from '../CopyButton';
 import { getTenantUrl } from '../../lib/tenant';
 import { platformCall } from './platformApi';
 import ConfirmDialog from './ConfirmDialog';
 import { formatDate, toDateInput, fromDateInputEndOfDay, STATUS_BADGE, STATUS_LABEL, type SubStatus } from './format';
+import { ListSkeleton } from '../Skeleton';
+import MiniLoader from '../MiniLoader';
 
 // TAB "DOANH NGHIỆP" — thay cho "Quản Lý Doanh Nghiệp" cũ nằm trong ERP: xem mọi doanh nghiệp, trạng thái gói/ngày hết hạn,
 // tạo doanh nghiệp mới, chỉnh gói/ngày hết hạn thủ công, khóa/mở doanh nghiệp.
@@ -96,7 +98,7 @@ export default function CompaniesTab() {
         </select>
       </div>
 
-      {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Đang tải...</div>}
+      {loading && <ListSkeleton rows={4} />}
       {loadError && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2.5 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {loadError}</div>}
 
       {!loading && !loadError && (
@@ -214,7 +216,7 @@ function CreateForm({ onDone }: { onDone: (msg: string) => void }) {
       </div>
       {error && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}</div>}
       <button type="submit" disabled={busy} className={`${btn} bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] !px-4 !py-2`}>
-        {busy && <Loader2 className="w-4 h-4 animate-spin" />} {busy ? 'Đang tạo...' : 'Tạo doanh nghiệp'}
+        {busy && <MiniLoader size={16} />} {busy ? 'Đang tạo...' : 'Tạo doanh nghiệp'}
       </button>
     </form>
   );
@@ -274,7 +276,7 @@ function EditModal({ company, plans, onClose, onSaved }: { company: Company; pla
         {error && <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 text-sm"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {error}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={`${btn} border border-slate-300 text-slate-700 hover:bg-slate-100 !px-4 !py-2`}>Hủy</button>
-          <button onClick={save} disabled={busy} className={`${btn} bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] !px-4 !py-2`}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Lưu</button>
+          <button onClick={save} disabled={busy} className={`${btn} bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff] !px-4 !py-2`}>{busy && <MiniLoader size={16} />} Lưu</button>
         </div>
       </div>
     </div>

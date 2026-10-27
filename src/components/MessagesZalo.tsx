@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import ProjectActivityModal from './ProjectActivityModal';
 import ProjectTodayCard from './ProjectTodayCard';
 import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
-import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
+import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, MessageSquare } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
@@ -32,6 +32,7 @@ import type { InboxItem } from './MyWorkOverview';
 import { buildWorkEntries } from '../lib/workEntries';
 import { workThreadId, isWorkThreadId } from '../lib/workThread';
 import { todayYmd, type MyWorkItem } from '../lib/myWork';
+import MiniLoader from './MiniLoader';
 
 // GIAO DIỆN TIN NHẮN KIỂU MỚI (lấy cảm hứng từ Zalo): danh sách hội thoại | khung chat | thông tin hội thoại.
 // Dùng lại toàn bộ hệ thống nhắn tin có sẵn (chatStore: realtime, đã xem, ghim tin, cảm xúc, trả lời, @nhắc tên, đính kèm...).
@@ -735,7 +736,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <div ref={listRef} onScroll={e => { const el = e.currentTarget as HTMLDivElement; if (Date.now() < jumpLockUntil.current) return;   // đang cuộn mượt xuống đáy theo nút → bỏ qua
                 const dist = el.scrollHeight - el.scrollTop - el.clientHeight; pinnedRef.current = dist < 120; setShowJump(dist > 320); if (dist < 120) setNewWhileUp(0); if (el.scrollTop < 80) loadOlder(); }} className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5 py-3 min-h-0 overscroll-contain" data-testid="zalo-messages">
               <div ref={innerRef}>
-              {loadingOlder && <div className="text-center text-[12px] text-slate-600 py-2"><Loader2 className="w-4 h-4 inline animate-spin mr-1" />Đang tải tin cũ hơn…</div>}
+              {loadingOlder && <div className="text-center text-[12px] text-slate-600 py-2"><MiniLoader size={16} className="inline mr-1" />Đang tải tin cũ hơn…</div>}
               {messages.length === 0 && <div className="text-center text-[13px] text-slate-600 py-10">Chưa có tin nhắn. Hãy gửi lời chào 👋</div>}
               {messages.map((m, i) => {
                 const mineMsg = m.senderId === me; const first = isFirstOfRun(messages, i); const newDay = i === 0 || dayKey(messages[i - 1].createdAt) !== dayKey(m.createdAt);
@@ -800,7 +801,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               {(replyTo || editing) && (
                 <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-100 text-[12.5px]"><span className="border-l-[3px] border-blue-500 pl-2 min-w-0 flex-1">{editing ? <b>Đang chỉnh sửa tin nhắn</b> : <><b>Trả lời {replyTo!.senderName}</b><span className="block truncate text-slate-500">{replyTo!.content}</span></>}</span><button type="button" onClick={() => { setReplyTo(null); setEditing(null); setText(''); }} aria-label="Hủy" className="cursor-pointer"><X className="w-4 h-4" /></button></div>)}
               {(attachments.length > 0 || uploading > 0) && (
-                <div className="flex gap-2 px-4 py-2 overflow-x-auto" data-testid="zalo-pending">{uploading > 0 && <span className="shrink-0 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><Loader2 className="w-3.5 h-3.5 animate-spin" />Đang tải lên…</span>}{attachments.map(a => <span key={a.id} className="relative shrink-0 bg-slate-100 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5">{a.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}<span className="max-w-[120px] truncate">{a.name}</span><button type="button" onClick={() => setAttachments(p => p.filter(x => x.id !== a.id))} aria-label="Bỏ tệp"><X className="w-3.5 h-3.5" /></button></span>)}</div>)}
+                <div className="flex gap-2 px-4 py-2 overflow-x-auto" data-testid="zalo-pending">{uploading > 0 && <span className="shrink-0 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><MiniLoader size={14} />Đang tải lên…</span>}{attachments.map(a => <span key={a.id} className="relative shrink-0 bg-slate-100 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5">{a.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}<span className="max-w-[120px] truncate">{a.name}</span><button type="button" onClick={() => setAttachments(p => p.filter(x => x.id !== a.id))} aria-label="Bỏ tệp"><X className="w-3.5 h-3.5" /></button></span>)}</div>)}
               {mention !== null && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 mb-1 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-56 z-30" data-testid="zalo-mention">{mentionCandidates.map(e => <button key={e.id} type="button" onClick={() => pickMention(e)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><UserAvatar employee={e} size="xs" noRing />{e.name}</button>)}</div>)}
               {emojiOpen && (

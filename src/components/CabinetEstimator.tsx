@@ -8,6 +8,7 @@ import { dbService } from '../lib/dbService';
 import QuotationTableSheet, { docSoTiengViet } from './QuotationTableSheet';
 import RichTextEditor from './RichTextEditor';
 import LegalTemplatePanel from './LegalTemplatePanel';
+import MiniLoader from './MiniLoader';
 
 export const DEFAULT_FURN_PAYMENT_TERMS = `<p><strong>1. Thời gian thực hiện:</strong> 10-12 ngày.</p>
 <p><strong>2. Bảo hành:</strong> Bảo hành 1 năm. Lỗi phụ kiện thay mới.</p>
@@ -2087,7 +2088,7 @@ export default function CabinetEstimator({
               }}
               className="w-full sm:w-auto px-5 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-xs uppercase tracking-wider rounded-xl cursor-pointer flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
             >
-              <Save className={`w-4 h-4 ${dbSaving ? 'animate-spin' : ''}`} />
+              {dbSaving ? <MiniLoader size={16} /> : <Save className="w-4 h-4" />}
               {dbSaving ? 'Đang lưu...' : 'Lưu'}
             </button>
           </div>
