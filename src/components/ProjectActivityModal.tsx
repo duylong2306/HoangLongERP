@@ -230,6 +230,14 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
                           {isOpen && <div className="mt-1 text-[12.5px] text-slate-600 whitespace-pre-line bg-slate-50 border border-slate-200 rounded-lg p-2">{ev.detail}</div>}
                         </div>
                       )}
+                      {ev.attachments && (
+                        // Ảnh/tệp đính kèm (báo cáo hoàn thành…): ảnh hiện thu nhỏ, bấm mở bản đầy đủ ở tab mới
+                        <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="activity-attachments">
+                          {ev.attachments.map((a, i) => (a.type === 'image' || a.type === 'camera'
+                            ? <a key={a.id || i} href={a.url} target="_blank" rel="noreferrer" title={a.name}><img src={a.url} alt={a.name || 'Ảnh'} loading="lazy" className="w-16 h-16 object-cover rounded-lg border border-slate-200" /></a>
+                            : <a key={a.id || i} href={a.url} target="_blank" rel="noreferrer" className="text-[11.5px] font-bold text-blue-700 bg-blue-50 rounded px-2 py-1 max-w-[220px] truncate">📎 {a.name || 'Tệp đính kèm'}</a>))}
+                        </div>
+                      )}
                       <div className="mt-1 flex gap-2 items-center text-[11px] text-slate-500">
                         <span className={`font-bold border rounded-full px-2 ${tone.badge}`}>{meta.label}</span>
                         <span>{hhmm(ev.createdAt)}</span>

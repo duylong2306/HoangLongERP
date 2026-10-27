@@ -38,6 +38,8 @@ export interface ProjectEventRow {
   detail?: string;
   from?: string;
   to?: string;
+  /** Ảnh / tệp đính kèm (vd. báo cáo hoàn thành kèm ảnh — chuyển từ tin nhóm chat cũ) */
+  attachments?: { id?: string; type?: string; name?: string; url: string }[];
   createdAt: string;
 }
 
@@ -157,6 +159,7 @@ const toRow = (r: any): ProjectEventRow => ({
   type: (EVENT_TYPE_META[r.type as ProjectEventType] ? r.type : 'khac') as ProjectEventType,
   objKind: r.obj_kind || undefined, objName: r.obj_name || undefined,
   text: r.text, detail: r.detail || undefined, from: r.from_val || undefined, to: r.to_val || undefined,
+  attachments: Array.isArray(r.attachments) && r.attachments.length ? r.attachments : undefined,
   createdAt: r.created_at,
 });
 
