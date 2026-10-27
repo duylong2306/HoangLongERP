@@ -25,7 +25,16 @@ export default defineConfig(() => {
       'import.meta.env.VITE_BUILD_COMMIT': JSON.stringify(getBuildCommit()),
       'import.meta.env.VITE_BUILD_DATE': JSON.stringify(new Date().toISOString().slice(0, 10)),
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(), tailwindcss(),
+      // Ghi /version.json (mã commit của lần build) để ứng dụng đang mở biết có bản mới — xem src/lib/appUpdate.ts
+      {
+        name: 'emit-version-json',
+        generateBundle() {
+          this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ commit: getBuildCommit(), builtAt: new Date().toISOString() }) });
+        },
+      },
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

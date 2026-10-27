@@ -85,6 +85,7 @@ import MessagesZalo from './components/MessagesZalo';
 import { useChatPrefs } from './lib/useChatPrefs';
 import { unreadForBadge } from './lib/chatPrefs';
 import { useProjectActivityUnread, activityProjectKey } from './lib/useProjectActivityUnread';
+import UpdateBanner from './components/UpdateBanner';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
@@ -3732,6 +3733,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   return (
     <AuthProvider employees={employees} addToast={addToast}>
       <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
+        {/* Thanh báo "Có bản mới" — máy mở lâu không tự lấy bản mới nên phải nhắc người dùng tải lại */}
+        <UpdateBanner />
         <div
           className={`lx-shell flex min-h-screen w-full md:h-screen md:w-screen bg-slate-950 md:overflow-hidden text-slate-200 font-sans transition-all duration-200 ${activeTab === 'messages' ? 'max-md:h-[100dvh] max-md:overflow-hidden' : ''}`}
           style={{ fontFamily: currentFont }}

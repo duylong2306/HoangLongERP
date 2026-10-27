@@ -81,7 +81,11 @@ describe('Nhật ký dự án — khung dòng thời gian', () => {
     const loader = vi.fn().mockResolvedValue({ ok: true, rows: [row('a', 0, { actorName: 'Ny' })], hasMore: false });
     render(<ProjectActivityModal projectId="P1" onClose={() => {}} loader={loader} />);
     await screen.findAllByTestId('activity-event');
-    fireEvent.click(screen.getByRole('button', { name: /Duyệt/ }));
+    // Loại sự kiện chọn trong dropdown (không còn hàng nút)
+    expect(screen.queryByRole('button', { name: /Duyệt/ })).toBeNull();
+    const sel = screen.getByLabelText('Lọc theo loại') as HTMLSelectElement;
+    expect(Array.from(sel.options).map(o => o.textContent)).toEqual(expect.arrayContaining(['Tất cả loại', '➕ Tạo mới', '📌 Giao việc', '✅ Duyệt']));
+    fireEvent.change(sel, { target: { value: 'duyet' } });
     await waitFor(() => expect(loader).toHaveBeenLastCalledWith('P1', expect.objectContaining({ filters: expect.objectContaining({ type: 'duyet' }) })));
     fireEvent.click(screen.getByRole('button', { name: 'Nhiệm vụ' }));
     await waitFor(() => expect(loader).toHaveBeenLastCalledWith('P1', expect.objectContaining({ filters: expect.objectContaining({ type: 'duyet', objKind: 'mission' }) })));

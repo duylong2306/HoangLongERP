@@ -578,7 +578,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
 
   return (
     <div className="relative bg-white overflow-hidden text-slate-900 h-full min-h-0" data-testid="zalo-root">
-      <div className={`grid h-full ${leftMode === 'chat' && infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
+      {/* Độ rộng 3 cột theo Zalo: danh sách 340px · khung chat co giãn · Thông tin hội thoại 340px (trước đây 300px, hẹp hơn Zalo) */}
+      <div className={`grid h-full ${leftMode === 'chat' && infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_340px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
         {/* ── DANH SÁCH ── */}
         <section className={`${showList ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 border-r border-slate-200`}>
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">

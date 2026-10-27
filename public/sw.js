@@ -67,6 +67,9 @@ self.addEventListener('fetch', (event) => {
   // Skip chrome-extension, data:, blob: URLs
   if (!url.protocol.startsWith('http')) return;
 
+  // /version.json (ứng dụng hỏi "có bản mới chưa?") — KHÔNG can thiệp, luôn đi thẳng mạng để không bao giờ đọc phải bản cũ trong cache
+  if (url.pathname === '/version.json') return;
+
   // ─── SPA NAVIGATION FALLBACK ───────────────────────────────────────────
   // App là SPA nhưng host chỉ phục vụ file tĩnh (không có rewrite về
   // index.html). Mọi điều hướng tới đường dẫn không phải file thật → 404.

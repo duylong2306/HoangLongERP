@@ -71,6 +71,12 @@ describe('Danh sách hội thoại', () => {
     expect(within(row('g_moi')).getByText('Nhóm mới tạo')).toBeTruthy();
   });
 
+  it('cột Thông tin hội thoại rộng 340px (bằng cột danh sách, như Zalo)', () => {
+    mount(); fireEvent.click(row('conv_project_A'));
+    const grid = screen.getByTestId('zalo-info').closest('div.grid') as HTMLElement | null;
+    expect(grid?.className).toContain('lg:grid-cols-[340px_minmax(0,1fr)_340px]');
+  });
+
   it('tab Chưa đọc chỉ còn hội thoại có tin mới, kèm số', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: /Chưa đọc/ }));

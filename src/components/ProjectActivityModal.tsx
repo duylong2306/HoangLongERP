@@ -159,11 +159,17 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
         {/* Bộ lọc (áp dụng trên toàn bộ lịch sử) */}
         <div className="shrink-0 px-3 py-2 bg-slate-50 border-b border-slate-200 space-y-2" data-testid="activity-filters">
           <div className="flex gap-2">
-            <div className="relative flex-1">
+            <div className="relative flex-1 min-w-0">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm người, công việc, nội dung…" data-testid="activity-search"
-                className="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-2 py-2 text-[12.5px] outline-none focus:border-blue-400" />
+                className="w-full min-w-0 bg-white border border-slate-200 rounded-lg pl-8 pr-2 py-2 text-[12.5px] outline-none focus:border-blue-400" />
             </div>
+            {/* Lọc theo LOẠI sự kiện: dropdown cho gọn (trước đây là một hàng nút dài) */}
+            <select value={type} onChange={e => setType(e.target.value as any)} aria-label="Lọc theo loại" data-testid="activity-types"
+              className="bg-white border border-slate-200 rounded-lg px-2 text-[12.5px] max-w-[130px]">
+              <option value="">Tất cả loại</option>
+              {Object.entries(EVENT_TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+            </select>
             <select value={who} onChange={e => setWho(e.target.value)} aria-label="Lọc theo người" className="bg-white border border-slate-200 rounded-lg px-2 text-[12.5px] max-w-[120px]">
               <option value="">Mọi người</option>
               {known.map(p => <option key={p} value={p}>{p}</option>)}
@@ -174,13 +180,6 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
               <button key={k || 'all'} type="button" onClick={() => setKind(k)}
                 className={`shrink-0 text-[11.5px] font-bold rounded-full px-3 py-1 border cursor-pointer ${kind === k ? 'bg-slate-800 border-slate-800' : 'bg-white border-slate-200 text-slate-600'}`}
                 style={kind === k ? { color: '#ffffff' } : undefined}>{label}</button>
-            ))}
-          </div>
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5" data-testid="activity-types">
-            {([['', 'Tất cả loại'], ...Object.entries(EVENT_TYPE_META).map(([k, v]) => [k, `${v.icon} ${v.label}`])] as [string, string][]).map(([k, label]) => (
-              <button key={k || 'all'} type="button" onClick={() => setType(k as any)}
-                className={`shrink-0 text-[11.5px] font-bold rounded-full px-3 py-1 border cursor-pointer ${type === k ? 'bg-[#0d47c9] border-[#0d47c9]' : 'bg-white border-slate-200 text-slate-600'}`}
-                style={type === k ? { color: '#ffffff' } : undefined}>{label}</button>
             ))}
           </div>
           <div className="flex items-center gap-2 text-[12px] text-slate-600">
