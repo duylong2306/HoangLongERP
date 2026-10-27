@@ -28,7 +28,7 @@ vi.mock('../supabase', () => ({
   getCurrentCompanyId: () => S.company,
 }));
 
-import { classifyEvent, recordProjectEvent, recordProjectEventFromMessage, loadProjectEventsPage, loadAllProjectEvents, __resetProjectEventsState, cleanSearch } from '../projectEvents';
+import { loadTodayProjectEvents, classifyEvent, recordProjectEvent, recordProjectEventFromMessage, loadProjectEventsPage, loadAllProjectEvents, __resetProjectEventsState, cleanSearch } from '../projectEvents';
 import { buildProjectLogSheets } from '../projectEventsExport';
 
 beforeEach(() => { S.rows = []; S.company = 'C1'; S.insertErr = null; S.selectErr = null; S.inserted = []; __resetProjectEventsState(); });
@@ -59,6 +59,18 @@ describe('classifyEvent', () => {
     expect(classifyEvent('💰 ĐÃ LẬP PHIẾU CHI TẠM ỨNG').type).toBe('tc');
     expect(classifyEvent('📝 Lan đã cập nhật Nhiệm Vụ "A" (Hạn mới: 21/08).').type).toBe('han');
     expect(classifyEvent('📌 Long đã chuyển công việc "KÝ HỢP ĐỒNG NHẬN TẠM ỨNG" sang An.').text).toContain('"KÝ HỢP ĐỒNG NHẬN TẠM ỨNG"');
+  });
+});
+
+describe('loadTodayProjectEvents', () => {
+  it('chỉ lấy sự kiện của dự án trong HÔM NAY, mới nhất trước', async () => {
+    S.rows = [ev('moi', 0, { created_at: at(0, 15) }), ev('sang', 0, { created_at: at(0, 7) }), ev('homqua', 1), ev('khac', 0, { project_id: 'P2', created_at: at(0, 9) })];
+    const r = await loadTodayProjectEvents('P1');
+    expect(r.map(x => x.id)).toEqual(['moi', 'sang']);
+  });
+  it('chưa chạy migration / lỗi → mảng rỗng, không ném lỗi', async () => {
+    S.selectErr = { code: '42P01', message: 'relation "project_events" does not exist' };
+    expect(await loadTodayProjectEvents('P1')).toEqual([]);
   });
 });
 

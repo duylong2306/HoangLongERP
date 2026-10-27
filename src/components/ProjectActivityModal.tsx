@@ -24,7 +24,8 @@ interface Props {
   loader?: typeof loadProjectEventsPage;
 }
 
-const TONE: Record<string, { dot: string; badge: string }> = {
+/** Màu theo loại sự kiện — dùng chung với thẻ "Hôm nay" (ProjectTodayCard) để hai nơi luôn giống nhau */
+export const TONE: Record<string, { dot: string; badge: string }> = {
   sky:     { dot: 'border-sky-300 bg-sky-50',         badge: 'text-sky-700 bg-sky-50 border-sky-200' },
   blue:    { dot: 'border-blue-300 bg-blue-50',       badge: 'text-blue-700 bg-blue-50 border-blue-200' },
   emerald: { dot: 'border-emerald-300 bg-emerald-50', badge: 'text-emerald-700 bg-emerald-50 border-emerald-200' },

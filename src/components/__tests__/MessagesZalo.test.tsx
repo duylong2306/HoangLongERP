@@ -17,6 +17,8 @@ vi.mock('../../lib/chatStore', () => ({
   loadConversationsFromCloud: vi.fn(async () => []), loadMessagesFromCloud: vi.fn(async () => []), loadMessagesProgressive: vi.fn(async () => []), subscribeConversations: () => () => {}, subscribeMessages: () => () => {},
   searchMessagesInConversation: (msgs: any[], q: string) => msgs.filter(m => (m.content || '').includes(q)),
 }));
+// Thẻ "Hôm nay" trong khung thông tin: không gọi máy chủ thật trong test
+vi.mock('../../lib/projectEvents', async (orig) => ({ ...(await orig<typeof import('../../lib/projectEvents')>()), loadTodayProjectEvents: vi.fn(async () => []) }));
 const addToast = vi.fn();
 vi.mock('../../context', () => ({ useNotification: () => ({ addToast }), isRoleAdmin: () => false }));
 import MessagesZalo from '../MessagesZalo';
@@ -75,6 +77,13 @@ describe('Danh sách hội thoại', () => {
     mount(); fireEvent.click(row('conv_project_A'));
     const grid = screen.getByTestId('zalo-info').closest('div.grid') as HTMLElement | null;
     expect(grid?.className).toContain('lg:grid-cols-[340px_minmax(0,1fr)_340px]');
+  });
+
+  it('nhóm dự án có thẻ "Hôm nay" trong khung thông tin; cá nhân thì không', async () => {
+    mount(); fireEvent.click(row('conv_project_A'));
+    expect(await screen.findByTestId('today-card')).toBeTruthy();
+    fireEvent.click(row('p_ny'));
+    await waitFor(() => expect(screen.queryByTestId('today-card')).toBeNull());
   });
 
   it('tab Chưa đọc chỉ còn hội thoại có tin mới, kèm số', () => {

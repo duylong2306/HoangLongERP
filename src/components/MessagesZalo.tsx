@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import * as MT from '../lib/messageTemplates';
 import { createPortal } from 'react-dom';
 import ProjectActivityModal from './ProjectActivityModal';
+import ProjectTodayCard from './ProjectTodayCard';
 import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
 import { ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
@@ -543,6 +544,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               className="relative ml-2 text-[12px] font-bold text-slate-700 bg-white border border-slate-300 rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-activity">🕘 Nhật ký dự án
               {(unreadAct[selected.projectId || String(selected.id).replace('conv_project_', '')]?.count || 0) > 0 && <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[11px] font-bold grid place-items-center" style={{ color: '#ffffff' }} data-testid="zalo-activity-badge">{Math.min(unreadAct[selected.projectId || String(selected.id).replace('conv_project_', '')].count, 99)}{unreadAct[selected.projectId || String(selected.id).replace('conv_project_', '')].count > 99 ? '+' : ''}</span>}</button>
           )}
+          {/* Thẻ "Hôm nay": dòng thời gian thu nhỏ các hoạt động của Nhật ký trong ngày; "Xem thêm" mở khung Nhật ký */}
+          {!selected.taskId && (() => { const pid = selected.projectId || String(selected.id).replace('conv_project_', ''); return <ProjectTodayCard projectId={pid} onOpen={() => setActivityPid(pid)} />; })()}
         </div>
       )}
       {selected.type !== 'personal' && (

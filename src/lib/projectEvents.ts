@@ -244,6 +244,21 @@ export async function loadProjectEventsPage(projectId: string, opts: { taskId?: 
   }
 }
 
+/**
+ * Các sự kiện của dự án trong NGÀY HÔM NAY (từ 00:00 giờ máy người dùng), mới nhất trước — dùng cho thẻ "Hôm nay" ở khung thông tin hội thoại.
+ * Chặn tối đa 200 dòng; lỗi / chưa chạy migration → mảng rỗng (thẻ tự ẩn, không ảnh hưởng chức năng khác).
+ */
+export async function loadTodayProjectEvents(projectId: string, now: Date = new Date()): Promise<ProjectEventRow[]> {
+  try {
+    const supabase = getSupabase();
+    if (!supabase || !projectId || tableMissing) return [];
+    const { data, error } = await supabase.from('project_events').select('*').eq('project_id', projectId)
+      .gte('created_at', startOfDay(now).toISOString()).order('created_at', { ascending: false }).limit(200);
+    if (error) { if (isMissingTable(error)) tableMissing = true; return []; }
+    return (data || []).map(toRow);
+  } catch { return []; }
+}
+
 /** Tải TOÀN BỘ nhật ký (nhiều trang liên tiếp) — dùng cho xuất Excel lưu trữ. Giới hạn 20.000 dòng để không treo máy. */
 export async function loadAllProjectEvents(projectId: string, opts: { taskId?: string; maxRows?: number } = {}): Promise<LoadEventsResult> {
   const max = opts.maxRows ?? 20000;
