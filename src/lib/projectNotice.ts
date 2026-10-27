@@ -5,7 +5,7 @@
 // An toàn khi chưa chạy migration: ghi nhật ký thất bại → tự gửi tin vào nhóm chat theo cách cũ (không mất thông báo).
 import type { ChatAttachment, ChatMessage } from '../types';
 import { ensureProjectChatGroup, addMemberToConversation, sendGroupChatMessage } from './chatStore';
-import { recordProjectEventFromMessage, type ProjectEventInput } from './projectEvents';
+import { recordProjectEventFromMessage, type ProjectEventInput, type ProjectEventType } from './projectEvents';
 
 export interface ProjectNoticeParams {
   project: { id: string; name?: string; pmId?: string };
@@ -17,6 +17,8 @@ export interface ProjectNoticeParams {
   memberIds?: (string | undefined)[];
   taskId?: string;
   missionId?: string;
+  /** Loại sự kiện nêu rõ (bỏ trống → tự đoán theo biểu tượng/từ khóa — xem classifyEvent) */
+  type?: ProjectEventType;
   objKind?: ProjectEventInput['objKind'];
   objName?: string;
   from?: string;
@@ -49,7 +51,7 @@ export async function postProjectNotice(p: ProjectNoticeParams): Promise<void> {
       projectId: p.project.id,
       actor: { id: p.actor.id, name: p.actor.name },
       taskId: p.taskId ?? ctx.taskId, missionId: p.missionId ?? ctx.missionId,
-      objKind: p.objKind ?? ctx.objKind, objName: p.objName, from: p.from, to: p.to,
+      type: p.type, objKind: p.objKind ?? ctx.objKind, objName: p.objName, from: p.from, to: p.to,
     });
     if ((!logged || p.alsoChat) && conv) {
       await sendGroupChatMessage({

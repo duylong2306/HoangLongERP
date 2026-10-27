@@ -2955,6 +2955,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setReceipts(prev => [newRec, ...prev]);
     try {
       await dbService.receipts.save(newRec);
+      // 📒 Nhật ký dự án: phiếu thu gắn dự án (bỏ qua phiếu nhập hàng loạt từ Excel để khỏi tràn nhật ký)
+      if (newRec.projectId && newRec.source !== 'import') {
+        logProjectEvt(newRec.projectId, MT.nk.phieuThuTao({
+          code: newRec.code, amount: newRec.amount, method: newRec.paymentMethod === 'cash' ? 'Tiền mặt' : 'Chuyển khoản',
+          customer: customers.find(c => c.id === newRec.customerId)?.name,
+        }), { type: 'tc', objKind: 'payment', objName: newRec.code });
+      }
     } catch (err) {
       console.error('[App] Lỗi lưu phiếu thu lên Supabase:', err);
       addToast({ title: '❌ Lỗi lưu', message: `Không thể lưu phiếu thu ${newRec.code} lên server.`, type: 'error' });
@@ -3008,6 +3015,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       const saved = await dbService.purchaseOrders.create(order) as PurchaseOrder;
       console.log('[App] Lưu đơn mua hàng thành công:', saved.id);
       setPurchaseOrders(prev => [saved, ...prev]);
+      // 📒 Nhật ký dự án: chỉ đơn mua tạo TAY cho 1 dự án thật. Đơn sinh từ Đề Xuất Vật Tư đã có dòng nhật ký riêng (MaterialCoordination);
+      // đơn "dự án" kho (WAREHOUSE_PROJECT_ID) không phải dự án nên bỏ qua.
+      if (saved.projectId && !saved.proposalId && projects.some(p => p.id === saved.projectId)) {
+        logProjectEvt(saved.projectId, MT.nk.donMuaTao({ id: saved.id, total: saved.tongTien, supplier: saved.supplierName }), { type: 'tc', objKind: 'material', objName: saved.id });
+      }
       return saved;
     } catch (err) {
       console.error('[App] Lỗi lưu đơn mua hàng lên Supabase:', err);
@@ -3017,9 +3029,13 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   const handleDeletePurchaseOrder = async (id: string) => {
+    const delPo = purchaseOrders.find(o => o.id === id);   // lấy TRƯỚC khi lọc khỏi state
     setPurchaseOrders(prev => prev.filter(o => o.id !== id));
     try {
       await dbService.purchaseOrders.delete(id);
+      if (delPo?.projectId && !delPo.proposalId && projects.some(p => p.id === delPo.projectId)) {
+        logProjectEvt(delPo.projectId, MT.nk.donMuaXoa({ id: delPo.id, total: delPo.tongTien, supplier: delPo.supplierName }), { type: 'xoa', objKind: 'material', objName: delPo.id });
+      }
     } catch (err) {
       console.error('[App] Lỗi xóa đơn mua hàng trên Supabase:', err);
     }
@@ -3053,9 +3069,11 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   const handleDeleteReceipt = async (id: string) => {
+    const delRec = receipts.find(r => r.id === id);   // lấy TRƯỚC khi lọc khỏi state — cần mã/số tiền/dự án để ghi nhật ký
     setReceipts(prev => prev.filter(r => r.id !== id));
     try {
       await dbService.receipts.delete(id);
+      if (delRec?.projectId) logProjectEvt(delRec.projectId, MT.nk.phieuThuXoa({ code: delRec.code, amount: delRec.amount }), { type: 'xoa', objKind: 'payment', objName: delRec.code });
     } catch (err) {
       console.error('[App] Lỗi xóa phiếu thu trên Supabase:', err);
     }
@@ -3120,6 +3138,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     setReceipts(prev => prev.map(r => r.id === updated.id ? updated : r));
     try {
       await dbService.receipts.save(updated);
+      if (updated.projectId) logProjectEvt(updated.projectId, MT.nk.phieuThuSua({ code: updated.code, amount: updated.amount }), { type: 'khac', objKind: 'payment', objName: updated.code });
     } catch (err) {
       console.error('[App] Lỗi cập nhật phiếu thu trên Supabase:', err);
     }
@@ -3247,6 +3266,9 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     }
   };
 
+  /** Tổng tiền các dòng của báo giá (dùng cho dòng nhật ký) */
+  const quoteTotal = (q: Quote) => (q.items || []).reduce((sum, it) => sum + (it.totalPrice || 0), 0);
+
   const handleAddQuote = (newQuote: Quote) => {
     let updatedCustomers = [...customers];
     
@@ -3265,6 +3287,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
       dbService.customers.save(newCust);
     }
 
+    // 📒 Nhật ký dự án: chỉ ghi khi là báo giá MỚI của 1 dự án (lưu lại báo giá đã có không ghi lại)
+    if (newQuote.projectId && !quotes.some(q => q.id === newQuote.id)) {
+      logProjectEvt(newQuote.projectId, MT.nk.baoGiaTao({ code: newQuote.code, total: quoteTotal(newQuote), customer: newQuote.customerName }), { type: 'tao', objKind: 'project' });
+    }
     setQuotes([newQuote, ...quotes]);
     dbService.quotes.save(newQuote);
 
@@ -3325,6 +3351,12 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   };
 
   const handleUpdateQuoteStatus = (quoteId: string, status: 'approved' | 'rejected' | 'sent' | 'draft') => {
+    // 📒 Nhật ký dự án: báo giá của dự án đổi trạng thái (gửi khách / khách duyệt / khách từ chối / về nháp)
+    const cur = quotes.find(q => q.id === quoteId);
+    if (cur?.projectId && cur.status !== status) {
+      logProjectEvt(cur.projectId, MT.nk.baoGiaTrangThai(status, { code: cur.code, total: quoteTotal(cur), customer: cur.customerName }),
+        { type: status === 'sent' ? 'tt' : status === 'draft' ? 'tt' : 'duyet', objKind: 'project' });
+    }
     const updated = quotes.map(q => {
       if (q.id === quoteId) {
         const nextq = { ...q, status };

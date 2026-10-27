@@ -62,6 +62,9 @@ export const ketQuaHoanThanh = (ok: boolean, task: string) => `${kq(ok)} hoàn t
 
 // ───────────── D. NHẬT KÝ / NHÓM DỰ ÁN (không có tên người — giao diện in sẵn tên người làm) ─────────────
 // Mở đầu bằng biểu tượng + động từ/từ khóa để classifyEvent phân loại đúng (xem projectEvents.ts).
+/** "BG-1: 120.000.000đ · Khách" — bỏ phần thiếu và bỏ luôn dấu hai chấm nếu không còn gì sau mã */
+const bgTail = (p: { code: string; total?: number; customer?: string }) => { const rest = join([p.total ? fmtMoney(p.total) : '', p.customer]); return rest ? `${p.code}: ${rest}` : p.code; };
+
 export const nk = {
   doiTruongDuAn: (p: { project: string; to: string }) => `👤 Chuyển Trưởng dự án ${p.project} sang ${p.to}`,
   doiTruongDuAnTuDong: (p: { project: string; to: string }) => `👤 Chuyển Trưởng dự án ${p.project} sang ${p.to} (tự động theo quy trình)`,
@@ -88,6 +91,17 @@ export const nk = {
   nhapExcel: (p: { count: number; task: string }) => `📝 Nhập ${p.count} nhiệm vụ từ Excel · công việc ${p.task}`,
   dongBoNhanSu: (n: number) => `👥 Đồng bộ nhân sự dự án: ${n} người`,
   kyDuyetHoSo: (p: { loai: string; code: string }) => `✅ Ký duyệt ${p.loai} ${p.code}`,
+  // Báo giá / phiếu thu / đơn mua gắn với dự án
+  baoGiaTao: (p: { code: string; total?: number; customer?: string }) => `📝 Lập báo giá ${bgTail(p)}`,
+  baoGiaTrangThai: (status: 'draft' | 'sent' | 'approved' | 'rejected', p: { code: string; total?: number; customer?: string }) => {
+    const tail = bgTail(p);
+    return status === 'sent' ? `📤 Gửi báo giá ${tail}` : status === 'approved' ? `✅ Khách duyệt báo giá ${tail}` : status === 'rejected' ? `❌ Khách từ chối báo giá ${tail}` : `🔄 Chuyển báo giá ${tail} về bản nháp`;
+  },
+  phieuThuTao: (p: { code: string; amount: number; method?: string; customer?: string }) => `💰 Thu tiền ${p.code}: ${join([fmtMoney(p.amount), p.method, p.customer])}`,
+  phieuThuSua: (p: { code: string; amount: number }) => `✏️ Sửa phiếu thu ${p.code}: ${fmtMoney(p.amount)}`,
+  phieuThuXoa: (p: { code: string; amount: number }) => `🗑️ Xóa phiếu thu ${p.code}: ${fmtMoney(p.amount)}`,
+  donMuaTao: (p: { id: string; total: number; supplier?: string }) => `🛒 Tạo đơn mua ${p.id}: ${join([fmtMoney(p.total), p.supplier])}`,
+  donMuaXoa: (p: { id: string; total: number; supplier?: string }) => `🗑️ Xóa đơn mua ${p.id}: ${join([fmtMoney(p.total), p.supplier])}`,
   deXuatVatTu: (p: { code: string; project: string; congViec?: string; lines: string[]; note?: string }) =>
     `📦 Đề xuất vật tư ${p.code} · ${p.project}${p.congViec ? ` · ${p.congViec}` : ''}\n${p.lines.join('\n')}${p.note ? `\n${p.note}` : ''}`,
 };
