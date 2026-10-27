@@ -45,7 +45,8 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys
-          .filter((key) => key !== CACHE_STATIC && key !== CACHE_DYNAMIC)
+          // 'hl-badge-v1' lưu số huy hiệu trên biểu tượng ứng dụng (lib/appBadge.ts + web-push-sw.js) — KHÔNG được dọn
+          .filter((key) => key !== CACHE_STATIC && key !== CACHE_DYNAMIC && key !== 'hl-badge-v1')
           .map((key) => {
             console.log('[SW] Deleting old cache:', key);
             return caches.delete(key);

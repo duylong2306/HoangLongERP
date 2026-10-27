@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readPrefs, writePrefs, toggleIn, unreadForBadge, prefsKey } from '../chatPrefs';
-import { scrollTopAfterPrepend, filterConversations, sortConversations, categoryOf, collectMedia, extractLinks, pinnedMessages, dayLabel, listTime, isFirstOfRun, isPinnedConv } from '../chatInfo';
+import { scrollTopAfterPrepend, filterConversations, sortConversations, categoryOf, collectMedia, extractLinks, pinnedMessages, dayLabel, listTime, isFirstOfRun, isPinnedConv, isStarredConv, CATEGORY_MENU } from '../chatInfo';
 
 const conv = (id: string, o: any = {}) => ({ id, type: 'personal', name: id, participantIds: ['me', 'x'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0, ...o }) as any;
 const none = { muted: [], pinned: [] };
@@ -9,8 +9,9 @@ const mem = () => { const m: Record<string, string> = {}; return { getItem: (k: 
 describe('chatPrefs', () => {
   it('tắt thông báo / ghim: lưu & đọc lại, dữ liệu hỏng → rỗng, mỗi người một khóa', () => {
     const s = mem(); const k = prefsKey('u1');
-    writePrefs(k, { muted: ['a'], pinned: ['b'] }, s); expect(readPrefs(k, s)).toEqual({ muted: ['a'], pinned: ['b'] });
-    s.setItem(k, '{hỏng'); expect(readPrefs(k, s)).toEqual({ muted: [], pinned: [] });
+    writePrefs(k, { muted: ['a'], pinned: ['b'], starred: ['c'] }, s); expect(readPrefs(k, s)).toEqual({ muted: ['a'], pinned: ['b'], starred: ['c'] });
+    s.setItem(k, '{"muted":["a"]}'); expect(readPrefs(k, s)).toEqual({ muted: ['a'], pinned: [], starred: [] });   // dữ liệu cũ chưa có starred vẫn đọc được
+    s.setItem(k, '{hỏng'); expect(readPrefs(k, s)).toEqual({ muted: [], pinned: [], starred: [] });
     expect(prefsKey('u1')).not.toBe(prefsKey('u2'));
   });
   it('toggleIn không sửa mảng gốc', () => { const a = ['x']; expect(toggleIn(a, 'y')).toEqual(['x', 'y']); expect(toggleIn(a, 'x')).toEqual([]); expect(a).toEqual(['x']); });
@@ -41,6 +42,16 @@ describe('lọc / phân loại / sắp xếp hội thoại', () => {
     expect(f({ tab: 'unread' })).toEqual(['p1', 'conv_project_X']);
     expect(f({ category: 'pinned', prefs: { muted: [], pinned: ['g1'] } })).toEqual(['g1']);
     expect(f({ category: 'muted', prefs: { muted: ['t1'], pinned: [] } })).toEqual(['t1']);
+  });
+  it('tab Quan tâm: chỉ hội thoại đã đánh dấu ⭐; kết hợp được với Phân loại; dữ liệu cũ chưa có starred → rỗng', () => {
+    expect(f({ tab: 'starred', prefs: { muted: [], pinned: [], starred: ['g1', 'p1'] } })).toEqual(['p1', 'g1']);
+    expect(f({ tab: 'starred', category: 'personal', prefs: { muted: [], pinned: [], starred: ['g1', 'p1'] } })).toEqual(['p1']);
+    expect(f({ tab: 'starred' })).toEqual([]);
+    expect(isStarredConv({ id: 'g1' }, { muted: [], pinned: [], starred: ['g1'] })).toBe(true);
+    expect(isStarredConv({ id: 'g1' }, none)).toBe(false);
+  });
+  it('menu Phân loại không còn "Công việc" và "Đã ghim"', () => {
+    expect(CATEGORY_MENU).toEqual(['all', 'personal', 'group', 'project', 'muted']);
   });
   it('tìm kiếm không dấu, theo tên và theo tin cuối', () => {
     expect(f({ query: 'ngo van' })).toEqual(['p1']);

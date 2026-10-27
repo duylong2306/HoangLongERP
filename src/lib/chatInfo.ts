@@ -3,7 +3,7 @@ import type { ChatMessage, Conversation } from '../types';
 import type { ChatPrefs } from './chatPrefs';
 import { isWorkThreadId } from './workThread';
 
-export type ListTab = 'all' | 'unread';
+export type ListTab = 'all' | 'unread' | 'starred';
 export type Category = 'all' | 'personal' | 'group' | 'project' | 'task' | 'pinned' | 'muted';
 export const CATEGORY_LABEL: Record<Category, string> = {
   all: 'Tất cả', personal: 'Cá nhân', group: 'Nhóm', project: 'Dự án', task: 'Công việc', pinned: 'Đã ghim', muted: 'Đã tắt thông báo',
@@ -16,6 +16,10 @@ export function categoryOf(c: Conversation): Exclude<Category, 'all' | 'pinned' 
   if (c.projectId || String(c.id).startsWith('conv_project_')) return 'project';
   return 'group';
 }
+/** Hội thoại đã đánh dấu ⭐ Quan tâm */
+export const isStarredConv = (c: { id: string }, prefs: ChatPrefs) => (prefs.starred || []).includes(c.id);
+/** Các mục hiện trong menu "Phân loại" (không còn "Công việc" và "Đã ghim") */
+export const CATEGORY_MENU: Category[] = ['all', 'personal', 'group', 'project', 'muted'];
 export const isPinnedConv = (c: Conversation, prefs: ChatPrefs) => !!c.pinned || prefs.pinned.includes(c.id);
 
 const norm = (s?: string) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd').toLowerCase();
@@ -27,7 +31,7 @@ export function filterConversations(
   const q = norm(o.query.trim());
   return convs
     .filter(c => c.participantIds.includes(o.userId) && !isWorkThreadId(c.id))   // luồng thảo luận "Việc của tôi" chỉ hiện ở tab Việc của tôi
-    .filter(c => o.tab === 'all' || (c.unreadCount || 0) > 0)
+    .filter(c => o.tab === 'all' || (o.tab === 'starred' ? isStarredConv(c, o.prefs) : (c.unreadCount || 0) > 0))
     .filter(c => {
       if (o.category === 'all') return true;
       if (o.category === 'pinned') return isPinnedConv(c, o.prefs);

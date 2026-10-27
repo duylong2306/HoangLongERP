@@ -67,6 +67,23 @@ describe('dựng dòng nhật ký từ tin cũ', () => {
     expect(p.event.obj_kind).toBe('mission');
   });
 
+  it('related_entity là CHUỖI JSON (đúng như tin chat lưu thật) vẫn đọc ra task_id / mission_id', () => {
+    const [a, b, c] = core.planMigration([
+      msg({ id: '1', related_entity: JSON.stringify({ type: 'task', id: 'T7' }) }),
+      msg({ id: '2', related_entity: JSON.stringify({ type: 'mission', id: 'M3' }) }),
+      msg({ id: '3', related_entity: JSON.stringify({ type: 'project', id: 'P1' }) }),
+    ]);
+    expect(a.event).toMatchObject({ task_id: 'T7', mission_id: null });
+    expect(b.event).toMatchObject({ task_id: null, mission_id: 'M3' });   // công việc chứa nhiệm vụ do bước bù (backfill) tra thêm
+    expect(c.event).toMatchObject({ task_id: null, mission_id: null });
+  });
+  it('parseEntity: chuỗi hỏng / thiếu mã / rỗng → null, không ném lỗi', () => {
+    expect(core.parseEntity('không phải json')).toBeNull();
+    expect(core.parseEntity('{"type":"task"}')).toBeNull();
+    expect(core.parseEntity(null)).toBeNull();
+    expect(core.parseEntity({ type: 'task', id: 'T1' })).toEqual({ type: 'task', id: 'T1' });
+  });
+
   it('vật tư 📦🛒🚚 → loại tài chính, đối tượng vật tư', () => {
     for (const ic of ['📦', '🛒', '🚚']) {
       const [p] = core.planMigration([msg({ content: `${ic} ĐỀ XUẤT VẬT TƯ VT-1 ĐÃ NHẬN HÀNG` })]);
@@ -159,6 +176,13 @@ describe('migration và giao diện', () => {
     expect(js).toMatch(/args\.ghi/); expect(js).toMatch(/args\.xoa/);
     expect(js).toMatch(/backedUp\.has\(p\.msg\.id\)/); expect(js).toMatch(/logged\.has\(p\.msg\.id\)/);
     expect(js).toMatch(/onConflict: 'company_id,source_msg_id', ignoreDuplicates: true/);
+  });
+  it('bước bù mã công việc/nhiệm vụ: chỉ điền dòng còn trống, tra công việc theo data.id, mặc định chạy thử', () => {
+    const js = fs.readFileSync(path.join(root, 'scripts/backfill-project-event-links.mjs'), 'utf8');
+    expect(js).toMatch(/args\.ghi/);
+    expect(js).toMatch(/\.is\('task_id', null\)\.is\('mission_id', null\)/);          // không đè dòng đã có mã
+    expect(js).toMatch(/in\('data->>id', part\)/);                                       // khóa task_missions là "task::mission"
+    expect(js).toMatch(/data->>related_entity/);                                         // đọc từ bản sao lưu, không kéo cả dòng nặng
   });
   it('Nhật ký hiển thị ảnh/tệp đính kèm', () => {
     const tsx = fs.readFileSync(path.join(root, 'src/components/ProjectActivityModal.tsx'), 'utf8');

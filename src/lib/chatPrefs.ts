@@ -1,7 +1,8 @@
 import { isWorkThreadId } from './workThread';
 // TÙY CHỌN RIÊNG của từng người trong Tin nhắn: tắt thông báo hội thoại, ghim hội thoại.
 // Lưu trong localStorage theo người dùng + doanh nghiệp (không đồng bộ giữa các máy). Hàm thuần nhận storage để dễ kiểm tra.
-export interface ChatPrefs { muted: string[]; pinned: string[] }
+// starred = hội thoại đánh dấu ⭐ "Quan tâm" (thay cho "ghim hội thoại"; pinned giữ lại để đọc dữ liệu cũ)
+export interface ChatPrefs { muted: string[]; pinned: string[]; starred?: string[] }
 
 export const prefsKey = (userId?: string) => `hl_chat_prefs_${userId || 'anon'}`;
 type R = Pick<Storage, 'getItem'>; type W = Pick<Storage, 'setItem'>;
@@ -11,8 +12,8 @@ export function readPrefs(key: string, storage: R | null = ls()): ChatPrefs {
   try {
     const p = JSON.parse(storage?.getItem(key) || 'null');
     const arr = (v: any) => (Array.isArray(v) ? v.filter((x: any) => typeof x === 'string') : []);
-    return { muted: arr(p?.muted), pinned: arr(p?.pinned) };
-  } catch { return { muted: [], pinned: [] }; }
+    return { muted: arr(p?.muted), pinned: arr(p?.pinned), starred: arr(p?.starred) };
+  } catch { return { muted: [], pinned: [], starred: [] }; }
 }
 export function writePrefs(key: string, prefs: ChatPrefs, storage: W | null = ls()) {
   try { storage?.setItem(key, JSON.stringify(prefs)); } catch { /* bỏ qua */ }

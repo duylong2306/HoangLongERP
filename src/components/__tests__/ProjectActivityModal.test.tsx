@@ -19,35 +19,47 @@ describe('Nhật ký dự án — khung dòng thời gian', () => {
     expect(screen.getByText('— Đã hiện toàn bộ lịch sử —')).toBeTruthy();
   });
 
-  it('báo cáo nhiệm vụ: hiện ảnh thu nhỏ + tệp kèm, và lối tắt mở nhiệm vụ (không hiện trong lịch sử riêng của công việc)', async () => {
-    const onOpenTask = vi.fn();
-    const withAtt = row('a', 0, { taskId: 'T7', missionId: 'M3', objKind: 'mission', objName: 'Lắp đặt tại công trình', attachments: [
+  describe('báo cáo nhiệm vụ kèm ảnh/tệp + lối tắt', () => {
+    const withAtt = () => row('a', 0, { taskId: 'T7', missionId: 'M3', objKind: 'mission', objName: 'Lắp đặt tại công trình', attachments: [
       { id: 'i1', type: 'image', name: 'a.jpg', url: 'https://kho/a.jpg' }, { id: 'f1', type: 'file', name: 'bao-cao.pdf', url: 'https://kho/bao-cao.pdf' },
     ] });
-    const loader = vi.fn().mockResolvedValue({ ok: true, rows: [withAtt, row('b', 0)], hasMore: false });
-    const { unmount } = render(<ProjectActivityModal projectId="P1" onClose={() => {}} loader={loader} onOpenTask={onOpenTask} />);
-    await screen.findAllByTestId('activity-event');
-    const box = screen.getByTestId('activity-attachments');
-    expect(box.querySelector('img')?.getAttribute('src')).toBe('https://kho/a.jpg');
-    expect(box.textContent).toContain('bao-cao.pdf');
-    fireEvent.click(screen.getByTestId('activity-open-task'));
-    expect(onOpenTask).toHaveBeenCalledWith('T7', 'M3');   // mở thẳng nhiệm vụ M3 trong công việc T7
-    expect(screen.getByTestId('activity-open-task').textContent).toContain('Mở nhiệm vụ');
-    expect(screen.getAllByTestId('activity-event')).toHaveLength(2);   // dòng không có công việc thì không có lối tắt
-    expect(screen.getAllByTestId('activity-open-task')).toHaveLength(1);
-    // Không truyền onOpenTask → phát sự kiện toàn ứng dụng kèm cả mã nhiệm vụ
-    unmount();
-    const seen: any[] = []; const h = (e: Event) => seen.push((e as CustomEvent).detail); window.addEventListener('hl-open-task', h);
-    const r2 = render(<ProjectActivityModal projectId="P1" onClose={() => {}} loader={loader} />);
-    await screen.findAllByTestId('activity-event');
-    fireEvent.click(screen.getByTestId('activity-open-task'));
-    window.removeEventListener('hl-open-task', h);
-    expect(seen).toEqual([{ taskId: 'T7', missionId: 'M3' }]);
-    r2.unmount();
-    // Xem lịch sử RIÊNG của 1 công việc (có taskId): không cần lối tắt
-    render(<ProjectActivityModal projectId="P1" taskId="T7" onClose={() => {}} loader={loader} />);
-    await screen.findAllByTestId('activity-event');
-    expect(screen.queryByTestId('activity-open-task')).toBeNull();
+    const mk = () => vi.fn().mockResolvedValue({ ok: true, rows: [withAtt(), row('b', 0)], hasMore: false });
+
+    it('hiện ảnh thu nhỏ + tệp kèm', async () => {
+      render(<ProjectActivityModal projectId="P1" onClose={() => {}} loader={mk()} />);
+      await screen.findAllByTestId('activity-event');
+      const box = screen.getByTestId('activity-attachments');
+      expect(box.querySelector('img')?.getAttribute('src')).toBe('https://kho/a.jpg');
+      expect(box.textContent).toContain('bao-cao.pdf');
+    });
+
+    it('lối tắt mở thẳng nhiệm vụ rồi ĐÓNG khung Nhật ký (để mục cần xem hiện đầy đủ); dòng không có công việc thì không có lối tắt', async () => {
+      const onOpenTask = vi.fn(); const onClose = vi.fn();
+      render(<ProjectActivityModal projectId="P1" onClose={onClose} loader={mk()} onOpenTask={onOpenTask} />);
+      await screen.findAllByTestId('activity-event');
+      expect(screen.getAllByTestId('activity-open-task')).toHaveLength(1);
+      expect(screen.getByTestId('activity-open-task').textContent).toContain('Mở nhiệm vụ');
+      fireEvent.click(screen.getByTestId('activity-open-task'));
+      expect(onOpenTask).toHaveBeenCalledWith('T7', 'M3');   // mở thẳng nhiệm vụ M3 trong công việc T7
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('không truyền onOpenTask → phát sự kiện toàn ứng dụng kèm mã nhiệm vụ, và cũng đóng khung', async () => {
+      const seen: any[] = []; const h = (e: Event) => seen.push((e as CustomEvent).detail); window.addEventListener('hl-open-task', h);
+      const onClose = vi.fn();
+      render(<ProjectActivityModal projectId="P1" onClose={onClose} loader={mk()} />);
+      await screen.findAllByTestId('activity-event');
+      fireEvent.click(screen.getByTestId('activity-open-task'));
+      window.removeEventListener('hl-open-task', h);
+      expect(seen).toEqual([{ taskId: 'T7', missionId: 'M3' }]);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('xem lịch sử RIÊNG của 1 công việc (có taskId): không cần lối tắt', async () => {
+      render(<ProjectActivityModal projectId="P1" taskId="T7" onClose={() => {}} loader={mk()} />);
+      await screen.findAllByTestId('activity-event');
+      expect(screen.queryByTestId('activity-open-task')).toBeNull();
+    });
   });
 
   it('tải thêm 3 ngày khi cuộn gần cuối và khi bấm nút; hết thì thôi', async () => {

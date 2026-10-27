@@ -3042,6 +3042,28 @@ export const dbService = {
     }
   },
 
+  /**
+   * Tải ảnh đại diện NHÓM CHAT lên Storage (bucket chat-attachments, thư mục <công ty>/conv-avatars/). Ảnh được thu nhỏ còn 512px
+   * (đủ nét cho khung 64px) để danh sách hội thoại tải nhẹ. KHÔNG quay về lưu base64 như tệp đính kèm: đường dẫn này nằm trong dòng
+   * hội thoại và được tải mỗi lần mở danh sách, nhúng ảnh vào đó sẽ làm chậm mọi người → lỗi thì trả null để nơi gọi báo người dùng.
+   */
+  async uploadConversationAvatar(conversationId: string, file: File): Promise<string | null> {
+    const supabase = getSupabase();
+    if (!supabase || !file.type.startsWith('image/')) return null;
+    file = await compressImageFile(file, { maxEdge: 512, quality: 0.85 });
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const safeConv = String(conversationId || 'conv').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const path = `${getCurrentCompanyId() || 'noco'}/conv-avatars/${safeConv}_${Date.now()}.${ext}`;
+    try {
+      const { error } = await supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type || 'image/jpeg', upsert: false });
+      if (error) throw error;
+      return supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
+    } catch (err: any) {
+      console.warn('[uploadConversationAvatar] Upload thất bại (đã chạy migration 20261101 chưa?):', String(err?.message || err));
+      return null;
+    }
+  },
+
   // ===== HÀM UPLOAD HÌNH ẢNH CHO SẢN PHẨM CATALOG =====
   async uploadProductImage(productId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
     const supabase = getSupabase();

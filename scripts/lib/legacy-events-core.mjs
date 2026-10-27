@@ -69,6 +69,17 @@ export function guessObject(icon, text) {
   return { kind, name: m ? m[1] : undefined };
 }
 
+/**
+ * related_entity của tin chat được LƯU DẠNG CHUỖI JSON (chatStore: JSON.stringify) — đọc ra đối tượng { type, id }; không đọc được → null.
+ * (Bản đầu của công cụ coi nó là đối tượng nên mọi dòng nhật ký chuyển từ chat đều thiếu mã công việc/nhiệm vụ — xem scripts/backfill-project-event-links.mjs.)
+ */
+export function parseEntity(v) {
+  try {
+    const o = typeof v === 'string' ? JSON.parse(v) : v;
+    return o && typeof o === 'object' && typeof o.id === 'string' ? o : null;
+  } catch { return null; }
+}
+
 /** Mã dự án từ mã hội thoại `conv_project_<mã dự án>`; undefined nếu không phải nhóm dự án */
 export const projectIdOfConversationId = (id) => (typeof id === 'string' && id.startsWith('conv_project_') ? id.slice('conv_project_'.length) : undefined);
 
@@ -88,7 +99,7 @@ export function planMigration(messages) {
     if (!EVENT_ICONS.has(icon)) return { action: 'keep', msg, why: icon ? 'biểu tượng không thuộc tin hệ thống (người chat / tệp đăng)' : 'tin chữ thường (người chat)' };
     const { type, text, detail } = splitEventMessage(msg.content, msg.sender_name);
     const obj = guessObject(icon, text);
-    const re = msg.related_entity && typeof msg.related_entity === 'object' ? msg.related_entity : null;
+    const re = parseEntity(msg.related_entity);
     const atts = Array.isArray(msg.attachments) && msg.attachments.length ? msg.attachments : null;
     return {
       action: 'event', msg,

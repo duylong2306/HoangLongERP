@@ -510,6 +510,26 @@ export async function addMemberToConversation(convId: string, memberId: string):
   return mergeMembersCloud(convId, [memberId]);
 }
 
+/**
+ * Đổi ảnh đại diện của NHÓM (url = đường dẫn ảnh; '' = trở về ảnh mặc định). Hội thoại cá nhân không có ảnh nhóm → false.
+ * Chỉ cập nhật cột avatar (không ghi đè thành viên/tin cuối từ bản copy trong bộ nhớ); máy chủ báo lỗi thì KHÔNG đổi ở máy này
+ * để tránh hiện ảnh mới mà người khác không thấy. Người khác nhận ảnh mới qua realtime của danh sách hội thoại.
+ */
+export async function updateConversationAvatar(convId: string, url: string): Promise<boolean> {
+  const conv = conversationsCache.get(convId);
+  if (conv?.type === 'personal') return false;
+  const sb = getSupabase();
+  if (sb) {
+    let q = sb.from('conversations').update({ avatar: url }).eq('id', convId);
+    const cid = getCurrentCompanyId();
+    if (cid) q = q.eq('company_id', cid);
+    const { data, error } = await q.select('id');
+    if (error || !data || data.length === 0) { console.error('updateConversationAvatar error:', error?.message || 'không có dòng nào được cập nhật'); return false; }
+  }
+  if (conv) conversationsCache.set(convId, { ...conv, avatar: url });
+  return true;
+}
+
 // ─── Nhóm chat "Điểm danh" ─────────────────────────────────────────────────
 // Nhóm chat ĐIỂM DANH (id cố định `conv_attendance`): người chấm công ĐẦU TIÊN
 // trong mỗi ca (Vào/Ra sáng, Vào/Ra chiều) khiến Hệ Thống gửi 1 tin nhắc vào

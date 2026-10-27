@@ -5,6 +5,27 @@
  * using Web Push API (VAPID keys)
  */
 
+// ── Huy hiệu số trên biểu tượng ứng dụng (App Badging API) ────────────────────────────────────────────
+// Lúc ứng dụng ĐÃ ĐÓNG, mỗi thông báo đẩy cộng thêm 1 vào huy hiệu (số ước lượng). Số được giữ trong Cache 'hl-badge-v1' (khóa '/__badge') —
+// cùng nơi ứng dụng ghi số thật khi mở (src/lib/appBadge.ts), nên mở ứng dụng là được đặt lại đúng. Đang mở và nhìn thấy ứng dụng thì bỏ qua
+// (ứng dụng tự đặt số chính xác). Trình duyệt không hỗ trợ / lỗi → bỏ qua, không ảnh hưởng việc hiện thông báo.
+const BADGE_CACHE = 'hl-badge-v1';
+const BADGE_KEY = '/__badge';
+async function bumpAppBadge() {
+  try {
+    if (!self.navigator || typeof self.navigator.setAppBadge !== 'function' || !self.caches) return;
+    if (self.clients && self.clients.matchAll) {
+      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if (wins.some((c) => c.visibilityState === 'visible')) return;
+    }
+    const cache = await self.caches.open(BADGE_CACHE);
+    const cur = await cache.match(BADGE_KEY);
+    const n = (cur ? parseInt(await cur.text(), 10) || 0 : 0) + 1;
+    await cache.put(BADGE_KEY, new Response(String(n)));
+    await self.navigator.setAppBadge(n);
+  } catch (e) { /* bỏ qua */ }
+}
+
 // Push notification handler
 self.addEventListener('push', (event) => {
   if (!event.data) {
@@ -63,7 +84,7 @@ self.addEventListener('push', (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(title || 'Thông báo mới', options)
+    Promise.all([self.registration.showNotification(title || 'Thông báo mới', options), bumpAppBadge()])
   );
 });
 

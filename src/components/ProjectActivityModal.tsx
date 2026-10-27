@@ -135,7 +135,11 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
     return out;
   }, [shown]);
 
-  const openTask = (id: string, missionId?: string) => (onOpenTask ? onOpenTask(id, missionId) : window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: id, missionId } })));
+  // Mở công việc / nhiệm vụ rồi ĐÓNG khung Nhật ký, để mục cần xem hiện đầy đủ (không bị khung Nhật ký che)
+  const openTask = (id: string, missionId?: string) => {
+    if (onOpenTask) onOpenTask(id, missionId); else window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: id, missionId } }));
+    onClose();
+  };
   const doExport = async () => { if (!onExport || exporting) return; setExporting(true); try { await onExport(); } finally { setExporting(false); } };
 
   return (

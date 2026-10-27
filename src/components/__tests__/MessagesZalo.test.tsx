@@ -8,7 +8,7 @@ const fn = vi.hoisted(() => ({
   markConversationRead: vi.fn(async () => {}), markMessagesReadByUser: vi.fn(async () => {}),
   softDeleteMessage: vi.fn(async (c: string, id: string) => { store.msgs[c] = store.msgs[c].map(m => m.id === id ? { ...m, deleted: true, content: 'x' } : m); return true; }),
   togglePinMessage: vi.fn(async (c: string, id: string) => { store.msgs[c] = store.msgs[c].map(m => m.id === id ? { ...m, pinned: !m.pinned } : m); return null; }),
-  toggleMessageReaction: vi.fn(async () => {}), updateMessage: vi.fn(async () => null),
+  toggleMessageReaction: vi.fn(async () => {}), updateMessage: vi.fn(async () => null), updateConversationAvatar: vi.fn(async () => true),
   getOrCreatePersonalConversation: vi.fn(async (a: string, b: string, an: string, bn: string) => { const c = { id: `conv_personal_${a}_${b}`, type: 'personal', name: bn, participantIds: [a, b], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0 }; store.convs.push(c); return c; }),
 }));
 vi.mock('../../lib/chatStore', () => ({
@@ -224,12 +224,63 @@ describe('Tắt thông báo / ghim hội thoại / thông tin hội thoại', ()
     expect(within(row('g_diemdanh')).getByTestId('zalo-unread').className).toContain('bg-slate-400');
     expect(within(row('p_ny')).getByTestId('zalo-unread').className).toContain('bg-red-500');
   });
-  it('ghim hội thoại: lưu và đưa lên đầu danh sách', async () => {
+  it('⭐ Quan tâm: nút trong khung thông tin lưu lại, hàng danh sách hiện ngôi sao, tab "Quan tâm" lọc đúng; bấm lại để bỏ', async () => {
     mount(); fireEvent.click(row('p_hao'));
     await screen.findByTestId('zalo-info');
-    fireEvent.click(screen.getByTestId('zalo-pinconv'));
-    expect(JSON.parse(localStorage.getItem('hl_chat_prefs_me')!).pinned).toEqual(['p_hao']);
-    expect(screen.getAllByTestId('zalo-conv').map(r => r.getAttribute('data-conv')).slice(0, 2)).toEqual(['conv_project_A', 'p_hao']);   // nhóm ghim (hệ thống + riêng) đứng đầu, mới nhất trước; p_hao nhảy lên trên các hội thoại chưa đọc
+    expect(screen.queryByTestId('zalo-pinconv')).toBeNull();                     // không còn nút ghim hội thoại
+    expect(screen.getByTestId('zalo-star').textContent).toContain('Quan tâm');
+    fireEvent.click(screen.getByTestId('zalo-star'));
+    expect(JSON.parse(localStorage.getItem('hl_chat_prefs_me')!).starred).toEqual(['p_hao']);
+    expect(screen.getByTestId('zalo-star').textContent).toContain('Bỏ quan tâm');
+    expect(within(row('p_hao')).getByTestId('zalo-row-star')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Quan tâm' }));            // tab (nút trong khung thông tin đã đổi tên thành "Bỏ quan tâm")
+    expect(screen.getAllByTestId('zalo-conv').map(r => r.getAttribute('data-conv'))).toEqual(['p_hao']);
+    fireEvent.click(screen.getByTestId('zalo-star'));
+    expect(JSON.parse(localStorage.getItem('hl_chat_prefs_me')!).starred).toEqual([]);
+    expect(screen.queryByTestId('zalo-row-star')).toBeNull();   // đã bỏ quan tâm → hết ngôi sao ở hàng danh sách
+  });
+  it('đổi ảnh nhóm: chọn ảnh → tải lên → lưu cho cả nhóm; có ảnh thì có nút Gỡ; hội thoại cá nhân không có mục này', async () => {
+    const { dbService } = await import('../../lib/dbService');
+    const up = vi.spyOn(dbService, 'uploadConversationAvatar').mockResolvedValue('https://kho/nhom.jpg');
+    mount(); fireEvent.click(row('conv_project_A'));
+    await screen.findByTestId('zalo-info');
+    expect(screen.queryByTestId('zalo-remove-avatar')).toBeNull();                       // chưa có ảnh riêng → chưa có nút Gỡ
+    const file = new File(['x'], 'nhom.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('zalo-avatar-input'), { target: { files: [file] } });
+    await waitFor(() => expect(fn.updateConversationAvatar).toHaveBeenCalledWith('conv_project_A', 'https://kho/nhom.jpg'));
+    expect(up).toHaveBeenCalledWith('conv_project_A', file);
+    // tệp không phải ảnh bị từ chối, không tải lên
+    up.mockClear(); fn.updateConversationAvatar.mockClear();
+    fireEvent.change(screen.getByTestId('zalo-avatar-input'), { target: { files: [new File(['x'], 'a.pdf', { type: 'application/pdf' })] } });
+    expect(up).not.toHaveBeenCalled(); expect(fn.updateConversationAvatar).not.toHaveBeenCalled();
+    // tải lên thất bại → không lưu
+    up.mockResolvedValue(null);
+    fireEvent.change(screen.getByTestId('zalo-avatar-input'), { target: { files: [file] } });
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ title: '❌ Không tải được ảnh' })));
+    expect(fn.updateConversationAvatar).not.toHaveBeenCalled();
+    // hội thoại cá nhân: không có mục đổi ảnh nhóm
+    fireEvent.click(row('p_ny'));
+    await waitFor(() => expect(screen.queryByTestId('zalo-change-avatar')).toBeNull());
+    up.mockRestore();
+  });
+  it('nhóm đã có ảnh riêng: hiện nút "Gỡ ảnh" và bấm thì lưu rỗng', async () => {
+    store.convs = store.convs.map(c => c.id === 'conv_project_A' ? { ...c, avatar: 'https://kho/nhom.jpg' } : c);
+    mount(); fireEvent.click(row('conv_project_A'));
+    fireEvent.click(await screen.findByTestId('zalo-remove-avatar'));
+    await waitFor(() => expect(fn.updateConversationAvatar).toHaveBeenCalledWith('conv_project_A', ''));
+  });
+  it('tab đặt sau "Chưa đọc"; menu Phân loại không còn Công việc / Đã ghim', () => {
+    mount();
+    const tabs = screen.getAllByRole('button').filter(b => ['Tất cả', 'Chưa đọc', 'Quan tâm'].some(t => b.textContent?.startsWith(t) && b.hasAttribute('aria-pressed')));
+    expect(tabs.map(b => b.textContent!.replace(/\d+$/, ''))).toEqual(['Tất cả', 'Chưa đọc', 'Quan tâm']);
+    fireEvent.click(screen.getByTestId('zalo-category-btn'));
+    const items = within(screen.getByTestId('zalo-category-menu')).getAllByRole('menuitem').map(b => b.textContent);
+    expect(items).toEqual(expect.arrayContaining(['Tất cả', 'Cá nhân', 'Nhóm', 'Dự án', 'Đã tắt thông báo']));
+    expect(items).not.toContain('Công việc'); expect(items).not.toContain('Đã ghim');
+  });
+  it('nhóm dự án ghim hệ thống vẫn đứng đầu danh sách', () => {
+    mount();
+    expect(screen.getAllByTestId('zalo-conv').map(r => r.getAttribute('data-conv'))[0]).toBe('conv_project_A');
   });
   it('thông tin hội thoại: ảnh, tệp, link, thành viên gom từ tin nhắn', async () => {
     mount(); fireEvent.click(row('conv_project_A'));

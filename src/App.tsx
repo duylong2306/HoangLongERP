@@ -86,6 +86,7 @@ import { useChatPrefs } from './lib/useChatPrefs';
 import { unreadForBadge } from './lib/chatPrefs';
 import { useProjectActivityUnread, activityProjectKey } from './lib/useProjectActivityUnread';
 import UpdateBanner from './components/UpdateBanner';
+import { useAppBadge } from './lib/appBadge';
 import DisplaySettingsPage from './components/DisplaySettingsPage';
 
 // ICONS
@@ -1073,6 +1074,10 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   }, [initialConvId]);
   // Hiển thị badge đếm số chưa đọc trên tab
   const [showBadgeCounts, setShowBadgeCounts] = useState<boolean>(() => localStorage.getItem('hl_show_badge_counts') !== 'false');
+  // Tin chưa đọc (không tính hội thoại đã tắt thông báo) + số dự án có hoạt động mới trong Nhật ký — dùng cho huy hiệu menu Tin nhắn, chuông
+  // và cả huy hiệu trên BIỂU TƯỢNG ứng dụng (khi đã thêm vào Màn hình chính; xem lib/appBadge.ts). Tắt "hiển thị badge" thì biểu tượng cũng không hiện số.
+  const chatUnreadForNav = (currentUser ? unreadForBadge(getUserConversations(getConversations(), currentUser.id), chatPrefsApp) : 0) + activityUnreadForNav;
+  useAppBadge(showBadgeCounts ? chatUnreadForNav : 0);
 
   // ═══════════════════════════════════════════════════════════════════════
   // DEEP LINK TỪ THÔNG BÁO ĐẨY (Web Push)
@@ -3596,9 +3601,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   })();
 
   // ─── MÔ HÌNH MENU (thanh trái máy tính + thanh dưới điện thoại) — CÙNG quy tắc phân quyền với menu cũ ───
-  // Tin chưa đọc (không tính hội thoại đã tắt thông báo) + số dự án có hoạt động mới trong Nhật ký
-  const chatUnreadForNav = (currentUser ? unreadForBadge(getUserConversations(getConversations(), currentUser.id), chatPrefsApp) : 0) + activityUnreadForNav;
-  const leaf = (id: string, label: string, active: boolean, onSelect: () => void): NavLeaf => ({ id, label, active, onSelect });
+    const leaf = (id: string, label: string, active: boolean, onSelect: () => void): NavLeaf => ({ id, label, active, onSelect });
   const navTops: NavTop[] = !currentUser ? [] : [
     ...(isAccessible('dashboard') ? [{ ...leaf('dashboard', 'Tổng quan', activeTab === 'dashboard', () => setActiveTab('dashboard')), icon: <LayoutDashboard className="lx-i" /> }] : []),
     ...(isAccessible('tasks') ? [{ ...leaf('tasks', 'Việc của tôi', activeTab === 'tasks', () => setActiveTab('tasks')), icon: <CheckSquare className="lx-i" />, badge: myUncompletedCount }] : []),

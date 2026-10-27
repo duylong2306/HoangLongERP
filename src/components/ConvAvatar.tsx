@@ -12,6 +12,8 @@ import UserAvatar from './UserAvatar';
 const PAL = ['#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#14b8a6', '#8b5cf6', '#f97316', '#ef4444', '#64748b'];
 const colorOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return PAL[h % PAL.length]; };
 const initials = (n: string) => { const p = (n || '?').replace('📁', '').trim().split(/\s+/); return ((p[0]?.[0] || '?') + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); };
+/** Ảnh đại diện riêng của nhóm: cột avatar chứa ĐƯỜNG DẪN ảnh (tải lên từ khung Thông tin hội thoại). Giá trị cũ là chữ viết tắt ("K.") thì không phải ảnh. */
+export const isAvatarImage = (a?: string): boolean => /^(https?:\/\/|data:image\/)/i.test(a || '');
 export type ConvKind = 'personal' | 'project' | 'task' | 'group';
 export const convKind = (c: Pick<Conversation, 'type' | 'id' | 'projectId'>): ConvKind =>
   c.type === 'personal' ? 'personal' : c.type === 'task' ? 'task' : (c.projectId || String(c.id).startsWith('conv_project_')) ? 'project' : 'group';
@@ -38,6 +40,10 @@ export default function ConvAvatar({ conv, employees, me, size, showCount = true
       {badge}
     </span>
   );
+  // Nhóm đã đặt ảnh riêng (mọi loại nhóm) → hiện ảnh đó, giữ huy hiệu số thành viên của công trình/công việc
+  if (isAvatarImage(conv.avatar)) {
+    return frame(<img src={conv.avatar} alt={conv.name} data-testid="conv-avatar-img" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />);
+  }
   if (kind === 'project' || kind === 'task') {
     const bg = kind === 'project' ? 'linear-gradient(135deg,#1f6bff,#0a4fd8)' : 'linear-gradient(135deg,#10b981,#059669)';
     const Icon = kind === 'project' ? Building2 : ClipboardList;

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import ProjectActivityModal from './ProjectActivityModal';
 import ProjectTodayCard from './ProjectTodayCard';
 import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
-import { ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
+import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, Loader2, MessageSquare } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
@@ -12,7 +12,7 @@ import {
   getConversations, getMessages, addMessage, getOrCreatePersonalConversation, createGroupConversation, deleteConversation,
   markConversationRead, markMessagesReadByUser, updateMessage, softDeleteMessage, togglePinMessage, toggleMessageReaction,
   addMemberToConversation, loadConversationsFromCloud, loadMessagesFromCloud, subscribeConversations, subscribeMessages,
-  searchMessagesInConversation, sendApprovalDirectMessage,
+  searchMessagesInConversation, sendApprovalDirectMessage, updateConversationAvatar,
 } from '../lib/chatStore';
 import { usePresence } from '../lib/presence';
 import { dbService } from '../lib/dbService';
@@ -22,10 +22,10 @@ import {
 } from '../lib/chatPrefs';
 import {
   scrollTopAfterPrepend, filterConversations, sortConversations, categoryOf, isPinnedConv, collectMedia, extractLinks, pinnedMessages, dayKey, dayLabel, listTime, isFirstOfRun,
-  CATEGORY_LABEL, type Category, type ListTab,
+  CATEGORY_LABEL, CATEGORY_MENU, isStarredConv, type Category, type ListTab,
 } from '../lib/chatInfo';
 import UserAvatar from './UserAvatar';
-import ConvAvatar from './ConvAvatar';
+import ConvAvatar, { isAvatarImage } from './ConvAvatar';
 import { WorkList, WorkDetail } from './MessagesWork';
 import { WorkCardView, SendWorkDialog, CreateTaskDialog, cardOfEntry, type NewTaskInput } from './MessagesWorkCards';
 import type { InboxItem } from './MyWorkOverview';
@@ -98,7 +98,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const [prefs, setPrefs] = useState<ChatPrefs>(() => readPrefs(companyScopedKey(prefsKey(me))));
   const updatePrefs = (next: ChatPrefs) => { setPrefs(next); writePrefs(pKey, next); window.dispatchEvent(new CustomEvent('hl-chat-prefs-updated')); };
   const toggleMute = (id: string) => { const was = prefs.muted.includes(id); updatePrefs({ ...prefs, muted: toggleIn(prefs.muted, id) }); addToast({ title: was ? '🔔 Đã bật thông báo' : '🔕 Đã tắt thông báo', message: was ? 'Hội thoại này sẽ báo tin mới trở lại.' : 'Tin mới của hội thoại này không tính vào huy hiệu chưa đọc.', type: 'info' }); };
-  const togglePinConv = (id: string) => updatePrefs({ ...prefs, pinned: toggleIn(prefs.pinned, id) });
+  // ⭐ Quan tâm: đánh dấu hội thoại cần theo dõi để lọc nhanh ở tab "Quan tâm" (thay cho nút ghim hội thoại)
+  const toggleStar = (id: string) => { const was = isStarredConv({ id }, prefs); updatePrefs({ ...prefs, starred: toggleIn(prefs.starred || [], id) }); addToast({ title: was ? '☆ Đã bỏ quan tâm' : '⭐ Đã thêm vào Quan tâm', message: was ? 'Hội thoại không còn ở tab Quan tâm' : 'Xem nhanh ở tab Quan tâm', type: 'info' }); };
 
   // ─── Tab "Việc của tôi" (cột trái chuyển giữa Tin nhắn | Việc của tôi) ───
   const [leftMode, setLeftMode] = useState<'chat' | 'work'>('chat');
@@ -275,9 +276,33 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const fileRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
+  const avatarRef = useRef<HTMLInputElement>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   // Số tệp đang tải lên Storage — chặn nút Gửi cho đến khi xong để tin không đi thiếu tệp
   const [uploading, setUploading] = useState(0);
+  // Đổi / gỡ ảnh đại diện NHÓM (thành viên nào của nhóm cũng đổi được, như Zalo): nén → tải lên kho → lưu vào dòng hội thoại, mọi người thấy ngay
+  const changeGroupAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file || !selected || selected.type === 'personal') return;
+    if (!file.type.startsWith('image/')) { addToast({ title: '⚠️ Chưa phải ảnh', message: 'Hãy chọn tệp ảnh (JPG, PNG…).', type: 'warning' }); return; }
+    if (file.size > 10 * 1024 * 1024) { addToast({ title: '⚠️ Ảnh quá lớn', message: `"${file.name}" > 10MB`, type: 'warning' }); return; }
+    setAvatarBusy(true);
+    try {
+      const url = await dbService.uploadConversationAvatar(selected.id, file);
+      if (!url) { addToast({ title: '❌ Không tải được ảnh', message: 'Vui lòng thử lại sau.', type: 'error' }); return; }
+      const ok = await updateConversationAvatar(selected.id, url);
+      if (ok) { setConversations(getConversations()); addToast({ title: '✅ Đã đổi ảnh nhóm', message: 'Mọi thành viên sẽ thấy ảnh mới.', type: 'success' }); }
+      else addToast({ title: '❌ Không lưu được ảnh nhóm', message: 'Vui lòng thử lại sau.', type: 'error' });
+    } finally { setAvatarBusy(false); }
+  };
+  const removeGroupAvatar = async () => {
+    if (!selected || selected.type === 'personal') return;
+    setAvatarBusy(true);
+    try { if (await updateConversationAvatar(selected.id, '')) { setConversations(getConversations()); addToast({ title: 'Đã gỡ ảnh nhóm', message: 'Nhóm trở về ảnh mặc định.', type: 'info' }); } }
+    finally { setAvatarBusy(false); }
+  };
+
   const onFiles = (e: React.ChangeEvent<HTMLInputElement>, source: 'image' | 'file') => {
     const files = Array.from(e.target.files || []);
     files.forEach((file, i) => {
@@ -517,12 +542,18 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       </div>
       <div className="flex flex-col items-center gap-1 pt-4 pb-1 px-3">
         <ConvAvatar conv={selected} employees={employees} me={me} size={64} />
+        {selected.type !== 'personal' && (
+          <div className="flex items-center gap-3 text-[12px]" data-testid="zalo-avatar-actions">
+            <button type="button" onClick={() => avatarRef.current?.click()} disabled={avatarBusy} data-testid="zalo-change-avatar" className="font-bold text-[#0d47c9] cursor-pointer disabled:opacity-50">{avatarBusy ? 'Đang tải…' : 'Đổi ảnh nhóm'}</button>
+            {isAvatarImage(selected.avatar) && !avatarBusy && <button type="button" onClick={removeGroupAvatar} data-testid="zalo-remove-avatar" className="font-semibold text-slate-500 cursor-pointer">Gỡ ảnh</button>}
+            <input ref={avatarRef} type="file" accept="image/*" hidden onChange={changeGroupAvatar} data-testid="zalo-avatar-input" />
+          </div>)}
         <b className="text-[15px] text-center">{convName(selected)}</b>
         {selected.type === 'personal' && otherOf(selected)?.position && <small className="text-slate-500">{otherOf(selected)?.position}</small>}
       </div>
       <div className="grid grid-cols-3 gap-1 px-3 pt-2 pb-4 text-center text-[11.5px] text-slate-600">
         <button type="button" onClick={() => toggleMute(selected.id)} className="cursor-pointer" data-testid="zalo-mute"><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${mutedSel ? 'bg-blue-100 text-blue-600' : 'bg-slate-100'}`}>{mutedSel ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}</span>{mutedSel ? 'Bật thông báo' : 'Tắt thông báo'}</button>
-        <button type="button" onClick={() => togglePinConv(selected.id)} className="cursor-pointer" data-testid="zalo-pinconv"><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${prefs.pinned.includes(selected.id) ? 'bg-blue-100 text-blue-600' : 'bg-slate-100'}`}><Pin className="w-4 h-4" /></span>{prefs.pinned.includes(selected.id) ? 'Bỏ ghim' : 'Ghim hội thoại'}</button>
+        <button type="button" onClick={() => toggleStar(selected.id)} className="cursor-pointer" data-testid="zalo-star" aria-pressed={isStarredConv(selected, prefs)}><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${isStarredConv(selected, prefs) ? 'bg-amber-100 text-amber-500' : 'bg-slate-100'}`}><Star className="w-4 h-4" fill={isStarredConv(selected, prefs) ? 'currentColor' : 'none'} /></span>{isStarredConv(selected, prefs) ? 'Bỏ quan tâm' : 'Quan tâm'}</button>
         <button type="button" onClick={() => (selected.type === 'personal' ? (setGroupMembers([otherOf(selected)?.id || '']), setGroupOpen(true)) : setAddMemberOpen(true))} className="cursor-pointer"><span className="mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full bg-slate-100"><UserPlus className="w-4 h-4" /></span>{selected.type === 'personal' ? 'Tạo nhóm' : 'Thêm thành viên'}</button>
       </div>
       {(selected.projectId || selected.taskId) && (
@@ -601,7 +632,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
           {leftMode === 'work' && <div className="flex-1 overflow-y-auto min-h-0" data-testid="zalo-worklist"><WorkList entries={workEntries} selectedKey={workKey} unreadKeys={workUnreadKeys} today={today} query={query} onSelect={k => { setWorkKey(k); setMobileView('chat'); }} /></div>}
           {leftMode === 'chat' && <>
           <div className="relative flex items-center gap-4 px-3.5 border-b border-slate-100">
-            {([['all', 'Tất cả'], ['unread', 'Chưa đọc']] as const).map(([k, l]) => (
+            {([['all', 'Tất cả'], ['unread', 'Chưa đọc'], ['starred', 'Quan tâm']] as const).map(([k, l]) => (
               <button key={k} type="button" onClick={() => setTab(k)} aria-pressed={tab === k} className={`py-2 text-[13px] font-bold border-b-2 -mb-px cursor-pointer ${tab === k ? 'text-blue-600 border-blue-600' : 'text-slate-500 border-transparent'}`}>
                 {l}{k === 'unread' && unreadTotal > 0 && <span className="ml-1.5 inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold align-middle">{unreadTotal}</span>}
               </button>))}
@@ -609,7 +640,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <button type="button" onClick={() => setShowCategory(v => !v)} className="text-[13px] font-semibold text-slate-600 flex items-center gap-1 cursor-pointer" data-testid="zalo-category-btn">{category === 'all' ? 'Phân loại' : CATEGORY_LABEL[category]}<ChevronDown className="w-3.5 h-3.5" /></button>
             {showCategory && (
               <div className="absolute right-2 top-full mt-1 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-52" role="menu" data-testid="zalo-category-menu">
-                {(Object.keys(CATEGORY_LABEL) as Category[]).map(k => <button key={k} type="button" role="menuitem" onClick={() => { setCategory(k); setShowCategory(false); }} className={`w-full text-left px-3.5 py-2 text-[13px] hover:bg-slate-50 cursor-pointer ${category === k ? 'font-bold text-blue-600' : ''}`}>{CATEGORY_LABEL[k]}</button>)}
+                {CATEGORY_MENU.map(k => <button key={k} type="button" role="menuitem" onClick={() => { setCategory(k); setShowCategory(false); }} className={`w-full text-left px-3.5 py-2 text-[13px] hover:bg-slate-50 cursor-pointer ${category === k ? 'font-bold text-blue-600' : ''}`}>{CATEGORY_LABEL[k]}</button>)}
                 <div className="border-t border-slate-100 my-1" />
                 <button type="button" role="menuitem" onClick={markAllRead} className="w-full text-left px-3.5 py-2 text-[13px] hover:bg-slate-50 cursor-pointer flex items-center gap-2"><CheckCheck className="w-4 h-4" />Đánh dấu tất cả đã đọc</button>
               </div>)}
@@ -622,7 +653,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               </button>)}
             {listed.length === 0 && <div className="py-14 text-center text-slate-500 text-[13px]"><MessageSquare className="w-8 h-8 mx-auto mb-2 text-slate-300" />{tab === 'unread' ? 'Không có tin chưa đọc 🎉' : 'Không có hội thoại nào'}</div>}
             {listed.map(c => {
-              const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const pinned = isPinnedConv(c, prefs); const o = otherOf(c);
+              const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const pinned = isPinnedConv(c, prefs); const starred = isStarredConv(c, prefs); const o = otherOf(c);
               return (
                 <button key={c.id} type="button" data-testid="zalo-conv" data-conv={c.id} onClick={() => { if (selectedId === c.id) setReloadTick(t => t + 1); setSelectedId(c.id); setPendingEmpId(null); setMobileView('chat'); }}
                   className={`w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
@@ -633,7 +664,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                       {(unreadAct[projectIdOfConversation(c) || '']?.count || 0) > 0 && <span className="text-[9.5px] font-extrabold text-red-600 bg-red-50 rounded px-1.5 py-px shrink-0" data-testid="zalo-conv-activity">🕘 {unreadAct[projectIdOfConversation(c) || ''].count} mới</span>}
                       <span className="ml-auto text-[11.5px] text-slate-500 shrink-0 flex items-center gap-1">{muted && <BellOff className="w-3 h-3" aria-label="Đã tắt thông báo" />}{listTime(c.lastMessageAt)}</span></span>
                     <span className="flex items-center gap-2"><span className={`truncate text-[13px] ${unread > 0 && !muted ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>{previewOf(c)}</span>
-                      {unread > 0 ? <span data-testid="zalo-unread" className={`ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold grid place-items-center ${muted ? 'bg-slate-400' : 'bg-red-500'}`}>{unread}</span> : pinned ? <Pin className="w-3.5 h-3.5 ml-auto text-slate-400 shrink-0" /> : null}</span>
+                      {unread > 0 ? <span data-testid="zalo-unread" className={`ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold grid place-items-center ${muted ? 'bg-slate-400' : 'bg-red-500'}`}>{unread}</span> : starred ? <Star className="w-3.5 h-3.5 ml-auto text-amber-500 shrink-0" fill="currentColor" data-testid="zalo-row-star" /> : pinned ? <Pin className="w-3.5 h-3.5 ml-auto text-slate-400 shrink-0" /> : null}</span>
                   </span>
                 </button>);
             })}
