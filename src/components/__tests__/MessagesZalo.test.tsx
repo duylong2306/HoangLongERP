@@ -61,6 +61,16 @@ describe('Danh sách hội thoại', () => {
     expect(within(row('p_ny')).getByText(/Dạ anh/)).toBeTruthy();
     expect(within(row('p_hao')).getByText(/^Bạn: OK/)).toBeTruthy();   // tin của chính mình có "Bạn:"
   });
+  it('nhóm dự án chưa có tin nào (tin hệ thống đã chuyển sang Nhật ký) hiện "Chưa có tin nhắn"; nhóm thường vẫn là "Nhóm mới tạo"', () => {
+    store.convs.push(
+      { id: 'conv_project_B', type: 'group', name: '📁 CÔNG TRÌNH B', participantIds: ['me', 'ny'], createdAt: new Date().toISOString(), lastMessageAt: new Date().toISOString(), unreadCount: 0, projectId: 'B' },
+      { id: 'g_moi', type: 'group', name: 'Nhóm thử', participantIds: ['me', 'ny'], createdAt: new Date().toISOString(), lastMessageAt: new Date().toISOString(), unreadCount: 0 },
+    );
+    mount();
+    expect(within(row('conv_project_B')).getByText('Chưa có tin nhắn')).toBeTruthy();
+    expect(within(row('g_moi')).getByText('Nhóm mới tạo')).toBeTruthy();
+  });
+
   it('tab Chưa đọc chỉ còn hội thoại có tin mới, kèm số', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: /Chưa đọc/ }));

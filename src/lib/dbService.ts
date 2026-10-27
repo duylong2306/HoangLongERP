@@ -2999,6 +2999,49 @@ export const dbService = {
     }
   },
 
+  /**
+   * Upload ảnh / tệp đính kèm của TIN NHẮN lên Storage (bucket chat-attachments, migration 20261101): trong tin chỉ giữ đường dẫn,
+   * thay cho cách cũ nhúng cả tệp dạng base64 vào bảng chat_messages (làm mở hội thoại có ảnh rất chậm).
+   * Ảnh JPEG/PNG/WebP được nén trước khi tải lên (xem lib/imageCompress.ts), tệp khác giữ nguyên.
+   * Trả về { url, stored, size, mimeType, name } — size/mimeType là của tệp SAU KHI nén. Chưa cấu hình Supabase / chưa có bucket / lỗi mạng →
+   * tự quay về data URL (stored = 'local') để gửi tin vẫn hoạt động như cũ.
+   */
+  async uploadChatAttachment(
+    conversationId: string,
+    file: File
+  ): Promise<{ url: string; stored: 'supabase' | 'local'; size: number; mimeType: string; name: string }> {
+    file = await compressImageFile(file);
+    const meta = { size: file.size, mimeType: file.type, name: file.name };
+    const toDataUrl = () => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Không đọc được file'));
+      reader.onerror = () => reject(reader.error || new Error('Lỗi đọc file'));
+      reader.readAsDataURL(file);
+    });
+    const supabase = getSupabase();
+    if (!supabase) return { url: await toDataUrl(), stored: 'local', ...meta };
+
+    const BUCKET = 'chat-attachments';
+    const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    const safeConv = String(conversationId || 'conv').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_\-\.]/g, '_').slice(0, 60) || 'tep';
+    const ts = typeof Date.now === 'function' ? Date.now() : Math.floor(performance.now());
+    // Multi-tenant: company_id làm thư mục gốc để Storage RLS cô lập theo công ty (xem ghi chú ở uploadMissionReportImage)
+    const path = `${getCurrentCompanyId() || 'noco'}/${safeConv}/${ts}_${Math.random().toString(36).slice(2, 6)}_${baseName}.${ext}`;
+
+    const doUpload = async (): Promise<string> => {
+      const { error } = await supabase.storage.from(BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+      if (error) throw error;
+      return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+    };
+    try {
+      return { url: await doUpload(), stored: 'supabase', ...meta };
+    } catch (err: any) {
+      console.warn('[uploadChatAttachment] Upload thất bại, lưu cục bộ (data URL) — đã chạy migration 20261101 chưa?:', String(err?.message || err));
+      return { url: await toDataUrl(), stored: 'local', ...meta };
+    }
+  },
+
   // ===== HÀM UPLOAD HÌNH ẢNH CHO SẢN PHẨM CATALOG =====
   async uploadProductImage(productId: string, file: File): Promise<{ url: string; stored: 'supabase' | 'local' }> {
     const supabase = getSupabase();

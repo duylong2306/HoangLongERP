@@ -14,6 +14,7 @@ import {
   searchMessagesInConversation, sendApprovalDirectMessage,
 } from '../lib/chatStore';
 import { usePresence } from '../lib/presence';
+import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
 import {
   prefsKey, readPrefs, writePrefs, toggleIn, type ChatPrefs,
@@ -274,13 +275,18 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
   const imgRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
 
+  // Số tệp đang tải lên Storage — chặn nút Gửi cho đến khi xong để tin không đi thiếu tệp
+  const [uploading, setUploading] = useState(0);
   const onFiles = (e: React.ChangeEvent<HTMLInputElement>, source: 'image' | 'file') => {
     const files = Array.from(e.target.files || []);
     files.forEach((file, i) => {
       if (file.size > 10 * 1024 * 1024) { addToast({ title: '⚠️ File quá lớn', message: `"${file.name}" > 10MB`, type: 'warning' }); return; }
-      const r = new FileReader();
-      r.onload = ev => setAttachments(prev => [...prev, { id: `att_${Date.now()}_${i}`, type: source === 'image' && file.type.startsWith('image/') ? 'image' : 'file', name: file.name, url: String(ev.target?.result), size: file.size, mimeType: file.type }]);
-      r.readAsDataURL(file);
+      setUploading(n => n + 1);
+      // Ảnh được nén rồi tải lên kho lưu trữ; trong tin chỉ giữ đường dẫn (không nhúng base64 làm nặng chat)
+      dbService.uploadChatAttachment(selected?.id || 'new', file)
+        .then(up => setAttachments(prev => [...prev, { id: `att_${Date.now()}_${i}`, type: source === 'image' && file.type.startsWith('image/') ? 'image' : 'file', name: file.name, url: up.url, size: up.size, mimeType: up.mimeType }]))
+        .catch(() => addToast({ title: '⚠️ Không đọc được tệp', message: `"${file.name}"`, type: 'warning' }))
+        .finally(() => setUploading(n => n - 1));
     });
     e.target.value = '';
   };
@@ -293,7 +299,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
       setMessages(applyWindow(getMessages(selected!.id))); setEditing(null); setText(''); return;
     }
     if (!body && attachments.length === 0) return;
-    if (sending) return;
+    if (sending || uploading > 0) return;   // còn tệp đang tải lên → chờ xong
     setSending(true);
     try {
       let conv = selected;
@@ -483,7 +489,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     return `${new Set(c.participantIds).size} thành viên${categoryOf(c) === 'project' ? ' · Nhóm dự án' : categoryOf(c) === 'task' ? ' · Nhóm công việc' : ''}`;
   };
   const previewOf = (c: Conversation) => {
-    const lm = c.lastMessage; if (!lm) return c.type === 'personal' ? 'Chưa có tin nhắn' : 'Nhóm mới tạo';
+    // Nhóm dự án chưa có tin thảo luận (các tin hệ thống đã chuyển sang Nhật ký dự án) cũng hiện "Chưa có tin nhắn" thay vì "Nhóm mới tạo"
+    const lm = c.lastMessage; if (!lm) return c.type === 'personal' || categoryOf(c) === 'project' ? 'Chưa có tin nhắn' : 'Nhóm mới tạo';
     const body = lm.deleted ? 'Tin nhắn đã được thu hồi' : lm.content;
     const who = lm.senderId === me ? 'Bạn: ' : c.type === 'personal' ? '' : `${(lm.senderName || '').split(' ').pop()}: `;
     return `${who}${body}`;
@@ -747,8 +754,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <footer className="bg-white border-t border-slate-200 relative" data-testid="zalo-composer">
               {(replyTo || editing) && (
                 <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-100 text-[12.5px]"><span className="border-l-[3px] border-blue-500 pl-2 min-w-0 flex-1">{editing ? <b>Đang chỉnh sửa tin nhắn</b> : <><b>Trả lời {replyTo!.senderName}</b><span className="block truncate text-slate-500">{replyTo!.content}</span></>}</span><button type="button" onClick={() => { setReplyTo(null); setEditing(null); setText(''); }} aria-label="Hủy" className="cursor-pointer"><X className="w-4 h-4" /></button></div>)}
-              {attachments.length > 0 && (
-                <div className="flex gap-2 px-4 py-2 overflow-x-auto" data-testid="zalo-pending">{attachments.map(a => <span key={a.id} className="relative shrink-0 bg-slate-100 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5">{a.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}<span className="max-w-[120px] truncate">{a.name}</span><button type="button" onClick={() => setAttachments(p => p.filter(x => x.id !== a.id))} aria-label="Bỏ tệp"><X className="w-3.5 h-3.5" /></button></span>)}</div>)}
+              {(attachments.length > 0 || uploading > 0) && (
+                <div className="flex gap-2 px-4 py-2 overflow-x-auto" data-testid="zalo-pending">{uploading > 0 && <span className="shrink-0 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><Loader2 className="w-3.5 h-3.5 animate-spin" />Đang tải lên…</span>}{attachments.map(a => <span key={a.id} className="relative shrink-0 bg-slate-100 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5">{a.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}<span className="max-w-[120px] truncate">{a.name}</span><button type="button" onClick={() => setAttachments(p => p.filter(x => x.id !== a.id))} aria-label="Bỏ tệp"><X className="w-3.5 h-3.5" /></button></span>)}</div>)}
               {mention !== null && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 mb-1 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-56 z-30" data-testid="zalo-mention">{mentionCandidates.map(e => <button key={e.id} type="button" onClick={() => pickMention(e)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><UserAvatar employee={e} size="xs" noRing />{e.name}</button>)}</div>)}
               {emojiOpen && (
@@ -764,8 +771,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               <div className="flex items-center gap-2 px-4 pb-3 pt-1">
                 <input value={text} onChange={e => onTextChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                   placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="chat-plain-input flex-1 outline-none text-[14px] py-1.5" />
-                {text.trim() || attachments.length || editing
-                  ? <button type="button" onClick={() => send()} disabled={sending} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
+                {text.trim() || attachments.length || uploading > 0 || editing
+                  ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
                   : <button type="button" onClick={() => send('👍')} aria-label="Gửi 👍" className="p-2 rounded-lg text-amber-500 hover:bg-amber-50 cursor-pointer"><ThumbsUp className="w-5 h-5" /></button>}
               </div>
             </footer>
