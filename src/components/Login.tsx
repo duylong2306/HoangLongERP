@@ -213,7 +213,9 @@ export default function Login({
   }
 
   return (
-    <div className="min-h-screen w-screen bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-y-auto select-none font-sans text-slate-200">
+    // overflow-x-hidden: khung này cuộn dọc (overflow-y-auto) nên trục ngang cũng thành cuộn được; hai khối trang trí mờ bên dưới (rộng 384px, đặt lệch phải)
+    // tràn quá bề ngang điện thoại → trang đăng nhập kéo ngang được. touch-action pan-y: chỉ cho vuốt DỌC, không kéo ngang, không chụm/nhấp đúp để phóng to.
+    <div className="min-h-screen w-screen max-w-full bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-x-hidden overflow-y-auto select-none font-sans text-slate-200" style={{ touchAction: 'pan-y' }} data-testid="login-root">
       
       {/* Decorative Background Elements */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />

@@ -153,7 +153,9 @@ body:not(:has(.lx-shell)) #root { background: #fff; }
 /* Trong KHUNG ỨNG DỤNG trên điện thoại: nửa trên nền xanh LoLo (dưới thanh trạng thái), nửa dưới nền TRẮNG cùng màu thanh menu. Trên iPhone, vừa mở ứng dụng từ Màn hình chính
    vùng hiển thị có lúc ngắn hơn màn hình vài giây (thanh menu "lơ lửng" cao hơn đáy), phần nền lộ ra phía dưới thanh menu trước đây là màu xanh/xám nên trông như thừa một dải;
    nay trùng màu thanh menu nên liền mạch. Nền canvas này chỉ lộ ra ở mép trên (dưới thanh trạng thái) và mép dưới, không ảnh hưởng nội dung. */
-html:has(.lx-shell) { background-color: #ffffff; background-image: linear-gradient(to bottom, #0a4fd8 50%, transparent 50%); }
+html:has(.lx-shell) { background: linear-gradient(#0a4fd8, #0a4fd8) top left / 100% 120px no-repeat #ffffff; }
+/* ↑ CHỈ một dải xanh LoLo cao 120px ở mép trên (dưới thanh trạng thái), KHÔNG lặp; toàn bộ phần còn lại — kể cả "cằm" dưới thanh menu — là nền TRẮNG. (Bản gradient 50%/50% trước đây bị LẶP ở ngoài khung trang nên
+   dưới thanh menu lộ ra đoạn đầu gradient màu xanh.) */
 /* Dải ở ĐÁY do hệ điều hành vẽ (lỗi WebKit của iPhone, xem index.html ios-viewport-nudge) lấy màu từ NỀN TRANG: trên điện thoại để nền body trắng = màu thanh menu, để dải đó liền với thanh menu
    thay vì hiện xám nhạt. (Nội dung trong khung ứng dụng có nền riêng nên không đổi.) */
 @media (max-width: 767px) { body:has(.lx-shell) { background-color: #ffffff; } }
@@ -200,3 +202,10 @@ html:root, html:root body { overflow-x: hidden; overscroll-behavior-x: none; }
 /* Mũi tên nhún nhảy chỉ xuống thanh công cụ Safari (nút Chia sẻ nằm giữa thanh dưới) */
 .lx-install-arrow { text-align: center; color: var(--lx-2); font-size: 22px; line-height: 1; margin-top: 6px; animation: lxBounce 1s ease-in-out infinite; }
 @keyframes lxBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+
+/* ─── TRANG ĐĂNG NHẬP (điện thoại): khóa zoom ───
+   iPhone TỰ PHÓNG TO khi chạm vào ô nhập có chữ nhỏ hơn 16px (ô đăng nhập đang cỡ 12px) và không tự thu lại → trang bị phóng + kéo ngang được.
+   Đặt cỡ chữ ô nhập đúng 16px trên điện thoại thì iOS không phóng; kết hợp khóa viewport (index.html) và touch-action trên khung đăng nhập. */
+@media (max-width: 767px) {
+  #login_form_card input, #login_form_card select, #login_form_card textarea { font-size: 16px; }
+}

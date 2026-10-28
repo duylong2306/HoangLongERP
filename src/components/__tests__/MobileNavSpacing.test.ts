@@ -18,9 +18,10 @@ describe('thanh menu dưới (điện thoại)', () => {
     // không còn chỗ nào cộng --lx-bnav với trọn vùng an toàn
     expect(css).not.toMatch(/var\(--lx-bnav\)\s*\+\s*var\(--lx-safe-bottom\)/);
   });
-  it('trong khung ứng dụng: nền canvas nửa trên xanh LoLo, nửa dưới trắng (cùng màu thanh menu); trang ngoài khung giữ nguyên nền xanh', () => {
-    expect(css).toMatch(/html:has\(\.lx-shell\)\s*\{\s*background-color:\s*#ffffff;\s*background-image:\s*linear-gradient\(to bottom, #0a4fd8 50%, transparent 50%\)/);
-    expect(css).toMatch(/@media \(max-width: 767px\)\s*\{\s*body:has\(\.lx-shell\)\s*\{\s*background-color:\s*#ffffff/);   // nền body trắng trên điện thoại: dải do hệ điều hành vẽ ở đáy khớp thanh menu
+  it('trong khung ứng dụng: chỉ một dải xanh LoLo 120px ở mép trên, KHÔNG lặp, phần còn lại (kể cả dưới thanh menu) trắng; nền body trắng trên điện thoại; trang ngoài khung giữ nền xanh', () => {
+    expect(css).toMatch(/html:has\(\.lx-shell\)\s*\{\s*background:\s*linear-gradient\(#0a4fd8, #0a4fd8\) top left \/ 100% 120px no-repeat #ffffff;/);
+    expect(css).not.toMatch(/html:has\(\.lx-shell\)\s*\{[^}]*50%/);   // không còn gradient 50/50 (bị lặp → cằm xanh)
+    expect(css).toMatch(/@media \(max-width: 767px\)\s*\{\s*body:has\(\.lx-shell\)\s*\{\s*background-color:\s*#ffffff/);
     expect(css).toMatch(/\nhtml\s*\{\s*background:\s*#0a4fd8;\s*\}/);   // quy tắc cũ cho trang đăng nhập / giới thiệu vẫn còn
   });
 });
