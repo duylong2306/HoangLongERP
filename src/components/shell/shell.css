@@ -153,7 +153,10 @@ body:not(:has(.lx-shell)) #root { background: #fff; }
 /* Trong KHUNG ỨNG DỤNG trên điện thoại: nửa trên nền xanh LoLo (dưới thanh trạng thái), nửa dưới nền TRẮNG cùng màu thanh menu. Trên iPhone, vừa mở ứng dụng từ Màn hình chính
    vùng hiển thị có lúc ngắn hơn màn hình vài giây (thanh menu "lơ lửng" cao hơn đáy), phần nền lộ ra phía dưới thanh menu trước đây là màu xanh/xám nên trông như thừa một dải;
    nay trùng màu thanh menu nên liền mạch. Nền canvas này chỉ lộ ra ở mép trên (dưới thanh trạng thái) và mép dưới, không ảnh hưởng nội dung. */
-html:has(.lx-shell) { background: linear-gradient(to bottom, #0a4fd8 50%, #ffffff 50%); }
+html:has(.lx-shell) { background-color: #ffffff; background-image: linear-gradient(to bottom, #0a4fd8 50%, transparent 50%); }
+/* Dải ở ĐÁY do hệ điều hành vẽ (lỗi WebKit của iPhone, xem index.html ios-viewport-nudge) lấy màu từ NỀN TRANG: trên điện thoại để nền body trắng = màu thanh menu, để dải đó liền với thanh menu
+   thay vì hiện xám nhạt. (Nội dung trong khung ứng dụng có nền riêng nên không đổi.) */
+@media (max-width: 767px) { body:has(.lx-shell) { background-color: #ffffff; } }
 /* 3) Hộp thoại / lớp phủ toàn màn hình (hơn 140 chỗ trong ứng dụng): không để nội dung chui dưới tai thỏ, vạch home hay cạnh khía khi xoay ngang.
       Ngăn kéo đã có tiêu đề xanh riêng (lx-drawer-head) tự né nên bỏ qua để không né đôi. */
 .fixed.inset-0:not(:has(.lx-drawer-head)):not(.lx-sheet) {

@@ -19,7 +19,8 @@ describe('thanh menu dưới (điện thoại)', () => {
     expect(css).not.toMatch(/var\(--lx-bnav\)\s*\+\s*var\(--lx-safe-bottom\)/);
   });
   it('trong khung ứng dụng: nền canvas nửa trên xanh LoLo, nửa dưới trắng (cùng màu thanh menu); trang ngoài khung giữ nguyên nền xanh', () => {
-    expect(css).toMatch(/html:has\(\.lx-shell\)\s*\{\s*background:\s*linear-gradient\(to bottom, #0a4fd8 50%, #ffffff 50%\)/);
+    expect(css).toMatch(/html:has\(\.lx-shell\)\s*\{\s*background-color:\s*#ffffff;\s*background-image:\s*linear-gradient\(to bottom, #0a4fd8 50%, transparent 50%\)/);
+    expect(css).toMatch(/@media \(max-width: 767px\)\s*\{\s*body:has\(\.lx-shell\)\s*\{\s*background-color:\s*#ffffff/);   // nền body trắng trên điện thoại: dải do hệ điều hành vẽ ở đáy khớp thanh menu
     expect(css).toMatch(/\nhtml\s*\{\s*background:\s*#0a4fd8;\s*\}/);   // quy tắc cũ cho trang đăng nhập / giới thiệu vẫn còn
   });
 });

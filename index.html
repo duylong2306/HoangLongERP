@@ -61,17 +61,28 @@
     <script type="module" src="/src/main.tsx"></script>
       <script>
       /* ios-viewport-nudge */
-      // iPhone mở ứng dụng từ Màn hình chính: vùng hiển thị (và các lớp cố định như màn chờ, thanh menu dưới) có lúc NGẮN HƠN màn hình khoảng 80px — lộ một dải trắng ở đáy —
-      // và chỉ trở lại bình thường sau khi người dùng VUỐT XUỐNG (một lần cuộn thật khiến iOS tính lại). Ở đây tự làm đúng việc đó ngay lúc khởi động:
-      // tạo 2px cuộn được rồi cuộn 2px và về 0, gắn lại thẻ viewport, phát sự kiện resize; lặp vài lần trong ~4 giây đầu (và khi quay lại ứng dụng).
-      // Chỉ chạy khi là ứng dụng đã cài ở Màn hình chính (standalone) — trình duyệt thường không bị ảnh hưởng.
+      // iPhone mở ứng dụng từ Màn hình chính: vùng hiển thị (window.innerHeight) có lúc NGẮN HƠN màn hình (screen.height) hàng chục px — phần chênh là một dải do HỆ ĐIỀU HÀNH vẽ ở đáy
+      // (màu lấy từ nền trang), mã web không với tới được; thanh menu dưới và màn chờ vì thế dừng cao hơn đáy. Đây là lỗi đã biết của WebKit (iOS 26.1 trở lên, tái xuất hiện ở 26.5 và iOS 27 beta —
+      // WebKit bug 301994) và chỉ trở lại bình thường sau khi người dùng VUỐT XUỐNG (iOS tính lại). Ở đây thử ép iOS tính lại ngay lúc khởi động theo hai cách:
+      //   (1) ẩn rồi hiện #root + đo lại bố cục trong cùng một lượt chạy (không vẽ chặng giữa nên không chớp) — cách đã được báo cáo là chữa được lỗi "vùng hiển thị bị co" của ứng dụng cài ở Màn hình chính;
+      //   (2) tạo 2px cuộn được rồi cuộn 2px và về 0, gắn lại thẻ viewport, phát sự kiện resize.
+      // Chỉ chạy khi: ứng dụng cài ở Màn hình chính (standalone) + đang để DỌC + vùng hiển thị ngắn hơn màn hình quá 16px. Lặp vài lần trong ~4 giây đầu, dừng khi đã khớp.
       (function () {
         var standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
         if (!standalone) return;
+        function isShort() {
+          try {
+            var portrait = window.matchMedia ? window.matchMedia('(orientation: portrait)').matches : window.innerHeight >= window.innerWidth;
+            if (!portrait || !window.screen) return false;
+            return Math.max(window.screen.width, window.screen.height) - window.innerHeight > 16;   // iOS luôn báo kích thước dọc của máy
+          } catch (e) { return false; }
+        }
         function nudge() {
           try {
-            var de = document.documentElement, b = document.body;
+            if (!isShort()) return;
+            var de = document.documentElement, b = document.body, root = document.getElementById('root');
             if (!de || !b) return;
+            if (root) { var pdisp = root.style.display; root.style.display = 'none'; void root.offsetHeight; root.style.display = pdisp; }
             var m = document.querySelector('meta[name="viewport"]');
             if (m && m.parentNode) m.parentNode.replaceChild(m.cloneNode(true), m);
             var pd = de.style.minHeight, pb = b.style.minHeight;
