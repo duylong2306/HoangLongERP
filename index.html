@@ -60,6 +60,33 @@
     </div></div>
     <script type="module" src="/src/main.tsx"></script>
       <script>
+      /* ios-viewport-nudge */
+      // iPhone mở ứng dụng từ Màn hình chính: vùng hiển thị (và các lớp cố định như màn chờ, thanh menu dưới) có lúc NGẮN HƠN màn hình khoảng 80px — lộ một dải trắng ở đáy —
+      // và chỉ trở lại bình thường sau khi người dùng VUỐT XUỐNG (một lần cuộn thật khiến iOS tính lại). Ở đây tự làm đúng việc đó ngay lúc khởi động:
+      // tạo 2px cuộn được rồi cuộn 2px và về 0, gắn lại thẻ viewport, phát sự kiện resize; lặp vài lần trong ~4 giây đầu (và khi quay lại ứng dụng).
+      // Chỉ chạy khi là ứng dụng đã cài ở Màn hình chính (standalone) — trình duyệt thường không bị ảnh hưởng.
+      (function () {
+        var standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+        if (!standalone) return;
+        function nudge() {
+          try {
+            var de = document.documentElement, b = document.body;
+            if (!de || !b) return;
+            var m = document.querySelector('meta[name="viewport"]');
+            if (m && m.parentNode) m.parentNode.replaceChild(m.cloneNode(true), m);
+            var pd = de.style.minHeight, pb = b.style.minHeight;
+            de.style.minHeight = 'calc(100% + 2px)'; b.style.minHeight = 'calc(100% + 2px)';
+            window.scrollTo(0, 2); window.scrollTo(0, 0);
+            de.style.minHeight = pd; b.style.minHeight = pb;
+            window.dispatchEvent(new Event('resize'));
+          } catch (e) { /* bỏ qua */ }
+        }
+        [0, 120, 400, 900, 1800, 3500].forEach(function (t) { setTimeout(nudge, t); });
+        window.addEventListener('pageshow', nudge);
+        document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') setTimeout(nudge, 100); });
+      })();
+    </script>
+      <script>
       // Chặn phóng to bằng 2 ngón trên iOS Safari (gesturestart/change/end) — bổ trợ cho user-scalable=no
       ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) {
         document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
