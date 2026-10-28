@@ -87,6 +87,34 @@
       })();
     </script>
       <script>
+      /* vp-probe */
+      // CHẨN ĐOÁN màn hình lúc khởi động (iPhone mở từ Màn hình chính bị ngắn đáy): ghi lại vài số đo ở các thời điểm đầu và ngay khi người dùng chạm / cuộn lần đầu,
+      // lưu trong máy (localStorage 'lolo_vp_diag', mỗi lần mở ghi đè lần trước) để xem ở Tôi → "Chẩn đoán màn hình". Không gửi đi đâu, không ảnh hưởng giao diện.
+      (function () {
+        var KEY = 'lolo_vp_diag', rows = [], t0 = Date.now();
+        var probe = document.createElement('div');
+        probe.setAttribute('aria-hidden', 'true');
+        probe.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)';
+        function snap(label) {
+          try {
+            if (!probe.parentNode && document.documentElement) document.documentElement.appendChild(probe);
+            var vv = window.visualViewport, cs = getComputedStyle(probe), r = probe.getBoundingClientRect();
+            rows.push({
+              t: label, ms: Date.now() - t0,
+              innerH: window.innerHeight, innerW: window.innerWidth, vvH: vv ? Math.round(vv.height * 10) / 10 : null, vvTop: vv ? Math.round(vv.offsetTop * 10) / 10 : null,
+              screenH: window.screen && screen.height, screenW: window.screen && screen.width, clientH: document.documentElement.clientHeight,
+              fixedBottom: Math.round(r.bottom * 10) / 10, safeT: cs.paddingTop, safeB: cs.paddingBottom, scrollY: Math.round(window.scrollY || 0),
+              standalone: window.navigator.standalone === true, displayMode: !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+            });
+            localStorage.setItem(KEY, JSON.stringify(rows));
+          } catch (e) { /* bỏ qua */ }
+        }
+        [0, 150, 500, 1200, 2500, 5000].forEach(function (t) { setTimeout(function () { snap('t' + t); }, t); });
+        ['touchstart', 'scroll'].forEach(function (ev) { window.addEventListener(ev, function once() { window.removeEventListener(ev, once, true); snap('lần ' + ev + ' đầu'); setTimeout(function () { snap('sau ' + ev + ' 300ms'); }, 300); }, { capture: true, passive: true }); });
+        window.addEventListener('resize', function () { if (rows.length < 40) snap('resize'); });
+      })();
+    </script>
+      <script>
       // Chặn phóng to bằng 2 ngón trên iOS Safari (gesturestart/change/end) — bổ trợ cho user-scalable=no
       ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) {
         document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
