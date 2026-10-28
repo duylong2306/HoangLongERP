@@ -15,7 +15,16 @@ import {
   burnTimestampToPhoto,
 } from '../lib/attendanceOutbox';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
-import { sendApprovalDirectMessage, findEmployeeByName, maybeSendAttendanceChatMessage } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, maybeSendAttendanceChatMessage, getConversations, getUserConversations } from '../lib/chatStore';
+import { unreadForBadge, readPrefs, prefsKey } from '../lib/chatPrefs';
+import { companyScopedKey } from '../lib/supabase';
+import { loadUnreadSummary } from '../lib/projectEventReads';
+import OverviewHome, { type OverviewHomeData, type TodoItem } from './overview/OverviewHome';
+import Sheet, { Field, Notice, SheetActions, Segmented, inputCls } from './overview/Sheet';
+import {
+  computeShiftView, pickFocusShift, buildWeek, standardWorkdays, summarizeTasks, summarizeViolations, summarizeLeaves, summarizeCtp, summarizeAdvances,
+  myProjects, summarizeCompanyToday, hasTime, type ShiftView,
+} from '../lib/overviewData';
 import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
 import PunchMediaList from './hr/PunchMediaList';
 import { DEFAULT_SYSTEM_CONFIG } from '../data';
@@ -2373,32 +2382,256 @@ export default function DashboardOverview({
   };
 
 
+  // Mở hộp "Xin nghỉ phép" (chọn sẵn người duyệt theo cấu hình) — dùng chung cho nút cũ và nút ở màn Tổng quan kiểu mới
+  const openLeaveModal = () => {
+    const configuredApprover = getConfiguredApprover('leave');
+    if (configuredApprover) {
+      setLeaveApprover(configuredApprover.name);
+      setLeaveApproverId(configuredApprover.id);
+      setLeaveApproverPosition(configuredApprover.position || '');
+    } else {
+      setLeaveApprover('Trương Hữu Long');
+      setLeaveApproverId(findUniqueEmployeeByName(hrmEmployees as any[], 'Trương Hữu Long')?.id || '');   // mặc định cũ: có mã thì chọn theo mã
+      setLeaveApproverPosition('');
+    }
+    setLeaveModalOpen(true);
+  };
+
+  // ─── DỮ LIỆU CHO MÀN TỔNG QUAN KIỂU MỚI (OverviewHome; công thức ở lib/overviewData.ts) ───
+  const [showDetail, setShowDetail] = useState(false);           // lịch tháng & chi tiết chấm công (khối cũ) — thu gọn mặc định
+  const [violationList, setViolationList] = useState<any[]>([]);
+  const [advanceList, setAdvanceList] = useState<any[]>([]);
+  const [companyLogs, setCompanyLogs] = useState<any[]>([]);
+  const [projectNew, setProjectNew] = useState<Record<string, number>>({});
+
+  // Vi phạm (Bảng Hiệu suất) và đề xuất tạm ứng lương của tôi: tải lúc mở, tải lại khi có thay đổi
+  useEffect(() => {
+    const loadViolations = () => dbService.hrmEmployeeErrors.list().then(l => { if (Array.isArray(l)) setViolationList(l); }).catch(() => {});
+    const loadAdvances = () => dbService.subcontractorAdvances.list().then(l => { if (Array.isArray(l)) setAdvanceList(l); }).catch(() => {});
+    loadViolations(); loadAdvances();
+    window.addEventListener('hl-hrm-employee-errors-updated', loadViolations);
+    window.addEventListener('hl-subcontractor-advances-updated', loadAdvances);
+    return () => { window.removeEventListener('hl-hrm-employee-errors-updated', loadViolations); window.removeEventListener('hl-subcontractor-advances-updated', loadAdvances); };
+  }, []);
+
+  // Giám đốc: chấm công của TOÀN công ty hôm nay (cho khối "Toàn công ty hôm nay"), làm mới mỗi phút
+  useEffect(() => {
+    if (!isAdmin) return;
+    let alive = true;
+    const load = () => dbService.attendance.listForRange(todayVal, todayVal).then(l => { if (alive && Array.isArray(l)) setCompanyLogs(l.map(normalizeRecord)); }).catch(() => {});
+    load();
+    const timer = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [isAdmin, todayVal]);
+
+  const taskSum = summarizeTasks(tasks as any[], empId, todayVal);
+  const myProjList = myProjects(projects as any[], tasks as any[], empId, 3);
+  const myProjKey = myProjList.map(p => p.id).join(',');
+  // Số hoạt động mới trong Nhật ký của từng dự án (cùng nguồn với chấm đỏ ở Tin nhắn)
+  useEffect(() => {
+    if (!empId || !myProjKey) { setProjectNew({}); return; }
+    let alive = true;
+    loadUnreadSummary(empId, myProjKey.split(',')).then(r => { if (alive) setProjectNew(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v.count]))); }).catch(() => {});
+    return () => { alive = false; };
+  }, [empId, myProjKey]);
+
+  const overviewData: OverviewHomeData = (() => {
+    const hmOf = (v: any) => { const t = normalizeTime(v); return hasTime(t) ? t : ''; };
+    const slotsOf = { morning: ['timeInS', 'timeOutS'], afternoon: ['timeInC', 'timeOutC'], overtime: ['timeInOT', 'timeOutOT'] } as const;
+    const views: ShiftView[] = (['morning', 'afternoon', 'overtime'] as const).map(key => {
+      const [sIn, sOut] = slotsOf[key];
+      const inInfo = getSessionInfo(sIn), outInfo = getSessionInfo(sOut);
+      return computeShiftView({
+        key, inSlot: sIn, outSlot: sOut,
+        inTime: hmOf(getLocalPunch(sIn) ?? userTodayLog[sIn]), outTime: hmOf(getLocalPunch(sOut) ?? userTodayLog[sOut]),
+        inActive: isSlotActive(sIn), outActive: isSlotActive(sOut), currMin: getCurrentMinute(),
+        inStartMin: inInfo.sessionStartMin, inStartStr: inInfo.sessionStartStr, inEndStr: inInfo.formatMinutes(inInfo.sessionEndMin),
+        outStartMin: outInfo.sessionStartMin, outStartStr: outInfo.sessionStartStr, outEndStr: outInfo.formatMinutes(outInfo.sessionEndMin),
+      });
+    });
+    const focus = pickFocusShift(views);
+    const cfgRange = (key: 'morning' | 'afternoon' | 'overtime') => {
+      const c: any = config;
+      const [a, b] = key === 'morning' ? [c.morningIn || '07:30', c.morningOut || '11:30'] : key === 'afternoon' ? [c.afternoonIn || '13:00', c.afternoonOut || '17:00'] : [c.overtimeIn || '17:45', c.overtimeOut || '20:45'];
+      return `${a}–${b}`;
+    };
+    const pm = (k: string) => hmOf(getLocalPunch(k) ?? userTodayLog[k]);
+    const punches = { inS: pm('timeInS'), outS: pm('timeOutS'), inC: pm('timeInC'), outC: pm('timeOutC') };
+    const doneParts = [punches.inS && punches.outS ? `Sáng ${punches.inS}→${punches.outS}` : '', punches.inC && punches.outC ? `Chiều ${punches.inC}→${punches.outC}` : ''].filter(Boolean);
+
+    // Dải tuần: dựa vào chấm công trong tháng đã tải; tuần giao tháng thì ngày thuộc tháng trước chưa tải → coi như chưa có dữ liệu (không đánh dấu vắng sai)
+    const approvedMine = (dashLeaves || []).filter((l: any) => l.status === 'approved' && (l.empId ? l.empId === empId : l.empName === currentUser.name));
+    const loadedMonth = todayVal.slice(0, 7);
+    const week = buildWeek(todayVal, (date) => {
+      const log = currentLogs.find(l => l.date === date);
+      const hasPunch = !!log && ['timeInS', 'timeOutS', 'timeInC', 'timeOutC', 'timeInOT', 'timeOutOT'].some(k => hasTime(normalizeTime(log[k])));
+      const outsideLoaded = !date.startsWith(loadedMonth);
+      return { hasPunch: hasPunch || outsideLoaded, lates: log ? getLogAttendanceStats(log).lates : 0, isRest: isCalendarRestDay(date), onLeave: approvedMine.some((l: any) => l.fromDate <= date && date <= (l.toDate || l.fromDate)) };
+    });
+
+    const profile = getCurrentEmployeeProfile();
+    const allowedLate = config.allowedLateCount ?? 3;
+    const proj = (id?: string) => projects.find(pr => pr.id === id)?.name || '';
+    const daysLate = (deadline: string) => Math.max(1, Math.round((new Date(todayVal).getTime() - new Date(deadline).getTime()) / 86400000));
+    // Ngày thiếu / lỗi chấm công cần báo cáo trong tháng (dùng đúng hàm của lịch tháng cũ: bỏ ngày nghỉ, ca chưa kết thúc, ngày đã chốt công và ca đã gửi báo cáo)
+    const reportDays = (() => {
+      const out: { date: string; label: string }[] = [];
+      const [yy, mm] = currentMonthYear.split('-').map(Number);
+      const lastDay = new Date(yy, mm, 0).getDate();
+      for (let day = lastDay; day >= 1; day--) {
+        const dateStr = `${currentMonthYear}-${String(day).padStart(2, '0')}`;
+        if (dateStr > todayVal) continue;
+        const issues = getDayAttendanceIssues(dateStr, currentLogs.find(l => l.date === dateStr));
+        if (issues.length) out.push({ date: dateStr, label: issues.map(i => i.label).join(' · ') });
+      }
+      return out;   // mới nhất trước
+    })();
+    const todo: TodoItem[] = [
+      ...reportDays.slice(0, 2).map(r => ({ id: `rp_${r.date}`, icon: '📝', title: `Báo cáo chấm công ngày ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`, sub: r.label, pill: 'Cần báo cáo', tone: 'warn' as const, dayDate: r.date })),
+      ...taskSum.overdue.slice(0, 2).map(t => ({ id: `od_${t.id}`, icon: '⏰', title: t.name, sub: `Quá hạn ${daysLate(t.deadline)} ngày${proj(t.projectId) ? ` · ${proj(t.projectId)}` : ''}`, pill: 'Quá hạn', tone: 'bad' as const, taskId: t.id })),
+      ...needingApprovalTasks.slice(0, 2).map(t => ({ id: `ap_${t.id}`, icon: '✅', title: `Duyệt: ${t.name}`, sub: proj(t.projectId) || 'Công việc chờ duyệt', pill: 'Duyệt', tone: 'vio' as const, taskId: t.id })),
+      ...taskSum.dueToday.slice(0, 2).map(t => ({ id: `td_${t.id}`, icon: '📌', title: t.name, sub: `Hạn hôm nay${proj(t.projectId) ? ` · ${proj(t.projectId)}` : ''}`, pill: 'Hôm nay', tone: 'blue' as const, taskId: t.id })),
+    ].slice(0, 5);
+
+    const unread = (() => { try { return unreadForBadge(getUserConversations(getConversations(), empId), readPrefs(companyScopedKey(prefsKey(empId)))); } catch { return 0; } })();
+    const viol = summarizeViolations(violationList, empId, todayVal);
+    const onLeaveToday = new Set<string>((dashLeaves || []).filter((l: any) => l.status === 'approved' && l.fromDate <= todayVal && todayVal <= (l.toDate || l.fromDate)).map((l: any) => String(l.empId)));
+    const company = isAdmin ? summarizeCompanyToday({ employees: hrmEmployees as any[], logs: companyLogs, today: todayVal, latesOf: (log: any) => getLogAttendanceStats(log).lates, onLeaveIds: onLeaveToday, isRestDay: isCalendarRestDay(todayVal) }) : null;
+
+    return {
+      user: { name: currentUser.name, roleLabel: isAdmin ? 'Giám đốc' : isAccountant ? 'Kế toán' : currentUser?.role === 'pm' ? 'QL Dự án' : 'Thành viên' },
+      todayLabel: `${['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'][new Date(todayVal).getDay()]}, ${todayVal.slice(8, 10)}/${todayVal.slice(5, 7)}`,
+      nowStr: digitalTime ? digitalTime.slice(0, 5) : '',
+      focus, focusRange: focus ? cfgRange(focus.key) : '', allDoneTimes: doneParts.join(' · '), punches, pendingSync,
+      week, reportDays,
+      kpi: { dueToday: taskSum.dueToday.length, overdue: taskSum.overdue.length, toApprove: needingApprovalTasks.length, unread },
+      month: { days: countAccumulatedDays, standard: standardWorkdays(currentMonthYear, isCalendarRestDay), phep: profile?.phepNam !== undefined ? String(profile.phepNam) : null, phepReserved: getAnnualLeaveAvailability().reserved, lateDays: monthLateEarly.lateDays.size, earlies: monthLateEarly.earlies, allowedLate, otHours: countOvertimeHours },
+      perf: { rate: taskSum.rate, done: taskSum.monthDone, total: taskSum.monthTotal, violations: viol.count, lastViolation: viol.last },
+      todo,
+      leaves: summarizeLeaves(dashLeaves as any[], { id: empId, name: currentUser.name }, todayVal, isRealLeaveType),
+      ctp: summarizeCtp((travelExpensesSummary || []).filter((item: any) => isTravelExpenseBeneficiary(item, currentUser)), todayVal),
+      advance: summarizeAdvances(advanceList, empId, todayVal),
+      projects: myProjList.map(pr => ({ id: pr.id, name: pr.name, progress: Number(pr.progress || 0), newCount: projectNew[pr.id] || 0 })),
+      company,
+    };
+  })();
+
+  // ─── CHI TIẾT NGÀY + BÁO CÁO LỖI CHẤM CA (kiểu LoLo): mở từ dải tuần / mục "Cần báo cáo" / lịch tháng cũ ───
+  // Mở chi tiết 1 ngày (cùng cách dựng bản ghi như khi bấm vào lịch tháng cũ): ngày không có bản ghi thì dựng bản rỗng để vẫn báo cáo được.
+  const openDay = (dateStr: string) => {
+    const log = currentLogs.find(l => l.date === dateStr);
+    const holidayMatch = (dashHolidays || []).find((h: any) => h?.date === `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}/${dateStr.slice(0, 4)}`);
+    setSelectedDayDetail({
+      date: dateStr,
+      log: log ? normalizeRecord(log) : {
+        id: `AT-${empId}-${dateStr.replace(/-/g, '')}`, empId, empName: currentUser.name, date: dateStr,
+        timeInS: '--:--', timeOutS: '--:--', timeInC: '--:--', timeOutC: '--:--', timeInOT: '--:--', timeOutOT: '--:--',
+        status: 'invalid', otHours: 0, notes: 'Không có dữ liệu chấm công cho ngày này.', isLocked: false,
+      },
+      holidayName: holidayMatch?.name,
+    });
+  };
+
+  // Biểu mẫu báo cáo (giải trình) cho 1 ca — cùng trường, cùng kiểm tra và cùng hàm gửi (handleReportSubmit) như bản cũ
+  const renderReportForm = () => {
+    const configuredLeaveApprovers = getConfiguredApprovers('leave');
+    const useLockedApprover = isAttendanceReportType(reportType);
+    return (
+      <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 mt-2 border-t border-slate-200 animate-fadeIn" data-testid="report-form">
+        <div className="text-[12px] font-extrabold text-[#0d47c9]">📝 Gửi báo cáo giải trình</div>
+        <Field label="Loại báo cáo">
+          {reportCategory === 'missing' ? (
+            <select value={reportType} onChange={(e) => setReportType(e.target.value as any)} className={inputCls}>
+              <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
+              <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
+            </select>
+          ) : (
+            <input type="text" value={reportType} readOnly className={`${inputCls} font-bold`} />
+          )}
+        </Field>
+        {renderWholeDayOption()}
+        {configuredLeaveApprovers.length > 0 && useLockedApprover ? (
+          <div>
+            <span className="block text-[11.5px] font-extrabold text-slate-600 mb-1">Người xét duyệt</span>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] flex items-center justify-between gap-2">
+              <span className="font-bold">{configuredLeaveApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+              <span className="text-[10.5px] font-bold bg-blue-50 text-[#0d47c9] border border-blue-200 px-2 py-0.5 rounded-full shrink-0">Tự động</span>
+            </div>
+          </div>
+        ) : (
+          <Field label="Người xét duyệt">
+            <select value={reportApprover} onChange={(e) => setReportApprover(e.target.value)} className={inputCls}>
+              {getApproversList().map((ap, idx) => <option key={idx} value={ap.name}>{ap.name} ({ap.role})</option>)}
+            </select>
+          </Field>
+        )}
+        <Field label="Lý do giải trình">
+          <textarea required placeholder="Giải thích lý do quên chấm công hoặc lý do vắng ca…" value={reportReason} onChange={(e) => setReportReason(e.target.value)} className={`${inputCls} h-24 resize-none`} />
+        </Field>
+        <div className="grid grid-cols-[1fr_2fr] gap-2">
+          <button type="button" onClick={() => { setShowReportForm(false); setReportShift(''); setReportType(''); }} className="py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-[13px] font-extrabold cursor-pointer" data-testid="report-cancel">Hủy</button>
+          <button type="submit" className="py-2.5 rounded-xl text-[13px] font-extrabold cursor-pointer" style={{ background: 'linear-gradient(135deg,#1f6bff,#0a4fd8)', color: '#ffffff' }} data-testid="report-submit">Gửi báo cáo</button>
+        </div>
+      </form>
+    );
+  };
+
+  // Khối 1 ca trong chi tiết ngày (sáng / chiều dùng CHUNG một đoạn mã; trước đây hai đoạn gần như trùng nhau)
+  const renderDayShift = (shift: 'morning' | 'afternoon') => {
+    if (!selectedDayDetail) return null;
+    const log = selectedDayDetail.log;
+    const c = shift === 'morning'
+      ? { icon: '🌅', title: 'Ca sáng', name: 'Ca Sáng', inKey: 'timeInS', outKey: 'timeOutS', cfgIn: config.morningIn || '07:30', cfgOut: config.morningOut || '11:30', allowed: config.allowedLateMorning ?? config.allowedLateMinutes ?? 15 }
+      : { icon: '🌇', title: 'Ca chiều', name: 'Ca Chiều', inKey: 'timeInC', outKey: 'timeOutC', cfgIn: config.afternoonIn || '13:00', cfgOut: config.afternoonOut || '17:00', allowed: config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15 };
+    const leave = approvedShiftLeavesOnDay(dashLeaves, { empId, empName: currentUser.name }, selectedDayDetail.date).find(l => l.shift === shift);
+    const inVal = normalizeTime(log[c.inKey]), outVal = normalizeTime(log[c.outKey]);
+    const hasIn = !(!log[c.inKey] || log[c.inKey] === '--:--' || log[c.inKey] === '');
+    const hasOut = !(!log[c.outKey] || log[c.outKey] === '--:--' || log[c.outKey] === '');
+    const isOff = log.timeInS === 'OFF';
+    const lateInfo = hasIn ? (() => {
+      const inMin = timeToMinutes(inVal), limitMin = timeToMinutes(c.cfgIn);
+      return inMin > limitMin + c.allowed ? { late: true, text: `Đi muộn ${inMin - limitMin} phút` } : { late: false, text: 'Đúng giờ' };
+    })() : null;
+    const missing = !hasIn && !hasOut, faulty = hasIn && !hasOut;
+    return (
+      <section className="rounded-2xl border border-slate-200 bg-white p-3" data-testid={`day-shift-${shift}`} data-state={isOff ? 'off' : missing ? 'missing' : faulty ? 'faulty' : 'ok'}>
+        <div className="flex items-center justify-between mb-2">
+          <b className="text-[13px]">{c.icon} {c.title}</b><span className="text-[11px] text-slate-500 font-mono">Định mức {c.cfgIn} – {c.cfgOut}</span>
+        </div>
+        {leave && <div className="mb-2"><Notice tone="info">🏖 {shiftLeaveFullLabel(leave)} — đã được duyệt nghỉ</Notice></div>}
+        {isOff ? <Notice tone="warn">Đăng ký nghỉ phép / Off</Notice> : missing ? (
+          <div className="rounded-xl border border-dashed border-rose-300 bg-rose-50/60 p-3 text-center space-y-2">
+            <div className="text-[12px] text-slate-600">Không có lịch sử chấm công {c.name}</div>
+            <div className="flex justify-center">{renderReportButtonAndStatus(shift, false, true)}</div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-[10.5px] font-bold text-slate-500">Giờ vào</div><b className="font-mono text-lg">{inVal}</b>
+              {lateInfo && <div className={`text-[11px] font-bold ${lateInfo.late ? 'text-amber-600' : 'text-emerald-600'}`}>{lateInfo.late ? '⏱️' : '✅'} {lateInfo.text}</div>}</div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-[10.5px] font-bold text-slate-500">Giờ ra</div><b className="font-mono text-lg">{hasOut ? outVal : '--:--'}</b>
+              {faulty && <div className="mt-1">{renderReportButtonAndStatus(shift, true, false)}</div>}</div>
+          </div>
+        )}
+        {showReportForm && reportShift === shift && renderReportForm()}
+      </section>
+    );
+  };
+
+  const openDetail = () => { setShowDetail(true); setTimeout(() => document.getElementById('overview_detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); };
+
   return (
     <div className="space-y-6" id="personalized_dashboard">
       
-      {/* CARD CHÀO MỪNG TIỂU SỬ KHÁCH HÀNG */}
-      <div className={`${
-        'bg-white border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.03)]'
-      } p-4 sm:p-6 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-200`}>
-        <div className="flex items-center gap-4">
-          <div className={`w-12 h-12 ${
-            'bg-emerald-50 text-emerald-700 border-emerald-200'
-          } border rounded-full flex items-center justify-center font-extrabold text-lg shadow-inner`}>
-            {currentUser.name.charAt(0)}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className={`text-lg font-black tracking-tight ${'text-slate-800'}`}>Xin chào, {currentUser.name} 🧑‍💼</h2>
-              <span className={`border text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${
-                'bg-emerald-50 text-emerald-700 border-emerald-200'
-              }`}>
-                {isAdmin ? 'Giám Đốc' : isAccountant ? 'Kế Toán' : currentUser?.role === 'pm' ? 'QL Dự Án' : 'Thành Viên'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* TỔNG QUAN KIỂU MỚI (mẫu A + D): điểm danh gọn, dải tuần, chỉ số, hiệu suất, việc cần làm, đơn, công tác phí, tạm ứng, dự án */}
+      <OverviewHome d={overviewData} a={{
+        onPunch: handlePunchClick, onGo: onNavigateTab,
+        onOpenTask: (taskId: string) => window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId } })),
+        onRequestLeave: openLeaveModal, onRequestAdvance: () => setAdvanceModalOpen(true), onOpenDetail: openDetail, onOpenDay: openDay,
+      }} />
 
+      {/* CHI TIẾT (khối cũ giữ nguyên): từng ca với nút điểm danh đầy đủ, thống kê tháng, lịch chấm công theo ngày (báo cáo lý do), bảng công tác phí */}
+      {showDetail && (
+      <div className="space-y-6" id="overview_detail">
       {/* --- HỆ THỐNG ĐIỂM DANH SINH TRẮC & ĐỊNH VỊ GPS REAL-TIME (Tích hợp như yêu cầu) --- */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6" id="realtime_biometric_timekeeping">
         
@@ -3007,19 +3240,7 @@ export default function DashboardOverview({
           {/* QUICK ACTIONS: XIN NGHỈ PHÉP, ỨNG LƯƠNG NHANH, CHI TIẾT CHẤM CÔNG */}
           <div className="space-y-2.5 pt-3 border-t border-slate-800/80">
             <button
-              onClick={() => {
-                const configuredApprover = getConfiguredApprover('leave');
-                if (configuredApprover) {
-                  setLeaveApprover(configuredApprover.name);
-                  setLeaveApproverId(configuredApprover.id);
-                  setLeaveApproverPosition(configuredApprover.position || '');
-                } else {
-                  setLeaveApprover('Trương Hữu Long');
-                  setLeaveApproverId(findUniqueEmployeeByName(hrmEmployees as any[], 'Trương Hữu Long')?.id || '');   // mặc định cũ: có mã thì chọn theo mã
-                  setLeaveApproverPosition('');
-                }
-                setLeaveModalOpen(true);
-              }}
+              onClick={openLeaveModal}
               className="w-full bg-slate-950 hover:bg-slate-850 text-slate-200 border border-slate-800 hover:border-slate-700 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
             >
               <CalendarCheck className="w-4 h-4 text-sky-400" />
@@ -3137,466 +3358,52 @@ export default function DashboardOverview({
         )}
       </div>
 
-      {/* MODAL CHI TIẾT CHẤM CÔNG CỦA NGÀY (KHI CLICK VÀO NGÀY CÓ LOG) */}
-      {selectedDayDetail && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn pointer-events-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
-            
-            <div className="p-4 bg-slate-950 border-b border-slate-850 flex items-center justify-between">
-              <span className="text-xs font-black text-slate-200 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-                📅 CHI TIẾT NGÀY {selectedDayDetail.date}
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedDayDetail(null)}
-                className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-705 p-1 px-2.5 rounded transition-all font-black text-xs border border-transparent hover:border-slate-700"
-              >
-                ĐÓNG [X]
-              </button>
-            </div>
-
-            <div className="p-4 space-y-4 max-h-[80vh] overflow-y-auto text-left">
-              {/* Thông tin nhân viên */}
-              <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-850/50 flex justify-between items-center text-xs">
-                <div>
-                  <span className="text-slate-400 font-medium block">Nhân viên:</span>
-                  <span className="text-white font-extrabold">{currentUser.name}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-slate-400 font-medium block">Trạng thái chấm công:</span>
-                  {(() => {
-                    const st = getAttendanceStatusText(selectedDayDetail.log, readHrmConfigFromStorage());
-                    const isGreen = st.isValid && selectedDayDetail.log.statusMsg !== 'Không hợp lệ' && selectedDayDetail.log.status !== 'invalid';
-                    return (
-                      <span className={`font-black uppercase tracking-wider text-[10px] ${
-                        isGreen ? 'text-emerald-450' : 'text-rose-455'
-                      }`}>
-                        {selectedDayDetail.log.statusMsg || (st.isValid ? 'Hợp lệ' : 'Không hợp lệ')}
-                      </span>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* Ca 1 / Sáng */}
-              <div className="bg-slate-950/30 p-3.5 rounded-xl border border-slate-850/60 space-y-2">
-                <div className="flex items-center justify-between border-b border-slate-850/50 pb-1.5">
-                  <span className="font-extrabold text-[11px] text-emerald-400 tracking-wide">🌅 CA 1 (SÁNG)</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Định mức: {config.morningIn} - {config.morningOut}</span>
-                </div>
-                {(() => {
-                  const sl = approvedShiftLeavesOnDay(dashLeaves, { empId, empName: currentUser.name }, selectedDayDetail.date).find(l => l.shift === 'morning');
-                  return sl ? (
-                    <div className="bg-sky-50 border border-sky-200 text-sky-700 rounded-lg px-2.5 py-1.5 text-[10.5px] font-bold">
-                      🏖 {shiftLeaveFullLabel(sl)} — đã được duyệt nghỉ
-                    </div>
-                  ) : null;
-                })()}
-                {(() => {
-                  const log = selectedDayDetail.log;
-                  const timeInS = normalizeTime(log.timeInS);
-                  const timeOutS = normalizeTime(log.timeOutS);
-
-                  if (log.timeInS === 'OFF') {
-                    return <div className="text-rose-455 font-bold text-center py-1">Đăng ký nghỉ phép / Off</div>;
-                  }
-
-                  const hasInS = !(!log.timeInS || log.timeInS === '--:--' || log.timeInS === '');
-                  const hasOutS = !(!log.timeOutS || log.timeOutS === '--:--' || log.timeOutS === '');
-
-                  const isMissingS = !hasInS && !hasOutS;
-                  const isFaultyS = hasInS && !hasOutS;
-
-                  if (isMissingS) {
-                    return (
-                      <div className="flex flex-col items-center justify-center p-3 bg-red-50 border border-dashed border-red-200 rounded-xl space-y-2 py-2.5">
-                        <span className="text-slate-500 italic text-[11px]">Không có lịch sử check-in Ca Sáng</span>
-                        {renderReportButtonAndStatus('morning', false, true)}
-                      </div>
-                    );
-                  }
-
-                  if (isFaultyS) {
-                    return (
-                      <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono items-center">
-                        <div>
-                          <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                          <strong className="text-white font-mono text-sm">{timeInS}</strong>
-                          {(() => {
-                            const inMin = timeToMinutes(timeInS);
-                            const limitMin = timeToMinutes(config.morningIn || '07:30');
-                            const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
-                            return inMin > (limitMin + allowedLateMorning) ? (
-                              <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
-                            ) : (
-                              <span className="text-emerald-450 font-bold text-[9px] block">✅ Đúng giờ</span>
-                            );
-                          })()}
-                        </div>
-                        <div className="space-y-1">
-                          <div>
-                            <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                            <strong className="text-white font-mono text-sm">--:--</strong>
-                          </div>
-                          <div className="pt-0.5">
-                            {renderReportButtonAndStatus('morning', true, false)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono">
-                      <div>
-                        <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                        <strong className="text-white font-mono text-sm">{timeInS}</strong>
-                        {(() => {
-                          const inMin = timeToMinutes(timeInS);
-                          const limitMin = timeToMinutes(config.morningIn || '07:30');
-                          const allowedLateMorning = config.allowedLateMorning ?? config.allowedLateMinutes ?? 15;
-                          return inMin > (limitMin + allowedLateMorning) ? (
-                            <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
-                          ) : (
-                            <span className="text-emerald-450 font-bold text-[9px] block">✅ Đúng giờ</span>
-                          );
-                        })()}
-                      </div>
-                      <div>
-                        <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                        <strong className="text-white font-mono text-sm">{timeOutS || '--:--'}</strong>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {showReportForm && reportShift === 'morning' && (
-                  <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 border-t border-slate-800/60 animate-fadeIn text-left mt-2">
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Loại đơn báo cáo</label>
-                      {reportCategory === 'missing' ? (
-                        <select
-                          value={reportType}
-                          onChange={(e) => setReportType(e.target.value as any)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none font-extrabold cursor-pointer"
-                        >
-                          <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
-                          <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={reportType}
-                          readOnly
-                          className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
-                        />
-                      )}
-                    </div>
-
-                    {renderWholeDayOption()}
-
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
-                      {(() => {
-                        // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
-                        const configuredLeaveApprovers = getConfiguredApprovers('leave');
-                        const useLockedApprover = isAttendanceReportType(reportType);
-                        if (configuredLeaveApprovers.length > 0 && useLockedApprover) {
-                          return (
-                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
-                              <span className="font-bold">{configuredLeaveApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
-                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
-                            </div>
-                          );
-                        }
-                        return (
-                          <select
-                            value={reportApprover}
-                            onChange={(e) => setReportApprover(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
-                          >
-                            {getApproversList().map((ap, idx) => (
-                              <option key={idx} value={ap.name} className="bg-slate-900">
-                                {ap.name} ({ap.role})
-                              </option>
-                            ))}
-                          </select>
-                        );
-                      })()}
-                    </div>
-
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">LÝ DO GIẢI TRÌNH CỤ THỂ</label>
-                      <textarea
-                        required
-                        placeholder="Giải thích lý do quên chấm công hoặc lý do vắng ca chi tiết..."
-                        value={reportReason}
-                        onChange={(e) => setReportReason(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none h-16 resize-none"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowReportForm(false);
-                          setReportShift('');
-                          setReportType('');
-                        }}
-                        className="bg-slate-800 hover:bg-slate-755 text-slate-300 text-[10px] px-2.5 py-1 rounded font-bold cursor-pointer"
-                      >
-                        Hủy
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-sky-500 hover:bg-sky-450 text-white text-[10px] px-3 py-1 rounded font-black cursor-pointer shadow-md"
-                      >
-                        Gửi yêu cầu giải trình 🚀
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-
-              {/* Ca 2 / Chiều */}
-              <div className="bg-slate-950/30 p-3.5 rounded-xl border border-slate-850/60 space-y-2">
-                <div className="flex items-center justify-between border-b border-slate-850/50 pb-1.5">
-                  <span className="font-extrabold text-[11px] text-sky-400 tracking-wide">🌇 CA 2 (CHIỀU)</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Định mức: {config.afternoonIn} - {config.afternoonOut}</span>
-                </div>
-                {(() => {
-                  const sl = approvedShiftLeavesOnDay(dashLeaves, { empId, empName: currentUser.name }, selectedDayDetail.date).find(l => l.shift === 'afternoon');
-                  return sl ? (
-                    <div className="bg-sky-50 border border-sky-200 text-sky-700 rounded-lg px-2.5 py-1.5 text-[10.5px] font-bold">
-                      🏖 {shiftLeaveFullLabel(sl)} — đã được duyệt nghỉ
-                    </div>
-                  ) : null;
-                })()}
-                
-                {(() => {
-                  const log = selectedDayDetail.log;
-                  const timeInC = normalizeTime(log.timeInC);
-                  const timeOutC = normalizeTime(log.timeOutC);
-
-                  if (log.timeInS === 'OFF') {
-                    return <div className="text-rose-455 font-bold text-center py-1">Đăng ký nghỉ phép / Off</div>;
-                  }
-
-                  const hasInC = !(!log.timeInC || log.timeInC === '--:--' || log.timeInC === '');
-                  const hasOutC = !(!log.timeOutC || log.timeOutC === '--:--' || log.timeOutC === '');
-
-                  const isMissingC = !hasInC && !hasOutC;
-                  const isFaultyC = hasInC && !hasOutC;
-
-                  if (isMissingC) {
-                    return (
-                      <div className="flex flex-col items-center justify-center p-3 bg-red-50 border border-dashed border-red-200 rounded-xl space-y-2 py-2.5">
-                        <span className="text-slate-505 italic text-[11px]">Không có lịch sử check-in Ca Chiều</span>
-                        {renderReportButtonAndStatus('afternoon', false, true)}
-                      </div>
-                    );
-                  }
-
-                  if (isFaultyC) {
-                    return (
-                      <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono items-center">
-                        <div>
-                          <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                          <strong className="text-white font-mono text-sm">{timeInC}</strong>
-                          {(() => {
-                            const inMin = timeToMinutes(timeInC);
-                            const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                            const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
-                            return inMin > (limitMin + allowedLateAfternoon) ? (
-                              <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
-                            ) : (
-                              <span className="text-emerald-455 font-bold text-[9px] block">✅ Đúng giờ</span>
-                            );
-                          })()}
-                        </div>
-                        <div className="space-y-1">
-                          <div>
-                            <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                            <strong className="text-white font-mono text-sm">--:--</strong>
-                          </div>
-                          <div className="pt-0.5">
-                            {renderReportButtonAndStatus('afternoon', true, false)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="grid grid-cols-2 gap-2 text-slate-350 font-mono">
-                      <div>
-                        <span className="text-slate-505 block text-[10px]">Giờ vào:</span>
-                        <strong className="text-white font-mono text-sm">{timeInC}</strong>
-                        {(() => {
-                          const inMin = timeToMinutes(timeInC);
-                          const limitMin = timeToMinutes(config.afternoonIn || '13:00');
-                          const allowedLateAfternoon = config.allowedLateAfternoon ?? config.allowedLateMinutes ?? 15;
-                          return inMin > (limitMin + allowedLateAfternoon) ? (
-                            <span className="text-amber-400 font-bold text-[9px] block">⏱️ Đi muộn {inMin - limitMin}p</span>
-                          ) : (
-                            <span className="text-emerald-455 font-bold text-[9px] block">✅ Đúng giờ</span>
-                          );
-                        })()}
-                      </div>
-                      <div>
-                        <span className="text-slate-505 block text-[10px]">Giờ ra:</span>
-                        <strong className="text-white font-mono text-sm">{timeOutC || '--:--'}</strong>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {showReportForm && reportShift === 'afternoon' && (
-                  <form onSubmit={handleReportSubmit} className="space-y-3 pt-3 border-t border-slate-800/60 animate-fadeIn text-left mt-2">
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Loại đơn báo cáo</label>
-                      {reportCategory === 'missing' ? (
-                        <select
-                          value={reportType}
-                          onChange={(e) => setReportType(e.target.value as any)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none font-extrabold cursor-pointer"
-                        >
-                          <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
-                          <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={reportType}
-                          readOnly
-                          className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-xs text-sky-400 outline-none cursor-not-allowed font-extrabold"
-                        />
-                      )}
-                    </div>
-
-                    {renderWholeDayOption()}
-
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">NGƯỜI XÉT DUYỆT</label>
-                      {(() => {
-                        // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
-                        const configuredLeaveApprovers = getConfiguredApprovers('leave');
-                        const useLockedApprover = isAttendanceReportType(reportType);
-                        if (configuredLeaveApprovers.length > 0 && useLockedApprover) {
-                          return (
-                            <div className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
-                              <span className="font-bold">{configuredLeaveApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
-                              <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
-                            </div>
-                          );
-                        }
-                        return (
-                          <select
-                            value={reportApprover}
-                            onChange={(e) => setReportApprover(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none font-bold"
-                          >
-                            {getApproversList().map((ap, idx) => (
-                              <option key={idx} value={ap.name} className="bg-slate-900">
-                                {ap.name} ({ap.role})
-                              </option>
-                            ))}
-                          </select>
-                        );
-                      })()}
-                    </div>
-
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">LÝ DO GIẢI TRÌNH CỤ THỂ</label>
-                      <textarea
-                        required
-                        placeholder="Giải thích lý do quên chấm công hoặc lý do vắng ca chi tiết..."
-                        value={reportReason}
-                        onChange={(e) => setReportReason(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200 outline-none h-16 resize-none"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowReportForm(false);
-                          setReportShift('');
-                          setReportType('');
-                        }}
-                        className="bg-slate-800 hover:bg-slate-755 text-slate-300 text-[10px] px-2.5 py-1 rounded font-bold cursor-pointer"
-                      >
-                        Hủy
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-sky-500 hover:bg-sky-450 text-white text-[10px] px-3 py-1 rounded font-black cursor-pointer shadow-md"
-                      >
-                        Gửi yêu cầu giải trình 🚀
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-
-              {/* Tăng ca (OT) */}
-              {((selectedDayDetail.log.timeInOT && selectedDayDetail.log.timeInOT !== '--:--') || (selectedDayDetail.log.otHours && selectedDayDetail.log.otHours > 0)) ? (
-                <div className="bg-purple-50 p-3.5 rounded-xl border border-purple-200 space-y-2 mt-2">
-                  <div className="flex items-center justify-between border-b border-purple-200 pb-1.5">
-                    <span className="font-extrabold text-[11px] text-purple-700 tracking-wide">🌌 TĂNG CA (OVERTIME)</span>
-                    <span className="text-[10px] text-purple-600 font-mono font-bold">Tích lũy: {selectedDayDetail.log.otHours || 0} giờ</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-purple-800">
-                    <div>
-                      <span className="text-purple-500 block text-[10px]">Giờ vào OT:</span>
-                      <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeInOT) || '--:--'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-purple-500 block text-[10px]">Giờ ra OT:</span>
-                      <strong className="font-mono text-sm">{normalizeTime(selectedDayDetail.log.timeOutOT) || '--:--'}</strong>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Ảnh FaceID & tọa độ GPS của TỪNG lượt chấm: Vào/Ra sáng, chiều, tăng ca */}
-              <PunchMediaList
-                log={selectedDayDetail.log}
-                onZoomImage={setZoomedImage}
-                variant="full"
-              />
-
-              {/* Ghi chú & Trạng thái hệ thống */}
-              <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-850/40 text-slate-400">
-                <span className="text-[10px] font-bold text-slate-500 block uppercase">Ghi chú từ hệ thống:</span>
-                <p className="italic mt-1 leading-relaxed text-slate-300 text-[11px]">
-                  {selectedDayDetail.log.notes || "Không có ghi chú đặc biệt."}
-                </p>
-                {selectedDayDetail.log.isLocked && (
-                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 mt-2 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                    🔒 BẢN GHI ĐÃ KHÓA CHỐT CÔNG
-                  </span>
-                )}
-              </div>
-
-            </div>
-
-            {/* Footer */}
-            <div className="p-3 bg-slate-950 border-t border-slate-850 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setSelectedDayDetail(null)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-955 rounded-xl text-xs font-black transition-all cursor-pointer shadow-md text-white active:scale-95"
-              >
-                Xác nhận & Đóng
-              </button>
-            </div>
-
-          </div>
-        </div>
+      <button type="button" onClick={() => setShowDetail(false)} className="w-full py-2 text-[12px] font-extrabold text-slate-500 cursor-pointer" data-testid="close-detail">Thu gọn chi tiết ▲</button>
+      </div>
       )}
+
+      {/* HỘP CHI TIẾT NGÀY + BÁO CÁO LỖI CHẤM CA (kiểu LoLo: trượt từ dưới lên). Mở từ dải tuần, mục "Cần báo cáo" hoặc lịch tháng. */}
+      {selectedDayDetail && (() => {
+        const log = selectedDayDetail.log;
+        const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
+        const valid = st.isValid && log.statusMsg !== 'Không hợp lệ' && log.status !== 'invalid';
+        const dd = selectedDayDetail.date;
+        const dow = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'][new Date(dd).getDay()];
+        const hasOT = (log.timeInOT && log.timeInOT !== '--:--') || (log.otHours && log.otHours > 0);
+        return (
+          <Sheet testid="day-detail-sheet" title={`Chi tiết ngày ${dd.slice(8, 10)}/${dd.slice(5, 7)}/${dd.slice(0, 4)}`} subtitle={`${dow} · ${currentUser.name}`}
+            onClose={() => setSelectedDayDetail(null)}
+            footer={<button type="button" onClick={() => setSelectedDayDetail(null)} className="w-full py-3 rounded-xl text-[14px] font-extrabold cursor-pointer" style={{ background: 'linear-gradient(135deg,#1f6bff,#0a4fd8)', color: '#ffffff' }} data-testid="day-close">Đóng</button>}>
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+              <span className="text-[12px] font-bold text-slate-600">Trạng thái chấm công</span>
+              <span className={`text-[12px] font-extrabold ${valid ? 'text-emerald-600' : 'text-rose-600'}`}>{log.statusMsg || (st.isValid ? 'Hợp lệ' : 'Không hợp lệ')}</span>
+            </div>
+            {selectedDayDetail.holidayName && <Notice tone="info">🎉 {selectedDayDetail.holidayName}</Notice>}
+
+            {renderDayShift('morning')}
+            {renderDayShift('afternoon')}
+
+            {hasOT ? (
+              <section className="rounded-2xl border border-violet-200 bg-violet-50 p-3" data-testid="day-ot">
+                <div className="flex items-center justify-between mb-2"><b className="text-[13px] text-violet-700">🌌 Tăng ca</b><span className="text-[11px] font-bold text-violet-600">Tích lũy {log.otHours || 0} giờ</span></div>
+                <div className="grid grid-cols-2 gap-3 text-violet-800">
+                  <div><div className="text-[10.5px] font-bold text-violet-500">Giờ vào</div><b className="font-mono">{normalizeTime(log.timeInOT) || '--:--'}</b></div>
+                  <div><div className="text-[10.5px] font-bold text-violet-500">Giờ ra</div><b className="font-mono">{normalizeTime(log.timeOutOT) || '--:--'}</b></div>
+                </div>
+              </section>
+            ) : null}
+
+            {/* Ảnh FaceID & tọa độ GPS của TỪNG lượt chấm: Vào/Ra sáng, chiều, tăng ca */}
+            <PunchMediaList log={log} onZoomImage={setZoomedImage} variant="full" />
+
+            <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+              <div className="text-[10.5px] font-extrabold text-slate-500 uppercase">Ghi chú từ hệ thống</div>
+              <p className="text-[12px] text-slate-700 mt-0.5 leading-relaxed">{log.notes || 'Không có ghi chú đặc biệt.'}</p>
+              {log.isLocked && <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-emerald-700 mt-1.5 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">🔒 Bản ghi đã khóa chốt công</span>}
+            </div>
+          </Sheet>
+        );
+      })()}
 
       {/* MODAL 4: XEM CHI TIẾT CHẤM CÔNG CHUYỂN TỪ TẤM BẢNG STATIC RA DẠNG MODAL */}
       {showDetailLogsModal && (
@@ -3836,335 +3643,145 @@ export default function DashboardOverview({
       )}
 
 
-      {/* MODAL 2: XIN NGHỈ PHÉP (NỘP HỆ THỐNG NHÂN SỰ) */}
-      {leaveModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="leave_request_submission_modal">
-          <form onSubmit={handleLeaveSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
-            
-            <div className="p-4 bg-slate-950 border-b border-slate-850 flex items-center justify-between">
-              <span className="text-xs font-black text-slate-200 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-                📅 LẬP ĐƠN NGHỈ PHÉP & CHI TIẾT NHÂN SỰ
-              </span>
-              <button
-                type="button"
-                onClick={() => setLeaveModalOpen(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* HỘP XIN NGHỈ PHÉP (kiểu LoLo: trượt từ dưới lên; logic, kiểm tra và hàm nộp đơn giữ nguyên như bản cũ) */}
+      {leaveModalOpen && (() => {
+        const profile = getCurrentEmployeeProfile();
+        const remainingDays = profile?.phepNam !== undefined ? profile.phepNam : 12;
+        const avail = getAnnualLeaveAvailability();
+        const outOfLeave = leaveRequestType === 'Nghỉ phép năm' && avail.available <= 0;   // hết phép năm → chặn tạo đơn
+        const configuredApprovers = getConfiguredApprovers('leave');
+        return (
+          <Sheet id="leave_request_submission_modal" title="Xin nghỉ phép" subtitle={`${currentUser.name} · Phép năm còn ${remainingDays} ngày`}
+            onClose={() => setLeaveModalOpen(false)} onSubmit={handleLeaveSubmit}
+            footer={<SheetActions onCancel={() => setLeaveModalOpen(false)} submitLabel="Gửi đơn nghỉ phép" disabled={outOfLeave} />}>
+            <Field label="Loại phép">
+              <select value={leaveRequestType} onChange={(e) => setLeaveRequestType(e.target.value)} className={inputCls}>
+                {leaveTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </Field>
+
+            {/* Thống kê phép năm: còn lại + số ngày đang bị các đơn chờ duyệt giữ chỗ */}
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-[12px]" data-testid="leave-balance">
+              <span className="font-bold text-slate-600">Phép năm của bạn</span>
+              <span className="font-extrabold text-emerald-600">Còn {formatDays(avail.available)} ngày{avail.reserved > 0 ? <span className="text-slate-500 font-semibold"> · {formatDays(avail.reserved)} ngày đang chờ duyệt</span> : null}</span>
+            </div>
+            {outOfLeave && <Notice tone="bad">⚠️ Bạn đã hết phép năm{avail.reserved > 0 ? ' (số còn lại đã được các đơn đang chờ duyệt dùng hết)' : ''} nên không thể tạo đơn</Notice>}
+
+            {/* Nghỉ cả ngày hay chỉ 1 ca — chỉ cho Nghỉ phép năm và Nghỉ không lương có xin phép */}
+            {supportsShiftLeave(leaveRequestType) && (
+              <div>
+                <span className="block text-[11.5px] font-extrabold text-slate-600 mb-1">Thời gian nghỉ</span>
+                <Segmented value={leaveShiftChoice} onChange={(v) => setLeaveShiftChoice(v as 'full' | LeaveShift)}
+                  options={[{ value: 'full', label: 'Cả ngày' }, { value: 'morning', label: 'Ca sáng (0,5)' }, { value: 'afternoon', label: 'Ca chiều (0,5)' }]} />
+                {leaveShiftChoice !== 'full' && leaveRequestType === 'Nghỉ phép năm' && <p className="text-[11px] text-slate-500 mt-1">Nghỉ 1 ca chỉ trong 1 ngày và trừ 0,5 ngày phép năm khi được duyệt.</p>}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Từ ngày">
+                <input type="date" value={leaveFrom} className={`${inputCls} font-mono ${leaveDateWarningMessage ? '!border-amber-500 ring-2 ring-amber-100' : ''}`}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setLeaveFrom(val);
+                    try {
+                      const d = new Date(val);
+                      if (leaveShiftChoice === 'full') d.setDate(d.getDate() + 1);   // nghỉ 1 ca: ngày kết thúc = ngày bắt đầu
+                      setLeaveTo(d.toISOString().split('T')[0]);
+                    } catch (err) {}
+                  }} />
+              </Field>
+              <Field label="Đến ngày">
+                <input type="date" value={leaveTo} onChange={(e) => setLeaveTo(e.target.value)} disabled={leaveShiftChoice !== 'full'}
+                  title={leaveShiftChoice !== 'full' ? 'Nghỉ 1 ca chỉ trong 1 ngày' : undefined} className={`${inputCls} font-mono`} />
+              </Field>
+            </div>
+            {leaveDateWarningMessage && <Notice tone="warn">{leaveDateWarningMessage}</Notice>}
+
+            <div className="flex items-center justify-between rounded-xl bg-blue-50 border border-blue-200 px-3 py-2" data-testid="leave-days">
+              <span className="text-[12px] font-bold text-slate-600">Tổng số ngày đề nghị</span><b className="text-[#0d47c9]">{formatDays(leaveDays)} ngày</b>
             </div>
 
-            <div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto pr-2">
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Người làm đơn</label>
-                  <input
-                    type="text"
-                    value={currentUser.name}
-                    readOnly
-                    className="w-full bg-slate-950 border border-slate-805 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-bold outline-none cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Loại phép</label>
-                  <select
-                    value={leaveRequestType}
-                    onChange={(e) => setLeaveRequestType(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500"
-                  >
-                    {leaveTypes.map((type) => (
-                      <option key={type} value={type} className="bg-slate-900">
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Thống kê phép năm */}
-              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-850 flex items-center justify-between text-[11px]">
-                <span className="text-slate-400 font-bold">Thống kê phép năm của bạn:</span>
-                <span className="font-mono text-cyan-400 font-extrabold">
-                  {(() => {
-                    const profile = getCurrentEmployeeProfile();
-                    const remainingDays = profile?.phepNam !== undefined ? profile.phepNam : 12;
-                    return `Còn dư: ${remainingDays} / 12 lần`;
-                  })()}
-                </span>
-              </div>
-
-              {/* Hết phép năm → chặn tạo đơn Nghỉ phép năm (đã trừ các đơn phép năm đang chờ duyệt) */}
-              {leaveRequestType === 'Nghỉ phép năm' && getAnnualLeaveAvailability().available <= 0 && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
-                  ⚠️ Bạn đã hết phép năm{getAnnualLeaveAvailability().reserved > 0 ? ' (số còn lại đã được các đơn đang chờ duyệt dùng hết)' : ''} nên không thể tạo đơn Nghỉ phép năm. Hãy chọn loại nghỉ khác.
-                </div>
-              )}
-
-              {/* Nghỉ cả ngày hay chỉ 1 ca — chỉ cho Nghỉ phép năm và Nghỉ không lương có xin phép */}
-              {supportsShiftLeave(leaveRequestType) && (
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">THỜI GIAN NGHỈ</label>
-                  <select
-                    value={leaveShiftChoice}
-                    onChange={(e) => setLeaveShiftChoice(e.target.value as 'full' | LeaveShift)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500"
-                  >
-                    <option value="full" className="bg-slate-900">Nghỉ cả ngày</option>
-                    <option value="morning" className="bg-slate-900">Chỉ nghỉ ca sáng (0,5 ngày)</option>
-                    <option value="afternoon" className="bg-slate-900">Chỉ nghỉ ca chiều (0,5 ngày)</option>
-                  </select>
-                  {leaveShiftChoice !== 'full' && leaveRequestType === 'Nghỉ phép năm' && (
-                    <p className="text-[10px] text-slate-500 mt-1">Nghỉ 1 ca chỉ trong 1 ngày và trừ 0,5 ngày phép năm khi được duyệt.</p>
-                  )}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">TỪ NGÀY</label>
-                  <input
-                    type="date"
-                    value={leaveFrom}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setLeaveFrom(val);
-                      try {
-                        const d = new Date(val);
-                        if (leaveShiftChoice === 'full') d.setDate(d.getDate() + 1);   // nghỉ 1 ca: ngày kết thúc = ngày bắt đầu
-                        setLeaveTo(d.toISOString().split('T')[0]);
-                      } catch (err) {}
-                    }}
-                    className={`w-full bg-slate-950 border rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 font-mono ${leaveDateWarningMessage ? 'border-amber-500/80 ring-1 ring-amber-500/20' : 'border-slate-800'}`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">ĐẾN NGÀY</label>
-                  <input
-                    type="date"
-                    value={leaveTo}
-                    onChange={(e) => setLeaveTo(e.target.value)}
-                    disabled={leaveShiftChoice !== 'full'}
-                    title={leaveShiftChoice !== 'full' ? 'Nghỉ 1 ca chỉ trong 1 ngày' : undefined}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
-                  />
-                </div>
-              </div>
-
-              {leaveDateWarningMessage && (
-                <div className="bg-amber-50 border border-amber-200 text-amber-700 p-2.5 rounded-lg text-[10.5px] font-bold leading-normal animate-fadeIn">
-                  {leaveDateWarningMessage}
-                </div>
-              )}
-
+            {/* Người xét duyệt: nhiều người được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được) */}
+            {configuredApprovers.length > 0 ? (
               <div>
-                <label className="text-[10px] text-slate-500 font-bold block mb-1">TỔNG SỐ NGÀY ĐỀ NGHỊ</label>
-                <input
-                  type="number"
-                  min="0.5"
-                  step="0.5"
-                  value={leaveDays}
-                  readOnly
-                  disabled
-                  className="w-full bg-slate-950/70 border border-slate-805 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-bold outline-none cursor-not-allowed font-mono shadow-inner"
-                />
+                <span className="block text-[11.5px] font-extrabold text-slate-600 mb-1">Người xét duyệt</span>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] flex items-center justify-between gap-2">
+                  <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                  <span className="text-[10.5px] font-bold bg-blue-50 text-[#0d47c9] border border-blue-200 px-2 py-0.5 rounded-full shrink-0">Tự động</span>
+                </div>
               </div>
+            ) : (
+              <Field label="Người xét duyệt">
+                <select value={leaveApproverId} className={inputCls}
+                  onChange={(e) => {
+                    const emp = hrmEmployees.find((em: any) => em.id === e.target.value);   // chọn theo MÃ nhân viên (không theo tên)
+                    setLeaveApprover(emp?.name || '');
+                    setLeaveApproverId(emp?.id || '');
+                    setLeaveApproverPosition(emp?.position || '');
+                  }}>
+                  <option value="">Chọn người xét duyệt...</option>
+                  {hrmEmployees.map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name} ({emp.position || emp.role})</option>)}
+                </select>
+              </Field>
+            )}
 
-              <div>
-                <label className="block text-[10px] text-slate-500 font-bold mb-1">NGƯỜI XÉT DUYỆT</label>
-                {(() => {
-                  // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
-                  const configuredApprovers = getConfiguredApprovers('leave');
-                  if (configuredApprovers.length > 0) {
-                    return (
-                      <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
-                        <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
-                        <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <select
-                      value={leaveApproverId}
-                      onChange={(e) => {
-                        const emp = hrmEmployees.find((em: any) => em.id === e.target.value);   // chọn theo MÃ nhân viên (không theo tên)
-                        setLeaveApprover(emp?.name || '');
-                        setLeaveApproverId(emp?.id || '');
-                        setLeaveApproverPosition(emp?.position || '');
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 cursor-pointer"
-                    >
-                      <option value="">Chọn người xét duyệt...</option>
-                      {hrmEmployees.map((emp: any) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name} ({emp.position || emp.role})
-                        </option>
-                      ))}
-                    </select>
-                  );
-                })()}
+            <Field label="Lý do xin phép">
+              <textarea required placeholder="Nhập lý do cụ thể (vd: giải quyết việc gia đình, đi khám bệnh…)" value={leaveReasonText} onChange={(e) => setLeaveReasonText(e.target.value)} className={`${inputCls} h-24 resize-none`} />
+            </Field>
+          </Sheet>
+        );
+      })()}
+
+
+      {/* HỘP ĐỀ XUẤT TẠM ỨNG LƯƠNG (kiểu LoLo; logic và hàm gửi đề xuất giữ nguyên như bản cũ) */}
+      {advanceModalOpen && (() => {
+        const configuredApprovers = getConfiguredApprovers('salary_advance');
+        return (
+          <Sheet id="salary_advance_proposal_modal" title="Đề xuất tạm ứng lương" subtitle={currentUser.name}
+            onClose={() => setAdvanceModalOpen(false)} onSubmit={handleAdvanceSubmit}
+            footer={<SheetActions onCancel={() => setAdvanceModalOpen(false)} submitLabel="Gửi đề xuất" />}>
+            <Field label="Kỳ lương áp dụng">
+              <select value={advancePeriod} onChange={(e) => setAdvancePeriod(e.target.value)} className={inputCls}>
+                {getPeriodOptions().map((opt: any) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </Field>
+
+            <div>
+              <Field label="Số tiền tạm ứng (đồng)">
+                <input type="number" inputMode="numeric" placeholder="Nhập số tiền, vd: 3000000" value={advanceAmountVal} onChange={(e) => setAdvanceAmountVal(e.target.value)} className={`${inputCls} font-mono font-bold`} required />
+              </Field>
+              <div className="flex gap-1.5 mt-2" data-testid="advance-quick">
+                {[1_000_000, 2_000_000, 3_000_000, 5_000_000].map(n => (
+                  <button key={n} type="button" onClick={() => setAdvanceAmountVal(String(n))} data-amount={n}
+                    className={`flex-1 py-1.5 rounded-lg border text-[12px] font-extrabold cursor-pointer ${Number(advanceAmountVal) === n ? 'bg-blue-50 border-[#0d47c9] text-[#0d47c9]' : 'bg-white border-slate-300 text-slate-600'}`}>{n / 1_000_000} triệu</button>))}
               </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 font-bold block mb-1">LÝ DO XIN PHÉP THUYẾT PHỤC BAN GIÁM ĐỐC</label>
-                <textarea
-                  placeholder="Nhập lý do cụ thể (vd: giải quyết việc đất cát ở Bảo Lộc, đi đám cưới em gái ruột, vv.)"
-                  value={leaveReasonText}
-                  onChange={(e) => setLeaveReasonText(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 h-20"
-                  required
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setLeaveModalOpen(false)}
-                  className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs py-2 rounded-xl font-bold text-center cursor-pointer border border-slate-700"
-                >
-                  ĐÓNG
-                </button>
-                <button
-                  type="submit"
-                  disabled={leaveRequestType === 'Nghỉ phép năm' && getAnnualLeaveAvailability().available <= 0}
-                  className="flex-1 bg-sky-500 hover:bg-sky-400 text-white text-xs py-2 rounded-xl font-black text-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  NỘP ĐƠN NGHỈ PHÉP
-                </button>
-              </div>
-
+              {advanceAmountVal && <div className="mt-2 text-[15px] text-[#0d47c9] font-extrabold" data-testid="advance-preview">{Number(advanceAmountVal).toLocaleString('vi-VN')} đ</div>}
             </div>
 
-          </form>
-        </div>
-      )}
+            <Field label="Lý do đề xuất">
+              <textarea required placeholder="vd: Chi tiêu cá nhân đột xuất, việc gia đình…" value={advanceReasonText} onChange={(e) => setAdvanceReasonText(e.target.value)} className={`${inputCls} h-24 resize-none`} />
+            </Field>
 
-
-      {/* MODAL 3: ĐỀ XUẤT ỨNG LƯƠNG NHANH */}
-      {advanceModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="salary_advance_proposal_modal">
-          <form onSubmit={handleAdvanceSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
-            
-            <div className="p-4 bg-slate-950 border-b border-slate-850 flex items-center justify-between">
-              <span className="text-xs font-black text-slate-200 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-                💸 ĐỀ XUẤT TẠM ỨNG LƯƠNG NHÂN SỰ
-              </span>
-              <button
-                type="button"
-                onClick={() => setAdvanceModalOpen(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">NHÂN SỰ ĐỀ NGHỊ</label>
-                  <input
-                    type="text"
-                    value={currentUser.name}
-                    readOnly
-                    className="w-full bg-slate-950 border border-slate-805 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-bold outline-none cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">KỲ LƯƠNG ÁP DỤNG</label>
-                  <select
-                    value={advancePeriod}
-                    onChange={(e) => setAdvancePeriod(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500"
-                  >
-                    {getPeriodOptions().map((opt: any) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+            {/* Người xét duyệt: nhiều người được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được) */}
+            {configuredApprovers.length > 0 ? (
+              <div>
+                <span className="block text-[11.5px] font-extrabold text-slate-600 mb-1">Người xét duyệt</span>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] flex items-center justify-between gap-2">
+                  <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
+                  <span className="text-[10.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">Tự động</span>
                 </div>
               </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 font-bold block mb-1">TIỀN LƯƠNG TẠM ỨNG ĐỀ XUẤT (VNĐ)</label>
-                <input
-                  type="number"
-                  placeholder="Nhập số tiền ứng, vd: 3000000"
-                  value={advanceAmountVal}
-                  onChange={(e) => setAdvanceAmountVal(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-500 font-mono font-bold"
-                  required
-                />
-                {advanceAmountVal && (
-                  <div className="mt-2 text-xs text-emerald-400 font-mono font-bold">
-                    {Number(advanceAmountVal).toLocaleString('vi-VN')} đ
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 font-bold block mb-1">LÝ DO ĐỀ XUẤT TẠM ỨNG CHI TIẾT</label>
-                <textarea
-                  placeholder="vd: Chi tiêu cá nhân đột xuất phục vụ hiếu hỉ, mua sắm máy tính làm việc"
-                  value={advanceReasonText}
-                  onChange={(e) => setAdvanceReasonText(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-500 h-20"
-                  required
-                />
-              </div>
-
-              <div>
-                {(() => {
-                  // Nhiều người xét duyệt được cấu hình → liệt kê đủ tên (bất kỳ ai trong số họ đều duyệt được).
-                  const configuredApprovers = getConfiguredApprovers('salary_advance');
-                  if (configuredApprovers.length > 0) {
-                    return (
-                      <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 flex items-center justify-between gap-2">
-                        <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
-                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <>
-                      <label className="block text-[10px] text-slate-500 font-bold mb-1">NGƯỜI XÉT DUYỆT (NHÓM KẾ TOÁN)</label>
-                      <select
-                        value={advanceApproverId}
-                        onChange={(e) => setAdvanceApproverId(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-500 cursor-pointer"
-                      >
-                        <option value="">Chọn người xét duyệt...</option>
-                        {hrmEmployees.map((emp: any) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name} ({emp.position || emp.role})
-                          </option>
-                        ))}
-                      </select>
-                    </>
-                  );
-                })()}
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAdvanceModalOpen(false)}
-                  className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs py-2 rounded-xl font-bold text-center cursor-pointer border border-slate-700"
-                >
-                  ĐÓNG
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs py-2 rounded-xl font-black text-center cursor-pointer text-white"
-                >
-                  GỬI ĐỆ TRÌNH ỨNG LƯƠNG
-                </button>
-              </div>
-
-            </div>
-
-          </form>
-        </div>
-      )}
+            ) : (
+              <Field label="Người xét duyệt (nhóm kế toán)">
+                <select value={advanceApproverId} onChange={(e) => setAdvanceApproverId(e.target.value)} className={inputCls}>
+                  <option value="">Chọn người xét duyệt...</option>
+                  {hrmEmployees.map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name} ({emp.position || emp.role})</option>)}
+                </select>
+              </Field>
+            )}
+          </Sheet>
+        );
+      })()}
 
       {zoomedImage && (
         <div 
