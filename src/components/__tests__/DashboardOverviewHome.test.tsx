@@ -77,13 +77,30 @@ describe('Tổng quan kiểu mới', () => {
     await waitFor(() => expect(screen.getByTestId('project-item').textContent).toContain('2 mới'));
   });
 
-  it('"Lịch tháng & chi tiết chấm công" mở khối cũ; nút Thu gọn đóng lại', async () => {
+  it('"Lịch chấm công tháng" chỉ còn giao diện lịch (không còn khối điểm danh/bảng cũ); nút Thu gọn đóng lại', async () => {
+    mount();
+    expect(screen.queryByTestId('month-calendar')).toBeNull();
+    fireEvent.click(await screen.findByTestId('open-detail'));
+    expect(await screen.findByTestId('month-calendar')).toBeTruthy();
+    // đủ 28–31 ô ngày của tháng, và khối cũ (điểm danh sinh trắc, bảng công tác phí) không còn
+    expect(screen.getAllByTestId(/^month-day/).length).toBeGreaterThanOrEqual(28);
+    expect(document.getElementById('realtime_biometric_timekeeping')).toBeNull();
+    fireEvent.click(screen.getByTestId('close-detail'));
+    await waitFor(() => expect(screen.queryByTestId('month-calendar')).toBeNull());
+  });
+
+  it('bấm một ngày trong lịch tháng mở hộp "Chi tiết ngày"', async () => {
     mount();
     fireEvent.click(await screen.findByTestId('open-detail'));
-    expect(await screen.findByTestId('close-detail')).toBeTruthy();
-    expect(document.getElementById('realtime_biometric_timekeeping')).not.toBeNull();
-    fireEvent.click(screen.getByTestId('close-detail'));
-    await waitFor(() => expect(document.getElementById('realtime_biometric_timekeeping')).toBeNull());
+    const days = await screen.findAllByTestId('month-day');   // ngày bấm được (đã tới)
+    fireEvent.click(days[0]);
+    expect(await screen.findByTestId('day-detail-sheet')).toBeTruthy();
+  });
+
+  it('thẻ "Toàn công ty hôm nay" và "Công tác phí" không còn nút "Chi tiết"', async () => {
+    mount();
+    await screen.findByTestId('open-detail');
+    expect(screen.queryByText('Chi tiết')).toBeNull();
   });
 
   it('đơn nghỉ phép của tôi chỉ hiện khi có đơn (đơn chờ kèm chuỗi duyệt)', async () => {

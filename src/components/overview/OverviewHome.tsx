@@ -136,7 +136,7 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
 
           {d.company && (
             <Card testid="ov-company">
-              <Title right={<Link onClick={() => a.onGo('employees')}>Chi tiết</Link>}>Toàn công ty hôm nay</Title>
+              <Title>Toàn công ty hôm nay</Title>
               <div className="flex items-center gap-2"><b className="text-2xl text-[#0d47c9] leading-none">{d.company.present}<small className="text-[13px] text-slate-500 font-semibold"> / {d.company.total}</small></b><span className="text-[12px] text-slate-500">đã điểm danh</span><span className="flex-1" />
                 <div className="w-32"><Bar pct={d.company.total ? (d.company.present / d.company.total) * 100 : 0} /></div></div>
               <div className="grid grid-cols-3 gap-2 mt-2.5 text-center">
@@ -227,7 +227,7 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
 
           {ctpShown && (
             <Card testid="ov-ctp">
-              <Title right={<Link onClick={a.onOpenDetail}>Chi tiết</Link>}>Công tác phí của tôi</Title>
+              <Title>Công tác phí của tôi</Title>
               <div className="grid grid-cols-3 gap-2 text-center mb-1.5">
                 <div className={`rounded-xl border py-1.5 ${TONE.warn}`}><b className="block text-sm">{fmtMoneyShort(d.ctp.pendingSum)}</b><span className="text-[10.5px] font-bold">Chờ duyệt ({d.ctp.pendingCount})</span></div>
                 <div className={`rounded-xl border py-1.5 ${TONE.ok}`}><b className="block text-sm">{fmtMoneyShort(d.ctp.approvedSum)}</b><span className="text-[10.5px] font-bold">Đã duyệt ({d.ctp.approvedCount})</span></div>
@@ -263,7 +263,7 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
             <button type="button" onClick={a.onRequestLeave} data-testid="quick-leave" className="bg-white border border-slate-200 rounded-2xl py-2.5 text-[12.5px] font-extrabold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"><CalendarCheck className="w-4 h-4 text-[#0d47c9]" />Xin nghỉ phép</button>
             <button type="button" onClick={a.onRequestAdvance} data-testid="quick-advance" className="bg-white border border-slate-200 rounded-2xl py-2.5 text-[12.5px] font-extrabold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"><DollarSign className="w-4 h-4 text-emerald-600" />Đề xuất ứng lương</button>
           </div>
-          <button type="button" onClick={a.onOpenDetail} data-testid="open-detail" className="w-full bg-[#0d47c9]/5 border border-[#0d47c9]/20 rounded-2xl py-2.5 text-[12.5px] font-extrabold text-[#0d47c9] cursor-pointer">Lịch tháng &amp; chi tiết chấm công ›</button>
+          <button type="button" onClick={a.onOpenDetail} data-testid="open-detail" className="w-full bg-[#0d47c9]/5 border border-[#0d47c9]/20 rounded-2xl py-2.5 text-[12.5px] font-extrabold text-[#0d47c9] cursor-pointer">Lịch chấm công tháng ›</button>
         </div>
       </div>
     </div>

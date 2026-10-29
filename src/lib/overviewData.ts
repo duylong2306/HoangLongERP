@@ -101,6 +101,41 @@ export function buildWeek(today: string, factsOf: (date: string) => DayFacts): W
 }
 export const weekCounts = (w: WeekDay[]) => ({ ok: w.filter(d => d.kind === 'ok').length, late: w.filter(d => d.kind === 'late').length, absent: w.filter(d => d.kind === 'absent').length });
 
+// ───────────── Lịch tháng ─────────────
+export type MonthKind = DayKind | 'holiday';
+export interface MonthDay { date: string; day: number; kind: MonthKind; label: string; ot: boolean; issue: boolean; holiday?: string }
+export interface MonthFacts extends DayFacts { holiday?: string; workLabel: string; ot: boolean; issue: boolean }
+
+/**
+ * Các ô của lịch tháng `ym` (YYYY-MM), cùng quy tắc với dải tuần (buildWeek) để hai nơi không lệch nhau:
+ * hôm nay → today; sau hôm nay → nghỉ/lễ hoặc chưa tới; trước hôm nay → lễ (nếu không đi làm) / nghỉ phép / nghỉ tuần (nếu không đi làm) /
+ * đi làm (đủ hoặc muộn) / vắng. `label` là số công hoặc ký hiệu hiện dưới số ngày. `issue` = ngày có lỗi/thiếu chấm công chưa báo cáo.
+ */
+export function buildMonth(ym: string, today: string, factsOf: (date: string) => MonthFacts): MonthDay[] {
+  const [y, m] = ym.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return Array.from({ length: last }, (_, i) => {
+    const day = i + 1, date = `${ym}-${pad(day)}`;
+    const f = factsOf(date);
+    const base = { date, day, ot: f.ot, issue: f.issue, holiday: f.holiday };
+    let kind: MonthKind, label = '';
+    if (date === today) { kind = 'today'; label = f.hasPunch ? f.workLabel : ''; }
+    else if (date > today) { kind = f.holiday ? 'holiday' : f.isRest ? 'rest' : 'future'; label = f.holiday ? 'Lễ' : ''; }
+    else if (f.hasPunch) { kind = f.lates > 0 ? 'late' : 'ok'; label = f.workLabel; }
+    else if (f.holiday) { kind = 'holiday'; label = 'Lễ'; }
+    else if (f.onLeave) { kind = 'leave'; label = 'Phép'; }
+    else if (f.isRest) { kind = 'rest'; label = ''; }
+    else { kind = 'absent'; label = 'Vắng'; }
+    return { ...base, kind, label };
+  });
+}
+/** Ô trống đầu lịch để ngày 1 rơi đúng thứ (tuần bắt đầu từ thứ Hai) */
+export const monthStartOffset = (ym: string) => { const [y, m] = ym.split('-').map(Number); return (new Date(y, m - 1, 1).getDay() + 6) % 7; };
+export const monthCounts = (days: MonthDay[]) => ({
+  ok: days.filter(d => d.kind === 'ok').length, late: days.filter(d => d.kind === 'late').length, absent: days.filter(d => d.kind === 'absent').length,
+  leave: days.filter(d => d.kind === 'leave').length, issue: days.filter(d => d.issue).length,
+});
+
 /** Số ngày công chuẩn của tháng (bỏ ngày nghỉ/lễ) — mẫu số của "Công tháng 17 / 22" */
 export function standardWorkdays(ym: string, isRest: (date: string) => boolean): number {
   const [y, m] = ym.split('-').map(Number);

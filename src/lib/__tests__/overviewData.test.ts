@@ -1,7 +1,7 @@
 // Tính toán cho màn Tổng quan kiểu mới (điểm danh gọn, dải tuần, tổng hợp việc / hiệu suất / đơn / công tác phí / tạm ứng / dự án / toàn công ty).
 import { describe, it, expect } from 'vitest';
 import {
-  computeShiftView, pickFocusShift, weekDates, buildWeek, weekCounts, standardWorkdays, summarizeTasks, summarizeViolations, summarizeLeaves,
+  computeShiftView, pickFocusShift, buildMonth, monthCounts, monthStartOffset, weekDates, buildWeek, weekCounts, standardWorkdays, summarizeTasks, summarizeViolations, summarizeLeaves,
   summarizeCtp, summarizeAdvances, myProjects, summarizeCompanyToday, fmtMoneyShort, fmtMoney, fmtLeaveRange, hasTime, type ShiftInput,
 } from '../overviewData';
 
@@ -193,5 +193,31 @@ describe('toàn công ty hôm nay (Giám đốc)', () => {
   });
   it('ngày nghỉ: không ai bị coi là chưa điểm danh', () => {
     expect(summarizeCompanyToday({ ...args, isRestDay: true })).toMatchObject({ absent: 0, missing: [] });
+  });
+});
+
+
+describe('buildMonth — lịch tháng', () => {
+  const base = { hasPunch: false, lates: 0, isRest: false, onLeave: false, workLabel: '', ot: false, issue: false };
+  // 2026-10: ngày 3 = thứ Bảy, 4 = Chủ nhật; hôm nay = 15
+  const facts: Record<string, any> = {
+    '2026-10-01': { hasPunch: true, workLabel: '1' },
+    '2026-10-02': { hasPunch: true, lates: 1, workLabel: '1', ot: true },
+    '2026-10-03': { isRest: true }, '2026-10-04': { isRest: true },
+    '2026-10-05': { onLeave: true }, '2026-10-06': { holiday: 'Lễ X' },
+    '2026-10-07': { issue: true },
+  };
+  const days = buildMonth('2026-10', '2026-10-15', (d) => ({ ...base, ...(facts[d] || {}) }));
+  const kind = (n: number) => days[n - 1].kind;
+  it('đủ số ngày của tháng', () => expect(days).toHaveLength(31));
+  it('phân loại từng ngày đã qua', () => {
+    expect(kind(1)).toBe('ok'); expect(kind(2)).toBe('late'); expect(kind(3)).toBe('rest'); expect(kind(5)).toBe('leave');
+    expect(kind(6)).toBe('holiday'); expect(kind(7)).toBe('absent'); expect(days[1].ot).toBe(true); expect(days[6].issue).toBe(true);
+  });
+  it('hôm nay / tương lai', () => { expect(kind(15)).toBe('today'); expect(kind(20)).toBe('future'); });
+  it('đếm và ô trống đầu tháng', () => {
+    const c = monthCounts(days);
+    expect(c.ok).toBe(1); expect(c.late).toBe(1); expect(c.leave).toBe(1); expect(c.issue).toBe(1);
+    expect(monthStartOffset('2026-10')).toBe(3);   // 1/10/2026 là thứ Năm → 3 ô trống (T2, T3, T4)
   });
 });
