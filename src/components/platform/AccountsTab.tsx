@@ -10,7 +10,7 @@ import MiniLoader from '../MiniLoader';
 // TAB "TÀI KHOẢN" — (1) mọi quản trị viên: đổi mật khẩu của chính mình; (2) CHỦ nền tảng: tạo / khóa / đặt lại mật khẩu
 // cho các quản trị viên khác (nhiều người cùng dùng trang quản trị). Quyền thật kiểm tra ở máy chủ (api/platform.ts).
 // ⚠️ Chữ trắng dùng `text-[#ffffff]` (không dùng `text-white`): src/index.css ghi đè mọi `.text-white` thành xám đậm.
-interface Account { id: string; username: string; name: string; active: boolean; isOwner: boolean; lastLoginAt: string | null; createdAt: string; totpEnabled?: boolean; email?: string | null }
+interface Account { id: string; username: string; name: string; active: boolean; isOwner: boolean; lastLoginAt: string | null; createdAt: string; totpEnabled?: boolean }
 
 const btn = 'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-colors bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-[#ffffff]';
 const btnSm = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-60';
@@ -51,37 +51,6 @@ function ChangePasswordForm() {
       <div><label className={label} htmlFor="st_nhap_lai_mat_khau_moi">Nhập lại mật khẩu mới</label><input id="st_nhap_lai_mat_khau_moi" type="password" className={input} value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} autoComplete="new-password" required /></div>
       {msg && <Msg {...msg} />}
       <button type="submit" disabled={busy} className={btn}>{busy && <MiniLoader size={16} />} Đổi mật khẩu</button>
-    </form>
-  );
-}
-
-// ─── Email khôi phục mật khẩu của tôi ───────────────────────────────────────────────────────────
-// Liên kết "Quên mật khẩu" ở trang đăng nhập chỉ gửi về email này. Đổi/xóa phải nhập mật khẩu hiện tại.
-function MyEmailForm({ email, onChanged }: { email: string | null; onChanged: (e: string | null) => void }) {
-  const [value, setValue] = useState(email || '');
-  const [pw, setPw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (busy) return;
-    setBusy(true); setMsg(null);
-    try {
-      const r = await platformCall<{ email: string | null }>('email.set', { email: value, currentPassword: pw });
-      setPw(''); setValue(r.email || ''); onChanged(r.email);
-      setMsg({ ok: true, text: r.email ? 'Đã lưu email khôi phục mật khẩu.' : 'Đã xóa email khôi phục. Bạn sẽ không dùng được "Quên mật khẩu" cho đến khi đặt lại email.' });
-    } catch (err: any) { setMsg({ ok: false, text: err.message }); } finally { setBusy(false); }
-  };
-
-  return (
-    <form onSubmit={submit} className="bg-white border border-slate-200 rounded-xl p-5 space-y-4" id="email_form">
-      <h2 className="text-base font-black text-slate-900">Email khôi phục mật khẩu</h2>
-      <p className="text-xs text-slate-500">Khi quên mật khẩu, liên kết đặt lại sẽ được gửi về email này (có hiệu lực 30 phút).</p>
-      <div><label className={label} htmlFor="st_email">Email</label><input id="st_email" type="email" className={input} value={value} onChange={e => setValue(e.target.value)} autoCapitalize="none" spellCheck={false} maxLength={120} placeholder="ten@congty.vn" /></div>
-      <div><label className={label} htmlFor="st_email_mat_khau">Mật khẩu hiện tại</label><input id="st_email_mat_khau" type="password" className={input} value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password" required /></div>
-      {msg && <Msg {...msg} />}
-      <button type="submit" disabled={busy} className={btn}>{busy && <MiniLoader size={16} />} Lưu email</button>
     </form>
   );
 }
@@ -223,7 +192,7 @@ function ManageAccounts({ myId }: { myId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-  const [form, setForm] = useState({ username: '', name: '', password: '', email: '' });
+  const [form, setForm] = useState({ username: '', name: '', password: '' });
   const [creating, setCreating] = useState(false);
   const [resetFor, setResetFor] = useState<{ id: string; username: string; password: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -245,7 +214,7 @@ function ManageAccounts({ myId }: { myId: string }) {
     try {
       await platformCall('accounts.create', form);
       setNotice({ ok: true, text: `Đã tạo tài khoản "${form.username.trim().toLowerCase()}". Hãy gửi mật khẩu cho họ qua kênh an toàn và nhắc đổi mật khẩu sau khi đăng nhập.` });
-      setForm({ username: '', name: '', password: '', email: '' });
+      setForm({ username: '', name: '', password: '' });
       await load();
     } catch (err: any) { setNotice({ ok: false, text: err.message }); } finally { setCreating(false); }
   };
@@ -285,10 +254,9 @@ function ManageAccounts({ myId }: { myId: string }) {
     <div className="space-y-5">
       <form onSubmit={create} className="bg-white border border-slate-200 rounded-xl p-5 space-y-4" id="account_create_form">
         <h2 className="text-base font-black text-slate-900">Thêm quản trị viên</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div><label className={label} htmlFor="ac_ten_dang_nhap">Tên đăng nhập *</label><input id="ac_ten_dang_nhap" className={input} value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} autoCapitalize="none" spellCheck={false} placeholder="chữ thường, số, . _ -" required /></div>
           <div><label className={label} htmlFor="ac_ho_ten">Họ tên</label><input id="ac_ho_ten" className={input} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} maxLength={80} /></div>
-          <div><label className={label} htmlFor="ac_email">Email (để nhận liên kết quên mật khẩu)</label><input id="ac_email" type="email" className={input} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} autoCapitalize="none" spellCheck={false} maxLength={120} /></div>
           <div><label className={label} htmlFor="ac_mat_khau">Mật khẩu ban đầu *</label><input id="ac_mat_khau" type="password" className={input} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete="new-password" required /></div>
         </div>
         <p className="text-xs text-slate-500">Mật khẩu từ 10 đến 72 ký tự, có cả chữ và số. Quản trị viên mới có đủ quyền như bạn, trừ quản lý tài khoản.</p>
@@ -305,7 +273,7 @@ function ManageAccounts({ myId }: { myId: string }) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
-                  <th className="text-left px-5 py-2">Tên đăng nhập</th><th className="text-left px-3 py-2">Họ tên</th><th className="text-left px-3 py-2">Email</th><th className="text-left px-3 py-2">Trạng thái</th><th className="text-left px-3 py-2">2FA</th>
+                  <th className="text-left px-5 py-2">Tên đăng nhập</th><th className="text-left px-3 py-2">Họ tên</th><th className="text-left px-3 py-2">Trạng thái</th><th className="text-left px-3 py-2">2FA</th>
                   <th className="text-left px-3 py-2">Đăng nhập gần nhất</th><th className="px-5 py-2" />
                 </tr></thead>
                 <tbody>
@@ -313,7 +281,6 @@ function ManageAccounts({ myId }: { myId: string }) {
                     <tr key={a.id} className="border-t border-slate-100">
                       <td className="px-5 py-2.5 font-mono">{a.username}{a.isOwner && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-300 font-sans">Chủ nền tảng</span>}</td>
                       <td className="px-3 py-2.5">{a.name}</td>
-                      <td className="px-3 py-2.5 text-slate-600">{a.email || <span className="text-slate-400">Chưa có</span>}</td>
                       <td className="px-3 py-2.5">{a.active ? <span className="text-emerald-700 font-semibold">Đang hoạt động</span> : <span className="text-rose-700 font-semibold">Đã khóa</span>}</td>
                       <td className="px-3 py-2.5">{a.totpEnabled ? <span className="text-emerald-700 font-semibold">Đã bật</span> : <span className="text-slate-400">Chưa bật</span>}</td>
                       <td className="px-3 py-2.5 text-slate-600">{formatDateTime(a.lastLoginAt)}</td>
@@ -356,12 +323,11 @@ function ManageAccounts({ myId }: { myId: string }) {
   );
 }
 
-export default function AccountsTab({ myId, isOwner, totpEnabled, onTotpChanged, email = null, onEmailChanged = () => {} }: { myId: string; isOwner: boolean; totpEnabled: boolean; onTotpChanged: (on: boolean) => void; email?: string | null; onEmailChanged?: (e: string | null) => void }) {
+export default function AccountsTab({ myId, isOwner, totpEnabled, onTotpChanged }: { myId: string; isOwner: boolean; totpEnabled: boolean; onTotpChanged: (on: boolean) => void }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-2 items-start">
         <ChangePasswordForm />
-        <MyEmailForm email={email} onChanged={onEmailChanged} />
         <TotpCard enabled={totpEnabled} onChanged={onTotpChanged} />
       </div>
       {isOwner && <ManageAccounts myId={myId} />}

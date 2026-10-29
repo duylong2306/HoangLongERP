@@ -90,7 +90,7 @@ export default function PlatformConsole() {
         {tab === 'orders' && <OrdersTab />}
         {tab === 'plans' && <PlansTab />}
         {tab === 'settings' && <SettingsTab />}
-        {tab === 'accounts' && <AccountsTab myId={admin.id} isOwner={admin.isOwner} totpEnabled={admin.totpEnabled === true} onTotpChanged={(on) => setAdmin(a => (a ? { ...a, totpEnabled: on } : a))} email={admin.email ?? null} onEmailChanged={(e) => setAdmin(a => (a ? { ...a, email: e } : a))} />}
+        {tab === 'accounts' && <AccountsTab myId={admin.id} isOwner={admin.isOwner} totpEnabled={admin.totpEnabled === true} onTotpChanged={(on) => setAdmin(a => (a ? { ...a, totpEnabled: on } : a))} />}
         {tab === 'logs' && <LogsTab />}
       </main>
     </div>
