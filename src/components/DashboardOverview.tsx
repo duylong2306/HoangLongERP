@@ -15,7 +15,7 @@ import {
   burnTimestampToPhoto,
 } from '../lib/attendanceOutbox';
 import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
-import { sendApprovalDirectMessage, findEmployeeByName, maybeSendAttendanceChatMessage, getConversations, getUserConversations } from '../lib/chatStore';
+import { sendApprovalDirectMessage, findEmployeeByName, getConversations, getUserConversations } from '../lib/chatStore';
 import { unreadForBadge, readPrefs, prefsKey } from '../lib/chatPrefs';
 import { companyScopedKey } from '../lib/supabase';
 import { loadUnreadSummary } from '../lib/projectEventReads';
@@ -1650,14 +1650,7 @@ export default function DashboardOverview({
         message: `Đã ghi nhận [${slotLabel}] lúc ${punchedTime}.`,
         type: 'success',
       });
-      // 📣 Nhóm chat "Điểm danh": người chấm ĐẦU TIÊN trong ca kích hoạt Hệ
-      // Thống gửi tin nhắc vào nhóm (server-side atomic, chống race + ngày nghỉ).
-      maybeSendAttendanceChatMessage({
-        date: todayVal,
-        slot: activePunchSlot,
-        empId,
-        empName: currentUser.name,
-      });
+      // (Tin nhắc vào nhóm chat "Điểm danh" nay do cron máy chủ đăng lúc mở điểm danh — không còn gửi theo người chấm đầu tiên.)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Lỗi không xác định';
       console.error('Lỗi khi lưu chấm công lên Supabase (đã lưu tạm vào Outbox):', err);

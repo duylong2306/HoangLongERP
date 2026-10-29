@@ -1,4 +1,4 @@
-// NHẮC ĐIỂM DANH qua Web Push — chạy cho TỪNG doanh nghiệp (đa doanh nghiệp). Hàm thuần nhận phụ thuộc qua tham số để test được.
+// NHẮC ĐIỂM DANH qua Web Push + tin trong nhóm chat "Điểm danh" (postGroupReminder) — chạy cho TỪNG doanh nghiệp (đa doanh nghiệp). Hàm thuần nhận phụ thuộc qua tham số để test được.
 // Đây là NGUỒN DUY NHẤT của nhắc điểm danh: pg_cron gọi hàm Edge này mỗi 5 phút (migration 20261029), hàm tự xét từng công ty
 // xem đã đến lúc nhắc chưa. (Hàm SQL cũ trigger_attendance_reminders() chỉ ghi vào bảng notifications mà ứng dụng không đọc,
 // lại đánh dấu cả công ty là "đã nhắc" nên chặn luôn đợt nhắc buổi chiều — đã ngừng dùng.)
@@ -62,10 +62,57 @@ export function reminderContent(plan: ShiftPlan) {
     title: `⏰ Điểm danh ca ${ca} · ${plan.inTime}`,
     body: `Đã mở điểm danh. Điểm danh trước ${plan.inTime} để không bị ghi nhận đi muộn.`,
     detail: `Ca ${ca}: ${plan.inTime} – ${plan.outTime}. Mở điểm danh từ ${plan.openTime}.`,
+    chat: `⏰ Đã mở điểm danh ca ${ca}. Mời chấm công trước ${plan.inTime}.`,   // tin đăng vào nhóm chat "Điểm danh"
   };
 }
 
 export interface AttendanceDeps extends PushDeps { now?: Date }
+
+/** Id cố định của nhóm chat "Điểm danh" (mỗi công ty có 1 nhóm riêng, phân biệt bằng company_id) — giống ATTENDANCE_CONV_ID ở chatStore.ts */
+export const ATTENDANCE_CONV_ID = 'conv_attendance';
+
+/**
+ * ĐĂNG TIN NHẮC VÀO NHÓM CHAT "ĐIỂM DANH" lúc mở điểm danh — thay cho cách cũ "ai chấm trước thì gửi" (chỉ có tin khi đã có người chấm,
+ * thường là lúc đã trễ, và không có tin nếu không ai chấm).
+ * Mỗi công ty / ngày / ca đăng ĐÚNG 1 lần: "giành lượt" bằng cách chèn dòng (company_id, date, slot) vào attendance_chat_notified (trùng khóa → 409
+ * → đã đăng rồi). Đăng tin lỗi thì trả lượt lại (xóa dòng) để lượt cron 5 phút sau thử lại. Chưa có nhóm (chưa ai đăng nhập tạo nhóm) → bỏ qua.
+ * Trả về chuỗi trạng thái để ghi vào kết quả chạy: posted | already | no_group | post_error | claim_error.
+ */
+async function postGroupReminder(d: AttendanceDeps, companyId: string, plan: ShiftPlan, today: string, now: Date): Promise<string> {
+  const convs = await getJson(d, `conversations?select=id,participant_ids,unread_counts&id=eq.${ATTENDANCE_CONV_ID}&company_id=eq.${companyId}`);
+  const conv = Array.isArray(convs) ? convs[0] : null;
+  if (!conv) return 'no_group';
+
+  const slot = `reminder_${plan.shift}`;
+  const claim = await d.fetchFn(`${d.supabaseUrl}/rest/v1/attendance_chat_notified`, {
+    method: 'POST', headers: { ...hdr(d.serviceKey), Prefer: 'return=minimal' },
+    body: JSON.stringify({ company_id: companyId, date: today, slot, notified_by: 'cron' }),
+  });
+  if (!claim.ok) return claim.status === 409 ? 'already' : 'claim_error';
+
+  const createdAt = now.toISOString();
+  const content = reminderContent(plan).chat;
+  const msg = await d.fetchFn(`${d.supabaseUrl}/rest/v1/chat_messages`, {
+    method: 'POST', headers: { ...hdr(d.serviceKey), Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      id: `msg_${now.getTime()}_${Math.random().toString(36).slice(2, 6)}`, conversation_id: ATTENDANCE_CONV_ID, company_id: companyId,
+      sender_id: 'system', sender_name: 'Hệ Thống', sender_role: 'system', content, created_at: createdAt, read: false, attachments: [], system: true,
+    }),
+  });
+  if (!msg.ok) {   // trả lượt lại để lần chạy sau đăng lại
+    await d.fetchFn(`${d.supabaseUrl}/rest/v1/attendance_chat_notified?company_id=eq.${companyId}&date=eq.${today}&slot=eq.${slot}`, { method: 'DELETE', headers: hdr(d.serviceKey) });
+    return 'post_error';
+  }
+
+  // Cập nhật hội thoại để danh sách chat hiện tin cuối + huy hiệu chưa đọc: mỗi thành viên +1 (người gửi là Hệ Thống, không phải thành viên)
+  const counts: Record<string, number> = { ...(conv.unread_counts || {}) };
+  for (const uid of (conv.participant_ids || [])) counts[uid] = (Number(counts[uid]) || 0) + 1;
+  await d.fetchFn(`${d.supabaseUrl}/rest/v1/conversations?id=eq.${ATTENDANCE_CONV_ID}&company_id=eq.${companyId}`, {
+    method: 'PATCH', headers: { ...hdr(d.serviceKey), Prefer: 'return=minimal' },
+    body: JSON.stringify({ last_message_at: createdAt, unread_counts: counts, last_message: { content, senderId: 'system', senderName: 'Hệ Thống', createdAt, deleted: false } }),
+  });
+  return 'posted';
+}
 
 async function getJson(d: AttendanceDeps, path: string): Promise<any> {
   const r = await d.fetchFn(`${d.supabaseUrl}/rest/v1/${path}`, { headers: hdr(d.serviceKey) });
@@ -107,6 +154,9 @@ export async function runAttendanceReminders(d: AttendanceDeps) {
       let holidays: string[] = [];
       try { holidays = (await getJson(d, `hrm_holidays?select=date&company_id=eq.${co.id}`)).map((h: any) => h.date).filter(Boolean); } catch { /* fail-open */ }
       if (holidays.includes(p.ddmm) || holidays.includes(p.ddmmyyyy)) { row.skipped = 'holiday'; perCompany.push(row); continue; }
+
+      // 3b) đăng tin nhắc vào nhóm chat "Điểm danh" (1 lần / ca / ngày). Lỗi ở bước này không được chặn thông báo đẩy bên dưới
+      try { row.chat = await postGroupReminder(d, co.id, plan, p.today, now); } catch (e: any) { row.chat = 'error'; row.chatError = String(e?.message || e).slice(0, 120); }
 
       // 4) nhân viên đang làm, CHƯA được nhắc CHO CA NÀY hôm nay (dấu "YYYY-MM-DD:ca" — sáng và chiều nhắc độc lập; dấu cũ chỉ có ngày nên không chặn)
       const mark = `${p.today}:${plan.shift}`;

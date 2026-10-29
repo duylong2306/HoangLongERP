@@ -531,6 +531,8 @@ export async function updateConversationAvatar(convId: string, url: string): Pro
 }
 
 // ─── Nhóm chat "Điểm danh" ─────────────────────────────────────────────────
+// [CŨ — KHÔNG CÒN DÙNG] Tin nhắc vào nhóm này nay do cron máy chủ đăng lúc mở điểm danh (supabase/functions/_shared/attendance-core.ts,
+// postGroupReminder); hàm maybeSendAttendanceChatMessage bên dưới không còn được gọi từ giao diện, giữ lại để tham khảo.
 // Nhóm chat ĐIỂM DANH (id cố định `conv_attendance`): người chấm công ĐẦU TIÊN
 // trong mỗi ca (Vào/Ra sáng, Vào/Ra chiều) khiến Hệ Thống gửi 1 tin nhắc vào
 // nhóm. Việc chọn "người đầu tiên" dùng RPC server-side atomic

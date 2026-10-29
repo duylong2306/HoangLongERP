@@ -44,7 +44,8 @@ function makeRest(db: Record<string, Row[]>, validTokens: string[]) {
     if (method === 'GET') { let out = rows.filter(match); const lim = u.searchParams.get('limit'); if (lim) out = out.slice(0, Number(lim)); return ok(out); }
     if (method === 'DELETE') { db[table] = (db[table] || []).filter(r => !match(r)); return ok([]); }
     if (method === 'PATCH') { (db[table] || []).filter(match).forEach(r => Object.assign(r, JSON.parse(init.body))); return ok([]); }
-    if (method === 'POST') { const b = JSON.parse(init.body); if ((db[table] || []).some(r => r.id === b.id)) return { ok: false, status: 409, json: async () => ({}), text: async () => 'duplicate' }; (db[table] = db[table] || []).push(b); return ok([]); }
+    if (method === 'POST') { const b = JSON.parse(init.body); const same = (r: Row) => (table === 'attendance_chat_notified' ? r.company_id === b.company_id && r.date === b.date && r.slot === b.slot : r.id === b.id);   // khóa chính của bảng claim = (company_id, date, slot)
+    if ((db[table] || []).some(same)) return { ok: false, status: 409, json: async () => ({}), text: async () => 'duplicate' }; (db[table] = db[table] || []).push(b); return ok([]); }
     return ok([]);
   };
   return { fetchFn, calls };
@@ -225,6 +226,63 @@ describe('nhắc điểm danh đa doanh nghiệp (giờ nhắc theo cấu hình 
     expect(reminderPlan(null, 7 * 60 + 20)).toMatchObject({ shift: 'morning', inTime: '07:30' });   // chưa có cấu hình → 07:30 / 13:00, mở trước 15 phút
     expect(openLeadMinutes({ punch_open_before_minutes: 1 })).toBe(5); expect(openLeadMinutes({ punch_open_before_minutes: 600 })).toBe(60); expect(openLeadMinutes({})).toBe(15);
     expect(vnDateParts(THU_HAI_7H20)).toMatchObject({ dow: 1, ddmm: '05/10', today: '2026-10-05', minutes: 440 });
+  });
+
+  describe('tin nhắc đăng vào nhóm chat "Điểm danh" (thay cho cách "ai chấm trước thì gửi")', () => {
+    const conv = (company: string) => ({ id: 'conv_attendance', company_id: company, participant_ids: ['emp_admin', 'nv2'], unread_counts: { nv2: 1 } });
+    const msgs = () => db.chat_messages || [];
+
+    it('đúng lúc mở điểm danh: đăng 1 tin hệ thống vào nhóm của ĐÚNG công ty, nêu giờ vào ca thật; cập nhật tin cuối + chưa đọc cho từng thành viên', async () => {
+      db.conversations = [conv(A), conv(B)];
+      const { r } = await run(THU_HAI_7H20);
+      expect(r.companies[0]).toMatchObject({ company: 'cong-ty-a', chat: 'posted' });
+      expect(msgs()).toHaveLength(1);
+      expect(msgs()[0]).toMatchObject({ conversation_id: 'conv_attendance', company_id: A, sender_id: 'system', sender_name: 'Hệ Thống', system: true, content: '⏰ Đã mở điểm danh ca sáng. Mời chấm công trước 07:30.' });
+      const ca = db.conversations.find(c => c.company_id === A)!;
+      expect(ca.unread_counts).toEqual({ nv2: 2, emp_admin: 1 });
+      expect(ca.last_message.content).toBe(msgs()[0].content);
+      expect(db.conversations.find(c => c.company_id === B)!.unread_counts).toEqual({ nv2: 1 });   // công ty B (nghỉ Thứ Hai) không bị đụng tới
+    });
+
+    it('chạy lại 5 phút sau (cùng ca, cùng ngày) KHÔNG đăng trùng; sang ca chiều thì đăng tin mới', async () => {
+      db.conversations = [conv(A)];
+      await run(THU_HAI_7H20);
+      const { r } = await run(new Date('2026-10-05T00:25:00Z'));
+      expect(r.companies[0]).toMatchObject({ chat: 'already' });
+      expect(msgs()).toHaveLength(1);
+      await run(THU_HAI_12H50);
+      expect(msgs().map(m => m.content)).toEqual(['⏰ Đã mở điểm danh ca sáng. Mời chấm công trước 07:30.', '⏰ Đã mở điểm danh ca chiều. Mời chấm công trước 13:00.']);
+    });
+
+    it('vẫn đăng dù mọi người đã chấm công rồi (tin là của cả nhóm, không phụ thuộc ai chưa chấm)', async () => {
+      db.conversations = [conv(A)];
+      db.attendance_records = [{ emp_id: 'emp_admin', company_id: A, date: '2026-10-05', time_in_s: '07:10' }, { emp_id: 'nv2', company_id: A, date: '2026-10-05', time_in_s: '07:12' }];
+      const { r } = await run(THU_HAI_7H20);
+      expect(r.companies[0]).toMatchObject({ needsReminder: 0, chat: 'posted' });
+    });
+
+    it('chưa có nhóm → bỏ qua (không tự tạo, không ném lỗi, push vẫn gửi); ngày lễ / ngoài cửa sổ → không đăng', async () => {
+      const { r, wp } = await run(THU_HAI_7H20);
+      expect(r.companies[0]).toMatchObject({ chat: 'no_group', pushSent: 2 }); expect(wp.sent).toHaveLength(2); expect(msgs()).toHaveLength(0);
+      db.conversations = [conv(A)]; db.hrm_holidays = [{ company_id: A, date: '05/10/2026' }];
+      await run(THU_HAI_7H20); expect(msgs()).toHaveLength(0);
+      db.hrm_holidays = [];
+      await run(new Date('2026-10-05T03:00:00Z')); expect(msgs()).toHaveLength(0);
+    });
+
+    it('đăng tin lỗi → trả lượt lại để lần chạy sau thử lại; lỗi đăng tin không chặn thông báo đẩy', async () => {
+      db.conversations = [conv(A)];
+      const orig = rest.fetchFn;
+      let fail = true;
+      const flaky = async (url: string, init: any = {}) => (fail && /\/chat_messages/.test(url) && init.method === 'POST' ? { ok: false, status: 500, json: async () => ({}), text: async () => 'loi' } : orig(url, init));
+      const wp = makeWebPush();
+      const r1 = await runAttendanceReminders({ supabaseUrl: ENV.SUPABASE_URL, serviceKey: SERVICE, fetchFn: flaky as any, webPush: wp.webPush, now: THU_HAI_7H20 });
+      expect(r1.companies[0]).toMatchObject({ chat: 'post_error', pushSent: 2 });
+      expect(db.attendance_chat_notified || []).toHaveLength(0);
+      fail = false;
+      const r2 = await runAttendanceReminders({ supabaseUrl: ENV.SUPABASE_URL, serviceKey: SERVICE, fetchFn: flaky as any, webPush: makeWebPush().webPush, now: new Date('2026-10-05T00:25:00Z') });
+      expect(r2.companies[0]).toMatchObject({ chat: 'posted' }); expect(msgs()).toHaveLength(1);
+    });
   });
 
   it('ngoài cửa sổ → không gửi gì, không ghi gì', async () => {
