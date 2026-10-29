@@ -10,7 +10,7 @@ export const setPlatformToken = (t: string | null) => {
 };
 
 // Thông tin quản trị viên đang đăng nhập (từ máy chủ). totpEnabled = đã bật xác thực hai lớp.
-export interface PlatformAdmin { id: string; username: string; name: string; isOwner: boolean; totpEnabled?: boolean }
+export interface PlatformAdmin { id: string; username: string; name: string; isOwner: boolean; totpEnabled?: boolean; email?: string | null }
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public errors?: Record<string, string>) { super(message); }

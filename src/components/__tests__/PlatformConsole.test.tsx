@@ -110,6 +110,61 @@ describe('trang quản trị — đăng nhập', () => {
   });
 });
 
+describe('trang quản trị — quên mật khẩu', () => {
+  // Chặn thư gửi đi (Resend) và trả về liên kết trong thư; các lời gọi khác chuyển cho fetch giả của /api/platform.
+  const chanThu = () => {
+    const mails: any[] = [];
+    const apiFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: any, init: any) => {
+      if (String(url).startsWith('https://api.resend.com')) { mails.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({}) } as any; }
+      return (apiFetch as any)(url, init);
+    }) as any;
+    return mails;
+  };
+  beforeEach(() => {
+    process.env.RESEND_API_KEY = 're_test'; process.env.MAIL_FROM = 'LoLo <no-reply@lolo.io.vn>'; process.env.PLATFORM_PUBLIC_URL = 'https://lolo.io.vn';
+    db.autoId.add('platform_password_resets');
+    db.tables['platform_admins'][0].email = 'chu@lolo.vn';
+  });
+
+  it('bấm "Quên mật khẩu?" → nhập tên → hiện thông báo đã gửi và thư có liên kết', async () => {
+    const mails = chanThu();
+    const u = userEvent.setup();
+    render(<PlatformConsole />);
+    await u.click(await screen.findByRole('button', { name: 'Quên mật khẩu?' }));
+    await u.type(screen.getByLabelText(/Tên đăng nhập hoặc email/i), 'chu');
+    await u.click(screen.getByRole('button', { name: 'Gửi liên kết đặt lại' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/liên kết đặt lại mật khẩu vừa được gửi/i);
+    expect(mails).toHaveLength(1);
+    expect(mails[0].to).toEqual(['chu@lolo.vn']);
+  });
+
+  it('mở liên kết trong thư (?reset=mã) → đặt mật khẩu mới, mã bị xóa khỏi thanh địa chỉ, rồi đăng nhập bằng mật khẩu mới', async () => {
+    const mails = chanThu();
+    const u = userEvent.setup();
+    // Xin liên kết bằng API thật để có mã hợp lệ
+    await (globalThis.fetch as any)('/api/platform', { method: 'POST', headers: {}, body: JSON.stringify({ action: 'password.forgot', identifier: 'chu' }) });
+    const ma = String(mails[0].text).match(/reset=([a-f0-9]{64})/)![1];
+    window.history.replaceState(null, '', `/quantri?reset=${ma}`);
+
+    render(<PlatformConsole />);
+    expect(window.location.search).toBe('');                                  // mã không nằm lại trên thanh địa chỉ
+    await u.type(await screen.findByLabelText('Mật khẩu mới'), 'MatKhauMoi12345');
+    await u.type(screen.getByLabelText('Nhập lại mật khẩu mới'), 'MatKhauKhacHan123');
+    await u.click(screen.getByRole('button', { name: 'Đổi mật khẩu' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/không khớp/i);
+    await u.clear(screen.getByLabelText('Nhập lại mật khẩu mới'));
+    await u.type(screen.getByLabelText('Nhập lại mật khẩu mới'), 'MatKhauMoi12345');
+    await u.click(screen.getByRole('button', { name: 'Đổi mật khẩu' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/Đã đổi mật khẩu/i);   // quay về màn đăng nhập
+
+    await u.type(screen.getByLabelText(/Tên đăng nhập/i), 'chu');
+    await u.type(screen.getByLabelText(/Mật khẩu/i), 'MatKhauMoi12345');
+    await u.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+    expect(await screen.findByText('Doanh nghiệp (3)')).toBeTruthy();
+  });
+});
+
 describe('tab Doanh nghiệp', () => {
   it('hiện trạng thái, gói, ngày hết hạn, số nhân viên và địa chỉ riêng của từng doanh nghiệp', async () => {
     await dangNhap();

@@ -19,6 +19,8 @@ import { resolveHost, getRequestHostname, getServerBaseDomains } from './_tenant
 import { signPlatformToken, verifyPlatformToken, bearerToken, LOGIN_WINDOW_MS, MAX_FAILS_PER_IP, MAX_FAILS_PER_PAIR, MAX_FAILS_PER_USERNAME, PLATFORM_BCRYPT_COST, passwordProblem, ADMIN_USERNAME_RE, signTotpChallenge, verifyTotpChallenge } from './_platformAuth.js';
 import { generateTotpSecret, otpauthUri, verifyTotp, encryptSecret, decryptSecret, generateRecoveryCodes, hashRecovery } from './_totp.js';
 import { sendTelegram, telegramConfigured } from './_telegram.js';
+import { sendMail, mailConfigured, resetMailContent } from './_mail.js';
+import { randomBytes, createHash } from 'node:crypto';
 import { writeAudit, purgeOldAudit, diffFields, AUDIT_RETENTION_DAYS, type AuditCtx } from './_audit.js';
 import { getClientIp, hashIp, slugProblem, SLUG_MESSAGES } from './_signup.js';
 import { createCompanyWithAdmin } from './_company.js';
@@ -65,7 +67,7 @@ async function finishLogin(db: SupabaseClient, res: VercelResponse, admin: any, 
   await db.from('platform_admins').update({ last_login_at: new Date().toISOString() }).eq('id', admin.id);
   await writeAudit(db, { adminId: admin.id, username: admin.username, ipHash }, { action: 'login', targetType: 'account', targetId: admin.id, summary: how });
   await purgeOldAudit(db);   // dọn nhật ký quá 30 ngày
-  res.status(200).json({ token: signPlatformToken({ id: admin.id, username: admin.username, ver: admin.token_version ?? 0 }, jwtSecret), admin: { id: admin.id, username: admin.username, name: admin.name, isOwner: admin.is_owner === true, totpEnabled: admin.totp_enabled === true } });
+  res.status(200).json({ token: signPlatformToken({ id: admin.id, username: admin.username, ver: admin.token_version ?? 0 }, jwtSecret), admin: { id: admin.id, username: admin.username, name: admin.name, isOwner: admin.is_owner === true, totpEnabled: admin.totp_enabled === true, email: admin.email ?? null } });
 }
 
 async function actionLogin(db: SupabaseClient, req: VercelRequest, res: VercelResponse, body: any, jwtSecret: string) {
@@ -435,7 +437,7 @@ async function actionAccountsResetTotp(db: SupabaseClient, res: VercelResponse, 
 // ─── Tài khoản quản trị (chỉ chủ nền tảng) ────────────────────────────────────────────────────────
 const accountToApi = (a: any) => ({
   id: a.id, username: a.username, name: a.name, active: a.active === true, isOwner: a.is_owner === true,
-  lastLoginAt: a.last_login_at ?? null, createdAt: a.created_at, totpEnabled: a.totp_enabled === true,
+  lastLoginAt: a.last_login_at ?? null, createdAt: a.created_at, totpEnabled: a.totp_enabled === true, email: a.email ?? null,
 });
 
 async function actionAccountsList(db: SupabaseClient, res: VercelResponse) {
@@ -451,11 +453,14 @@ async function actionAccountsCreate(db: SupabaseClient, res: VercelResponse, bod
   if (!ADMIN_USERNAME_RE.test(username)) return fail(res, 400, 'Tên đăng nhập chỉ gồm chữ thường, số, dấu . _ - (3–40 ký tự).');
   const problem = passwordProblem(password);
   if (problem) return fail(res, 400, problem);
+  const email = normalizeEmail(body.email);
+  if (email === false) return fail(res, 400, 'Email không hợp lệ.');
 
   const { data, error } = await db.from('platform_admins').insert({
     username, name: name || username, password_hash: await bcrypt.hash(password, PLATFORM_BCRYPT_COST), active: true,   // is_owner mặc định false
+    ...(email ? { email } : {}),
   }).select('id').maybeSingle();
-  if (error) return fail(res, (error as any).code === '23505' ? 409 : 500, (error as any).code === '23505' ? 'Tên đăng nhập này đã tồn tại.' : error.message);
+  if (error) return fail(res, (error as any).code === '23505' ? 409 : 500, (error as any).code === '23505' ? 'Tên đăng nhập hoặc email này đã tồn tại.' : error.message);
   await writeAudit(db, ctx, { action: 'accounts.create', targetType: 'account', targetId: data?.id, summary: `Tạo tài khoản quản trị "${username}"`, detail: { username, name: name || username } });
   res.status(201).json({ ok: true, id: data?.id });
 }
@@ -507,6 +512,116 @@ async function actionAccountsReset(db: SupabaseClient, res: VercelResponse, body
   res.status(200).json({ ok: true });
 }
 
+// ─── Quên mật khẩu (gửi liên kết về email) ───────────────────────────────────────────────────────
+// Luồng: (1) `password.forgot` {identifier: tên đăng nhập hoặc email} → nếu khớp 1 tài khoản đang hoạt động CÓ email thì tạo mã dùng 1 lần
+// (sống 30 phút, DB chỉ giữ BĂM sha256) và gửi liên kết `…/quantri?reset=MÃ` về email đó; (2) `password.reset` {token, newPassword} → đặt mật khẩu mới.
+// An toàn:
+//   • `forgot` LUÔN trả cùng 1 câu "nếu tài khoản tồn tại…" dù có/không có tài khoản/email → không dò được tên hay email nào có thật;
+//   • giới hạn: 5 yêu cầu/15 phút theo IP (đếm cả khi không có tài khoản) và 3 thư/giờ theo tài khoản (chống dùng làm công cụ gửi thư rác);
+//   • đặt lại xong: thu hồi MỌI phiên cũ, vô hiệu mọi mã còn lại; KHÔNG vượt được 2FA — đăng nhập sau đó vẫn phải nhập mã 6 số.
+const RESET_TTL_MINUTES = 30;
+const FORGOT_MAX_PER_IP = 5;
+const FORGOT_MAX_PER_ADMIN_HOUR = 3;
+const FORGOT_ANSWER = 'Nếu tài khoản tồn tại và đã có email, liên kết đặt lại mật khẩu vừa được gửi. Kiểm tra hộp thư (cả mục thư rác); liên kết có hiệu lực 30 phút.';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+// Chuẩn hóa email: rỗng → null (xóa); sai định dạng → false.
+function normalizeEmail(v: unknown): string | null | false {
+  const e = String(v ?? '').trim().toLowerCase();
+  if (!e) return null;
+  return e.length <= 120 && EMAIL_RE.test(e) ? e : false;
+}
+
+// Địa chỉ gốc để dựng liên kết trong thư. Ưu tiên biến PLATFORM_PUBLIC_URL (không tin header Host vì có thể bị giả mạo
+// để đẩy liên kết đặt lại sang tên miền lạ); chỉ khi chưa cấu hình mới dùng Host của yêu cầu.
+function publicBase(req: VercelRequest): string {
+  const fixed = String(process.env.PLATFORM_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+  if (fixed) return fixed;
+  return `https://${getRequestHostname(req)}`;
+}
+
+async function actionPasswordForgot(db: SupabaseClient, req: VercelRequest, res: VercelResponse, body: any, jwtSecret: string) {
+  const identifier = String(body.identifier || '').trim().toLowerCase();
+  if (!identifier) return fail(res, 400, 'Vui lòng nhập tên đăng nhập hoặc email.');
+  if (!mailConfigured()) return fail(res, 503, 'Hệ thống chưa cấu hình gửi email. Hãy liên hệ chủ nền tảng để đặt lại mật khẩu.');
+
+  const ipHash = hashIp(getClientIp(req), jwtSecret);
+  const since = new Date(Date.now() - LOGIN_WINDOW_MS).toISOString();
+  const { count, error: cErr } = await db.from('platform_login_attempts').select('id', { count: 'exact', head: true }).eq('ip_hash', ipHash).eq('username', 'forgot').gte('created_at', since);
+  if (cErr) return fail(res, 500, 'Hệ thống chưa sẵn sàng.');
+  if ((count || 0) >= FORGOT_MAX_PER_IP) return fail(res, 429, 'Bạn đã yêu cầu quá nhiều lần. Vui lòng thử lại sau 15 phút.');
+  await db.from('platform_login_attempts').insert({ ip_hash: ipHash, username: 'forgot', success: false });   // đếm mọi yêu cầu, kể cả khi không có tài khoản
+
+  // Tra theo tên đăng nhập trước, không có mới tra theo email (2 truy vấn riêng, không ghép chuỗi lọc từ dữ liệu người dùng).
+  const cols = 'id, username, name, email, active';
+  let { data: admin } = await db.from('platform_admins').select(cols).eq('username', identifier).maybeSingle();
+  if (!admin) ({ data: admin } = await db.from('platform_admins').select(cols).eq('email', identifier).maybeSingle());
+  if (admin && admin.active === true && admin.email) {
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count: recent } = await db.from('platform_password_resets').select('id', { count: 'exact', head: true }).eq('admin_id', admin.id).gte('created_at', hourAgo);
+    if ((recent || 0) < FORGOT_MAX_PER_ADMIN_HOUR) {
+      const token = randomBytes(32).toString('hex');
+      // Mỗi lần yêu cầu mới vô hiệu các mã cũ chưa dùng → chỉ liên kết mới nhất còn hiệu lực.
+      await db.from('platform_password_resets').update({ used_at: new Date().toISOString() }).eq('admin_id', admin.id).is('used_at', null);
+      const { data: row, error: iErr } = await db.from('platform_password_resets').insert({
+        admin_id: admin.id, token_hash: sha256(token), ip_hash: ipHash, expires_at: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000).toISOString(),
+      }).select('id').maybeSingle();
+      if (!iErr && row) {
+        const mail = await sendMail({ to: admin.email, ...resetMailContent(admin.name || admin.username, `${publicBase(req)}/quantri?reset=${token}`, RESET_TTL_MINUTES) });
+        if (!mail.ok) await db.from('platform_password_resets').delete().eq('id', row.id);   // gửi hỏng → không để lại mã vô dụng
+        await writeAudit(db, { adminId: admin.id, username: admin.username, ipHash }, { action: 'password.forgot', targetType: 'account', targetId: admin.id, summary: mail.ok ? 'Yêu cầu quên mật khẩu — đã gửi liên kết về email' : 'Yêu cầu quên mật khẩu — gửi email thất bại' });
+      }
+    }
+  }
+  res.status(200).json({ ok: true, message: FORGOT_ANSWER });
+}
+
+async function actionPasswordReset(db: SupabaseClient, req: VercelRequest, res: VercelResponse, body: any, jwtSecret: string) {
+  const token = String(body.token || '').trim();
+  const next = String(body.newPassword || '');
+  if (!/^[a-f0-9]{64}$/.test(token)) return fail(res, 400, 'Liên kết không hợp lệ hoặc đã hết hạn. Hãy yêu cầu lại.');
+  const problem = passwordProblem(next);
+  if (problem) return fail(res, 400, problem);
+
+  // Dùng chung bộ đếm đăng nhập sai (username 'reset') để chặn dò mã hàng loạt từ 1 IP.
+  const ipHash = hashIp(getClientIp(req), jwtSecret);
+  const st = await throttleState(db, ipHash, 'reset');
+  if (st === 'error') return fail(res, 500, 'Hệ thống chưa sẵn sàng.');
+  if (st === 'blocked') return fail(res, 429, TOO_MANY);
+
+  const { data: row } = await db.from('platform_password_resets').select('id, admin_id, expires_at, used_at').eq('token_hash', sha256(token)).maybeSingle();
+  const valid = !!row && !row.used_at && new Date(row.expires_at).getTime() > Date.now();
+  const { data: admin } = valid ? await db.from('platform_admins').select('id, username, active, token_version').eq('id', row!.admin_id).maybeSingle() : { data: null as any };
+  if (!valid || !admin || admin.active !== true) {
+    await db.from('platform_login_attempts').insert({ ip_hash: ipHash, username: 'reset', success: false });
+    return fail(res, 400, 'Liên kết không hợp lệ hoặc đã hết hạn. Hãy yêu cầu lại.');
+  }
+  // Đánh dấu đã dùng TRƯỚC (có điều kiện used_at is null) để 2 yêu cầu đồng thời không cùng dùng 1 mã.
+  const { data: claimed } = await db.from('platform_password_resets').update({ used_at: new Date().toISOString() }).eq('id', row!.id).is('used_at', null).select('id');
+  if (!claimed || claimed.length === 0) return fail(res, 400, 'Liên kết không hợp lệ hoặc đã hết hạn. Hãy yêu cầu lại.');
+
+  const { error } = await db.from('platform_admins').update({
+    password_hash: await bcrypt.hash(next, PLATFORM_BCRYPT_COST), token_version: (admin.token_version ?? 0) + 1,   // thu hồi mọi phiên cũ
+  }).eq('id', admin.id);
+  if (error) return fail(res, 500, 'Không lưu được mật khẩu mới, vui lòng thử lại.');
+  await db.from('platform_password_resets').update({ used_at: new Date().toISOString() }).eq('admin_id', admin.id).is('used_at', null);   // vô hiệu mã còn lại
+  await writeAudit(db, { adminId: admin.id, username: admin.username, ipHash }, { action: 'password.reset', targetType: 'account', targetId: admin.id, summary: 'Đặt lại mật khẩu bằng liên kết gửi về email' });
+  res.status(200).json({ ok: true });
+}
+
+// Tự đặt / đổi / xóa email khôi phục của mình. Phải nhập đúng mật khẩu hiện tại (đề phòng người mượn máy đổi email để chiếm tài khoản).
+async function actionEmailSet(db: SupabaseClient, res: VercelResponse, body: any, adminRow: any, ctx: AuditCtx) {
+  const email = normalizeEmail(body.email);
+  if (email === false) return fail(res, 400, 'Email không hợp lệ.');
+  const { data: admin } = await db.from('platform_admins').select('password_hash').eq('id', adminRow.id).maybeSingle();
+  if (!admin || !(await bcrypt.compare(String(body.currentPassword || ''), admin.password_hash))) return fail(res, 400, 'Mật khẩu hiện tại không đúng.');
+  const { error } = await db.from('platform_admins').update({ email }).eq('id', adminRow.id);
+  if (error) return fail(res, (error as any).code === '23505' ? 409 : 500, (error as any).code === '23505' ? 'Email này đã được dùng cho tài khoản khác.' : error.message);
+  await writeAudit(db, ctx, { action: 'email.set', targetType: 'account', targetId: adminRow.id, summary: email ? 'Đặt email khôi phục mật khẩu' : 'Xóa email khôi phục mật khẩu' });   // không lưu email vào chi tiết
+  res.status(200).json({ ok: true, email });
+}
+
 // ─── Nhật ký thao tác ────────────────────────────────────────────────────────────────────────────
 async function actionLogsList(db: SupabaseClient, res: VercelResponse, body: any) {
   await purgeOldAudit(db);   // đảm bảo không trả bản ghi quá 30 ngày
@@ -551,6 +666,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'login') return actionLogin(db, req, res, body, jwtSecret);
   if (action === 'login.totp') return actionLoginTotp(db, req, res, body, jwtSecret);
+  if (action === 'password.forgot') return actionPasswordForgot(db, req, res, body, jwtSecret);
+  if (action === 'password.reset') return actionPasswordReset(db, req, res, body, jwtSecret);
 
   // Mọi action còn lại: token quản trị hợp lệ + tài khoản còn active (tra lại DB mỗi lần).
   const token = verifyPlatformToken(bearerToken(req.headers.authorization), jwtSecret);
@@ -565,7 +682,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isOwner = admin.is_owner === true;
 
   switch (action) {
-    case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name, isOwner, totpEnabled: admin.totp_enabled === true } });
+    case 'me': return void res.status(200).json({ admin: { id: admin.id, username: admin.username, name: admin.name, isOwner, totpEnabled: admin.totp_enabled === true, email: admin.email ?? null } });
+    case 'email.set': return actionEmailSet(db, res, body, admin, ctx);
     case 'companies.list': return actionCompaniesList(db, res);
     case 'companies.create': return actionCompaniesCreate(db, res, body, ctx);
     case 'companies.update': return actionCompaniesUpdate(db, res, body, ctx);
