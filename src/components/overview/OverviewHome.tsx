@@ -185,6 +185,24 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
               <b className="block text-xl text-violet-600 leading-tight">{Number(d.month.otHours.toFixed(1)).toLocaleString('vi-VN')}<small className="text-[13px] text-slate-500 font-semibold"> giờ</small></b><small className="text-[11px] text-slate-500">Tháng này</small></div>
           </div>
 
+          {/* Công tác phí được hưởng: đặt ngay trên Hiệu suất và LUÔN hiện (chưa có khoản nào thì báo trống) để người dùng không tưởng là thiếu */}
+          {(
+            <Card testid="ov-ctp">
+              <Title>Công tác phí của tôi</Title>
+              <div className="grid grid-cols-3 gap-2 text-center mb-1.5">
+                <div className={`rounded-xl border py-1.5 ${TONE.warn}`}><b className="block text-sm">{fmtMoneyShort(d.ctp.pendingSum)}</b><span className="text-[10.5px] font-bold">Chờ duyệt ({d.ctp.pendingCount})</span></div>
+                <div className={`rounded-xl border py-1.5 ${TONE.ok}`}><b className="block text-sm">{fmtMoneyShort(d.ctp.approvedSum)}</b><span className="text-[10.5px] font-bold">Đã duyệt ({d.ctp.approvedCount})</span></div>
+                <div className={`rounded-xl border py-1.5 ${TONE.gray}`}><b className="block text-sm">{d.ctp.rejectedCount}</b><span className="text-[10.5px] font-bold">Từ chối</span></div>
+              </div>
+              {!ctpShown && <div className="text-[12.5px] text-slate-500 py-1" data-testid="ctp-empty">Chưa có khoản công tác phí nào được hưởng.</div>}
+              {d.ctp.latest.map((c, i) => (
+                <div key={c.id || c.code || i} className="flex items-center gap-2.5 py-2 border-t border-slate-100" data-testid="ctp-item">
+                  <span className="w-9 h-9 rounded-xl bg-slate-50 grid place-items-center text-base shrink-0">🧾</span>
+                  <span className="flex-1 min-w-0"><b className="block text-[13px] leading-tight truncate">{c.content || 'Công tác phí'}</b><small className="text-[11.5px] text-slate-500 block truncate">{[c.code || c.id, c.missionName].filter(Boolean).join(' · ')}</small></span>
+                  <span className="text-right shrink-0"><b className="block text-[12.5px]">{fmtMoney(Number(c.amount || 0))}</b><Pill tone={c.status === 'pending' ? 'warn' : c.status === 'rejected' ? 'bad' : 'ok'}>{c.status === 'pending' ? 'Chờ duyệt' : c.status === 'rejected' ? 'Từ chối' : 'Đã duyệt'}</Pill></span>
+                </div>))}
+            </Card>)}
+
           <Card testid="ov-perf">
             <Title>Hiệu suất tháng {d.week[0]?.date.slice(5, 7)}</Title>
             <div className="flex items-center gap-3.5">
@@ -222,22 +240,6 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
                     {l.status === 'pending' && <span className="flex items-center gap-1.5 mt-1.5 text-[10.5px] font-bold text-slate-500"><span className="text-emerald-600">✓ Đã gửi</span><i className="flex-1 h-0.5 bg-slate-200" /><span className="text-[#0d47c9]">● Chờ duyệt</span><i className="flex-1 h-0.5 bg-slate-200" /><span>Hoàn tất</span></span>}
                   </span>
                   {l.status !== 'pending' && <Pill tone={l.status === 'approved' ? 'ok' : 'bad'}>{l.status === 'approved' ? 'Đã duyệt' : 'Từ chối'}</Pill>}
-                </div>))}
-            </Card>)}
-
-          {ctpShown && (
-            <Card testid="ov-ctp">
-              <Title>Công tác phí của tôi</Title>
-              <div className="grid grid-cols-3 gap-2 text-center mb-1.5">
-                <div className={`rounded-xl border py-1.5 ${TONE.warn}`}><b className="block text-sm">{fmtMoneyShort(d.ctp.pendingSum)}</b><span className="text-[10.5px] font-bold">Chờ duyệt ({d.ctp.pendingCount})</span></div>
-                <div className={`rounded-xl border py-1.5 ${TONE.ok}`}><b className="block text-sm">{fmtMoneyShort(d.ctp.approvedSum)}</b><span className="text-[10.5px] font-bold">Đã duyệt ({d.ctp.approvedCount})</span></div>
-                <div className={`rounded-xl border py-1.5 ${TONE.gray}`}><b className="block text-sm">{d.ctp.rejectedCount}</b><span className="text-[10.5px] font-bold">Từ chối</span></div>
-              </div>
-              {d.ctp.latest.map((c, i) => (
-                <div key={c.id || c.code || i} className="flex items-center gap-2.5 py-2 border-t border-slate-100" data-testid="ctp-item">
-                  <span className="w-9 h-9 rounded-xl bg-slate-50 grid place-items-center text-base shrink-0">🧾</span>
-                  <span className="flex-1 min-w-0"><b className="block text-[13px] leading-tight truncate">{c.content || 'Công tác phí'}</b><small className="text-[11.5px] text-slate-500 block truncate">{[c.code || c.id, c.missionName].filter(Boolean).join(' · ')}</small></span>
-                  <span className="text-right shrink-0"><b className="block text-[12.5px]">{fmtMoney(Number(c.amount || 0))}</b><Pill tone={c.status === 'pending' ? 'warn' : c.status === 'rejected' ? 'bad' : 'ok'}>{c.status === 'pending' ? 'Chờ duyệt' : c.status === 'rejected' ? 'Từ chối' : 'Đã duyệt'}</Pill></span>
                 </div>))}
             </Card>)}
 

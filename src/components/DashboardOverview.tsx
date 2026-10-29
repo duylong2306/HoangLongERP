@@ -2811,123 +2811,54 @@ export default function DashboardOverview({
         </div>
       )}
 
-      {showPunchModal && activePunchSlot && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="biometric_webcam_modal">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
-            
-            <div className="p-4 bg-slate-950 border-b border-slate-850 flex items-center justify-between">
-              <span className="text-xs font-black text-slate-200 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-                🛡️ XÁC THỰC BIOMETRIC FACEID & GPS LÂM ĐỒNG
-              </span>
-              <button
-                onClick={() => { stopCameraStream(); setShowPunchModal(false); }}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* HỘP CHẤM CÔNG BẰNG ẢNH + VỊ TRÍ (kiểu LoLo: trượt từ dưới lên). Logic camera / GPS / chụp giữ nguyên như bản cũ: chỉ đổi giao diện và lời văn. */}
+      {showPunchModal && activePunchSlot && (() => {
+        const closePunch = () => { stopCameraStream(); setShowPunchModal(false); };
+        // Tên mốc đang chấm hiện ở tiêu đề để người dùng biết mình đang chấm vào / ra ca nào
+        const slotTitle: Record<string, string> = { timeInS: 'Vào ca sáng', timeOutS: 'Ra ca sáng', timeInC: 'Vào ca chiều', timeOutC: 'Ra ca chiều', timeInOT: 'Vào tăng ca', timeOutOT: 'Ra tăng ca' };
+        const cameraOk = webcamActive && !webcamError;
+        return (
+          <Sheet id="biometric_webcam_modal" title={`Chấm công · ${slotTitle[activePunchSlot] || 'Điểm danh'}`} subtitle={`${currentUser.name} · xác thực bằng ảnh và vị trí`} onClose={closePunch}
+            footer={<SheetActions onCancel={closePunch} submitType="button" onSubmit={handleConfirmPunch} disabled={webcamError} submitLabel="Chụp ảnh & chấm công" />}>
+            {/* Khung camera (hoặc cảnh báo khi camera không hoạt động — KHÔNG giả lập ảnh) */}
+            <div className="relative rounded-2xl bg-slate-900 overflow-hidden h-52 flex items-center justify-center" data-testid="punch-camera">
+              {cameraOk ? (
+                <>
+                  <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover transform -scale-x-100" />
+                  {/* Khung căn khuôn mặt: bốn góc trắng mảnh */}
+                  <div className="absolute inset-4 pointer-events-none rounded-xl border border-white/40" />
+                  <span className="absolute top-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-bold" style={{ color: '#ffffff' }}>
+                    <i className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />Đang quay
+                  </span>
+                </>
+              ) : (
+                <div className="w-full h-full bg-rose-50 flex flex-col items-center justify-center text-center px-5 gap-2" data-testid="punch-camera-error">
+                  <AlertCircle className="w-10 h-10 text-rose-500" />
+                  <div><b className="block text-[13px] text-rose-700">Không mở được camera</b>
+                    <span className="block text-[12px] text-slate-600 leading-snug mt-0.5">Chấm công cần ảnh khuôn mặt chụp trực tiếp. Hãy cho phép dùng camera (trang cần chạy HTTPS) rồi thử lại.</span></div>
+                  <button type="button" onClick={startCameraStream} className="mt-1 px-3.5 py-1.5 rounded-xl border border-rose-200 bg-white text-[12.5px] font-extrabold text-rose-700 cursor-pointer">Thử lại camera</button>
+                </div>
+              )}
             </div>
 
-            <div className="p-5 space-y-4">
-              
-              {/* CAMERA FEED (hoặc cảnh báo khi camera không hoạt động) */}
-              <div className="relative rounded-xl border border-slate-750 bg-black overflow-hidden h-48 flex flex-col items-center justify-center">
-                {webcamActive && !webcamError ? (
-                  <>
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      className="absolute inset-0 w-full h-full object-cover transform -scale-x-100"
-                    />
-                    {/* Laser scanning line animation overlay */}
-                    <div className="absolute left-0 right-0 h-[2px] bg-sky-500 shadow-[0_0_8px_#0ea5e9] animate-bounce top-1/4 pointer-events-none"></div>
-                    <div className="absolute inset-2 border-2 border-dashed border-sky-500/30 rounded-lg pointer-events-none"></div>
-                    <span className="absolute bottom-2 left-2 bg-slate-950/85 border border-slate-800 text-[10px] text-sky-400 font-mono px-2 py-0.5 rounded flex items-center gap-1">
-                      <Camera className="w-3 h-3 text-sky-400 animate-pulse" /> Live Feed
-                    </span>
-                  </>
-                ) : (
-                  // Camera lỗi/không có → cảnh báo rõ ràng (KHÔNG giả lập ảnh AI)
-                  <div className="text-center p-5 space-y-3 w-full h-full flex flex-col justify-center items-center bg-red-50 border border-red-200">
-                    <div className="relative">
-                      <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-rose-700 font-black">KHÔNG TRUY CẬP ĐƯỢC CAMERA</p>
-                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        Chấm công bắt buộc có ảnh khuôn mặt chụp trực tiếp lúc điểm danh.
-                        Vui lòng cấp quyền truy cập camera, mở qua HTTPS và thử lại.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={startCameraStream}
-                      className="mt-1 bg-sky-500 hover:bg-sky-400 text-white text-[10px] py-1.5 px-3 rounded-lg font-bold cursor-pointer"
-                    >
-                      🔄 Thử lại camera
-                    </button>
-                  </div>
-                )}
+            {/* Vị trí hiện tại: địa chỉ + tọa độ + trạng thái định vị */}
+            <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 text-[13px]" data-testid="punch-location">
+              <div className="px-3 py-2.5">
+                <div className="text-[11.5px] font-extrabold text-slate-500 mb-0.5">Vị trí hiện tại</div>
+                {gpsLoading
+                  ? <span className="text-slate-500 italic">Đang xác định vị trí...</span>
+                  : <b className="font-semibold text-slate-900 leading-snug">{liveGpsAddr || 'Chưa lấy được địa chỉ'}</b>}
               </div>
-
-              {/* GPS STATE INFO */}
-              <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 text-left space-y-1.5 text-[11px]">
-                <div className="flex justify-between items-start gap-2">
-                  <span className="text-slate-500 font-bold shrink-0">TỌA ĐỘ GPS THỰC TẾ:</span>
-                  {gpsLoading ? (
-                    <span className="text-sky-450 font-mono font-black flex items-center gap-1 animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping"></span>
-                      Đang định vị chính xác...
-                    </span>
-                  ) : gpsErrorMsg ? (
-                    <span className="text-rose-500 font-mono font-bold text-right">{gpsErrorMsg}</span>
-                  ) : (
-                    <span className="text-emerald-400 font-black font-mono text-right">{liveGpsCoords || 'Chưa nhận dạng'}</span>
-                  )}
-                </div>
-                <div className="flex flex-col gap-0.5 pt-0.5 border-t border-slate-850/40">
-                  <span className="text-slate-500 font-bold">VỊ TRÍ THỰC TẾ PHÁT HIỆN:</span>
-                  {gpsLoading ? (
-                    <span className="text-slate-500 italic text-[10px]">Đang giải mã bản đồ phản xạ...</span>
-                  ) : (
-                    <span className="text-xs text-indigo-300 font-semibold">{liveGpsAddr || 'Không lấy được thông tin vị trí thực tế'}</span>
-                  )}
-                </div>
-                <div className="flex justify-between pt-1.5 border-t border-slate-850/60 text-[10px]">
-                  <span className="text-slate-500 font-bold">NHÂN VIÊN:</span>
-                  <span className="text-slate-200 font-bold">{currentUser.name}</span>
-                </div>
+              <div className="px-3 py-2.5 flex items-start gap-2">
+                <span className="text-[11.5px] font-extrabold text-slate-500 shrink-0 pt-0.5">Tọa độ GPS</span><span className="flex-1" />
+                {gpsLoading ? <span className="inline-flex items-center gap-1.5 text-[#0d47c9] font-bold"><i className="w-1.5 h-1.5 rounded-full bg-[#0d47c9] animate-ping" />Đang định vị...</span>
+                  : gpsErrorMsg ? <span className="text-rose-600 font-bold text-right">{gpsErrorMsg}</span>
+                  : <span className="text-emerald-600 font-bold font-mono text-right">{liveGpsCoords || 'Chưa có tọa độ'}</span>}
               </div>
-
-              {/* ACTION BTNS */}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => { stopCameraStream(); setShowPunchModal(false); }}
-                  className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs py-2 rounded-xl border border-slate-700 font-bold text-center cursor-pointer"
-                >
-                  HUY BỎ
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmPunch}
-                  disabled={webcamError}
-                  className={`flex-1 text-xs py-2 rounded-xl font-black text-center flex items-center justify-center gap-1.5 ${
-                    webcamError
-                      ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                      : 'bg-sky-500 hover:bg-sky-400 text-white cursor-pointer'
-                  }`}
-                >
-                  <Camera className={`w-4 h-4 ${webcamError ? 'text-slate-600' : 'text-white'}`} />
-                  CHỤP ẢNH & CHẤM CÔNG
-                </button>
-              </div>
-
             </div>
-
-          </div>
-        </div>
-      )}
+          </Sheet>
+        );
+      })()}
 
 
       {/* HỘP XIN NGHỈ PHÉP (kiểu LoLo: trượt từ dưới lên; logic, kiểm tra và hàm nộp đơn giữ nguyên như bản cũ) */}

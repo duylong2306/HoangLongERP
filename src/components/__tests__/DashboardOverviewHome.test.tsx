@@ -115,10 +115,12 @@ describe('Tổng quan kiểu mới', () => {
     expect(card.textContent).toContain('30/10 – 31/10'); expect(card.textContent).toContain('Trương Hữu Long'); expect(card.textContent).toContain('Chờ duyệt');
   });
 
-  it('công tác phí của tôi: ẩn khi không có, hiện khi có (chờ duyệt kèm số tiền)', async () => {
+  it('công tác phí của tôi: luôn hiện (chưa có thì báo trống), nằm ngay trên Hiệu suất; có thì kèm số tiền chờ duyệt', async () => {
     const { unmount } = mount();
     await screen.findByTestId('overview-home');
-    expect(screen.queryByTestId('ov-ctp')).toBeNull();
+    expect(screen.getByTestId('ov-ctp')).toBeTruthy(); expect(screen.getByTestId('ctp-empty')).toBeTruthy();
+    // thứ tự: công tác phí đứng ngay trước hiệu suất
+    expect(screen.getByTestId('ov-ctp').compareDocumentPosition(screen.getByTestId('ov-perf')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     unmount();
     mount({ travelExpensesSummary: [{ empId: 'u1', employeeName: me.name, status: 'pending', amount: 1_200_000, content: 'Đi lại khảo sát', code: 'CTP-1', missionName: 'Khảo sát' }] });
     const card = await screen.findByTestId('ov-ctp');
@@ -148,6 +150,22 @@ describe('Tổng quan kiểu mới', () => {
     mount();
     const btn = await screen.findByTestId('punch-main') as HTMLButtonElement;
     expect(btn.disabled).toBe(true); expect(btn.textContent).toContain('Vào ca chiều'); expect(btn.textContent).toContain('Mở lúc');
+  });
+});
+
+describe('Hộp chấm công bằng ảnh + vị trí (kiểu LoLo)', () => {
+  it('bấm "Vào ca sáng" → hộp trượt từ dưới lên: tiêu đề nêu mốc đang chấm, khung camera, khối vị trí; Hủy đóng lại', async () => {
+    mount();
+    fireEvent.click(await screen.findByTestId('punch-main'));
+    const dlg = await screen.findByRole('dialog', { name: /Chấm công · Vào ca sáng/ });
+    expect(dlg.id).toBe('biometric_webcam_modal');
+    expect(within(dlg).getByTestId('punch-camera')).toBeTruthy();
+    expect(within(dlg).getByTestId('punch-location').textContent).toContain('Vị trí hiện tại');
+    expect(within(dlg).getByTestId('sheet-submit').textContent).toBe('Chụp ảnh & chấm công');
+    // lời văn cũ (tiếng Anh pha trộn, chữ in hoa) không còn
+    expect(dlg.textContent).not.toMatch(/BIOMETRIC|Live Feed|HUY BỎ/);
+    fireEvent.click(within(dlg).getByTestId('sheet-cancel'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Chấm công/ })).toBeNull());
   });
 });
 

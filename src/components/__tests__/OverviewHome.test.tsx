@@ -117,11 +117,11 @@ describe('các khối tổng hợp', () => {
     expect(items[0].textContent).toContain('Người duyệt: Trương Hữu Long'); expect(items[0].textContent).toContain('Chờ duyệt');
     expect(items[1].textContent).toContain('Đã duyệt');
   });
-  it('tạm ứng lương và công tác phí chỉ hiện khi có; nút Đề xuất gọi đúng hàm', () => {
+  it('tạm ứng lương chỉ hiện khi có (công tác phí luôn hiện, báo trống khi chưa có); nút Đề xuất gọi đúng hàm', () => {
     const a = view({ advance: { pendingCount: 1, pendingSum: 1_000_000, approvedCount: 1, approvedSum: 3_000_000 } });
     expect(screen.getByTestId('ov-advance').textContent).toContain('3.000.000');
     fireEvent.click(within(screen.getByTestId('ov-advance')).getByText('Đề xuất')); expect(a.onRequestAdvance).toHaveBeenCalled();
-    expect(screen.queryByTestId('ov-ctp')).toBeNull();
+    expect(screen.getByTestId('ov-ctp')).toBeTruthy(); expect(screen.getByTestId('ctp-empty')).toBeTruthy();
   });
   it('dự án: tiến độ và số hoạt động mới', () => {
     view({ projects: [{ id: 'p1', name: 'SỬA CHỮA', progress: 61.6, newCount: 2 }, { id: 'p2', name: 'KHÁCH SẠN', progress: 35, newCount: 0 }] });
