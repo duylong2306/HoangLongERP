@@ -125,3 +125,14 @@ describe('Nhật ký dự án — khung dòng thời gian', () => {
     expect(await screen.findByTestId('activity-empty')).toBeTruthy();
   });
 });
+
+// iPhone: vùng an toàn phía trên (tai thỏ) chỉ được đệm MỘT lần. Quy tắc chung của lớp phủ toàn màn hình (shell.css) đã đệm cho mọi `.fixed.inset-0`
+// trừ lớp phủ chứa tiêu đề `lx-drawer-head` (tự đệm). Khung từng tự đệm thêm env(safe-area-inset-top) → cộng đôi, hở dải trắng trên tiêu đề (ảnh lỗi iOS 27.2).
+describe('Nhật ký dự án — vùng an toàn không bị đệm đôi', () => {
+  it('tiêu đề dùng lx-drawer-head và khung KHÔNG tự đệm env(safe-area-inset-top)', async () => {
+    render(<ProjectActivityModal projectId="P1" projectName="Cổng sắt" onClose={() => {}} loader={vi.fn().mockResolvedValue({ ok: true, rows: [], hasMore: false })} />);
+    const overlay = await screen.findByTestId('activity-modal');
+    expect(overlay.querySelector('.lx-drawer-head')).not.toBeNull();
+    expect(overlay.innerHTML).not.toMatch(/padding-top:\s*env\(safe-area-inset-top\)/);
+  });
+});

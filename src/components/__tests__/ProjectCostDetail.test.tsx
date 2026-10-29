@@ -33,3 +33,11 @@ describe('ProjectCostDetail', () => {
     fireEvent.click(screen.getByTestId('cost-detail-close')); expect(onClose).toHaveBeenCalled();
   });
 });
+
+// iPhone: tiêu đề phải mang lx-drawer-head để quy tắc chung (shell.css) không đệm vùng an toàn thêm lần nữa cho lớp phủ (tránh cộng đôi)
+describe('ProjectCostDetail — vùng an toàn không bị đệm đôi', () => {
+  it('tiêu đề có lớp lx-drawer-head', () => {
+    render(<ProjectCostDetail project={proj} cost={cost} items={items} onClose={() => {}} />);
+    expect(screen.getByTestId('cost-detail').querySelector('header.lx-drawer-head')).not.toBeNull();
+  });
+});

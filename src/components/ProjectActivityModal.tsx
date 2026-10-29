@@ -146,10 +146,11 @@ export default function ProjectActivityModal({ projectId, projectName, taskId, t
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/50 flex justify-end" data-testid="activity-modal" onClick={onClose}>
-      <div className="w-full sm:max-w-[560px] h-full bg-white flex flex-col" onClick={e => e.stopPropagation()}
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-        {/* Tiêu đề nền xanh LoLo */}
-        <div className="shrink-0 px-4 py-3 flex items-center gap-2" style={{ background: '#0d47c9', color: '#ffffff' }}>
+      <div className="w-full sm:max-w-[560px] h-full bg-white flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Tiêu đề nền xanh LoLo. Dùng lớp lx-drawer-head (shell.css): tiêu đề tự chừa tai thỏ, và quy tắc chung của lớp phủ toàn màn hình
+            bỏ qua khung này — trước đây vừa đệm vùng an toàn ở lớp phủ vừa đệm ở khung (env(safe-area-inset-top)) nên trên iPhone bị CỘNG ĐÔI:
+            hộp thoại tụt xuống, hở một dải trắng dày phía trên tiêu đề. */}
+        <div className="lx-drawer-head shrink-0 px-4 py-3 flex items-center gap-2" style={{ background: '#0d47c9', color: '#ffffff' }}>
           <div className="min-w-0 flex-1">
             <div className="font-extrabold text-[15px] truncate" style={{ color: '#ffffff' }}>{taskId ? 'Lịch sử công việc' : 'Nhật ký dự án'}</div>
             <div className="text-[11.5px] truncate" style={{ color: '#dbe7ff' }}>{taskId ? (taskName || '') : (projectName || '')}</div>

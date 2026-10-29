@@ -21,8 +21,8 @@ export default function ProjectCostDetail({ project, cost, items, onClose }: Pro
     <div className="fixed inset-0 z-[70] flex justify-end" role="dialog" aria-label="Chi tiết tổng chi phí" data-testid="cost-detail">
       <div className="absolute inset-0 bg-slate-900/45" onClick={onClose} />
       <aside className="relative bg-white w-full md:w-[560px] h-full flex flex-col shadow-2xl">
-        {/* Tiêu đề: xanh LoLo, chừa vùng tai thỏ ở điện thoại */}
-        <header className="flex items-start gap-3 px-4 pb-3 md:pt-4" style={{ paddingTop: 'max(env(safe-area-inset-top), 14px)', background: 'linear-gradient(135deg,#0a4fd8,#1f6bff)', color: '#ffffff' }}>
+        {/* Tiêu đề: xanh LoLo, chừa vùng tai thỏ ở điện thoại. Lớp lx-drawer-head để quy tắc chung (shell.css) không đệm vùng an toàn thêm lần nữa cho lớp phủ → tránh cộng đôi trên iPhone */}
+        <header className="lx-drawer-head flex items-start gap-3 px-4 pb-3 md:pt-4" style={{ paddingTop: 'max(env(safe-area-inset-top), 14px)', background: 'linear-gradient(135deg,#0a4fd8,#1f6bff)', color: '#ffffff' }}>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-bold uppercase tracking-wide opacity-80">Chi tiết tổng chi phí</div>
             <h2 className="text-[16px] font-extrabold leading-snug break-words">{project.name}</h2>
