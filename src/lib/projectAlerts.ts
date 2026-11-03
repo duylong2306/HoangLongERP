@@ -8,7 +8,7 @@
 // Chỉ CẢNH BÁO, không chặn thao tác nào.
 import type { Project, Task } from '../types';
 import type { KanbanColumn } from './kanbanLogic';
-import { columnsForProject, computeProjectProgress, stageIdOf } from './projectProgress';
+import { columnsForProject, computeProjectProgress, finalIndexOf, stageIdOf } from './projectProgress';
 
 export const DEFAULT_STUCK_DAYS = 30;
 export const BEHIND_GAP = 15;   // điểm % chậm hơn kế hoạch thì mới cảnh báo
@@ -42,7 +42,7 @@ export function buildProjectHealth(
     const pg = computeProjectProgress(p, tasks, cols);
     const stageId = stageIdOf(p as any, cols);
     const col = cols.find(c => c.id === stageId);
-    const isFinalStage = stageId === cols[cols.length - 1].id;
+    const isFinalStage = cols.findIndex(c => c.id === stageId) >= finalIndexOf(cols);   // từ cột "Hoàn thành" trở đi
     const alerts: ProjectAlert[] = [];
 
     // ── Ngày ở giai đoạn hiện tại ──

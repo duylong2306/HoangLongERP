@@ -1,6 +1,7 @@
 import React from 'react';
 import { CalendarCheck, DollarSign, ChevronRight } from 'lucide-react';
 import type { ShiftView, WeekDay, LeaveLike, CtpSummary, AdvanceSummary, CompanyToday } from '../../lib/overviewData';
+import { progressTone } from '../../lib/projectProgress';
 import { fmtLeaveRange, fmtMoney, fmtMoneyShort } from '../../lib/overviewData';
 
 // MÀN TỔNG QUAN KIỂU MỚI (thứ tự khối theo mẫu A + D, đã được duyệt): chào + điểm danh gọn → dải tuần → 4 chỉ số → số liệu tháng → hiệu suất →
@@ -28,6 +29,9 @@ const Link = ({ children, onClick, testid }: { children: React.ReactNode; onClic
 const Bar = ({ pct, tone = 'blue' }: { pct: number; tone?: 'blue' | 'ok' | 'warn' | 'bad' }) => (
   <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden mt-1.5"><i className={`block h-full rounded-full ${tone === 'ok' ? 'bg-emerald-500' : tone === 'warn' ? 'bg-amber-500' : tone === 'bad' ? 'bg-rose-500' : 'bg-[#0d47c9]'}`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></div>
 );
+
+/** Màu vòng/thanh theo mức tiến độ (đỏ < 30%, vàng < 60%, xanh dương < 100%, xanh lá = 100%) */
+const RING_COLOR = { bad: '#e11d48', warn: '#f59e0b', blue: '#0a4fd8', ok: '#10b981' } as const;
 
 export interface TodoItem { id: string; icon: string; title: string; sub: string; pill: string; tone: Tone; taskId?: string; goTab?: string; /** mở chi tiết ngày này (báo cáo lỗi chấm công) */ dayDate?: string }
 /** Ngày có lỗi chấm công cần báo cáo (thiếu chấm vào/ra ca) */
@@ -176,7 +180,7 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
 
           <div className="grid grid-cols-2 gap-2" data-testid="ov-month">
             <div className="bg-white border border-slate-200 rounded-2xl p-2.5"><span className="text-[11px] font-bold text-slate-500">Công tháng {d.week[0]?.date.slice(5, 7)}</span>
-              <b className="block text-xl text-[#0d47c9] leading-tight">{Number(d.month.days.toFixed(1)).toLocaleString('vi-VN')}<small className="text-[13px] text-slate-500 font-semibold"> / {d.month.standard}</small></b><Bar pct={d.month.standard ? (d.month.days / d.month.standard) * 100 : 0} /></div>
+              <b className="block text-xl text-[#0d47c9] leading-tight">{Number(d.month.days.toFixed(1)).toLocaleString('vi-VN')}<small className="text-[13px] text-slate-500 font-semibold"> / {d.month.standard}</small></b><Bar pct={d.month.standard ? (d.month.days / d.month.standard) * 100 : 0} tone={progressTone(d.month.standard ? (d.month.days / d.month.standard) * 100 : 0)} /></div>
             <div className="bg-white border border-slate-200 rounded-2xl p-2.5"><span className="text-[11px] font-bold text-slate-500">Phép năm còn</span>
               <b className="block text-xl text-emerald-600 leading-tight">{d.month.phep ?? '—'}<small className="text-[13px] text-slate-500 font-semibold"> ngày</small></b>
               <small className="text-[11px] text-slate-500">{d.month.phepReserved > 0 ? `Đang chờ duyệt: ${d.month.phepReserved} ngày` : 'Không có đơn chờ'}</small></div>
@@ -207,11 +211,11 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
           <Card testid="ov-perf">
             <Title>Hiệu suất tháng {d.week[0]?.date.slice(5, 7)}</Title>
             <div className="flex items-center gap-3.5">
-              <div className="w-[76px] h-[76px] rounded-full grid place-items-center shrink-0" style={{ background: `conic-gradient(#0a4fd8 0 ${(d.perf.rate ?? 0) * 3.6}deg, #e8eef9 ${(d.perf.rate ?? 0) * 3.6}deg)` }} data-testid="perf-ring">
+              <div className="w-[76px] h-[76px] rounded-full grid place-items-center shrink-0" style={{ background: `conic-gradient(${RING_COLOR[progressTone(d.perf.rate ?? 0)]} 0 ${(d.perf.rate ?? 0) * 3.6}deg, #e8eef9 ${(d.perf.rate ?? 0) * 3.6}deg)` }} data-testid="perf-ring">
                 <div className="w-[58px] h-[58px] rounded-full bg-white grid place-items-center text-center leading-none"><b className="text-xl">{d.perf.rate === null ? '—' : `${d.perf.rate}%`}</b><small className="text-[9.5px] font-bold text-slate-500 -mt-1">hoàn thành</small></div>
               </div>
               <div className="flex-1 space-y-2 text-[12px]">
-                <div><div className="flex justify-between"><span className="text-slate-500 font-bold">Việc trong tháng</span><b>{d.perf.done}/{d.perf.total}</b></div><Bar pct={d.perf.total ? (d.perf.done / d.perf.total) * 100 : 0} tone="ok" /></div>
+                <div><div className="flex justify-between"><span className="text-slate-500 font-bold">Việc trong tháng</span><b>{d.perf.done}/{d.perf.total}</b></div><Bar pct={d.perf.total ? (d.perf.done / d.perf.total) * 100 : 0} tone={progressTone(d.perf.total ? (d.perf.done / d.perf.total) * 100 : 0)} /></div>
                 <div><div className="flex justify-between"><span className="text-slate-500 font-bold">Giờ giấc (ngày muộn)</span><b>{d.month.lateDays}/{d.month.allowedLate}</b></div><Bar pct={d.month.allowedLate ? (d.month.lateDays / d.month.allowedLate) * 100 : 0} tone={d.month.lateDays > d.month.allowedLate ? 'bad' : 'warn'} /></div>
                 <div className="flex justify-between"><span className="text-slate-500 font-bold">Vi phạm trong tháng</span><b className={d.perf.violations > 0 ? 'text-rose-600' : 'text-emerald-600'}>{d.perf.violations}</b></div>
               </div>
@@ -270,7 +274,7 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
                     <small className="text-[11.5px] text-slate-500 block" data-testid="project-progress">
                       Tiến độ {Math.round(p.progress)}%{p.manual ? ' · PM nhập tay' : ''}{p.totalTasks ? ` · ${p.done ?? 0}/${p.totalTasks} việc` : ''}
                     </small>
-                    <Bar pct={p.progress} />
+                    <Bar pct={p.progress} tone={progressTone(p.progress)} />
                     {/* Cảnh báo giai đoạn: kẹt quá lâu / việc & giai đoạn không khớp / chậm so với kế hoạch */}
                     {p.alerts?.map((t, i) => <small key={i} className="block text-[11px] font-bold text-rose-600 mt-0.5" data-testid="project-alert">⚠ {t}</small>)}
                   </span>

@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import type { ProjectProgress } from '../../lib/projectProgress';
+import { progressTone, type ProjectProgress } from '../../lib/projectProgress';
+
+// Màu thanh theo mức tiến độ (đỏ < 30%, vàng < 60%, xanh dương < 100%, xanh lá = 100%)
+const BAR = { bad: 'bg-rose-500', warn: 'bg-amber-500', blue: 'bg-sky-500', ok: 'bg-emerald-500' } as const;
 
 // KHỐI "TIẾN ĐỘ DỰ ÁN" trong ngăn thông tin dự án (giao diện tối như các khối bên cạnh).
 // Tiến độ TỰ TÍNH = đầu khoảng của giai đoạn (cột kanban) + phần việc con đã xong trong khoảng đó (lib/projectProgress.ts).
@@ -27,7 +30,7 @@ export default function ProjectProgressCard({ progress, canEdit, onSave }: {
         <span>TIẾN ĐỘ DỰ ÁN</span>
         <span className="text-slate-100 text-[15px] font-black" data-testid="progress-value">{value}%</span>
       </span>
-      <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${value}%` }} /></div>
+      <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full ${BAR[progressTone(value)]}`} data-testid="progress-bar" data-tone={progressTone(value)} style={{ width: `${value}%` }} /></div>
       <div className="text-[11px] text-slate-400 space-y-1" data-testid="progress-explain">
         <div className="flex justify-between gap-3"><span>Giai đoạn hiện tại</span><b className="text-slate-200 text-right">{stage.name} (bước {stage.index + 1}/{stage.total})</b></div>
         <div className="flex justify-between gap-3"><span>Khoảng tiến độ của giai đoạn</span><b className="text-slate-200">{stage.from}% → {stage.to}%</b></div>

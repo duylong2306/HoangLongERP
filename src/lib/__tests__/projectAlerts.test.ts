@@ -74,3 +74,14 @@ describe('khác', () => {
     expect(avgDaysInStage(['c'], m)).toBeNull();
   });
 });
+
+describe('cột Hoàn thành không nằm cuối', () => {
+  it('thẻ ở cột "HOÀN THÀNH" (còn cột Bảo hành phía sau) + xong hết việc → không nhắc "chưa chuyển giai đoạn"', () => {
+    const custom = [
+      { id: 'a', name: 'THIẾT KẾ', color: '', iconColor: '', automation: { type: 'none' } }, { id: 'b', name: 'THI CÔNG', color: '', iconColor: '', automation: { type: 'none' } },
+      { id: 'c', name: 'HOÀN THÀNH', color: '', iconColor: '', automation: { type: 'none' } }, { id: 'd', name: 'BẢO HÀNH', color: '', iconColor: '', automation: { type: 'none' } },
+    ];
+    const h = buildProjectHealth([P({ kanbanColumnId: 'c' })], [T('completed')], { construction: custom as any }, new Map(), TODAY).get('p1')!;
+    expect(h.alerts).toEqual([]);
+  });
+});

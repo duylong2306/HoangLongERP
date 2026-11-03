@@ -91,3 +91,32 @@ describe('phễu giai đoạn', () => {
     expect(stageIdOf(P('e', 'col_khong_co'), cols)).toBe('col_design');
   });
 });
+
+import { finalIndexOf, progressTone } from '../projectProgress';
+
+describe('cột "Hoàn thành" không nằm cuối & màu theo mức', () => {
+  // Công ty có thêm cột Bảo hành sau cột Hoàn thành: cột "HOÀN THÀNH" phải là mốc 100%, không phải coi cột Bảo hành là cuối
+  const custom = [
+    { id: 'a', name: 'THIẾT KẾ', color: '', iconColor: '', automation: { type: 'none' } },
+    { id: 'b', name: 'THI CÔNG', color: '', iconColor: '', automation: { type: 'none' } },
+    { id: 'c', name: 'Hoàn thành', color: '', iconColor: '', automation: { type: 'none' } },
+    { id: 'd', name: 'BẢO HÀNH', color: '', iconColor: '', automation: { type: 'none' } },
+  ] as any[];
+  it('nhận cột theo tên; từ cột đó trở đi là 100%', () => {
+    expect(finalIndexOf(custom)).toBe(2);
+    expect(stageRange(custom, 'c')).toMatchObject({ from: 100, to: 100 });
+    expect(stageRange(custom, 'd')).toMatchObject({ from: 100, to: 100 });
+    expect(stageRange(custom, 'a')).toMatchObject({ from: 0, to: 50 });   // 2 giai đoạn làm việc chia đều
+    expect(stageRange(custom, 'b')).toMatchObject({ from: 50, to: 100 });
+  });
+  it('dự án ở cột Hoàn thành, xong hết việc → 100%, không bị báo lệch/kẹt', () => {
+    const p: any = { id: 'p', type: 'construction', status: 'processing', kanbanColumnId: 'c' };
+    expect(computeProjectProgress(p, [{ projectId: 'p', status: 'completed' }] as any, custom).value).toBe(100);
+  });
+  it('không có cột nào tên/quy tắc hoàn thành → cột cuối là hoàn thành', () => {
+    expect(finalIndexOf(custom.slice(0, 2))).toBe(1);
+  });
+  it('màu theo mức: <30 đỏ, <60 vàng, <100 xanh dương, 100 xanh lá', () => {
+    expect([0, 29, 30, 59, 60, 99, 100].map(progressTone)).toEqual(['bad', 'bad', 'warn', 'warn', 'blue', 'blue', 'ok']);
+  });
+});

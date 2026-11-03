@@ -41,4 +41,8 @@ describe('Khối tiến độ dự án', () => {
     expect(screen.queryByTestId('progress-edit')).toBeNull();
     expect(screen.getByTestId('progress-explain').textContent).toContain('đã hoàn thành');
   });
+  it('thanh tiến độ đổi màu theo mức', () => {
+    const tone = (v: number) => { const { unmount } = render(<ProjectProgressCard progress={{ ...auto, value: v }} canEdit={false} onSave={vi.fn()} />); const t = screen.getByTestId('progress-bar').getAttribute('data-tone'); unmount(); return t; };
+    expect([10, 45, 80, 100].map(tone)).toEqual(['bad', 'warn', 'blue', 'ok']);
+  });
 });

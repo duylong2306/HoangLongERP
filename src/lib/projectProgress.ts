@@ -26,7 +26,16 @@ export interface ProjectProgress {
 }
 
 const clamp = (n: number) => Math.min(100, Math.max(0, n));
-const isFinal = (c: KanbanColumn, i: number, all: KanbanColumn[]) => c.automation?.type === 'auto_complete' || c.automation?.statusSet === 'completed' || i === all.length - 1;
+// Cột "Hoàn thành": cột có quy tắc tự hoàn thành / đặt trạng thái hoàn thành, HOẶC tên cột là "Hoàn thành/Hoàn tất" (mỗi công ty tự đặt tên cột,
+// không phải lúc nào cột cuối cũng là cột hoàn thành — vd còn thêm cột Bảo hành phía sau). Không có cột nào như vậy thì coi cột cuối là hoàn thành.
+const FINAL_NAME = /HOÀN\s*(THÀNH|TẤT)/i;
+const isFinalByRule = (c: KanbanColumn) => c.automation?.type === 'auto_complete' || c.automation?.statusSet === 'completed' || FINAL_NAME.test(c.name || '');
+/** Vị trí cột "Hoàn thành" đầu tiên; từ cột này trở đi tiến độ là 100%. */
+export function finalIndexOf(cols: KanbanColumn[]): number {
+  const i = cols.findIndex(isFinalByRule);
+  return i >= 0 ? i : cols.length - 1;
+}
+const isFinal = (_c: KanbanColumn, i: number, all: KanbanColumn[]) => i >= finalIndexOf(all);
 
 /** Khoảng % của cột `columnId` trong bộ cột `columns` (đã có cấu hình riêng thì theo cấu hình, không thì chia đều). */
 export function stageRange(columns: KanbanColumn[], columnId: string): StageInfo {
@@ -79,7 +88,7 @@ export function computeProjectProgress(project: Project, tasks: Pick<Task, 'proj
  */
 export function stageIdOf(project: Pick<Project, 'status'> & { kanbanColumnId?: string }, columns: KanbanColumn[]): string {
   const cols = columns.length ? columns : getDefaultColumns();
-  if (project.status === 'completed') return cols[cols.length - 1].id;
+  if (project.status === 'completed') return cols[finalIndexOf(cols)].id;
   return getProjectColumnId(project as Project, cols);
 }
 
@@ -99,3 +108,7 @@ export function buildPipeline(projects: Project[], tasks: Pick<Task, 'projectId'
   stages.forEach(s => { s.avgProgress = s.count ? Math.round((sums.get(s.id) || 0) / s.count) : 0; });
   return stages;
 }
+
+/** Màu thanh tiến độ theo mức: dưới 30% đỏ, 30–59% vàng, 60–99% xanh dương, 100% xanh lá. */
+export type ProgressTone = 'bad' | 'warn' | 'blue' | 'ok';
+export const progressTone = (pct: number): ProgressTone => (pct >= 100 ? 'ok' : pct >= 60 ? 'blue' : pct >= 30 ? 'warn' : 'bad');

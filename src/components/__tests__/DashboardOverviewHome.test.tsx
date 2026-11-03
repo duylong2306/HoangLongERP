@@ -106,6 +106,15 @@ describe('Tổng quan kiểu mới', () => {
     await screen.findByTestId('project-stage');
     expect(screen.queryByTestId('project-alert')).toBeNull();
   });
+  it('thanh tiến độ dự án đổi màu theo mức (6% → đỏ; ghi đè 85% → xanh dương)', async () => {
+    const { unmount } = mount();
+    await screen.findByTestId('project-progress');
+    expect(screen.getByTestId('ov-projects').querySelector('i.bg-rose-500')).toBeTruthy();
+    unmount();
+    mount({ projects: [{ ...projects[0], progressManual: 85 }] });
+    await screen.findByTestId('project-progress');
+    expect(screen.getByTestId('ov-projects').querySelector('i.bg-\\[\\#0d47c9\\]')).toBeTruthy();
+  });
   it('hiệu suất: tỷ lệ hoàn thành việc trong tháng (1/3 việc có hạn trong tháng 10 đã xong → 33%)', async () => {
     mount();
     await screen.findByTestId('ov-perf');

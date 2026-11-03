@@ -10,7 +10,7 @@ import { buildMissionRows, inMissionView, sortMissions, MISSION_VIEW_LABEL, type
 import { buildProjectCosts, buildProjectCostItems, describeProjectCost, costBudgetFlags, type ProjectCost } from '../../lib/projectCost';
 import ProjectCostDetail from './ProjectCostDetail';
 import { dbService } from '../../lib/dbService';
-import { computeProjectProgress, columnsForProject, stageIdOf, buildPipeline } from '../../lib/projectProgress';
+import { computeProjectProgress, columnsForProject, stageIdOf, buildPipeline, progressTone } from '../../lib/projectProgress';
 import { useKanbanColumnsBySector } from '../../hooks/useKanbanColumnsBySector';
 import { useStageEntries } from '../../hooks/useStageEntries';
 import { buildProjectHealth, avgDaysInStage, ALERT_LABEL, type AlertKind } from '../../lib/projectAlerts';
@@ -24,6 +24,8 @@ interface Props {
 const TYPE_LABEL: Record<string, string> = { construction: 'Xây dựng', furniture: 'Nội thất', mechanical: 'Cơ khí', general: 'Khác' };
 const STATUS_LABEL: Record<string, string> = { new: 'Mới', processing: 'Đang thi công', paused: 'Tạm dừng', maintenance: 'Bảo hành', completed: 'Hoàn thành', cancelled: 'Đã hủy' };
 const STATUS_TONE: Record<string, Tone> = { new: 'sky', processing: 'emerald', paused: 'amber', maintenance: 'indigo', completed: 'slate', cancelled: 'rose' };
+/** Màu thanh tiến độ theo mức (đỏ < 30%, vàng < 60%, xanh dương < 100%, xanh lá = 100%) */
+const TONE_OF_LEVEL = { bad: 'rose', warn: 'amber', blue: 'sky', ok: 'emerald' } as const;
 const projectTab = (p: Project) => p.type === 'furniture' ? 'projects-furniture' : p.type === 'mechanical' ? 'projects-mechanical' : 'projects-construction';
 
 type TaskView = 'all' | 'doing' | 'overdue' | 'todo' | 'reviewing' | 'completed';
@@ -266,7 +268,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                     <tr key={p.id} onClick={() => onNavigateTab(projectTab(p))} className="border-b border-slate-100 hover:bg-amber-50/40 cursor-pointer transition-colors">
                       <td className="px-3 py-2.5"><div className="font-bold text-slate-800">{p.name}</div><div className="text-[10px] text-slate-400 font-mono">{p.code} · {TYPE_LABEL[p.type || 'general']} · {custName(p.customerId)}</div></td>
                       <td className="px-3 py-2.5 text-slate-700">{empName(p.pmId)}</td>
-                      <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={progOf(p.id)} tone={f?.flags.includes('late') ? 'amber' : 'emerald'} /><b className="text-[10.5px] w-9 text-right">{progOf(p.id)}%</b></div>{prog.get(p.id)?.stage && <div className="text-[10px] text-slate-500 truncate" data-testid="row-stage">{prog.get(p.id)!.source === 'completed' ? 'Hoàn thành' : prog.get(p.id)!.stage.name}{prog.get(p.id)!.source === 'manual' ? ' · PM nhập tay' : ''}</div>}</td>
+                      <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={progOf(p.id)} tone={TONE_OF_LEVEL[progressTone(progOf(p.id))]} /><b className="text-[10.5px] w-9 text-right">{progOf(p.id)}%</b></div>{prog.get(p.id)?.stage && <div className="text-[10px] text-slate-500 truncate" data-testid="row-stage">{prog.get(p.id)!.source === 'completed' ? 'Hoàn thành' : prog.get(p.id)!.stage.name}{prog.get(p.id)!.source === 'manual' ? ' · PM nhập tay' : ''}</div>}</td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{dmy(toDay(p.endDate))}{f?.flags.includes('late') && <span className="block"><Badge tone="rose">Trễ tiến độ</Badge></span>}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(f?.contractValue || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(f?.collected || 0)}</td>
