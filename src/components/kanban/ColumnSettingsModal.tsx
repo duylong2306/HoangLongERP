@@ -4,7 +4,7 @@ import { KanbanColumn } from '../../lib/kanbanLogic';
 
 interface ColumnSettingsModalProps {
   column: KanbanColumn;
-  onSave: (edits: { name: string; color: string; ruleType: string; ruleParam: string }) => void;
+  onSave: (edits: { name: string; color: string; ruleType: string; ruleParam: string; progressFrom: string; progressTo: string; stuckDays: string }) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 }
@@ -30,6 +30,10 @@ const ColumnSettingsModal: React.FC<ColumnSettingsModalProps> = ({
   const [editColColor, setEditColColor] = useState(column.color);
   const [editColRuleType, setEditColRuleType] = useState<string>(column.automation?.type || 'none');
   const [editColRuleParam, setEditColRuleParam] = useState<string>(String(column.automation?.param || ''));
+  // Khoảng % tiến độ của giai đoạn (để trống = chia đều theo số cột) và số ngày ở lại tối đa trước khi cảnh báo "kẹt" (để trống = 30; 0 = tắt)
+  const [editFrom, setEditFrom] = useState<string>(column.automation?.progressFrom != null ? String(column.automation.progressFrom) : '');
+  const [editTo, setEditTo] = useState<string>(column.automation?.progressTo != null ? String(column.automation.progressTo) : '');
+  const [editStuck, setEditStuck] = useState<string>(column.automation?.stuckDays != null ? String(column.automation.stuckDays) : '');
 
   // Sync internal state when a different column is opened
   useEffect(() => {
@@ -37,6 +41,9 @@ const ColumnSettingsModal: React.FC<ColumnSettingsModalProps> = ({
     setEditColColor(column.color);
     setEditColRuleType(column.automation?.type || 'none');
     setEditColRuleParam(String(column.automation?.param || ''));
+    setEditFrom(column.automation?.progressFrom != null ? String(column.automation.progressFrom) : '');
+    setEditTo(column.automation?.progressTo != null ? String(column.automation.progressTo) : '');
+    setEditStuck(column.automation?.stuckDays != null ? String(column.automation.stuckDays) : '');
   }, [column.id]);
 
   return (
@@ -148,6 +155,25 @@ const ColumnSettingsModal: React.FC<ColumnSettingsModalProps> = ({
               )}
             </div>
           </div>
+          <div className="border-t border-slate-850 pt-3 space-y-2.5" data-testid="column-progress-settings">
+            <div>
+              <label className="block text-slate-450 font-bold mb-1">Khoảng tiến độ của giai đoạn (%)</label>
+              <div className="flex items-center gap-2">
+                <input type="number" min="0" max="100" value={editFrom} onChange={(e) => setEditFrom(e.target.value)} aria-label="Tiến độ từ (%)" placeholder="từ" data-testid="col-from"
+                  className="w-20 bg-slate-950 border border-slate-800 rounded p-2 text-white outline-none font-mono" />
+                <span className="text-slate-500">đến</span>
+                <input type="number" min="0" max="100" value={editTo} onChange={(e) => setEditTo(e.target.value)} aria-label="Tiến độ đến (%)" placeholder="đến" data-testid="col-to"
+                  className="w-20 bg-slate-950 border border-slate-800 rounded p-2 text-white outline-none font-mono" />
+              </div>
+              <p className="text-slate-500 mt-1">Dự án ở giai đoạn này có tiến độ chạy trong khoảng trên theo số việc con đã xong. Để trống = chia đều theo số cột.</p>
+            </div>
+            <div>
+              <label className="block text-slate-450 font-bold mb-1">Cảnh báo kẹt sau (ngày)</label>
+              <input type="number" min="0" value={editStuck} onChange={(e) => setEditStuck(e.target.value)} aria-label="Cảnh báo kẹt sau (ngày)" placeholder="30" data-testid="col-stuck"
+                className="w-24 bg-slate-950 border border-slate-800 rounded p-2 text-white outline-none font-mono" />
+              <p className="text-slate-500 mt-1">Dự án nằm ở giai đoạn này quá số ngày trên sẽ bị báo "kẹt" cho Giám đốc. Để trống = 30 ngày, nhập 0 = không cảnh báo.</p>
+            </div>
+          </div>
         </div>
 
         <div className="flex justify-between items-center pt-2">
@@ -170,7 +196,7 @@ const ColumnSettingsModal: React.FC<ColumnSettingsModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onSave({ name: editColName, color: editColColor, ruleType: editColRuleType, ruleParam: editColRuleParam })}
+              onClick={() => onSave({ name: editColName, color: editColColor, ruleType: editColRuleType, ruleParam: editColRuleParam, progressFrom: editFrom, progressTo: editTo, stuckDays: editStuck })}
               className="bg-emerald-600 hover:bg-emerald-550 text-white px-4 py-1.8 rounded font-black cursor-pointer"
             >
               Lưu thiết lập

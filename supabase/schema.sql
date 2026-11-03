@@ -58,6 +58,7 @@ create table if not exists public.projects (
   pm_id                 text,                 -- employee id
   status                text,                 -- new|processing|paused|completed|cancelled
   progress              numeric,
+  progress_manual       numeric,              -- PM/Giám đốc ghi đè tiến độ (null = tự tính theo cột + việc con)
   notes                 text,
   image                 text,
   documents             jsonb,                -- ProjectDoc[]

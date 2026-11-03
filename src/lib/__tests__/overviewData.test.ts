@@ -153,6 +153,14 @@ describe('công tác phí của tôi', () => {
     expect(s).toMatchObject({ pendingCount: 1, pendingSum: 1_200_000, approvedCount: 2, approvedSum: 3_450_000, rejectedCount: 1 });
     expect(s.latest[0].status).toBe('pending');
   });
+  it('tính theo THÁNG CỦA CHUYẾN ĐI (month/completedDate), không theo ngày lập phiếu', () => {
+    const s = summarizeCtp([
+      { status: 'approved', amount: 100, month: '10/2026', createdAt: '2026-09-30T10:00:00Z' },        // lập tháng 9 nhưng chuyến đi tháng 10 → tính
+      { status: 'approved', amount: 200, completedDate: '05/10/2026', createdAt: '2026-11-01T00:00:00Z' },
+      { status: 'approved', amount: 999, month: '09/2026', createdAt: '2026-10-02T00:00:00Z' },       // chuyến đi tháng 9 → không tính
+    ], '2026-10-28');
+    expect(s).toMatchObject({ approvedCount: 2, approvedSum: 300 });
+  });
   it('khoản không có ngày vẫn được tính', () => {
     expect(summarizeCtp([{ status: 'approved', amount: 10 }], '2026-10-28').approvedCount).toBe(1);
   });

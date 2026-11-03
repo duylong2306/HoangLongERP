@@ -270,7 +270,7 @@ describe('Khung chat — tự cuộn xuống cuối & ô nhập', () => {
       unreadMock.P7 = { count: 3, latest: [{ text: 'giao việc "Lắp tủ"', actorName: 'Lan' }, { text: 'nhận việc', actorName: 'Hùng' }] };
       try {
         mount({ canOpenProject: () => true });
-        expect((await screen.findByTestId('zalo-conv-activity')).textContent).toContain('3 mới');
+        expect((await screen.findByTestId('zalo-conv-activity')).textContent).toContain('3');
         fireEvent.click(document.querySelector('[data-conv="conv_project_P7"]') as HTMLElement);
         const bar = await screen.findByTestId('zalo-activity-bar');
         expect(bar.textContent).toContain('3 hoạt động mới'); expect(bar.textContent).toContain('Lan giao việc');

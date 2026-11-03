@@ -155,6 +155,8 @@ export interface Project {
   pmId: string; // Employee ID
   status: ProjectStatus;
   progress: number;
+  /** PM/Giám đốc ghi đè tiến độ (0–100). null/không có = tiến độ TỰ TÍNH theo cột + việc con (lib/projectProgress.ts). */
+  progressManual?: number | null;
   notes?: string;
   image?: string;
   documents?: ProjectDoc[]; // Bộ tài liệu hồ sơ dự án gồm: Báo giá, Hợp đồng, Nghiệm thu, Thanh lý

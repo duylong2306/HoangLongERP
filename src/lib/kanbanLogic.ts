@@ -17,6 +17,11 @@ export interface KanbanColumnAutomation {
   approvalRole?: string;
   tagToAdd?: string;
   progressVal?: number;
+  /** Khoảng % tiến độ của giai đoạn (cột) này — xem lib/projectProgress.ts. Chưa đặt thì chia đều các cột. */
+  progressFrom?: number;
+  progressTo?: number;
+  /** Cảnh báo "kẹt" khi dự án ở giai đoạn này quá bấy nhiêu ngày (không đặt = 30 ngày; 0 = tắt cảnh báo) — xem lib/projectAlerts.ts */
+  stuckDays?: number;
   subtaskTitle?: string;
   subtaskTitles?: string[];
   subtaskAutomations?: any[];

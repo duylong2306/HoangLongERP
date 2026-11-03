@@ -662,11 +662,12 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5"><b className={`truncate text-[14.5px] ${unread > 0 && !muted ? 'font-extrabold' : 'font-medium'}`}>{convName(c)}</b>
                       {categoryOf(c) === 'project' && <span className="text-[9.5px] font-extrabold text-blue-600 bg-blue-50 rounded px-1.5 py-px shrink-0">Dự án</span>}
-                      {(unreadAct[projectIdOfConversation(c) || '']?.count || 0) > 0 && <span className="text-[9.5px] font-extrabold text-red-600 bg-red-50 rounded px-1.5 py-px shrink-0" data-testid="zalo-conv-activity">🕘 {unreadAct[projectIdOfConversation(c) || ''].count} mới</span>}
                       <span className="ml-auto text-[11.5px] text-slate-500 shrink-0 flex items-center gap-1">{muted && <BellOff className="w-3 h-3" aria-label="Đã tắt thông báo" />}{listTime(c.lastMessageAt)}</span></span>
                     <span className="flex items-center gap-2"><span className={`truncate text-[13px] ${unread > 0 && !muted ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>{previewOf(c)}</span>
                       {/* Bên phải: số chưa đọc + ⭐ Quan tâm (thay cho biểu tượng ghim). Sao tô vàng = đã quan tâm; chưa quan tâm chỉ hiện mờ khi rê chuột (điện thoại luôn hiện mờ). Bấm sao KHÔNG mở hội thoại. */}
                       <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                        {/* Nhật ký dự án mới: đặt ở DÒNG DƯỚI (cạnh số chưa đọc) và chỉ hiện "🕘 số" để dòng tên hội thoại không bị chiếm chỗ, tên đọc được nhiều hơn. */}
+                        {(unreadAct[projectIdOfConversation(c) || '']?.count || 0) > 0 && <span className="text-[10px] font-extrabold text-red-600 bg-red-50 rounded px-1 py-px shrink-0" title="Nhật ký dự án có hoạt động mới" aria-label={`${unreadAct[projectIdOfConversation(c) || ''].count} hoạt động mới`} data-testid="zalo-conv-activity">🕘{unreadAct[projectIdOfConversation(c) || ''].count}</span>}
                         {unread > 0 && <span data-testid="zalo-unread" className={`shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold grid place-items-center ${muted ? 'bg-slate-400' : 'bg-red-500'}`}>{unread}</span>}
                         <span role="button" tabIndex={0} aria-label={starred ? 'Bỏ quan tâm' : 'Đánh dấu quan tâm'} aria-pressed={starred} title={starred ? 'Bỏ quan tâm' : 'Quan tâm'} data-testid={starred ? 'zalo-row-star' : 'zalo-row-star-off'}
                           onClick={e => { e.stopPropagation(); toggleStar(c.id); }}

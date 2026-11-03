@@ -10,6 +10,10 @@ import { buildMissionRows, inMissionView, sortMissions, MISSION_VIEW_LABEL, type
 import { buildProjectCosts, buildProjectCostItems, describeProjectCost, costBudgetFlags, type ProjectCost } from '../../lib/projectCost';
 import ProjectCostDetail from './ProjectCostDetail';
 import { dbService } from '../../lib/dbService';
+import { computeProjectProgress, columnsForProject, stageIdOf, buildPipeline } from '../../lib/projectProgress';
+import { useKanbanColumnsBySector } from '../../hooks/useKanbanColumnsBySector';
+import { useStageEntries } from '../../hooks/useStageEntries';
+import { buildProjectHealth, avgDaysInStage, ALERT_LABEL, type AlertKind } from '../../lib/projectAlerts';
 import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, usePager, fmtFull, fmtShort, dmy, tableHead, Th, type Tone } from './kit';
 
 interface Props {
@@ -56,6 +60,15 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
     const b = costBudgetFlags(f.contractValue, f.collected, c);
     return b.risk || (withNear && b.near);
   };
+  // ─── Tiến độ TỰ TÍNH theo giai đoạn (cột kanban) + việc con xong; PM ghi đè thì theo số của PM (lib/projectProgress.ts) ───
+  // Cả danh sách, thẻ "Tiến độ TB" lẫn file xuất đều dùng cùng 1 số này (trước đây đọc thẳng project.progress nên lệch với Tổng quan).
+  const colsBySector = useKanbanColumnsBySector();
+  const prog = useMemo(() => new Map(projects.map(p => [p.id, computeProjectProgress(p, tasks, columnsForProject(p, colsBySector))] as const)), [projects, tasks, colsBySector]);
+  const progOf = (id: string) => prog.get(id)?.value ?? 0;
+  // ─── Cảnh báo giai đoạn: kẹt (ở 1 cột quá lâu) / lệch (giai đoạn ≠ công việc) / chậm kế hoạch — lib/projectAlerts.ts ───
+  const stageEntries = useStageEntries();
+  const healthMap = useMemo(() => buildProjectHealth(projects, tasks, colsBySector, stageEntries, today), [projects, tasks, colsBySector, stageEntries, today]);
+  const alertCount = (k: AlertKind) => [...healthMap.values()].filter(h => h.alerts.some(a => a.kind === k)).length;
   const taskStats = useMemo(() => {
     const m = new Map<string, { open: number; overdue: number; todo: number; doing: number }>();
     for (const p of projects) {
@@ -67,9 +80,9 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
   }, [projects, tasks, today]);
 
   // ─── Bộ lọc công trình ───
-  const [q, setQ] = useState(''); const [type, setType] = useState('all'); const [status, setStatus] = useState('all'); const [pm, setPm] = useState('all'); const [health, setHealth] = useState('all');
-  const projectFilterActive = !!q || type !== 'all' || status !== 'all' || pm !== 'all' || health !== 'all';
-  const resetProjects = () => { setQ(''); setType('all'); setStatus('all'); setPm('all'); setHealth('all'); };
+  const [q, setQ] = useState(''); const [type, setType] = useState('all'); const [status, setStatus] = useState('all'); const [pm, setPm] = useState('all'); const [health, setHealth] = useState('all'); const [stage, setStage] = useState('all');   // stage = mã cột kanban (chỉ có nghĩa khi đã chọn Loại)
+  const projectFilterActive = !!q || type !== 'all' || status !== 'all' || pm !== 'all' || health !== 'all' || stage !== 'all';
+  const resetProjects = () => { setQ(''); setType('all'); setStatus('all'); setPm('all'); setHealth('all'); setStage('all'); };
 
   const filteredProjects = useMemo(() => projects.filter(p => {
     const f = fin.get(p.id), ts = taskStats.get(p.id);
@@ -77,23 +90,35 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
     if (type !== 'all' && (p.type || 'general') !== type) return false;
     if (status !== 'all' && p.status !== status) return false;
     if (pm !== 'all' && p.pmId !== pm) return false;
+    if (stage !== 'all' && stageIdOf(p as any, columnsForProject(p, colsBySector)) !== stage) return false;
     if (health === 'late' && !f?.flags.includes('late')) return false;
+    if ((health === 'stuck' || health === 'mismatch' || health === 'behind') && !healthMap.get(p.id)?.alerts.some(a => a.kind === health)) return false;
     if (health === 'overdueTasks' && !(ts && ts.overdue > 0)) return false;
     if (health === 'budget' && !(f && costRisk(p.id, true))) return false;
     return true;
-  }).sort((a, b) => (costs.get(b.id)?.total || 0) - (costs.get(a.id)?.total || 0)), [projects, fin, costs, taskStats, q, type, status, pm, health, employees, customers]);
+  }).sort((a, b) => (costs.get(b.id)?.total || 0) - (costs.get(a.id)?.total || 0)), [projects, fin, costs, taskStats, healthMap, q, type, status, pm, health, stage, colsBySector, employees, customers]);
 
-  const projectPager = usePager(filteredProjects, [q, type, status, pm, health].join('|'));
+  const projectPager = usePager(filteredProjects, [q, type, status, pm, health, stage].join('|'));
 
   // ─── Tổng quan (trên TOÀN BỘ công trình, không phụ thuộc bộ lọc) ───
   const active = projects.filter(p => p.status === 'processing' || p.status === 'new');
   const lateProjects = [...fin.values()].filter(r => r.flags.includes('late')).length;
   const budgetRisk = projects.filter(p => p.status !== 'cancelled' && costRisk(p.id, false)).length;
-  const avgProgress = active.length ? Math.round(active.reduce((s, p) => s + (p.progress || 0), 0) / active.length) : 0;
+  const avgProgress = active.length ? Math.round(active.reduce((s, p) => s + progOf(p.id), 0) / active.length) : 0;
   const byType = (['construction', 'furniture', 'mechanical', 'general'] as const).map(t => {
     const list = projects.filter(p => (p.type || 'general') === t && p.status !== 'cancelled');
     return { t, count: list.length, running: list.filter(p => p.status === 'processing' || p.status === 'new').length, value: list.reduce((s, p) => s + (p.contractValue || 0), 0) };
   });
+
+  // ─── Phễu giai đoạn: mỗi cột kanban của 1 lĩnh vực → số dự án, giá trị hợp đồng, tiến độ TB. Bấm 1 giai đoạn → lọc danh sách bên dưới ───
+  const funnelTypes = byType.filter(x => x.count > 0);
+  const [funnelPick, setFunnelPick] = useState<string>('');
+  const funnelType = funnelTypes.find(x => x.t === funnelPick)?.t || (type !== 'all' && funnelTypes.some(x => x.t === type) ? type : [...funnelTypes].sort((a, b) => b.count - a.count)[0]?.t) || '';
+  const funnelCols = useMemo(() => columnsForProject({ type: funnelType } as any, colsBySector), [funnelType, colsBySector]);
+  const funnel = useMemo(() => (funnelType ? buildPipeline(projects, tasks, funnelCols, funnelType) : []), [projects, tasks, funnelCols, funnelType]);
+  const funnelMax = Math.max(1, ...funnel.map(s => s.count));
+  // Danh sách giai đoạn cho ô lọc "Giai đoạn": chỉ khi đã chọn 1 Loại cụ thể (mỗi lĩnh vực có bộ cột riêng)
+  const stageOptions = type === 'all' ? [] : [{ value: 'all', label: 'Tất cả' }, ...columnsForProject({ type } as any, colsBySector).map(c => ({ value: c.id, label: c.name }))];
 
   // ─── Danh sách công việc ───
   const [tq, setTq] = useState(''); const [tProject, setTProject] = useState('all'); const [tView, setTView] = useState<TaskView>('all'); const [tAssignee, setTAssignee] = useState('all');
@@ -121,7 +146,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
   const costRows = useMemo(() => filteredProjects
     .filter(p => matchesQuery(cq, p.name, p.code) && (cShow === 'all' || (costs.get(p.id)?.total || 0) > 0))
     .map(p => ({ p, c: costs.get(p.id) as ProjectCost })), [filteredProjects, costs, cq, cShow]);
-  const costPager = usePager(costRows, [cq, cShow, q, type, status, pm, health].join('|'));
+  const costPager = usePager(costRows, [cq, cShow, q, type, status, pm, health, stage].join('|'));
   const costSum = useMemo(() => costRows.reduce((a, { c }) => ({
     material: a.material + c.material, warehouse: a.warehouse + c.warehouse, subcontract: a.subcontract + c.subcontract, site: a.site + c.site,
     other: a.other + c.other, pending: a.pending + c.pending, total: a.total + c.total, paid: a.paid + c.paid, remaining: a.remaining + c.remaining, cash: a.cash + c.cash,
@@ -147,7 +172,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
 
   const exportCsv = () => {
     const head = ['Mã', 'Công trình', 'Loại', 'Trạng thái', 'Trưởng dự án', 'Khách hàng', 'Tiến độ (%)', 'Kết thúc dự kiến', 'Giá trị hợp đồng', 'Đã thu', 'Tổng chi phí', 'Việc đang mở', 'Việc quá hạn'];
-    const body = filteredProjects.map(p => { const f = fin.get(p.id); const ts = taskStats.get(p.id); return [p.code, p.name, TYPE_LABEL[p.type || 'general'], STATUS_LABEL[p.status] || p.status, empName(p.pmId), custName(p.customerId), p.progress || 0, toDay(p.endDate), f?.contractValue || 0, f?.collected || 0, costs.get(p.id)?.total || 0, ts?.open || 0, ts?.overdue || 0]; });
+    const body = filteredProjects.map(p => { const f = fin.get(p.id); const ts = taskStats.get(p.id); return [p.code, p.name, TYPE_LABEL[p.type || 'general'], STATUS_LABEL[p.status] || p.status, empName(p.pmId), custName(p.customerId), progOf(p.id), toDay(p.endDate), f?.contractValue || 0, f?.collected || 0, costs.get(p.id)?.total || 0, ts?.open || 0, ts?.overdue || 0]; });
     const csv = [head, ...body].map(l => l.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `cong-trinh-${today}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
@@ -181,15 +206,52 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
         </div>
       </Card>
 
+      {/* Phễu giai đoạn dự án (theo cột kanban) */}
+      {funnelTypes.length > 0 && (
+        <Card title="Dự án theo giai đoạn" icon={<HardHat className="w-4 h-4 text-amber-500" />} id="director_pipeline">
+          <div className="flex flex-wrap gap-1.5 mb-3" role="tablist" aria-label="Lĩnh vực">
+            {funnelTypes.map(x => (
+              <button key={x.t} type="button" role="tab" aria-selected={funnelType === x.t} onClick={() => setFunnelPick(x.t)} data-testid="funnel-tab"
+                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${funnelType === x.t ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{TYPE_LABEL[x.t]} ({x.count})</button>))}
+          </div>
+          {/* Cảnh báo giai đoạn: bấm để lọc danh sách công trình bên dưới */}
+          <div className="flex flex-wrap gap-1.5 mb-3" data-testid="stage-alerts">
+            {(['stuck', 'mismatch', 'behind'] as const).map(k => (
+              <button key={k} type="button" onClick={() => { resetProjects(); setHealth(k); }} aria-pressed={health === k} data-testid={`alert-chip-${k}`}
+                className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${health === k ? 'bg-rose-50 border-rose-300 text-rose-800' : alertCount(k) ? 'bg-white border-rose-200 text-rose-700 hover:bg-rose-50' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{ALERT_LABEL[k]}: {alertCount(k)}</button>))}
+          </div>
+          <div className="space-y-1.5" data-testid="funnel">
+            {funnel.map(st => {
+              const on = type === funnelType && stage === st.id;
+              return (
+                <button key={st.id} type="button" disabled={st.count === 0} data-testid="funnel-stage" aria-pressed={on}
+                  onClick={() => { resetProjects(); setType(funnelType); setStage(st.id); }}
+                  className={`w-full text-left grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto] items-center gap-2.5 border rounded-xl px-3 py-2 transition-colors ${on ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'} ${st.count ? 'cursor-pointer hover:bg-amber-50/40' : 'opacity-60 cursor-default'}`}>
+                  <span className="text-[11px] font-black text-slate-700 truncate"><span className="text-slate-400 font-mono mr-1">{st.index + 1}</span>{st.name}</span>
+                  <span className="min-w-0"><Bar pct={(st.count / funnelMax) * 100} tone="amber" h="h-2" /></span>
+                  <span className="text-right whitespace-nowrap"><b className="text-[12px] text-slate-800" data-testid="funnel-count">{st.count}</b><span className="text-[10.5px] text-slate-500"> dự án{st.count ? ` · ${fmtShort(st.value)} · TB ${st.avgProgress}%` : ''}</span>
+                    {st.count > 0 && (() => {
+                      const avg = avgDaysInStage(st.projectIds, healthMap);
+                      const stuck = st.projectIds.filter(id => healthMap.get(id)?.alerts.some(a => a.kind === 'stuck')).length;
+                      return <span className="block text-[10.5px] text-slate-500" data-testid="funnel-dwell">{avg === null ? 'Chưa rõ thời gian ở giai đoạn' : `Ở giai đoạn TB ${avg} ngày`}{stuck > 0 && <b className="text-rose-600"> · {stuck} kẹt</b>}</span>;
+                    })()}
+                  </span>
+                </button>);
+            })}
+          </div>
+          <p className="text-[10.5px] text-slate-400 mt-2">Mỗi dòng là 1 cột kanban. Bấm vào giai đoạn để xem các công trình trong đó ở danh sách bên dưới. Dự án đã hoàn thành tính vào cột cuối. Số ngày ở giai đoạn tính từ lần chuyển cột gần nhất trong nhật ký dự án; dự án chưa chuyển cột kể từ khi có nhật ký thì chưa rõ. Số ngày cho phép (cảnh báo kẹt) đặt ở cài đặt từng cột Kanban.</p>
+        </Card>)}
+
       {/* Danh sách công trình */}
       <Card title="Danh sách công trình" icon={<HardHat className="w-4 h-4 text-indigo-500" />}
         right={<button type="button" onClick={exportCsv} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer"><FileDown className="w-3.5 h-3.5" />Xuất Excel (CSV)</button>}>
         <FilterBar onReset={resetProjects} active={projectFilterActive}>
           <SearchBox value={q} onChange={setQ} placeholder="Tên, mã, trưởng dự án, khách hàng, địa chỉ…" />
-          <SelectBox label="Loại" value={type} onChange={setType} options={[{ value: 'all', label: 'Tất cả' }, ...Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))]} />
+          <SelectBox label="Loại" value={type} onChange={v => { setType(v); setStage('all'); }} options={[{ value: 'all', label: 'Tất cả' }, ...Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))]} />
           <SelectBox label="Trạng thái" value={status} onChange={setStatus} options={[{ value: 'all', label: 'Tất cả' }, ...Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))]} />
+          {stageOptions.length > 0 && <SelectBox label="Giai đoạn" value={stage} onChange={setStage} options={stageOptions} />}
           <SelectBox label="Trưởng dự án" value={pm} onChange={setPm} options={pmOptions} />
-          <SelectBox label="Tình trạng" value={health} onChange={setHealth} options={[{ value: 'all', label: 'Tất cả' }, { value: 'late', label: 'Trễ tiến độ' }, { value: 'overdueTasks', label: 'Có việc quá hạn' }, { value: 'budget', label: 'Chi vượt / sắp hết ngân sách' }]} />
+          <SelectBox label="Tình trạng" value={health} onChange={setHealth} options={[{ value: 'all', label: 'Tất cả' }, { value: 'late', label: 'Trễ tiến độ' }, { value: 'stuck', label: 'Kẹt giai đoạn' }, { value: 'mismatch', label: 'Lệch giai đoạn' }, { value: 'behind', label: 'Chậm kế hoạch' }, { value: 'overdueTasks', label: 'Có việc quá hạn' }, { value: 'budget', label: 'Chi vượt / sắp hết ngân sách' }]} />
         </FilterBar>
         {filteredProjects.length === 0 ? <Empty>Không có công trình nào khớp bộ lọc.</Empty> : (
           <div className="overflow-x-auto">
@@ -204,13 +266,13 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                     <tr key={p.id} onClick={() => onNavigateTab(projectTab(p))} className="border-b border-slate-100 hover:bg-amber-50/40 cursor-pointer transition-colors">
                       <td className="px-3 py-2.5"><div className="font-bold text-slate-800">{p.name}</div><div className="text-[10px] text-slate-400 font-mono">{p.code} · {TYPE_LABEL[p.type || 'general']} · {custName(p.customerId)}</div></td>
                       <td className="px-3 py-2.5 text-slate-700">{empName(p.pmId)}</td>
-                      <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={p.progress || 0} tone={f?.flags.includes('late') ? 'amber' : 'emerald'} /><b className="text-[10.5px] w-9 text-right">{p.progress || 0}%</b></div></td>
+                      <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={progOf(p.id)} tone={f?.flags.includes('late') ? 'amber' : 'emerald'} /><b className="text-[10.5px] w-9 text-right">{progOf(p.id)}%</b></div>{prog.get(p.id)?.stage && <div className="text-[10px] text-slate-500 truncate" data-testid="row-stage">{prog.get(p.id)!.source === 'completed' ? 'Hoàn thành' : prog.get(p.id)!.stage.name}{prog.get(p.id)!.source === 'manual' ? ' · PM nhập tay' : ''}</div>}</td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{dmy(toDay(p.endDate))}{f?.flags.includes('late') && <span className="block"><Badge tone="rose">Trễ tiến độ</Badge></span>}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(f?.contractValue || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(f?.collected || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-800 font-bold" title={costs.get(p.id) ? describeProjectCost(costs.get(p.id) as ProjectCost, fmtFull) : ''} data-testid="total-cost"><button type="button" onClick={e => { e.stopPropagation(); setCostDetailId(p.id); }} className="font-mono font-bold text-slate-800 underline decoration-dotted underline-offset-4 hover:text-blue-700 cursor-pointer" data-testid="open-cost-detail" title="Xem chi tiết các khoản chi">{fmtFull(costs.get(p.id)?.total || 0)}</button>{costRisk(p.id, false) && <span className="block"><Badge tone="rose">Cần xem ngân sách</Badge></span>}</td>
                       <td className="px-3 py-2.5 text-right">{ts?.open || 0}{(ts?.overdue || 0) > 0 && <span className="text-rose-600 font-bold"> / {ts?.overdue}</span>}</td>
-                      <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[p.status] || 'slate'}>{STATUS_LABEL[p.status] || p.status}</Badge></td>
+                      <td className="px-3 py-2.5"><Badge tone={STATUS_TONE[p.status] || 'slate'}>{STATUS_LABEL[p.status] || p.status}</Badge>{healthMap.get(p.id)?.alerts.map(a => <span key={a.kind} className="block mt-0.5" title={a.text} data-testid="row-alert"><Badge tone={a.kind === 'stuck' ? 'rose' : 'amber'}>{ALERT_LABEL[a.kind]}</Badge></span>)}</td>
                     </tr>
                   );
                 })}

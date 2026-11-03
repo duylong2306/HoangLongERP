@@ -32,7 +32,8 @@ const Bar = ({ pct, tone = 'blue' }: { pct: number; tone?: 'blue' | 'ok' | 'warn
 export interface TodoItem { id: string; icon: string; title: string; sub: string; pill: string; tone: Tone; taskId?: string; goTab?: string; /** mở chi tiết ngày này (báo cáo lỗi chấm công) */ dayDate?: string }
 /** Ngày có lỗi chấm công cần báo cáo (thiếu chấm vào/ra ca) */
 export interface ReportDay { date: string; label: string }
-export interface ProjectItem { id: string; name: string; progress: number; newCount: number }
+// stage = giai đoạn (cột kanban) hiện tại của dự án; manual = PM đang ghi đè tiến độ; done/totalTasks = việc con đã xong / tổng
+export interface ProjectItem { id: string; name: string; progress: number; newCount: number; stage?: { name: string; index: number; total: number }; manual?: boolean; done?: number; totalTasks?: number; alerts?: string[] }
 export interface OverviewHomeData {
   user: { name: string; roleLabel: string };
   todayLabel: string;                // "Thứ Tư, 28/10"
@@ -256,7 +257,23 @@ export default function OverviewHome({ d, a }: { d: OverviewHomeData; a: Overvie
               {d.projects.map(p => (
                 <div key={p.id} className="flex items-center gap-2.5 py-2 border-t first:border-t-0 border-slate-100" data-testid="project-item">
                   <span className="w-9 h-9 rounded-xl bg-blue-50 grid place-items-center text-base shrink-0">🏗️</span>
-                  <span className="flex-1 min-w-0"><b className="block text-[13px] leading-tight truncate">{p.name}</b><small className="text-[11.5px] text-slate-500">Tiến độ {Math.round(p.progress)}%</small><Bar pct={p.progress} /></span>
+                  <span className="flex-1 min-w-0">
+                    <b className="block text-[13px] leading-tight truncate">{p.name}</b>
+                    {/* Giai đoạn hiện tại: thanh bước (mỗi bước = 1 cột kanban; bước đã qua + bước hiện tại tô xanh) */}
+                    {p.stage && (
+                      <span className="flex items-center gap-1.5 mt-0.5" data-testid="project-stage">
+                        <span className="flex gap-[2px] shrink-0" aria-hidden="true">
+                          {Array.from({ length: p.stage.total }, (_, i) => <i key={i} className={`block h-1.5 w-3 rounded-sm ${i <= p.stage!.index ? 'bg-[#0d47c9]' : 'bg-slate-200'}`} />)}
+                        </span>
+                        <small className="text-[11px] font-bold text-[#0d47c9] truncate">{p.stage.name}</small>
+                      </span>)}
+                    <small className="text-[11.5px] text-slate-500 block" data-testid="project-progress">
+                      Tiến độ {Math.round(p.progress)}%{p.manual ? ' · PM nhập tay' : ''}{p.totalTasks ? ` · ${p.done ?? 0}/${p.totalTasks} việc` : ''}
+                    </small>
+                    <Bar pct={p.progress} />
+                    {/* Cảnh báo giai đoạn: kẹt quá lâu / việc & giai đoạn không khớp / chậm so với kế hoạch */}
+                    {p.alerts?.map((t, i) => <small key={i} className="block text-[11px] font-bold text-rose-600 mt-0.5" data-testid="project-alert">⚠ {t}</small>)}
+                  </span>
                   {p.newCount > 0 && <Pill tone="ok">{p.newCount} mới</Pill>}
                 </div>))}
             </Card>)}

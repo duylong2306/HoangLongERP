@@ -273,3 +273,20 @@ export async function loadAllProjectEvents(projectId: string, opts: { taskId?: s
   }
   return { ok: true, rows: all };
 }
+
+/**
+ * Ngày vào giai đoạn HIỆN TẠI của mọi dự án: lấy từ sự kiện "Giai đoạn dự án …" gần nhất trong nhật ký (do bảng Kanban ghi mỗi lần đổi cột).
+ * Trả về Map(mã dự án → thời điểm ISO). Dự án chưa từng đổi cột từ khi có nhật ký (hoặc chưa chạy migration nhật ký) thì không có trong Map.
+ */
+export async function loadStageEntries(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  try {
+    const supabase = getSupabase();
+    if (!supabase || tableMissing) return out;
+    const { data, error } = await supabase.from('project_events').select('project_id, created_at')
+      .eq('obj_kind', 'project').like('text', 'Giai đoạn dự án%').order('created_at', { ascending: false }).limit(5000);
+    if (error) { if (isMissingTable(error)) tableMissing = true; return out; }
+    for (const r of data || []) if (r.project_id && !out.has(r.project_id)) out.set(r.project_id, r.created_at);   // sắp mới → cũ: lần đầu gặp = gần nhất
+  } catch { /* không có nhật ký thì không có số ngày — không làm hỏng màn hình */ }
+  return out;
+}

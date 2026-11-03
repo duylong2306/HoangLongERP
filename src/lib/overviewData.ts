@@ -189,12 +189,23 @@ export const fmtDM = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? `${s.s
 export const fmtLeaveRange = (l: { fromDate: string; toDate: string }) => (l.toDate && l.toDate !== l.fromDate ? `${fmtDM(l.fromDate)} – ${fmtDM(l.toDate)}` : fmtDM(l.fromDate));
 
 // ───────────── Công tác phí ─────────────
-export interface CtpLike { status?: string; amount?: number; code?: string; id?: string; content?: string; missionName?: string; date?: string; createdAt?: string }
+export interface CtpLike { status?: string; amount?: number; code?: string; id?: string; content?: string; missionName?: string; date?: string; createdAt?: string; month?: string; completedDate?: string }
 export interface CtpSummary { pendingCount: number; pendingSum: number; approvedCount: number; approvedSum: number; rejectedCount: number; latest: CtpLike[] }
 /** Công tác phí của tôi: chờ duyệt (mọi thời gian), đã duyệt và từ chối trong THÁNG này nếu khoản có ngày (không có ngày thì tính). */
 export function summarizeCtp(list: CtpLike[], today: string): CtpSummary {
   const ym = today.slice(0, 7);
-  const inMonth = (c: CtpLike) => { const d = String(c.date || c.createdAt || ''); return !d || d.startsWith(ym) || /^\d{2}\/\d{2}\/\d{4}$/.test(d) && d.slice(6) + '-' + d.slice(3, 5) === ym; };
+  // Tháng của khoản CTP (dạng YYYY-MM), ưu tiên TRƯỜNG THẬT do màn hình lập CTP ghi: `month` ("MM/YYYY" — tháng của chuyến đi, cũng là
+  // tháng tính lương) rồi `completedDate` ("DD/MM/YYYY"). Trước đây chỉ xem `date`/`createdAt` (ngày LẬP phiếu) nên khoản của chuyến đi
+  // tháng này nhưng lập ở tháng khác bị loại khỏi "Đã duyệt", nhìn như chưa hiển thị công tác phí được hưởng.
+  const monthKey = (c: CtpLike): string => {
+    const m = String(c.month || '').match(/^(\d{1,2})\/(\d{4})$/);
+    if (m) return `${m[2]}-${m[1].padStart(2, '0')}`;
+    const d = String(c.completedDate || c.date || c.createdAt || '');
+    const dmy = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}`;
+    return d.slice(0, 7);   // ISO: YYYY-MM-DD…
+  };
+  const inMonth = (c: CtpLike) => { const k = monthKey(c); return !k || k === ym; };
   const sum = (a: CtpLike[]) => a.reduce((s, c) => s + Number(c.amount || 0), 0);
   const pending = list.filter(c => c.status === 'pending');
   const approved = list.filter(c => (c.status === 'approved' || c.status === 'completed') && inMonth(c));

@@ -1,6 +1,10 @@
 import { isPaymentProposedBy } from '../lib/approvalInbox';
 import * as MT from '../lib/messageTemplates';
 import { isTravelExpenseBeneficiary } from '../lib/ctpOwnership';
+import { computeProjectProgress, columnsForProject } from '../lib/projectProgress';
+import { useKanbanColumnsBySector } from '../hooks/useKanbanColumnsBySector';
+import { useStageEntries } from '../hooks/useStageEntries';
+import { buildProjectHealth } from '../lib/projectAlerts';
 import { findUniqueEmployeeByName } from '../lib/employeeLookup';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Project, Task, Receipt, Payment, Quote, SubcontractorAdvanceProposal, SystemConfig } from '../types';
@@ -120,16 +124,17 @@ export default function DashboardOverview({
   const isAccountant = currentUser ? isRoleAccounting(currentUser.id) : false;
   const isPM = currentUser ? isRoleOffice(currentUser.id) : false;
 
+  // ⚠️ Chỉ tính việc ĐANG ở trạng thái "Chờ duyệt" (reviewing). Trước đây còn tính mọi việc có bước duyệt tồn dư 'pending' dù việc đã
+  // hoàn thành / đang làm → Tổng quan hiện "Duyệt: …" cho việc thực tế không còn chờ ai duyệt (sai so với "Việc của tôi" và thanh trạng thái).
   const needingApprovalTasks = tasks.filter(t => {
-    if (isAdmin || isAccountant) {
-      return t.status === 'reviewing' || t.approvals?.some(a => a.status === 'pending');
-    }
+    if (t.status !== 'reviewing') return false;
+    if (isAdmin || isAccountant) return true;
+    const isPendingApprover = t.approvals?.some(a => a.approverId === currentUser.id && a.status === 'pending');
     if (isPM) {
       const isProjectPM = projects.find(p => p.id === t.projectId)?.pmId === currentUser.id;
-      const isPendingApprover = t.approvals?.some(a => a.approverId === currentUser.id && a.status === 'pending');
-      return (t.status === 'reviewing' && isProjectPM) || isPendingApprover;
+      return isProjectPM || isPendingApprover;
     }
-    return t.approvals?.some(a => a.approverId === currentUser.id && a.status === 'pending');
+    return isPendingApprover;
   });
 
   // 1.2 Công việc cần làm (My Tasks to do)
@@ -2419,6 +2424,8 @@ export default function DashboardOverview({
   }, [isAdmin, todayVal]);
 
   const taskSum = summarizeTasks(tasks as any[], empId, todayVal);
+  const kanbanColsBySector = useKanbanColumnsBySector();
+  const stageEntries = useStageEntries();
   const myProjList = myProjects(projects as any[], tasks as any[], empId, 3);
   const myProjKey = myProjList.map(p => p.id).join(',');
   // Số hoạt động mới trong Nhật ký của từng dự án (cùng nguồn với chấm đỏ ở Tin nhắn)
@@ -2505,7 +2512,13 @@ export default function DashboardOverview({
       leaves: summarizeLeaves(dashLeaves as any[], { id: empId, name: currentUser.name }, todayVal, isRealLeaveType),
       ctp: summarizeCtp((travelExpensesSummary || []).filter((item: any) => isTravelExpenseBeneficiary(item, currentUser)), todayVal),
       advance: summarizeAdvances(advanceList, empId, todayVal),
-      projects: myProjList.map(pr => ({ id: pr.id, name: pr.name, progress: Number(pr.progress || 0), newCount: projectNew[pr.id] || 0 })),
+      // Tiến độ TỰ TÍNH theo giai đoạn (cột kanban) + việc con xong; PM ghi đè thì hiện số của PM (lib/projectProgress.ts)
+      projects: myProjList.map(pr => {
+        const pg = computeProjectProgress(pr as any, tasks as any[], columnsForProject(pr as any, kanbanColsBySector));
+        // Cảnh báo giai đoạn (kẹt / lệch / chậm kế hoạch) của riêng dự án này — lib/projectAlerts.ts
+        const alerts = (buildProjectHealth([pr as any], tasks as any[], kanbanColsBySector, stageEntries, todayVal).get(pr.id)?.alerts || []).map(a => a.text);
+        return { alerts, id: pr.id, name: pr.name, progress: pg.value, newCount: projectNew[pr.id] || 0, stage: { name: pg.stage.name, index: pg.stage.index, total: pg.stage.total }, manual: pg.source === 'manual', done: pg.done, totalTasks: pg.total };
+      }),
       company,
     };
   })();

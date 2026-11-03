@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
-const S = vi.hoisted(() => ({ saved: [] as any[], employees: [] as any[], attendance: [] as any[], leaves: [] as any[], errors: [] as any[], advances: [] as any[], admin: false, now: new Date(2026, 9, 28, 7, 40, 19)   /* 07:40 giờ máy: trong khung vào ca sáng mặc định (07:15–07:45); dựng theo giờ máy để không phụ thuộc múi giờ */ }));
+const S = vi.hoisted(() => ({ stage: new Map<string, string>(), saved: [] as any[], employees: [] as any[], attendance: [] as any[], leaves: [] as any[], errors: [] as any[], advances: [] as any[], admin: false, now: new Date(2026, 9, 28, 7, 40, 19)   /* 07:40 giờ máy: trong khung vào ca sáng mặc định (07:15–07:45); dựng theo giờ máy để không phụ thuộc múi giờ */ }));
 // CSDL giả: mọi bảng trả về mảng rỗng, riêng các bảng tổng quan cần dùng
 vi.mock('../../lib/dbService', () => {
   const rows: Record<string, () => any[]> = { employees: () => S.employees, attendance: () => S.attendance, hrmLeaves: () => S.leaves, hrmEmployeeErrors: () => S.errors, subcontractorAdvances: () => S.advances };
@@ -18,6 +18,7 @@ vi.mock('../../context', () => ({
   useNotification: () => ({ addToast: vi.fn() }), isUserInRoleGroup: () => false, loadHrmRoleGroups: () => [], getConfiguredApprover: () => null, getConfiguredApprovers: () => [],
   isRoleAdmin: () => S.admin, isRoleAccounting: () => false, isRoleOffice: () => false,
 }));
+vi.mock('../../lib/projectEvents', async (orig) => ({ ...(await orig<any>()), loadStageEntries: async () => S.stage }));
 vi.mock('../../lib/projectEventReads', () => ({ loadUnreadSummary: vi.fn(async () => ({ p1: { count: 2, latest: [] } })) }));
 import DashboardOverview from '../DashboardOverview';
 
@@ -64,6 +65,47 @@ describe('Tổng quan kiểu mới', () => {
     expect(seen).toEqual([{ taskId: 't1' }]);
   });
 
+  it('"Duyệt:" chỉ hiện cho việc ĐANG chờ duyệt; việc đã hoàn thành/đang làm còn bước duyệt tồn dư KHÔNG hiện', async () => {
+    S.admin = true;
+    const pend = [{ id: 'a1', levelName: 'Cấp 1', approverId: 'u1', status: 'pending' }];
+    mount({ tasks: [
+      { id: 'r1', name: 'Việc đang chờ duyệt', status: 'reviewing', deadline: '2026-11-05', assigneeId: 'u9', projectId: 'p1', approvals: pend },
+      { id: 'r2', name: 'Việc đã xong còn bước duyệt cũ', status: 'completed', deadline: '2026-10-20', assigneeId: 'u9', projectId: 'p1', approvals: pend },
+      { id: 'r3', name: 'Việc đang làm còn bước duyệt cũ', status: 'doing', deadline: '2026-11-05', assigneeId: 'u9', projectId: 'p1', approvals: pend },
+    ] });
+    const items = await screen.findAllByTestId('todo-item');
+    const text = items.map(i => i.textContent).join('|');
+    expect(text).toContain('Duyệt: Việc đang chờ duyệt');
+    expect(text).not.toContain('Việc đã xong còn bước duyệt cũ');
+    expect(text).not.toContain('Việc đang làm còn bước duyệt cũ');
+    S.admin = false;
+  });
+
+  it('dự án của tôi: hiện giai đoạn (cột kanban), tiến độ tự tính theo việc con xong; PM ghi đè thì hiện số của PM', async () => {
+    // Cột mặc định: dự án chưa có cột → cột đầu "YÊU CẦU THIẾT KẾ" (0–17%); 1/3 việc xong → 0 + 17×1/3 ≈ 6%
+    mount();
+    const stage = await screen.findByTestId('project-stage');
+    expect(stage.textContent).toContain('YÊU CẦU THIẾT KẾ');
+    expect(screen.getByTestId('project-progress').textContent).toContain('Tiến độ 6%');
+    expect(screen.getByTestId('project-progress').textContent).toContain('1/3 việc');
+  });
+  it('dự án có PM ghi đè → hiện số ghi đè kèm chú thích', async () => {
+    mount({ projects: [{ ...projects[0], progressManual: 85 }] });
+    const t = (await screen.findByTestId('project-progress')).textContent!;
+    expect(t).toContain('Tiến độ 85%'); expect(t).toContain('PM nhập tay');
+  });
+
+  it('dự án của tôi: ở 1 giai đoạn quá lâu → hiện cảnh báo kẹt; chưa rõ ngày vào giai đoạn → không cảnh báo', async () => {
+    S.stage = new Map([['p1', '2026-09-01T03:00:00Z']]);   // cột đầu "YÊU CẦU THIẾT KẾ" từ 01/09 → 57 ngày > 30
+    mount();
+    expect((await screen.findByTestId('project-alert')).textContent).toContain('Kẹt 57 ngày');
+    S.stage = new Map();
+  });
+  it('dự án của tôi: chưa rõ ngày vào giai đoạn → không có cảnh báo', async () => {
+    mount();
+    await screen.findByTestId('project-stage');
+    expect(screen.queryByTestId('project-alert')).toBeNull();
+  });
   it('hiệu suất: tỷ lệ hoàn thành việc trong tháng (1/3 việc có hạn trong tháng 10 đã xong → 33%)', async () => {
     mount();
     await screen.findByTestId('ov-perf');

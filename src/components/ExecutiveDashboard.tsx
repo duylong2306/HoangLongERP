@@ -15,6 +15,8 @@ import {
   materialByDay, proposalStatusCounts, supplierPayable, summarizeAttendance, buildAlerts, type ProjectFinanceRow,
 } from '../lib/executiveDashboard';
 import MiniLoader from './MiniLoader';
+import { computeProjectProgress, columnsForProject } from '../lib/projectProgress';
+import { useKanbanColumnsBySector } from '../hooks/useKanbanColumnsBySector';
 
 interface ExecutiveDashboardProps {
   projects: Project[];
@@ -166,6 +168,9 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
   const empName = useCallback((id?: string) => employees.find(e => e.id === id)?.name || '—', [employees]);
   const projName = useCallback((id?: string) => projects.find(p => p.id === id)?.name || '', [projects]);
   const buckets = useMemo(() => bucketTasks(tasks, today), [tasks, today]);
+  // Tiến độ công trình: tự tính theo giai đoạn (cột kanban) + việc con xong, PM ghi đè thì theo PM — cùng số với Tổng quan và Phòng Dự Án
+  const colsBySector = useKanbanColumnsBySector();
+  const progressOf = (p: Project) => computeProjectProgress(p, tasks, columnsForProject(p, colsBySector)).value;
   const rows = useMemo(() => buildProjectFinance(projects, receipts, payments, today), [projects, receipts, payments, today]);
   const totals = useMemo(() => sumFinance(rows), [rows]);
   const flow = useMemo(() => cashflowByDay(receipts, payments, today, 14), [receipts, payments, today]);
@@ -287,7 +292,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
                   <tr key={r.project.id} onClick={() => onNavigateTab(projectTab(r.project))} className="border-b border-slate-100 hover:bg-amber-50/40 cursor-pointer transition-colors">
                     <td className="px-3 py-2.5">
                       <div className="font-bold text-slate-800">{r.project.name}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">{r.project.code} · tiến độ {r.project.progress || 0}%</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{r.project.code} · tiến độ {progressOf(r.project)}%</div>
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono text-slate-700">{fmtFull(r.contractValue)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-emerald-600">{fmtFull(r.collected)}</td>

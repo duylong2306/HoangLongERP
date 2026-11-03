@@ -5,6 +5,8 @@ import { postProjectNotice } from '../lib/projectNotice';
 import { exportProjectLogExcel } from '../lib/projectEventsExport';
 import ProjectActivityModal from './ProjectActivityModal';
 import { Project, ProjectStatus, Customer, Employee, Task, TaskUpdatePayload, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
+import ProjectProgressCard from './kanban/ProjectProgressCard';
+import { computeProjectProgress } from '../lib/projectProgress';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, ensureColumnsHaveAutomationDefaults, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
 import {
@@ -1755,20 +1757,28 @@ export default function ProjectKanbanBoard({
 
   // saveColumnSettings() → Lưu cài đặt cột đang edit (dùng các reducer từ kanbanLogic)
   // Nhận giá trị trực tiếp từ modal để tránh race condition với React setState
-  const saveColumnSettings = (edits: { name: string; color: string; ruleType: string; ruleParam: string }) => {
+  const saveColumnSettings = (edits: { name: string; color: string; ruleType: string; ruleParam: string; progressFrom?: string; progressTo?: string; stuckDays?: string }) => {
     if (!editingColumnId || !edits.name.trim()) return;
+
+    // Số tùy chọn: để trống → bỏ cấu hình (về mặc định); có số → kẹp vào miền hợp lệ
+    const optNum = (v: string | undefined, min: number, max: number): number | undefined => {
+      if (v === undefined || String(v).trim() === '') return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : undefined;
+    };
+    const from = optNum(edits.progressFrom, 0, 100);
+    let to = optNum(edits.progressTo, 0, 100);
+    if (from !== undefined && to !== undefined && to < from) to = from;
 
     const updated = columns.map(c => {
       if (c.id === editingColumnId) {
-        return {
-          ...c,
-          name: edits.name.toUpperCase(),
-          color: edits.color,
-          automation: {
-            type: edits.ruleType as any,
-            param: edits.ruleType === 'auto_progress' ? Number(edits.ruleParam) : edits.ruleParam
-          }
-        };
+        // ⚠️ Giữ nguyên các thiết lập tự động khác của cột (trạng thái, kiểu chữ, khoảng tiến độ…) — chỉ ghi đè loại/tham số quy tắc.
+        const automation: any = { ...(c.automation || {}), type: edits.ruleType as any, param: edits.ruleType === 'auto_progress' ? Number(edits.ruleParam) : edits.ruleParam };
+        const stuck = optNum(edits.stuckDays, 0, 3650);
+        if (from === undefined) delete automation.progressFrom; else automation.progressFrom = from;
+        if (to === undefined) delete automation.progressTo; else automation.progressTo = to;
+        if (stuck === undefined) delete automation.stuckDays; else automation.stuckDays = stuck;
+        return { ...c, name: edits.name.toUpperCase(), color: edits.color, automation };
       }
       return c;
     });
@@ -1914,6 +1924,9 @@ export default function ProjectKanbanBoard({
   
   // Track open menu for subtask cards
   const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
+  // Vị trí menu "⋮" của công việc con (tọa độ màn hình). Menu vẽ dạng `fixed` theo nút bấm để KHÔNG bị khung cuộn của danh sách
+  // cắt mất (trên điện thoại, hàng cuối/hàng gần đáy làm menu "Sửa công việc" bị khuất nên không bấm được). Gần đáy màn hình thì bật lên phía trên.
+  const [taskMenuPos, setTaskMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
 
   // ===========================================================================
   // CÁC HÀM QUẢN LÝ CÔNG VIỆC CON (Subtask)
@@ -3515,6 +3528,26 @@ export default function ProjectKanbanBoard({
               {/* Left major side detail (7 columns width analog) */}
               <div className={`flex-1 p-4 md:p-5 space-y-6 overflow-y-auto h-full border-b lg:border-b-0 lg:border-r border-slate-800 ${mobileTab === 'info' ? '' : 'max-lg:hidden'}`} id="drawer_left_pane">
                 
+                {/* 0. Tiến độ dự án: tự tính theo giai đoạn (cột kanban) + việc con xong; PM/người có quyền sửa thông tin được ghi đè */}
+                <ProjectProgressCard
+                  progress={computeProjectProgress(selectedProject, tasks, columns)}
+                  canEdit={canOn('editProjectInfo', selectedProject)}
+                  onSave={async (value) => {
+                    const before = computeProjectProgress(selectedProject, tasks, columns);
+                    try {
+                      await notifyProjectChatAfterSave(
+                        onUpdateProject(selectedProject.id, { progressManual: value } as any),
+                        value === null
+                          ? `📊 ${selectedProject.name}: bỏ ghi đè tiến độ — về tự tính (${before.auto}%)`
+                          : `📊 ${selectedProject.name}: PM ghi đè tiến độ ${before.value}% → ${value}% (tự tính: ${before.auto}%)`
+                      );
+                      addToast({ title: '✅ Thành công', message: value === null ? 'Đã về chế độ tự tính tiến độ.' : `Đã ghi đè tiến độ ${value}%.`, type: 'success' });
+                    } catch {
+                      addToast({ title: 'Không lưu được', message: 'Chưa lưu được tiến độ ghi đè. Vui lòng thử lại.', type: 'error' });
+                    }
+                  }}
+                />
+
                 {/* 1. Basic detail card */}
                 <div className="bg-slate-950 border border-slate-850 p-5 rounded-2xl space-y-4">
                   <span className="font-extrabold text-[11px] text-emerald-400 flex items-center gap-1 uppercase tracking-wide border-b border-slate-900 pb-2">
@@ -5085,6 +5118,10 @@ export default function ProjectKanbanBoard({
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      const r = e.currentTarget.getBoundingClientRect();
+                                      const right = Math.max(8, window.innerWidth - r.right);
+                                      // Dưới nút còn < 130px (menu cao ~90px) → mở lên phía trên nút
+                                      setTaskMenuPos(window.innerHeight - r.bottom < 130 ? { bottom: window.innerHeight - r.top + 6, right } : { top: r.bottom + 6, right });
                                       setOpenMenuTaskId(openMenuTaskId === task.id ? null : task.id);
                                     }}
                                     className="p-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-300 rounded border border-slate-800 transition duration-150 cursor-pointer flex items-center justify-center"
@@ -5103,7 +5140,8 @@ export default function ProjectKanbanBoard({
                                         }}
                                       />
                                       <div 
-                                        className="absolute right-0 top-full mt-1.5 z-[90] bg-slate-900 border border-slate-800/95 rounded-xl p-1.5 w-40 shadow-2xl space-y-1 text-left"
+                                        className="fixed z-[90] bg-slate-900 border border-slate-800/95 rounded-xl p-1.5 w-40 shadow-2xl space-y-1 text-left"
+                                        style={taskMenuPos ?? { top: 0, right: 8 }}
                                         onClick={(e) => e.stopPropagation()}
                                       >
                                         {canOn('editTask', selectedProject, task) && (

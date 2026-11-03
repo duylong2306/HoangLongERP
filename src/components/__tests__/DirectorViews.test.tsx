@@ -108,6 +108,39 @@ describe('Phòng Dự Án — Tổng chi phí / Còn phải chi / bảng Chi ph�
   });
 });
 
+describe('Phòng Dự Án — phễu giai đoạn (cột kanban) & tiến độ tự tính', () => {
+  const P = (id: string, name: string, col: string, o: any = {}) => ({ id, code: id, name, type: 'construction', status: 'processing', contractValue: 1_000_000, progress: 99, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1', kanbanColumnId: col, ...o }) as any;
+  const projects = [P('A', 'Công trình A', 'col_active'), P('B', 'Công trình B', 'col_active'), P('C', 'Công trình C', 'col_design')];
+  const tasks = [{ id: 't1', name: 'v1', projectId: 'A', status: 'completed', deadline: '2026-10-20' }, { id: 't2', name: 'v2', projectId: 'A', status: 'doing', deadline: '2026-10-20' }] as any;
+  const open = () => render(<ProjectsView projects={projects} tasks={tasks} receipts={[]} payments={[]} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={vi.fn()} />);
+  const rowNames = () => screen.getAllByTestId('total-cost').map(td => td.closest('tr')!.querySelector('td')!.textContent);
+
+  it('phễu liệt kê đủ 7 cột kanban với số dự án mỗi cột', () => {
+    open();
+    const stages = screen.getAllByTestId('funnel-stage');
+    expect(stages).toHaveLength(7);
+    const count = (name: string) => within(stages.find(s => s.textContent!.includes(name))!).getByTestId('funnel-count').textContent;
+    expect(count('GIỚI ĐOẠN THI CÔNG')).toBe('2'); expect(count('YÊU CẦU THIẾT KẾ')).toBe('1'); expect(count('HOÀN THÀNH')).toBe('0');
+  });
+  it('bấm 1 giai đoạn → danh sách chỉ còn công trình ở giai đoạn đó; ô lọc "Giai đoạn" hiện đúng giá trị; Xóa lọc trả lại đủ', () => {
+    open();
+    fireEvent.click(screen.getAllByTestId('funnel-stage').find(s => s.textContent!.includes('YÊU CẦU THIẾT KẾ'))!);
+    expect(rowNames().join('|')).toContain('Công trình C'); expect(rowNames().join('|')).not.toContain('Công trình A');
+    expect((screen.getByLabelText('Giai đoạn') as HTMLSelectElement).value).toBe('col_design');
+    fireEvent.change(screen.getByLabelText('Giai đoạn'), { target: { value: 'col_active' } });
+    expect(rowNames().join('|')).toContain('Công trình A'); expect(rowNames().join('|')).not.toContain('Công trình C');
+  });
+  it('tiến độ trong danh sách là số TỰ TÍNH (không phải project.progress = 99): A xong 1/2 việc ở Thi công → 59%; B không có việc → 50%', () => {
+    open();
+    const rows = screen.getAllByTestId('total-cost').map(td => td.closest('tr')!);
+    const rowOf = (n: string) => rows.find(r => r.textContent!.includes(n))!;
+    expect(rowOf('Công trình A').textContent).toContain('59%');
+    expect(rowOf('Công trình B').textContent).toContain('50%');
+    expect(rowOf('Công trình A').textContent).not.toContain('99%');
+    expect(within(rowOf('Công trình A')).getByTestId('row-stage').textContent).toContain('GIỚI ĐOẠN THI CÔNG');
+  });
+});
+
 describe('Phòng Dự Án — lọc & phân trang', () => {
   const projects = Array.from({ length: 25 }, (_, i) => ({ id: `P${i}`, code: `CT${i}`, name: `Công trình ${String(i).padStart(2, '0')}`, type: i % 2 ? 'furniture' : 'construction', status: 'processing', contractValue: 1_000_000 * (i + 1), progress: i, endDate: '2027-01-01', pmId: 'E1', customerId: 'C1' })) as any;
   const open = (nav = vi.fn()) => { render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={[]} employees={employees} customers={[{ id: 'C1', name: 'Khách A' } as any]} onNavigateTab={nav} />); return nav; };
