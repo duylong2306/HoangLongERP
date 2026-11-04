@@ -182,6 +182,7 @@ describe('dựng file Excel lưu trữ', () => {
     });
     const flat = info.map(r => r.join('|'));
     expect(flat).toContain('Mã dự án|DA-1');
+    expect(flat).toContain('Tiến độ (%)|40');            // không truyền progress → dùng số cũ
     expect(flat).toContain('Trưởng dự án|Bình');
     expect(flat).toContain('Giai đoạn (cột Kanban)|Thi công');
     expect(flat).toContain('Giá trị hợp đồng (đ)|210000000');
@@ -194,5 +195,11 @@ describe('dựng file Excel lưu trữ', () => {
     expect(logRows).toHaveLength(3);
     expect(logRows[1][6]).toBe('đã tạo dự án');         // cũ nhất trước
     expect(logRows[2].slice(7, 9)).toEqual(['Chờ duyệt', 'Hoàn thành']);
+  });
+
+  it('truyền progress tự tính thì file Excel dùng số đó thay vì số cũ', () => {
+    const project: any = { id: 'P1', code: 'DA-1', name: 'A', type: 'mechanical', status: 'processing', progress: 40 };
+    const { info } = buildProjectLogSheets({ project, employees: [], tasks: [], events: [], progress: 72 });
+    expect(info.map(r => r.join('|'))).toContain('Tiến độ (%)|72');
   });
 });

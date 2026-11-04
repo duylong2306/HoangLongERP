@@ -1,4 +1,6 @@
 import { exportProjectLogExcel } from './lib/projectEventsExport';
+import { computeProjectProgress, columnsForProject } from './lib/projectProgress';
+import { useKanbanColumnsBySector } from './hooks/useKanbanColumnsBySector';
 import * as MT from './lib/messageTemplates';
 import { postProjectNotice, type ProjectNoticeParams } from './lib/projectNotice';
 import { recordProjectEvent } from './lib/projectEvents';
@@ -1204,6 +1206,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  // Cột Kanban theo mảng — để file Excel nhật ký xuất đúng tiến độ tự tính (khớp màn hình)
+  const kanbanColsBySector = useKanbanColumnsBySector();
   const [tasks, setTasks] = useState<Task[]>([]);
   // Phản chiếu tasks mới nhất để handler sự kiện đọc được giá trị cập nhật mà
   // không phải chạy side-effect bên trong hàm updater của setState.
@@ -3676,7 +3680,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
     const pr = projects.find(p => p.id === projectId);
     if (!pr) { addToast({ title: '🔍 Không tìm thấy dự án', message: 'Dự án có thể đã bị xóa.', type: 'warning' }); return; }
     try {
-      const file = await exportProjectLogExcel({ project: pr, customer: customers.find(c => c.id === pr.customerId) || null, employees, tasks, exportedBy: currentUser?.name });
+      const file = await exportProjectLogExcel({ project: pr, customer: customers.find(c => c.id === pr.customerId) || null, employees, tasks, progress: computeProjectProgress(pr, tasks, columnsForProject(pr, kanbanColsBySector)).value, exportedBy: currentUser?.name });
       addToast({ title: '✅ Đã xuất nhật ký', message: `Đã tải file ${file}`, type: 'success' });
     } catch (e: any) {
       addToast({ title: '❌ Không xuất được', message: e?.message || 'Có lỗi khi xuất nhật ký dự án.', type: 'error' });

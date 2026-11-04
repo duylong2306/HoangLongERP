@@ -28,6 +28,8 @@ export interface ProjectLogExportCtx {
   events: ProjectEventRow[];
   /** Tên cột/giai đoạn Kanban hiện tại của dự án (nếu biết) */
   stageName?: string;
+  /** Tiến độ TỰ TÍNH theo cột Kanban (computeProjectProgress). Không truyền thì dùng số cũ p.progress. */
+  progress?: number;
   exportedBy?: string;
   now?: Date;
 }
@@ -46,7 +48,7 @@ export function buildProjectLogSheets(c: ProjectLogExportCtx) {
     ['Loại dự án', PROJECT_TYPE[p.type] || p.type],
     ['Trạng thái', PROJECT_STATUS[p.status] || p.status],
     ['Giai đoạn (cột Kanban)', c.stageName || ''],
-    ['Tiến độ (%)', p.progress ?? 0],
+    ['Tiến độ (%)', c.progress ?? p.progress ?? 0],
     ['Địa chỉ dự án', p.address || ''],
     ['Trưởng dự án', emp(p.pmId)],
     ['Ngày bắt đầu', fmtDate(p.startDate)],

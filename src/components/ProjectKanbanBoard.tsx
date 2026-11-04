@@ -3362,7 +3362,8 @@ export default function ProjectKanbanBoard({
                           endDate: selectedProject.endDate,
                           pmId: selectedProject.pmId,
                           status: selectedProject.status,
-                          progress: selectedProject.progress,
+                          // Tiến độ tự tính theo cột Kanban (khớp màn hình), không dùng số cũ
+                          progress: computeProjectProgress(selectedProject, tasks, columns).value,
                           notes: selectedProject.notes,
                           documents: selectedProject.documents || [],
                         },
@@ -3509,7 +3510,7 @@ export default function ProjectKanbanBoard({
                   try {
                     const file = await exportProjectLogExcel({
                       project: selectedProject, customer: customers.find(c => c.id === selectedProject.customerId) || null,
-                      employees, tasks, stageName: columns.find(c => c.id === getProjectColumnId(selectedProject, columns))?.name, exportedBy: currentUser?.name,
+                      employees, tasks, stageName: columns.find(c => c.id === getProjectColumnId(selectedProject, columns))?.name, progress: computeProjectProgress(selectedProject, tasks, columns).value, exportedBy: currentUser?.name,
                     });
                     addToast({ title: '✅ Đã xuất nhật ký', message: `Đã tải file ${file}`, type: 'success' });
                   } catch (e: any) {
