@@ -1,9 +1,11 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Project, Customer, Employee, ProjectType, ProjectStatus, Receipt, Payment, ProjectDoc, ProjectDocCustomField } from '../types';
+import { Project, Customer, Employee, ProjectType, ProjectStatus, Receipt, Payment, ProjectDoc, ProjectDocCustomField, Task } from '../types';
 import { Plus, Search, Eye, Filter, Calendar, TrendingUp, DollarSign, ArrowRight, FileText, Check, Trash2, FolderOpen, Settings, AlertTriangle, X, Users } from 'lucide-react';
 import { useNotification } from '../context';
 import { can, loadProjectPermissions, syncProjectPermissionsFromDb } from './hr/hrProjectPermissions';
 import { generateProjectId } from '../lib/projectId';
+import { computeProjectProgress, columnsForProject, progressTone, type ProjectProgress } from '../lib/projectProgress';
+import { useKanbanColumnsBySector } from '../hooks/useKanbanColumnsBySector';
 
 interface ProjectManagementProps {
   projects: Project[];
@@ -11,6 +13,8 @@ interface ProjectManagementProps {
   employees: Employee[];
   receipts: Receipt[];
   payments: Payment[];
+  /** Công việc — để tính tiến độ theo giai đoạn (cột Kanban) + số việc con đã xong. Không truyền → coi như chưa có việc con. */
+  tasks?: Task[];
   onAddProject: (newProject: Project) => void;
   onUpdateProjectStatus: (id: string, status: ProjectStatus, progress: number) => void;
   onUpdateProject?: (id: string, updates: Partial<Project>) => void;
@@ -35,12 +39,49 @@ const getAbbreviation = (name: string): string => {
   return initials;
 };
 
+// Màu thanh tiến độ theo mức (đồng bộ với Tổng quan và Dashboard giám đốc): <30 đỏ · <60 vàng · <100 xanh dương · 100 xanh lá
+const BAR_TONE: Record<string, string> = { bad: 'bg-rose-500', warn: 'bg-amber-500', blue: 'bg-[#0d47c9]', ok: 'bg-emerald-500' };
+
+/**
+ * Tiến độ dự án trong khung chi tiết: số TỰ TÍNH theo giai đoạn (cột Kanban) + việc con đã xong; người có quyền có thể GHI ĐÈ số tay
+ * (lưu vào project.progressManual) hoặc bấm "Về tự động". Thay cho thanh kéo cũ (thanh kéo ghi thẳng project.progress nên đứng yên và lệch với Tổng quan).
+ */
+function ProgressOverride({ pg, canEdit, onSave }: { pg: ProjectProgress; canEdit: boolean; onSave: (v: number | null) => void }) {
+  const [val, setVal] = useState(String(pg.value));
+  useEffect(() => { setVal(String(pg.value)); }, [pg.value]);
+  const n = Number(val);
+  const valid = val.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 100;
+  return (
+    <div className="space-y-1.5" data-testid="progress-override">
+      <div className="flex items-center justify-between">
+        <span className="text-slate-500 font-bold">Tiến độ: <strong className="text-slate-800" data-testid="progress-value">{pg.value}%</strong></span>
+        {pg.source === 'manual' && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">PM nhập tay</span>}
+        {pg.source === 'completed' && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">Đã hoàn thành</span>}
+      </div>
+      <div className="w-full bg-slate-200 rounded-full h-1.5"><div className={`h-1.5 rounded-full ${BAR_TONE[progressTone(pg.value)]}`} style={{ width: `${pg.value}%` }} /></div>
+      <p className="text-[10.5px] text-slate-500">
+        Tự tính {pg.auto}% · giai đoạn <b>{pg.stage.name}</b> · {pg.done}/{pg.total} việc con xong
+      </p>
+      {canEdit && pg.source !== 'completed' && (
+        <div className="flex items-center gap-1.5">
+          <input type="number" min={0} max={100} value={val} onChange={e => setVal(e.target.value)} aria-label="Tiến độ nhập tay (%)"
+            className="w-20 border rounded p-1 text-xs" />
+          <button type="button" disabled={!valid || Math.round(n) === pg.value} onClick={() => onSave(Math.round(n))}
+            className="px-2 py-1 rounded text-[11px] font-bold disabled:opacity-40 cursor-pointer" style={{ background: '#0d47c9', color: '#ffffff' }}>Lưu</button>
+          {pg.source === 'manual' && <button type="button" onClick={() => onSave(null)} className="px-2 py-1 rounded text-[11px] font-bold border border-slate-300 text-slate-700 cursor-pointer">Về tự động</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectManagement({
   projects,
   customers,
   employees,
   receipts,
   payments,
+  tasks = [],
   onAddProject,
   onUpdateProjectStatus,
   onUpdateProject,
@@ -49,6 +90,9 @@ export default function ProjectManagement({
   currentUser
 }: ProjectManagementProps) {
   const { addToast } = useNotification();
+  // Tiến độ tự tính theo giai đoạn (cột Kanban của lĩnh vực dự án) + việc con xong (lib/projectProgress.ts) — cùng một số với Tổng quan
+  const colsBySector = useKanbanColumnsBySector();
+  const progressOf = (p: Project): ProjectProgress => computeProjectProgress(p, tasks, columnsForProject(p, colsBySector));
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -749,13 +793,18 @@ export default function ProjectManagement({
 
                   <div className="grid grid-cols-2 gap-4 mt-3 border-t border-slate-100/60 pt-2.5">
                     <div>
-                      <div className="flex justify-between mb-1">
-                        <span className="text-slate-450 font-medium">Tiến độ thi công:</span>
-                        <strong className="text-sky-700 font-bold">{p.progress}%</strong>
-                      </div>
-                      <div className="w-full bg-slate-200 rounded-full h-1.5">
-                        <div className="bg-sky-600 h-1.5 rounded-full" style={{ width: `${p.progress}%` }}></div>
-                      </div>
+                      {(() => {
+                        const pg = progressOf(p);
+                        return (<>
+                          <div className="flex justify-between mb-1">
+                            <span className="text-slate-450 font-medium" title={`Giai đoạn ${pg.stage.name} · ${pg.done}/${pg.total} việc con xong`}>Tiến độ thi công:</span>
+                            <strong className="text-slate-800 font-bold" data-testid="pm-progress">{pg.value}%{pg.source === 'manual' ? ' ✎' : ''}</strong>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-1.5">
+                            <div className={`h-1.5 rounded-full ${BAR_TONE[progressTone(pg.value)]}`} style={{ width: `${pg.value}%` }} data-testid="pm-bar" data-tone={progressTone(pg.value)}></div>
+                          </div>
+                        </>);
+                      })()}
                     </div>
                     <div className="text-right">
                       <span className="text-slate-450 block">Hợp đồng bao thầu:</span>
@@ -803,8 +852,8 @@ export default function ProjectManagement({
               {/* Thay đổi trạng thái nhanh — gated by canUpdateProjectStatus */}
               {canUpdateProjectStatus ? (
                 <div>
-                  <label className="block text-slate-500 font-bold mb-1">Cập nhật nhanh Trạng thái & % Tiến độ</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-slate-500 font-bold mb-1">Cập nhật nhanh Trạng thái & Tiến độ</label>
+                  <div className="grid grid-cols-2 gap-2 items-start">
                     <select
                       value={selectedProject.status}
                       onChange={(e) => onUpdateProjectStatus(selectedProject.id, e.target.value as ProjectStatus, selectedProject.progress)}
@@ -816,14 +865,8 @@ export default function ProjectManagement({
                       <option value="maintenance">Đang Bảo Trì</option>
                       <option value="completed">Hoàn thành</option>
                     </select>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={selectedProject.progress}
-                      onChange={(e) => onUpdateProjectStatus(selectedProject.id, selectedProject.status, Number(e.target.value))}
-                      className="w-full"
-                    />
+                    <ProgressOverride key={selectedProject.id} pg={progressOf(selectedProject)} canEdit={!!onUpdateProject}
+                      onSave={v => onUpdateProject?.(selectedProject.id, { progressManual: v })} />
                   </div>
                 </div>
               ) : (

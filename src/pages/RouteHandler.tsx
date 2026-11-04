@@ -60,7 +60,7 @@ export default function RouteHandler(p: Props) {
   });
 
   if (t('dashboard')) return <DashboardOverview projects={p.projects} tasks={p.tasks} receipts={p.receipts} payments={p.payments} quotes={p.quotes} currentUser={p.currentUser} onNavigateTab={p.onNavigateTab} onUpdateTask={p.onUpdateTask} onApprovePayment={p.onApprovePayment} onAddTask={p.onAddTask} onAddPayment={p.onAddPayment} />;
-  if (t('projects')) return <ProjectManagement projects={p.projects} customers={p.customers} employees={p.employees} receipts={p.receipts} payments={p.payments} onAddProject={p.onAddProject} onUpdateProjectStatus={p.onUpdateProjectStatus} onUpdateProject={p.onUpdateProject} onDeleteProject={p.onDeleteProject} onAddCustomer={p.onAddCustomer} currentUser={p.currentUser} />;
+  if (t('projects')) return <ProjectManagement projects={p.projects} customers={p.customers} employees={p.employees} receipts={p.receipts} payments={p.payments} tasks={p.tasks} onAddProject={p.onAddProject} onUpdateProjectStatus={p.onUpdateProjectStatus} onUpdateProject={p.onUpdateProject} onDeleteProject={p.onDeleteProject} onAddCustomer={p.onAddCustomer} currentUser={p.currentUser} />;
   if (t('projects-construction')) return <ProjectKanbanBoard {...kanbanProps('construction')} />;
   if (t('projects-furniture')) return <ProjectKanbanBoard {...kanbanProps('furniture')} />;
   if (t('projects-mechanical')) return <ProjectKanbanBoard {...kanbanProps('mechanical')} />;
