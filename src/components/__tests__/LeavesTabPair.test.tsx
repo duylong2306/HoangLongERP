@@ -103,3 +103,43 @@ describe('Tab Nghỉ phép — nhãn "Xin muộn"', () => {
     expect(container.textContent).not.toContain('Xin muộn');
   });
 });
+
+describe('Tab Nghỉ phép — Sửa ngày đơn đã duyệt', () => {
+  const approved = () => rep('LR-515', 'morning', { type: 'Nghỉ không lương có xin phép', shift: undefined, status: 'approved', fromDate: d, toDate: d });
+  const mount = (leaves: any[], onReschedule?: any, canApprove?: any) => {
+    const Wrapper = () => {
+      const [sel, setSel] = useState<string | null>(null);
+      return <LeavesTab leaves={leaves} selectedLeaveId={sel} setSelectedLeaveId={setSel} handleApproveLeave={() => {}} onDeleteLeave={() => {}}
+        onRescheduleLeave={onReschedule} canApproveLeave={canApprove} globalPageSize={50} setGlobalPageSize={() => {}} leavePage={1} setLeavePage={() => {}} />;
+    };
+    return render(<Wrapper />);
+  };
+  it('đơn đã duyệt: có nút Sửa ngày; nhập ngày mới → gọi onRescheduleLeave và đóng hộp khi lưu được', () => {
+    const fn = vi.fn().mockReturnValue(true);
+    const { container } = mount([approved()], fn);
+    fireEvent.click(container.querySelector('tbody tr')!);
+    fireEvent.click(screen.getByTitle('Sửa ngày nghỉ (hoán ngày)'));
+    fireEvent.change(screen.getByLabelText('Từ ngày mới'), { target: { value: `${today.getFullYear()}-01-11` } });
+    fireEvent.change(screen.getByLabelText('Đến ngày mới'), { target: { value: `${today.getFullYear()}-01-12` } });
+    fireEvent.click(screen.getByText('Lưu ngày mới'));
+    expect(fn).toHaveBeenCalledWith('LR-515', `${today.getFullYear()}-01-11`, `${today.getFullYear()}-01-12`);
+    expect(screen.queryByTestId('leave-edit-dates')).toBeNull();
+  });
+  it('lưu thất bại (handler trả false) → hộp sửa vẫn mở để chỉnh lại', () => {
+    const { container } = mount([approved()], vi.fn().mockReturnValue(false));
+    fireEvent.click(container.querySelector('tbody tr')!);
+    fireEvent.click(screen.getByTitle('Sửa ngày nghỉ (hoán ngày)'));
+    fireEvent.click(screen.getByText('Lưu ngày mới'));
+    expect(screen.getByTestId('leave-edit-dates')).toBeInTheDocument();
+  });
+  it('không có nút Sửa ngày với đơn chờ duyệt, hoặc người xem không phải người xét duyệt', () => {
+    const a = mount([rep('LR-9', 'morning', { type: 'Nghỉ phép năm', shift: undefined })], vi.fn());
+    fireEvent.click(a.container.querySelector('tbody tr')!);
+    expect(screen.queryByTitle('Sửa ngày nghỉ (hoán ngày)')).toBeNull();
+    cleanup();
+    const b = mount([approved()], vi.fn(), () => false);
+    fireEvent.click(b.container.querySelector('tbody tr')!);
+    expect(screen.queryByTitle('Sửa ngày nghỉ (hoán ngày)')).toBeNull();
+  });
+});
+

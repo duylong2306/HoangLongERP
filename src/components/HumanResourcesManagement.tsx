@@ -1,7 +1,8 @@
 ﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
 import * as MT from '../lib/messageTemplates';
-import { isShiftLeave, shiftLabel, supportsShiftLeave, type LeaveShift } from '../lib/leaveShift';
+import { isShiftLeave, shiftLabel, supportsShiftLeave, leaveSymbolOf, type LeaveShift } from '../lib/leaveShift';
+import { planLeaveReschedule, applyLeaveReschedule } from '../lib/leaveReschedule';
 import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNotification, getConfiguredApprover, getConfiguredApprovers, getConfiguredSettler, getConfiguredSettlers } from '../context';
@@ -3509,6 +3510,62 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     dbService.hrmLeaves.delete(id).catch(err => console.warn('Xóa đơn nghỉ phép trên Supabase thất bại:', err));
   };
 
+  // SỬA NGÀY của đơn nghỉ phép ĐÃ DUYỆT (hoán ngày nghỉ sang ngày khác). Đơn là nguồn dữ liệu gốc nên đổi ở đơn thì công, phép năm
+  // và chấm công đều theo: ngày cũ được trả về chưa nghỉ, ngày mới ghi ký hiệu nghỉ (chi tiết ở lib/leaveReschedule).
+  // Chỉ người xét duyệt đơn (hoặc admin) được sửa. Trả true nếu đã lưu.
+  const handleRescheduleLeave = (id: string, newFrom: string, newTo: string): boolean => {
+    const leave = leaves.find(l => l.id === id);
+    if (!leave) return false;
+    if (!canApproveLeaveRecord(leave)) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Chỉ người xét duyệt đơn này mới được sửa ngày (xem Quyền Phê Duyệt).', type: 'warning' });
+      return false;
+    }
+    const plan = planLeaveReschedule({ leave, newFrom, newTo, leaves, attendance });
+    if (plan.error) { addToast({ title: '⚠️ Không đổi được', message: plan.error, type: 'warning' }); return false; }
+    // Ngày đã chốt công: không cho đổi (phải mở chốt ở Chấm công trước, tránh sửa số liệu lương đã khóa)
+    if (plan.lockedDates.length) {
+      addToast({ title: '🔒 Công đã chốt', message: `Ngày ${plan.lockedDates.join(', ')} đã chốt công. Mở chốt ở tab Chấm công ngày rồi sửa lại.`, type: 'warning' });
+      return false;
+    }
+    const warn = plan.punchedAdded.length ? `\n⚠️ Ngày ${plan.punchedAdded.join(', ')} đã có giờ chấm — sẽ bị thay bằng ký hiệu nghỉ.` : '';
+    if (!window.confirm(`Đổi ngày nghỉ của ${leave.empName} (${leave.id})\nTừ: ${leave.fromDate} → ${leave.toDate}\nSang: ${newFrom} → ${plan.days === 0.5 ? newFrom : newTo} (${plan.days} ngày)${warn}\nTiếp tục?`)) return false;
+
+    // Tên loại → ký hiệu công: ưu tiên hệ số công của doanh nghiệp, giống lúc duyệt
+    const symbol = (leaveCoefficients || []).find((c: any) => c.type === leave.type)?.id || leaveSymbolOf(leave.type);
+    const res = applyLeaveReschedule({
+      leave, plan, attendance, symbol,
+      newId: d => `AT-${leave.empId}-${d.replace(/-/g, '')}-${Date.now().toString().slice(-5)}-${Math.random().toString().slice(-2)}`,
+    });
+    setAttendance(res.attendance as any);
+    res.saved.forEach(a => dbService.attendance.save(a as any).catch(() => {}));
+    res.deletedIds.forEach(aid => dbService.attendance.delete(aid).catch(() => {}));
+    window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: res.attendance } }));
+
+    // Phép năm đã bị trừ theo số ngày cũ lúc duyệt → cộng/trừ phần chênh để số dư khớp số ngày mới
+    if (leave.type === 'Nghỉ phép năm' && plan.days !== leave.daysCount) {
+      const emp = employees.find(e => e.id === leave.empId);
+      if (emp) {
+        const cur = emp.phepNam !== undefined ? emp.phepNam : 12;
+        const updatedEmp = { ...emp, phepNam: Math.max(0, cur + (leave.daysCount - plan.days)) };
+        setEmployees(prev => prev.map(e => e.id === emp.id ? updatedEmp : e));
+        dbService.employees.save(updatedEmp).catch(err => console.warn(`Cập nhật phép năm ${emp.id} lên Supabase thất bại:`, err));
+      }
+    }
+
+    // Ghi dấu vết ngay trong lý do đơn (không cần thêm cột DB): ai đổi, lúc nào, từ ngày nào sang ngày nào
+    const stamp = new Date().toLocaleString('vi-VN');
+    const updated = {
+      ...leave, fromDate: newFrom, toDate: isShiftLeave(leave as any) ? newFrom : newTo, daysCount: plan.days,
+      reason: `${leave.reason || ''} [Đổi ngày ${leave.fromDate}→${leave.toDate} sang ${newFrom}→${isShiftLeave(leave as any) ? newFrom : newTo} bởi ${currentUser?.name || 'Quản lý'} lúc ${stamp}]`.trim(),
+    };
+    const nextLeaves = leaves.map(l => l.id === id ? updated : l);
+    setLeaves(nextLeaves);
+    dbService.hrmLeaves.save(updated as any).catch(err => console.warn('Lưu đơn nghỉ phép sau đổi ngày thất bại:', err));
+    window.dispatchEvent(new CustomEvent('hl_leaves_changed_from_hrm', { detail: nextLeaves }));
+    addToast({ title: '✅ Đã đổi ngày nghỉ', message: `${leave.empName}: ${newFrom}${updated.toDate !== newFrom ? ` → ${updated.toDate}` : ''} (${plan.days} ngày).`, type: 'success' });
+    return true;
+  };
+
   // ===================== BLOCK CÔNG TÁC PHÍ (trips) =====================
   const handleCreateTrip = (e: React.FormEvent) => {
     e.preventDefault();
@@ -4356,6 +4413,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 handleApproveLeave={handleApproveLeaveWithPair}
                 canApproveLeave={canApproveLeaveRecord}
                 onDeleteLeave={handleDeleteLeave}
+                onRescheduleLeave={handleRescheduleLeave}
                 globalPageSize={globalPageSize}
                 setGlobalPageSize={setGlobalPageSize}
                 leavePage={leavePage}

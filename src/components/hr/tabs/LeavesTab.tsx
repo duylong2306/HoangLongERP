@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, CalendarClock } from 'lucide-react';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../../../lib/leaveRequests';
 import { parseLateNotice } from '../../../lib/leaveNotice';
 import { isShiftLeave, shiftLabel } from '../../../lib/leaveShift';
@@ -28,6 +28,8 @@ interface LeavesTabProps {
   /** Người đang đăng nhập có được duyệt/từ chối đơn này không (theo Quyền Phê Duyệt). Không truyền → như cũ (hiện cho mọi người). */
   canApproveLeave?: (leave: any) => boolean;
   onDeleteLeave: (id: string) => void;
+  /** Đổi ngày đơn ĐÃ DUYỆT (hoán ngày nghỉ). Trả true nếu lưu được → đóng hộp sửa. Không truyền → ẩn nút Sửa ngày. */
+  onRescheduleLeave?: (id: string, newFrom: string, newTo: string) => boolean;
   globalPageSize: number | 'all';
   setGlobalPageSize: (v: number | 'all') => void;
   leavePage: number;
@@ -61,11 +63,15 @@ export default function LeavesTab({
   handleApproveLeave,
   canApproveLeave,
   onDeleteLeave,
+  onRescheduleLeave,
   globalPageSize,
   setGlobalPageSize,
   leavePage,
   setLeavePage,
 }: LeavesTabProps) {
+  // Hộp "Sửa ngày" của đơn đã duyệt: id đơn đang sửa + ngày nhập
+  const [editDates, setEditDates] = useState<{ id: string; from: string; to: string } | null>(null);
+
   // ── Multi-row selection ──
   const [leaveSelectedRows, setLeaveSelectedRows] = useState<Set<string>>(new Set());
   const [leaveSelectAll, setLeaveSelectAll] = useState(false);
@@ -401,6 +407,16 @@ export default function LeavesTab({
                     <p className="text-[10px] text-slate-400">Mã NV: {l.empId}</p>
                   </div>
                   <div className="flex items-center gap-1">
+                    {l.status === 'approved' && onRescheduleLeave && (!canApproveLeave || canApproveLeave(l)) && (
+                      <button
+                        type="button"
+                        onClick={() => setEditDates({ id: l.id, from: l.fromDate, to: l.toDate })}
+                        className="p-1 text-amber-400 hover:text-amber-300 rounded transition cursor-pointer"
+                        title="Sửa ngày nghỉ (hoán ngày)"
+                      >
+                        <CalendarClock className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleDeleteSelectedLeave(l)}
@@ -442,6 +458,35 @@ export default function LeavesTab({
                       </div>
                     </div>
                   </div>
+
+                  {editDates && editDates.id === l.id && (
+                    <div className="bg-slate-950 p-3 rounded-lg border border-amber-500/40 space-y-2" data-testid="leave-edit-dates">
+                      <h5 className="font-extrabold text-[10px] text-amber-500 uppercase tracking-wider">Sửa ngày nghỉ (hoán ngày)</h5>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <label className="block">Từ ngày
+                          <input type="date" aria-label="Từ ngày mới" value={editDates.from}
+                            onChange={e => setEditDates({ ...editDates, from: e.target.value, to: isShiftLeave(l) ? e.target.value : editDates.to })}
+                            className="mt-0.5 w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 font-mono" />
+                        </label>
+                        {/* Đơn nghỉ 1 ca chỉ có 1 ngày → không cho chọn "Đến ngày" */}
+                        {!isShiftLeave(l) && (
+                          <label className="block">Đến ngày
+                            <input type="date" aria-label="Đến ngày mới" value={editDates.to}
+                              onChange={e => setEditDates({ ...editDates, to: e.target.value })}
+                              className="mt-0.5 w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 font-mono" />
+                          </label>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">Ngày cũ được trả về chưa nghỉ, ngày mới ghi nghỉ. Số ngày và phép năm tự tính lại.</p>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setEditDates(null)}
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10.5px] font-bold py-2 rounded-lg cursor-pointer">Hủy</button>
+                        <button type="button"
+                          onClick={() => { if (onRescheduleLeave?.(l.id, editDates.from, editDates.to)) setEditDates(null); }}
+                          className="flex-1 bg-amber-600 hover:bg-amber-500 text-[10.5px] font-bold py-2 rounded-lg cursor-pointer" style={{ color: '#ffffff' }}>Lưu ngày mới</button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="bg-slate-950 p-3 rounded-lg border border-slate-850 space-y-1.5">
                     <h5 className="font-extrabold text-[10px] text-amber-500 uppercase tracking-wider">Lý Do Nghỉ Phép</h5>
