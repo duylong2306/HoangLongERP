@@ -74,7 +74,7 @@ describe('script, migration, upload mới', () => {
     expect(z).toMatch(/dbService\.uploadChatAttachment\(/);
     expect(z).not.toMatch(/readAsDataURL/);
     const d = read('src/lib/dbService.ts');
-    expect(d).toMatch(/async uploadChatAttachment\([\s\S]*?compressImageFile\(file\)[\s\S]*?chat-attachments/);
+    expect(d).toMatch(/async uploadChatAttachment\([\s\S]*?compressImageFile\(file(, compressOpts)?\)[\s\S]*?chat-attachments/);
   });
 });
 

@@ -1,4 +1,4 @@
-import { compressImageFile } from './imageCompress';
+import { compressImageFile, type CompressOptions } from './imageCompress';
 import { getSupabase, getCurrentCompanyId } from './supabase';
 import { ensureProjectChatGroup } from './chatStore';
 import { parsePunchMeta, mergePunchMeta, hasAnyPunchMeta } from './attendanceMeta';
@@ -3008,9 +3008,11 @@ export const dbService = {
    */
   async uploadChatAttachment(
     conversationId: string,
-    file: File
+    file: File,
+    /** Tùy chọn nén ảnh. Ảnh chụp màn hình (có chữ) nên truyền maxEdge/quality cao hơn mặc định để chữ không bị mờ. */
+    compressOpts?: CompressOptions
   ): Promise<{ url: string; stored: 'supabase' | 'local'; size: number; mimeType: string; name: string }> {
-    file = await compressImageFile(file);
+    file = await compressImageFile(file, compressOpts);
     const meta = { size: file.size, mimeType: file.type, name: file.name };
     const toDataUrl = () => new Promise<string>((resolve, reject) => {
       const reader = new FileReader();

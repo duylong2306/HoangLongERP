@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import ProjectActivityModal from './ProjectActivityModal';
 import ProjectTodayCard from './ProjectTodayCard';
 import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
-import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, MessageSquare } from 'lucide-react';
+import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, MessageSquare, Camera } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
@@ -33,6 +33,9 @@ import { buildWorkEntries } from '../lib/workEntries';
 import { workThreadId, isWorkThreadId } from '../lib/workThread';
 import { todayYmd, type MyWorkItem } from '../lib/myWork';
 import MiniLoader from './MiniLoader';
+import ChatImageEditor from './ChatImageEditor';
+import { screenshotName } from '../lib/imageMarkup';
+import { capturePage, captureDisplay, canCaptureDisplay } from '../lib/screenCapture';
 
 // GIAO DIỆN TIN NHẮN KIỂU MỚI (lấy cảm hứng từ Zalo): danh sách hội thoại | khung chat | thông tin hội thoại.
 // Dùng lại toàn bộ hệ thống nhắn tin có sẵn (chatStore: realtime, đã xem, ghim tin, cảm xúc, trả lời, @nhắc tên, đính kèm...).
@@ -304,18 +307,75 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     finally { setAvatarBusy(false); }
   };
 
-  const onFiles = (e: React.ChangeEvent<HTMLInputElement>, source: 'image' | 'file') => {
-    const files = Array.from(e.target.files || []);
+  // Bản gốc (tệp cục bộ) của từng ảnh đang chờ gửi, để mở lại trình sửa mà không phải tải ảnh về (tránh lỗi CORS khi vẽ lại)
+  const localImages = useRef(new Map<string, File>());
+  const [imgEdit, setImgEdit] = useState<{ id: string; file: File } | null>(null);
+  // Ảnh chụp màn hình có chữ → nén nhẹ tay hơn mặc định (1920px/0,8) để chữ không bị mờ
+  const HQ_IMAGE = { maxEdge: 2560, quality: 0.92 };
+
+  // Nhận danh sách tệp từ mọi nguồn (chọn tệp, dán Ctrl+V, kéo-thả): tải lên kho rồi đưa vào danh sách chờ gửi
+  const addFiles = (files: File[], source: 'image' | 'file', hq = false) => {
     files.forEach((file, i) => {
       if (file.size > 10 * 1024 * 1024) { addToast({ title: '⚠️ File quá lớn', message: `"${file.name}" > 10MB`, type: 'warning' }); return; }
+      const id = `att_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`;
+      const isImg = source === 'image' && file.type.startsWith('image/');
       setUploading(n => n + 1);
       // Ảnh được nén rồi tải lên kho lưu trữ; trong tin chỉ giữ đường dẫn (không nhúng base64 làm nặng chat)
-      dbService.uploadChatAttachment(selected?.id || 'new', file)
-        .then(up => setAttachments(prev => [...prev, { id: `att_${Date.now()}_${i}`, type: source === 'image' && file.type.startsWith('image/') ? 'image' : 'file', name: file.name, url: up.url, size: up.size, mimeType: up.mimeType }]))
+      dbService.uploadChatAttachment(selected?.id || 'new', file, hq ? HQ_IMAGE : undefined)
+        .then(up => {
+          if (isImg) localImages.current.set(id, file);
+          setAttachments(prev => [...prev, { id, type: isImg ? 'image' : 'file', name: file.name, url: up.url, size: up.size, mimeType: up.mimeType }]);
+        })
         .catch(() => addToast({ title: '⚠️ Không đọc được tệp', message: `"${file.name}"`, type: 'warning' }))
         .finally(() => setUploading(n => n - 1));
     });
+  };
+  const onFiles = (e: React.ChangeEvent<HTMLInputElement>, source: 'image' | 'file') => {
+    addFiles(Array.from(e.target.files || []), source);
     e.target.value = '';
+  };
+  // Dán ảnh (Ctrl/Cmd+V) vào ô soạn tin, như ảnh chụp bằng phím tắt của hệ điều hành. Dán chữ thường thì để trình duyệt xử lý.
+  const onPasteComposer = (e: React.ClipboardEvent) => {
+    const imgs = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+    if (!imgs.length) return;
+    e.preventDefault();
+    // Ảnh dán từ clipboard luôn tên "image.png" → đặt tên theo giờ để mỗi ảnh một tên
+    addFiles(imgs.map((f, i) => new File([f], f.name && f.name !== 'image.png' ? f.name : screenshotName(new Date(Date.now() + i * 1000), (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')), { type: f.type })), 'image', true);
+  };
+  const onDropComposer = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (!files.length) return;
+    e.preventDefault();
+    addFiles(files.filter(f => f.type.startsWith('image/')), 'image', true);
+    addFiles(files.filter(f => !f.type.startsWith('image/')), 'file');
+  };
+  // ─── Chụp màn hình (kiểu Zalo): chụp xong mở trình sửa (sẵn công cụ Cắt); bấm Xong → ảnh vào danh sách chờ gửi ───
+  const [shotMenu, setShotMenu] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const [shot, setShot] = useState<File | null>(null);
+  const takeShot = async (mode: 'page' | 'display') => {
+    setShotMenu(false); setCapturing(true);
+    try {
+      await new Promise(r => setTimeout(r, 120));   // chờ menu đóng hẳn để không lọt vào ảnh chụp trang
+      const f = mode === 'page' ? await capturePage() : await captureDisplay();
+      if (f) setShot(f);
+      else if (mode === 'page') addToast({ title: '⚠️ Không chụp được', message: 'Vui lòng thử lại.', type: 'warning' });
+    } catch (e: any) {
+      addToast({ title: '⚠️ Không chụp được màn hình', message: String(e?.message || 'Vui lòng thử lại.'), type: 'warning' });
+    } finally { setCapturing(false); }
+  };
+
+  // Trình sửa ảnh trả về ảnh mới → tải lên và THAY ảnh cũ trong danh sách (giữ nguyên vị trí). Bản đã tải của ảnh cũ bị bỏ lại trong kho.
+  const applyEditedImage = (id: string, file: File) => {
+    setImgEdit(null);
+    setUploading(n => n + 1);
+    dbService.uploadChatAttachment(selected?.id || 'new', file, HQ_IMAGE)
+      .then(up => {
+        localImages.current.set(id, file);
+        setAttachments(prev => prev.map(a => a.id === id ? { ...a, name: file.name, url: up.url, size: up.size, mimeType: up.mimeType } : a));
+      })
+      .catch(() => addToast({ title: '⚠️ Không lưu được ảnh đã sửa', message: 'Ảnh gốc vẫn được giữ.', type: 'warning' }))
+      .finally(() => setUploading(n => n - 1));
   };
 
   const send = async (override?: string) => {
@@ -798,11 +858,26 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
               </button>)}
             </div>
 
-            <footer className="bg-white border-t border-slate-200 relative" data-testid="zalo-composer">
+            <footer className="bg-white border-t border-slate-200 relative" data-testid="zalo-composer" onDragOver={e => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }} onDrop={onDropComposer}>
               {(replyTo || editing) && (
                 <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-100 text-[12.5px]"><span className="border-l-[3px] border-blue-500 pl-2 min-w-0 flex-1">{editing ? <b>Đang chỉnh sửa tin nhắn</b> : <><b>Trả lời {replyTo!.senderName}</b><span className="block truncate text-slate-500">{replyTo!.content}</span></>}</span><button type="button" onClick={() => { setReplyTo(null); setEditing(null); setText(''); }} aria-label="Hủy" className="cursor-pointer"><X className="w-4 h-4" /></button></div>)}
               {(attachments.length > 0 || uploading > 0) && (
-                <div className="flex gap-2 px-4 py-2 overflow-x-auto" data-testid="zalo-pending">{uploading > 0 && <span className="shrink-0 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><MiniLoader size={14} />Đang tải lên…</span>}{attachments.map(a => <span key={a.id} className="relative shrink-0 bg-slate-100 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5">{a.type === 'image' ? <ImageIcon className="w-3.5 h-3.5" /> : <Paperclip className="w-3.5 h-3.5" />}<span className="max-w-[120px] truncate">{a.name}</span><button type="button" onClick={() => setAttachments(p => p.filter(x => x.id !== a.id))} aria-label="Bỏ tệp"><X className="w-3.5 h-3.5" /></button></span>)}</div>)}
+                <div className="px-4 py-2" data-testid="zalo-pending">
+                  {attachments.some(a => a.type === 'image') && <div className="text-[11.5px] font-semibold text-slate-600 mb-1">{attachments.filter(a => a.type === 'image').length} ảnh</div>}
+                  <div className="flex gap-2 overflow-x-auto items-center">
+                    {uploading > 0 && <span className="shrink-0 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><MiniLoader size={14} />Đang tải lên…</span>}
+                    {attachments.map(a => a.type === 'image'
+                      // Ảnh: hiện ảnh nhỏ; bấm vào để sửa (cắt/vẽ/làm mờ) nếu còn bản gốc cục bộ
+                      ? <span key={a.id} className="relative shrink-0" data-testid="zalo-thumb">
+                          <button type="button" onClick={() => { const f = localImages.current.get(a.id); if (f) setImgEdit({ id: a.id, file: f }); }} aria-label={`Sửa ảnh ${a.name}`} title="Bấm để sửa ảnh" className="block cursor-pointer">
+                            <img src={a.url} alt={a.name} className="h-14 w-14 rounded-lg object-cover border border-slate-200" />
+                          </button>
+                          <button type="button" onClick={() => { localImages.current.delete(a.id); setAttachments(p => p.filter(x => x.id !== a.id)); }} aria-label="Bỏ tệp" className="absolute -top-1.5 -right-1.5 bg-white border border-slate-300 rounded-full p-0.5 cursor-pointer"><X className="w-3 h-3" /></button>
+                        </span>
+                      : <span key={a.id} className="relative shrink-0 bg-slate-100 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5"><Paperclip className="w-3.5 h-3.5" /><span className="max-w-[120px] truncate">{a.name}</span><button type="button" onClick={() => setAttachments(p => p.filter(x => x.id !== a.id))} aria-label="Bỏ tệp"><X className="w-3.5 h-3.5" /></button></span>)}
+                    {attachments.some(a => a.type === 'image') && <button type="button" onClick={() => imgRef.current?.click()} aria-label="Thêm ảnh" title="Thêm ảnh" className="shrink-0 h-14 w-14 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 hover:text-slate-600 hover:border-slate-400 text-xl cursor-pointer">+</button>}
+                  </div>
+                </div>)}
               {mention !== null && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 mb-1 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-56 z-30" data-testid="zalo-mention">{mentionCandidates.map(e => <button key={e.id} type="button" onClick={() => pickMention(e)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><UserAvatar employee={e} size="xs" noRing />{e.name}</button>)}</div>)}
               {emojiOpen && (
@@ -811,12 +886,22 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 <button type="button" title="Biểu tượng cảm xúc" aria-label="Biểu tượng cảm xúc" onClick={() => setEmojiOpen(v => !v)} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Smile className="w-5 h-5" /></button>
                 <button type="button" title="Gửi ảnh" aria-label="Gửi ảnh" onClick={() => imgRef.current?.click()} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><ImageIcon className="w-5 h-5" /></button>
                 <button type="button" title="Đính kèm tệp" aria-label="Đính kèm tệp" onClick={() => fileRef.current?.click()} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Paperclip className="w-5 h-5" /></button>
+                <span className="relative" data-no-capture>
+                  <button type="button" title="Chụp màn hình" aria-label="Chụp màn hình" aria-expanded={shotMenu} disabled={capturing} onClick={() => setShotMenu(v => !v)} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer disabled:opacity-50">{capturing ? <MiniLoader size={18} /> : <Camera className="w-5 h-5" />}</button>
+                  {shotMenu && (<>
+                    <button type="button" aria-label="Đóng menu chụp" className="fixed inset-0 z-30 cursor-default" onClick={() => setShotMenu(false)} />
+                    <div role="menu" className="absolute bottom-full left-0 mb-1 z-40 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-64" data-testid="zalo-shot-menu">
+                      <button type="button" role="menuitem" onClick={() => takeShot('page')} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 cursor-pointer"><b className="block">Chụp trang LoLo này</b><span className="text-[11.5px] text-slate-500">Chụp màn hình đang xem trong LoLo</span></button>
+                      {canCaptureDisplay() && <button type="button" role="menuitem" onClick={() => takeShot('display')} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 cursor-pointer"><b className="block">Chụp cửa sổ / màn hình khác</b><span className="text-[11.5px] text-slate-500">Chọn cửa sổ hoặc màn hình cần chụp</span></button>}
+                    </div>
+                  </>)}
+                </span>
                 {workEntries.length > 0 && <button type="button" title="Gửi việc vào hội thoại" aria-label="Gửi việc vào hội thoại" onClick={() => setSendWorkOpen(true)} data-testid="zalo-sendwork-btn" className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><ClipboardList className="w-[18px] h-[18px]" /></button>}
                 <input ref={imgRef} type="file" accept="image/*" multiple hidden onChange={e => onFiles(e, 'image')} data-testid="zalo-img-input" />
                 <input ref={fileRef} type="file" multiple hidden onChange={e => onFiles(e, 'file')} data-testid="zalo-file-input" />
               </div>
               <div className="flex items-center gap-2 px-4 pb-3 pt-1">
-                <input value={text} onChange={e => onTextChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                <input value={text} onChange={e => onTextChange(e.target.value)} onPaste={onPasteComposer} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                   placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="chat-plain-input flex-1 outline-none text-[14px] py-1.5" />
                 {text.trim() || attachments.length || uploading > 0 || editing
                   ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
@@ -858,6 +943,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <div className="mx-3 mt-3 border-l-[3px] border-blue-500 bg-slate-50 rounded-md px-3 py-1.5 text-[12.5px] text-slate-600 line-clamp-2">{forwardMsg.content}</div>
             <div className="overflow-y-auto flex-1 py-1">{sortConversations(mine, prefs).map(c => <label key={c.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer"><input type="checkbox" checked={fwdTargets.includes(c.id)} onChange={() => setFwdTargets(toggleIn(fwdTargets, c.id))} data-testid="zalo-fwd-target" /><ConvAvatar conv={c} employees={employees} me={me} size={32} /><span className="text-[13.5px] truncate">{convName(c)}</span></label>)}</div>
             <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setForwardMsg(null)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={doForward} disabled={fwdTargets.length === 0} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[13px] font-bold disabled:opacity-40 cursor-pointer">Gửi ({fwdTargets.length})</button></div></div></div>)}
+      {shot && <ChatImageEditor file={shot} initialTool="crop" onCancel={() => setShot(null)} onDone={f => { setShot(null); addFiles([f], 'image', true); }} />}
+      {imgEdit && <ChatImageEditor file={imgEdit.file} onCancel={() => setImgEdit(null)} onDone={f => applyEditedImage(imgEdit.id, f)} />}
       {expanded && <div className="absolute inset-0 z-[60] bg-black/80 grid place-items-center p-4" onClick={() => setExpanded(null)} role="dialog" aria-label="Xem ảnh"><img src={expanded} alt="" className="max-w-full max-h-full rounded-lg" /></div>}
       {activityPid && createPortal(
         <ProjectActivityModal
