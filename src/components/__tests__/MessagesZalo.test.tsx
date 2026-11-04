@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act, cleanup } from '@testing-library/react';
 
 // Tin nhắn kiểu mới (Zalo): danh sách, tab Chưa đọc, Phân loại, tắt thông báo, ghim, gửi/trả lời/chuyển tiếp/thu hồi, thông tin hội thoại.
 const store = vi.hoisted(() => ({ convs: [] as any[], msgs: {} as Record<string, any[]> }));
@@ -234,28 +234,36 @@ describe('Khung chat', () => {
     beforeEach(() => { cap.page.mockReset(); cap.display.mockReset(); cap.can.v = true; (URL as any).createObjectURL = vi.fn(() => 'blob:x'); (URL as any).revokeObjectURL = vi.fn(); });
     const shotFile = () => new File(['png'], 'man-hinh-20261104-090000.png', { type: 'image/png' });
     const openChat = async () => { mount(); fireEvent.click(row('p_ny')); await screen.findByLabelText('Nhập tin nhắn'); };
-    it('menu có 2 lựa chọn trên máy tính; trên điện thoại (không có getDisplayMedia) chỉ còn "Chụp trang LoLo này"', async () => {
-      await openChat();
-      fireEvent.click(screen.getByLabelText('Chụp màn hình'));
-      expect(screen.getByText('Chụp trang LoLo này')).toBeInTheDocument(); expect(screen.getByText('Chụp cửa sổ / màn hình khác')).toBeInTheDocument();
-      fireEvent.click(screen.getByLabelText('Đóng menu chụp'));
-      cap.can.v = false;
-      fireEvent.click(screen.getByLabelText('Chụp màn hình'));
-      expect(screen.getByText('Chụp trang LoLo này')).toBeInTheDocument(); expect(screen.queryByText('Chụp cửa sổ / màn hình khác')).toBeNull();
-    });
-    it('chụp trang → mở trình sửa sẵn công cụ Cắt; bấm Hủy thì bỏ ảnh, không thêm đính kèm', async () => {
+    it('bấm biểu tượng chụp → khoanh vùng NGAY (không qua menu); trình khoanh vùng sẵn công cụ Cắt, có gợi ý kéo chuột', async () => {
       cap.page.mockResolvedValue(shotFile());
       await openChat();
-      fireEvent.click(screen.getByLabelText('Chụp màn hình')); fireEvent.click(screen.getByText('Chụp trang LoLo này'));
-      await screen.findByTestId('chat-image-editor');
+      fireEvent.click(screen.getByLabelText('Chụp màn hình'));
+      const dlg = await screen.findByTestId('chat-image-editor');
+      expect(dlg).toHaveAttribute('data-variant', 'snip'); expect(dlg).toHaveAttribute('aria-label', 'Khoanh vùng chụp');
       expect(screen.getByLabelText('Cắt')).toHaveAttribute('aria-pressed', 'true');
+      expect(dlg.textContent).toContain('Kéo chuột để khoanh vùng cần chụp');
+      expect(cap.page).toHaveBeenCalledTimes(1);
+    });
+    it('mũi tên ▾ có 2 cách chụp trên máy tính; trên điện thoại không có ▾ (chỉ chụp trang LoLo)', async () => {
+      await openChat();
+      fireEvent.click(screen.getByLabelText('Chọn cách chụp'));
+      expect(screen.getByText('Chụp màn hình LoLo')).toBeInTheDocument(); expect(screen.getByText('Chụp cửa sổ / màn hình khác')).toBeInTheDocument();
+      cleanup(); cap.can.v = false;
+      await openChat();
+      expect(screen.queryByLabelText('Chọn cách chụp')).toBeNull();
+    });
+    it('Hủy ở trình khoanh vùng → bỏ ảnh, không thêm đính kèm', async () => {
+      cap.page.mockResolvedValue(shotFile());
+      await openChat();
+      fireEvent.click(screen.getByLabelText('Chụp màn hình'));
+      await screen.findByTestId('chat-image-editor');
       fireEvent.click(screen.getByLabelText('Hủy'));
       expect(screen.queryByTestId('chat-image-editor')).toBeNull(); expect(screen.queryByTestId('zalo-pending')).toBeNull();
     });
     it('chụp cửa sổ khác: người dùng Hủy ở hộp chọn (null) → không mở trình sửa, không báo lỗi', async () => {
       cap.display.mockResolvedValue(null);
       await openChat();
-      fireEvent.click(screen.getByLabelText('Chụp màn hình')); fireEvent.click(screen.getByText('Chụp cửa sổ / màn hình khác'));
+      fireEvent.click(screen.getByLabelText('Chọn cách chụp')); fireEvent.click(screen.getByText('Chụp cửa sổ / màn hình khác'));
       await waitFor(() => expect(cap.display).toHaveBeenCalled());
       await waitFor(() => expect(screen.getByLabelText('Chụp màn hình')).not.toBeDisabled());
       expect(screen.queryByTestId('chat-image-editor')).toBeNull(); expect(addToast).not.toHaveBeenCalled();
@@ -263,7 +271,7 @@ describe('Khung chat', () => {
     it('chụp lỗi → báo toast, không mở trình sửa', async () => {
       cap.page.mockRejectedValue(new Error('hỏng canvas'));
       await openChat();
-      fireEvent.click(screen.getByLabelText('Chụp màn hình')); fireEvent.click(screen.getByText('Chụp trang LoLo này'));
+      fireEvent.click(screen.getByLabelText('Chụp màn hình'));
       await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ message: 'hỏng canvas' })));
       expect(screen.queryByTestId('chat-image-editor')).toBeNull();
     });

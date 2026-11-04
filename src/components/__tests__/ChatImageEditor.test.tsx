@@ -88,4 +88,20 @@ describe('ChatImageEditor', () => {
     fireEvent.click(colors[2]);
     expect(colors[2]).toHaveAttribute('aria-pressed', 'true'); expect(colors[0]).toHaveAttribute('aria-pressed', 'false');
   });
+  it('chế độ khoanh vùng (snip): chưa khoanh thì cả ảnh mờ + gợi ý; khoanh 300×200 rồi Xong → ảnh xuất đúng 300×200', async () => {
+    const { canvas, onDone } = await open({ variant: 'snip', initialTool: 'crop' });
+    expect(screen.getByTestId('chat-image-editor').textContent).toContain('Kéo chuột để khoanh vùng cần chụp');
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 800, 600);      // lớp mờ phủ toàn ảnh trước khi khoanh
+    drag(canvas, [50, 60], [350, 260]);
+    expect(screen.getByTestId('chat-image-editor').textContent).not.toContain('Kéo chuột để khoanh vùng cần chụp');
+    fireEvent.click(screen.getByLabelText('Xong'));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(lastCanvas.at(-1)).toEqual({ w: 300, h: 200 });
+  });
+  it('snip: vùng chọn sát mép trên → thanh công cụ nhảy xuống dưới để không che vùng chụp', async () => {
+    const { canvas } = await open({ variant: 'snip', initialTool: 'crop' });
+    expect(screen.getByTestId('editor-toolbar').className).toContain('top-3');
+    drag(canvas, [50, 10], [350, 260]);
+    expect(screen.getByTestId('editor-toolbar').className).toContain('bottom-3');
+  });
 });

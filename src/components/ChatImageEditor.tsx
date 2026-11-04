@@ -14,7 +14,9 @@ const TOOLS: { id: Tool; label: string; icon: React.ReactNode }[] = [
   { id: 'blur', label: 'Làm mờ', icon: <Grid3x3 className="w-4 h-4" /> },
 ];
 
-export default function ChatImageEditor({ file, onCancel, onDone, initialTool }: { file: File; onCancel: () => void; onDone: (f: File) => void; initialTool?: Tool }) {
+export default function ChatImageEditor({ file, onCancel, onDone, initialTool, variant }: { file: File; onCancel: () => void; onDone: (f: File) => void; initialTool?: Tool; variant?: 'snip' }) {
+  // variant 'snip' = chế độ KHOANH VÙNG CHỤP kiểu Zalo: ảnh chụp phủ kín màn hình, mờ đi, người dùng kéo chuột khoanh vùng cần lấy rồi mới hiện công cụ vẽ.
+  const snip = variant === 'snip';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);   // kích thước làm việc (px ảnh)
@@ -46,6 +48,7 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool }:
     const ctx = c.getContext('2d'); if (!ctx) return;
     const live = ops.concat(draft && draft.k !== 'crop' ? [draft] : []);
     paintOps(ctx, img, size.w, size.h, live);
+    if (snip && !crop) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, size.w, size.h); }   // chưa khoanh → cả màn hình mờ đi
     if (crop) {
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -57,7 +60,7 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool }:
       ctx.strokeRect(crop.x, crop.y, crop.w, crop.h);
       ctx.restore();
     }
-  }, [ops, draft, crop, size]);
+  }, [ops, draft, crop, size, snip]);
 
   // Đổi tọa độ chuột/ngón tay (theo khung hiển thị) sang pixel ảnh
   const toImg = (e: React.PointerEvent): Pt => {
@@ -126,35 +129,36 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool }:
 
   const btn = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[12.5px] font-semibold cursor-pointer transition-colors';
   return createPortal(
-    <div className="fixed inset-0 z-[80] bg-black/85 flex flex-col" role="dialog" aria-label="Sửa ảnh" data-testid="chat-image-editor">
-      {/* Thanh công cụ */}
-      <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 bg-slate-900">
+    <div className={snip ? 'fixed inset-0 z-[80] bg-black grid place-items-center overflow-hidden' : 'fixed inset-0 z-[80] bg-black/85 flex flex-col'} role="dialog" aria-label={snip ? 'Khoanh vùng chụp' : 'Sửa ảnh'} data-testid="chat-image-editor" data-variant={snip ? 'snip' : undefined}>
+      {/* Thanh công cụ (chế độ khoanh vùng: thanh nổi, tự xuống dưới nếu vùng chọn sát mép trên) */}
+      <div className={snip ? `absolute left-1/2 -translate-x-1/2 z-10 flex flex-wrap items-center justify-center gap-1.5 px-2.5 py-2 bg-slate-900/95 rounded-xl shadow-2xl max-w-[96vw] ${crop && size && crop.y < size.h * 0.15 ? 'bottom-3' : 'top-3'}` : 'flex flex-wrap items-center gap-1.5 px-3 py-2 bg-slate-900'} data-testid="editor-toolbar">
+        {/* Màu nền các nút đặt trực tiếp (style): index.css của giao diện sáng ghi đè các lớp bg-slate-*, nút sẽ thành nền trắng chữ trắng */}
         {TOOLS.map(t => (
           <button key={t.id} type="button" onClick={() => { setTool(t.id); if (textAt) commitText(); }} aria-label={t.label} aria-pressed={tool === t.id} title={t.label}
-            className={`${btn} ${tool === t.id ? 'bg-[#0d47c9]' : 'bg-slate-800 hover:bg-slate-700'}`} style={{ color: '#ffffff' }}>
+            className={btn} style={{ color: '#ffffff', background: tool === t.id ? '#0d47c9' : '#334155' }}>
             {t.icon}<span className="hidden sm:inline">{t.label}</span>
           </button>
         ))}
         <span className="w-px h-6 bg-slate-700 mx-1" />
         {COLORS.map(c => (
           <button key={c} type="button" onClick={() => setColor(c)} aria-label={`Màu ${c}`} aria-pressed={color === c} data-testid="editor-color"
-            className={`w-6 h-6 rounded-full cursor-pointer border-2 ${color === c ? 'border-white' : 'border-transparent'}`} style={{ background: c }} />
+            className={`w-6 h-6 rounded-full cursor-pointer border-2 ${color === c ? 'border-white' : 'border-slate-500'}`} style={{ background: c }} />
         ))}
         <span className="w-px h-6 bg-slate-700 mx-1" />
         <button type="button" onClick={undo} disabled={ops.length === 0} aria-label="Hoàn tác" title="Hoàn tác (Ctrl+Z)"
-          className={`${btn} bg-slate-800 hover:bg-slate-700 disabled:opacity-40`} style={{ color: '#ffffff' }}><Undo2 className="w-4 h-4" /><span className="hidden sm:inline">Hoàn tác</span></button>
+          className={`${btn} disabled:opacity-40`} style={{ color: '#ffffff', background: '#334155' }}><Undo2 className="w-4 h-4" /><span className="hidden sm:inline">Hoàn tác</span></button>
         <span className="flex-1" />
-        <button type="button" onClick={onCancel} aria-label="Hủy" title="Hủy (Esc)" className={`${btn} bg-slate-800 hover:bg-slate-700`} style={{ color: '#ffffff' }}><X className="w-4 h-4" />Hủy</button>
-        <button type="button" onClick={finish} disabled={!size} aria-label="Xong" title="Xong — đưa ảnh vào ô soạn tin" className={`${btn} bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50`} style={{ color: '#ffffff' }}><Check className="w-4 h-4" />Xong</button>
+        <button type="button" onClick={onCancel} aria-label="Hủy" title="Hủy (Esc)" className={btn} style={{ color: '#ffffff', background: '#334155' }}><X className="w-4 h-4" />Hủy</button>
+        <button type="button" onClick={finish} disabled={!size} aria-label="Xong" title="Xong — đưa ảnh vào ô soạn tin" className={`${btn} disabled:opacity-50`} style={{ color: '#ffffff', background: '#059669' }}><Check className="w-4 h-4" />Xong</button>
       </div>
       {/* Vùng ảnh */}
-      <div className="flex-1 min-h-0 overflow-auto grid place-items-center p-3">
+      <div className={snip ? 'w-screen h-screen grid place-items-center' : 'flex-1 min-h-0 overflow-auto grid place-items-center p-3'}>
         {error ? <p className="text-white text-sm">Không mở được ảnh này để sửa.</p> : !size ? <p className="text-white text-sm">Đang mở ảnh…</p> : (
           <div className="relative inline-block max-w-full" style={{ lineHeight: 0 }}>
             <canvas ref={canvasRef} width={size.w} height={size.h} data-testid="editor-canvas"
               onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-              className="max-w-full bg-white rounded shadow-xl"
-              style={{ maxHeight: 'calc(100vh - 110px)', touchAction: 'none', cursor: tool === 'text' ? 'text' : 'crosshair' }} />
+              className={snip ? 'max-w-full bg-white' : 'max-w-full bg-white rounded shadow-xl'}
+              style={{ maxHeight: snip ? '100vh' : 'calc(100vh - 110px)', touchAction: 'none', cursor: tool === 'text' ? 'text' : 'crosshair' }} />
             {textAt && (
               <input autoFocus value={textVal} onChange={e => setTextVal(e.target.value)} aria-label="Nhập chữ"
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitText(); } e.stopPropagation(); }}
@@ -165,8 +169,8 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool }:
           </div>
         )}
       </div>
-      <p className="text-center text-[11.5px] text-slate-300 pb-2">
-        {tool === 'crop' ? 'Kéo để chọn vùng giữ lại. Kéo lại để chọn vùng khác.' : tool === 'text' ? 'Bấm vào ảnh rồi gõ chữ, nhấn Enter để chốt.' : tool === 'blur' ? 'Kéo qua phần cần che (số tiền, tên, mật khẩu…).' : 'Kéo trên ảnh để vẽ.'}
+      <p className={snip ? 'absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-slate-900/90 rounded-full px-3 py-1 text-[11.5px] text-slate-100 text-center max-w-[94vw]' : 'text-center text-[11.5px] text-slate-300 pb-2'}>
+        {snip && !crop ? 'Kéo chuột để khoanh vùng cần chụp · Esc để hủy' : tool === 'crop' ? 'Kéo để chọn vùng giữ lại. Kéo lại để chọn vùng khác.' : tool === 'text' ? 'Bấm vào ảnh rồi gõ chữ, nhấn Enter để chốt.' : tool === 'blur' ? 'Kéo qua phần cần che (số tiền, tên, mật khẩu…).' : 'Kéo trên ảnh để vẽ.'}
       </p>
     </div>,
     document.body

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import ProjectActivityModal from './ProjectActivityModal';
 import ProjectTodayCard from './ProjectTodayCard';
 import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
-import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, MessageSquare, Camera } from 'lucide-react';
+import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, MessageSquare } from 'lucide-react';
 import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
@@ -34,6 +34,7 @@ import { workThreadId, isWorkThreadId } from '../lib/workThread';
 import { todayYmd, type MyWorkItem } from '../lib/myWork';
 import MiniLoader from './MiniLoader';
 import ChatImageEditor from './ChatImageEditor';
+import ScreenSnipIcon from './ScreenSnipIcon';
 import { screenshotName } from '../lib/imageMarkup';
 import { capturePage, captureDisplay, canCaptureDisplay } from '../lib/screenCapture';
 
@@ -886,13 +887,15 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 <button type="button" title="Biểu tượng cảm xúc" aria-label="Biểu tượng cảm xúc" onClick={() => setEmojiOpen(v => !v)} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Smile className="w-5 h-5" /></button>
                 <button type="button" title="Gửi ảnh" aria-label="Gửi ảnh" onClick={() => imgRef.current?.click()} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><ImageIcon className="w-5 h-5" /></button>
                 <button type="button" title="Đính kèm tệp" aria-label="Đính kèm tệp" onClick={() => fileRef.current?.click()} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Paperclip className="w-5 h-5" /></button>
-                <span className="relative" data-no-capture>
-                  <button type="button" title="Chụp màn hình" aria-label="Chụp màn hình" aria-expanded={shotMenu} disabled={capturing} onClick={() => setShotMenu(v => !v)} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer disabled:opacity-50">{capturing ? <MiniLoader size={18} /> : <Camera className="w-5 h-5" />}</button>
+                {/* Nút chụp kiểu Zalo: bấm biểu tượng = khoanh vùng chụp NGAY trên màn hình LoLo; mũi tên ▾ (chỉ máy tính) chọn chụp cửa sổ/màn hình khác */}
+                <span className="relative inline-flex items-center" data-no-capture>
+                  <button type="button" title="Chụp màn hình — kéo chuột khoanh vùng cần chụp" aria-label="Chụp màn hình" disabled={capturing} onClick={() => takeShot('page')} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer disabled:opacity-50">{capturing ? <MiniLoader size={18} /> : <ScreenSnipIcon />}</button>
+                  {canCaptureDisplay() && <button type="button" title="Chọn cách chụp" aria-label="Chọn cách chụp" aria-expanded={shotMenu} disabled={capturing} onClick={() => setShotMenu(v => !v)} className="-ml-1 p-0.5 rounded text-slate-500 hover:bg-slate-100 cursor-pointer disabled:opacity-50"><ChevronDown className="w-3.5 h-3.5" /></button>}
                   {shotMenu && (<>
                     <button type="button" aria-label="Đóng menu chụp" className="fixed inset-0 z-30 cursor-default" onClick={() => setShotMenu(false)} />
-                    <div role="menu" className="absolute bottom-full left-0 mb-1 z-40 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-64" data-testid="zalo-shot-menu">
-                      <button type="button" role="menuitem" onClick={() => takeShot('page')} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 cursor-pointer"><b className="block">Chụp trang LoLo này</b><span className="text-[11.5px] text-slate-500">Chụp màn hình đang xem trong LoLo</span></button>
-                      {canCaptureDisplay() && <button type="button" role="menuitem" onClick={() => takeShot('display')} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 cursor-pointer"><b className="block">Chụp cửa sổ / màn hình khác</b><span className="text-[11.5px] text-slate-500">Chọn cửa sổ hoặc màn hình cần chụp</span></button>}
+                    <div role="menu" className="absolute bottom-full left-0 mb-1 z-40 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-72" data-testid="zalo-shot-menu">
+                      <button type="button" role="menuitem" onClick={() => takeShot('page')} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 cursor-pointer"><b className="block">Chụp màn hình LoLo</b><span className="text-[11.5px] text-slate-500">Khoanh vùng cần chụp ngay trên trang đang xem</span></button>
+                      <button type="button" role="menuitem" onClick={() => takeShot('display')} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 cursor-pointer"><b className="block">Chụp cửa sổ / màn hình khác</b><span className="text-[11.5px] text-slate-500">Chọn cửa sổ hoặc màn hình, rồi khoanh vùng cần chụp</span></button>
                     </div>
                   </>)}
                 </span>
@@ -943,7 +946,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
             <div className="mx-3 mt-3 border-l-[3px] border-blue-500 bg-slate-50 rounded-md px-3 py-1.5 text-[12.5px] text-slate-600 line-clamp-2">{forwardMsg.content}</div>
             <div className="overflow-y-auto flex-1 py-1">{sortConversations(mine, prefs).map(c => <label key={c.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer"><input type="checkbox" checked={fwdTargets.includes(c.id)} onChange={() => setFwdTargets(toggleIn(fwdTargets, c.id))} data-testid="zalo-fwd-target" /><ConvAvatar conv={c} employees={employees} me={me} size={32} /><span className="text-[13.5px] truncate">{convName(c)}</span></label>)}</div>
             <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setForwardMsg(null)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={doForward} disabled={fwdTargets.length === 0} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[13px] font-bold disabled:opacity-40 cursor-pointer">Gửi ({fwdTargets.length})</button></div></div></div>)}
-      {shot && <ChatImageEditor file={shot} initialTool="crop" onCancel={() => setShot(null)} onDone={f => { setShot(null); addFiles([f], 'image', true); }} />}
+      {shot && <ChatImageEditor file={shot} variant="snip" initialTool="crop" onCancel={() => setShot(null)} onDone={f => { setShot(null); addFiles([f], 'image', true); }} />}
       {imgEdit && <ChatImageEditor file={imgEdit.file} onCancel={() => setImgEdit(null)} onDone={f => applyEditedImage(imgEdit.id, f)} />}
       {expanded && <div className="absolute inset-0 z-[60] bg-black/80 grid place-items-center p-4" onClick={() => setExpanded(null)} role="dialog" aria-label="Xem ảnh"><img src={expanded} alt="" className="max-w-full max-h-full rounded-lg" /></div>}
       {activityPid && createPortal(
