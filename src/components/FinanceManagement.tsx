@@ -4845,7 +4845,10 @@ export default function FinanceManagement({
       } else {
         // Nếu chưa có bản ghi, tạo mới
         payrollItem = {
-          id: `PL-${Date.now().toString().slice(-4)}`,
+          // Mã CHUẨN trùng với mã "Tính lương tự động" tạo (PL-<mã NV>-<MMYYYY>, xem handleCalculatePayroll ở Nhân sự):
+          // lần tính lương sau sẽ ghi ĐÈ lên đúng dòng này thay vì sinh thêm dòng thứ hai (dòng 0 công chỉ có tạm ứng).
+          // Chỉ khi thiếu mã nhân viên hoặc kỳ không đúng dạng MM/YYYY mới dùng mã ngẫu nhiên như cũ.
+          id: (empId && /^\d{2}\/\d{4}$/.test(period)) ? `PL-${empId}-${period.replace('/', '')}` : `PL-${Date.now().toString().slice(-4)}`,
           empId,
           empName: empName,
           month: period,
