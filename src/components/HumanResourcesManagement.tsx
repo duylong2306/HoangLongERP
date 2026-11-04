@@ -1,5 +1,6 @@
 ﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import * as MT from '../lib/messageTemplates';
 import { isShiftLeave, shiftLabel, supportsShiftLeave, leaveSymbolOf, type LeaveShift } from '../lib/leaveShift';
 import { planLeaveReschedule, applyLeaveReschedule } from '../lib/leaveReschedule';
@@ -5030,7 +5031,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                         const target = e.target as HTMLElement;
                         if (!target.dataset?.noteKey) return;
                         // Ghi chú theo dòng chỉ 1 dòng — Enter để lưu & rời ô thay vì xuống dòng.
-                        if (e.key === 'Enter') { e.preventDefault(); target.blur(); }
+                        if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); target.blur(); }
                       }}
                     />
                   </div>

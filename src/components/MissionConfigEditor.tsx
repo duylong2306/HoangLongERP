@@ -1,4 +1,5 @@
 import { findUniqueEmployeeByName } from '../lib/employeeLookup';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import React, { useState, useRef, useEffect } from 'react';
 import { Employee, SubTaskMissionTemplate } from '../types';
 import { CheckSquare, Plus, X, Download, Upload, Briefcase, User } from 'lucide-react';
@@ -328,7 +329,7 @@ export default function MissionConfigEditor({
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMission(); } }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); addMission(); } }}
               placeholder="VD: Kiểm tra mộng tủ dưới bếp, Cắt CNC hồi tủ áo..."
               className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-[10.5px] text-slate-200 placeholder-slate-600 outline-none focus:border-indigo-500 transition-colors"
             />

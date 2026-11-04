@@ -1,5 +1,6 @@
 ﻿import { createPortal } from 'react-dom';
 import ProjectActivityModal from './ProjectActivityModal';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import * as MT from '../lib/messageTemplates';
 import { postProjectNotice } from '../lib/projectNotice';
 import { findUniqueEmployeeByName } from '../lib/employeeLookup';
@@ -2192,7 +2193,7 @@ export default function TaskDetailModal({
                           value={newMissionChecklistInput}
                           onChange={(e) => setNewMissionChecklistInput(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key !== 'Enter') return;
+                            if (e.key !== 'Enter' || isImeComposing(e)) return;
                             e.preventDefault();
                             const text = newMissionChecklistInput.trim();
                             if (!text) return;

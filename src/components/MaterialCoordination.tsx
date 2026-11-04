@@ -1,4 +1,5 @@
 import { recordProjectEventFromMessage } from '../lib/projectEvents';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import * as MT from '../lib/messageTemplates';
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -4021,7 +4022,7 @@ export default function MaterialCoordination({
                     <input
                       value={quickSupplierName}
                       onChange={(e) => setQuickSupplierName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') addQuickSupplier(); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !isImeComposing(e)) addQuickSupplier(); }}
                       placeholder="Tên nhà cung cấp mới..."
                       className="flex-1 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-sky-500"
                     />

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import { Plus, Trash2, Save, Check, FileText, Printer, Edit, LayoutTemplate, X } from 'lucide-react';
 import { dbService } from '../lib/dbService';
 import { companyScopedKey } from '../lib/supabase';
@@ -848,7 +849,7 @@ export default function ConstructionTakeoff({
                     type="text"
                     value={newTemplateName}
                     onChange={(e) => setNewTemplateName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') saveAsTemplate(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !isImeComposing(e)) saveAsTemplate(); }}
                     placeholder="VD: Nhà phố cải tạo, Nhà cấp 4 xây mới..."
                     className="flex-1 bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 outline-none focus:border-indigo-500 font-semibold"
                   />

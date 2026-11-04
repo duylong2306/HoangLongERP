@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import * as MT from '../lib/messageTemplates';
 import { createPortal } from 'react-dom';
 import { postProjectNotice } from '../lib/projectNotice';
@@ -4426,7 +4427,7 @@ export default function ProjectKanbanBoard({
                                 placeholder="VD: Kiểm tra kích thước phủ bì cánh tủ..."
                                 className="flex-1 bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-[10.5px] text-slate-200 placeholder-slate-600 outline-none focus:border-indigo-500 transition-colors"
                                 onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Enter' && !isImeComposing(e)) {
                                     e.preventDefault();
                                     const inputEl = document.getElementById('new_checklist_input_subtask') as HTMLInputElement;
                                     if (inputEl && inputEl.value.trim()) {
@@ -6010,7 +6011,7 @@ export default function ProjectKanbanBoard({
                                   placeholder="VD: Kiểm tra kích thước phủ bì cánh tủ..."
                                   className="flex-1 bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-[10.5px] text-slate-200 placeholder-slate-600 outline-none focus:border-indigo-500 transition-colors"
                                   onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
+                                    if (e.key === 'Enter' && !isImeComposing(e)) {
                                       e.preventDefault();
                                       const inputEl = document.getElementById(`new_checklist_input_${index}`) as HTMLInputElement;
                                       if (inputEl && inputEl.value.trim()) {
@@ -7026,7 +7027,7 @@ export default function ProjectKanbanBoard({
                         placeholder="VD: Kiểm tra kích thước phủ bì cánh tủ..."
                         className="flex-1 bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-[10.5px] text-slate-200 placeholder-slate-600 outline-none focus:border-indigo-500 transition-colors"
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                          if (e.key === 'Enter' && !isImeComposing(e)) {
                             e.preventDefault();
                             const inputEl = document.getElementById('edit_checklist_input_subtask') as HTMLInputElement;
                             if (inputEl && inputEl.value.trim()) {

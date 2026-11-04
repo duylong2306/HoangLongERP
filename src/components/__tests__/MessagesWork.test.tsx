@@ -85,6 +85,19 @@ describe('Tab Việc của tôi trong Tin nhắn', () => {
     expect(fn.addMessage.mock.calls[0][0]).toMatchObject({ conversationId: 'conv_work_ap_ad_DX1', senderId: 'me', content: 'Anh đã xem' });
     await waitFor(() => expect(screen.getAllByTestId('work-msg')).toHaveLength(1));
   });
+  it('gõ tiếng Việt: Enter lúc đang ghép chữ chỉ chốt chữ, không gửi; Enter thường mới gửi MỘT tin đủ nội dung', async () => {
+    mount(); toWork();
+    fireEvent.click(document.querySelector('[data-work="ap:ad:DX1"]') as HTMLElement);
+    await waitFor(() => expect(fn.ensureWorkThread).toHaveBeenCalled());
+    const input = screen.getByTestId('work-input');
+    fireEvent.change(input, { target: { value: 'Anh đã xem rồi ơi' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false, keyCode: 229 });
+    expect(fn.addMessage).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 });
+    await waitFor(() => expect(fn.addMessage).toHaveBeenCalledTimes(1));
+    expect(fn.addMessage.mock.calls[0][0].content).toBe('Anh đã xem rồi ơi');
+  });
   it('luồng của việc gồm người được giao + người giao; mục có thảo luận chưa đọc hiện chấm đỏ', async () => {
     store.convs.push({ id: 'conv_work_task_a', type: 'group', name: '💬 Việc a', participantIds: ['me', 'tang'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 2 });
     mount(); toWork();

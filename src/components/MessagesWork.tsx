@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import { ChevronLeft, Send, MessageSquare, CheckCircle2 } from 'lucide-react';
 import type { Employee, ChatMessage } from '../types';
 import { ensureWorkThread, getMessages, addMessage, markConversationRead, markMessagesReadByUser, loadMessagesFromCloud, subscribeMessages } from '../lib/chatStore';
@@ -141,7 +142,7 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
         <div ref={endRef} />
       </div>
       <footer className="bg-white border-t border-slate-200 flex items-center gap-2 px-3 py-2.5" data-testid="work-composer">
-        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); send(); } }}
           placeholder="Trao đổi về mục này…" aria-label="Nhập tin nhắn thảo luận" className="chat-plain-input flex-1 outline-none text-[14px] px-2 py-2" data-testid="work-input" />
         <button type="button" onClick={send} disabled={!text.trim() || sending} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 disabled:text-slate-300 cursor-pointer" data-testid="work-send"><Send className="w-5 h-5" /></button>
       </footer>

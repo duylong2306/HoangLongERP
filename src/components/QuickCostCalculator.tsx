@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import { Calculator, ChevronDown, ChevronUp, Plus, Trash2, RotateCcw } from 'lucide-react';
 
 /**
@@ -110,7 +111,7 @@ export default function QuickCostCalculator() {
 
   const handleRowEnter = (e: React.KeyboardEvent, index: number) => {
     // Chỉ xử lý khi đang gõ trong ô nhập (không chặn phím Enter trên nút Xóa dòng)
-    if (e.key !== 'Enter' || (e.target as HTMLElement).tagName !== 'INPUT') return;
+    if (e.key !== 'Enter' || isImeComposing(e) || (e.target as HTMLElement).tagName !== 'INPUT') return;
     e.preventDefault();
     const next = rows[index + 1];
     if (next) {
