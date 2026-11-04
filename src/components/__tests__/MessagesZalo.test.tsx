@@ -276,6 +276,17 @@ describe('Khung chat', () => {
       expect(screen.queryByTestId('chat-image-editor')).toBeNull();
     });
   });
+  it('gõ tiếng Việt (Telex): Enter lúc chữ cuối còn đang ghép chỉ chốt chữ, KHÔNG gửi (tránh tách chữ cuối thành tin thứ hai)', async () => {
+    mount(); fireEvent.click(row('p_ny'));
+    const input = await screen.findByLabelText('Nhập tin nhắn');
+    fireEvent.change(input, { target: { value: 'Ok r đấy a ơi' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });            // Chrome: đang ghép
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false, keyCode: 229 }); // Safari: chốt chữ rồi mới báo phím
+    expect(fn.addMessage).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false, keyCode: 13 });  // Enter thật sau khi chốt → gửi MỘT tin đủ nội dung
+    await waitFor(() => expect(fn.addMessage).toHaveBeenCalledTimes(1));
+    expect(fn.addMessage.mock.calls[0][0].content).toBe('Ok r đấy a ơi');
+  });
   it('@ gợi ý thành viên nhóm và chèn tên', async () => {
     mount(); fireEvent.click(row('conv_project_A'));
     const input = await screen.findByLabelText('Nhập tin nhắn');

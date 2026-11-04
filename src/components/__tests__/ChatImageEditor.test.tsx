@@ -133,4 +133,15 @@ describe('ChatImageEditor', () => {
     fireEvent.click(screen.getByLabelText('Bút'));
     expect(fireEvent.mouseDown(canvas)).toBe(true);
   });
+  it('Chữ: Enter lúc đang ghép chữ tiếng Việt không chốt sớm; Enter thường mới chốt', async () => {
+    const { canvas } = await open();
+    fireEvent.click(screen.getByLabelText('Chữ'));
+    fireEvent.pointerDown(canvas, { clientX: 40, clientY: 40, pointerId: 1 });
+    const input = await screen.findByLabelText('Nhập chữ');
+    fireEvent.change(input, { target: { value: 'Sai ơi' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(screen.getByLabelText('Nhập chữ')).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 });
+    await waitFor(() => expect(ctx.fillText).toHaveBeenCalledWith('Sai ơi', 40, 40));
+  });
 });

@@ -35,6 +35,7 @@ import { todayYmd, type MyWorkItem } from '../lib/myWork';
 import MiniLoader from './MiniLoader';
 import ChatImageEditor from './ChatImageEditor';
 import ScreenSnipIcon from './ScreenSnipIcon';
+import { isImeComposing } from '../lib/ime';
 import { screenshotName } from '../lib/imageMarkup';
 import { capturePage, captureDisplay, canCaptureDisplay } from '../lib/screenCapture';
 
@@ -904,7 +905,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                 <input ref={fileRef} type="file" multiple hidden onChange={e => onFiles(e, 'file')} data-testid="zalo-file-input" />
               </div>
               <div className="flex items-center gap-2 px-4 pb-3 pt-1">
-                <input value={text} onChange={e => onTextChange(e.target.value)} onPaste={onPasteComposer} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                <input value={text} onChange={e => onTextChange(e.target.value)} onPaste={onPasteComposer} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); send(); } }}   /* đang ghép chữ tiếng Việt thì Enter chỉ chốt chữ, chưa gửi */
                   placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="chat-plain-input flex-1 outline-none text-[14px] py-1.5" />
                 {text.trim() || attachments.length || uploading > 0 || editing
                   ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>

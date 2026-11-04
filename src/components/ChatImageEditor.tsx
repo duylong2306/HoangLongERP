@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crop, Pencil, Square, Type, Grid3x3, Undo2, X, Check } from 'lucide-react';
+import { isImeComposing } from '../lib/ime';
 import { COLORS, MIN_SIZE, clampRect, cropOf, fitEdge, fontSizeFor, normRect, paintOps, screenshotName, type Op, type Pt, type Rect } from '../lib/imageMarkup';
 
 // Trình sửa ảnh trước khi gửi trong Tin nhắn (kiểu Zalo): Cắt · Bút · Khung · Chữ · Làm mờ + chọn màu + hoàn tác.
@@ -171,7 +172,7 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
             })()}
             {textAt && (
               <input ref={textRef} autoFocus value={textVal} onChange={e => setTextVal(e.target.value)} aria-label="Nhập chữ"
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitText(); } e.stopPropagation(); }}
+                onKeyDown={e => { if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); commitText(); } e.stopPropagation(); }}
                 // Mất tiêu điểm trong 300ms đầu = do cú bấm mở ô (không phải người dùng bỏ đi) → lấy lại tiêu điểm thay vì chốt/đóng
                 onBlur={() => { if (Date.now() - textOpenedAt.current < 300) { textRef.current?.focus(); return; } commitText(); }}
                 className="absolute bg-white/90 border border-dashed border-slate-500 outline-none px-1 rounded font-bold"
