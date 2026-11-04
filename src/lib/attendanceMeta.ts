@@ -198,9 +198,19 @@ export const ATTENDANCE_REPORT_TYPES = [
   'Báo cáo nghỉ ca',
   'Báo cáo lỗi chấm ra ca',
   'Báo cáo lỗi hệ thống chấm công',
+  'Báo cáo quên chấm công',
 ] as const;
 
 export type AttendanceReportType = typeof ATTENDANCE_REPORT_TYPES[number];
+
+/**
+ * Loại báo cáo mà khi DUYỆT thì tính đủ công cho CA ĐƯỢC BÁO CÁO (điền giờ chuẩn của ca đó, ca còn lại giữ nguyên):
+ *  - "Lỗi hệ thống chấm công": app/GPS lỗi nên không chấm được dù có đi làm;
+ *  - "Quên chấm công": có đi làm nhưng quên bấm chấm. Cùng cách tính công, khác nhau ở lý do (người duyệt đọc lý do để quyết).
+ */
+export function isShiftCreditReport(type?: string): boolean {
+  return type === 'Báo cáo lỗi hệ thống chấm công' || type === 'Báo cáo quên chấm công';
+}
 
 /** Đơn có phải là một trong các loại giải trình chấm công không. */
 export function isAttendanceReportType(type?: string): boolean {

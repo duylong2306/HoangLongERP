@@ -12,7 +12,7 @@ import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { announceLeaveApproved } from '../lib/leaveAnnounce';
 import { useNotification, getMaterialApprovers, getMaterialCoordinators, isRoleAdmin, isAccountingGroupMember, isAdminFallbackApprover, isAdminFallbackForPayment, isAdminFallbackForProposal, canSeeTravelExpenseApproval, isConfiguredApproverForProposal, isConfiguredApproverForPayment, canApproveTravelExpense as canApproveTravelExpenseCfg, isLeaveApproverFor } from '../context';
-import { isAttendanceReportType } from '../lib/attendanceMeta';
+import { isAttendanceReportType, isShiftCreditReport } from '../lib/attendanceMeta';
 import { isPaymentPendingForUser, isAdvancePendingForUser, isVoucherPendingForUser } from '../lib/approvalInbox';
 import { materialInboxFor, materialProposalTotal, COORDINATOR_STATUS_LABEL } from '../lib/materialApproval';
 import MyWorkOverview, { type InboxItem } from './MyWorkOverview';
@@ -228,7 +228,7 @@ export default function TaskManagement({
               if (targetLeave.type === 'Báo cáo lỗi chấm ra ca') {
                 if (targetLeave.shift === 'morning') timeOutS = shiftTimes.morningOut;
                 else if (targetLeave.shift === 'afternoon') timeOutC = shiftTimes.afternoonOut;
-              } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
+              } else if (isShiftCreditReport(targetLeave.type)) {
                 // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO (giữ ca còn lại nguyên).
                 if (targetLeave.shift === 'morning') { timeInS = shiftTimes.morningIn; timeOutS = shiftTimes.morningOut; }
                 else if (targetLeave.shift === 'afternoon') { timeInC = shiftTimes.afternoonIn; timeOutC = shiftTimes.afternoonOut; }
@@ -259,7 +259,7 @@ export default function TaskManagement({
               } else if (targetLeave.type === 'Báo cáo nghỉ ca') {
                 // Nghỉ ca = KHÔNG làm → không tự điền giờ chuẩn cho ca còn lại (trước đây làm công ảo +0,5 cho người nghỉ cả ngày)
                 timeInS = ''; timeOutS = ''; timeInC = ''; timeOutC = '';
-              } else if (targetLeave.type === 'Báo cáo lỗi hệ thống chấm công') {
+              } else if (isShiftCreditReport(targetLeave.type)) {
                 if (targetLeave.shift === 'morning') { timeInS = shiftTimes.morningIn; timeOutS = shiftTimes.morningOut; timeInC = ''; timeOutC = ''; }
                 else { timeInS = ''; timeOutS = ''; timeInC = shiftTimes.afternoonIn; timeOutC = shiftTimes.afternoonOut; }
               }

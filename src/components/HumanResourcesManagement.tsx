@@ -27,7 +27,7 @@ import { companyScopedKey } from '../lib/supabase';
 import { sendApprovalDirectMessage, findEmployeeByName } from '../lib/chatStore';
 import { announceLeaveApproved } from '../lib/leaveAnnounce';
 import { CTPStatus, ctpStatusLabel } from '../lib/travelExpenseStatus';
-import { mergePunchMeta, isAttendanceReportType } from '../lib/attendanceMeta';
+import { mergePunchMeta, isAttendanceReportType, isShiftCreditReport } from '../lib/attendanceMeta';
 import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog, ERP_MODULE_CODES } from './hr/hrTypes';
@@ -3269,7 +3269,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     }
                   } else if (l.type === 'Báo cáo nghỉ ca') {
                     // Trạng thái ngày đó sẽ là HỢP LỆ, không cần ghi thêm giờ nếu không có sẵn
-                  } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
+                  } else if (isShiftCreditReport(l.type)) {
                     // Lỗi hệ thống không thể chấm công: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO
                     // (chỉ ca đó; ca còn lại giữ nguyên giờ hiện tại để không làm sai lệch).
                     if (l.shift === 'morning') {
@@ -3337,7 +3337,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     // Nghỉ ca = KHÔNG làm → tuyệt đối không tự điền giờ chuẩn (trước đây điền giờ cho ca không được báo cáo → cộng công ảo
                     // +0,5 cho người nghỉ cả ngày). Để trống cả 4 ô: công do công thức quyết định (đủ 2 ca đã duyệt → 0 công mã P).
                     timeInS = ''; timeOutS = ''; timeInC = ''; timeOutC = '';
-                  } else if (l.type === 'Báo cáo lỗi hệ thống chấm công') {
+                  } else if (isShiftCreditReport(l.type)) {
                     // Lỗi hệ thống: điền ĐỦ giờ chuẩn CA ĐƯỢC BÁO CÁO, ca còn lại để trống.
                     if (l.shift === 'morning') {
                       timeInS = shiftTimes.morningIn;

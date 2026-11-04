@@ -22,17 +22,19 @@ export function generateLeaveId(existingIds: Iterable<string>, rand: () => numbe
 type Leave = { id: string; type?: string; status?: string; shift?: string; empId?: string; empName?: string; fromDate?: string; toDate?: string };
 
 export const ABSENCE_REPORT_TYPE = 'Báo cáo nghỉ ca';
+/** Các loại báo cáo cho phép gửi/duyệt "CẢ NGÀY" (2 đơn sáng + chiều gộp thành 1 thao tác). Hai đơn của cặp phải CÙNG loại. */
+export const WHOLE_DAY_REPORT_TYPES = [ABSENCE_REPORT_TYPE, 'Báo cáo quên chấm công'];
 
 const sameEmp = (a: Leave, b: Leave) => (a.empId && b.empId ? a.empId === b.empId : !!a.empName && a.empName === b.empName);
 
 /** Đơn còn lại của cặp (nếu có) — dùng khi Duyệt/Từ chối 1 đơn để áp dụng cho cả cặp. */
 export function findPairedAbsenceReport<T extends Leave>(leave: T | undefined | null, leaves: T[]): T | null {
-  if (!leave || leave.type !== ABSENCE_REPORT_TYPE || leave.status !== 'pending') return null;
+  if (!leave || !WHOLE_DAY_REPORT_TYPES.includes(leave.type || '') || leave.status !== 'pending') return null;
   if (leave.shift !== 'morning' && leave.shift !== 'afternoon') return null;
   if (!leave.fromDate || leave.fromDate !== leave.toDate) return null;
   const other = leave.shift === 'morning' ? 'afternoon' : 'morning';
   return leaves.find(l =>
-    l.id !== leave.id && l.type === ABSENCE_REPORT_TYPE && l.status === 'pending' && l.shift === other &&
+    l.id !== leave.id && l.type === leave.type && l.status === 'pending' && l.shift === other &&
     l.fromDate === leave.fromDate && l.toDate === leave.toDate && sameEmp(l, leave)) || null;
 }
 

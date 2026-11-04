@@ -62,7 +62,7 @@ import {
   Compass
 } from 'lucide-react';
 import { Employee } from '../types';
-import { generateLeaveId } from '../lib/leaveRequests';
+import { generateLeaveId, WHOLE_DAY_REPORT_TYPES } from '../lib/leaveRequests';
 import { evaluateLeaveNotice, isRealLeaveType, tagLateNoticeReason, formatDays } from '../lib/leaveNotice';
 import { supportsShiftLeave, leaveDaysCount, shiftLabel, shiftLeaveBadge, shiftLeaveFullLabel, approvedShiftLeavesOnDay, type LeaveShift } from '../lib/leaveShift';
 
@@ -1053,7 +1053,7 @@ export default function DashboardOverview({
   const [reportApprover, setReportApprover] = useState('');
   const [reportStatusText, setReportStatusText] = useState('');
   const [reportReason, setReportReason] = useState('');
-  const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | 'Báo cáo lỗi hệ thống chấm công' | ''>('');
+  const [reportType, setReportType] = useState<'Báo cáo nghỉ ca' | 'Báo cáo lỗi chấm ra ca' | 'Báo cáo lỗi hệ thống chấm công' | 'Báo cáo quên chấm công' | ''>('');
   const [reportCategory, setReportCategory] = useState<'faulty' | 'missing' | ''>('');
   const [reportShift, setReportShift] = useState<'morning' | 'afternoon' | ''>('');
   // Báo cáo nghỉ ca: khi CẢ HAI ca của ngày đều vắng thì gửi 1 lần cho cả ngày (tạo 2 đơn: sáng + chiều). Mặc định bật.
@@ -1809,9 +1809,9 @@ export default function DashboardOverview({
       ? (configuredLeaveApprover.position || '')
       : '';
 
-    // Gửi cho CẢ NGÀY: chỉ khi loại là "Báo cáo nghỉ ca", người dùng để bật lựa chọn và thật sự cả 2 ca đều vắng (xem wholeDayEligible).
+    // Gửi cho CẢ NGÀY: chỉ khi loại là "Báo cáo nghỉ ca" hoặc "Quên chấm công", người dùng để bật lựa chọn và thật sự cả 2 ca đều vắng (xem wholeDayEligible).
     // Dữ liệu vẫn là 2 đơn (mỗi ca 1 đơn) để luồng tính công không đổi; người duyệt thấy và duyệt như 1 đơn "Cả ngày".
-    const isWholeDay = reportType === 'Báo cáo nghỉ ca' && reportWholeDay && wholeDayEligible();
+    const isWholeDay = WHOLE_DAY_REPORT_TYPES.includes(reportType) && reportWholeDay && wholeDayEligible();
     const shiftsToSend: ('morning' | 'afternoon')[] = isWholeDay ? ['morning', 'afternoon'] : [reportShift as 'morning' | 'afternoon'];
     // Mã đơn chọn KHÔNG TRÙNG mã có sẵn (mã cũ chỉ 3 số cuối của đồng hồ → có thể trùng và ghi đè đơn khác)
     const usedLeaveIds = new Set<string>((dashLeaves || []).map((x: any) => x.id));
@@ -1819,7 +1819,7 @@ export default function DashboardOverview({
       const id = generateLeaveId(usedLeaveIds);
       usedLeaveIds.add(id);
       const statusText = isWholeDay
-        ? `Vắng mặt / Không điểm danh (${sh === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`
+        ? `${reportType === 'Báo cáo quên chấm công' ? 'Quên chấm công' : 'Vắng mặt / Không điểm danh'} (${sh === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})`
         : reportStatusText;
       return {
         id,
@@ -2351,7 +2351,7 @@ export default function DashboardOverview({
 
   // Ô chọn "báo cáo cả ngày" — hiện ở form Báo cáo nghỉ ca khi đủ điều kiện (dùng chung cho form ca sáng và ca chiều)
   const renderWholeDayOption = () => {
-    if (reportType !== 'Báo cáo nghỉ ca' || reportCategory !== 'missing' || !wholeDayEligible()) return null;
+    if (!WHOLE_DAY_REPORT_TYPES.includes(reportType) || reportCategory !== 'missing' || !wholeDayEligible()) return null;
     return (
       <label className="flex items-start gap-2 bg-slate-950 border border-slate-800 rounded px-2.5 py-2 cursor-pointer">
         <input type="checkbox" checked={reportWholeDay} onChange={(e) => setReportWholeDay(e.target.checked)} className="mt-0.5 cursor-pointer" />
@@ -2551,6 +2551,7 @@ export default function DashboardOverview({
             <select value={reportType} onChange={(e) => setReportType(e.target.value as any)} className={inputCls}>
               <option value="Báo cáo nghỉ ca">Báo cáo nghỉ ca (vắng thật / không có mặt)</option>
               <option value="Báo cáo lỗi hệ thống chấm công">Lỗi hệ thống không chấm được ca (app / GPS lỗi)</option>
+              <option value="Báo cáo quên chấm công">Quên chấm công (có đi làm nhưng quên bấm chấm)</option>
             </select>
           ) : (
             <input type="text" value={reportType} readOnly className={`${inputCls} font-bold`} />

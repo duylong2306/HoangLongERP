@@ -299,7 +299,7 @@ export default function LeavesTab({
                           : isShiftLeave(l)
                             // Nghỉ phép THẬT chỉ 1 ca: nhãn nổi bật để nhận ra ngay lịch nghỉ nửa ngày
                             ? <span className="block text-[9px] font-black text-sky-400">🏖 Nghỉ 1 {shiftLabel(l.shift)}</span>
-                            : (l.type === 'Báo cáo nghỉ ca' && l.shift ? <span className="block text-[9px] text-slate-500">{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
+                            : ((l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo quên chấm công') && l.shift ? <span className="block text-[9px] text-slate-500">{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
                         {parseLateNotice(l.reason).late && <span className="block text-[9px] font-black text-amber-700" title={parseLateNotice(l.reason).detail}>⚠ Xin muộn</span>}
                       </td>
                       <td className="py-2.5 text-slate-350 text-center font-mono">

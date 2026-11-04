@@ -48,3 +48,16 @@ describe('Cặp báo cáo nghỉ ca sáng + chiều', () => {
     expect(visible.map(l => l.id)).toEqual(['A']); expect(pairOf.get('A')).toBe('B');
   });
 });
+
+describe('Cặp "Cả ngày" cho Báo cáo quên chấm công', () => {
+  const mk = (id: string, type: string, shift: string) => ({ id, type, status: 'pending', shift, empId: 'E1', fromDate: '2026-11-03', toDate: '2026-11-03' });
+  it('ghép được cặp sáng + chiều cùng loại "quên chấm công"', () => {
+    const list = [mk('A', 'Báo cáo quên chấm công', 'morning'), mk('B', 'Báo cáo quên chấm công', 'afternoon')];
+    expect(findPairedAbsenceReport(list[0], list)?.id).toBe('B');
+    expect(groupPendingAbsencePairs(list).pairOf.get('A')).toBe('B');
+  });
+  it('KHÔNG ghép hai đơn khác loại (nghỉ ca sáng + quên chấm chiều)', () => {
+    const list = [mk('A', 'Báo cáo nghỉ ca', 'morning'), mk('B', 'Báo cáo quên chấm công', 'afternoon')];
+    expect(findPairedAbsenceReport(list[0], list)).toBeNull();
+  });
+});
