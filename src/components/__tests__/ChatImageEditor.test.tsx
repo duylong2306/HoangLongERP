@@ -91,8 +91,17 @@ describe('ChatImageEditor', () => {
   it('chế độ khoanh vùng (snip): chưa khoanh thì cả ảnh mờ + gợi ý; khoanh 300×200 rồi Xong → ảnh xuất đúng 300×200', async () => {
     const { canvas, onDone } = await open({ variant: 'snip', initialTool: 'crop' });
     expect(screen.getByTestId('chat-image-editor').textContent).toContain('Kéo chuột để khoanh vùng cần chụp');
-    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 800, 600);      // lớp mờ phủ toàn ảnh trước khi khoanh
-    drag(canvas, [50, 60], [350, 260]);
+    expect(screen.getByTestId('snip-dim')).toBeInTheDocument();      // lớp mờ phủ toàn ảnh trước khi khoanh (phần tử HTML, không vẽ lên canvas)
+    await waitFor(() => expect(ctx.drawImage).toHaveBeenCalled());   // chờ lần vẽ đầu xong rồi mới đo, tránh chập chờn khi máy bận
+    const paints = ctx.drawImage.mock.calls.length;
+    fireEvent.pointerDown(canvas, { clientX: 50, clientY: 60, pointerId: 1 });
+    for (const [x, y] of [[100, 100], [200, 180], [350, 260]]) fireEvent.pointerMove(canvas, { clientX: x, clientY: y, pointerId: 1 });
+    // Đang KÉO khoanh vùng không được vẽ lại canvas (nguyên nhân giật trước đây) — chỉ cập nhật khung chọn HTML
+    expect(ctx.drawImage.mock.calls.length).toBe(paints);
+    fireEvent.pointerUp(canvas, { clientX: 350, clientY: 260, pointerId: 1 });
+    expect(screen.queryByTestId('snip-dim')).toBeNull();
+    const box = screen.getByTestId('crop-box') as HTMLElement;
+    expect(box.style.left).toBe('6.25%'); expect(box.style.width).toBe('37.5%');
     expect(screen.getByTestId('chat-image-editor').textContent).not.toContain('Kéo chuột để khoanh vùng cần chụp');
     fireEvent.click(screen.getByLabelText('Xong'));
     await waitFor(() => expect(onDone).toHaveBeenCalled());

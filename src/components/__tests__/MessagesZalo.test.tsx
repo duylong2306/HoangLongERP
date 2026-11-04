@@ -214,8 +214,8 @@ describe('Khung chat', () => {
     await screen.findByLabelText('Nhập tin nhắn');
     const img = new File(['a'], 'loi.png', { type: 'image/png' }); const pdf = new File(['b'], 'hd.pdf', { type: 'application/pdf' });
     fireEvent.drop(screen.getByTestId('zalo-composer'), { dataTransfer: { files: [img, pdf], types: ['Files'] } });
-    await waitFor(() => expect(screen.getByTestId('zalo-pending').textContent).toContain('hd.pdf'));
-    expect(screen.getByTestId('zalo-pending').textContent).toContain('1 ảnh');
+    // Ảnh và PDF tải lên song song, xong lúc khác nhau → chờ đủ cả hai rồi mới kiểm tra
+    await waitFor(() => { const t = screen.getByTestId('zalo-pending').textContent || ''; expect(t).toContain('hd.pdf'); expect(t).toContain('1 ảnh'); });
   });
   it('bấm ảnh nhỏ → mở trình sửa ảnh; Hủy thì đóng, ảnh vẫn còn', async () => {
     // jsdom không có blob URL / canvas → giả lập vừa đủ để trình sửa mở được

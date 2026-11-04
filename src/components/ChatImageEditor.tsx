@@ -41,26 +41,15 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
 
   const crop = useMemo(() => cropOf(draft?.k === 'crop' ? [...ops, draft] : ops), [ops, draft]);
 
-  // Vẽ lại canvas mỗi khi đổi thao tác; vùng cắt hiện bằng lớp phủ tối + viền nét đứt bên ngoài vùng giữ lại
+  // Vẽ lại canvas CHỈ khi nội dung ảnh đổi (nét bút/khung/chữ/làm mờ). Kéo khoanh vùng cắt KHÔNG vẽ lại canvas: lớp mờ + khung chọn là
+  // phần tử HTML đặt chồng lên (bên dưới) → kéo chuột mượt kể cả ảnh chụp màn hình lớn (trước đây mỗi lần chuột nhúc nhích vẽ lại cả ảnh vài megapixel).
+  const liveDraft = useMemo(() => (draft && draft.k !== 'crop' ? draft : null), [draft]);
   useEffect(() => {
     const c = canvasRef.current, img = imgRef.current;
     if (!c || !img || !size) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
-    const live = ops.concat(draft && draft.k !== 'crop' ? [draft] : []);
-    paintOps(ctx, img, size.w, size.h, live);
-    if (snip && !crop) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, size.w, size.h); }   // chưa khoanh → cả màn hình mờ đi
-    if (crop) {
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(0, 0, size.w, crop.y);
-      ctx.fillRect(0, crop.y + crop.h, size.w, size.h - crop.y - crop.h);
-      ctx.fillRect(0, crop.y, crop.x, crop.h);
-      ctx.fillRect(crop.x + crop.w, crop.y, size.w - crop.x - crop.w, crop.h);
-      ctx.strokeStyle = '#ffffff'; ctx.setLineDash([12, 8]); ctx.lineWidth = Math.max(2, size.w / 600);
-      ctx.strokeRect(crop.x, crop.y, crop.w, crop.h);
-      ctx.restore();
-    }
-  }, [ops, draft, crop, size, snip]);
+    paintOps(ctx, img, size.w, size.h, liveDraft ? [...ops, liveDraft] : ops);
+  }, [ops, liveDraft, size]);
 
   // Đổi tọa độ chuột/ngón tay (theo khung hiển thị) sang pixel ảnh
   const toImg = (e: React.PointerEvent): Pt => {
@@ -159,6 +148,20 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
               onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
               className={snip ? 'max-w-full bg-white' : 'max-w-full bg-white rounded shadow-xl'}
               style={{ maxHeight: snip ? '100vh' : 'calc(100vh - 110px)', touchAction: 'none', cursor: tool === 'text' ? 'text' : 'crosshair' }} />
+            {/* Lớp mờ ngoài vùng giữ lại + khung nét đứt (chưa khoanh ở chế độ khoanh vùng → mờ cả ảnh) */}
+            {snip && !crop && <div data-testid="snip-dim" className="absolute inset-0 pointer-events-none" style={{ background: 'rgba(0,0,0,0.45)' }} />}
+            {crop && size && (() => {
+              const pc = (v: number) => `${v * 100}%`;
+              const dim = { position: 'absolute', background: 'rgba(0,0,0,0.55)', pointerEvents: 'none' } as const;
+              const l = crop.x / size.w, t = crop.y / size.h, w = crop.w / size.w, h = crop.h / size.h;
+              return (<>
+                <div style={{ ...dim, left: 0, top: 0, width: '100%', height: pc(t) }} />
+                <div style={{ ...dim, left: 0, top: pc(t + h), width: '100%', height: pc(1 - t - h) }} />
+                <div style={{ ...dim, left: 0, top: pc(t), width: pc(l), height: pc(h) }} />
+                <div style={{ ...dim, left: pc(l + w), top: pc(t), width: pc(1 - l - w), height: pc(h) }} />
+                <div data-testid="crop-box" style={{ position: 'absolute', left: pc(l), top: pc(t), width: pc(w), height: pc(h), outline: '2px dashed #ffffff', pointerEvents: 'none' }} />
+              </>);
+            })()}
             {textAt && (
               <input autoFocus value={textVal} onChange={e => setTextVal(e.target.value)} aria-label="Nhập chữ"
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitText(); } e.stopPropagation(); }}
@@ -169,9 +172,10 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
           </div>
         )}
       </div>
-      <p className={snip ? 'absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-slate-900/90 rounded-full px-3 py-1 text-[11.5px] text-slate-100 text-center max-w-[94vw]' : 'text-center text-[11.5px] text-slate-300 pb-2'}>
+      {/* Chế độ khoanh vùng: đã khoanh rồi thì ẩn gợi ý (khỏi đè lên thanh công cụ khi nó nhảy xuống dưới) */}
+      {!(snip && crop) && <p className={snip ? 'absolute bottom-3 left-1/2 -translate-x-1/2 z-10 bg-slate-900/90 rounded-full px-3 py-1 text-[11.5px] text-slate-100 text-center max-w-[94vw]' : 'text-center text-[11.5px] text-slate-300 pb-2'}>
         {snip && !crop ? 'Kéo chuột để khoanh vùng cần chụp · Esc để hủy' : tool === 'crop' ? 'Kéo để chọn vùng giữ lại. Kéo lại để chọn vùng khác.' : tool === 'text' ? 'Bấm vào ảnh rồi gõ chữ, nhấn Enter để chốt.' : tool === 'blur' ? 'Kéo qua phần cần che (số tiền, tên, mật khẩu…).' : 'Kéo trên ảnh để vẽ.'}
-      </p>
+</p>}
     </div>,
     document.body
   );

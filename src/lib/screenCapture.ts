@@ -11,8 +11,10 @@ export function canCaptureDisplay(nav: Navigator | undefined = typeof navigator 
   return !/Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent || '');
 }
 
+// Ảnh chụp trung gian lưu JPEG (mã hóa nhanh hơn PNG nhiều lần với ảnh màn hình lớn → bớt trễ sau khi bấm chụp);
+// ảnh người dùng gửi đi là PNG xuất ra từ trình sửa sau khi đã cắt nhỏ.
 const toFile = (c: HTMLCanvasElement): Promise<File | null> =>
-  new Promise(res => c.toBlob(b => res(b ? new File([b], screenshotName(), { type: 'image/png' }) : null), 'image/png'));
+  new Promise(res => c.toBlob(b => res(b ? new File([b], screenshotName(new Date(), 'jpg'), { type: 'image/jpeg' }) : null), 'image/jpeg', 0.92));
 
 /**
  * Chụp phần đang NHÌN THẤY của trang LoLo (không phải cả trang cuộn dài). Trả null nếu không tạo được ảnh.
@@ -24,9 +26,16 @@ export async function capturePage(): Promise<File | null> {
   const canvas: HTMLCanvasElement = await html2canvas(document.documentElement, {   // gốc <html> (không phải <body>): body có thể cao 0px khi giao diện dùng bố cục cố định, html2canvas sẽ báo lỗi kích thước
     x: window.scrollX, y: window.scrollY, width: window.innerWidth, height: window.innerHeight,
     windowWidth: window.innerWidth, windowHeight: window.innerHeight,
-    scale: Math.min(2, window.devicePixelRatio || 1),   // tối đa 2x: nét vừa đủ, không phình bộ nhớ trên màn hình 3x
+    scale: Math.min(1.5, window.devicePixelRatio || 1),   // tối đa 1,5x: chữ vẫn đọc rõ sau khi cắt, nhưng chụp nhanh hơn hẳn 2x trên màn hình Retina
     useCORS: true, backgroundColor: '#ffffff', logging: false,
     ignoreElements: (el: Element) => el.hasAttribute?.('data-no-capture'),
+    // html2canvas vẽ SAI bóng đổ của Tailwind (shadow-sm có spread âm): bong bóng tin nhắn ra khung xám dày + ô trắng trong, rất xấu.
+    // Chỉ sửa trên BẢN SAO trang dùng để chụp (trang thật không đổi): tắt bóng đổ/mờ nền → ảnh sạch, chỉ mất hiệu ứng bóng nhẹ.
+    onclone: (doc: Document) => {
+      const st = doc.createElement('style');
+      st.textContent = '*,*::before,*::after{box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}';
+      doc.head.appendChild(st);
+    },
   });
   return toFile(canvas);
 }
