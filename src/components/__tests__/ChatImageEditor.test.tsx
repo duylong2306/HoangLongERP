@@ -113,4 +113,24 @@ describe('ChatImageEditor', () => {
     drag(canvas, [50, 10], [350, 260]);
     expect(screen.getByTestId('editor-toolbar').className).toContain('bottom-3');
   });
+  it('Chữ: mất tiêu điểm NGAY sau khi bấm mở ô (do cú bấm chuột trên canvas) không được đóng ô; mất tiêu điểm sau đó mới chốt chữ', async () => {
+    const { canvas } = await open();
+    fireEvent.click(screen.getByLabelText('Chữ'));
+    fireEvent.pointerDown(canvas, { clientX: 40, clientY: 40, pointerId: 1 });
+    const input = await screen.findByLabelText('Nhập chữ');
+    fireEvent.change(input, { target: { value: 'Giữ lại' } });
+    fireEvent.blur(input);                                    // blur tức thì: trình duyệt cướp focus lúc mousedown → ô phải còn
+    expect(screen.getByLabelText('Nhập chữ')).toBeInTheDocument();
+    const t0 = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(t0 + 1000);
+    fireEvent.blur(screen.getByLabelText('Nhập chữ'));       // người dùng thực sự bấm ra ngoài → chốt chữ
+    await waitFor(() => expect(ctx.fillText).toHaveBeenCalledWith('Giữ lại', 40, 40));
+    expect(screen.queryByLabelText('Nhập chữ')).toBeNull();
+  });
+  it('Chữ: mousedown trên canvas bị chặn mặc định khi đang dùng công cụ Chữ (để canvas không cướp tiêu điểm)', async () => {
+    const { canvas } = await open();
+    fireEvent.click(screen.getByLabelText('Chữ'));
+    expect(fireEvent.mouseDown(canvas)).toBe(false);          // false = đã preventDefault
+    fireEvent.click(screen.getByLabelText('Bút'));
+    expect(fireEvent.mouseDown(canvas)).toBe(true);
+  });
 });

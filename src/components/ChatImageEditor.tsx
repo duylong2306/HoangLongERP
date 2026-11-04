@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crop, Pencil, Square, Type, Grid3x3, Undo2, X, Check } from 'lucide-react';
-import { COLORS, MIN_SIZE, clampRect, cropOf, fitEdge, normRect, paintOps, screenshotName, type Op, type Pt, type Rect } from '../lib/imageMarkup';
+import { COLORS, MIN_SIZE, clampRect, cropOf, fitEdge, fontSizeFor, normRect, paintOps, screenshotName, type Op, type Pt, type Rect } from '../lib/imageMarkup';
 
 // Trình sửa ảnh trước khi gửi trong Tin nhắn (kiểu Zalo): Cắt · Bút · Khung · Chữ · Làm mờ + chọn màu + hoàn tác.
 // Bấm ✓ → trả về tệp PNG đã sửa (onDone); bấm ✕ / Esc → bỏ qua (onCancel), ảnh gốc giữ nguyên.
@@ -28,6 +28,8 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
   const start = useRef<Pt | null>(null);
   const [textAt, setTextAt] = useState<Pt | null>(null);        // ô gõ chữ đang mở tại điểm này
   const [textVal, setTextVal] = useState('');
+  const textRef = useRef<HTMLInputElement>(null);
+  const textOpenedAt = useRef(0);   // lúc mở ô gõ chữ — để bỏ qua cú mất tiêu điểm ngay sau khi bấm (xem onBlur bên dưới)
 
   // Nạp ảnh từ tệp (blob URL cục bộ → không dính CORS, xuất lại được)
   useEffect(() => {
@@ -51,6 +53,9 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
     paintOps(ctx, img, size.w, size.h, liveDraft ? [...ops, liveDraft] : ops);
   }, [ops, liveDraft, size]);
 
+  // Mở ô gõ chữ thì đưa con trỏ vào ngay (autoFocus của trình duyệt bị cú bấm chuột trên canvas giành lại tiêu điểm)
+  useEffect(() => { if (textAt) textRef.current?.focus(); }, [textAt]);
+
   // Đổi tọa độ chuột/ngón tay (theo khung hiển thị) sang pixel ảnh
   const toImg = (e: React.PointerEvent): Pt => {
     const c = canvasRef.current!; const r = c.getBoundingClientRect();
@@ -66,7 +71,7 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
     if (!size) return;
     if (textAt) commitText();   // bấm chỗ khác → chốt chữ đang gõ
     const p = toImg(e);
-    if (tool === 'text') { setTextAt(p); setTextVal(''); return; }
+    if (tool === 'text') { textOpenedAt.current = Date.now(); setTextAt(p); setTextVal(''); return; }
     (e.target as Element).setPointerCapture?.(e.pointerId);
     start.current = p;
     if (tool === 'pen') setDraft({ k: 'pen', color, pts: [p] });
@@ -146,6 +151,8 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
           <div className="relative inline-block max-w-full" style={{ lineHeight: 0 }}>
             <canvas ref={canvasRef} width={size.w} height={size.h} data-testid="editor-canvas"
               onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+              // Công cụ Chữ: chặn hành vi mặc định của mousedown, nếu không canvas (không nhận tiêu điểm) cướp focus khỏi ô gõ chữ vừa mở → ô tự đóng ngay, không gõ được
+              onMouseDown={e => { if (tool === 'text') e.preventDefault(); }}
               className={snip ? 'max-w-full bg-white' : 'max-w-full bg-white rounded shadow-xl'}
               style={{ maxHeight: snip ? '100vh' : 'calc(100vh - 110px)', touchAction: 'none', cursor: tool === 'text' ? 'text' : 'crosshair' }} />
             {/* Lớp mờ ngoài vùng giữ lại + khung nét đứt (chưa khoanh ở chế độ khoanh vùng → mờ cả ảnh) */}
@@ -163,11 +170,14 @@ export default function ChatImageEditor({ file, onCancel, onDone, initialTool, v
               </>);
             })()}
             {textAt && (
-              <input autoFocus value={textVal} onChange={e => setTextVal(e.target.value)} aria-label="Nhập chữ"
+              <input ref={textRef} autoFocus value={textVal} onChange={e => setTextVal(e.target.value)} aria-label="Nhập chữ"
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitText(); } e.stopPropagation(); }}
-                onBlur={commitText}
+                // Mất tiêu điểm trong 300ms đầu = do cú bấm mở ô (không phải người dùng bỏ đi) → lấy lại tiêu điểm thay vì chốt/đóng
+                onBlur={() => { if (Date.now() - textOpenedAt.current < 300) { textRef.current?.focus(); return; } commitText(); }}
                 className="absolute bg-white/90 border border-dashed border-slate-500 outline-none px-1 rounded font-bold"
-                style={{ left: `${(textAt.x / size.w) * 100}%`, top: `${(textAt.y / size.h) * 100}%`, color, minWidth: 80, fontSize: 16, lineHeight: 1.3 }} />
+                // Cỡ chữ ô gõ = cỡ chữ sẽ in lên ảnh, quy đổi theo tỉ lệ hiển thị (gõ thấy sao in ra vậy)
+                style={{ left: `${(textAt.x / size.w) * 100}%`, top: `${(textAt.y / size.h) * 100}%`, color, minWidth: 80, lineHeight: 1.25,
+                  fontSize: Math.max(12, fontSizeFor(size.w) * ((canvasRef.current?.getBoundingClientRect().width || size.w) / size.w)) }} />
             )}
           </div>
         )}
