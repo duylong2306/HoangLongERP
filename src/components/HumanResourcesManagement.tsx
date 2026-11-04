@@ -3522,6 +3522,22 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     }
     const plan = planLeaveReschedule({ leave, newFrom, newTo, leaves, attendance });
     if (plan.error) { addToast({ title: '⚠️ Không đổi được', message: plan.error, type: 'warning' }); return false; }
+    // Giống lúc nộp đơn: không cho nghỉ rơi vào ngày nghỉ tuần của công ty (nếu không sẽ trừ phép/ghi nghỉ sai cho ngày vốn đã nghỉ)
+    const badDay = plan.added.find(d => weekendDays.includes(new Date(`${d}T00:00:00`).getDay()));
+    if (badDay) {
+      addToast({ title: '⚠️ Không đổi được', message: `Ngày ${badDay} là ngày nghỉ tuần của công ty, không thể xin nghỉ vào ngày này.`, type: 'warning' });
+      return false;
+    }
+    // Phép năm: tăng số ngày thì số dư phải đủ (phép đã trừ theo số ngày cũ lúc duyệt, chỉ cần đủ phần tăng thêm)
+    if (leave.type === 'Nghỉ phép năm' && plan.days > Number(leave.daysCount || 0)) {
+      const emp0 = employees.find(e => e.id === leave.empId);
+      const cur0 = emp0?.phepNam !== undefined ? Number(emp0.phepNam) : 12;
+      const extra = plan.days - Number(leave.daysCount || 0);
+      if (extra > cur0) {
+        addToast({ title: '⚠️ Không đổi được', message: `Phép năm còn ${formatDays(cur0)} ngày, không đủ cho phần tăng thêm ${formatDays(extra)} ngày.`, type: 'warning' });
+        return false;
+      }
+    }
     // Ngày đã chốt công: không cho đổi (phải mở chốt ở Chấm công trước, tránh sửa số liệu lương đã khóa)
     if (plan.lockedDates.length) {
       addToast({ title: '🔒 Công đã chốt', message: `Ngày ${plan.lockedDates.join(', ')} đã chốt công. Mở chốt ở tab Chấm công ngày rồi sửa lại.`, type: 'warning' });
@@ -3542,11 +3558,11 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     window.dispatchEvent(new CustomEvent('hl-attendance-updated', { detail: { attendance: res.attendance } }));
 
     // Phép năm đã bị trừ theo số ngày cũ lúc duyệt → cộng/trừ phần chênh để số dư khớp số ngày mới
-    if (leave.type === 'Nghỉ phép năm' && plan.days !== leave.daysCount) {
+    if (leave.type === 'Nghỉ phép năm' && plan.days !== Number(leave.daysCount || 0)) {
       const emp = employees.find(e => e.id === leave.empId);
       if (emp) {
         const cur = emp.phepNam !== undefined ? emp.phepNam : 12;
-        const updatedEmp = { ...emp, phepNam: Math.max(0, cur + (leave.daysCount - plan.days)) };
+        const updatedEmp = { ...emp, phepNam: Math.max(0, cur + (Number(leave.daysCount || 0) - plan.days)) };
         setEmployees(prev => prev.map(e => e.id === emp.id ? updatedEmp : e));
         dbService.employees.save(updatedEmp).catch(err => console.warn(`Cập nhật phép năm ${emp.id} lên Supabase thất bại:`, err));
       }
