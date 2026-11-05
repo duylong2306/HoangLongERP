@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Check, CheckSquare, Trash2, RotateCcw, UserPlus, Users, X } from 'lucide-react';
+import { Search, Check, CheckSquare, Trash2, RotateCcw, UserPlus, Users, X, Plus, Download, FileUp, Pencil } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
 import { SalaryScale } from '../../../types';
 import { dbService } from '../../../lib/dbService';
@@ -110,6 +110,8 @@ interface ProfilesTabProps {
   handleImportProfilesExcel: (e: React.ChangeEvent<HTMLInputElement>) => void;
   profileFileInputRef: React.RefObject<HTMLInputElement | null>;
   salaryScales: SalaryScale[];
+  /** Mở form thêm nhân viên (đã kiểm tra quyền ở nơi gọi). Không truyền → ẩn nút Thêm. */
+  onAddEmployee?: () => void;
 }
 
 export default function ProfilesTab({
@@ -134,6 +136,7 @@ export default function ProfilesTab({
   handleImportProfilesExcel,
   profileFileInputRef,
   salaryScales,
+  onAddEmployee,
 }: ProfilesTabProps) {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
@@ -144,10 +147,17 @@ export default function ProfilesTab({
     onConfirm: (roleAssignments: Record<string, string>) => void;
   } | null>(null);
 
+  // Lọc nhanh theo trạng thái (chip phía trên bảng). 'off' gồm mọi trạng thái còn lại (nghỉ làm…).
+  const [statusFilter, setStatusFilter] = useState<'all' | 'working' | 'leave' | 'director_board' | 'off'>('all');
+  const statusKeyOf = (e: EmployeeProfile): 'working' | 'leave' | 'director_board' | 'off' =>
+    e.status === 'working' ? 'working' : e.status === 'leave' ? 'leave' : e.status === 'director_board' ? 'director_board' : 'off';
+  const statusCount = (k: string) => employees.filter(e => statusKeyOf(e) === k).length;
+
   const filteredEmployees = employees.filter(emp =>
+    (statusFilter === 'all' || statusKeyOf(emp) === statusFilter) && (
     emp.name.toLowerCase().includes(employeeSearch.toLowerCase()) ||
     emp.position.toLowerCase().includes(employeeSearch.toLowerCase()) ||
-    emp.department.toLowerCase().includes(employeeSearch.toLowerCase())
+    emp.department.toLowerCase().includes(employeeSearch.toLowerCase()))
   ).sort((a, b) => {
     // Prioritize "working" status (đang làm) first
     if (a.status === 'working' && b.status !== 'working') return -1;
@@ -364,198 +374,223 @@ export default function ProfilesTab({
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
       {/* Left side: basic table layout */}
       <div className={`${selectedEmpId ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
-        <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-900 p-3 rounded-xl border border-slate-800 gap-3">
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <Search className="w-4 h-4 text-slate-400" />
+        {/* ── THANH CÔNG CỤ: tìm kiếm + nút. Nút chính (xanh LoLo) chỉ có "Thêm nhân viên"; Xuất/Nhập Excel là nút phụ chỉ biểu tượng ── */}
+        <div className="flex flex-wrap items-center gap-2" data-testid="profiles-toolbar">
+          <div className="flex items-center gap-2 h-9 px-3 flex-1 min-w-[150px] bg-white border border-slate-200 rounded-xl">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
             <input
               type="text"
-              placeholder="Tìm theo tên nhân viên, chức vụ, bộ phận..."
+              placeholder="Tìm tên, chức vụ, bộ phận"
               value={employeeSearch}
               onChange={(e) => setEmployeeSearch(e.target.value)}
-              className="flex-1 min-w-[200px] bg-transparent text-xs border-none outline-none text-slate-200 placeholder-slate-500"
+              className="flex-1 min-w-0 bg-transparent text-[13px] border-none outline-none text-slate-800 placeholder-slate-400"
+              data-testid="profiles-search"
             />
           </div>
+          <button type="button" onClick={handleExportProfilesExcel} title="Xuất Excel" aria-label="Xuất Excel" data-testid="profiles-export"
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><Download className="w-4 h-4" /></button>
+          <button type="button" onClick={() => profileFileInputRef.current?.click()} title="Nhập Excel" aria-label="Nhập Excel" data-testid="profiles-import"
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><FileUp className="w-4 h-4" /></button>
+          <input ref={profileFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportProfilesExcel} />
+          {onAddEmployee && (
+            <button type="button" onClick={onAddEmployee} data-testid="profiles-add"
+              // Nền xanh đặt inline vì index.css ép màu cho bg-* / text-white
+              style={{ background: '#0d47c9', color: '#ffffff' }}
+              className="h-9 px-3.5 rounded-xl flex items-center gap-1.5 text-[13px] font-bold cursor-pointer">
+              <Plus className="w-4 h-4" /><span className="hidden sm:inline">Thêm nhân viên</span><span className="sm:hidden">Thêm</span>
+            </button>
+          )}
           {selectedEmpId && (
-            <button
-              onClick={() => { setSelectedEmpId(null); setIsEditingEmp(false); }}
-              className="text-xs text-amber-500 hover:text-amber-400 font-bold flex items-center gap-1 transition cursor-pointer"
-            >
-              Đóng chi tiết ✕
+            <button type="button" onClick={() => { setSelectedEmpId(null); setIsEditingEmp(false); }}
+              className="h-9 px-3 rounded-xl flex items-center gap-1 text-[13px] font-bold cursor-pointer bg-white border border-slate-200 text-slate-600">
+              <X className="w-4 h-4" /> Đóng chi tiết
             </button>
           )}
         </div>
 
-        <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl text-[11px] overflow-x-auto">
-          <table className="w-full text-left border-collapse whitespace-nowrap">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-405">
-                <th className="pb-2 font-bold font-sans w-10 text-center">
-                  <input
-                    type="checkbox"
-                    checked={selectAll && paginatedEmployees.length > 0}
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                  />
-                </th>
-                <th className="pb-2 font-bold font-sans">Mã NV</th>
-                <th className="pb-2 font-bold font-sans">Nhân viên</th>
-                <th className="pb-2 font-bold font-sans text-center">Giới tính</th>
-                <th className="pb-2 font-bold font-sans">SĐT</th>
-                <th className="pb-2 font-bold font-sans">Bộ phận</th>
-                <th className="pb-2 font-bold font-sans">Chức vụ</th>
-                <th className="pb-2 font-bold font-sans text-center">Phép năm</th>
-                <th className="pb-2 font-bold font-sans text-center">Tài khoản HT</th>
-                <th className="pb-2 font-bold font-sans text-center">Trạng thái</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-850">
-              {paginatedEmployees.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="py-8 text-center text-slate-500 italic">Không tìm thấy nhân viên nào phù hợp.</td>
-                </tr>
-              ) : (
-                paginatedEmployees.map(emp => (
-                  <tr
-                    key={emp.id}
-                    onClick={() => {
-                      setSelectedEmpId(emp.id);
-                      setIsEditingEmp(false);
-                    }}
-                    className={`hover:bg-slate-950/40 cursor-pointer transition-colors ${selectedEmpId === emp.id ? 'bg-amber-600/10' : ''} ${selectedRows.has(emp.id) ? 'bg-amber-500/10' : ''}`}
-                  >
-                    <td className="py-2.5 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedRows.has(emp.id)}
-                        onChange={(e) => { e.stopPropagation(); handleRowSelect(emp.id, e.target.checked); }}
-                        className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                      />
-                    </td>
-                    <td className="py-2.5 font-mono font-bold text-amber-500">{emp.id}</td>
-                    <td className="py-2.5 font-bold text-white hover:text-amber-400 transition-colors leading-none">
-                      {emp.name}
-                                          </td>
-                    <td className="py-2.5 text-slate-300 text-center">{emp.gender}</td>
-                    <td className="py-2.5 font-mono text-slate-300">{emp.phone}</td>
-                    <td className="py-2.5 text-slate-350">{emp.department}</td>
-                    <td className="py-2.5 text-slate-300 font-bold">{emp.position}</td>
-                    <td className="py-2.5 text-center font-mono font-bold text-sky-400">{emp.phepNam !== undefined ? emp.phepNam : 12} ngày</td>
-                    <td className="py-2.5 text-center">
-                      {/* Badge nền pastel sáng (theo chuẩn Điều phối vật tư) thay cho nền
-                          màu trong suốt trước đây — xem docs/design-system-dieu-phoi-vat-tu.md */}
-                      {emp.hasSystemAccount ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                          Đã tạo
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-50 text-slate-600 border border-slate-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-                          Chưa tạo
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 text-center">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                        emp.status === 'working' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                        emp.status === 'leave' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                        emp.status === 'director_board' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
-                        'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === 'working' ? 'bg-emerald-500' : emp.status === 'leave' ? 'bg-amber-500' : emp.status === 'director_board' ? 'bg-indigo-500' : 'bg-rose-500'}`}></span>
-                        {emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-
-          {/* Pagination controller */}
-          {(() => {
-            const totalFiltered = filteredEmployees.length;
-            if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
-            const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
+        {/* Lọc nhanh theo trạng thái (kèm số lượng); chip trống số lượng thì ẩn trừ "Tất cả" */}
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5" data-testid="profiles-chips">
+          {([
+            ['all', 'Tất cả', employees.length],
+            ['working', 'Đang làm', statusCount('working')],
+            ['leave', 'Nghỉ phép', statusCount('leave')],
+            ['director_board', 'Ban giám đốc', statusCount('director_board')],
+            ['off', 'Nghỉ làm', statusCount('off')],
+          ] as const).filter(([k, , n]) => k === 'all' || n > 0).map(([k, label, n]) => {
+            const on = statusFilter === k;
             return (
-              <div className="flex justify-center items-center gap-1.5 mt-4 pt-4 border-t border-slate-850">
-                <button
-                  type="button"
-                  disabled={profilePage === 1}
-                  onClick={(e) => { e.stopPropagation(); setProfilePage(prev => Math.max(prev - 1, 1)); }}
-                  className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all cursor-pointer"
-                >
-                  ◀ Trước
-                </button>
-                <span className="text-[11px] font-mono text-slate-400 px-2">
-                  Trang <strong>{profilePage}</strong> / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={profilePage >= totalPages}
-                  onClick={(e) => { e.stopPropagation(); setProfilePage(prev => Math.min(prev + 1, totalPages)); }}
-                  className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all cursor-pointer"
-                >
-                  Sau ▶
-                </button>
-              </div>
+              <button key={k} type="button" onClick={() => { setStatusFilter(k); setProfilePage(1); }} data-testid={`profiles-chip-${k}`}
+                style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
+                className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>
+                {label} {n}
+              </button>
             );
-          })()}
-
-          {/* Bulk Actions & Row Count */}
-          <div className="flex flex-col sm:flex-row justify-between items-center mt-3 pt-2 text-[10px] text-slate-500 border-t border-slate-850/50 gap-3">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-              {(() => {
-                return (
-                  <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, paginatedEmployees.length)} / ${filteredEmployees.length} nhân sự`} mỗi trang.</div>
-                );
-              })()}
-              {selectedRows.size > 0 && (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-amber-500 font-bold">Đã chọn: {selectedRows.size}</span>
-                  <button
-                    onClick={handleBulkDelete}
-                    className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
-                  >
-                    <Trash2 className="w-3 h-3 inline-block align-middle mr-1" /> Xóa
-                  </button>
-                  <button
-                    onClick={handleBulkResetPhepNam}
-                    className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
-                  >
-                    <RotateCcw className="w-3 h-3 inline-block align-middle mr-1" /> Reset phép năm
-                  </button>
-                  <button
-                    onClick={handleBulkCreateSystemAccounts}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px]"
-                  >
-                    <UserPlus className="w-3 h-3 inline-block align-middle mr-1" /> Tạo tài khoản nhanh
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span>Hiển thị:</span>
-              <select
-                value={globalPageSize.toString()}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const newSize = val === 'all' ? 'all' : parseInt(val, 10);
-                  setGlobalPageSize(newSize);
-                  localStorage.setItem('hl_global_page_size', val);
-                }}
-                className="bg-slate-950 border border-slate-800 text-slate-300 px-1.5 py-0.5 rounded text-[10px] cursor-pointer outline-none font-bold"
-              >
-                <option value="5">5 dòng</option>
-                <option value="10">10 dòng</option>
-                <option value="20">20 dòng</option>
-                <option value="50">50 dòng</option>
-                <option value="all">Tất cả</option>
-              </select>
-            </div>
-          </div>
-
+          })}
         </div>
+
+        {/* Thanh thao tác hàng loạt — chỉ hiện khi đã tick chọn */}
+        {selectedRows.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="profiles-bulkbar">
+            <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {selectedRows.size}</span>
+            <span className="flex-1" />
+            <button onClick={handleBulkCreateSystemAccounts} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><UserPlus className="w-3.5 h-3.5" /> Tạo tài khoản</button>
+            <button onClick={handleBulkResetPhepNam} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><RotateCcw className="w-3.5 h-3.5" /> Reset phép năm</button>
+            <button onClick={handleBulkDelete} className="h-8 px-3 rounded-lg bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+          </div>
+        )}
+
+        {(() => {
+          // Dùng chung cho bảng (máy tính) và thẻ (điện thoại)
+          const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(-2).map(w => w[0]).join('').toUpperCase();
+          const statusPill = (emp: EmployeeProfile) => {
+            const k = statusKeyOf(emp);
+            const cls = k === 'working' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : k === 'leave' ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : k === 'director_board' ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+              : 'bg-slate-100 text-slate-600 border-slate-200';
+            const label = k === 'working' ? 'Đang làm' : k === 'leave' ? 'Nghỉ phép' : k === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm';
+            return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${cls}`}>{label}</span>;
+          };
+          const openRow = (emp: EmployeeProfile) => {
+            setSelectedEmpId(emp.id);
+            setIsEditingEmp(false);
+            // Điện thoại: khung chi tiết nằm dưới danh sách → cuộn xuống cho người dùng thấy ngay
+            if (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 1279px)').matches) {
+              setTimeout(() => document.getElementById('hr-profile-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+            }
+          };
+          const editRow = (emp: EmployeeProfile) => { setSelectedEmpId(emp.id); setEditingEmpData({ ...emp }); setIsEditingEmp(true); };
+          const empty = <div className="py-10 text-center text-slate-500 text-sm">Không tìm thấy nhân viên phù hợp.</div>;
+
+          return (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              {/* MÁY TÍNH: bảng */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left border-collapse text-[13px]" data-testid="profiles-table">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs">
+                      <th className="px-3 py-2.5 w-10 text-center">
+                        <input type="checkbox" checked={selectAll && paginatedEmployees.length > 0} onChange={(e) => handleSelectAll(e.target.checked)}
+                          aria-label="Chọn tất cả" className="w-4 h-4 rounded cursor-pointer" />
+                      </th>
+                      <th className="px-3 py-2.5 font-bold">Mã</th>
+                      <th className="px-3 py-2.5 font-bold">Nhân viên</th>
+                      <th className="px-3 py-2.5 font-bold">Bộ phận</th>
+                      <th className="px-3 py-2.5 font-bold">SĐT</th>
+                      <th className="px-3 py-2.5 font-bold text-center">Phép năm</th>
+                      <th className="px-3 py-2.5 font-bold text-center">Tài khoản</th>
+                      <th className="px-3 py-2.5 font-bold text-center">Trạng thái</th>
+                      <th className="px-3 py-2.5 w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedEmployees.length === 0 ? (
+                      <tr><td colSpan={9}>{empty}</td></tr>
+                    ) : paginatedEmployees.map(emp => (
+                      <tr key={emp.id} onClick={() => openRow(emp)} data-testid={`profile-row-${emp.id}`}
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${selectedEmpId === emp.id ? 'bg-blue-50' : ''}`}>
+                        <td className="px-3 py-2.5 text-center">
+                          <input type="checkbox" checked={selectedRows.has(emp.id)} aria-label={`Chọn ${emp.name}`}
+                            onClick={(e) => e.stopPropagation()} onChange={(e) => handleRowSelect(emp.id, e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{emp.id}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(emp.name)}</div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 truncate">{emp.name}</div>
+                              <div className="text-[11px] text-slate-500 truncate">{emp.position}{emp.gender ? ` · ${emp.gender}` : ''}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-700">{emp.department}</td>
+                        <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{emp.phone}</td>
+                        <td className="px-3 py-2.5 text-center font-mono text-xs font-bold text-slate-700">{emp.phepNam !== undefined ? emp.phepNam : 12} ngày</td>
+                        <td className="px-3 py-2.5 text-center">
+                          {emp.hasSystemAccount
+                            ? <span className="inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">Đã tạo</span>
+                            : <span className="inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-slate-100 text-slate-500 border-slate-200">Chưa tạo</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-center">{statusPill(emp)}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          <button type="button" aria-label={`Sửa ${emp.name}`} title="Sửa" onClick={(e) => { e.stopPropagation(); editRow(emp); }}
+                            className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ĐIỆN THOẠI: danh sách thẻ (không phải kéo ngang) */}
+              <div className="md:hidden" data-testid="profiles-cards">
+                {paginatedEmployees.length === 0 ? empty : paginatedEmployees.map(emp => (
+                  <div key={emp.id} onClick={() => openRow(emp)} data-testid={`profile-card-${emp.id}`}
+                    className={`flex gap-3 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${selectedEmpId === emp.id ? 'bg-blue-50' : ''}`}>
+                    <div className="flex flex-col items-center gap-2 pt-0.5">
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(emp.name)}</div>
+                      <input type="checkbox" checked={selectedRows.has(emp.id)} aria-label={`Chọn ${emp.name}`}
+                        onClick={(e) => e.stopPropagation()} onChange={(e) => handleRowSelect(emp.id, e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-bold text-slate-900 text-sm leading-snug">{emp.name}</div>
+                        {statusPill(emp)}
+                      </div>
+                      <div className="text-xs text-slate-600 mt-0.5">{emp.position} · {emp.department}</div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[11px] text-slate-500">
+                        <span className="font-mono">{emp.id}</span>
+                        <span className="font-mono">{emp.phone}</span>
+                        <span>Phép {emp.phepNam !== undefined ? emp.phepNam : 12} ngày</span>
+                        {emp.hasSystemAccount && <span className="text-emerald-700 font-bold">Có tài khoản</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Chân bảng: số lượng + số dòng mỗi trang + phân trang */}
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
+                <span>{filteredEmployees.length} nhân viên</span>
+                {(() => {
+                  const totalFiltered = filteredEmployees.length;
+                  if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
+                  const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" disabled={profilePage === 1} aria-label="Trang trước"
+                        onClick={(e) => { e.stopPropagation(); setProfilePage(prev => Math.max(prev - 1, 1)); }}
+                        className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
+                      <span className="px-1">Trang <strong>{profilePage}</strong> / {totalPages}</span>
+                      <button type="button" disabled={profilePage >= totalPages} aria-label="Trang sau"
+                        onClick={(e) => { e.stopPropagation(); setProfilePage(prev => Math.min(prev + 1, totalPages)); }}
+                        className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
+                    </div>
+                  );
+                })()}
+                <label className="flex items-center gap-1.5">
+                  <span>Hiển thị</span>
+                  <select
+                    value={globalPageSize.toString()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const newSize = val === 'all' ? 'all' : parseInt(val, 10);
+                      setGlobalPageSize(newSize);
+                      localStorage.setItem('hl_global_page_size', val);
+                    }}
+                    className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold"
+                  >
+                    <option value="5">5 dòng</option>
+                    <option value="10">10 dòng</option>
+                    <option value="20">20 dòng</option>
+                    <option value="50">50 dòng</option>
+                    <option value="all">Tất cả</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Right side: sticky details sidebar panel */}
@@ -564,7 +599,7 @@ export default function ProfilesTab({
         if (!emp) return null;
 
         return (
-          <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4 text-slate-300 relative sticky top-6 animate-fade-in shadow-2xl text-[11px] border-l-4 border-l-amber-500">
+          <div id="hr-profile-detail" className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4 text-slate-300 relative sticky top-6 animate-fade-in shadow-2xl text-[11px] border-l-4 border-l-amber-500">
             <div className="flex justify-between items-start border-b border-slate-800 pb-3">
               <div>
                 <span className="text-[9px] font-mono font-bold text-amber-500">{emp.id}</span>

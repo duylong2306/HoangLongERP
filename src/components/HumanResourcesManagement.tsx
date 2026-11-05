@@ -4064,7 +4064,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             )}
 
             {/* Header block summarizing currently viewed subtab */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
+                        {/* Tab Hồ sơ đã có thanh công cụ riêng (ProfilesTab) nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
+            {activeSubTab !== 'profiles' && (
+<div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2 capitalize">
                   {activeSubTab === 'profiles' && '👥 Quản lý Hồ sơ & Hợp đồng nhân sự'}
@@ -4214,6 +4216,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 
               </div>
             </div>
+            )}
 
             {/* TAB PORT DISPLAY */}
 
@@ -4246,6 +4249,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 handleExportProfilesExcel={handleExportProfilesExcel}
                 handleImportProfilesExcel={handleImportProfilesExcel}
                 profileFileInputRef={profileFileInputRef}
+                // Nút "Thêm nhân viên" chuyển vào thanh công cụ của tab; giữ nguyên kiểm tra quyền "Thêm" như nút cũ ở tiêu đề
+                onAddEmployee={hasModulePermission(currentUser?.id, 'employees', 'create') ? () => setShowEmpModal(true) : undefined}
                 salaryScales={salaryScales}
               />
             )}
