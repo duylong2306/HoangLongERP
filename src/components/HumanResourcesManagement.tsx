@@ -1,4 +1,4 @@
-﻿import { findPairedAbsenceReport, generateLeaveId } from '../lib/leaveRequests';
+﻿import { findPairedAbsenceReport, generateLeaveId, groupPendingAbsencePairs } from '../lib/leaveRequests';
 import { resolveShiftTimes } from '../lib/standardShiftTimes';
 import { isImeComposing } from '../lib/ime';   // Enter lúc đang ghép chữ tiếng Việt chỉ chốt chữ, không kích hoạt hành động
 import * as MT from '../lib/messageTemplates';
@@ -37,6 +37,7 @@ import { saveProjectPermissions } from './hr/hrProjectPermissions';
 import TripsTab, { QuickSearchFilter } from './hr/tabs/TripsTab';
 import SearchableSelect from './SearchableSelect';
 import LeavesTab from './hr/tabs/LeavesTab';
+import { HrDesktopTabs, HrMobileNav } from './hr/HrNavigation';
 import PayrollTab from './hr/tabs/PayrollTab';
 import PerformanceTab from './hr/tabs/PerformanceTab';
 import ProfilesTab from './hr/tabs/ProfilesTab';
@@ -164,7 +165,6 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       setActiveSubTab(defaultSubTab);
     }
   }, [defaultSubTab]);
-  const [menuDisplayMode, setMenuDisplayMode] = useState<'sidebar' | 'tabs'>('tabs');
 
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [deletingErrorId, setDeletingErrorId] = useState<string | null>(null);
@@ -4042,157 +4042,27 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     }
   };
 
+  // Chấm đỏ trên tab "Nghỉ phép": số đơn đang CHỜ DUYỆT mà người dùng này duyệt được. Cặp "Cả ngày" (sáng + chiều) đếm là 1 đơn.
+  const hrNavBadges: Record<string, number> = {
+    leaves: groupPendingAbsencePairs((leaves || []).filter((l: any) => l.status === 'pending' && canApproveLeaveRecord(l))).visible.length,
+  };
+
   return (
     <div className="bg-slate-950 text-slate-100 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden font-sans" id="erp_hrm_module">
       <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[75vh]">
         
-        {/* LEFT COLUMN: NAVIGATION & SUITE STATS (3 cols) */}
-        {menuDisplayMode === 'sidebar' && !hideSidebar && activeSubTab !== 'hr_data' && (
-          <div className="lg:col-span-3 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0 font-sans p-4 space-y-4" id="hrm_sidebar_control">
-            <div>
-              {/* Interactive Functional Tabs */}
-              <div className="flex flex-col gap-1 text-[11px] mt-4">
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('profiles')}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'profiles' ? 'bg-slate-800/90 text-white border-l-4 border-amber-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
-                  <span>1. Hồ sơ nhân viên</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('attendance')}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'attendance' ? 'bg-slate-800/90 text-white border-l-4 border-amber-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
-                >
-                  <Clock className="w-3.5 h-3.5 text-sky-400" />
-                  <span>2. Chấm công ngày</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('leaves')}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'leaves' ? 'bg-slate-800/90 text-white border-l-4 border-amber-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
-                >
-                  <Calendar className="w-3.5 h-3.5 text-pink-400" />
-                  <span>3. Đơn nghỉ phép</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('payroll')}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'payroll' ? 'bg-slate-800/90 text-white border-l-4 border-amber-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
-                >
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>4. Tính lương tự động</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('trips')}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'trips' ? 'bg-slate-800/90 text-white border-l-4 border-amber-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
-                >
-                  <MapPin className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>5. Công tác phí</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('performance')}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left font-bold transition-all ${activeSubTab === 'performance' ? 'bg-slate-800/90 text-white border-l-4 border-amber-500' : 'text-slate-400 hover:text-white hover:bg-slate-850/50'}`}
-                >
-                  <Award className="w-3.5 h-3.5 text-amber-550" />
-                  <span>6. Hiệu suất công việc</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="p-3 border-t border-slate-850/70 text-[9px] text-slate-500 text-center uppercase tracking-wider font-bold">
-              Hoàng Long Group • HRM v2.1
-            </div>
-          </div>
-        )}
-
-        {/* RIGHT COLUMN: MAIN PANEL VIEWPORT (9 cols) */}
-        <div className={`${(menuDisplayMode === 'tabs' || hideSidebar || activeSubTab === 'hr_data') ? 'lg:col-span-12' : 'lg:col-span-9'} p-6 bg-slate-950 flex flex-col justify-between`} id="hrm_workspace_panel" data-save-bar-host>
+        {/* KHUNG NỘI DUNG (thanh bên cũ đã gỡ — chuyển tab bằng HrDesktopTabs / HrMobileNav) */}
+        <div className="lg:col-span-12 p-4 md:p-6 bg-slate-950 flex flex-col justify-between" id="hrm_workspace_panel" data-save-bar-host>
           <div>
             
-            {/* Top Navigation & Mode Switcher (Fully active when menuDisplayMode is 'tabs') */}
-            {menuDisplayMode === 'tabs' && !hideSidebar && activeSubTab !== 'hr_data' && (
-              <div className="bg-white border-b border-slate-200 mb-6 rounded-t-lg">
-                {/* Horizontal underline-tab list (style: bottom-border tabs) */}
-                <ul className="flex flex-nowrap md:flex-wrap items-center gap-1 -mb-px text-sm font-medium overflow-x-auto scrollbar-none" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('profiles')}
-                      aria-current={activeSubTab === 'profiles' ? 'page' : undefined}
-                      className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'profiles' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                    >
-                      <UserCheck className={`w-4 h-4 me-2 ${activeSubTab === 'profiles' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                      <span>Hồ sơ nhân viên</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('attendance')}
-                      aria-current={activeSubTab === 'attendance' ? 'page' : undefined}
-                      className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'attendance' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                    >
-                      <Clock className={`w-4 h-4 me-2 ${activeSubTab === 'attendance' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                      <span>Chấm công ngày</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('leaves')}
-                      aria-current={activeSubTab === 'leaves' ? 'page' : undefined}
-                      className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'leaves' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                    >
-                      <Calendar className={`w-4 h-4 me-2 ${activeSubTab === 'leaves' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                      <span>Đơn nghỉ phép</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('payroll')}
-                      aria-current={activeSubTab === 'payroll' ? 'page' : undefined}
-                      className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'payroll' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                    >
-                      <DollarSign className={`w-4 h-4 me-2 ${activeSubTab === 'payroll' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                      <span>Tính lương tự động</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('trips')}
-                      aria-current={activeSubTab === 'trips' ? 'page' : undefined}
-                      className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'trips' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                    >
-                      <MapPin className={`w-4 h-4 me-2 ${activeSubTab === 'trips' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                      <span>Công tác phí</span>
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setActiveSubTab('performance')}
-                      aria-current={activeSubTab === 'performance' ? 'page' : undefined}
-                      className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${activeSubTab === 'performance' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                    >
-                      <Award className={`w-4 h-4 me-2 ${activeSubTab === 'performance' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                      <span>Hiệu suất</span>
-                    </button>
-                  </li>
-                </ul>
-              </div>
+            {/* MENU CHUYỂN TAB: máy tính = thanh tab nút bo tròn; điện thoại = ☰ + ngăn kéo hẹp bên trái (xem hr/HrNavigation.tsx) */}
+            {!hideSidebar && activeSubTab !== 'hr_data' && (
+              <>
+                <HrDesktopTabs active={activeSubTab} onChange={setActiveSubTab} badges={hrNavBadges} />
+                <HrMobileNav active={activeSubTab} onChange={setActiveSubTab} badges={hrNavBadges} />
+              </>
             )}
-            
+
             {/* Header block summarizing currently viewed subtab */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
