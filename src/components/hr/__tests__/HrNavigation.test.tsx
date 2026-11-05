@@ -48,4 +48,10 @@ describe('Menu Hệ thống nhân sự (thiết kế mới)', () => {
     expect(src).toContain('<HrDesktopTabs'); expect(src).toContain('<HrMobileNav');
     expect(src).not.toContain('hrm_sidebar_control'); expect(src).not.toContain('menuDisplayMode');
   });
+
+  it('ngăn kéo có đầu nền xanh LoLo phủ vùng tai thỏ (không để trắng gây loang trên iOS)', () => {
+    const src = fs.readFileSync('src/components/hr/HrNavigation.tsx', 'utf8');
+    expect(src).toMatch(/linear-gradient\(135deg, var\(--lx-2[^)]*\), var\(--lx-1[^)]*\)\)/);
+    expect(src).toContain("calc(env(safe-area-inset-top) + 10px)");
+  });
 });

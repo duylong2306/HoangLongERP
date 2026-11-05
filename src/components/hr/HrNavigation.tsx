@@ -97,10 +97,16 @@ export function HrMobileNav({ active, onChange, badges = {} }: NavProps) {
         // Phủ kín như các ngăn kéo chi tiết (z-50 > thanh dưới z-46); nền mờ bấm để đóng, ngăn hẹp bên trái
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menu nhân sự" data-testid="hr-drawer">
           <div className="absolute inset-0" style={{ background: 'rgba(15,23,42,.45)' }} onClick={() => setOpen(false)} data-testid="hr-drawer-scrim" />
-          <div className="absolute left-0 top-0 bottom-0 w-[84px] bg-white border-r border-slate-200 flex flex-col gap-1 px-1.5 overflow-y-auto"
-            style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)' }}>
-            <button type="button" onClick={() => setOpen(false)} aria-label="Đóng menu" data-testid="hr-drawer-close"
-              className="self-center w-9 h-9 mb-1 rounded-xl flex items-center justify-center text-slate-500 bg-slate-100 cursor-pointer"><X className="w-4 h-4" /></button>
+          <div className="absolute left-0 top-0 bottom-0 w-[84px] bg-white border-r border-slate-200 flex flex-col overflow-hidden">
+            {/* Đầu ngăn kéo: nền xanh LoLo phủ cả vùng tai thỏ/thanh trạng thái (giống tiêu đề app và các ngăn kéo chi tiết). Trước đây
+                đầu ngăn để trắng nên iOS làm mờ/loang vùng trên cùng (trắng chuyển dần sang xanh của tiêu đề phía sau). */}
+            <div className="shrink-0 flex items-end justify-center pb-2.5"
+              style={{ background: 'linear-gradient(135deg, var(--lx-2, #1a5ce0), var(--lx-1, #0d47c9))', paddingTop: 'calc(env(safe-area-inset-top) + 10px)' }}>
+              <button type="button" onClick={() => setOpen(false)} aria-label="Đóng menu" data-testid="hr-drawer-close"
+                style={{ background: 'rgba(255,255,255,.2)', color: '#ffffff' }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col gap-1 px-1.5 pt-2 overflow-y-auto" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)' }}>
             {HR_TABS.map(t => {
               const on = active === t.id;
               const n = badges[t.id] || 0;
@@ -118,6 +124,7 @@ export function HrMobileNav({ active, onChange, badges = {} }: NavProps) {
                 </button>
               );
             })}
+            </div>
           </div>
         </div>
       )}
