@@ -114,6 +114,65 @@ interface ProfilesTabProps {
   onAddEmployee?: () => void;
 }
 
+// ───── Thành phần dùng chung cho danh sách và thẻ chi tiết nhân viên ─────
+type StatusKey = 'working' | 'leave' | 'director_board' | 'off';
+const statusKeyOf = (e: EmployeeProfile): StatusKey =>
+  e.status === 'working' ? 'working' : e.status === 'leave' ? 'leave' : e.status === 'director_board' ? 'director_board' : 'off';
+
+/** Nhãn trạng thái nền nhạt (chuẩn Điều phối vật tư) */
+function StatusPill({ emp }: { emp: EmployeeProfile }) {
+  const k = statusKeyOf(emp);
+  const cls = k === 'working' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    : k === 'leave' ? 'bg-amber-50 text-amber-700 border-amber-200'
+    : k === 'director_board' ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    : 'bg-slate-100 text-slate-600 border-slate-200';
+  const label = k === 'working' ? 'Đang làm' : k === 'leave' ? 'Nghỉ phép' : k === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm';
+  return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${cls}`}>{label}</span>;
+}
+
+const initialsOf = (name: string) => (name || '?').trim().split(/\s+/).slice(-2).map(w => w[0]).join('').toUpperCase();
+
+/**
+ * Hiển thị ngày cho dễ đọc: "2026-03-05" → "05/03/2026". Dữ liệu nhập từ Excel đôi khi lưu dạng SỐ SERI của Excel
+ * (vd 37109 = 13/09/2001; Excel tính từ 30/12/1899) → đổi lại thành ngày. Giá trị khác (đã là dd/mm/yyyy, chữ…) giữ nguyên.
+ * Chỉ dùng để HIỂN THỊ, không sửa dữ liệu đã lưu.
+ */
+export function formatDisplayDate(v?: string | number | null): string {
+  if (v === undefined || v === null || v === '') return '—';
+  const t = String(v).trim();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  if (/^\d{4,6}$/.test(t)) {
+    const n = Number(t);
+    if (n >= 20000 && n <= 80000) {   // khoảng năm 1954–2118: đúng dải số seri ngày của Excel
+      const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+      return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`;
+    }
+  }
+  return t;
+}
+
+/** Một cặp "nhãn nhỏ — giá trị" trong thẻ chi tiết */
+function InfoField({ label, value, mono, wide }: { label: string; value?: React.ReactNode; mono?: boolean; wide?: boolean }) {
+  const empty = value === undefined || value === null || value === '';
+  return (
+    <div className={`min-w-0 ${wide ? 'col-span-2' : ''}`}>
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className={`text-[13px] font-bold text-slate-900 break-words ${mono ? 'font-mono' : ''}`}>{empty ? '—' : value}</div>
+    </div>
+  );
+}
+
+/** Khối thông tin có tiêu đề nhỏ */
+function InfoSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-3.5">
+      <h5 className="text-xs font-bold text-slate-500 mb-2.5">{title}</h5>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">{children}</div>
+    </section>
+  );
+}
+
 export default function ProfilesTab({
   employees,
   setEmployees,
@@ -149,8 +208,6 @@ export default function ProfilesTab({
 
   // Lọc nhanh theo trạng thái (chip phía trên bảng). 'off' gồm mọi trạng thái còn lại (nghỉ làm…).
   const [statusFilter, setStatusFilter] = useState<'all' | 'working' | 'leave' | 'director_board' | 'off'>('all');
-  const statusKeyOf = (e: EmployeeProfile): 'working' | 'leave' | 'director_board' | 'off' =>
-    e.status === 'working' ? 'working' : e.status === 'leave' ? 'leave' : e.status === 'director_board' ? 'director_board' : 'off';
   const statusCount = (k: string) => employees.filter(e => statusKeyOf(e) === k).length;
 
   const filteredEmployees = employees.filter(emp =>
@@ -441,16 +498,8 @@ export default function ProfilesTab({
 
         {(() => {
           // Dùng chung cho bảng (máy tính) và thẻ (điện thoại)
-          const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(-2).map(w => w[0]).join('').toUpperCase();
-          const statusPill = (emp: EmployeeProfile) => {
-            const k = statusKeyOf(emp);
-            const cls = k === 'working' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : k === 'leave' ? 'bg-amber-50 text-amber-700 border-amber-200'
-              : k === 'director_board' ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-              : 'bg-slate-100 text-slate-600 border-slate-200';
-            const label = k === 'working' ? 'Đang làm' : k === 'leave' ? 'Nghỉ phép' : k === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm';
-            return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${cls}`}>{label}</span>;
-          };
+          const initials = initialsOf;
+          const statusPill = (emp: EmployeeProfile) => <StatusPill emp={emp} />;
           const openRow = (emp: EmployeeProfile) => {
             setSelectedEmpId(emp.id);
             setIsEditingEmp(false);
@@ -599,110 +648,94 @@ export default function ProfilesTab({
         if (!emp) return null;
 
         return (
-          <div id="hr-profile-detail" className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4 text-slate-300 relative sticky top-6 animate-fade-in shadow-2xl text-[11px] border-l-4 border-l-amber-500">
-            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-              <div>
-                <span className="text-[9px] font-mono font-bold text-amber-500">{emp.id}</span>
-                <h4 className="font-extrabold text-sm text-slate-100 mt-0.5">{emp.name}</h4>
-                <p className="text-[10px] text-slate-420">{emp.department} • {emp.position}</p>
+          <div id="hr-profile-detail" data-testid="profile-detail" className="xl:col-span-5 bg-white border border-slate-200 rounded-2xl p-4 space-y-4 text-slate-300 relative xl:sticky xl:top-6 animate-fade-in shadow-sm text-[11px]">
+            {/* ĐẦU THẺ: ảnh chữ cái + tên + chức vụ · bộ phận + trạng thái; nút đóng bên phải */}
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initialsOf(emp.name)}</div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-black text-base text-slate-900 leading-snug">{emp.name}</h4>
+                <p className="text-xs text-slate-600">{emp.position} · {emp.department}</p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <StatusPill emp={emp} />
+                  <span className="font-mono text-[11px] text-slate-500">{emp.id}</span>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => { setSelectedEmpId(null); setIsEditingEmp(false); }}
-                className="p-1 text-slate-400 hover:text-white rounded transition cursor-pointer"
-                title="Đóng chi tiết"
-              >
-                ✕
-              </button>
+              <button type="button" onClick={() => { setSelectedEmpId(null); setIsEditingEmp(false); }} aria-label="Đóng chi tiết" title="Đóng" data-testid="profile-detail-close"
+                className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
 
             {!isEditingEmp ? (
               <div className="space-y-3">
-                {/* Basic Profile Details */}
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-850 space-y-2">
-                  <h5 className="font-extrabold text-[10px] text-amber-500 uppercase tracking-wider">Thông Tin Cá Nhân & Liên Hệ</h5>
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs">
-                    <div>CCCD: <strong className="text-slate-200 font-mono block mt-0.5">{emp.cccd}</strong></div>
-                    <div>SĐT: <strong className="text-slate-200 font-mono block mt-0.5">{emp.phone}</strong></div>
-                    <div>Ngày cấp CCCD: <strong className="text-slate-200 block mt-0.5">{emp.cccdIssuedDate || '—'}</strong></div>
-                    <div>Nơi cấp CCCD: <strong className="text-slate-200 block mt-0.5">{emp.cccdIssuedPlace || '—'}</strong></div>
-                    <div className="truncate col-span-2">Email: <strong className="text-slate-200 font-mono block mt-0.5 truncate">{emp.email}</strong></div>
-                    <div>Ngày sinh: <strong className="text-slate-200 font-mono block mt-0.5">{emp.dob}</strong></div>
-                    <div>Giới tính: <strong className="text-slate-200 block mt-0.5">{emp.gender}</strong></div>
-                    <div className="col-span-2 font-xs">Địa chỉ thường trú: <strong className="text-slate-250 block mt-0.5 text-xs">{emp.address}</strong></div>
-                    <div className="col-span-2 font-xs">Địa chỉ tạm trú: <strong className="text-slate-250 block mt-0.5 text-xs">{emp.currentAddress || emp.address}</strong></div>
-                    <div>Trình độ học vấn: <strong className="text-slate-200 block mt-0.5">{emp.education || '—'}</strong></div>
-                    <div className="col-span-2">Khẩn cấp: <strong className="text-slate-250 block mt-0.5 italic">{emp.emergencyContact || '—'}</strong></div>
-                  </div>
+                {/* Nút thao tác: Sửa là nút chính (xanh LoLo), Tạo tài khoản là nút phụ, Xóa là nút biểu tượng viền đỏ */}
+                <div className="flex items-center gap-2" data-testid="profile-detail-actions">
+                  <button type="button" data-testid="profile-edit"
+                    onClick={() => { setEditingEmpData({ ...emp }); setIsEditingEmp(true); }}
+                    style={{ background: '#0d47c9', color: '#ffffff' }}
+                    className="h-9 px-4 rounded-xl text-[13px] font-bold flex items-center gap-1.5 cursor-pointer"><Pencil className="w-4 h-4" /> Sửa</button>
+                  <button type="button" data-testid="profile-create-account" onClick={() => handleSingleCreateSystemAccount(emp)}
+                    className="h-9 px-3.5 rounded-xl text-[13px] font-bold flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"><UserPlus className="w-4 h-4" /> Tạo tài khoản</button>
+                  <span className="flex-1" />
+                  <button type="button" aria-label="Xóa hồ sơ" title="Xóa hồ sơ" data-testid="profile-delete"
+                    onClick={() => {
+                      if (emp.id === 'NV_ADMIN' || emp.id === 'emp_admin' || emp.name === 'Administrator') {
+                        addToast({ title: '🔒 Bị khóa', message: 'Không thể xóa tài khoản quản trị viên hệ thống (admin). Tài khoản này được bảo vệ và không thể xóa.', type: 'warning' });
+                        return;
+                      }
+                      if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa vĩnh viễn hồ sơ nhân sự của ${emp.name} (${emp.id}) không?\nHành động này không thể hoàn tác.`)) {
+                        setEmployees(employees.filter(e => e.id !== emp.id));
+                        setSelectedEmpId(null);
+                        // Đồng bộ xóa lên Supabase
+                        dbService.employees.delete(emp.id).catch(err =>
+                          console.warn(`Xóa nhân viên ${emp.id} trên Supabase thất bại:`, err));
+                      }
+                    }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                 </div>
 
-                {/* Contracts & Labor */}
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-850 space-y-2">
-                  <h5 className="font-extrabold text-[10px] text-amber-500 uppercase tracking-wider">Hợp Đồng & Quản Trị</h5>
-                  <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs">
-                    <div>Ngạch lương: <strong className="text-slate-200 block mt-0.5 font-mono text-amber-400">{emp.salaryCode || '—'}</strong></div>
-                    <div>Loại hợp đồng: <strong className="text-slate-200 block mt-0.5">{emp.contractType}</strong></div>
-                    <div>Thời hạn HĐ (tháng): <strong className="text-slate-200 block mt-0.5">{emp.contractType === 'Có thời hạn' ? (emp.contractDurationMonths || '—') : '—'}</strong></div>
-                    <div>Công Nhật Vào: <strong className="text-slate-200 block mt-0.5">{emp.startDate}</strong></div>
-                    <div>Trạng thái: <strong className="text-slate-200 block mt-0.5 capitalize">{emp.status === 'working' ? 'Đang làm' : emp.status === 'leave' ? 'Nghỉ phép' : emp.status === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm'}</strong></div>
-                  </div>
-                </div>
+                <InfoSection title="Liên hệ">
+                  <InfoField label="Điện thoại" value={emp.phone} mono />
+                  <InfoField label="Giới tính" value={emp.gender} />
+                  <InfoField label="Email" value={emp.email} mono wide />
+                  <InfoField label="Thường trú" value={emp.address} wide />
+                  <InfoField label="Tạm trú" value={emp.currentAddress || emp.address} wide />
+                  <InfoField label="Liên hệ khẩn cấp" value={emp.emergencyContact} wide />
+                </InfoSection>
 
-                {/* Finance / Allowances */}
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-850 space-y-1.5">
-                  <h5 className="font-extrabold text-[10px] text-amber-500 uppercase tracking-wider">Quy Chế Phép Năm</h5>
-                  <div className="flex justify-between">
-                    <span className="text-slate-420">Số lần phép năm được cấp:</span>
-                    <span className="font-bold text-amber-500 font-mono">{emp.phepNam !== undefined ? emp.phepNam : 12} / 12 lần</span>
-                  </div>
-                  <div className="flex justify-between border-t border-slate-800 pt-1.5 mt-1">
-                    <span className="text-slate-420">Tài khoản ngân quỹ:</span>
-                    <span className="font-mono text-slate-300 text-right">{emp.bankAccount} ({emp.bankName})</span>
-                  </div>
-                </div>
+                <InfoSection title="Giấy tờ cá nhân">
+                  <InfoField label="CCCD" value={emp.cccd} mono />
+                  <InfoField label="Ngày sinh" value={formatDisplayDate(emp.dob)} />
+                  <InfoField label="Ngày cấp" value={formatDisplayDate(emp.cccdIssuedDate)} />
+                  <InfoField label="Nơi cấp" value={emp.cccdIssuedPlace} />
+                  <InfoField label="Trình độ" value={emp.education} wide />
+                </InfoSection>
 
-                {/* Actions on detailed sidebar */}
-                <div className="flex justify-between items-center text-[10.5px] border-t border-slate-800 pt-3 mt-1.5">
+                <InfoSection title="Hợp đồng">
+                  <InfoField label="Ngày vào làm" value={formatDisplayDate(emp.startDate)} />
+                  <InfoField label="Ngạch lương" value={emp.salaryCode} mono />
+                  <InfoField label="Loại hợp đồng" value={emp.contractType} />
+                  <InfoField label="Thời hạn (tháng)" value={emp.contractType === 'Có thời hạn' ? emp.contractDurationMonths : undefined} />
+                </InfoSection>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingEmpData({ ...emp });
-                        setIsEditingEmp(true);
-                      }}
-                      className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
-                    >
-                      Sửa
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSingleCreateSystemAccount(emp)}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
-                    >
-                      <UserPlus className="w-3 h-3" /> Tạo tài khoản nhanh
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (emp.id === 'NV_ADMIN' || emp.id === 'emp_admin' || emp.name === 'Administrator') {
-                          addToast({ title: '🔒 Bị khóa', message: 'Không thể xóa tài khoản quản trị viên hệ thống (admin). Tài khoản này được bảo vệ và không thể xóa.', type: 'warning' });
-                          return;
-                        }
-                        if (window.confirm(`⚠️ Bạn có chắc chắn muốn xóa vĩnh viễn hồ sơ nhân sự của ${emp.name} (${emp.id}) không?\nHành động này không thể hoàn tác.`)) {
-                          setEmployees(employees.filter(e => e.id !== emp.id));
-                          setSelectedEmpId(null);
-                          // Đồng bộ xóa lên Supabase
-                          dbService.employees.delete(emp.id).catch(err =>
-                            console.warn(`Xóa nhân viên ${emp.id} trên Supabase thất bại:`, err));
-                        }
-                      }}
-                      className="bg-red-650 hover:bg-red-600 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
-                    >
-                      Xóa
-                    </button>
-                  </div>
-                </div>
+                {/* Phép năm: số lần đã cấp trên 12, kèm thanh tiến độ; kèm tài khoản ngân hàng */}
+                {(() => {
+                  const phep = emp.phepNam !== undefined ? emp.phepNam : 12;
+                  const pct = Math.max(0, Math.min(100, (phep / 12) * 100));
+                  return (
+                    <section className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3">
+                      <div>
+                        <div className="flex items-baseline justify-between">
+                          <h5 className="text-xs font-bold text-slate-500">Phép năm</h5>
+                          <span className="text-[13px] font-black font-mono" style={{ color: '#0d47c9' }}>{phep} / 12 lần</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-slate-100 mt-2 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: '#0d47c9' }} /></div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 border-t border-slate-100 pt-3">
+                        <InfoField label="Số tài khoản" value={emp.bankAccount} mono />
+                        <InfoField label="Ngân hàng" value={emp.bankName} />
+                      </div>
+                    </section>
+                  );
+                })()}
               </div>
             ) : (
               // EDIT FORM
