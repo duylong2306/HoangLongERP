@@ -65,4 +65,15 @@ describe('Form sửa hồ sơ nhân viên', () => {
     setup({ ...EMP, contractType: 'Có thời hạn', contractDurationMonths: 12 });
     expect((screen.getByTestId('edit-contract-months') as HTMLInputElement).value).toBe('12');
   });
+
+  it('Phòng ban "Xưởng cơ khí": giá trị đúng (không lẫn tên class); hồ sơ cũ lưu nhầm vẫn hiện đúng mục', () => {
+    setup({ ...EMP, department: 'Xưởng cơ khí font-bold' });
+    const sel = screen.getByTestId('edit-department') as HTMLSelectElement;
+    expect(sel.value).toBe('Xưởng cơ khí');
+    expect(Array.from(sel.options).map(o => o.value)).not.toContain('Xưởng cơ khí font-bold');
+    cleanup();
+    const p = setup();
+    fireEvent.change(screen.getByTestId('edit-department'), { target: { value: 'Xưởng cơ khí' } });
+    expect(p.setEditingEmpData).toHaveBeenCalledWith(expect.objectContaining({ department: 'Xưởng cơ khí' }));
+  });
 });

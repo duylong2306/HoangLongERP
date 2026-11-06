@@ -836,11 +836,13 @@ export default function ProfilesTab({
 
                   <EditSection title="Công việc & hợp đồng">
                     <EditField label="Phòng ban">
-                      <select value={editingEmpData.department} className={EDIT_INPUT}
+                      {/* Hồ sơ cũ từng lưu nhầm "Xưởng cơ khí font-bold" (lẫn tên class vào giá trị) → hiện đúng mục "Xưởng cơ khí";
+                          bấm Lưu sẽ ghi lại giá trị đúng. */}
+                      <select value={editingEmpData.department === 'Xưởng cơ khí font-bold' ? 'Xưởng cơ khí' : editingEmpData.department} className={EDIT_INPUT} data-testid="edit-department"
                         onChange={(e) => setEditingEmpData({ ...editingEmpData, department: e.target.value })}>
                         <option value="Phòng Dự án">Phòng Dự án</option>
                         <option value="Xưởng mộc">Xưởng mộc</option>
-                        <option value="Xưởng cơ khí font-bold">Xưởng cơ khí</option>
+                        <option value="Xưởng cơ khí">Xưởng cơ khí</option>
                         <option value="Kế toán">Kế toán</option>
                         <option value="Marketing/Sale">Marketing/Sale</option>
                         <option value="Ban Giám đốc">Ban Giám đốc</option>
