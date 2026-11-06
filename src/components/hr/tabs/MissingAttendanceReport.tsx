@@ -1,8 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import {
-  AlertTriangle, CalendarX, CalendarCheck,
-  UserX, Layers,
-} from 'lucide-react';
+import { AlertTriangle, CalendarCheck, Layers } from 'lucide-react';
 import { getMissingAttendanceReport, readHrmConfigFromStorage } from '../hrCalculations';
 
 type ToastInput = { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number };
@@ -33,9 +30,9 @@ const PHEP_OPTIONS = [
 ];
 
 const TYPE_META: Record<string, { label: string; cls: string }> = {
-  absent: { label: 'Vắng KP', cls: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
-  holiday: { label: 'Nghỉ lễ', cls: 'text-violet-400 bg-violet-500/10 border-violet-500/20' },
-  weekend: { label: 'Nghỉ cuối tuần', cls: 'text-slate-400 bg-slate-500/10 border-slate-600/30' },
+  absent: { label: 'Vắng KP', cls: 'text-rose-700 bg-rose-50 border-rose-200' },
+  holiday: { label: 'Nghỉ lễ', cls: 'text-violet-700 bg-violet-50 border-violet-200' },
+  weekend: { label: 'Nghỉ cuối tuần', cls: 'text-slate-600 bg-slate-100 border-slate-200' },
 };
 
 const keyOf = (e: { empId: string; date: string }) => `${e.empId}|${e.date}`;
@@ -215,184 +212,144 @@ export default function MissingAttendanceReport({
   };
 
   const monthLabel = `${String(rptMonth).padStart(2, '0')}/${rptYear}`;
+  const fmtDate = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : d; };
+  const allChecked = visible.length > 0 && selected.size >= visible.length;
+  const toggleOne = (k: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold cursor-pointer outline-none focus:border-blue-400';
+  const resetSel = () => setSelected(new Set());
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800 pb-2 gap-2">
-        <div className="flex items-center gap-2">
-          <UserX className="w-4 h-4 text-rose-400" />
-          <span className="text-sm font-bold text-white">Báo cáo vắng mặt</span>
-          <span className="text-[11px] text-slate-500">tháng {monthLabel}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <select
-            value={filterType}
-            onChange={(e) => { setFilterType(e.target.value as any); setSelected(new Set()); }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1 rounded text-[11px] cursor-pointer outline-none"
-          >
-            <option value="absent">Vắng KP ({counts.absent})</option>
-            <option value="holiday">Nghỉ lễ ({counts.holiday})</option>
-            <option value="weekend">Nghỉ cuối tuần ({counts.weekend})</option>
-            <option value="all">Tất cả ({entries.length})</option>
-          </select>
-          <select
-            value={filterEmp}
-            onChange={(e) => { setFilterEmp(e.target.value); setSelected(new Set()); }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1 rounded text-[11px] cursor-pointer outline-none max-w-[160px]"
-          >
-            <option value="all">👥 Tất cả NV</option>
-            {empOptions.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-          <select
-            value={rptMonth}
-            onChange={(e) => { setRptMonth(e.target.value); setSelected(new Set()); }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1 rounded text-[11px] cursor-pointer outline-none"
-          >
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-              <option key={m} value={String(m)}>{`Th${m}`}</option>
-            ))}
-          </select>
-          <select
-            value={rptDay}
-            onChange={(e) => { setRptDay(e.target.value); setSelected(new Set()); }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1 rounded text-[11px] cursor-pointer outline-none"
-          >
-            {rptDayOptions.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <select
-            value={rptYear}
-            onChange={(e) => { setRptYear(e.target.value); setSelected(new Set()); }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1 rounded text-[11px] cursor-pointer outline-none"
-          >
-            {rptYearOptions.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </div>
+    <div className="space-y-3" data-testid="miss-root">
+      {/* Chip chọn loại (kèm số lượng) — thay cho ô chọn loại cũ */}
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5" data-testid="miss-chips">
+        {([['absent', 'Vắng KP', counts.absent], ['holiday', 'Nghỉ lễ', counts.holiday], ['weekend', 'Nghỉ cuối tuần', counts.weekend], ['all', 'Tất cả', entries.length]] as const).map(([k, label, n]) => {
+          const on = filterType === k;
+          return (
+            <button key={k} type="button" data-testid={`miss-chip-${k}`} onClick={() => { setFilterType(k); resetSel(); }}
+              style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
+              className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>{label} {n}</button>
+          );
+        })}
       </div>
 
-      {/* Giải thích loại trừ */}
-      <div className="text-[10px] text-slate-500 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2 flex items-start gap-2">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-        <span>
-          Chỉ nhân viên <strong className="text-slate-300">Đang làm</strong>. Đã loại trừ: Admin/Giám đốc, ngày trước ngày vào làm,
-          đơn nghỉ đã duyệt, và ngày tương lai. Các ngày nghỉ lễ/cuối tuần không có bản ghi mặc định = 0 công
-          (không sai); chuyển sang <strong className="text-slate-300">Tất cả</strong> nếu cần bù công ngày lễ quên chấm.
-        </span>
+      {/* Bộ lọc riêng của báo cáo: nhân viên / tháng / ngày / năm */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="miss-filters">
+        <select value={filterEmp} onChange={(e) => { setFilterEmp(e.target.value); resetSel(); }} aria-label="Nhân viên" className={`${inputCls} flex-1 min-w-[150px]`}>
+          <option value="all">Tất cả nhân viên</option>
+          {empOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        <select value={rptMonth} onChange={(e) => { setRptMonth(e.target.value); resetSel(); }} aria-label="Tháng" className={inputCls}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={String(m)}>Tháng {m}</option>)}
+        </select>
+        <select value={rptDay} onChange={(e) => { setRptDay(e.target.value); resetSel(); }} aria-label="Ngày" className={inputCls}>
+          {rptDayOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select value={rptYear} onChange={(e) => { setRptYear(e.target.value); resetSel(); }} aria-label="Năm" className={inputCls}>
+          {rptYearOptions.map((y) => <option key={y} value={y}>Năm {y}</option>)}
+        </select>
       </div>
 
-      {/* Thanh duyệt hàng loạt */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={visible.length > 0 && selected.size >= visible.length}
-            onChange={toggleAll}
-            className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-          />
-          Chọn tất cả hiển thị ({visible.length})
-        </label>
-        <span className="text-[11px] text-slate-400">Đã chọn: <strong className="text-amber-400">{selected.size}</strong> dòng</span>
-        <div className="flex items-center gap-2 ml-auto">
-          <select
-            value={batchAction}
-            onChange={(e) => setBatchAction(e.target.value)}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1.5 rounded text-[11px] cursor-pointer outline-none"
-          >
-            <option value="">— Chọn hành động —</option>
+      {/* Ghi chú ngắn về cách tính (đã lược bớt) */}
+      <div className="text-xs text-slate-500 flex items-start gap-2 px-1" data-testid="miss-note">
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+        <span>Chỉ tính nhân viên đang làm; đã loại Admin/Giám đốc, đơn nghỉ đã duyệt và ngày tương lai. Ngày lễ/cuối tuần không có bản ghi = 0 công — chọn "Tất cả" nếu cần bù công.</span>
+      </div>
+
+      {/* Thanh duyệt hàng loạt — chỉ hiện khi đã tick chọn */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="miss-bulkbar">
+          <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {selected.size}</span>
+          <span className="flex-1" />
+          <select value={batchAction} onChange={(e) => setBatchAction(e.target.value)} aria-label="Hành động" data-testid="miss-action" className={`${inputCls} h-8 text-xs`}>
+            <option value="">Chọn hành động</option>
             <option value="kp">Gán KP (vắng không phép)</option>
             <option value="phep">Gán phép (chọn loại)</option>
             <option value="worked">Đã đi làm (quên chấm)</option>
             <option value="dismiss">Bỏ qua</option>
           </select>
           {batchAction === 'phep' && (
-            <select
-              value={phepSymbol}
-              onChange={(e) => setPhepSymbol(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-1.5 rounded text-[11px] cursor-pointer outline-none"
-            >
-              {PHEP_OPTIONS.map((p) => (
-                <option key={p.symbol} value={p.symbol}>{p.label}</option>
-              ))}
+            <select value={phepSymbol} onChange={(e) => setPhepSymbol(e.target.value)} aria-label="Loại phép" className={`${inputCls} h-8 text-xs`}>
+              {PHEP_OPTIONS.map((p) => <option key={p.symbol} value={p.symbol}>{p.label}</option>)}
             </select>
           )}
-          <button
-            onClick={applyBatch}
-            className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-1.5 rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-          >
-            <Layers className="w-3.5 h-3.5" /> Áp dụng cho {selected.size} dòng
-          </button>
-        </div>
-      </div>
-
-      {/* Bảng */}
-      {visible.length === 0 ? (
-        <div className="text-center py-10 text-slate-500 font-semibold bg-slate-900/40 border border-slate-800 rounded-xl">
-          <CalendarCheck className="w-8 h-8 mx-auto mb-2 text-emerald-500/70" />
-          Không có ngày vắng mặt nào trong bộ lọc này.
-        </div>
-      ) : (
-        <div className="overflow-x-auto bg-slate-900/40 border border-slate-800 rounded-xl">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="text-slate-400 border-b border-slate-800">
-                <th className="py-2.5 pl-2 text-left w-8"></th>
-                <th className="py-2.5 pl-1 text-left">Nhân viên</th>
-                <th className="py-2.5 text-left">Ngày</th>
-                <th className="py-2.5 text-left">Thứ</th>
-                <th className="py-2.5 text-left">Loại</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-850">
-              {visible.map((e) => {
-                const checked = selected.has(keyOf(e));
-                const meta = TYPE_META[e.type];
-                return (
-                  <tr key={keyOf(e)} className={`hover:bg-slate-950/40 transition-colors ${checked ? 'bg-amber-500/10' : ''}`}>
-                    <td className="py-2 pl-2">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setSelected((prev) => {
-                            const n = new Set(prev);
-                            if (n.has(keyOf(e))) n.delete(keyOf(e));
-                            else n.add(keyOf(e));
-                            return n;
-                          });
-                        }}
-                        className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                      />
-                    </td>
-                    <td className="py-2 pl-1 font-semibold text-white leading-tight">
-                      <div className="flex items-center gap-1.5">
-                        <span>{e.empName}</span>
-                        <span className="text-[8.5px] bg-slate-800 text-slate-400 font-mono px-1 rounded">{e.empId}</span>
-                      </div>
-                    </td>
-                    <td className="py-2 font-mono text-slate-400">{e.date}</td>
-                    <td className="py-2 text-slate-400">{WEEKDAY[e.dayOfWeek]}</td>
-                    <td className="py-2">
-                      <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-bold ${meta.cls}`}>
-                        {meta.label}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <button type="button" onClick={applyBatch} data-testid="miss-apply"
+            style={{ background: '#0d47c9', color: '#ffffff' }}
+            className="h-8 px-3.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Layers className="w-3.5 h-3.5" /> Áp dụng</button>
         </div>
       )}
 
-      <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
-        <CalendarX className="w-3.5 h-3.5" />
-        Gợi ý: chọn nhiều dòng → chọn hành động → “Áp dụng”. HR duyệt thủ công, hệ thống không tự động phạt.
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        {visible.length === 0 ? (
+          <div className="text-center py-10 text-slate-500 text-sm" data-testid="miss-empty">
+            <CalendarCheck className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
+            Không có ngày vắng mặt nào trong bộ lọc này.
+          </div>
+        ) : (
+          <>
+            {/* MÁY TÍNH: bảng */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[13px]" data-testid="miss-table">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs">
+                    <th className="px-3 py-2.5 w-10 text-center">
+                      <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="Chọn tất cả" className="w-4 h-4 rounded cursor-pointer" />
+                    </th>
+                    <th className="px-3 py-2.5 font-bold">Nhân viên</th>
+                    <th className="px-3 py-2.5 font-bold">Ngày</th>
+                    <th className="px-3 py-2.5 font-bold">Thứ</th>
+                    <th className="px-3 py-2.5 font-bold">Loại</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((e) => {
+                    const k = keyOf(e);
+                    const checked = selected.has(k);
+                    return (
+                      <tr key={k} data-testid={`miss-row-${k}`} onClick={() => toggleOne(k)}
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${checked ? 'bg-blue-50' : ''}`}>
+                        <td className="px-3 py-2.5 text-center">
+                          <input type="checkbox" checked={checked} aria-label={`Chọn ${e.empName}`} onClick={(ev) => ev.stopPropagation()} onChange={() => toggleOne(k)} className="w-4 h-4 rounded cursor-pointer" />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="font-bold text-slate-900">{e.empName}</span>
+                          <span className="ml-2 font-mono text-[11px] text-slate-500">{e.empId}</span>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{fmtDate(e.date)}</td>
+                        <td className="px-3 py-2.5 text-slate-600">{WEEKDAY[e.dayOfWeek]}</td>
+                        <td className="px-3 py-2.5"><span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${TYPE_META[e.type].cls}`}>{TYPE_META[e.type].label}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ĐIỆN THOẠI: thẻ */}
+            <div className="md:hidden" data-testid="miss-cards">
+              <label className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-xs text-slate-600 font-bold cursor-pointer">
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} className="w-4 h-4 rounded cursor-pointer" /> Chọn tất cả ({visible.length})
+              </label>
+              {visible.map((e) => {
+                const k = keyOf(e);
+                const checked = selected.has(k);
+                return (
+                  <div key={k} data-testid={`miss-card-${k}`} onClick={() => toggleOne(k)}
+                    className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${checked ? 'bg-blue-50' : ''}`}>
+                    <input type="checkbox" checked={checked} aria-label={`Chọn ${e.empName}`} onClick={(ev) => ev.stopPropagation()} onChange={() => toggleOne(k)} className="w-4 h-4 rounded cursor-pointer mt-1" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-bold text-slate-900 text-sm leading-snug">{e.empName}</div>
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${TYPE_META[e.type].cls}`}>{TYPE_META[e.type].label}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5"><span className="font-mono">{e.empId}</span> · {WEEKDAY[e.dayOfWeek]} · <span className="font-mono">{fmtDate(e.date)}</span></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+        <div className="px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">{visible.length} dòng · tháng {monthLabel}</div>
       </div>
     </div>
   );

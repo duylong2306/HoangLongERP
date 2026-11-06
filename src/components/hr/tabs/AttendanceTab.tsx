@@ -388,6 +388,8 @@ export default function AttendanceTab({
   return (
     <div className="space-y-3" data-testid="att-root">
       {/* ── THANH CÔNG CỤ: bộ lọc + nút. Xuất/Nhập chỉ biểu tượng; "Chốt hàng loạt" là nút phụ có chữ ── */}
+      {/* Màn Báo cáo vắng mặt có bộ lọc riêng nên ẩn thanh công cụ này để khỏi lặp bộ lọc Tháng/Ngày/Năm */}
+      {attView === 'table' && (
       <div className="flex flex-wrap items-center gap-2" data-testid="att-toolbar">
         <select value={attendanceSearchEmpId} onChange={(e) => setAttendanceSearchEmpId(e.target.value)} aria-label="Nhân viên" data-testid="att-filter-emp"
           className={`${inputCls} flex-1 min-w-[150px]`}>
@@ -420,6 +422,7 @@ export default function AttendanceTab({
           className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><FileUp className="w-4 h-4" /></button>
         <input ref={attendanceFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportAttendanceExcel} />
       </div>
+      )}
 
       {/* Chuyển giữa Bảng chấm công / Báo cáo vắng mặt (chip, kèm số của hôm nay) */}
       <div className="flex gap-1.5 overflow-x-auto pb-0.5" data-testid="att-views">
