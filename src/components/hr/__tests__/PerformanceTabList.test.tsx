@@ -42,6 +42,9 @@ describe('Hiệu suất — giao diện mới', () => {
     expect(props.setEditingErrorId).toHaveBeenCalledWith(null);
     expect(props.handleFormEmployeeChange).toHaveBeenCalledWith('NV1');
     expect(props.setShowErrorModal).toHaveBeenCalledWith(true);
+    // Ngày mặc định phải là hôm nay (không còn gán cứng)
+    const d = new Date();
+    expect(props.setErrFormDate).toHaveBeenCalledWith(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     fireEvent.change(screen.getByTestId('perf-filter-month'), { target: { value: '6' } });
     expect(props.setErrorFilterMonth).toHaveBeenCalledWith('6');
   });

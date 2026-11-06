@@ -255,7 +255,9 @@ export default function PerformanceTab({
     } else {
       setErrFormEmpId('');
     }
-    setErrFormDate('2026-06-12');
+    // Ngày mặc định = hôm nay theo giờ máy (không dùng toISOString vì lệch UTC, đêm khuya có thể ra ngày hôm qua)
+    const now = new Date();
+    setErrFormDate(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
     setErrFormNotes('');
     setErrorFormCritSearch('');
     setShowErrorModal(true);
