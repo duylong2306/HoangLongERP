@@ -32,7 +32,9 @@ describe('Ngăn kéo chi tiết — đồng bộ thiết kế mới', () => {
   });
   it('chi tiết công việc trên điện thoại: thẻ Chi tiết | Liên thông, menu liên thông không che chi tiết', () => {
     expect(task).toContain('task-mobile-tabs');
-    expect(task).toMatch(/onOpenConnectedTool && mobileTab === 'tools' \? 'max-lg:hidden'/);   // chi tiết ẩn khi đang xem Liên thông
+    // Chi tiết (cột trái) ẩn khi xem Liên thông — ẩn ĐÚNG cột trái, không ẩn khung bao chứa cả ngăn Liên thông (lỗi màn trắng trên điện thoại)
+    expect(task).toMatch(/justify-between \$\{onOpenConnectedTool && mobileTab === 'tools' \? 'max-lg:hidden' : ''\}`\} id="modal_left_scrollable"/);
+    expect(task).not.toMatch(/lx-drawer-body[^`]*\$\{onOpenConnectedTool && mobileTab === 'tools'/);
     expect(task).toMatch(/mobileTab === 'tools' \? 'max-lg:flex-1 max-lg:min-h-0' : 'max-lg:hidden'/);   // liên thông ẩn khi đang xem Chi tiết, và lấp đầy khi hiện
     expect(task).toMatch(/useEffect\(\(\) => \{ setMobileTab\('detail'\); \}, \[taskId\]\)/);
   });

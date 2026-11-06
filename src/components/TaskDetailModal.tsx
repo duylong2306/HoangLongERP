@@ -1720,10 +1720,12 @@ export default function TaskDetailModal({
         )}
 
         {/* Dynamic Connected Layout Container */}
-        <div className={`lx-drawer-body flex-1 flex flex-col lg:flex-row overflow-hidden ${onOpenConnectedTool && mobileTab === 'tools' ? 'max-lg:hidden' : ''}`}>
+        <div className="lx-drawer-body flex-1 flex flex-col lg:flex-row overflow-hidden">
           
           {/* Scrollable Core Elements */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/70 flex flex-col justify-between" id="modal_left_scrollable">
+          {/* Điện thoại: khi xem thẻ "Công cụ liên thông" thì ẩn riêng cột chi tiết này. KHÔNG ẩn cả khung bao (lx-drawer-body)
+                vì ngăn Công cụ liên thông nằm bên trong khung đó — ẩn khung bao làm ngăn này mất theo (màn hình trắng). */}
+          <div className={`flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/70 flex flex-col justify-between ${onOpenConnectedTool && mobileTab === 'tools' ? 'max-lg:hidden' : ''}`} id="modal_left_scrollable">
             
             <div className="space-y-4">
               {/* Cảnh báo và thông báo tiến trình phê duyệt */}
