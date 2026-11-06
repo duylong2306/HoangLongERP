@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Lock, FileSpreadsheet, FileUp, Download, Trash2, AlertTriangle, Clock, CheckCircle, XCircle, AlertCircle, Users } from 'lucide-react';
+import { Lock, Unlock, Pencil, FileUp, Download, Trash2, AlertTriangle, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { readHrmConfigFromStorage, getAttendanceStatusText, getMissingAttendanceReport } from '../hrCalculations';
 import MissingAttendanceReport from './MissingAttendanceReport';
 import { EmployeeProfile, LeaveCoefficient, Holiday, AttendanceLog, LeaveRequest } from '../hrTypes';
@@ -108,6 +108,8 @@ export default function AttendanceTab({
   // ── Multi-row selection ──
   const [attSelectedRows, setAttSelectedRows] = useState<Set<string>>(new Set());
   const [attSelectAll, setAttSelectAll] = useState(false);
+  // Dòng đang mở phần chi tiết (ảnh FaceID/vị trí/ghi chú)
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
 
   // --- Start: Helper functions from DashboardOverview ---
@@ -294,72 +296,143 @@ export default function AttendanceTab({
     addToast({ title: '✅ Đã xóa', message: `Đã xóa ${attSelectedRows.size} bản ghi chấm công.`, type: 'success' });
   };
 
+  // ── Hiển thị dùng chung cho bảng (máy tính) và thẻ (điện thoại) ──
+  // Ngày lưu dạng YYYY-MM-DD → hiển thị dd/mm/yyyy
+  const fmtDate = (d?: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ''));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—');
+  };
+  // Giá trị "không có giờ": '--:--', 'OFF' (nghỉ), 'KP' (không phép) hiển thị mờ
+  const isBlankTime = (v?: string) => !v || v === '--:--' || v === 'OFF' || v === 'KP';
+  const Shift = ({ a, b }: { a?: string; b?: string }) => (
+    <span className="font-mono text-xs whitespace-nowrap">
+      <span className={isBlankTime(a) ? 'text-slate-300' : 'text-slate-900 font-bold'}>{a || '--:--'}</span>
+      <span className="text-slate-300 mx-1">→</span>
+      <span className={isBlankTime(b) ? 'text-slate-300' : 'text-slate-700'}>{b || '--:--'}</span>
+    </span>
+  );
+  const OtText = ({ log }: { log: AttendanceLog }) => log.timeInOT
+    ? <span className="inline-block px-1.5 py-0.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 font-mono text-[11px] font-bold">{log.timeInOT}–{log.timeOutOT} ({log.otHours}h)</span>
+    : <span className="text-slate-300">—</span>;
+  // Tình trạng: nhãn đúng/sai + các chip bất thường (đã gồm đi muộn / về sớm nên không cần cột riêng)
+  const StatusCell = ({ log }: { log: AttendanceLog }) => {
+    const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${st.isValid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>{st.text}</span>
+        {getAttendanceAnomalies(log).map((an, i) => (
+          <span key={i} title={an.title} className={`px-1.5 py-0.5 rounded-full border ${an.color} text-[10px] font-bold inline-flex items-center gap-1`}>{an.icon}{an.label}</span>
+        ))}
+      </div>
+    );
+  };
+  // Nút thao tác theo từng bản ghi: Sửa / Chốt-Mở khóa / Xóa. Giữ nguyên quy tắc quyền cũ:
+  //  - đã chốt + không có quyền chốt → chỉ hiện ổ khóa;  - Chốt/Mở khóa chỉ cho người có quyền chốt công.
+  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const RowActions = ({ log }: { log: AttendanceLog }) => {
+    const canManage = canManageLockedAttendance();
+    if (log.isLocked && !canManage) {
+      return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400" title="Đã chốt — chỉ Giám đốc/Kế toán mới được sửa"><Lock className="w-3.5 h-3.5" />Đã chốt</span>;
+    }
+    return (
+      <div className="inline-flex items-center gap-1.5">
+        <button type="button" className={iconBtn} title="Sửa bản ghi" aria-label="Sửa bản ghi" data-testid={`att-edit-${log.id}`}
+          onClick={(e) => { e.stopPropagation(); setEditingAttendance(log); }}><Pencil className="w-3.5 h-3.5" /></button>
+        {canManage && onUpdateAttendance && (
+          <button type="button" className={iconBtn} data-testid={`att-lock-${log.id}`}
+            title={log.isLocked ? 'Mở khóa bản ghi này' : 'Chốt & khóa bản ghi này'} aria-label={log.isLocked ? 'Mở khóa' : 'Chốt công'}
+            onClick={(e) => { e.stopPropagation(); onUpdateAttendance(log.id, { isLocked: !log.isLocked }); }}>
+            {log.isLocked ? <Unlock className="w-3.5 h-3.5 text-amber-600" /> : <Lock className="w-3.5 h-3.5 text-emerald-600" />}
+          </button>
+        )}
+        <button type="button" title="Xóa bản ghi" aria-label="Xóa bản ghi" data-testid={`att-delete-${log.id}`}
+          className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); handleDeleteAttendance(log); }}><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+    );
+  };
+  // Khối "Sinh trắc & vị trí" + ghi chú — chỉ mở khi bấm vào dòng (đỡ chật bảng)
+  const DetailBox = ({ log }: { log: AttendanceLog }) => (
+    <div className="space-y-2 text-xs" data-testid={`att-detail-${log.id}`}>
+      <div className="text-slate-500">Cách chấm: <strong className="text-slate-700">{log.method ? log.method.replace('Công trình ', '') : 'Chưa ghi nhận'}</strong></div>
+      <PunchMediaList log={log} onZoomImage={setZoomedImage} variant="compact" />
+      <div className="text-slate-500">Ghi chú: <span className="text-slate-700">{log.notes || 'Không có'}</span></div>
+    </div>
+  );
+
+  const hrm = readHrmConfigFromStorage();
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold cursor-pointer outline-none focus:border-blue-400';
+  const pageSizeNum = globalPageSize === 'all' ? 0 : (globalPageSize as number);
+  const totalPages = pageSizeNum ? Math.ceil(filteredAttendance.length / pageSizeNum) : 1;
+
   // Loading skeleton
   if (isLoadingAttendance) {
     return (
-      <div className="space-y-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-5 h-5 bg-amber-500/20 rounded animate-pulse" />
-            <div className="h-4 bg-slate-800 rounded w-48 animate-pulse" />
-          </div>
-          <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-800/50">
-                <div className="w-4 h-4 bg-slate-800 rounded animate-pulse" />
-                <div className="h-3 bg-slate-800 rounded w-24 animate-pulse" />
-                <div className="h-3 bg-slate-800 rounded w-20 animate-pulse" />
-                <div className="h-3 bg-slate-800 rounded w-32 animate-pulse" />
-                <div className="h-3 bg-slate-800 rounded w-32 animate-pulse" />
-                <div className="h-3 bg-slate-800 rounded w-16 animate-pulse" />
-              </div>
-            ))}
-          </div>
-          <div className="text-center mt-4">
-            <p className="text-[11px] text-slate-400 animate-pulse">⏳ Đang tải dữ liệu chấm công...</p>
-          </div>
-        </div>
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3" data-testid="att-loading">
+        {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-9 bg-slate-100 rounded-lg animate-pulse" />)}
+        <p className="text-center text-xs text-slate-500">Đang tải dữ liệu chấm công...</p>
       </div>
     );
   }
 
+  const tiles: Array<[string, number, string, string]> = [
+    ['Tổng NV', dailySummary.totalEmployees, '#334155', 'Số nhân viên đang làm'],
+    ['Đúng giờ', dailySummary.onTime, '#047857', 'Có mặt và chấm công đúng giờ'],
+    ['Đi muộn', dailySummary.late, '#be123c', 'Số bản ghi đi muộn'],
+    ['Về sớm', dailySummary.early, '#b45309', 'Số bản ghi về sớm'],
+    ['Thiếu chấm', dailySummary.missingPunch, '#c2410c', 'Thiếu một lượt chấm (vào hoặc ra)'],
+    ['Vắng mặt', dailySummary.absent, '#b91c1c', 'Nhân viên vắng hoặc nghỉ không phép'],
+    ['Đã chốt', dailySummary.locked, '#475569', 'Bản ghi đã chốt, không sửa được'],
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* Bulk delete button when rows are selected */}
-      {attSelectedRows.size > 0 && (
-        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 mb-4 flex justify-between items-center">
-          <span className="text-rose-700 font-bold">Đã chọn: {attSelectedRows.size} bản ghi</span>
-          <button
-            onClick={handleBulkDeleteAttendance}
-            className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors text-[11px] flex items-center gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Xóa hàng loạt
+    <div className="space-y-3" data-testid="att-root">
+      {/* ── THANH CÔNG CỤ: bộ lọc + nút. Xuất/Nhập chỉ biểu tượng; "Chốt hàng loạt" là nút phụ có chữ ── */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="att-toolbar">
+        <select value={attendanceSearchEmpId} onChange={(e) => setAttendanceSearchEmpId(e.target.value)} aria-label="Nhân viên" data-testid="att-filter-emp"
+          className={`${inputCls} flex-1 min-w-[150px]`}>
+          <option value="all">Tất cả nhân viên</option>
+          {employees.filter(emp => emp.status === 'working').map(emp => (
+            <option key={emp.id} value={emp.id}>{emp.id} - {emp.name}</option>
+          ))}
+        </select>
+        <select value={attendanceFilterMonth} onChange={(e) => setAttendanceFilterMonth(e.target.value)} aria-label="Tháng" data-testid="att-filter-month" className={inputCls}>
+          <option value="all">Mọi tháng</option>
+          {Array.from({ length: 12 }, (_, i) => <option key={i} value={String(i + 1)}>Tháng {String(i + 1).padStart(2, '0')}</option>)}
+        </select>
+        <select value={attendanceFilterDay} onChange={(e) => setAttendanceFilterDay(e.target.value)} aria-label="Ngày" data-testid="att-filter-day" className={inputCls}>
+          <option value="all">Mọi ngày</option>
+          <option value="today">Hôm nay</option>
+          {Array.from({ length: 31 }, (_, i) => <option key={i} value={String(i + 1)}>Ngày {String(i + 1).padStart(2, '0')}</option>)}
+        </select>
+        <select value={attendanceFilterYear} onChange={(e) => setAttendanceFilterYear(e.target.value)} aria-label="Năm" data-testid="att-filter-year" className={inputCls}>
+          {Array.from({ length: 5 }, (_, i) => { const y = new Date().getFullYear() - 2 + i; return <option key={y} value={String(y)}>Năm {y}</option>; })}
+        </select>
+        {canManageLockedAttendance() && (
+          <button type="button" onClick={() => setShowBulkLockModal(true)} title="Chốt công hàng loạt (trang hiện tại hoặc cả tháng)" data-testid="att-bulk-lock"
+            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">
+            <Lock className="w-4 h-4" /><span className="hidden sm:inline">Chốt hàng loạt</span>
           </button>
-        </div>
-      )}
-      {/* Toggle: Bảng chấm công / Báo cáo vắng mặt */}
-      <div className="flex items-center gap-2 mb-3">
-        <div className="inline-flex rounded-lg border border-slate-800 overflow-hidden">
-          <button
-            onClick={() => setAttView('table')}
-            className={`px-3 py-1.5 text-[11px] font-bold transition-colors flex items-center gap-1.5 ${attView === 'table' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
-          >
-            📋 Bảng chấm công
-            <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-bold" title="Số bản ghi đã chấm hôm nay">
-              {attTodayRecordCount}
-            </span>
-          </button>
-          <button
-            onClick={() => setAttView('missing')}
-            className={`px-3 py-1.5 text-[11px] font-bold transition-colors flex items-center gap-1.5 ${attView === 'missing' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'}`}
-          >
-            ⚠️ Báo cáo vắng mặt
-            <span className="px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 text-[9px] font-bold" title="Số ngày vắng chưa tạo bản ghi hôm nay">
-              {attTodayMissingCount}
-            </span>
-          </button>
-        </div>
+        )}
+        <button type="button" onClick={handleExportAttendanceExcel} title="Xuất Excel" aria-label="Xuất Excel" data-testid="att-export"
+          className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><Download className="w-4 h-4" /></button>
+        <button type="button" onClick={() => attendanceFileInputRef.current?.click()} title="Nhập Excel" aria-label="Nhập Excel" data-testid="att-import"
+          className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><FileUp className="w-4 h-4" /></button>
+        <input ref={attendanceFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportAttendanceExcel} />
       </div>
+
+      {/* Chuyển giữa Bảng chấm công / Báo cáo vắng mặt (chip, kèm số của hôm nay) */}
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5" data-testid="att-views">
+        <button type="button" onClick={() => setAttView('table')} data-testid="att-view-table"
+          style={attView === 'table' ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
+          className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${attView === 'table' ? '' : 'bg-white text-slate-600 border-slate-200'}`}
+          title="Số bản ghi đã chấm hôm nay">Bảng chấm công {attTodayRecordCount}</button>
+        <button type="button" onClick={() => setAttView('missing')} data-testid="att-view-missing"
+          style={attView === 'missing' ? { background: '#fee2e2', color: '#b91c1c', borderColor: '#fecaca' } : undefined}
+          className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${attView === 'missing' ? '' : 'bg-white text-slate-600 border-slate-200'}`}
+          title="Số nhân viên vắng chưa có bản ghi hôm nay">Báo cáo vắng mặt {attTodayMissingCount}</button>
+      </div>
+
       {attView === 'missing' ? (
         <MissingAttendanceReport
           employees={employees}
@@ -375,460 +448,150 @@ export default function AttendanceTab({
           addToast={addToast}
         />
       ) : (
-      <>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800 pb-2 gap-2">
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Filter 1: Employee */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="text-slate-400 font-bold select-none">Nhân viên:</span>
-            <select
-              value={attendanceSearchEmpId}
-              onChange={(e) => setAttendanceSearchEmpId(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
-            >
-              <option value="all">👥 Tất cả</option>
-              {employees.filter(emp => emp.status === 'working').map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.id} - {emp.name}</option>
-              ))}
-            </select>
+        <>
+          {/* Thẻ số liệu tổng hợp của danh sách đang lọc */}
+          <div className="grid grid-cols-4 sm:grid-cols-7 gap-2" data-testid="att-summary">
+            {tiles.map(([label, n, color, tip]) => (
+              <div key={label} title={tip} className="bg-white border border-slate-200 rounded-xl px-2 py-2 text-center">
+                <div className="text-lg font-black leading-none" style={{ color }}>{n}</div>
+                <div className="text-[10px] text-slate-500 font-bold mt-1 truncate">{label}</div>
+              </div>
+            ))}
           </div>
 
-          {/* Filter 2: Month */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="text-slate-400 font-bold select-none">Tháng:</span>
-            <select
-              value={attendanceFilterMonth}
-              onChange={(e) => setAttendanceFilterMonth(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
-            >
-              <option value="all">📅 Tất cả</option>
-              {Array.from({ length: 12 }, (_, i) => {
-                const m = String(i + 1);
-                return (
-                  <option key={i} value={m}>Tháng {m.padStart(2, '0')}</option>
-                );
-              })}
-            </select>
-          </div>
-
-          {/* Filter 3: Day */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="text-slate-400 font-bold select-none">Ngày:</span>
-            <select
-              value={attendanceFilterDay}
-              onChange={(e) => setAttendanceFilterDay(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
-            >
-              <option value="all">📅 Tất cả</option>
-              <option value="today">📅 Hôm nay</option>
-              {Array.from({ length: 31 }, (_, i) => {
-                const d = String(i + 1);
-                return (
-                  <option key={i} value={d}>Ngày {d.padStart(2, '0')}</option>
-                );
-              })}
-            </select>
-          </div>
-
-          {/* Filter 4: Year */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="text-slate-400 font-bold select-none">Năm:</span>
-            <select
-              value={attendanceFilterYear}
-              onChange={(e) => setAttendanceFilterYear(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] font-bold cursor-pointer hover:border-amber-500 focus:outline-none transition-colors"
-            >
-              {Array.from({ length: 5 }, (_, i) => {
-                const year = new Date().getFullYear() - 2 + i;
-                return (
-                  <option key={year} value={String(year)}>Năm {year}</option>
-                );
-              })}
-            </select>
-          </div>
-          {canManageLockedAttendance() && (
-            <button
-              onClick={() => setShowBulkLockModal(true)}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border border-emerald-500/30"
-              title="Chốt công hàng loạt (trang hiện tại hoặc cả tháng)"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Chốt hàng loạt</span>
-            </button>
-          )}
-          <button
-            onClick={handleExportAttendanceExcel}
-            className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border border-sky-500/30"
-            title="Xuất báo cáo bảng công ra Excel"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Xuất Excel</span>
-          </button>
-          <button
-            onClick={() => attendanceFileInputRef.current?.click()}
-            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border border-slate-600/30"
-            title="Nhập chấm công thủ công từ Excel"
-          >
-            <FileUp className="w-3.5 h-3.5" />
-            <span>Nhập Excel</span>
-          </button>
-          <input
-            ref={attendanceFileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleImportAttendanceExcel}
-          />
-        </div>
-      </div>
-
-      <div className="px-4 py-2 bg-slate-950/40 border-y border-slate-800 text-[11px] flex flex-wrap items-center gap-x-6 gap-y-2 justify-between">
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <div className="flex items-center gap-1.5" title="Tổng số nhân viên trong danh sách">
-            <Users className="w-3.5 h-3.5 text-slate-500" />
-            <span className="text-slate-400">Tổng NV: <strong className="text-white">{dailySummary.totalEmployees}</strong></span>
-          </div>
-          <div className="flex items-center gap-1.5" title="Số nhân viên có mặt và chấm công đúng giờ">
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-            <span className="text-slate-400">Đúng giờ: <strong className="text-emerald-400">{dailySummary.onTime}</strong></span>
-          </div>
-          <div className="flex items-center gap-1.5" title="Số nhân viên đi muộn">
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
-            <span className="text-slate-400">Đi muộn: <strong className="text-rose-400">{dailySummary.late}</strong></span>
-          </div>
-          <div className="flex items-center gap-1.5" title="Số nhân viên về sớm">
-            <Clock className="w-3.5 h-3.5 text-amber-500" />
-            <span className="text-slate-400">Về sớm: <strong className="text-amber-400">{dailySummary.early}</strong></span>
-          </div>
-          <div className="flex items-center gap-1.5" title="Số trường hợp thiếu chấm công một lần (vào hoặc ra)">
-            <AlertCircle className="w-3.5 h-3.5 text-orange-500" />
-            <span className="text-slate-400">Thiếu chấm: <strong className="text-orange-400">{dailySummary.missingPunch}</strong></span>
-          </div>
-           <div className="flex items-center gap-1.5" title="Số nhân viên vắng mặt hoặc nghỉ không phép">
-            <XCircle className="w-3.5 h-3.5 text-red-500" />
-            <span className="text-slate-400">Vắng mặt: <strong className="text-red-400">{dailySummary.absent}</strong></span>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5" title="Số bản ghi đã được chốt, không thể sửa">
-            <Lock className="w-3.5 h-3.5 text-slate-500" />
-            <span className="text-slate-400">Đã chốt: <strong className="text-slate-400">{dailySummary.locked}</strong></span>
-        </div>
-      </div>
-
-      <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl text-[11px] overflow-x-auto">
-
-        {/* Daily timesheet rows spreadsheet layout */}
-        <table className="w-full text-left border-collapse whitespace-nowrap">
-          <thead>
-            <tr className="border-b border-slate-800 text-slate-400 text-[10.5px]">
-              <th className="pb-2.5 pl-2 w-10 text-center">
-                <input
-                  type="checkbox"
-                  checked={attSelectAll && slicedAttendance.length > 0 && slicedAttendance.every(l => attSelectedRows.has(l.id))}
-                  onChange={(e) => handleAttSelectAll(e.target.checked)}
-                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                />
-              </th>
-              <th className="pb-2.5 pl-2">Nhân viên</th>
-              <th className="pb-2.5">Ngày</th>
-              <th className="pb-2.5">
-                Ca Sáng (Vào → Ra)
-                <div className="font-normal text-[8.5px] text-slate-500 mt-0.5 font-mono">Chuẩn: {readHrmConfigFromStorage().morningIn} → {readHrmConfigFromStorage().morningOut}</div>
-              </th>
-              <th className="pb-2.5">
-                Ca Chiều (Vào → Ra)
-                <div className="font-normal text-[8.5px] text-slate-500 mt-0.5 font-mono">Chuẩn: {readHrmConfigFromStorage().afternoonIn} → {readHrmConfigFromStorage().afternoonOut}</div>
-              </th>
-              <th className="pb-2.5">Tăng Ca</th>
-              <th className="pb-2.5 text-center font-bold text-amber-500">Chốt công</th>
-              <th className="pb-2.5">Thông tin Sinh trắc & Vị trí</th>
-              <th className="pb-2.5 text-center">Trạng thái</th>
-              <th className="pb-2.5 text-center">Bất thường</th>
-              <th className="pb-2.5 text-center text-sky-400">Đi muộn / Về sớm</th>
-              <th className="pb-2.5 pr-2">Ghi chú thực tế</th>
-              <th className="pb-2.5 pr-2 text-center">Thao tác</th>
-              <th className="pb-2.5 pr-2 text-center">Hành động</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-850">
-            {(() => {
-              const filtered = attendanceFiltered;
-              const totalFiltered = filtered.length;
-              if (totalFiltered === 0) {
-                return (
-                  <tr>
-                    <td colSpan={9} className="text-center py-10 text-slate-500 font-semibold">
-                      📭 Không tìm thấy bản ghi nhật ký chấm công nào.
-                    </td>
-                  </tr>
-                );
-              }
-              const sliced = globalPageSize === 'all'
-                ? filtered
-                : filtered.slice((attendancePage - 1) * (globalPageSize as number), attendancePage * (globalPageSize as number));
-              return sliced.map(log => (
-                <tr key={log.id} className={`hover:bg-slate-950/40 text-[11px] transition-colors ${attSelectedRows.has(log.id) ? 'bg-amber-500/10' : ''}`}>
-                  <td className="py-2.5 pl-2 text-center">
-                    <input
-                      type="checkbox"
-                      checked={attSelectedRows.has(log.id)}
-                      onChange={(e) => { e.stopPropagation(); handleAttRowSelect(log.id, e.target.checked); }}
-                      className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                    />
-                  </td>
-                  <td className="py-2.5 pl-2 font-semibold text-white leading-tight">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold text-slate-100">{log.empName}</span>
-                      <span className="text-[8.5px] bg-slate-800 text-slate-400 font-mono px-1 rounded">{log.empId}</span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 font-mono text-slate-400 text-[10.5px] whitespace-nowrap">{log.date}</td>
-                  <td className="py-2.5 font-mono text-[10.5px]">
-                    <div className="flex items-center gap-1">
-                      <span className={log.timeInS === '--:--' || log.timeInS === 'OFF' || log.timeInS === 'KP' ? 'text-slate-600' : 'text-slate-100 font-medium'}>
-                        {log.timeInS}
-                      </span>
-                      <span className="text-slate-600">→</span>
-                      <span className={log.timeOutS === '--:--' || log.timeOutS === 'OFF' || log.timeOutS === 'KP' ? 'text-slate-600' : 'text-slate-350'}>
-                        {log.timeOutS}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 font-mono text-[10.5px]">
-                    <div className="flex items-center gap-1">
-                      <span className={log.timeInC === '--:--' || log.timeInC === 'OFF' || log.timeInC === 'KP' ? 'text-slate-600' : 'text-slate-100 font-medium'}>
-                        {log.timeInC}
-                      </span>
-                      <span className="text-slate-600">→</span>
-                      <span className={log.timeOutC === '--:--' || log.timeOutC === 'OFF' || log.timeOutC === 'KP' ? 'text-slate-600' : 'text-slate-350'}>
-                        {log.timeOutC}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 font-mono text-amber-500 font-semibold text-[10.5px]">
-                    {log.timeInOT ? (
-                      <div className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200 inline-block font-bold">
-                        {log.timeInOT} - {log.timeOutOT} ({log.otHours}h)
-                      </div>
-                    ) : <span className="text-slate-600">--</span>}
-                  </td>
-                  <td className="py-2.5 text-center">
-                    <WorkdayCell
-                      log={log}
-                      leaveCoefficients={leaveCoefficients}
-                      holidays={holidays}
-                      weekendDays={weekendDays}
-                      leaves={leaves}
-                    />
-                  </td>
-                  <td className="py-2.5 text-[10.5px]">
-                    <div className="space-y-1 text-slate-300">
-                      <div className="text-[10px] text-slate-404 font-medium">
-                        {log.method ? log.method.replace('Công trình ', '') : 'Chưa ghi nhận'}
-                      </div>
-                      {/* Ảnh FaceID + GPS đầy đủ 6 lượt: Vào/Ra sáng, chiều, tăng ca */}
-                      <PunchMediaList
-                        log={log}
-                        onZoomImage={setZoomedImage}
-                        variant="compact"
-                      />
-                    </div>
-                  </td>
-                  <td className="py-2.5 text-center whitespace-nowrap">
-                    {(() => {
-                      const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
-                      return (
-                        <span className={`px-2 py-0.5 rounded font-black text-[9px] uppercase tracking-wider select-none ${
-                          st.isValid ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                          'bg-rose-50 text-rose-700 border border-rose-200'
-                        }`}>
-                          {st.text}
-                        </span>
-                      );
-                    })()}
-                  </td>
-                  <td className="py-2.5 text-center whitespace-nowrap">
-                    <div className="flex flex-wrap gap-1 justify-center">
-                      {getAttendanceAnomalies(log).map((anomaly, idx) => (
-                        <span key={idx} className={`px-1.5 py-0.5 rounded border ${anomaly.color} text-[9px] font-bold flex items-center gap-1`} title={anomaly.title}>
-                          {anomaly.icon} {anomaly.label}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="py-2.5 text-center whitespace-nowrap">
-                    {(() => {
-                      const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
-                      const late = st.lateMinutes;
-                      const early = st.earlyMinutes;
-                      if (late <= 0 && early <= 0) {
-                        return <span className="text-[10px] text-slate-600">—</span>;
-                      }
-                      return (
-                        <div className="flex flex-col items-center gap-0.5 text-[10px] font-bold leading-tight">
-                          {late > 0 && (
-                            <span className="text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                              ⏰ {late}p
-                            </span>
-                          )}
-                          {early > 0 && (
-                            <span className="text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                              ⏱ {early}p
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="py-2.5 pr-2 text-slate-400 text-[10.5px] truncate max-w-[160px] font-medium" title={log.notes}>
-                    {log.notes || <span className="text-slate-600 font-normal italic">Không có</span>}
-                  </td>
-                  <td className="py-2.5 pr-2 text-center whitespace-nowrap">
-                    {log.isLocked ? (
-                      canManageLockedAttendance() ? (
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => setEditingAttendance(log)}
-                            className="text-[9px] text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500/25 px-1.5 py-0.5 rounded border border-amber-500/20 cursor-pointer transition-all font-bold"
-                            title="Sửa bản ghi (đã chốt)"
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            onClick={() => handleDeleteAttendance(log)}
-                            className="text-[9px] text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 px-1.5 py-0.5 rounded border border-rose-500/20 cursor-pointer transition-all font-bold"
-                            title="Xóa bản ghi (đã chốt)"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-slate-600 text-[9px] font-bold flex items-center justify-center gap-0.5" title="Đã chốt — chỉ Giám đốc/Kế toán mới được sửa">
-                          🔒
-                        </span>
-                      )
-                    ) : (
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => setEditingAttendance(log)}
-                          className="text-[9px] text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500/25 px-1.5 py-0.5 rounded border border-amber-500/20 cursor-pointer transition-all font-bold"
-                          title="Sửa bản ghi"
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          onClick={() => handleDeleteAttendance(log)}
-                          className="text-[9px] text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/25 px-1.5 py-0.5 rounded border border-rose-500/20 cursor-pointer transition-all font-bold"
-                          title="Xóa bản ghi"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td className="py-2.5 pr-2 text-center whitespace-nowrap">
-                    {canManageLockedAttendance() && onUpdateAttendance && (
-                      <div className="flex items-center justify-center">
-                        {log.isLocked ? (
-                          <button
-                            onClick={() => onUpdateAttendance(log.id, { isLocked: false })}
-                            className="text-[9px] text-yellow-400 hover:text-white bg-yellow-500/10 hover:bg-yellow-500/25 px-2 py-1 rounded border border-yellow-500/20 cursor-pointer transition-all font-bold flex items-center gap-1"
-                            title="Mở khóa bản ghi này"
-                          >
-                            <Lock className="w-3 h-3" /> Mở
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => onUpdateAttendance(log.id, { isLocked: true })}
-                            className="text-[9px] text-green-400 hover:text-white bg-green-500/10 hover:bg-green-500/25 px-2 py-1 rounded border border-green-500/20 cursor-pointer transition-all font-bold flex items-center gap-1"
-                            title="Chốt & Khóa bản ghi này"
-                          >
-                            <Lock className="w-3 h-3" /> Chốt
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ));
-            })()}
-          </tbody>
-        </table>
-
-        {/* Pagination helper for attendance log */}
-        {(() => {
-          const filtered = attendanceFiltered;
-          const totalFiltered = filtered.length;
-          if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
-          return (
-            <div className="flex justify-center items-center gap-1.5 mt-4 pt-4 border-t border-slate-850">
-              <button
-                type="button"
-                disabled={attendancePage === 1}
-                onClick={(e) => { e.stopPropagation(); setAttendancePage(prev => Math.max(prev - 1, 1)); }}
-                className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all cursor-pointer"
-              >
-                ◀ Trước
-              </button>
-              <span className="text-[11px] font-mono text-slate-450 px-2">
-                Trang <strong>{attendancePage}</strong> / {Math.ceil(totalFiltered / (globalPageSize as number))}
-              </span>
-              <button
-                type="button"
-                disabled={attendancePage >= Math.ceil(totalFiltered / (globalPageSize as number))}
-                onClick={(e) => { e.stopPropagation(); setAttendancePage(prev => Math.min(prev + 1, Math.ceil(totalFiltered / (globalPageSize as number)))); }}
-                className="px-2 py-1 bg-slate-950 border border-slate-800 rounded text-slate-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all cursor-pointer"
-              >
-                Sau ▶
-              </button>
+          {/* Thanh thao tác hàng loạt — chỉ hiện khi đã tick chọn */}
+          {attSelectedRows.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="att-bulkbar">
+              <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {attSelectedRows.size}</span>
+              <span className="flex-1" />
+              <button type="button" onClick={handleBulkDeleteAttendance} className="h-8 px-3 rounded-lg bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
             </div>
-          );
-        })()}
+          )}
 
-        {/* Global Row Selector inside attendance spreadsheet footer */}
-        <div className="flex justify-between items-center mt-3 pt-2 text-[10px] text-slate-500 border-t border-slate-850/50">
-          {(() => {
-            const filtered = attendanceFiltered;
-            return (
-              <div>Hiển thị {globalPageSize === 'all' ? 'tất cả' : `${Math.min(globalPageSize as number, filtered.length)} / ${filtered.length} dòng`} mỗi trang.</div>
-            );
-          })()}
-          <div className="flex items-center gap-1.5">
-            <span>Hiển thị:</span>
-            <select
-              value={globalPageSize.toString()}
-              onChange={(e) => {
-                const val = e.target.value;
-                const newSize = val === 'all' ? 'all' : parseInt(val, 10);
-                setGlobalPageSize(newSize);
-                localStorage.setItem('hl_global_page_size', val);
-              }}
-              className="bg-slate-950 border border-slate-800 text-slate-350 px-1.5 py-0.5 rounded text-[10px] cursor-pointer outline-none font-bold"
-            >
-              <option value="5">5 dòng</option>
-              <option value="10">10 dòng</option>
-              <option value="20">20 dòng</option>
-              <option value="50">50 dòng</option>
-              <option value="all">Tất cả</option>
-            </select>
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            {/* MÁY TÍNH: bảng gọn — ảnh/vị trí/ghi chú nằm trong phần mở rộng của dòng */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[13px]" data-testid="att-table">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs">
+                    <th className="px-3 py-2.5 w-10 text-center">
+                      <input type="checkbox" aria-label="Chọn tất cả" className="w-4 h-4 rounded cursor-pointer"
+                        checked={attSelectAll && slicedAttendance.length > 0 && slicedAttendance.every(l => attSelectedRows.has(l.id))}
+                        onChange={(e) => handleAttSelectAll(e.target.checked)} />
+                    </th>
+                    <th className="px-3 py-2.5 font-bold">Nhân viên</th>
+                    <th className="px-3 py-2.5 font-bold">Ngày</th>
+                    <th className="px-3 py-2.5 font-bold">Ca sáng<div className="font-normal text-[10px] text-slate-400 font-mono">{hrm.morningIn} → {hrm.morningOut}</div></th>
+                    <th className="px-3 py-2.5 font-bold">Ca chiều<div className="font-normal text-[10px] text-slate-400 font-mono">{hrm.afternoonIn} → {hrm.afternoonOut}</div></th>
+                    <th className="px-3 py-2.5 font-bold">Tăng ca</th>
+                    <th className="px-3 py-2.5 font-bold text-center" title="Đủ 4 mốc chính = 1 công. Ngày thường tăng ca hệ số 1.5; Chủ nhật 2.0">Công</th>
+                    <th className="px-3 py-2.5 font-bold">Tình trạng</th>
+                    <th className="px-3 py-2.5 font-bold text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {slicedAttendance.length === 0 ? (
+                    <tr><td colSpan={9} className="py-10 text-center text-slate-500 text-sm">Không có bản ghi chấm công nào.</td></tr>
+                  ) : slicedAttendance.map(log => (
+                    <React.Fragment key={log.id}>
+                      <tr data-testid={`att-row-${log.id}`} onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${attSelectedRows.has(log.id) || expandedId === log.id ? 'bg-blue-50' : ''}`}>
+                        <td className="px-3 py-2.5 text-center">
+                          <input type="checkbox" aria-label={`Chọn ${log.empName}`} className="w-4 h-4 rounded cursor-pointer"
+                            checked={attSelectedRows.has(log.id)} onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => handleAttRowSelect(log.id, e.target.checked)} />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="font-bold text-slate-900">{log.empName}</div>
+                          <div className="font-mono text-[11px] text-slate-500">{log.empId}</div>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-xs text-slate-600 whitespace-nowrap">{fmtDate(log.date)}</td>
+                        <td className="px-3 py-2.5"><Shift a={log.timeInS} b={log.timeOutS} /></td>
+                        <td className="px-3 py-2.5"><Shift a={log.timeInC} b={log.timeOutC} /></td>
+                        <td className="px-3 py-2.5"><OtText log={log} /></td>
+                        <td className="px-3 py-2.5 text-center">
+                          <WorkdayCell log={log} leaveCoefficients={leaveCoefficients} holidays={holidays} weekendDays={weekendDays} leaves={leaves} />
+                        </td>
+                        <td className="px-3 py-2.5"><StatusCell log={log} /></td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap"><RowActions log={log} /></td>
+                      </tr>
+                      {expandedId === log.id && (
+                        <tr className="bg-slate-50 border-b border-slate-100"><td colSpan={9} className="px-4 py-3"><DetailBox log={log} /></td></tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ĐIỆN THOẠI: thẻ — không phải kéo ngang */}
+            <div className="md:hidden" data-testid="att-cards">
+              {slicedAttendance.length === 0 ? (
+                <div className="py-10 text-center text-slate-500 text-sm">Không có bản ghi chấm công nào.</div>
+              ) : slicedAttendance.map(log => (
+                <div key={log.id} data-testid={`att-card-${log.id}`} onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
+                  className={`px-3 py-3 border-b border-slate-100 last:border-b-0 ${attSelectedRows.has(log.id) || expandedId === log.id ? 'bg-blue-50' : ''}`}>
+                  <div className="flex items-start gap-2.5">
+                    <input type="checkbox" aria-label={`Chọn ${log.empName}`} className="w-4 h-4 rounded cursor-pointer mt-1"
+                      checked={attSelectedRows.has(log.id)} onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => handleAttRowSelect(log.id, e.target.checked)} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-bold text-slate-900 text-sm leading-snug">{log.empName}</div>
+                        <div className="font-mono text-xs text-slate-500 whitespace-nowrap">{fmtDate(log.date)}</div>
+                      </div>
+                      <div className="font-mono text-[11px] text-slate-500">{log.empId}</div>
+                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 mt-2 items-center text-xs">
+                        <span className="text-slate-500">Sáng</span><Shift a={log.timeInS} b={log.timeOutS} />
+                        <span className="text-slate-500">Chiều</span><Shift a={log.timeInC} b={log.timeOutC} />
+                        {log.timeInOT && <><span className="text-slate-500">Tăng ca</span><OtText log={log} /></>}
+                      </div>
+                      <div className="mt-2"><StatusCell log={log} /></div>
+                      <div className="flex items-center justify-between gap-2 mt-2">
+                        <WorkdayCell log={log} leaveCoefficients={leaveCoefficients} holidays={holidays} weekendDays={weekendDays} leaves={leaves} />
+                        <RowActions log={log} />
+                      </div>
+                      {expandedId === log.id && <div className="mt-2 pt-2 border-t border-slate-200"><DetailBox log={log} /></div>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Chân bảng: số lượng + phân trang + số dòng mỗi trang */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
+              <span>{filteredAttendance.length} bản ghi</span>
+              {pageSizeNum > 0 && filteredAttendance.length > pageSizeNum && (
+                <div className="flex items-center gap-1.5">
+                  <button type="button" disabled={attendancePage === 1} aria-label="Trang trước"
+                    onClick={() => setAttendancePage(prev => Math.max(prev - 1, 1))}
+                    className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
+                  <span className="px-1">Trang <strong>{attendancePage}</strong> / {totalPages}</span>
+                  <button type="button" disabled={attendancePage >= totalPages} aria-label="Trang sau"
+                    onClick={() => setAttendancePage(prev => Math.min(prev + 1, totalPages))}
+                    className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
+                </div>
+              )}
+              <label className="flex items-center gap-1.5">
+                <span>Hiển thị</span>
+                <select value={globalPageSize.toString()}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setGlobalPageSize(val === 'all' ? 'all' : parseInt(val, 10));
+                    localStorage.setItem('hl_global_page_size', val);
+                  }}
+                  className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold">
+                  <option value="5">5 dòng</option>
+                  <option value="10">10 dòng</option>
+                  <option value="20">20 dòng</option>
+                  <option value="50">50 dòng</option>
+                  <option value="all">Tất cả</option>
+                </select>
+              </label>
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col md:flex-row justify-between items-center gap-2">
-        <div className="text-[11px] text-slate-400">
-          💡 Quy tắc thợ thô: <strong>Đủ 4 mốc chính = 1 công.</strong> Ngày thường hệ số tăng ca: <strong>1.5</strong>. Chủ nhật tính xưởng: <strong>2.0</strong> dầm sắt.
-        </div>
-        <button
-          onClick={handleExportAttendanceExcel}
-          className="bg-slate-850 hover:bg-slate-800 text-[10px] font-bold text-slate-300 px-3 py-1.5 rounded flex items-center gap-1 cursor-pointer"
-        >
-          <Download className="w-3.5 h-3.5" /> Xuất bảng công Excel
-        </button>
-      </div>
-      </>
+        </>
       )}
-
     </div>
   );
 }

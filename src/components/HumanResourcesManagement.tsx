@@ -132,19 +132,19 @@ const WorkdayCell = React.memo(function WorkdayCell({
   return (
     <div className="flex flex-col items-center justify-center space-y-1">
       <span className={`px-1.5 py-0.5 rounded font-mono font-black text-[10.5px] border select-none ${
-        result.workday > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-        result.workday < 0 ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
-        'bg-slate-950 text-slate-400 border-slate-800'
+        result.workday > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+        result.workday < 0 ? 'bg-rose-50 text-rose-700 border-rose-200' :
+        'bg-slate-50 text-slate-500 border-slate-200'
       }`}>
         {result.label}
       </span>
       {log.isLocked ? (
-        <span className="text-[8.5px] text-emerald-400 font-bold flex items-center gap-0.5 bg-emerald-950/40 px-1 py-0.5 rounded border border-emerald-900/30">
+        <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-0.5 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
           <Lock className="w-2.5 h-2.5 shrink-0" />
           <span>Đã chốt</span>
         </span>
       ) : (
-        <span className="text-[8.5px] text-amber-500 font-bold flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-905/20" title="Chờ chốt">
+        <span className="text-[10px] text-amber-700 font-bold flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="Chờ chốt">
           <Unlock className="w-2.5 h-2.5 shrink-0" />
           <span>Chờ chốt</span>
         </span>
@@ -4064,8 +4064,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             )}
 
             {/* Header block summarizing currently viewed subtab */}
-                        {/* Tab Hồ sơ đã có thanh công cụ riêng (ProfilesTab) nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
-            {activeSubTab !== 'profiles' && (
+                        {/* Tab Hồ sơ và Chấm công đã có thanh công cụ riêng nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
+            {activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && (
 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2 capitalize">
