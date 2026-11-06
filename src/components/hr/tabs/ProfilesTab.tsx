@@ -163,6 +163,29 @@ function InfoField({ label, value, mono, wide }: { label: string; value?: React.
   );
 }
 
+/** Lớp dùng chung cho ô nhập trong form sửa hồ sơ (nền trắng, viền nhạt, focus xanh LoLo) */
+const EDIT_INPUT = 'w-full h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-900 outline-none focus:border-[#0d47c9]';
+
+/** Khối nhóm ô nhập trong form sửa (cùng kiểu InfoSection của thẻ chi tiết): lưới 2 cột */
+function EditSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-3.5">
+      <h5 className="text-xs font-bold text-slate-500 mb-2.5">{title}</h5>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">{children}</div>
+    </section>
+  );
+}
+
+/** Một ô nhập: nhãn nhỏ phía trên; wide = chiếm cả hàng */
+function EditField({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <label className={`block min-w-0 ${wide ? 'col-span-2' : ''}`}>
+      <span className="block text-[11px] text-slate-500 mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 /** Khối thông tin có tiêu đề nhỏ */
 function InfoSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -738,9 +761,11 @@ export default function ProfilesTab({
                 })()}
               </div>
             ) : (
-              // EDIT FORM
+              // FORM SỬA HỒ SƠ — chia khối giống thẻ chi tiết (Thông tin cá nhân / Liên hệ / Công việc & hợp đồng / Lương & ngân hàng).
+              // Logic lưu/ràng buộc giữ nguyên; chỉ đổi giao diện.
               editingEmpData && (
                 <form
+                  data-testid="profile-edit-form"
                   onSubmit={(e) => {
                     e.preventDefault();
                     const updated = employees.map(item => item.id === editingEmpData.id ? editingEmpData : item);
@@ -750,136 +775,69 @@ export default function ProfilesTab({
                     dbService.employees.save(editingEmpData).catch(err =>
                       console.warn('Lưu chỉnh sửa hồ sơ lên Supabase thất bại:', err));
                   }}
-                  className="space-y-3.5 max-h-[70vh] overflow-y-auto pr-1 text-slate-200"
+                  className="space-y-3 max-h-[70vh] overflow-y-auto pr-1"
                 >
-                  <div className="space-y-2">
-                    <label className="block text-slate-400 font-bold text-[9.5px] uppercase">Họ và Tên:</label>
-                    <input
-                      type="text"
-                      required
-                      value={editingEmpData.name}
-                      onChange={(e) => setEditingEmpData({ ...editingEmpData, name: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Giới tính:</label>
-                      <select
-                        value={editingEmpData.gender}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, gender: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      >
+                  <EditSection title="Thông tin cá nhân">
+                    <EditField label="Họ và tên" wide>
+                      <input type="text" required value={editingEmpData.name} className={EDIT_INPUT} data-testid="edit-name"
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, name: e.target.value })} />
+                    </EditField>
+                    <EditField label="Giới tính">
+                      <select value={editingEmpData.gender} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, gender: e.target.value })}>
                         <option value="Nam">Nam</option>
                         <option value="Nữ">Nữ</option>
                       </select>
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Ngày sinh:</label>
-                      <input
-                        type="date"
-                        value={editingEmpData.dob}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, dob: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      />
-                    </div>
-                  </div>
+                    </EditField>
+                    <EditField label="Ngày sinh">
+                      <input type="date" value={editingEmpData.dob} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, dob: e.target.value })} />
+                    </EditField>
+                    <EditField label="CCCD / CMND">
+                      <input type="text" required value={editingEmpData.cccd} className={`${EDIT_INPUT} font-mono`}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, cccd: e.target.value })} />
+                    </EditField>
+                    <EditField label="Ngày cấp CCCD">
+                      <input type="text" value={editingEmpData.cccdIssuedDate || ''} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, cccdIssuedDate: e.target.value })} />
+                    </EditField>
+                    <EditField label="Nơi cấp CCCD" wide>
+                      <input type="text" value={editingEmpData.cccdIssuedPlace || ''} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, cccdIssuedPlace: e.target.value })} />
+                    </EditField>
+                    <EditField label="Trình độ học vấn" wide>
+                      <input type="text" value={editingEmpData.education || ''} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, education: e.target.value })} />
+                    </EditField>
+                  </EditSection>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Số điện thoại:</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingEmpData.phone}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, phone: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">CCCD / CMND:</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingEmpData.cccd}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, cccd: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none font-mono"
-                      />
-                    </div>
-                  </div>
+                  <EditSection title="Liên hệ">
+                    <EditField label="Số điện thoại">
+                      <input type="text" required value={editingEmpData.phone} className={`${EDIT_INPUT} font-mono`}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, phone: e.target.value })} />
+                    </EditField>
+                    <EditField label="Email liên hệ">
+                      <input type="email" required value={editingEmpData.email} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, email: e.target.value })} />
+                    </EditField>
+                    <EditField label="Địa chỉ thường trú" wide>
+                      <input type="text" required value={editingEmpData.address} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, address: e.target.value })} />
+                    </EditField>
+                    <EditField label="Địa chỉ tạm trú" wide>
+                      <input type="text" value={editingEmpData.currentAddress || ''} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, currentAddress: e.target.value })} />
+                    </EditField>
+                    <EditField label="Liên hệ khẩn cấp" wide>
+                      <input type="text" value={editingEmpData.emergencyContact || ''} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, emergencyContact: e.target.value })} />
+                    </EditField>
+                  </EditSection>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Ngày cấp CCCD:</label>
-                      <input
-                        type="text"
-                        value={editingEmpData.cccdIssuedDate || ''}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, cccdIssuedDate: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Nơi cấp CCCD:</label>
-                      <input
-                        type="text"
-                        value={editingEmpData.cccdIssuedPlace || ''}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, cccdIssuedPlace: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[9.5px] uppercase">Email liên hệ:</label>
-                    <input
-                      type="email"
-                      required
-                      value={editingEmpData.email}
-                      onChange={(e) => setEditingEmpData({ ...editingEmpData, email: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[9.5px] uppercase">Địa chỉ thường trú:</label>
-                    <input
-                      type="text"
-                      required
-                      value={editingEmpData.address}
-                      onChange={(e) => setEditingEmpData({ ...editingEmpData, address: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[9.5px] uppercase">Địa chỉ tạm trú:</label>
-                    <input
-                      type="text"
-                      value={editingEmpData.currentAddress || ''}
-                      onChange={(e) => setEditingEmpData({ ...editingEmpData, currentAddress: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[9.5px] uppercase">Liên hệ khẩn cấp:</label>
-                    <input
-                      type="text"
-                      value={editingEmpData.emergencyContact || ''}
-                      onChange={(e) => setEditingEmpData({ ...editingEmpData, emergencyContact: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Phòng ban:</label>
-                      <select
-                        value={editingEmpData.department}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, department: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      >
+                  <EditSection title="Công việc & hợp đồng">
+                    <EditField label="Phòng ban">
+                      <select value={editingEmpData.department} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, department: e.target.value })}>
                         <option value="Phòng Dự án">Phòng Dự án</option>
                         <option value="Xưởng mộc">Xưởng mộc</option>
                         <option value="Xưởng cơ khí font-bold">Xưởng cơ khí</option>
@@ -887,23 +845,53 @@ export default function ProfilesTab({
                         <option value="Marketing/Sale">Marketing/Sale</option>
                         <option value="Ban Giám đốc">Ban Giám đốc</option>
                       </select>
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Chức vụ:</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingEmpData.position}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, position: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      />
-                    </div>
-                  </div>
+                    </EditField>
+                    <EditField label="Chức vụ">
+                      <input type="text" required value={editingEmpData.position} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, position: e.target.value })} />
+                    </EditField>
+                    <EditField label="Loại hợp đồng">
+                      <select value={editingEmpData.contractType} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, contractType: e.target.value, contractDurationMonths: e.target.value === 'Có thời hạn' ? (editingEmpData.contractDurationMonths || undefined) : undefined })}>
+                        <option value="Không thời hạn">Không thời hạn</option>
+                        <option value="Có thời hạn">Có thời hạn</option>
+                        <option value="Thử việc">Thử việc</option>
+                      </select>
+                    </EditField>
+                    {/* Thời hạn chỉ hiện khi hợp đồng "Có thời hạn" (bắt buộc nhập khi hiện) */}
+                    {editingEmpData.contractType === 'Có thời hạn' && (
+                      <EditField label="Thời hạn HĐ (tháng)">
+                        <input type="number" min="1" required className={`${EDIT_INPUT} font-mono`} data-testid="edit-contract-months"
+                          value={editingEmpData.contractDurationMonths !== undefined ? editingEmpData.contractDurationMonths : ''}
+                          onChange={(e) => setEditingEmpData({ ...editingEmpData, contractDurationMonths: Number(e.target.value) })} />
+                      </EditField>
+                    )}
+                    <EditField label="Trạng thái làm việc" wide>
+                      <select value={editingEmpData.status} className={EDIT_INPUT} data-testid="edit-status"
+                        onChange={(e) => {
+                          const newStatus = e.target.value as any;
+                          // Gắn "Nghỉ hẳn" -> xóa rỗng ngay tài khoản + mật khẩu đăng nhập,
+                          // tránh nhân viên đã nghỉ việc vẫn đăng nhập được vào hệ thống.
+                          // Không xóa hồ sơ nhân sự, chỉ khóa đường đăng nhập.
+                          const accountClear = newStatus === 'retired' ? { username: '', password: '', hasSystemAccount: false } : {};
+                          setEditingEmpData({ ...editingEmpData, status: newStatus, ...accountClear } as any);
+                        }}>
+                        <option value="working">Đang làm</option>
+                        <option value="leave">Nghỉ phép</option>
+                        <option value="director_board">Ban giám đốc</option>
+                        <option value="retired">Nghỉ hẳn</option>
+                      </select>
+                      {editingEmpData.status === 'retired' && (
+                        <p className="mt-1.5 text-[11px] leading-relaxed rounded-lg border border-amber-200 bg-amber-50 text-amber-700 px-2.5 py-1.5" data-testid="edit-retired-warning">
+                          ⚠️ Nhân viên "Nghỉ hẳn" sẽ bị xóa tài khoản + mật khẩu đăng nhập khi lưu, không thể đăng nhập hệ thống nữa.
+                        </p>
+                      )}
+                    </EditField>
+                  </EditSection>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Ngạch lương:</label>
-                      <select
+                  <EditSection title="Lương & ngân hàng">
+                    <EditField label="Ngạch lương">
+                      <select className={EDIT_INPUT}
                         value={(() => {
                           const found = salaryScales.find(s => editingEmpData.salaryCode && s.id === `${s.groupCode}${editingEmpData.salaryCode.replace(s.groupCode, '')}` || s.id === editingEmpData.salaryCode);
                           return found ? found.groupCode : (salaryScales.find(s => s.id === editingEmpData.salaryCode)?.groupCode || '');
@@ -915,18 +903,15 @@ export default function ProfilesTab({
                             ...editingEmpData,
                             salaryCode: firstLevel ? `${groupCode}${firstLevel.level}` : '',
                           });
-                        }}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      >
+                        }}>
                         <option value="">-- Chọn ngạch lương --</option>
                         {Array.from(new Map(salaryScales.map(s => [s.groupCode, s])).values()).map(s => (
                           <option key={s.groupCode} value={s.groupCode}>{s.groupName} ({s.groupCode})</option>
                         ))}
                       </select>
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Cấp bậc (Bậc):</label>
-                      <select
+                    </EditField>
+                    <EditField label="Cấp bậc (bậc)">
+                      <select disabled={!editingEmpData.salaryCode} className={`${EDIT_INPUT} disabled:opacity-50`}
                         value={(() => {
                           const found = salaryScales.find(s => s.id === editingEmpData.salaryCode);
                           return found ? found.level : '';
@@ -940,10 +925,7 @@ export default function ProfilesTab({
                           if (groupCode) {
                             setEditingEmpData({ ...editingEmpData, salaryCode: `${groupCode}${level}` });
                           }
-                        }}
-                        disabled={!editingEmpData.salaryCode}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none disabled:opacity-50"
-                      >
+                        }}>
                         <option value="">-- Chọn bậc --</option>
                         {(() => {
                           const groupCode = salaryScales.find(s => s.id === editingEmpData.salaryCode)?.groupCode || '';
@@ -953,153 +935,34 @@ export default function ProfilesTab({
                           ));
                         })()}
                       </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Mã ngạch (tự động):</label>
-                      <input
-                        type="text"
-                        value={editingEmpData.salaryCode || ''}
-                        readOnly
-                        disabled
-                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-white outline-none font-mono text-amber-400 cursor-not-allowed"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Loại hợp đồng:</label>
-                      <select
-                        value={editingEmpData.contractType}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, contractType: e.target.value, contractDurationMonths: e.target.value === 'Có thời hạn' ? (editingEmpData.contractDurationMonths || undefined) : undefined })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      >
-                        <option value="Không thời hạn">Không thời hạn</option>
-                        <option value="Có thời hạn">Có thời hạn</option>
-                        <option value="Thử việc">Thử việc</option>
-                      </select>
-                    </div>
-                    {editingEmpData.contractType === 'Có thời hạn' ? (
-                      <div>
-                        <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Thời hạn HĐ (tháng):</label>
-                        <input
-                          type="number"
-                          min="1"
-                          required
-                          value={editingEmpData.contractDurationMonths !== undefined ? editingEmpData.contractDurationMonths : ''}
-                          onChange={(e) => setEditingEmpData({ ...editingEmpData, contractDurationMonths: Number(e.target.value) })}
-                          className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white font-mono outline-none"
-                        />
-                      </div>
-                    ) : (
-                      <div style={{visibility: 'hidden'}}>
-                        <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Thời hạn HĐ (tháng):</label>
-                        <input type="number" disabled className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-white font-mono outline-none cursor-not-allowed opacity-50" />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Trạng thái làm việc:</label>
-                      <select
-                        value={editingEmpData.status}
-                        onChange={(e) => {
-                          const newStatus = e.target.value as any;
-                          // Gắn "Nghỉ hẳn" -> xóa rỗng ngay tài khoản + mật khẩu đăng nhập,
-                          // tránh nhân viên đã nghỉ việc vẫn đăng nhập được vào hệ thống.
-                          // Không xóa hồ sơ nhân sự, chỉ khóa đường đăng nhập.
-                          const accountClear = newStatus === 'retired' ? { username: '', password: '', hasSystemAccount: false } : {};
-                          setEditingEmpData({ ...editingEmpData, status: newStatus, ...accountClear } as any);
-                        }}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      >
-                        <option value="working">Đang làm</option>
-                        <option value="leave">Nghỉ phép</option>
-                        <option value="director_board">Ban giám đốc</option>
-                        <option value="retired">Nghỉ hẳn</option>
-                      </select>
-                      {editingEmpData.status === 'retired' && (
-                        <p className="text-[9.5px] text-amber-400 mt-1 leading-relaxed">
-                          ⚠️ Nhân viên "Nghỉ hẳn" sẽ bị xóa tài khoản + mật khẩu đăng nhập khi lưu, không thể đăng nhập hệ thống nữa.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Số lần phép năm được cấp:</label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min="0"
-                        required
+                    </EditField>
+                    {/* Mã ngạch tự sinh từ ngạch + bậc, chỉ xem (trước đây hiện 2 lần ở 2 chỗ → gộp 1) */}
+                    <EditField label="Mã ngạch (tự động)">
+                      <input type="text" readOnly disabled value={editingEmpData.salaryCode || ''}
+                        className={`${EDIT_INPUT} font-mono cursor-not-allowed`} style={{ background: '#f1f5f9', color: '#0d47c9' }} />
+                    </EditField>
+                    <EditField label="Số lần phép năm được cấp">
+                      <input type="number" step="0.5" min="0" required className={`${EDIT_INPUT} font-mono`}
                         value={editingEmpData.phepNam !== undefined ? editingEmpData.phepNam : 12}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, phepNam: Number(e.target.value) })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Trình độ học vấn:</label>
-                      <input
-                        type="text"
-                        value={editingEmpData.education || ''}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, education: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none"
-                      />
-                    </div>
-                  </div>
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, phepNam: Number(e.target.value) })} />
+                    </EditField>
+                    <EditField label="Số tài khoản ngân hàng">
+                      <input type="text" required value={editingEmpData.bankAccount} className={`${EDIT_INPUT} font-mono`}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, bankAccount: e.target.value })} />
+                    </EditField>
+                    <EditField label="Tên ngân hàng">
+                      <input type="text" required value={editingEmpData.bankName} className={EDIT_INPUT}
+                        onChange={(e) => setEditingEmpData({ ...editingEmpData, bankName: e.target.value })} />
+                    </EditField>
+                  </EditSection>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Tài khoản Ngân quỹ:</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingEmpData.bankAccount}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, bankAccount: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Tên ngân hàng:</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingEmpData.bankName}
-                        onChange={(e) => setEditingEmpData({ ...editingEmpData, bankName: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 font-bold text-[9.5px] uppercase mb-1">Mã ngạch lương (Salary Code):</label>
-                      <input
-                        type="text"
-                        value={editingEmpData.salaryCode || ''}
-                        readOnly
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none font-mono text-amber-400 cursor-not-allowed opacity-60"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingEmp(false)}
-                      className="bg-slate-800 hover:bg-slate-705 text-white px-3 py-1.5 rounded-lg cursor-pointer"
-                    >
-                      Hủy bỏ
-                    </button>
-                    <button
-                      type="submit"
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded-lg cursor-pointer"
-                    >
-                      Lưu lại ✅
-                    </button>
+                  {/* Thanh nút dính đáy: luôn thấy khi cuộn form dài. Nút Lưu xanh LoLo (màu inline vì index.css ép màu nền và màu chữ của nút) */}
+                  <div className="sticky bottom-0 -mx-1 px-1 pt-2 pb-1 bg-white border-t border-slate-200 flex justify-end gap-2">
+                    <button type="button" onClick={() => setIsEditingEmp(false)} data-testid="profile-edit-cancel"
+                      className="h-9 px-4 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Hủy</button>
+                    <button type="submit" data-testid="profile-edit-save"
+                      style={{ background: '#0d47c9', color: '#ffffff' }}
+                      className="h-9 px-5 rounded-xl text-[13px] font-bold cursor-pointer">Lưu thay đổi</button>
                   </div>
                 </form>
               )
