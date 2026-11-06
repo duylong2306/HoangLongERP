@@ -214,18 +214,38 @@ export default function PerformanceTab({
     if (score === 80) return 'bg-orange-50 text-orange-700 border-orange-200';
     return 'bg-rose-50 text-rose-700 border-rose-200';
   };
+  // Màu đặc (hex) cho thanh/vòng điểm — cùng nhóm màu với scoreTone
+  const scoreHex = (score: number) => score === 100 ? '#10b981' : score >= 95 ? '#0ea5e9' : score >= 85 ? '#eab308' : score === 80 ? '#f97316' : '#f43f5e';
   const fmtDate = (d: string) => d.split('-').reverse().join('/');
   const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(-2).map(w => w[0]).join('').toUpperCase();
   const selectedEmp = employees.find(e => e.id === errorSearchEmpId);
+
+  const total = employeesSummaryList.length;
   const withErrors = employeesSummaryList.filter(s => s.errorCount > 0).length;
   const perfect = employeesSummaryList.filter(s => s.score === 100).length;
-  const tiles: Array<[string, number, string, string]> = [
-    ['Bản ghi lỗi', filteredErrors.length, '#334155', 'Số lỗi vi phạm trong bộ lọc hiện tại'],
-    ['Nhân sự có lỗi', withErrors, '#b45309', 'Số nhân sự có ít nhất 1 lỗi trong kỳ'],
-    ['Đạt 100 điểm', perfect, '#047857', 'Số nhân sự không mắc lỗi nào trong kỳ'],
-  ];
-  // Thang quy đổi số lỗi → điểm (hiện gọn thay cho bảng tham chiếu cũ)
+  // Điểm trung bình toàn bộ nhân sự trong bộ lọc (làm tròn 1 số lẻ); không có nhân sự thì để 0
+  const avgScore = total > 0 ? employeesSummaryList.reduce((s, x) => s + x.score, 0) / total : 0;
+  const avgText = total > 0 ? String(Math.round(avgScore * 10) / 10) : '—';
+
+  // Thang quy đổi số lỗi → điểm; kèm số nhân sự đang rơi vào từng mức để vẽ thanh phân bố
   const SCALE: Array<[string, number]> = [['0 lỗi', 100], ['1', 97], ['2', 95], ['3', 90], ['4', 85], ['5', 80], ['≥6', 50]];
+  const scaleCounts = SCALE.map(([k, v]) => ({ label: k, score: v, n: employeesSummaryList.filter(s => s.score === v).length }));
+
+  // Nhóm hiển thị xếp loại: người có lỗi (điểm thấp nhất lên đầu, cần chú ý) / người không lỗi (gọn thành chip)
+  const attention = employeesSummaryList.filter(s => s.errorCount > 0).sort((a, b) => a.score - b.score || b.errorCount - a.errorCount);
+  const clean = employeesSummaryList.filter(s => s.errorCount === 0);
+  const CLEAN_PREVIEW = 8;
+  const [showAllClean, setShowAllClean] = React.useState(false);
+  const cleanShown = showAllClean ? clean : clean.slice(0, CLEAN_PREVIEW);
+
+  // Nhật ký lỗi gom theo ngày (mới nhất trước) để dễ đọc theo dòng thời gian
+  const logGroups = React.useMemo(() => {
+    const map = new Map<string, EmployeeErrorLog[]>();
+    filteredErrors.forEach(e => { const k = e.date || ''; map.set(k, [...(map.get(k) || []), e]); });
+    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [filteredErrors]);
+  // Vạch màu bên trái thẻ lỗi theo loại lỗi
+  const catAccent = (cat: string) => cat === 'readiness' ? '#0ea5e9' : cat === 'progress' ? '#8b5cf6' : cat === 'reporting' ? '#f59e0b' : '#94a3b8';
 
   // Mở hộp "Ghi nhận lỗi" (logic giữ nguyên như nút cũ)
   const openNewError = () => {
@@ -241,8 +261,12 @@ export default function PerformanceTab({
     setShowErrorModal(true);
   };
 
+  // Vòng tròn điểm trung bình (SVG): phần tô = avg/100
+  const R = 38, C = 2 * Math.PI * R;
+  const ringColor = total > 0 ? scoreHex(avgScore >= 99.5 ? 100 : avgScore >= 95 ? 95 : avgScore >= 85 ? 85 : avgScore >= 80 ? 80 : 50) : '#cbd5e1';
+
   return (
-    <div className="space-y-3" data-testid="perf-root">
+    <div className="space-y-3 min-w-0" data-testid="perf-root">
       {/* ── THANH CÔNG CỤ: lọc nhân sự/tháng/năm; nút chính (xanh LoLo) là "Ghi nhận lỗi" ── */}
       <div className="flex flex-wrap items-center gap-2" data-testid="perf-toolbar">
         <select value={errorSearchEmpId} onChange={(e) => setErrorSearchEmpId(e.target.value)} aria-label="Nhân sự" data-testid="perf-filter-emp" className={`${inputCls} flex-1 min-w-[160px]`}>
@@ -266,50 +290,116 @@ export default function PerformanceTab({
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2" data-testid="perf-summary">
-        {tiles.map(([label, n, color, tip]) => (
-          <div key={label} title={tip} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
-            <div className="text-[11px] text-slate-500 font-bold">{label}</div>
-            <div className="text-xl font-black mt-0.5" style={{ color }}>{n}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* ── TRÁI: thang điểm + xếp loại kỳ này ── */}
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-          <div className="px-3.5 py-3 border-b border-slate-200">
-            <div className="text-[11px] font-black uppercase tracking-wide text-slate-400 mb-2">Thang điểm theo số lỗi/tháng</div>
-            <div className="flex flex-wrap gap-1.5" data-testid="perf-scale">
-              {SCALE.map(([k, v]) => <span key={k} className={`${PILL} ${scoreTone(v)}`}>{k} → {v}</span>)}
+      {/* ── TỔNG QUAN: vòng điểm trung bình + 3 chỉ số + thanh phân bố điểm ── */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row gap-4 md:gap-6 md:items-center" data-testid="perf-summary">
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="relative w-[96px] h-[96px]" data-testid="perf-avg">
+            <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+              <circle cx="50" cy="50" r={R} fill="none" stroke="#e2e8f0" strokeWidth="10" />
+              <circle cx="50" cy="50" r={R} fill="none" stroke={ringColor} strokeWidth="10" strokeLinecap="round"
+                strokeDasharray={C} strokeDashoffset={C * (1 - Math.min(avgScore, 100) / 100)} />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-2xl font-black text-slate-900 leading-none">{avgText}</div>
+              <div className="text-[10px] font-bold text-slate-500 mt-0.5">điểm TB</div>
             </div>
           </div>
-          <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-slate-200">
-            <div className="text-sm font-black text-slate-900">Xếp loại {errorFilterMonth === 'all' ? 'cả năm' : `tháng ${errorFilterMonth}`}/{errorFilterYear}</div>
-            <span className="min-w-[24px] h-[22px] px-1.5 rounded-full text-xs leading-[22px] text-center font-black" style={{ background: '#e2e8f0', color: '#475569' }}>{employeesSummaryList.length}</span>
-          </div>
-          <div className="max-h-[420px] overflow-y-auto" data-testid="perf-ranking">
-            {employeesSummaryList.length === 0 ? (
-              <div className="py-8 text-center text-slate-500 text-sm">Chưa có nhân sự.</div>
-            ) : employeesSummaryList.map(sum => (
-              <div key={sum.id} onClick={() => setErrorSearchEmpId(sum.id)} data-testid={`perf-rank-${sum.id}`}
-                className={`flex items-center gap-2.5 px-3.5 py-2.5 border-b border-slate-100 last:border-b-0 cursor-pointer transition-colors hover:bg-blue-50/50 ${errorSearchEmpId === sum.id ? 'bg-blue-50' : ''}`}>
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(sum.name)}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-slate-900 text-[13px] truncate">{sum.name}</div>
-                  <div className="text-[11px] text-slate-500 truncate" title={sum.position}>{sum.position} · {(sum.department || '').split('(')[0].trim()}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className={`${PILL} ${scoreTone(sum.score)} font-mono`}>{sum.score}</span>
-                  <div className={`text-[11px] mt-0.5 ${sum.errorCount === 0 ? 'text-emerald-700' : 'text-amber-700'} font-bold`}>{sum.errorCount} lỗi</div>
-                </div>
+          <div className="md:hidden text-xs text-slate-500">Điểm trung bình của {total} nhân sự trong kỳ</div>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ['Bản ghi lỗi', String(filteredErrors.length), '#334155', 'Số lỗi vi phạm trong bộ lọc hiện tại'],
+              ['Nhân sự có lỗi', `${withErrors}/${total}`, '#b45309', 'Số nhân sự có ít nhất 1 lỗi trong kỳ'],
+              ['Đạt 100 điểm', `${perfect}/${total}`, '#047857', 'Số nhân sự không mắc lỗi nào trong kỳ'],
+            ] as Array<[string, string, string, string]>).map(([label, v, color, tip]) => (
+              <div key={label} title={tip} className="rounded-xl px-3 py-2" style={{ background: '#f8fafc' }}>
+                <div className="text-[11px] text-slate-500 font-bold">{label}</div>
+                <div className="text-xl font-black mt-0.5" style={{ color }}>{v}</div>
               </div>
             ))}
           </div>
+
+          {/* Thanh phân bố: mỗi đoạn là số nhân sự ở một mức điểm; chú thích chính là thang quy đổi số lỗi → điểm */}
+          <div data-testid="perf-scale">
+            <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
+              {scaleCounts.filter(s => s.n > 0).map(s => (
+                <div key={s.score} title={`${s.label} → ${s.score} điểm: ${s.n} nhân sự`} style={{ width: `${(s.n / Math.max(total, 1)) * 100}%`, background: scoreHex(s.score) }} />
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+              {scaleCounts.map(s => (
+                <span key={s.score} className={`inline-flex items-center gap-1 text-[11px] ${s.n > 0 ? 'text-slate-700 font-bold' : 'text-slate-400'}`}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: scoreHex(s.score), opacity: s.n > 0 ? 1 : 0.35 }} />
+                  {s.label} → {s.score}<span className="text-slate-400 font-medium">({s.n})</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+        {/* ── TRÁI: xếp loại kỳ này — người có lỗi nổi lên trên, người không lỗi gọn thành chip ── */}
+        <div className="lg:col-span-2 min-w-0 bg-white border border-slate-200 rounded-2xl overflow-hidden" data-testid="perf-ranking">
+          <div className="px-3.5 py-3 flex items-center justify-between border-b border-slate-200">
+            <div className="text-sm font-black text-slate-900">Xếp loại {errorFilterMonth === 'all' ? 'cả năm' : `tháng ${errorFilterMonth}`}/{errorFilterYear}</div>
+            <span className="min-w-[24px] h-[22px] px-1.5 rounded-full text-xs leading-[22px] text-center font-black" style={{ background: '#e2e8f0', color: '#475569' }}>{total}</span>
+          </div>
+
+          {total === 0 && <div className="py-8 text-center text-slate-500 text-sm">Chưa có nhân sự.</div>}
+
+          {attention.length > 0 && (
+            <div>
+              <div className="px-3.5 pt-3 pb-1 text-[11px] font-black uppercase tracking-wide text-amber-700">Cần chú ý · {attention.length}</div>
+              {attention.map(sum => (
+                <div key={sum.id} onClick={() => setErrorSearchEmpId(sum.id)} data-testid={`perf-rank-${sum.id}`}
+                  className={`px-3.5 py-2.5 border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${errorSearchEmpId === sum.id ? 'bg-blue-50' : ''}`}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(sum.name)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-900 text-[13px] truncate">{sum.name}</div>
+                      <div className="text-[11px] text-slate-500 truncate" title={sum.position}>{sum.position} · {(sum.department || '').split('(')[0].trim()}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`${PILL} ${scoreTone(sum.score)} font-mono`}>{sum.score}</span>
+                      <div className="text-[11px] mt-0.5 text-amber-700 font-bold">{sum.errorCount} lỗi</div>
+                    </div>
+                  </div>
+                  {/* Thanh điểm: dài = điểm/100, màu theo mức */}
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${sum.score}%`, background: scoreHex(sum.score) }} /></div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {clean.length > 0 && (
+            <div className="p-3.5">
+              <div className="text-[11px] font-black uppercase tracking-wide text-emerald-700 mb-2">Không lỗi · {clean.length}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {cleanShown.map(sum => (
+                  <button key={sum.id} type="button" onClick={() => setErrorSearchEmpId(sum.id)} data-testid={`perf-rank-${sum.id}`} title={`${sum.name} — ${sum.position} · 100 điểm`}
+                    className={`inline-flex items-center gap-1.5 pl-1 pr-2.5 h-8 rounded-full border text-[12px] font-bold cursor-pointer hover:bg-emerald-50 ${errorSearchEmpId === sum.id ? 'border-blue-300 bg-blue-50' : 'border-emerald-200 bg-white'} text-slate-800`}>
+                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: '#d1fae5', color: '#047857' }}>{initials(sum.name)}</span>
+                    {sum.name.trim().split(/\s+/).slice(-2).join(' ')}
+                    <span className="sr-only">0 lỗi</span>
+                  </button>
+                ))}
+                {clean.length > CLEAN_PREVIEW && (
+                  <button type="button" onClick={() => setShowAllClean(v => !v)} data-testid="perf-clean-toggle"
+                    style={{ background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' }}
+                    className="h-8 px-3 rounded-full text-xs font-bold border cursor-pointer">
+                    {showAllClean ? 'Thu gọn' : `+${clean.length - CLEAN_PREVIEW} người`}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* ── PHẢI: nhật ký lỗi vi phạm ── */}
-        <div className="lg:col-span-2 space-y-3">
+        {/* ── PHẢI: nhật ký lỗi vi phạm, gom theo ngày ── */}
+        <div className="lg:col-span-3 min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-sm font-black text-slate-900">Nhật ký lỗi vi phạm</div>
             <span className="min-w-[24px] h-[22px] px-1.5 rounded-full text-xs leading-[22px] text-center font-black" style={{ background: '#e2e8f0', color: '#475569' }} data-testid="perf-log-count">{filteredErrors.length}</span>
@@ -328,55 +418,65 @@ export default function PerformanceTab({
               Không ghi nhận lỗi vi phạm nào trong bộ lọc hiện tại.
             </div>
           ) : (
-            <div className="space-y-2.5" data-testid="perf-log">
-              {filteredErrors.map(err => (
-                <div key={err.id} data-testid={`perf-err-${err.id}`} className="bg-white border border-slate-200 rounded-2xl p-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <span className="font-bold text-slate-900 text-sm">{err.employeeName}</span>
-                      <span className="font-mono text-[11px] text-slate-500">{err.employeeId}</span>
-                      <span className={`${PILL} bg-violet-50 text-violet-700 border-violet-200`}>{getCatText(err.category)}</span>
-                    </div>
-                    <span className={`${PILL} bg-slate-50 text-slate-600 border-slate-200 font-mono`}><Clock className="w-3 h-3" />{fmtDate(err.date)}</span>
+            <div className="space-y-4" data-testid="perf-log">
+              {logGroups.map(([date, items]) => (
+                <div key={date}>
+                  {/* Tiêu đề ngày của nhóm */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`${PILL} bg-slate-50 text-slate-700 border-slate-200 font-mono`}><Clock className="w-3 h-3" />{fmtDate(date)}</span>
+                    <span className="text-[11px] text-slate-500 font-bold">{items.length} lỗi</span>
+                    <div className="flex-1 h-px bg-slate-200" />
                   </div>
-
-                  <div className="mt-2.5 space-y-1.5 text-[13px]">
-                    <div><span className="text-slate-500">Lỗi vi phạm: </span><span className="font-bold text-amber-700">{err.criterionContent}</span></div>
-                    {err.notes && <div><span className="text-slate-500">Ghi chú: </span><span className="text-slate-700 italic">"{err.notes}"</span></div>}
-                    <div className="text-xs text-slate-500">Khung đánh giá: <span className="text-slate-700 font-medium">{err.departmentName}</span></div>
-                    {err.images && err.images.length > 0 && (
-                      <div className="flex gap-1.5 flex-wrap pt-1">
-                        {err.images.map((imgUrl, imgIdx) => (
-                          <img key={imgIdx} src={imgUrl} alt={`Ảnh vi phạm ${imgIdx + 1}`}
-                            className="w-14 h-14 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all cursor-zoom-in"
-                            onClick={() => {
-                              const w = window.open();
-                              if (w) {
-                                w.document.write(`<img src="${imgUrl}" style="max-width: 100vw; max-height: 100vh; object-fit: contain; margin: auto; display: block;" />`);
-                              }
-                            }} />
-                        ))}
+                  <div className="space-y-2">
+                    {items.map(err => (
+                      <div key={err.id} data-testid={`perf-err-${err.id}`} className="bg-white border border-slate-200 rounded-2xl p-3 pl-4 relative overflow-hidden min-w-0">
+                        <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: catAccent(err.category) }} />
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(err.employeeName)}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="font-bold text-slate-900 text-sm">{err.employeeName}</span>
+                              <span className="font-mono text-[11px] text-slate-500">{err.employeeId}</span>
+                              <span className={`${PILL} bg-violet-50 text-violet-700 border-violet-200`}>{getCatText(err.category)}</span>
+                            </div>
+                            <div className="mt-1 text-[13px] font-bold text-amber-700 break-words">{err.criterionContent}</div>
+                            {err.notes && <div className="mt-0.5 text-[12px] text-slate-600 italic break-words">"{err.notes}"</div>}
+                            <div className="mt-1 text-[11px] text-slate-500">Khung đánh giá: <span className="text-slate-700 font-bold">{err.departmentName}</span></div>
+                            {err.images && err.images.length > 0 && (
+                              <div className="flex gap-1.5 flex-wrap pt-2">
+                                {err.images.map((imgUrl, imgIdx) => (
+                                  <img key={imgIdx} src={imgUrl} alt={`Ảnh vi phạm ${imgIdx + 1}`}
+                                    className="w-14 h-14 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all cursor-zoom-in"
+                                    onClick={() => {
+                                      const w = window.open();
+                                      if (w) {
+                                        w.document.write(`<img src="${imgUrl}" style="max-width: 100vw; max-height: 100vh; object-fit: contain; margin: auto; display: block;" />`);
+                                      }
+                                    }} />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {/* Thao tác: Sửa / Xóa (xóa có bước xác nhận ngay tại thẻ, như cũ) */}
+                          {deletingErrorId !== err.id && (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button type="button" className={iconBtn} title="Sửa lỗi" aria-label="Sửa lỗi" data-testid={`perf-edit-${err.id}`} onClick={() => handleEditErrorTrigger(err)}><Pencil className="w-3.5 h-3.5" /></button>
+                              <button type="button" title="Xóa lỗi" aria-label="Xóa lỗi" data-testid={`perf-delete-${err.id}`} onClick={() => setDeletingErrorId(err.id)}
+                                className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                            </div>
+                          )}
+                        </div>
+                        {deletingErrorId === err.id && (
+                          <div className="flex items-center justify-end gap-2 mt-2.5 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+                            <span className="text-xs font-bold text-rose-700 mr-auto">Xác nhận xóa lỗi này?</span>
+                            <button type="button" data-testid={`perf-confirm-delete-${err.id}`} onClick={() => { handleDeleteError(err.id); setDeletingErrorId(null); }}
+                              className="h-7 px-2.5 rounded-lg text-xs font-bold cursor-pointer" style={{ background: '#e11d48', color: '#ffffff' }}>Đồng ý</button>
+                            <button type="button" onClick={() => setDeletingErrorId(null)}
+                              className="h-7 px-2.5 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer">Hủy</button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-
-                  {/* Thao tác: Sửa / Xóa (xóa có bước xác nhận ngay tại thẻ, như cũ) */}
-                  <div className="flex justify-end items-center gap-2 mt-3 pt-2.5 border-t border-slate-100">
-                    {deletingErrorId === err.id ? (
-                      <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
-                        <span className="text-xs font-bold text-rose-700">Xác nhận xóa lỗi này?</span>
-                        <button type="button" data-testid={`perf-confirm-delete-${err.id}`} onClick={() => { handleDeleteError(err.id); setDeletingErrorId(null); }}
-                          className="h-7 px-2.5 rounded-lg text-xs font-bold cursor-pointer" style={{ background: '#e11d48', color: '#ffffff' }}>Đồng ý</button>
-                        <button type="button" onClick={() => setDeletingErrorId(null)}
-                          className="h-7 px-2.5 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer">Hủy</button>
-                      </div>
-                    ) : (
-                      <>
-                        <button type="button" className={iconBtn} title="Sửa lỗi" aria-label="Sửa lỗi" data-testid={`perf-edit-${err.id}`} onClick={() => handleEditErrorTrigger(err)}><Pencil className="w-3.5 h-3.5" /></button>
-                        <button type="button" title="Xóa lỗi" aria-label="Xóa lỗi" data-testid={`perf-delete-${err.id}`} onClick={() => setDeletingErrorId(err.id)}
-                          className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </>
-                    )}
+                    ))}
                   </div>
                 </div>
               ))}

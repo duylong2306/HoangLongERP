@@ -73,4 +73,23 @@ describe('Hiệu suất — giao diện mới', () => {
     setup({ employeeErrors: [] });
     expect(screen.getByTestId('perf-empty')).toBeTruthy();
   });
+
+  it('tổng quan: điểm trung bình, thanh phân bố theo mức điểm; nhật ký gom theo ngày', () => {
+    setup();
+    // An 2 lỗi → 95, Bùi 0 lỗi → 100 ⇒ trung bình 97.5
+    expect(screen.getByTestId('perf-avg').textContent).toContain('97.5');
+    expect(screen.getByTestId('perf-scale').textContent).toContain('2 → 95(1)');
+    expect(screen.getByTestId('perf-summary').textContent).toContain('1/2');
+    // 2 lỗi cùng ngày 12/06/2026 gom thành 1 nhóm
+    expect(screen.getByTestId('perf-log').textContent).toContain('12/06/2026');
+    expect(screen.getByTestId('perf-log').textContent).toContain('2 lỗi');
+  });
+
+  it('nhiều nhân sự không lỗi → gọn thành chip, có nút xem thêm/thu gọn', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: 'X' + i, name: 'Người ' + i, department: 'P', position: 'NV' }));
+    setup({ employees: many, employeeErrors: [] });
+    expect(screen.queryByTestId('perf-rank-X11')).toBeNull();
+    fireEvent.click(screen.getByTestId('perf-clean-toggle'));
+    expect(screen.getByTestId('perf-rank-X11')).toBeTruthy();
+  });
 });
