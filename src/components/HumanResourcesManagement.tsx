@@ -34,7 +34,7 @@ import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoe
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
 import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
-import TripsTab, { QuickSearchFilter } from './hr/tabs/TripsTab';
+import TripsTab from './hr/tabs/TripsTab';
 import SearchableSelect from './SearchableSelect';
 import LeavesTab from './hr/tabs/LeavesTab';
 import { HrDesktopTabs, HrMobileNav } from './hr/HrNavigation';
@@ -4064,8 +4064,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             )}
 
             {/* Header block summarizing currently viewed subtab */}
-                        {/* Tab Hồ sơ, Chấm công và Nghỉ phép đã có thanh công cụ riêng nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
-            {activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && activeSubTab !== 'leaves' && (
+                        {/* Tab Hồ sơ, Chấm công, Nghỉ phép, Lương, Công tác phí và Hiệu suất đã có thanh công cụ riêng nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
+            {activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && activeSubTab !== 'leaves' && activeSubTab !== 'payroll' && activeSubTab !== 'trips' && activeSubTab !== 'performance' && (
 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2 capitalize">
@@ -4137,80 +4137,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   </div>
                 )}
 
-                {activeSubTab === 'trips' && (
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-400 text-[10px] font-bold uppercase">Dự án:</span>
-                      <QuickSearchFilter
-                        value={selectedProjectFilter}
-                        onChange={setSelectedProjectFilter}
-                        options={Array.from(new Set([
-                          ...(projects || []).map((p: any) => p?.name).filter(Boolean),
-                          ...travelExpensesSummary.map((item: any) => item.projectName).filter(Boolean),
-                        ])).sort((a: any, b: any) => a.localeCompare(b, 'vi'))
-                          .map((name: any) => ({ value: name, label: name }))}
-                        placeholder="Tất cả dự án"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-400 text-[10px] font-bold uppercase">Nhân viên:</span>
-                      <QuickSearchFilter
-                        value={selectedEmpFilter}
-                        onChange={setSelectedEmpFilter}
-                        options={Array.from(new Set(travelExpensesSummary.map((item: any) => item.employeeName).filter(Boolean)))
-                          .sort((a: any, b: any) => a.localeCompare(b, 'vi'))
-                          .map((name: any) => ({ value: name, label: name }))}
-                        placeholder="Tất cả nhân viên"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-400 text-[10px] font-bold uppercase">Tháng:</span>
-                      <select
-                        value={selectedMonthFilter}
-                        onChange={(e) => setSelectedMonthFilter(e.target.value)}
-                        className="bg-slate-900 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] outline-none font-medium focus:border-amber-500 transition-colors cursor-pointer"
-                      >
-                        <option value="all">Tất cả</option>
-                        {Array.from({ length: 12 }, (_, i) => String(i + 1)).map(m => (
-                          <option key={m} value={m}>Tháng {m}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-400 text-[10px] font-bold uppercase">Năm:</span>
-                      <select
-                        value={selectedYearFilter}
-                        onChange={(e) => setSelectedYearFilter(e.target.value)}
-                        className="bg-slate-900 border border-slate-800 text-white rounded px-2.5 py-1 text-[11px] outline-none font-medium focus:border-amber-500 transition-colors cursor-pointer"
-                      >
-                        <option value="all">Tất cả</option>
-                        {['2024', '2025', '2026', '2027'].map(y => (
-                          <option key={y} value={y}>Năm {y}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <button
-                      onClick={handleExportExcel}
-                      className="bg-emerald-600 hover:bg-emerald-550 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                      title="Xuất file báo cáo Excel"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5" /> Xuất file Excel
-                    </button>
-
-                    <button
-                      onClick={() => setShowAddTravelExpenseModal(true)}
-                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg px-3 py-1.5 font-extrabold shadow-md shadow-amber-500/20 transition-all cursor-pointer"
-                      title="Thêm công tác phí mới"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Thêm công tác phí
-                    </button>
-
-                  </div>
-                )}
+                {/* Bộ lọc + nút của tab Công tác phí đã chuyển vào TripsTab (thanh công cụ riêng) */}
 
 
                 
@@ -4387,6 +4314,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 canApprove={canApproveTravelExpense}
                 onDeleteTravelExpenses={handleDeleteTravelExpenses}
                 onEditTravelExpense={handleEditTravelExpense}
+                // Danh sách dự án cho bộ lọc (kể cả dự án chưa có công tác phí) + nút "Thêm công tác phí" nay nằm trong tab
+                projectNames={(projects || []).map((p: any) => p?.name).filter(Boolean)}
+                onAddTravelExpense={() => setShowAddTravelExpenseModal(true)}
               />
             )}
 

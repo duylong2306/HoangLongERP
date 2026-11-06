@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, CheckCircle, Users, AlertTriangle, Clock, FileSpreadsheet } from 'lucide-react';
+import { Plus, CheckCircle, Clock, Download, Pencil, Trash2, X } from 'lucide-react';
 import { EmployeeErrorLog } from '../hrTypes';
 import { calculateScoreFromErrorCount } from '../hrCalculations';
 
@@ -201,375 +201,189 @@ export default function PerformanceTab({
     URL.revokeObjectURL(url);
   };
 
+  // ── Hiển thị ──
+  // Huy hiệu dùng chung (cùng kiểu các tab khác): bo tròn hẳn, chữ 11px đậm, viền nhạt
+  const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-blue-400 cursor-pointer';
+  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  // Màu huy hiệu điểm: 100 xanh lá · ≥95 xanh dương · ≥85 vàng · 80 cam · còn lại đỏ
+  const scoreTone = (score: number) => {
+    if (score === 100) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (score >= 95) return 'bg-sky-50 text-sky-700 border-sky-200';
+    if (score >= 85) return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+    if (score === 80) return 'bg-orange-50 text-orange-700 border-orange-200';
+    return 'bg-rose-50 text-rose-700 border-rose-200';
+  };
+  const fmtDate = (d: string) => d.split('-').reverse().join('/');
+  const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(-2).map(w => w[0]).join('').toUpperCase();
+  const selectedEmp = employees.find(e => e.id === errorSearchEmpId);
+  const withErrors = employeesSummaryList.filter(s => s.errorCount > 0).length;
+  const perfect = employeesSummaryList.filter(s => s.score === 100).length;
+  const tiles: Array<[string, number, string, string]> = [
+    ['Bản ghi lỗi', filteredErrors.length, '#334155', 'Số lỗi vi phạm trong bộ lọc hiện tại'],
+    ['Nhân sự có lỗi', withErrors, '#b45309', 'Số nhân sự có ít nhất 1 lỗi trong kỳ'],
+    ['Đạt 100 điểm', perfect, '#047857', 'Số nhân sự không mắc lỗi nào trong kỳ'],
+  ];
+  // Thang quy đổi số lỗi → điểm (hiện gọn thay cho bảng tham chiếu cũ)
+  const SCALE: Array<[string, number]> = [['0 lỗi', 100], ['1', 97], ['2', 95], ['3', 90], ['4', 85], ['5', 80], ['≥6', 50]];
+
+  // Mở hộp "Ghi nhận lỗi" (logic giữ nguyên như nút cũ)
+  const openNewError = () => {
+    setEditingErrorId(null);
+    if (employees.length > 0) {
+      handleFormEmployeeChange(employees[0].id);
+    } else {
+      setErrFormEmpId('');
+    }
+    setErrFormDate('2026-06-12');
+    setErrFormNotes('');
+    setErrorFormCritSearch('');
+    setShowErrorModal(true);
+  };
+
   return (
-    <div className="space-y-6 animate-fadeIn font-sans text-left">
-
-      {/* WORKSPACE FILTERS */}
-      <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 shadow-xl">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">
-              Tìm nhân sự
-            </label>
-            <select
-              value={errorSearchEmpId}
-              onChange={(e) => setErrorSearchEmpId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
-            >
-              <option value="all">👥 Tất cả nhân sự</option>
-              {employees.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.id} - {emp.name} ({emp.position})</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">
-              Lọc theo Tháng
-            </label>
-            <select
-              value={errorFilterMonth}
-              onChange={(e) => setErrorFilterMonth(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
-            >
-              <option value="all">📅 Tất cả các tháng</option>
-              {Array.from({ length: 12 }, (_, i) => {
-                const mStr = String(i + 1);
-                return <option key={i} value={mStr}>Tháng {mStr.padStart(2, '0')}</option>;
-              })}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider font-extrabold text-slate-400 mb-1">
-              Lọc theo Năm
-            </label>
-            <select
-              value={errorFilterYear}
-              onChange={(e) => setErrorFilterYear(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
-            >
-              <option value="2024">Năm 2024</option>
-              <option value="2025">Năm 2025</option>
-              <option value="2026">Năm 2026</option>
-              <option value="2027">Năm 2027</option>
-              <option value="2028">Năm 2028</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex items-end gap-2 self-stretch md:self-auto pt-2 md:pt-0">
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            className="bg-emerald-600 hover:bg-emerald-550 text-slate-950 font-extrabold px-3 py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-xs"
-            title="Xuất bảng xếp loại & nhật ký lỗi vi phạm ra file Excel"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            Xuất file Excel
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setEditingErrorId(null);
-              if (employees.length > 0) {
-                handleFormEmployeeChange(employees[0].id);
-              } else {
-                setErrFormEmpId('');
-              }
-              setErrFormDate('2026-06-12');
-              setErrFormNotes('');
-              setErrorFormCritSearch('');
-              setShowErrorModal(true);
-            }}
-            className="w-full md:w-auto bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:translate-y-0.5 text-white text-xs font-extrabold px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-500/20 transition-all"
-          >
-            <Plus className="w-4 h-4 text-white" />
-            Ghi Nhận Lỗi Vi Phạm
-          </button>
-        </div>
+    <div className="space-y-3" data-testid="perf-root">
+      {/* ── THANH CÔNG CỤ: lọc nhân sự/tháng/năm; nút chính (xanh LoLo) là "Ghi nhận lỗi" ── */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="perf-toolbar">
+        <select value={errorSearchEmpId} onChange={(e) => setErrorSearchEmpId(e.target.value)} aria-label="Nhân sự" data-testid="perf-filter-emp" className={`${inputCls} flex-1 min-w-[160px]`}>
+          <option value="all">Tất cả nhân sự</option>
+          {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.id} - {emp.name} ({emp.position})</option>)}
+        </select>
+        <select value={errorFilterMonth} onChange={(e) => setErrorFilterMonth(e.target.value)} aria-label="Tháng" data-testid="perf-filter-month" className={inputCls}>
+          <option value="all">Mọi tháng</option>
+          {Array.from({ length: 12 }, (_, i) => <option key={i} value={String(i + 1)}>Tháng {String(i + 1).padStart(2, '0')}</option>)}
+        </select>
+        <select value={errorFilterYear} onChange={(e) => setErrorFilterYear(e.target.value)} aria-label="Năm" data-testid="perf-filter-year" className={inputCls}>
+          {['2024', '2025', '2026', '2027', '2028'].map(y => <option key={y} value={y}>Năm {y}</option>)}
+        </select>
+        <button type="button" onClick={handleExportExcel} title="Xuất bảng xếp loại & nhật ký lỗi vi phạm ra Excel" aria-label="Xuất Excel" data-testid="perf-export"
+          className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><Download className="w-4 h-4" /></button>
+        <button type="button" onClick={openNewError} data-testid="perf-add"
+          // Nền xanh đặt inline vì index.css ép màu cho bg-* / text-white
+          style={{ background: '#0d47c9', color: '#ffffff' }}
+          className="h-9 px-3.5 rounded-xl flex items-center gap-1.5 text-[13px] font-bold cursor-pointer">
+          <Plus className="w-4 h-4" /><span className="hidden sm:inline">Ghi nhận lỗi vi phạm</span><span className="sm:hidden">Ghi lỗi</span>
+        </button>
       </div>
 
-      {/* MASTER-DETAIL LAYOUT */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-3 gap-2" data-testid="perf-summary">
+        {tiles.map(([label, n, color, tip]) => (
+          <div key={label} title={tip} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+            <div className="text-[11px] text-slate-500 font-bold">{label}</div>
+            <div className="text-xl font-black mt-0.5" style={{ color }}>{n}</div>
+          </div>
+        ))}
+      </div>
 
-        {/* LEFT PANEL: CONFIG MAPPING TABLE & TOTAL EVALUATION RATINGS */}
-        <div className="space-y-6">
-
-          {/* SUB-CARD 1: REFERENCE TABLE ON OVERALL METHOD DECLARED */}
-          <div className="bg-slate-900 border border-slate-805 p-4 rounded-2xl shadow-xl space-y-3">
-            <div className="border-b border-slate-800 pb-2 flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-amber-500" />
-              <h4 className="text-xs font-extrabold text-white uppercase tracking-wider">
-                Cách Đánh Giá Tổng Hợp
-              </h4>
-            </div>
-            <p className="text-[10px] text-slate-400 italic">
-              Hệ thống theo vết số lỗi mắc phải của nhân viên trong tháng và quy đổi điểm xếp loại xếp bậc:
-            </p>
-
-            <div className="overflow-hidden border border-slate-800 rounded-lg">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-950 font-bold text-slate-300 border-b border-slate-800 text-[10px]">
-                    <th className="p-2 border-r border-slate-850">Số lần mắc lỗi/tháng</th>
-                    <th className="p-2 text-center">Xếp loại (Điểm)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-850 text-[10.5px] text-slate-400 font-mono">
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">0 lần</td>
-                    <td className="p-2 text-center text-emerald-400 font-extrabold">100</td>
-                  </tr>
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">1 lần</td>
-                    <td className="p-2 text-center text-emerald-500/80 font-bold">97 <span className="text-[9px] text-slate-500 font-normal italic">(Quy đổi)</span></td>
-                  </tr>
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">2 lần</td>
-                    <td className="p-2 text-center text-sky-400 font-bold">95</td>
-                  </tr>
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">3 lần</td>
-                    <td className="p-2 text-center text-yellow-500 font-bold">90</td>
-                  </tr>
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">4 lần</td>
-                    <td className="p-2 text-center text-amber-550 font-bold">85</td>
-                  </tr>
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">5 lần</td>
-                    <td className="p-2 text-center text-orange-400">80</td>
-                  </tr>
-                  <tr className="hover:bg-slate-850/30">
-                    <td className="p-2 border-r border-slate-850 text-slate-200">≥ 6 lần</td>
-                    <td className="p-2 text-center text-red-700 font-extrabold bg-red-50">50</td>
-                  </tr>
-                </tbody>
-              </table>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        {/* ── TRÁI: thang điểm + xếp loại kỳ này ── */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="px-3.5 py-3 border-b border-slate-200">
+            <div className="text-[11px] font-black uppercase tracking-wide text-slate-400 mb-2">Thang điểm theo số lỗi/tháng</div>
+            <div className="flex flex-wrap gap-1.5" data-testid="perf-scale">
+              {SCALE.map(([k, v]) => <span key={k} className={`${PILL} ${scoreTone(v)}`}>{k} → {v}</span>)}
             </div>
           </div>
+          <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-slate-200">
+            <div className="text-sm font-black text-slate-900">Xếp loại {errorFilterMonth === 'all' ? 'cả năm' : `tháng ${errorFilterMonth}`}/{errorFilterYear}</div>
+            <span className="min-w-[24px] h-[22px] px-1.5 rounded-full text-xs leading-[22px] text-center font-black" style={{ background: '#e2e8f0', color: '#475569' }}>{employeesSummaryList.length}</span>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto" data-testid="perf-ranking">
+            {employeesSummaryList.length === 0 ? (
+              <div className="py-8 text-center text-slate-500 text-sm">Chưa có nhân sự.</div>
+            ) : employeesSummaryList.map(sum => (
+              <div key={sum.id} onClick={() => setErrorSearchEmpId(sum.id)} data-testid={`perf-rank-${sum.id}`}
+                className={`flex items-center gap-2.5 px-3.5 py-2.5 border-b border-slate-100 last:border-b-0 cursor-pointer transition-colors hover:bg-blue-50/50 ${errorSearchEmpId === sum.id ? 'bg-blue-50' : ''}`}>
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(sum.name)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-slate-900 text-[13px] truncate">{sum.name}</div>
+                  <div className="text-[11px] text-slate-500 truncate" title={sum.position}>{sum.position} · {(sum.department || '').split('(')[0].trim()}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className={`${PILL} ${scoreTone(sum.score)} font-mono`}>{sum.score}</span>
+                  <div className={`text-[11px] mt-0.5 ${sum.errorCount === 0 ? 'text-emerald-700' : 'text-amber-700'} font-bold`}>{sum.errorCount} lỗi</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
 
-          {/* SUB-CARD 2: MONTHLY TOTAL RATING SUMMARY */}
-          <div className="bg-slate-900 border border-slate-805 p-4 rounded-2xl shadow-xl space-y-3">
-            <div className="border-b border-slate-800 pb-2 flex justify-between items-center">
-              <h4 className="text-xs font-extrabold text-white uppercase tracking-wider flex items-center gap-1.5">
-                <Users className="w-4 h-4 text-emerald-500" />
-                Xếp Loại Kỳ Này {errorFilterMonth === 'all' ? 'Tổng năm' : `T.${errorFilterMonth}`}/{errorFilterYear}
-              </h4>
-              <span className="text-[9px] bg-slate-950 text-slate-400 px-1.5 py-0.5 rounded border border-slate-800">
-                {employeesSummaryList.length} NS
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
-              {employeesSummaryList.map(sum => {
-                const getScoreBadgeColor = (score: number) => {
-                  if (score === 100) return 'bg-emerald-950 text-emerald-400 border border-emerald-800/60';
-                  if (score >= 95) return 'bg-sky-950 text-sky-400 border border-sky-800/60';
-                  if (score >= 85) return 'bg-yellow-950 text-yellow-400 border border-yellow-800/60';
-                  if (score === 80) return 'bg-orange-950 text-orange-400 border border-orange-855';
-                  return 'bg-red-950 text-red-400 border border-red-855';
-                };
-
-                return (
-                  <div
-                    key={sum.id}
-                    onClick={() => setErrorSearchEmpId(sum.id)}
-                    className={`p-2 rounded-xl border transition-all cursor-pointer text-[11px] ${
-                      errorSearchEmpId === sum.id
-                        ? 'bg-slate-800 border-amber-500 shadow-md'
-                        : 'bg-slate-950 hover:bg-slate-850/50 border-slate-850'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-extrabold text-white flex items-center gap-1 select-none">
-                          <span>{sum.name}</span>
-                          <span className="text-[9px] font-mono text-slate-500">#{sum.id}</span>
-                        </div>
-                        <div className="text-[9.5px] text-slate-400 mt-0.5 truncate max-w-[130px]" title={sum.position}>
-                          {sum.position} • {sum.department.split('(')[0].trim()}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[10px] font-bold">
-                          {sum.errorCount === 0 ? (
-                            <span className="text-emerald-400">0 lỗi</span>
-                          ) : (
-                            <span className="text-amber-500 font-mono">{sum.errorCount} lỗi</span>
-                          )}
-                        </div>
-                        <span className={`inline-block mt-1 px-1 py-0.2 rounded text-[9.5px] font-mono font-bold ${getScoreBadgeColor(sum.score)}`}>
-                          Đánh giá: {sum.score}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
+        {/* ── PHẢI: nhật ký lỗi vi phạm ── */}
+        <div className="lg:col-span-2 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm font-black text-slate-900">Nhật ký lỗi vi phạm</div>
+            <span className="min-w-[24px] h-[22px] px-1.5 rounded-full text-xs leading-[22px] text-center font-black" style={{ background: '#e2e8f0', color: '#475569' }} data-testid="perf-log-count">{filteredErrors.length}</span>
             {errorSearchEmpId !== 'all' && (
-              <div className="pt-1.5 text-right">
-                <button
-                  type="button"
-                  onClick={() => setErrorSearchEmpId('all')}
-                  className="text-[10px] font-extrabold text-amber-500 hover:underline cursor-pointer"
-                >
-                  × Hiện tất cả nhân sự
-                </button>
-              </div>
+              <button type="button" onClick={() => setErrorSearchEmpId('all')} data-testid="perf-clear-emp"
+                style={{ background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' }}
+                className="h-8 px-3 rounded-full text-xs font-bold border cursor-pointer inline-flex items-center gap-1">
+                {selectedEmp?.name || errorSearchEmpId} <X className="w-3 h-3" />
+              </button>
             )}
           </div>
 
-        </div>
-
-        {/* RIGHT COLUMN: IN-DEPTH ERROR DETAIL LOG */}
-        <div className="lg:col-span-2 space-y-4">
-
-          <div className="bg-slate-900 border border-slate-805 p-5 rounded-2xl shadow-xl space-y-4">
-
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-800 pb-3">
-              <div>
-                <h4 className="text-xs font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse" />
-                  Nhật Ký Lỗi Vi Phạm ({filteredErrors.length} bản ghi)
-                </h4>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  Xem chi tiết lỗi phục vụ đánh giá xếp loại bậc lương
-                </p>
-              </div>
-
-              {errorSearchEmpId !== 'all' && (
-                <span className="bg-slate-950 border border-slate-800 text-[9.5px] py-1 px-2.5 rounded-lg text-amber-400 font-bold flex items-center gap-1.5">
-                  <span>Lọc: {employees.find(e => e.id === errorSearchEmpId)?.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setErrorSearchEmpId('all')}
-                    className="text-red-400 text-xs hover:text-white font-extrabold cursor-pointer ml-1"
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
+          {filteredErrors.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-2xl py-12 text-center text-slate-500 text-sm" data-testid="perf-empty">
+              <CheckCircle className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
+              Không ghi nhận lỗi vi phạm nào trong bộ lọc hiện tại.
             </div>
-
-            {filteredErrors.length === 0 ? (
-              <div className="py-14 text-center text-slate-500 italic space-y-2 text-xs">
-                <div className="text-4xl text-slate-800">✓</div>
-                <p className="font-sans">Không ghi nhận lỗi vi phạm nào trong bộ lọc hiện thời.</p>
-              </div>
-            ) : (
-              <div className="space-y-3.5">
-                {filteredErrors.map(err => {
-                  return (
-                    <div key={err.id} className="p-3.5 bg-slate-950 border border-slate-850 rounded-xl hover:border-slate-800/80 hover:bg-slate-900/10 transition-all">
-
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 mb-2 border-b border-slate-900">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-extrabold text-white text-xs">{err.employeeName}</span>
-                          <span className="text-[10px] text-slate-500 font-mono">#{err.employeeId}</span>
-                          <span className="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-                            {getCatText(err.category)}
-                          </span>
-                        </div>
-                        <div className="text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-850 px-2 py-0.5 rounded flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-slate-500" />
-                          <span>{err.date.split('-').reverse().join('/')}</span>
-                        </div>
-                      </div>
-
-                      <div className="text-[11px] space-y-1.5 text-slate-300">
-                        <div>
-                          <span className="text-slate-500 font-bold select-none text-[10px] uppercase">Lỗi vi phạm:</span>{" "}
-                          <span className="text-amber-450 font-bold">{err.criterionContent}</span>
-                        </div>
-                        {err.notes && (
-                          <div>
-                            <span className="text-slate-500 font-bold select-none text-[10px] uppercase">Ghi chú cụ thể:</span>{" "}
-                            <span className="font-sans text-slate-300 italic">"{err.notes}"</span>
-                          </div>
-                        )}
-                        <div className="text-[10px] text-slate-500">
-                          Khung đánh giá phòng ban: <span className="text-slate-400 font-medium">{err.departmentName}</span>
-                        </div>
-                        {err.images && err.images.length > 0 && (
-                          <div className="pt-2 bg-slate-900/40 p-2 rounded-lg border border-slate-900/80 flex gap-1.5 flex-wrap">
-                            {err.images.map((imgUrl, imgIdx) => (
-                              <div key={imgIdx} className="relative focus:outline-none">
-                                <img
-                                  src={imgUrl}
-                                  alt={`Violation ${imgIdx + 1}`}
-                                  className="w-14 h-14 object-cover rounded-lg border border-slate-800 hover:border-slate-705 transition-all cursor-zoom-in"
-                                  onClick={() => {
-                                    const w = window.open();
-                                    if (w) {
-                                      w.document.write(`<img src="${imgUrl}" style="max-width: 100vw; max-height: 100vh; object-fit: contain; margin: auto; display: block;" />`);
-                                    }
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex justify-end gap-3 mt-3 pt-2.5 border-t border-slate-900/50 items-center">
-                        {deletingErrorId === err.id ? (
-                          <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200 animate-fadeIn">
-                            <span className="text-[10.5px] font-bold text-rose-700">⚠️ Xác nhận xóa lỗi này?</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleDeleteError(err.id);
-                                setDeletingErrorId(null);
-                              }}
-                              className="px-2.5 py-1 text-[9.5px] font-extrabold rounded-lg bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition-all active:scale-95"
-                            >
-                              Đồng ý
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeletingErrorId(null)}
-                              className="px-2.5 py-1 text-[9.5px] font-bold rounded-lg bg-slate-800 hover:bg-slate-705 text-slate-300 cursor-pointer transition-colors"
-                            >
-                              Hủy
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleEditErrorTrigger(err)}
-                              className="text-[10.5px] text-sky-400 hover:text-sky-300 font-extrabold flex items-center gap-1 cursor-pointer"
-                            >
-                              ✏️ Sửa lỗi
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeletingErrorId(err.id)}
-                              className="text-[10.5px] text-red-500 hover:text-red-400 font-extrabold flex items-center gap-1 cursor-pointer"
-                            >
-                              🗑️ Xoá
-                            </button>
-                          </>
-                        )}
-                      </div>
-
+          ) : (
+            <div className="space-y-2.5" data-testid="perf-log">
+              {filteredErrors.map(err => (
+                <div key={err.id} data-testid={`perf-err-${err.id}`} className="bg-white border border-slate-200 rounded-2xl p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="font-bold text-slate-900 text-sm">{err.employeeName}</span>
+                      <span className="font-mono text-[11px] text-slate-500">{err.employeeId}</span>
+                      <span className={`${PILL} bg-violet-50 text-violet-700 border-violet-200`}>{getCatText(err.category)}</span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    <span className={`${PILL} bg-slate-50 text-slate-600 border-slate-200 font-mono`}><Clock className="w-3 h-3" />{fmtDate(err.date)}</span>
+                  </div>
 
-          </div>
+                  <div className="mt-2.5 space-y-1.5 text-[13px]">
+                    <div><span className="text-slate-500">Lỗi vi phạm: </span><span className="font-bold text-amber-700">{err.criterionContent}</span></div>
+                    {err.notes && <div><span className="text-slate-500">Ghi chú: </span><span className="text-slate-700 italic">"{err.notes}"</span></div>}
+                    <div className="text-xs text-slate-500">Khung đánh giá: <span className="text-slate-700 font-medium">{err.departmentName}</span></div>
+                    {err.images && err.images.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap pt-1">
+                        {err.images.map((imgUrl, imgIdx) => (
+                          <img key={imgIdx} src={imgUrl} alt={`Ảnh vi phạm ${imgIdx + 1}`}
+                            className="w-14 h-14 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all cursor-zoom-in"
+                            onClick={() => {
+                              const w = window.open();
+                              if (w) {
+                                w.document.write(`<img src="${imgUrl}" style="max-width: 100vw; max-height: 100vh; object-fit: contain; margin: auto; display: block;" />`);
+                              }
+                            }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
+                  {/* Thao tác: Sửa / Xóa (xóa có bước xác nhận ngay tại thẻ, như cũ) */}
+                  <div className="flex justify-end items-center gap-2 mt-3 pt-2.5 border-t border-slate-100">
+                    {deletingErrorId === err.id ? (
+                      <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+                        <span className="text-xs font-bold text-rose-700">Xác nhận xóa lỗi này?</span>
+                        <button type="button" data-testid={`perf-confirm-delete-${err.id}`} onClick={() => { handleDeleteError(err.id); setDeletingErrorId(null); }}
+                          className="h-7 px-2.5 rounded-lg text-xs font-bold cursor-pointer" style={{ background: '#e11d48', color: '#ffffff' }}>Đồng ý</button>
+                        <button type="button" onClick={() => setDeletingErrorId(null)}
+                          className="h-7 px-2.5 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer">Hủy</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button type="button" className={iconBtn} title="Sửa lỗi" aria-label="Sửa lỗi" data-testid={`perf-edit-${err.id}`} onClick={() => handleEditErrorTrigger(err)}><Pencil className="w-3.5 h-3.5" /></button>
+                        <button type="button" title="Xóa lỗi" aria-label="Xóa lỗi" data-testid={`perf-delete-${err.id}`} onClick={() => setDeletingErrorId(err.id)}
+                          className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-
       </div>
-
     </div>
   );
 }
