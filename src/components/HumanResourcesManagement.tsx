@@ -131,7 +131,7 @@ const WorkdayCell = React.memo(function WorkdayCell({
   );
   return (
     <div className="flex flex-col items-center justify-center space-y-1">
-      <span className={`px-1.5 py-0.5 rounded font-mono font-black text-[10.5px] border select-none ${
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-mono font-bold text-[11px] border select-none whitespace-nowrap ${
         result.workday > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
         result.workday < 0 ? 'bg-rose-50 text-rose-700 border-rose-200' :
         'bg-slate-50 text-slate-500 border-slate-200'
@@ -139,12 +139,12 @@ const WorkdayCell = React.memo(function WorkdayCell({
         {result.label}
       </span>
       {log.isLocked ? (
-        <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-0.5 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+        <span className="text-[11px] text-emerald-700 font-bold inline-flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap">
           <Lock className="w-2.5 h-2.5 shrink-0" />
           <span>Đã chốt</span>
         </span>
       ) : (
-        <span className="text-[10px] text-amber-700 font-bold flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="Chờ chốt">
+        <span className="text-[11px] text-amber-700 font-bold inline-flex items-center gap-1 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 whitespace-nowrap" title="Chờ chốt">
           <Unlock className="w-2.5 h-2.5 shrink-0" />
           <span>Chờ chốt</span>
         </span>

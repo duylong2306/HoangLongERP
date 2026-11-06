@@ -83,4 +83,15 @@ describe('Chấm công ngày — giao diện mới', () => {
     setup({ isLoadingAttendance: true });
     expect(screen.getByTestId('att-loading')).toBeTruthy();
   });
+
+  it('số lượng trên hai chip là huy hiệu nổi bật; tăng ca trống ("--:--") không hiện huy hiệu giờ', () => {
+    // 2 bản ghi hôm nay (chip bảng) → số 2; có bản ghi tăng ca thật thì mới hiện giờ tăng ca
+    const today = new Date(); const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const rows = [log('1', { date: d, timeInOT: '--:--', timeOutOT: '--:--' }), log('2', { date: d, timeInOT: '18:00', timeOutOT: '20:00', otHours: 2 })];
+    setup({ attendanceFiltered: rows, attendance: rows });
+    expect(screen.getByTestId('att-count-table').textContent).toBe('2');
+    expect(screen.getByTestId('att-count-missing')).toBeTruthy();
+    expect(screen.getByTestId('att-row-1').textContent).not.toContain('(0h)');
+    expect(screen.getByTestId('att-row-2').textContent).toContain('18:00–20:00 (2h)');
+  });
 });

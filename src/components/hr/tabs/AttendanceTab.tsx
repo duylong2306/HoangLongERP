@@ -311,17 +311,20 @@ export default function AttendanceTab({
       <span className={isBlankTime(b) ? 'text-slate-300' : 'text-slate-700'}>{b || '--:--'}</span>
     </span>
   );
-  const OtText = ({ log }: { log: AttendanceLog }) => log.timeInOT
-    ? <span className="inline-block px-1.5 py-0.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 font-mono text-[11px] font-bold">{log.timeInOT}–{log.timeOutOT} ({log.otHours}h)</span>
+  // Huy hiệu dùng chung (ngôn ngữ thiết kế mới): bo tròn hẳn, chữ 11px đậm, viền nhạt — chỉ khác tông màu
+  const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
+  // Tăng ca: giờ trống ('--:--') coi như không có tăng ca (trước đây hiện nhầm "--:-----:-- (0h)")
+  const OtText = ({ log }: { log: AttendanceLog }) => !isBlankTime(log.timeInOT)
+    ? <span className={`${PILL} border-amber-200 bg-amber-50 text-amber-700 font-mono`}>{log.timeInOT}–{log.timeOutOT} ({log.otHours}h)</span>
     : <span className="text-slate-300">—</span>;
   // Tình trạng: nhãn đúng/sai + các chip bất thường (đã gồm đi muộn / về sớm nên không cần cột riêng)
   const StatusCell = ({ log }: { log: AttendanceLog }) => {
     const st = getAttendanceStatusText(log, readHrmConfigFromStorage());
     return (
       <div className="flex flex-wrap items-center gap-1">
-        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${st.isValid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>{st.text}</span>
+        <span className={`${PILL} ${st.isValid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>{st.text}</span>
         {getAttendanceAnomalies(log).map((an, i) => (
-          <span key={i} title={an.title} className={`px-1.5 py-0.5 rounded-full border ${an.color} text-[10px] font-bold inline-flex items-center gap-1`}>{an.icon}{an.label}</span>
+          <span key={i} title={an.title} className={`${PILL} ${an.color}`}>{an.icon}{an.label}</span>
         ))}
       </div>
     );
@@ -332,7 +335,7 @@ export default function AttendanceTab({
   const RowActions = ({ log }: { log: AttendanceLog }) => {
     const canManage = canManageLockedAttendance();
     if (log.isLocked && !canManage) {
-      return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400" title="Đã chốt — chỉ Giám đốc/Kế toán mới được sửa"><Lock className="w-3.5 h-3.5" />Đã chốt</span>;
+      return <span className={`${PILL} border-slate-200 bg-slate-100 text-slate-500`} title="Đã chốt — chỉ Giám đốc/Kế toán mới được sửa"><Lock className="w-3 h-3" />Đã chốt</span>;
     }
     return (
       <div className="inline-flex items-center gap-1.5">
@@ -428,12 +431,21 @@ export default function AttendanceTab({
       <div className="flex gap-1.5 overflow-x-auto pb-0.5" data-testid="att-views">
         <button type="button" onClick={() => setAttView('table')} data-testid="att-view-table"
           style={attView === 'table' ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
-          className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${attView === 'table' ? '' : 'bg-white text-slate-600 border-slate-200'}`}
-          title="Số bản ghi đã chấm hôm nay">Bảng chấm công {attTodayRecordCount}</button>
+          className={`h-10 pl-4 pr-2.5 rounded-full text-sm font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-2 ${attView === 'table' ? '' : 'bg-white text-slate-600 border-slate-200'}`}
+          title="Số bản ghi đã chấm hôm nay">
+          Bảng chấm công
+          {/* Số bản ghi hôm nay: huy hiệu tròn xanh LoLo */}
+          <span data-testid="att-count-table" className="min-w-[26px] h-[24px] px-2 rounded-full text-[13px] leading-[24px] text-center font-black" style={{ background: '#0d47c9', color: '#ffffff' }}>{attTodayRecordCount}</span>
+        </button>
         <button type="button" onClick={() => setAttView('missing')} data-testid="att-view-missing"
           style={attView === 'missing' ? { background: '#fee2e2', color: '#b91c1c', borderColor: '#fecaca' } : undefined}
-          className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${attView === 'missing' ? '' : 'bg-white text-slate-600 border-slate-200'}`}
-          title="Số nhân viên vắng chưa có bản ghi hôm nay">Báo cáo vắng mặt {attTodayMissingCount}</button>
+          className={`h-10 pl-4 pr-2.5 rounded-full text-sm font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-2 ${attView === 'missing' ? '' : 'bg-white text-slate-600 border-slate-200'}`}
+          title="Số nhân viên vắng chưa có bản ghi hôm nay">
+          Báo cáo vắng mặt
+          {/* Có người vắng → huy hiệu đỏ để gây chú ý; không có → xám */}
+          <span data-testid="att-count-missing" className="min-w-[26px] h-[24px] px-2 rounded-full text-[13px] leading-[24px] text-center font-black"
+            style={attTodayMissingCount > 0 ? { background: '#ef4444', color: '#ffffff' } : { background: '#e2e8f0', color: '#475569' }}>{attTodayMissingCount}</span>
+        </button>
       </div>
 
       {attView === 'missing' ? (

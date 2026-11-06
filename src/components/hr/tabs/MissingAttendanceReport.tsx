@@ -227,7 +227,12 @@ export default function MissingAttendanceReport({
           return (
             <button key={k} type="button" data-testid={`miss-chip-${k}`} onClick={() => { setFilterType(k); resetSel(); }}
               style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
-              className={`h-8 px-3 rounded-full text-xs font-bold whitespace-nowrap border cursor-pointer ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>{label} {n}</button>
+              className={`h-9 pl-3.5 pr-2 rounded-full text-[13px] font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-2 ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>
+              {label}
+              {/* Số lượng: huy hiệu tròn — chip đang chọn tô xanh LoLo, còn lại xám */}
+              <span className="min-w-[24px] h-[22px] px-1.5 rounded-full text-xs leading-[22px] text-center font-black"
+                style={on ? { background: '#0d47c9', color: '#ffffff' } : { background: '#e2e8f0', color: '#475569' }}>{n}</span>
+            </button>
           );
         })}
       </div>
