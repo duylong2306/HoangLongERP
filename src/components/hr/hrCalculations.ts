@@ -582,9 +582,12 @@ export function calculateSingleEmployeePayroll(
   const performanceSalary = scale ? scale.performanceSalary : 0;
   const kpiScore = inputs.kpiScore;
 
-  const kpiBonus = (performanceSalary * kpiScore) / 100;
+  // QUY TẮC LÀM TRÒN (phục vụ báo cáo thuế): MỌI khoản tiền lưu vào dòng lương là SỐ NGUYÊN ĐỒNG (làm tròn từng khoản
+  // ngay khi tính), nên Tổng thu nhập, Bảo hiểm, Thuế, Thực lĩnh đều khớp đến hàng đơn vị và bằng đúng tổng các khoản thành phần.
+  // Riêng các ĐƠN GIÁ (lương ngày chuẩn, đơn giá tăng ca) giữ nguyên độ chính xác để tính ra tiền không bị sai số cộng dồn.
+  const kpiBonus = Math.round((performanceSalary * kpiScore) / 100);
   const salaryPerDay = (baseSalary + kpiBonus) / standardWorkDays;
-  const daySalary = salaryPerDay * inputs.workedDays;
+  const daySalary = Math.round(salaryPerDay * inputs.workedDays);
 
   // Đơn giá RIÊNG dùng cho tăng ca (CN/Lễ + ngoài giờ) — ĐÚNG theo sheet "LƯƠNG OK":
   // dùng "Định mức" (performanceSalary, CHƯA nhân điểm KPI) thay vì "Thưởng HS
@@ -594,14 +597,14 @@ export function calculateSingleEmployeePayroll(
   const otSalaryPerDay = (baseSalary + performanceSalary) / standardWorkDays;
 
   const otSundayCount = inputs.otSunday;
-  const otSundaySalary = otSalaryPerDay * otSundayCount;
+  const otSundaySalary = Math.round(otSalaryPerDay * otSundayCount);
 
   const otHolidayCount = inputs.otHoliday;
-  const otHolidaySalary = otSalaryPerDay * otHolidayCount;
+  const otHolidaySalary = Math.round(otSalaryPerDay * otHolidayCount);
 
   const otHours = inputs.otHours;
   const otCount = inputs.otCount;
-  const otHoursSalary = ((otSalaryPerDay / 8) * otHours * 1.5) + (otCount * 40000);
+  const otHoursSalary = Math.round(((otSalaryPerDay / 8) * otHours * 1.5) + (otCount * 40000));
 
   const expenses = inputs.expenses;
   const bonusHoliday = inputs.bonusHoliday;
@@ -609,7 +612,7 @@ export function calculateSingleEmployeePayroll(
 
   const totalIncome = daySalary + otSundaySalary + otHolidaySalary + otHoursSalary + expenses + bonusHoliday + bonusCreative;
 
-  const bhxhAmount = baseSalary * 0.105;
+  const bhxhAmount = Math.round(baseSalary * 0.105);
   const otherDeductions = inputs.otherDeductions;
   const advances = inputs.advances;
 
@@ -627,12 +630,11 @@ export function calculateSingleEmployeePayroll(
   const dependentCount = Number(emp.dependentCount) || 0;
   const dependentDeduction = dependentCount * 6200000;
   const taxableNetIncome = Math.max(0, taxableIncome - bhxhAmount - personalDeduction - dependentDeduction);
-  const tax = calculatePersonalIncomeTax(taxableNetIncome);
+  const tax = Math.round(calculatePersonalIncomeTax(taxableNetIncome));
 
-  // Làm tròn Thực lĩnh về hàng chục nghìn — đúng ROUND(...,-4) trong file gốc
-  // (trước đây làm tròn hàng nghìn, nay đồng bộ lại theo đúng file tham chiếu).
-  const netSalaryRaw = totalIncome - bhxhAmount - otherDeductions - advances - tax;
-  const netSalary = Math.round(netSalaryRaw / 10000) * 10000;
+  // Thực lĩnh = SỐ TIỀN CHÍNH XÁC đến hàng đơn vị (không còn làm tròn chục nghìn như ROUND(...,-4) của file gốc),
+  // vì số liệu này dùng cho báo cáo thuế. Mọi thành phần đã là số nguyên nên kết quả cũng là số nguyên.
+  const netSalary = totalIncome - bhxhAmount - otherDeductions - advances - tax;
 
   const bluCode = `BLU-${emp.id}-${monthStr.replace('/', '')}`;
 

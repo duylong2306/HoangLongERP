@@ -95,3 +95,27 @@ describe('calculateSingleEmployeePayroll — CTP & KPI đi vào lương', () => 
     expect(pCtp.netSalary - p0.netSalary).toBe(500000);
   });
 });
+
+// Phục vụ báo cáo thuế: mọi khoản tiền là SỐ NGUYÊN ĐỒNG, Thực lĩnh chính xác đến hàng đơn vị (không làm tròn chục nghìn).
+describe('calculateSingleEmployeePayroll — số liệu chính xác đến hàng đơn vị', () => {
+  const scales = [{ id: 'X', baseSalary: 6970000, performanceSalary: 6970000 }];
+  const inputs = { workedDays: 26.5, kpiScore: 97, otSunday: 2, otHoliday: 0, otHours: 18.5, otCount: 3, bonusHoliday: 0, bonusCreative: 0, otherDeductions: 0, advances: 1234567, expenses: 85000 };
+  const r: any = calculateSingleEmployeePayroll({ id: 'A', salaryCode: 'X' }, '10/2026', inputs, scales, 27);
+
+  it('mọi khoản tiền đều là số nguyên', () => {
+    ['kpiBonus', 'daySalary', 'otSundaySalary', 'otHolidaySalary', 'otHoursSalary', 'totalIncome', 'insurance', 'taxExemptIncome', 'taxableIncome', 'taxableNetIncome', 'tax', 'netSalary']
+      .forEach(k => expect(Number.isInteger(r[k]), `${k} = ${r[k]}`).toBe(true));
+  });
+  it('Thực lĩnh = Tổng thu nhập − Bảo hiểm − Khấu trừ − Tạm ứng − Thuế (khớp đến đồng)', () => {
+    expect(r.netSalary).toBe(r.totalIncome - r.insurance - r.otherDeductions - r.advances - r.tax);
+  });
+  it('Tổng thu nhập đúng bằng tổng các khoản thành phần', () => {
+    expect(r.totalIncome).toBe(r.daySalary + r.otSundaySalary + r.otHolidaySalary + r.otHoursSalary + r.expenses + r.bonusHoliday + r.bonusCreative);
+  });
+  it('Thực lĩnh không còn bị làm tròn về chục nghìn', () => {
+    expect(r.netSalary % 10000).not.toBe(0);
+  });
+  it('đơn giá lương ngày chuẩn giữ nguyên độ chính xác (dùng để suy ra công chuẩn)', () => {
+    expect(r.salaryPerDay).toBeCloseTo((6970000 + r.kpiBonus) / 27, 6);
+  });
+});

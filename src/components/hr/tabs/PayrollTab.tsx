@@ -116,7 +116,8 @@ export default function PayrollTab({
         .slice(0, 10);
 
   // ── Hiển thị dùng chung ──
-  const money = (n?: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+  // Hiện tiền đến hàng đơn vị (đồng); dòng lương cũ còn số lẻ thập phân thì làm tròn khi hiển thị
+  const money = (n?: number) => `${Math.round(n || 0).toLocaleString('vi-VN')} đ`;
   const dailyWageOf = (p: any) => Math.round(((p.baseSalary || 0) / standardWorkDays) * (p.workedDays || 0));
   const otOf = (p: any) => (p.otSundaySalary || 0) + (p.otHolidaySalary || 0) + (p.otHoursSalary || 0);
   const deductOf = (p: any) => (p.advances || 0) + (p.insurance || 0) + (p.tax || 0);
